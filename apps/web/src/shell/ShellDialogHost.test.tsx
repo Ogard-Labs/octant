@@ -80,6 +80,8 @@ function hostProps(): ShellDialogHostProps {
     announcement: "",
     announcementSequence: 0,
     createOpen: false,
+    firstRunStatus: undefined,
+    tourBlocked: false,
     whatsNew: {
       announcements: undefined,
       card: undefined,

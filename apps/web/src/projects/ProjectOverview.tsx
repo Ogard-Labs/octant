@@ -16,13 +16,15 @@ import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/desktop-lease";
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
-import { ChevronDown, SquarePen } from "lucide-react";
+import { ChevronDown, Ellipsis, SquarePen } from "../ui/icons";
 import { Children, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
-import { OctantButton } from "../ui/base/OctantButton";
+import { homeRelativePath } from "../lib/homeRelativePath";
+import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantMenu } from "../ui/base/OctantMenu";
+import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { ProjectIcon, useProjectIconDetails, useProjectIconSource } from "./ProjectIcon";
 import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
@@ -46,7 +48,10 @@ import {
   projectColorFromMenuValue,
   projectColorMenuValue,
 } from "./ProjectTile";
-import { ProjectSpendCeilingSection } from "../usage/ProjectSpendCeilingSection";
+import {
+  ProjectSpendCeilingSection,
+  useProjectSpendCeilingSet,
+} from "../usage/ProjectSpendCeilingSection";
 import { ProjectInstructionsSettings } from "../settings/OctantInstructionsSettings";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
@@ -90,14 +95,13 @@ export interface ProjectOverviewProps {
     projectId: ProjectId,
     providers: KeyProviderDriverKinds,
   ) => Promise<boolean>;
+  readonly onOpenSandboxRestrictions?: () => void;
   /** Sets the mode this Code Project's new threads start in; absent follows Settings. */
   readonly onPermissionModeChange?: (
     projectId: ProjectId,
     permissionMode: PermissionMode | undefined,
     /** "keep" (the default) leaves the Project's sandbox choice as it is. */
-    fullAccessSandbox?: boolean | "settings" | "keep",
-    /** "keep" (the default) leaves the Project's Strict choice as it is. */
-    strict?: boolean | "settings" | "keep",
+    strict?: boolean | "inherit" | "keep",
   ) => Promise<boolean>;
   /** Sets who answers this Code Project's prompts at Auto; absent follows Settings. */
   readonly onAutoReviewerChange?: (
@@ -150,11 +154,31 @@ export interface ProjectOverviewProps {
   /** The person's instructions for this Project, beside its memory. */
   readonly octantInstructionsClient?: OctantInstructionsClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  /** Off hides the Project's spend ceiling row, unless a ceiling is set. */
+  readonly spendCeilingShown?: boolean;
   /** Absent when the window cannot reach the host's model roles; the Models section is then not shown. */
   readonly modelRoles?: Omit<ProjectModelRolesSectionProps, "projectId" | "disabled">;
 }
 
+const MAX_ICON_BYTES = 262_144;
+
+/** The Project's own icon when its folder has one, else the coloured tile; the colour menu opens from either. */
+function ProjectPageMark(props: { readonly project: ProjectOverviewProps["project"] }) {
+  return (
+    <ProjectIcon
+      fallback={<ProjectTile project={props.project} />}
+      projectId={String(props.project.id)}
+      size={24}
+    />
+  );
+}
+
 export function ProjectOverview(props: ProjectOverviewProps) {
+  const projectCeilingSet = useProjectSpendCeilingSet(
+    props.spendCeilingClient,
+    String(props.project.id),
+    props.spendCeilingShown === true,
+  );
   const alive = useRef(true);
   const nameInput = useRef<HTMLInputElement>(null);
   const relinkGeneration = useRef(0);
@@ -167,6 +191,44 @@ export function ProjectOverview(props: ProjectOverviewProps) {
   const { onAddExtraFolder, onRemoveExtraFolder } = props;
   const unavailable = props.project.type !== "chat" && props.availability?.status === "unavailable";
   const boundMode = props.project.type === "code" ? "code" : "work";
+  const canRelink =
+    props.project.type !== "chat" && !archived && !connectionStale && allowRootRelink;
+  // Relink and Archive are occasional; New thread is the page's one action.
+  // An unavailable root is the exception: choosing a new one is then the
+  // remedy, so it stays beside New thread instead of waiting in the menu.
+  const iconSource = useProjectIconSource();
+  const iconDetails = useProjectIconDetails(String(props.project.id));
+  const iconFile = useRef<HTMLInputElement>(null);
+  // The picture is chosen with the desktop's own file picker; a browser tab
+  // has no such picker, so the item says why it is off.
+  const canChooseIcon = props.hostBridge !== undefined && iconSource?.choose !== undefined;
+  const iconItems: ReadonlyArray<OctantMenuItem> =
+    archived || connectionStale || iconSource?.choose === undefined
+      ? []
+      : [
+          {
+            label: "Change icon…",
+            value: "icon-change",
+            disabled: !canChooseIcon,
+            ...(canChooseIcon ? {} : { description: "Choose an icon in the desktop app." }),
+          },
+          ...(iconDetails?.custom === true
+            ? [
+                iconDetails.foundAvailable
+                  ? { label: "Use found icon", value: "icon-reset" }
+                  : { label: "Remove custom icon", value: "icon-reset" },
+              ]
+            : []),
+        ];
+  const overflowItems: ReadonlyArray<OctantMenuItem> = [
+    ...iconItems,
+    ...(canRelink && !unavailable ? [{ label: "Relink folder", value: "relink" }] : []),
+    {
+      destructive: true,
+      label: props.project.type === "chat" ? "Archive" : "Archive Project",
+      value: "archive",
+    },
+  ];
   // A base URL the client refuses (a remote host over plain HTTP) leaves the
   // recipe editor unable to ask, which it says, rather than broken.
   const { serverUrl, windowCapability } = props;
@@ -207,6 +269,32 @@ export function ProjectOverview(props: ProjectOverviewProps) {
     };
   }, [props.project.id]);
 
+  async function chooseIcon(file: File | undefined) {
+    if (file === undefined || iconSource?.choose === undefined) return;
+    const operation = ++relinkGeneration.current;
+    setRelinkFailed(false);
+    setRelinkStatus("");
+    // The host checks again; this only spares a round trip for a plain mistake.
+    if (file.size > MAX_ICON_BYTES) {
+      setRelinkFailed(true);
+      setRelinkStatus("That image is larger than 256 KB. Choose a smaller icon.");
+      return;
+    }
+    const outcome = await iconSource.choose(String(props.project.id), file);
+    if (!alive.current || operation !== relinkGeneration.current) return;
+    setRelinkFailed(outcome.status === "refused");
+    setRelinkStatus(outcome.status === "changed" ? "Icon changed." : outcome.message);
+  }
+
+  async function resetIcon() {
+    if (iconSource?.reset === undefined) return;
+    const operation = ++relinkGeneration.current;
+    const outcome = await iconSource.reset(String(props.project.id));
+    if (!alive.current || operation !== relinkGeneration.current) return;
+    setRelinkFailed(outcome.status === "refused");
+    setRelinkStatus(outcome.status === "changed" ? "Icon changed." : outcome.message);
+  }
+
   async function commitName() {
     const normalized = nameInput.current?.value.trim() ?? "";
     if (!archived && normalized !== "" && normalized !== props.project.name) {
@@ -225,7 +313,9 @@ export function ProjectOverview(props: ProjectOverviewProps) {
         setPicking(false);
       } else {
         setRelinkFailed(true);
-        setRelinkStatus("Project root could not be relinked. Review the Project status and retry.");
+        setRelinkStatus(
+          "Could not relink the Project folder. Check the Project status and try again.",
+        );
       }
     } catch {
       if (!alive.current || operation !== relinkGeneration.current) return;
@@ -270,7 +360,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
 
   return (
     <section className="projects-workspace--detail-only">
-      <section className="project-overview">
+      <section className="project-overview" data-project-type={props.project.type}>
         {connectionStale ? (
           <div className="project-overview__warning" role="status">
             <div className="project-overview__warning-copy">
@@ -282,7 +372,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
         <header className="project-overview__toolbar">
           <div className="project-overview__identity">
             {props.onColorChange === undefined || archived || connectionStale ? (
-              <ProjectTile project={props.project} />
+              <ProjectPageMark project={props.project} />
             ) : (
               <OctantMenu
                 items={PROJECT_COLOR_MENU_ITEMS}
@@ -290,7 +380,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   const color = projectColorFromMenuValue(value);
                   if (color !== undefined) void props.onColorChange?.(props.project.id, color);
                 }}
-                trigger={<ProjectTile project={props.project} />}
+                trigger={<ProjectPageMark project={props.project} />}
                 triggerClassName="project-overview__color"
                 triggerLabel={`Project colour for ${props.project.name}`}
                 value={projectColorMenuValue(props.project.color)}
@@ -322,7 +412,13 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 </h1>
               </form>
               {props.project.type === "chat" ? null : (
-                <span className="project-overview__type">{label(props.project.type)} Project</span>
+                <p className="project-overview__type">
+                  <span>{label(props.project.type)} Project</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="project-overview__root">
+                    {homeRelativePath(props.project.binding.canonicalRoot)}
+                  </span>
+                </p>
               )}
             </div>
           </div>
@@ -335,35 +431,85 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               {relinkStatus}
             </p>
             {props.onNewThread === undefined || archived || connectionStale ? null : (
-              <OctantButton onClick={props.onNewThread} size="sm" type="button" variant="secondary">
+              <OctantButton onClick={props.onNewThread} size="sm" type="button" variant="solid">
                 <SquarePen aria-hidden="true" size={14} />
                 {props.project.type === "chat" ? "New chat" : "New thread"}
               </OctantButton>
             )}
-            {props.project.type !== "chat" && !archived && !connectionStale && allowRootRelink ? (
-              <OctantButton onClick={() => void relink()} size="sm" type="button" variant="ghost">
-                {unavailable ? "Choose new root" : "Relink folder"}
+            {canRelink && unavailable ? (
+              <OctantButton
+                onClick={() => void relink()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Choose new root
               </OctantButton>
             ) : null}
+            <input
+              accept="image/png,image/svg+xml,image/x-icon,.png,.svg,.ico"
+              aria-label="Choose an icon image"
+              className="sr-only"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.item(0) ?? undefined;
+                event.currentTarget.value = "";
+                void chooseIcon(file);
+              }}
+              ref={iconFile}
+              tabIndex={-1}
+              type="file"
+            />
             {archived || connectionStale ? (
               <span className="project-overview__archived">
                 {archived ? "Archived Project · read-only" : "Stale snapshot · read-only"}
               </span>
             ) : (
-              <OctantButton
-                className="project-overview__archive"
-                onClick={() => props.onArchive(props.project.id)}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                {props.project.type === "chat" ? "Archive" : "Archive Project"}
-              </OctantButton>
+              <OctantMenu
+                items={overflowItems}
+                onValueChange={(value) => {
+                  if (value === "relink") void relink();
+                  else if (value === "archive") props.onArchive(props.project.id);
+                  else if (value === "icon-change") iconFile.current?.click();
+                  else if (value === "icon-reset") void resetIcon();
+                }}
+                selectionMode="action"
+                trigger={<Ellipsis aria-hidden="true" size={16} />}
+                triggerClassName={`${octantButtonClassName({ size: "icon-sm", variant: "ghost" })} project-overview__more`}
+                triggerLabel="More Project actions"
+                value=""
+              />
             )}
           </div>
         </header>
         {props.project.type !== "chat" ? (
-          <section className="project-overview__context" aria-label="Project binding">
+          <section
+            className="project-overview__context project-overview__repo"
+            aria-label="Project binding"
+          >
+            <header className="project-overview__card-header">
+              <h2 className="project-overview__card-title">
+                {props.project.type === "code" ? "Repository" : "Folders"}
+              </h2>
+              {unavailable ? null : (
+                <span
+                  className="project-overview__availability"
+                  data-state={
+                    archived
+                      ? "quiet"
+                      : props.availability?.status === "unverified"
+                        ? "quiet"
+                        : "ok"
+                  }
+                >
+                  <span aria-hidden="true" className="project-overview__availability-dot" />
+                  {archived
+                    ? "Archived · read-only"
+                    : props.availability?.status === "unverified"
+                      ? "Availability unverified"
+                      : "Available"}
+                </span>
+              )}
+            </header>
             <ProjectFoldersSection
               key={String(props.project.id)}
               disabled={archived || connectionStale}
@@ -393,15 +539,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   <p>{props.availability?.reason}</p>
                 </div>
               </OctantAlert>
-            ) : (
-              <span className="project-overview__availability">
-                {archived
-                  ? "Archived · read-only"
-                  : props.availability?.status === "unverified"
-                    ? "Availability unverified"
-                    : "Available"}
-              </span>
-            )}
+            ) : null}
             <p className="project-overview__description">{authorityCopy(props.project.type)}</p>
           </section>
         ) : null}
@@ -439,10 +577,10 @@ export function ProjectOverview(props: ProjectOverviewProps) {
           ) : props.project.type === "code" && props.codeOverview !== undefined ? (
             props.codeOverview
           ) : props.project.type === "work" && props.workOverview !== undefined ? (
-            <>
+            <div className="project-overview__stack">
               {props.workOverview}
               {props.workPromotion}
-            </>
+            </div>
           ) : props.project.type === "work" && props.workPromotion !== undefined ? (
             props.workPromotion
           ) : (
@@ -518,7 +656,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 summary={
                   props.project.type === "chat"
                     ? "Colours and fonts your designs can use"
-                    : "Colours and fonts designs use when no DESIGN.md sets them"
+                    : "Colours and fonts for designs without a DESIGN.md"
                 }
               >
                 <ProjectBrandKitSection
@@ -561,7 +699,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-native-providers`}
                 label="Trusted providers"
-                summary="Let a provider load this Project's own hooks, MCP servers, and plugins"
+                summary="Hooks, MCP servers, and plugins a provider may load"
               >
                 <ProjectNativeProvidersSection
                   disabled={archived || connectionStale}
@@ -602,7 +740,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-actions`}
                 label="Actions"
-                summary="Run, Test, Dev and other commands for this Project's terminal"
+                summary="Run, Test, Dev and other named commands"
               >
                 <ProjectActionsSection
                   {...(projectTerminalClient === undefined
@@ -623,12 +761,14 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 summary="The mode this Project's new threads start in"
               >
                 <ProjectPermissionModeSection
+                  {...(props.onOpenSandboxRestrictions === undefined
+                    ? {}
+                    : { onOpenSandboxRestrictions: props.onOpenSandboxRestrictions })}
                   disabled={archived || connectionStale}
-                  onChange={async (mode, fullAccessSandbox, strict) =>
+                  onChange={async (mode, strict) =>
                     (await props.onPermissionModeChange?.(
                       props.project.id,
                       mode,
-                      fullAccessSandbox ?? "keep",
                       strict ?? "keep",
                     )) ?? false
                   }
@@ -687,7 +827,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-models`}
                 label="Models"
-                summary="Which models this Project's coordinators and helper agents use for each role"
+                summary="Models this Project's coordinators and helpers use"
               >
                 <ProjectModelRolesSection
                   {...props.modelRoles}
@@ -696,11 +836,12 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 />
               </ProjectOverviewInspector>
             ) : null}
-            {props.spendCeilingClient === undefined ? null : (
+            {props.spendCeilingClient === undefined ||
+            (props.spendCeilingShown !== true && !projectCeilingSet) ? null : (
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-ceiling`}
                 label="Spend ceiling"
-                summary="Optional Project limits on tokens, turns, agent run time, and money"
+                summary="Optional limits on tokens, turns, run time, and money"
               >
                 <ProjectSpendCeilingSection
                   client={props.spendCeilingClient}
@@ -714,6 +855,12 @@ export function ProjectOverview(props: ProjectOverviewProps) {
     </section>
   );
 }
+
+const STATUS_FILE_RULE =
+  "Keep a STATUS.md in this folder. Tasks read it and update it, and dated follow-ups become reminders. Off: Octant writes nothing to the folder.";
+
+const DEVELOPER_TOOLS_RULE =
+  "Show this Project's terminal and its Run, Test and Dev actions. Tasks can still run commands and Git either way; this only changes what you see.";
 
 /**
  * The opt-in for the STATUS.md Octant keeps in a Work folder. Not offered for
@@ -734,11 +881,10 @@ function WorkStatusFileSetting(props: {
       <div className="project-overview-inspector__row">
         <div>
           <h3>Status file</h3>
-          <p id={descriptionId}>
-            Keep a STATUS.md in this folder. Every task reads it and updates where the work stands,
-            and its dated follow-ups and deadlines become reminders. When off, Octant writes nothing
-            into the folder.
-          </p>
+          <p title={STATUS_FILE_RULE}>Keep a STATUS.md in this folder.</p>
+          <span className="sr-only" id={descriptionId}>
+            {STATUS_FILE_RULE}
+          </span>
         </div>
         <OctantSwitch
           checked={props.enabled}
@@ -774,10 +920,10 @@ function AgentMemoryWritesSetting(props: {
       <div className="project-overview-inspector__row">
         <div>
           <h3>Agent memory writes</h3>
+          {/* The limits stay on screen: they are what make the switch safe. */}
           <p id={descriptionId}>
-            Below Full access, an agent asks before each change to this Project&apos;s memory. Turn
-            this on to let agents write it without asking; each entry is marked as written by an
-            agent. At Full access agents never ask, and Plan never writes.
+            Below Full access, agents write memory without asking. Each entry is marked as written
+            by an agent. Full access never asks. Plan never writes.
           </p>
         </div>
         <OctantSwitch
@@ -893,10 +1039,10 @@ function WorkDeveloperToolsSetting(props: {
       <div className="project-overview-inspector__row">
         <div>
           <h3>Developer tools</h3>
-          <p id={descriptionId}>
-            Show this Project&apos;s terminal and its Run, Test and Dev actions. Tasks here can run
-            commands and Git at their mode either way; this only changes what you see.
-          </p>
+          <p title={DEVELOPER_TOOLS_RULE}>Show this Project&apos;s terminal and actions.</p>
+          <span className="sr-only" id={descriptionId}>
+            {DEVELOPER_TOOLS_RULE}
+          </span>
         </div>
         <OctantSwitch
           checked={props.enabled}
@@ -967,8 +1113,7 @@ function label(type: ProjectSummary["type"]): string {
 
 function authorityCopy(type: ProjectSummary["type"]): string {
   if (type === "chat")
-    return "Virtual organization with approved memory and no implicit host access.";
-  if (type === "work")
-    return "Confined to the Project's folders. Knowledge-work stays inside them.";
-  return "Checkouts and Git stay in the main repository. New Code work starts approval-gated.";
+    return "A virtual organization with approved memory. No automatic host access.";
+  if (type === "work") return "Stays inside the Project's folders.";
+  return "New Code work starts approval-gated.";
 }

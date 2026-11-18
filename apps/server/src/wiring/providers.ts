@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { hostStartsThreadsAtOpenFullAccess } from "@octant/domain/guardrail-policy";
+import { hostReadsProviderCatalogUnconfined } from "@octant/domain/guardrail-policy";
 import { openAdmittedSqlite, openSqlite } from "../persistence/sqlitePort";
 import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
 import { GitObservationPort } from "../code/gitObservationPort";
@@ -15,7 +15,14 @@ import {
 import { randomUUID } from "node:crypto";
 import { bindGeneratedMcpSignInPolicy } from "../extensions/generatedMcpSignInPolicy";
 import { lstatSync, realpathSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { acpRegistryAgent } from "@octant/plugin-host/acp-agents";
+import { installAcpAgent, makeAcpAgentInstallPorts } from "../providers/acpAgentInstall";
 import { homedir, tmpdir } from "node:os";
+import {
+  makeAccountSessionCarrier,
+  type AccountSessionCarrier,
+} from "../providers/accountSessionCarry";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   decodeCodeCheckoutId,
@@ -103,6 +110,7 @@ import {
 } from "../providers/oauth/providerCloudIamSignIn";
 import { makeAmazonBedrockDriver } from "../providers/amazonBedrockDriver";
 import { readDirectoryOAuthCredential } from "@octant/provider-sdk/directory-oauth";
+import type { ProviderSessionOwnership } from "@octant/provider-sdk/driver";
 import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
 import { type ClaudeAgentSdkPort, makeClaudeAgentSdkPort } from "../providers/claudeAgentSdkPort";
 import type { ClaudeResumeIdentityPort } from "../providers/claudeDriver";
@@ -116,6 +124,7 @@ import { personSshAgentSocket } from "../shield/shieldServerStore";
 import { makeServerSshKeysBrokerClient } from "../shield/sshKeyBrokerClient";
 import { resolveRuntimeProject } from "./runtimeNetwork";
 import { ClaudeResumeIdentityJournal } from "../providers/claudeResumeIdentityJournal";
+import { JournalProviderSessionOwnership } from "../providers/providerSessionHolds";
 import { ClaudeResumeIdentityStore } from "../providers/claudeResumeIdentityStore";
 import { type CodexProcessPort, makeCodexProcessLive } from "../providers/codexProcess";
 import { type AcpProcessPort, makeAcpProcessLive } from "../providers/acpProcess";
@@ -233,6 +242,7 @@ import {
   appToolThreadLevel,
   accountKeepsOwnMemory,
   browserToolTransport,
+  claudeAccountUsesStoredKey,
   claudePlanUsageStateDirectory,
   defaultShellSettings,
   effectiveClaudeAccountConfigDirectory,
@@ -272,6 +282,8 @@ export interface ConfiguredProviderDriverOptions {
   /** The Project's registered servers, for Claude's own `ssh` below Full access. */
   readonly claudeServerAccess?: ProviderServerAccessPort;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
+  /** Which runtime sessions an Octant thread holds, handed to every driver that takes up its own. */
+  readonly sessionOwnership?: ProviderSessionOwnership;
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
@@ -308,6 +320,29 @@ export interface ConfiguredProviderDriverOptions {
   readonly localUsageHistorySourceForInstance?: (
     instance: ProviderInstance,
   ) => ProviderLocalUsageHistorySource | undefined;
+}
+
+/**
+ * What carries a thread's session between accounts of one provider, for every
+ * mode's turn path: the instances as configured now, a driver built from the
+ * same options the turn's own driver is, which does the carrying itself.
+ */
+export function makeConfiguredAccountSessionCarrier(
+  readProviderInstance: (instanceId: ProviderInstanceId) => ProviderInstance | undefined,
+  options: ConfiguredProviderDriverOptions,
+): AccountSessionCarrier {
+  return makeAccountSessionCarrier({
+    readInstance: readProviderInstance,
+    resolveDriver: (instanceId) => {
+      const instance = readProviderInstance(instanceId);
+      if (instance === undefined || !instance.enabled) return undefined;
+      try {
+        return makeConfiguredProviderDriver(instance, options);
+      } catch {
+        return undefined;
+      }
+    },
+  });
 }
 
 /**
@@ -436,6 +471,9 @@ export function makeConfiguredProviderDriver(
       ...(options.claudeResumeIdentityPort === undefined
         ? {}
         : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
+      ...(options.sessionOwnership === undefined
+        ? {}
+        : { sessionOwnership: options.sessionOwnership }),
       ...(options.claudeAuthorityNow === undefined
         ? {}
         : { claudeAuthorityNow: options.claudeAuthorityNow }),
@@ -668,7 +706,7 @@ export type ProvidersDependencies = Pick<
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<
     FoundationsWiring,
-    "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict"
+    "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict" | "resolveHostStrict"
   >;
 
 export function wireProviders(deps: ProvidersDependencies) {
@@ -768,19 +806,24 @@ export function wireProviders(deps: ProvidersDependencies) {
         });
       },
     };
+    // On Windows a read that serves no one thread (a version or catalog read)
+    // runs unconfined only while the host's new threads run with no Octant
+    // sandbox; read as each such read starts.
+    const windowsCatalogUnconfined = () =>
+      hostReadsProviderCatalogUnconfined({
+        code: persistence.readCodeSettings()?.settings,
+        work: workThreadProjection.settings(),
+      });
     const openCodeProcess =
-      options.openCodeProcess ?? makeOpenCodeProcessLive({ runtimeNetwork, serverAccess });
+      options.openCodeProcess ??
+      makeOpenCodeProcessLive({ runtimeNetwork, serverAccess, windowsCatalogUnconfined });
     const codexProcessPort =
       options.codexProcess ??
       makeCodexProcessLive({
         octantVersion: version,
         runtimeNetwork,
         serverAccess,
-        windowsCatalogForOpenFullAccess: () =>
-          hostStartsThreadsAtOpenFullAccess({
-            code: persistence.readCodeSettings()?.settings,
-            work: workThreadProjection.settings(),
-          }),
+        windowsCatalogUnconfined,
       });
     const codexProcess: CodexProcessPort = {
       start: (input) =>
@@ -794,7 +837,9 @@ export function wireProviders(deps: ProvidersDependencies) {
           }),
         ),
     };
-    const acpProcess = options.acpProcess ?? makeAcpProcessLive({ runtimeNetwork, serverAccess });
+    const acpProcess =
+      options.acpProcess ??
+      makeAcpProcessLive({ runtimeNetwork, serverAccess, windowsCatalogUnconfined });
     const piProcess = options.piProcess ?? makePiProcessLive({ runtimeNetwork, serverAccess });
     const ohMyPiProcess = options.ohMyPiProcess ?? makeOhMyPiProcessLive();
     // An outside driver runs on the runtime that runs this server and on
@@ -1676,6 +1721,7 @@ export function wireProviders(deps: ProvidersDependencies) {
           clock: () => new Date().toISOString(),
         }),
       });
+    const sessionOwnership = new JournalProviderSessionOwnership(persistence.connection);
     const nativeHarnessTranscripts = new JournalNativeHarnessTranscriptStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -1758,6 +1804,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         ),
       processes: outsideDriverProcesses,
       runtimeRegistry: providerRuntimeRegistry,
+      strict: () => deps.resolveHostStrict(),
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
     });
     stopOutsideDriversOf = (extensionId) => outsideDriverAdmission.stopPackage(extensionId);
@@ -1871,8 +1918,30 @@ export function wireProviders(deps: ProvidersDependencies) {
       }
       await credentialResolver.delete(instanceId);
     };
+    const acpAgentInstallPorts = makeAcpAgentInstallPorts({
+      fetchesAllowed: isMarketplaceFetchAllowed,
+    });
     const providerService = new ProviderService({
       latestNpmVersion: createProviderLatestVersionCheck({ isAllowed: isMarketplaceFetchAllowed }),
+      acpAgentInstall: {
+        install: (instance) =>
+          installAcpAgent(
+            {
+              configuration: instance.configuration,
+              listing:
+                instance.configuration.source.kind === "registry"
+                  ? acpRegistryAgent(instance.configuration.source.registryId)
+                  : undefined,
+              root: join(providerDataDirectory, "acp-agent-installs", instance.id),
+            },
+            acpAgentInstallPorts,
+          ),
+        remove: (instanceId) =>
+          rm(join(providerDataDirectory, "acp-agent-installs", instanceId), {
+            recursive: true,
+            force: true,
+          }),
+      },
       persistence,
       runtimeRegistry: providerRuntimeRegistry,
       isProviderExecutableAvailable,
@@ -1915,6 +1984,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             claudeRuntimeNetwork: runtimeNetwork,
             claudeServerAccess: serverAccess,
             claudeResumeIdentityPort: claudeResumeIdentityStore,
+            sessionOwnership,
             claudeAuthorityNow: processAuthorityTime,
             isProjectConfinedPath,
             protectedPaths: hostProtectedPaths,
@@ -1949,6 +2019,12 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerService.forgetOutsideDriverVerification(extensionId);
     quarantineOutsideDriver = (instanceId, digest) =>
       providerService.quarantineOutsideDriver(instanceId, digest);
+    // Names saved before the defaults dropped "CLI" are shortened here: after
+    // the provider projection is read and before any scan can register a new
+    // account, so a scan never meets an old name.
+    yield* Effect.promise(() =>
+      providerService.renameLegacyDefaultNames(LOCAL_HOST_ID as never).catch(() => undefined),
+    );
     // A host that stopped between a trust and the move it causes makes the
     // move now; with nothing to move this journals nothing and starts nothing.
     yield* Effect.promise(() => reconcileOutsideDriverState().catch(() => undefined));
@@ -2006,6 +2082,7 @@ export function wireProviders(deps: ProvidersDependencies) {
               readProject: (projectId) => persistence.readProject(projectId),
               readProviderInstance: (id) => persistence.readProviderInstance(id),
               readProviderCliTrust: providerCliProjectTrust,
+              readStrict: (threadId) => deps.resolveThreadStrict(threadId),
             },
             request,
           ),
@@ -2174,6 +2251,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       claudeRuntimeNetwork: runtimeNetwork,
       claudeServerAccess: serverAccess,
       claudeResumeIdentityPort: claudeResumeIdentityStore,
+      sessionOwnership,
       claudeAuthorityNow: processAuthorityTime,
       isProjectConfinedPath,
       protectedPaths: hostProtectedPaths,
@@ -2288,7 +2366,8 @@ export function wireProviders(deps: ProvidersDependencies) {
           .filter((instance) => !isImageProfileDriverKind(instance.driverKind)),
       now: () => new Date().toISOString() as UtcTimestamp,
       unavailableReason: (instance) =>
-        instance.driverKind === "claude" && instance.configuration.authentication === "api-key"
+        instance.driverKind === "claude" &&
+        claudeAccountUsesStoredKey(instance.configuration.authentication)
           ? "plan-limits-do-not-apply"
           : unavailableLimitsReason(
               instance.driverKind,
@@ -2297,7 +2376,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       observe: async (instance, signal, { onDemand }) => {
         if (
           instance.driverKind === "claude" &&
-          instance.configuration.authentication === "api-key"
+          claudeAccountUsesStoredKey(instance.configuration.authentication)
         ) {
           return { source: "provider-runtime", unavailableReason: "plan-limits-do-not-apply" };
         }

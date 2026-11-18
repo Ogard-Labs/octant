@@ -49,6 +49,7 @@ import {
   type HumanBrowserResult,
 } from "@octant/contracts/browser-presentation";
 import { createHash, randomUUID } from "node:crypto";
+import { isIP } from "node:net";
 import { BrowserCredentialFill } from "./browserCredentialFill";
 import type { BrowserSurfacePointSelection } from "@octant/contracts/desktop-bridge";
 import {
@@ -92,7 +93,14 @@ import {
   type BrowserTransferLimits,
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
+import { isPrivateAddress } from "./privateAddress";
 import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
+import {
+  FAVICON_MIN_INTERVAL_MS,
+  fetchFaviconDataUrl,
+  firstHttpIcon,
+  type FaviconSession,
+} from "./browserFavicon";
 import {
   autoAttachSurfaceFrames,
   scriptString,
@@ -224,6 +232,8 @@ export function appShortcutOf(
 }
 
 interface BrowserSurfaceSessionPort {
+  /** Electron's session fetch: the page's own network rules, used for its icon. */
+  readonly fetch?: FaviconSession["fetch"];
   /**
    * Electron reports the download item and the page that started it. A
    * download is held only for a context's agent action; see `DesktopDownloadHold`.
@@ -421,6 +431,21 @@ interface HibernatedTab {
 /** One page of a context. Tabs share the context's session and its guards. */
 interface OwnedTab {
   readonly tabId: string;
+  /**
+   * The page's declared icon and the address it came from, in memory only. An
+   * address already fetched is not fetched again; a failed fetch keeps the
+   * address with no image, so the globe stands and the page is not asked twice.
+   */
+  favicon?:
+    | { readonly url: string; readonly pageOrigin: string; readonly dataUrl: string | undefined }
+    | undefined;
+  /**
+   * The icon fetch in flight and when it began. A page chooses its icon's
+   * address, so it could ask for a new one in a loop: one fetch runs per tab,
+   * a newer declaration ends the older fetch, and a declaration that arrives
+   * inside the minimum interval is not fetched.
+   */
+  faviconFetch?: { readonly controller: AbortController; readonly startedAt: number } | undefined;
   readonly view: BrowserSurfaceViewPort;
   documentRevision: number;
   /** Electron may remove the view getter before the WebContents destroyed callback. */
@@ -514,6 +539,9 @@ interface OwnedSurface {
    */
   extensionLoads: number;
   actionTail: Promise<void>;
+  /** When the owning window's card last asked for a picture, and whether one is being taken. */
+  previewTakenAt: number;
+  previewPending: boolean;
   /**
    * The person's embedded input in arrival order. It is separate from the
    * agent's action queue so the person's keys and releases never wait behind
@@ -521,6 +549,14 @@ interface OwnedSurface {
    */
   humanInputTail: Promise<void>;
   control: BrowserSurfaceState["control"];
+  /**
+   * True while a navigation the person started from the address bar loads.
+   * Its hops are the person's browsing, except onto this computer or its
+   * network; see `admitNavigation`.
+   */
+  personNavigation: boolean;
+  /** The origin the person typed, while `personNavigation` holds. */
+  personNavigationOrigin: string | undefined;
   /** Remote owner input never turns delayed page navigation into a local person's origin grant. */
   ownerNavigationRestricted: boolean;
   shellWindow: BrowserSurfaceShellWindowPort | undefined;
@@ -695,6 +731,15 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
       readonly name: string;
       readonly url: string;
     };
+    /**
+     * Set by the server only on a `navigate` a person started from the address
+     * bar of a window of this computer. It is the person's browsing, as a link
+     * they click is: its redirects are followed, and a site it reaches outside
+     * the allowlist is one only the person's view shows. Typing an address
+     * that moved to another site stopped on a refusal written for the agent
+     * until 2026-11-17.
+     */
+    readonly startedBy?: "person";
   };
 
 export interface BrowserSurfaceRuntimeObservation {
@@ -716,6 +761,8 @@ export interface BrowserSurfaceRuntimeObservation {
     readonly active: boolean;
   }>;
   readonly screenshotDataUrl?: string;
+  /** Only a peek fills this: the page's icon, for the person's tab strip, never an agent. */
+  readonly faviconDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
   /** Only a resize fills this: what the page reports about its device now. */
   readonly emulation?: BrowserEmulationReport;
@@ -1554,7 +1601,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         target.downloads.accept(
           event,
           item,
-          target.control === "user" ? options.personDownloadsFolder : undefined,
+          // A typed address is not a click on a download: while it loads, a
+          // page it was redirected to starts none in the person's name.
+          target.control === "user" && !target.personNavigation
+            ? options.personDownloadsFolder
+            : undefined,
         );
       });
     }
@@ -1594,6 +1645,59 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         publish(contextId, owned);
       });
     }
+    // The page's declared icon, fetched once through its own session and only
+    // from a site the context admits for the page itself.
+    view.webContents.on("page-favicon-updated", (...args: readonly unknown[]) => {
+      const declared = args.find(Array.isArray) as readonly unknown[] | undefined;
+      const iconUrl = firstHttpIcon(declared ?? []);
+      if (iconUrl === undefined) {
+        tab.faviconFetch?.controller.abort();
+        tab.faviconFetch = undefined;
+        if (tab.favicon !== undefined) {
+          tab.favicon = undefined;
+          publish(contextId, owned);
+        }
+        return;
+      }
+      if (view.webContents.isDestroyed()) return;
+      const pageOrigin = originOf(view.webContents.getURL()) ?? "";
+      // The same address declared by the same site is not fetched again. A
+      // different site declaring it is a new page: its icon is fetched for it,
+      // so the earlier site's image is never kept for the tab's next page.
+      if (tab.favicon?.url === iconUrl && tab.favicon.pageOrigin === pageOrigin) return;
+      const session = view.webContents.session;
+      if (session.fetch === undefined || !originAllowed(iconUrl, owned.policy.allowedOrigins)) {
+        tab.faviconFetch?.controller.abort();
+        tab.faviconFetch = undefined;
+        tab.favicon = undefined;
+        return;
+      }
+      const now = Date.now();
+      if (
+        tab.faviconFetch !== undefined &&
+        now - tab.faviconFetch.startedAt < FAVICON_MIN_INTERVAL_MS
+      ) {
+        return;
+      }
+      tab.faviconFetch?.controller.abort();
+      const controller = new AbortController();
+      tab.faviconFetch = { controller, startedAt: now };
+      tab.favicon = { url: iconUrl, pageOrigin, dataUrl: undefined };
+      void fetchFaviconDataUrl({ fetch: session.fetch.bind(session) }, iconUrl, {
+        signal: controller.signal,
+      }).then((dataUrl) => {
+        if (
+          controller.signal.aborted ||
+          tab.favicon?.url !== iconUrl ||
+          tab.favicon.pageOrigin !== pageOrigin ||
+          dataUrl === undefined
+        ) {
+          return;
+        }
+        tab.favicon = { url: iconUrl, pageOrigin, dataUrl };
+        publish(contextId, owned);
+      });
+    });
     const guardNavigation =
       (knownMainFrame: boolean) =>
       (event: unknown, ...details: readonly unknown[]) => {
@@ -1629,6 +1733,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       },
     );
     view.webContents.on("console-message", (...args: readonly unknown[]) => {
+      if (!diagnosable(owned, view.webContents.getURL())) return;
       recordConsoleError(owned, view.webContents.getURL(), args);
     });
     // Electron keeps one failed-request listener per session, and the pages of a
@@ -1637,15 +1742,28 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     // installed it last.
     const webContentsId = view.webContents.id;
     if (webContentsId !== undefined) surfaceByWebContents.set(webContentsId, owned);
+    // The page a request belongs to: the tab it came from, else this one.
+    const requestPage = (surface: OwnedSurface, id: number | undefined): string =>
+      (
+        surface.tabs.find((entry) => entry.view.webContents.id === id)?.view ?? view
+      ).webContents.getURL();
     view.webContents.session.webRequest?.onErrorOccurred((details) => {
-      if (details.webContentsId === undefined) return recordFailedRequest(owned, details);
-      const target = surfaceByWebContents.get(details.webContentsId);
-      if (target !== undefined) recordFailedRequest(target, details);
+      const target =
+        details.webContentsId === undefined
+          ? owned
+          : surfaceByWebContents.get(details.webContentsId);
+      if (target === undefined || !diagnosable(target, requestPage(target, details.webContentsId)))
+        return;
+      recordFailedRequest(target, details);
     });
     view.webContents.session.webRequest?.onCompleted?.((details) => {
-      if (details.webContentsId === undefined) return recordHttpError(owned, details);
-      const target = surfaceByWebContents.get(details.webContentsId);
-      if (target !== undefined) recordHttpError(target, details);
+      const target =
+        details.webContentsId === undefined
+          ? owned
+          : surfaceByWebContents.get(details.webContentsId);
+      if (target === undefined || !diagnosable(target, requestPage(target, details.webContentsId)))
+        return;
+      recordHttpError(target, details);
     });
     view.webContents.on("context-menu", (_event: unknown, raw?: unknown) => {
       if (
@@ -3009,12 +3127,36 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           throw new BrowserTargetStaleError();
         }
         const inputsAtStart = owned.personInputs;
-        owned.control = "agent";
+        // The address bar reaches the page through this route too. A navigation
+        // the server marks as the person's is driven by them, not by the agent.
+        const personNavigation = request.kind === "navigate" && request.startedBy === "person";
+        // Set together: the person's control without the mark would let the
+        // page already open start a download in their name, or move to this
+        // computer's network, while the dialog guard below is still attaching.
+        owned.control = personNavigation ? "user" : "agent";
+        owned.personNavigation = personNavigation;
+        owned.personNavigationOrigin =
+          personNavigation && request.target !== undefined ? originOf(request.target) : undefined;
         owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
         // Dialogs an earlier action answered before it failed come first.
         const dialogs: DialogReport[] = owned.unreportedDialogs.splice(0);
-        const releaseDialogs = await guardDialogs(contentsView(owned), dialogs, request.dialog);
+        // Those came from earlier actions; the rest are this action's page's.
+        const carriedDialogs = dialogs.length;
+        const diagnosticsAtStart = owned.diagnosticSeq;
+        let withheld = false;
+        let releaseDialogs: () => Promise<void>;
+        try {
+          releaseDialogs = await guardDialogs(contentsView(owned), dialogs, request.dialog);
+        } catch (error) {
+          // The action never began, so the `finally` below never runs: nothing
+          // may be left reading the next hops as the person's.
+          owned.personNavigation = false;
+          owned.personNavigationOrigin = undefined;
+          owned.control = "idle";
+          publish(contextId, owned);
+          throw error;
+        }
         if (request.downloads === "hold") owned.downloads.begin(request.downloadLimits);
         try {
           checkObservation();
@@ -3257,6 +3399,21 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 break;
             }
             if (SETTLING_ACTIONS.has(request.kind)) await settlePage(contentsView(owned));
+            // The typed address has loaded. What the page does from here on is
+            // nobody's action, so a move it makes during the reads below
+            // grants no site.
+            if (personNavigation) owned.control = "idle";
+            // The person's own navigation may end on a site only their view
+            // shows. Nothing of that page goes into the answer, which the
+            // server keeps as the observation an agent's results are built
+            // from: no address, title, text, hash or picture.
+            if (
+              personNavigation &&
+              !originAllowed(contents.getURL(), owned.policy.allowedOrigins)
+            ) {
+              withheld = true;
+              return {};
+            }
             refuseUnapprovedPage(owned, contents);
             const include = new Set(request.include ?? []);
             const wantsText = request.kind === "extract-text" || include.has("text");
@@ -3298,6 +3455,16 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 ? undefined
                 : await captureScreenshot(contentsView(owned));
             const outline = include.has("snapshot") ? await snapshotOf(owned) : {};
+            // The reads above await, and a page can move itself meanwhile to a
+            // site only the person's view may show (one they reached before).
+            // What was read may describe that page, so none of it goes back.
+            if (!originAllowed(contents.getURL(), owned.policy.allowedOrigins)) {
+              if (personNavigation) {
+                withheld = true;
+                return {};
+              }
+              refuseUnapprovedPage(owned, contents);
+            }
             return {
               ...outline,
               ...(contents.getURL() === ""
@@ -3317,6 +3484,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               ...(pageToolCall === undefined ? {} : { pageToolCall }),
             };
           })();
+          // A dialog's text is the page's own words, so none this load raised
+          // goes back either, and the agent has not read this page.
+          if (withheld) {
+            owned.unreportedDialogs.push(...dialogs.slice(0, carriedDialogs));
+            dropDiagnosticsAfter(owned, diagnosticsAtStart);
+            return {};
+          }
           if (
             request.kind === "snapshot" ||
             request.kind === "navigate" ||
@@ -3337,7 +3511,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         } catch (error) {
           // The action failed after the page raised a dialog: the answer the
           // policy gave is reported with the next action that succeeds.
-          owned.unreportedDialogs.push(...dialogs.slice(-8));
+          // The person's navigation may have failed on a page approval never
+          // covered, so its dialogs are not kept for the agent's next answer.
+          owned.unreportedDialogs.push(
+            ...(personNavigation ? dialogs.slice(0, carriedDialogs) : dialogs).slice(-8),
+          );
+          if (personNavigation) dropDiagnosticsAfter(owned, diagnosticsAtStart);
           throw error;
         } finally {
           // Released before the surface is handed back, whatever the action did;
@@ -3345,6 +3524,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           await releaseDialogs().catch(() => undefined);
           // A failed action stops holding too; its reports wait for the next answer.
           if (request.downloads === "hold") await owned.downloads.finish().catch(() => undefined);
+          owned.personNavigation = false;
+          owned.personNavigationOrigin = undefined;
           owned.control = "idle";
           publish(contextId, owned);
         }
@@ -3365,22 +3546,68 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         // A context that has not navigated yet has no document to inspect and
         // no painted frame to capture; both probes below would never resolve.
         if (contents.getURL() === "") return {};
+        // A page only the person's view shows is not described to the server,
+        // whose observation an agent's results are built from. The address,
+        // title and picture of a page the person had browsed to reached it
+        // through the preview's poll.
+        if (!originAllowed(contents.getURL(), owned.policy.allowedOrigins)) return {};
         const sensitiveDocument = await hasSensitiveDocument(
           contentsView(owned),
           owned.policy.credentialFieldProtection,
+          (read) => queueSurfaceAction(owned, read),
         );
         const screenshotDataUrl = sensitiveDocument
           ? undefined
           : await captureScreenshot(contentsView(owned));
         checkObservation();
+        const favicon = activeFavicon(owned);
         return {
           ...(contents.getURL() === ""
             ? {}
             : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
           ...(contents.getTitle() === "" ? {} : { title: contents.getTitle().slice(0, 1_024) }),
           ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
+          ...(favicon === undefined ? {} : { faviconDataUrl: favicon }),
         };
       });
+    },
+    /**
+     * A small picture of the page for the owning window's own minimised
+     * Browser card, or nothing when the page has not committed a document or
+     * a picture was taken too recently.
+     *
+     * Unlike `peek`, this skips the credential-field check: on a news front
+     * page that check almost always withholds the picture (hidden token inputs,
+     * dozens of ad frames it cannot read), which left the card an empty box.
+     * The picture is display-only: it goes to the window that already shows
+     * this page to this person and is never part of an observation.
+     */
+    previewPicture: async (
+      contextId: BrowserContextId | string,
+      owner: BrowserSurfaceOwner,
+    ): Promise<string | undefined> => {
+      const owned = surface(contextId);
+      if (owned.owner.windowId !== owner.windowId || owned.owner.threadId !== owner.threadId) {
+        throw new Error("Octant Browser preview does not own this context.");
+      }
+      const now = Date.now();
+      if (owned.previewPending || now - owned.previewTakenAt < PREVIEW_INTERVAL_MS)
+        return undefined;
+      owned.previewPending = true;
+      owned.previewTakenAt = now;
+      try {
+        // Queued: a detached view is captured through the debugger, which
+        // must not attach in the middle of an agent action or another read.
+        return await queueSurfaceAction(owned, () =>
+          awake(contextId, owned, async () => {
+            const view = contentsView(owned);
+            if (view.webContents.getURL() === "") return undefined;
+            return captureScreenshot(view, PREVIEW_PICTURE);
+          }),
+        );
+      } finally {
+        owned.previewPending = false;
+      }
     },
     command: async (
       contextId: BrowserContextId | string,
@@ -3736,6 +3963,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       actionTail: Promise.resolve(),
       humanInputTail: Promise.resolve(),
       control: "idle",
+      personNavigation: false,
+      personNavigationOrigin: undefined,
       ownerNavigationRestricted: false,
       shellWindow: undefined,
       blockedNavigationUrl: undefined,
@@ -3753,6 +3982,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       lastUsedAt: Date.now(),
       hibernated: undefined,
       waking: undefined,
+      previewTakenAt: 0,
+      previewPending: false,
     };
     openTabView(input.contextId, owned, firstTabId);
     surfaces.set(input.contextId, owned);
@@ -3888,6 +4119,18 @@ function admitNavigation(
     originAllowed(target, temporary.origins)
   )
     return true;
+  // An address the person typed follows its redirects like any browsing, but
+  // never onto this computer or its network, whatever the page admits: a
+  // public page must not walk the person's view to an address only they can
+  // reach. A Private page admits every site, so this comes before that check;
+  // only the origin the person typed is exempt.
+  if (
+    owned.personNavigation &&
+    onThisComputerOrNetwork(target) &&
+    (owned.personNavigationOrigin === undefined ||
+      !originAllowed(target, [owned.personNavigationOrigin]))
+  )
+    return false;
   if (originAllowed(target, owned.policy.allowedOrigins)) return true;
   if (originAllowed(target, owned.userGrantedOrigins)) return true;
   // Only while the person is demonstrably driving. "idle" is nobody's action:
@@ -3920,12 +4163,46 @@ function refuseUnapprovedPage(
   throw new Error("Octant Browser will not act on a page outside this context's allowed origins.");
 }
 
+/**
+ * Whether an address names this computer or its network by its own text: an
+ * IP literal outside the public ranges, localhost, a name under a suffix kept
+ * for private networks, or a bare name with no dot. A public name that
+ * resolves to a private address is not caught here.
+ */
+export function onThisComputerOrNetwork(target: string): boolean {
+  let hostname: string;
+  try {
+    hostname = new URL(normalizeUrl(target)).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return true;
+  }
+  const bare =
+    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  if (isIP(bare) !== 0) return isPrivateAddress(bare);
+  return (
+    !bare.includes(".") ||
+    bare === "localhost" ||
+    [".localhost", ".local", ".internal", ".lan", ".home.arpa"].some((suffix) =>
+      bare.endsWith(suffix),
+    )
+  );
+}
+
 function originOf(target: string): string | undefined {
   try {
     return new URL(normalizeUrl(target)).origin;
   } catch {
     return undefined;
   }
+}
+
+/** The active page's icon, only while the page is still on the site that declared it. */
+function activeFavicon(owned: OwnedSurface): string | undefined {
+  const tab = owned.tabs.find((candidate) => candidate.tabId === owned.activeTabId);
+  if (tab === undefined || tab.favicon === undefined) return undefined;
+  return originOf(tab.contents.getURL()) === tab.favicon.pageOrigin
+    ? tab.favicon.dataUrl
+    : undefined;
 }
 
 function readState(contextId: string, owned: OwnedSurface): BrowserSurfaceState {
@@ -5448,6 +5725,12 @@ async function waitForPageSettled(view: BrowserSurfaceViewPort): Promise<void> {
 async function hasSensitiveDocument(
   view: BrowserSurfaceViewPort,
   protectCredentials: boolean,
+  /**
+   * Where the debugger's DOM read runs when a frame refuses the probe. A caller
+   * outside the surface's queue passes the queue, so no agent action can adopt
+   * the read's attachment and lose it when the read detaches.
+   */
+  domRead: (read: () => Promise<boolean>) => Promise<boolean> = (read) => read(),
 ): Promise<boolean> {
   if (!protectCredentials) return false;
   // No committed document means no credential fields and no frame whose
@@ -5475,10 +5758,144 @@ async function hasSensitiveDocument(
     }
     return false;
   } catch {
-    // If any frame cannot be inspected, screenshot and extracted evidence
-    // fail closed instead of risking credential disclosure.
-    return true;
+    // A frame its page sandboxed without scripts refuses the probe ("Script
+    // not run"), and news and shopping pages carry such frames for their ads:
+    // failing closed on them withheld every picture of those pages. The
+    // debugger reads the DOM whatever a frame's script settings, so the page
+    // is checked there, and any frame it cannot read still fails closed.
+    return await domRead(() => domHoldsCredentialField(view)).catch(() => true);
   }
+}
+
+/** Frame sessions the DOM check follows before it gives up and fails closed. */
+const MAX_CREDENTIAL_CHECK_FRAME_SESSIONS = 64;
+/** How long one protocol answer of the DOM check may take; a busy frame fails closed. */
+const CREDENTIAL_CHECK_SEND_MS = 2_000;
+/** How long the whole DOM check may hold its attachment. */
+const CREDENTIAL_CHECK_MS = 5_000;
+
+/**
+ * Whether any document of the page, read from the debugger's DOM, holds a
+ * credential field. A frame on another site is its own target and is read
+ * through its own session; a frame element whose document it cannot reach
+ * counts as holding one.
+ *
+ * The read uses only an attachment it makes itself: reading through one an
+ * agent's recording, emulation, or popup watch holds would leave the DOM
+ * domain on for the rest of it. A debugger already attached fails closed, as
+ * every such page did before this read existed.
+ */
+async function domHoldsCredentialField(view: BrowserSurfaceViewPort): Promise<boolean> {
+  checkExecutionView(view);
+  const client = view.webContents.debugger;
+  if (client.isAttached()) return true;
+  client.attach("1.3");
+  // Marked as Octant's own, so a popup watch or point selection that starts
+  // meanwhile shares it instead of taking it for someone else's.
+  agentDebuggers.add(client);
+  try {
+    const targets = frameTargetsOf(client);
+    const deadline = Date.now() + CREDENTIAL_CHECK_MS;
+    const send = (
+      method: string,
+      parameters?: Record<string, unknown>,
+      sessionId?: string,
+    ): Promise<unknown> => {
+      checkExecutionView(view);
+      const answer =
+        sessionId === undefined
+          ? client.sendCommand(method, parameters)
+          : client.sendCommand(method, parameters, sessionId);
+      // A busy frame can leave a command unanswered; the check fails closed
+      // at the bound instead of holding the peek and the surface's queue.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const bound = Math.max(0, Math.min(CREDENTIAL_CHECK_SEND_MS, deadline - Date.now()));
+      return Promise.race([
+        answer,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("Browser frame did not answer.")), bound);
+        }),
+      ]).finally(() => clearTimeout(timer));
+    };
+    const pending: Array<string | undefined> = [undefined];
+    const read = new Set<string>();
+    while (pending.length > 0) {
+      const sessionId = pending.pop();
+      const document = await send("DOM.getDocument", { depth: -1, pierce: true }, sessionId);
+      const scan = credentialFieldScan(document);
+      if (scan.status !== "clear") return true;
+      if (scan.remoteFrameIds.length === 0) continue;
+      const attached = await autoAttachSurfaceFrames(send, targets, sessionId);
+      for (const frameId of scan.remoteFrameIds) {
+        const remote = attached.get(frameId);
+        if (remote === undefined) return true;
+        if (read.has(remote.sessionId)) continue;
+        if (read.size >= MAX_CREDENTIAL_CHECK_FRAME_SESSIONS) return true;
+        read.add(remote.sessionId);
+        pending.push(remote.sessionId);
+      }
+    }
+    return false;
+  } finally {
+    // A recording or emulation that adopted the attachment keeps it.
+    if (!attachmentHeld(client)) detachAgentDebugger(client);
+  }
+}
+
+/**
+ * One session's DOM, as `DOM.getDocument` with `pierce` returns it: its
+ * shadow roots and the documents of frames in its own process are inside it,
+ * and a frame on another site appears only as a frame element with an id.
+ */
+function credentialFieldScan(
+  value: unknown,
+):
+  | { readonly status: "clear"; readonly remoteFrameIds: ReadonlyArray<string> }
+  | { readonly status: "holds" | "unreadable" } {
+  if (!scriptRecord(value) || !scriptRecord(value.root)) return { status: "unreadable" };
+  const pending: unknown[] = [value.root];
+  const remoteFrameIds: string[] = [];
+  let count = 0;
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (++count > 50_000 || !scriptRecord(node) || typeof node.nodeName !== "string")
+      return { status: "unreadable" };
+    const name = node.nodeName.toUpperCase();
+    const attributes = Array.isArray(node.attributes) ? node.attributes : [];
+    const attribute = (wanted: string): string | undefined => {
+      for (let index = 0; index + 1 < attributes.length; index += 2) {
+        const key: unknown = attributes[index];
+        const text: unknown = attributes[index + 1];
+        if (typeof key === "string" && key.toLowerCase() === wanted && typeof text === "string")
+          return text;
+      }
+      return undefined;
+    };
+    const editable = attribute("contenteditable") === "true";
+    if (name === "INPUT" || name === "TEXTAREA" || editable) {
+      const hint = ["type", "autocomplete", "name", "id", "aria-label"]
+        .map((key) => attribute(key) ?? "")
+        .join(" ")
+        .toLowerCase();
+      if (
+        /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|card|ssn|secret|token|api.?key)/.test(
+          hint,
+        )
+      )
+        return { status: "holds" };
+    }
+    // Any element that owns a frame, whatever its tag, is followed into it.
+    if (scriptRecord(node.contentDocument)) pending.push(node.contentDocument);
+    else if (node.nodeType === 1 && typeof node.frameId === "string")
+      remoteFrameIds.push(node.frameId);
+    for (const field of ["children", "shadowRoots"]) {
+      const children = node[field];
+      if (children === undefined) continue;
+      if (!Array.isArray(children)) return { status: "unreadable" };
+      pending.push(...children);
+    }
+  }
+  return { status: "clear", remoteFrameIds };
 }
 
 function boundedText(value: string, limit: number): string {
@@ -5553,6 +5970,32 @@ function recordHttpError(
 }
 
 /** Number one diagnostic entry and keep it, dropping the oldest of its kind past the bound. */
+/**
+ * Whether what a page logs or fails to load is kept for the agent's
+ * diagnostics read. A page outside the approved origins is one only the
+ * person's view shows: its console text is its own words, and its requests
+ * name where the person went.
+ */
+function diagnosable(owned: OwnedSurface, pageUrl: string): boolean {
+  return pageUrl === "" || originAllowed(pageUrl, owned.policy.allowedOrigins);
+}
+
+/**
+ * Forget what was recorded after `seq`: the hops of a person's navigation that
+ * ended outside the approved origins, logged while the approved page was still
+ * the one in front. The cursor is left alone, so a reader's `since` still holds.
+ */
+function dropDiagnosticsAfter(owned: OwnedSurface, seq: number): void {
+  for (const list of [
+    owned.consoleErrors,
+    owned.consoleWarnings,
+    owned.failedRequests,
+    owned.httpErrors,
+  ] as ReadonlyArray<Array<{ seq: number }>>) {
+    list.splice(0, list.length, ...list.filter((entry) => entry.seq <= seq));
+  }
+}
+
 function keepDiagnostic<T extends { seq: number }>(
   owned: OwnedSurface,
   list: T[],
@@ -5625,6 +6068,11 @@ async function waitForSelector(
 
 /** What the observation contract carries for a picture, data URL included. */
 const MAX_SCREENSHOT_DATA_URL = 54 * 1_024;
+/** The widths a picture steps down through, unscaled when absent, and its size limit. */
+interface PictureSize {
+  readonly widths: ReadonlyArray<number | undefined>;
+  readonly maxDataUrl: number;
+}
 /**
  * The steps a picture is shrunk through to fit. A full Retina frame of a busy
  * page (a news front page) was several times the limit at quality 70, and the
@@ -5632,38 +6080,53 @@ const MAX_SCREENSHOT_DATA_URL = 54 * 1_024;
  * title over an empty frame. A preview needs a recognisable page, not every
  * pixel, so the frame steps down in width and quality until it fits.
  */
-const SCREENSHOT_WIDTHS = [undefined, 1_280, 960, 720, 480] as const;
 const SCREENSHOT_QUALITIES = [70, 55] as const;
+const OBSERVATION_PICTURE: PictureSize = {
+  widths: [undefined, 1_280, 960, 720, 480],
+  maxDataUrl: MAX_SCREENSHOT_DATA_URL,
+};
+
+/**
+ * The minimised Browser card's picture. The card is under 300px wide, so a
+ * 640px frame stays sharp on a Retina screen without sending a full page.
+ */
+const PREVIEW_PICTURE: PictureSize = { widths: [640, 480, 320], maxDataUrl: 96 * 1_024 };
+/** The card polls; a picture more often than this would cost the page for nothing. */
+const PREVIEW_INTERVAL_MS = 2_000;
 
 function jpegDataUrl(bytes: Uint8Array | string): string {
   const base64 = typeof bytes === "string" ? bytes : Buffer.from(bytes).toString("base64");
   return `data:image/jpeg;base64,${base64}`;
 }
 
-function fitImage(image: BrowserSurfaceImage): string | undefined {
+function fitImage(image: BrowserSurfaceImage, size: PictureSize): string | undefined {
   const width = image.getSize?.().width;
-  for (const target of SCREENSHOT_WIDTHS) {
-    if (
-      target !== undefined &&
-      (image.resize === undefined || width === undefined || width <= target)
-    ) {
-      continue;
+  // A frame already no wider than a step is encoded unscaled, once.
+  let triedUnscaled = false;
+  for (const target of size.widths) {
+    const shrinks =
+      target !== undefined && image.resize !== undefined && width !== undefined && width > target;
+    if (!shrinks) {
+      if (triedUnscaled) continue;
+      triedUnscaled = true;
     }
-    const sized =
-      target === undefined || image.resize === undefined ? image : image.resize({ width: target });
+    const sized = shrinks && image.resize !== undefined ? image.resize({ width: target }) : image;
     for (const quality of SCREENSHOT_QUALITIES) {
       const dataUrl = jpegDataUrl(sized.toJPEG(quality));
-      if (dataUrl.length <= MAX_SCREENSHOT_DATA_URL) return dataUrl;
+      if (dataUrl.length <= size.maxDataUrl) return dataUrl;
     }
   }
   return undefined;
 }
 
-async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string | undefined> {
+async function captureScreenshot(
+  view: BrowserSurfaceViewPort,
+  size: PictureSize = OBSERVATION_PICTURE,
+): Promise<string | undefined> {
   const image = await view.webContents.capturePage();
   // A detached surface paints nothing, and Chromium reports that as an empty
   // image rather than an error; an empty JPEG is not a page snapshot.
-  if (!image.isEmpty()) return fitImage(image);
+  if (!image.isEmpty()) return fitImage(image, size);
   // A surface that is not in a window still has a live renderer: the debugger
   // captures its view directly instead of a compositor surface it does not
   // have.
@@ -5682,12 +6145,16 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
       | undefined;
     const viewportWidth = metrics?.cssLayoutViewport?.clientWidth;
     const viewportHeight = metrics?.cssLayoutViewport?.clientHeight;
-    for (const target of SCREENSHOT_WIDTHS) {
+    let triedUnscaled = false;
+    for (const target of size.widths) {
       const scale =
         target === undefined || viewportWidth === undefined || viewportWidth <= target
           ? undefined
           : target / viewportWidth;
-      if (target !== undefined && scale === undefined) continue;
+      if (scale === undefined) {
+        if (triedUnscaled) continue;
+        triedUnscaled = true;
+      }
       for (const quality of SCREENSHOT_QUALITIES) {
         const result = (await client.sendCommand("Page.captureScreenshot", {
           format: "jpeg",
@@ -5700,7 +6167,7 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
         const data = typeof result.data === "string" ? result.data : "";
         if (data === "") return undefined;
         const dataUrl = jpegDataUrl(data);
-        if (dataUrl.length <= MAX_SCREENSHOT_DATA_URL) return dataUrl;
+        if (dataUrl.length <= size.maxDataUrl) return dataUrl;
       }
     }
     return undefined;

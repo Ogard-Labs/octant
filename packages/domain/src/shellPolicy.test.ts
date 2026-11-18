@@ -167,15 +167,15 @@ describe("shell settings policy", () => {
       modeSwitcherPresentation: "buttons",
       projectViewSwitcherPresentation: "dropdown",
       transcriptTextSize: "small",
-      transcriptWidth: "narrow",
+      transcriptWidth: "medium",
       usageBars: "smooth",
       replyDetail: "low",
       threadReplyDetail: [],
       showThreadProviderIcons: true,
       showThreadStats: true,
       homeCards: { order: [], visibility: [] },
-      // Each view starts showing exactly what its rows already carried; the
-      // Appearance switches only take facts away when someone asks.
+      // Each view starts with its defaults; the Appearance switches only take
+      // facts away when someone asks.
       sidebarRowProperties: {
         projects: {
           project: false,
@@ -188,7 +188,7 @@ describe("shell settings policy", () => {
           project: true,
           branch: false,
           pullRequest: false,
-          lastUpdated: false,
+          lastUpdated: true,
           status: true,
         },
       },
@@ -206,6 +206,7 @@ describe("shell settings policy", () => {
       // The More row is part of the sidebar until the person turns it off.
       sidebarMoreEnabled: true,
       sidebarCountTiles: true,
+      spendCeilingShown: false,
       sidebarSearchPresentation: "icon",
       sidebarCollapsedPresentation: "always",
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
@@ -876,6 +877,71 @@ describe("workspace operations", () => {
       paneId: ids.paneB,
     });
     expect(codePane(emptied).surface).toMatchObject({ kind: "welcome", mode: "code" });
+  });
+
+  it("an open that asks for the whole window leaves its pane as the mode's only pane", () => {
+    const base = applyWorkspaceOperation(defaultWindowWorkspace(ids.window), {
+      kind: "set-active-mode",
+      mode: "code",
+    });
+    const paneId = codePane(base).paneId;
+    const split = applyWorkspaceOperation(base, {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: paneId,
+      surface: overviewSurface(ids.tabA),
+      splitNodeId: ids.splitA,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: ids.paneB,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5,
+    });
+    const draft = decodeWorkspaceTab({
+      kind: "draft-thread",
+      id: ids.tabC,
+      mode: "code",
+      title: "New Code thread",
+    });
+
+    // The same open without the request keeps the split, as every open does.
+    const beside = applyWorkspaceOperation(split, {
+      kind: "open-surface",
+      mode: "code",
+      paneId: ids.paneB,
+      surface: draft,
+    });
+    expect(beside.layouts.code.kind).toBe("split");
+
+    const alone = applyWorkspaceOperation(split, {
+      kind: "open-surface",
+      mode: "code",
+      paneId: ids.paneB,
+      surface: draft,
+      alone: true,
+    });
+    expect(alone.layouts.code).toMatchObject({
+      kind: "pane",
+      paneId: ids.paneB,
+      surface: { kind: "draft-thread", id: ids.tabC },
+    });
+    expect(alone.activePaneIds.code).toBe(ids.paneB);
+
+    // A zoom on one pane of the split ends with the split.
+    const zoomed = applyWorkspaceOperation(split, {
+      kind: "focus-pane",
+      mode: "code",
+      paneId,
+    });
+    const aloneFromZoom = applyWorkspaceOperation(zoomed, {
+      kind: "open-surface",
+      mode: "code",
+      paneId,
+      surface: draft,
+      alone: true,
+    });
+    expect(aloneFromZoom.layouts.code).toMatchObject({ kind: "pane", paneId });
+    expect(aloneFromZoom.focusedPaneId).toBeUndefined();
   });
 
   it("clamps resize ratios to the supported range", () => {

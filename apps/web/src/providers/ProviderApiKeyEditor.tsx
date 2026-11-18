@@ -37,7 +37,11 @@ export function acceptsApiKeyPool(instance: ProviderInstance): boolean {
     return false;
   }
   if (!("authentication" in configuration)) return true;
-  return configuration.authentication === "api-key" || configuration.authentication === "bearer";
+  return (
+    configuration.authentication === "api-key" ||
+    configuration.authentication === "bearer" ||
+    (instance.driverKind === "claude" && configuration.authentication === "gateway")
+  );
 }
 
 /**

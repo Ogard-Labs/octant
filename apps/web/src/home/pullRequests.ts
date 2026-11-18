@@ -37,6 +37,9 @@ export interface PullRequestCardRow {
   readonly reference: string;
   readonly ci: PullRequestCiState;
   readonly review: PullRequestReviewState;
+  readonly author: string;
+  /** When the pull request last moved, for the list's age. */
+  readonly updatedAt: string;
 }
 
 export interface PullRequestCardModel {
@@ -46,6 +49,9 @@ export interface PullRequestCardModel {
   readonly shown: ReadonlyArray<PullRequestCardRow>;
   readonly hidden: number;
   readonly total: number;
+  /** Every row of each group, before the card's own six-row limit. */
+  readonly everyWaiting: ReadonlyArray<PullRequestCardRow>;
+  readonly everyYours: ReadonlyArray<PullRequestCardRow>;
 }
 
 export interface PullRequestCardCapability {
@@ -103,6 +109,28 @@ export function pullRequestReviewState(
   return "in review";
 }
 
+export interface PullRequestCardStatus {
+  readonly word: string;
+  readonly tone: "positive" | "warning" | "negative" | "neutral";
+}
+
+/**
+ * The one word a row ends with, taken from the checks and the review together:
+ * a draft says so, a failure outranks everything, and a quiet row reads as
+ * what is true of it.
+ */
+export function pullRequestCardStatus(
+  row: Pick<PullRequestCardRow, "ci" | "review">,
+): PullRequestCardStatus {
+  if (row.review === "draft") return { word: "Draft", tone: "neutral" };
+  if (row.ci === "failed") return { word: "Failing", tone: "negative" };
+  if (row.review === "changes requested") return { word: "Changes requested", tone: "negative" };
+  if (row.ci === "running") return { word: "Running", tone: "warning" };
+  if (row.review === "approved") return { word: "Approved", tone: "positive" };
+  if (row.ci === "passed") return { word: "Passed", tone: "positive" };
+  return { word: "In review", tone: "neutral" };
+}
+
 function sameLogin(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
 }
@@ -123,6 +151,8 @@ function cardRow(row: CodeProjectPullRequestRow, group: PullRequestCardGroup): P
     reference: `${row.repositoryName}#${String(row.number)}`,
     ci: pullRequestCiState(row.checks),
     review: pullRequestReviewState(row),
+    author: row.author,
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -160,6 +190,8 @@ export function buildPullRequestCard(input: {
     shown,
     hidden: ordered.length - shown.length,
     total: ordered.length,
+    everyWaiting: waiting,
+    everyYours: yours,
   };
 }
 

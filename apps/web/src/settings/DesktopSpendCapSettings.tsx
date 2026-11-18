@@ -98,7 +98,7 @@ export function DesktopSpendCapSettings(props: {
   return (
     <SettingsSection
       title="Desktops that bill you"
-      description="Disposable desktops in your own cloud account cost you money while they run."
+      description="Disposable desktops in your cloud account cost money while they run."
     >
       <div className="setgroup">
         <SettingRow

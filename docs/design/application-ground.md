@@ -6,11 +6,12 @@ The picture or drawn field behind the start screens, or behind every page, and h
 
 The screen sits on the application ground, set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, a field
-of pulsing characters, a field of dithered pixels, a flowing colour field, or
-the plain page. A fresh install starts on Soft glow, one of three Gradient
-pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
-print, so the ground follows the window's scheme; the stylesheet swaps them
-by `data-octant-theme-mode`. A settings row written before the ground
+of pulsing characters (the ASCII field), the pixel ground, a flowing colour field, or
+the plain page. A fresh install starts on the ASCII field, behind the start
+screens only: the glow it replaces competed with the heading. Soft glow, Graphite
+and Sunset stay in the catalog as three Gradient pictures that each carry a light
+and a dark print, so the ground follows the window's scheme; the stylesheet
+swaps them by `data-octant-theme-mode`. A settings row written before the ground
 existed replays as the plain page it showed. Effect: the picture is shown as it is, pixelated,
 dithered, or in ASCII, at a chosen pixel size and colour count; an animated picture is
 printed from its still frame. ASCII prints one character per cell from the
@@ -26,17 +27,72 @@ over it readable. It has no
 Colours dial. An ASCII print is always still: a wave pushing through
 characters read as flicker, so it offers no Motion. Like every print,
 increased contrast turns it off. Any other printed picture is still unless a person sets
-its Motion to Wave: then a click on a start screen pushes a ring outward
+its Motion to Wave: then a click on a start screen's empty space (never one on
+a control or anywhere in the composer's box) pushes a ring outward
 through its cells, each cell sampled from a little further in as the ring's
 edge passes and lit toward the accent through the same dither, so the ring
 stays in pixels; between clicks the print rests and draws nothing. A ground
-saved with the retired dot pattern resolves to the plain page. Dithered pixels
-is a drawn ground of square cells in the theme's primary ink, at most about
-two-fifths opaque, whose brightness drifts in slow overlapping waves at twelve
-frames a second and prints through a 4×4 ordered dither (or plain pixels) at
-the chosen pixel size and number of shades; a click on a start screen sends
-the same pushing, accent-lit ring through it at twenty-four frames a second,
-for under two seconds. Flowing is a drawn ground of large, soft, edgeless
+saved with the retired dot pattern resolves to the plain page. The pixel ground
+is the ASCII field's counterpart: a drawn ground of square cells, three CSS
+pixels each by default, in the theme's primary ink at a few ordered-dither
+levels (a 4×4 Bayer threshold, four shades by default), with the theme's accent
+as one glow that dithers from accent into ink into nothing. It never carries
+more than one accent colour. The ink is at most half opaque on a dark page, and
+the accent at most about seven-tenths there; on a light page the ink is dark, at
+most two-fifths opaque, and the glow stays about half as strong, so it stays
+faint. A Scene chooses what it draws. Ridges is the one bold scene, a picture rather than a texture: five layered ridges from smooth noise, each a solid shape. The crest is a bright, crisp line two or three cells thick, at near full ink on the near layers and fainter on the far ones, and under it a dark dither that is clearly there at the crest and fades downward to black, so each layer occludes the one behind and reads as a shape. A round accent sun sits low toward one side, its core wholly inside the window within a wide soft dithered halo, with a valley cut under it, and the crests near it are rim-lit in the accent, fading with distance from it. The sky above is mostly empty, with a sparse haze near the horizon, and empty behind the heading and subtitle. Ridges carries its own peak opacities above the caps just given: ink up to 0.96 and the accent to full on a dark page, ink up to 0.8 and the accent to 0.72 on a light one, which stays a little lighter. Burst is a soft radial burst of about twenty rounded rays in the accent from
+the top right corner, fading into dither, whose size breathes by a few per cent.
+Drift is diagonal streaks in the ink, in loose bands that break up along their
+length, with a few in the accent, sliding across the page. Your picture prints a
+photo from the host's library in the same two tones: its brightness is stretched
+to the photo's own range and printed in ink (dark ink on a light page, so shadows
+take the ink there), and only its brightest warm cells take the accent, so a
+sunset glows and a grey photo does not; it is read at the cell grid first, so it
+costs no more memory than the grid. A ground saved before scenes existed has none
+and draws Drift, the nearest to the drifting field it drew; a Picture scene
+without a photo draws Drift too. Every scene is generated in code from a fixed
+seed, so it looks the same each time, and none ships an image. Each scene is laid
+out for what the window shows (a start screen that scrolls makes the ground as
+tall as its content) and dimmed behind the start screen's content column, across its
+full width and height, to a third of its strength (a quarter on a light page, where dark ink reads louder), back to full 140px past the
+column's edge, so the brightest cells stay away from text. Ridges is the bold scene, so
+it runs at full strength outside the text: its own sky is empty behind the heading and
+subtitle, and the column calms it (to a fifth) only at the foot of the window, where the
+composer and its chips sit. Under the sidebar, where a
+ground runs there, every scene keeps a third. A ground whose scope is the start
+screens is one layer in the window frame, a level under the sidebar, the title
+band and the panes, and it is shown only while every pane holds a start screen
+(a destination page hides it, and so does a thread beside a start screen, which
+paints its own fill). Under Glass a start screen keeps the window's glass under
+its ground, whichever scope put the ground there: one veil, half a second coat
+of the window's own tint, lies in the pane's fill layer under the ground, so
+the cells read and the screen stays glass, and the same start screen looks the
+same with the ground behind start screens only or behind every page. Before
+2026-11-16 the start-screens scope painted the theme's opaque page under the
+ground (a black slab in a window of glass) and the every-page scope lay the
+ground on the bare glass, where it was barely there (maintainer report).
+Reduced transparency and increased contrast keep the opaque page. In the
+opaque material it paints the page where the stage is and, on a wide
+window, runs on under the sidebar over the sidebar's own width and the height of
+the window below the title band, as the same picture: a scene is composed for the
+stage and continues to the left, so no seam and no second composition shows at the
+sidebar's edge, and the sidebar's translucent fill (94%) shows it softly. A drawn
+ground dims itself to a third there; the picture grounds and Flowing take a third
+through their mask. It is drawn under the sidebar only where that fill is
+translucent: not on a phone, not with the sidebar collapsed, not under Glass, and
+not under reduced transparency or increased contrast, which keep the sidebar
+opaque and start the ground at the stage. On every other page the sidebar sits on
+the plain frame. Ridges keeps the sky behind the heading
+and its subtitle empty, so the sun sits low toward a corner and no cell lies under text. Motion is slow: ridges drift
+a few cells a second, the sun and the burst breathe, the streaks slide. It runs at
+fifteen frames a second, stops while the document is hidden or the ground is off
+screen, caps its backing store at twice the display ratio, sets up in idle time,
+and fades in over 1.2 seconds once it has drawn. Reduced motion, or Motion Still,
+holds one frame. A click on a start screen sends the same pushing, accent-lit ring
+through it at twenty-four frames a second for under two seconds. The effect
+(Pixelate or Dither), cell size, shade count and scope are set as for any print,
+and Settings › Appearance › Background lists the ASCII field and the Pixel ground
+side by side, the latter with its scene; choosing it from another ground opens Ridges at four shades. Flowing is a drawn ground of large, soft, edgeless
 colour that drifts like ink in water, and only when a person picks it. Four
 stops are taken from the theme's accent in OKLCH — a near-black deep tone, a
 dark saturated reading of the accent, a brighter accent tone, and a vivid glow
@@ -50,33 +106,69 @@ the ground is off-screen, and falls back to a few blurred radial gradients
 that use the same stops when that path is unavailable. A static grain at a few
 percent of opacity and a quiet vignette sit on top of either path so the wash
 does not band. It answers no clicks. Motion Still holds it on one frame; Wave
-lets the colour keep drifting. Reduced motion holds it still. Pulsing characters is the other drawn ground, and only when a person
-picks it: a grid of monospace letters and digits in the theme's primary ink,
-at most half opaque, whose brightness drifts in slow patches and breathes as
-a whole at twenty-four frames a second while a few glyphs swap. The field is
-drawn on the GPU in one pass, because painting each lit cell from the CPU was
-the cost (ten to sixteen milliseconds a frame at the larger window sizes,
-against a fraction of a millisecond on the GPU). A click over it
-on a start screen (behind every page, only there; a click in a thread or a
-list sends nothing) sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
-it grows, trailed by a fainter echo, and about one click in six draws a heart
-instead, and fades within two seconds. With the Mono style the ring
-is the ink, only brighter; the accent colours it otherwise. It carries no picture, so the effect controls do not apply, and it
-pauses while the window is hidden. Reduced motion holds it on one still frame
-and takes no rings. Behind a
-start screen the ground is masked away behind the composer and fades out below
-it, so the prompt and the recent-thread list read on the plain page; in the
-light theme it fades out sooner, because dark text over a pale picture has
-less contrast headroom than light text over a dark one. A person
+lets the colour keep drifting. Reduced motion holds it still. The ASCII field (Pulsing characters) is the default drawn ground, and the one a start screen
+shows on a fresh install: a canvas of small monospace letters and digits in the
+theme's primary ink, at most 15% opaque, that shows only inside slowly drifting
+patches and leaves the rest empty. Three patterns (round blotches, long
+horizontal currents, rings) take turns every twenty seconds and cross-fade over
+the last four. A person can set what the field draws (Settings › Appearance ›
+Background › Customize, shown while the ASCII field is the ground): its pattern (all in turn, as before, or blotches, currents or rings held alone, with no cross-fade; saved on pick), its characters (one to 64, one
+code point per cell; whitespace and repeats are dropped, and controls, bidi and
+format characters, combining marks and emoji are refused, so a refused text keeps the last good set),
+its density (it moves both patch edges by 0.004 per point from the default 50: 100 shows more,
+0 less) and its speed (the patches' drift and the glyph swap share scale by speed ÷ 50; 0 holds
+one frame, as Motion Still does). Edits preview in the running ground at once and are saved when you let go of a slider or leave the field. Readability holds for any
+set and density: the average ink is no heavier than the default field at the default density, and the peak ink is never above 15%. The field measures each glyph's mean alpha in one 7 × 13 cell and scales the peak by min(1, coverage of the default letters and digits ÷ coverage of the chosen set), and by min(1, the default field's mean patch strength ÷ the mean for the chosen pattern and density), so a block character or a dense field draws fainter; a set that inks less is not boosted. Increased
+contrast and reduced motion behave as before, and a row without these values draws the default field.
+Installed, trusted and enabled plugins can offer character grounds as data (a set and optionally density, speed and pattern; never colours, images or code). They appear in the starter menu under "From plugins" with the plugin's name; picking one copies its values into the person's ground and saves once, replacing the density, speed and pattern with the plugin's (or the defaults it omits). The copy belongs to the person: Reset still returns to the defaults, and switching the plugin off removes its grounds from the menu but leaves the copy. Detail: [Custom grounds](custom-grounds.md).
+A theme file carries the whole ground. Importing one on a computer whose photo library lacks the photo it
+names never leaves a broken ground: a photo ground becomes the plain page with the same tuning, a pixel
+ground's Picture photo is dropped (the Picture scene then draws Drift), and a sidebar photo gives way to
+the sidebar's default; Settings says so in one line under the import buttons ("The theme's photo is not
+on this computer, so the background is plain."). If the library cannot be read, the theme is imported as it is. Behind the start screen's content column, across its full width and height, the field is dimmed to a third of its
+strength (a quarter on a light page; and under the sidebar where it runs there), and comes back to full strength 140px past the column's
+edge, so the heading, the cards and the composer stay on a calm page. The glyphs are painted once into a layer (a few per cent swap each
+frame), and a frame only rewrites one alpha value per cell, so the cost does not
+grow with the number of glyphs. It runs at about fifteen frames a second, and
+stops while the document is hidden or the field is off screen. Its backing store
+is capped at twice the display ratio and at about five million pixels, and its
+setup waits for idle time. It fades in over 1.2 seconds once it has
+drawn, sits behind the content with no pointer events and is hidden from
+assistive technology. Reduced motion, or Motion Still, holds it on one still
+frame and takes no rings. A click on empty ground (not on a control, a menu or a
+dialog, and not the end of a drag or of a text selection) sends an uneven ring of
+glyphs out across the field in the theme's accent, whose edge wobbles as it
+grows, trailed by a fainter echo; about one click in six draws a heart instead.
+The cells a ring crosses take the accent at the ring's strength (up to 90%
+opaque) and scramble their glyphs faster, and the ring fades within two seconds.
+Under the whole shell the field answers only a click on a start screen, never one
+in a thread or a list. While a ring is alive the field runs at about forty frames
+a second, and falls back to fifteen once it is gone. A saved choice always wins: only a fresh install and Reset take this default. Behind a
+start screen every ground, the ASCII field and the dithered scenes included,
+fades toward the foot of the window: full strength down to 55% of the stage,
+then easing smoothly to the stage's own colour across the lower 45%, as a mask
+on the ground layer under everything, so the composer and the lists under the
+question always sit on a calm area. The ramp is the same in the light theme and
+in the dark (the page colour under the mask is what the ground fades into), and
+the dim behind the content column stays beside it, because the greeting and the
+lists sit in that column. A person
 may instead put the ground behind every page, from the workspace's leading
 edge, and under the sidebar too when they ask for it (see [Depth and material](../../DESIGN.md#depth-and-material)). Every
 surface that shows text or information softens it beneath one continuous
-reading veil, the sheet colour at 80%, so it shows at about a fifth of its
-strength and agent replies remain bare prose: a thread, every other pane
+reading veil, the sheet colour at 94% (`--octant-reading-surface-keep`, also the
+sidebar's fill; at 80% and 82% a photo still ran through the letters, maintainer
+request 2026-11-15), so the ground is a whisper and agent replies remain bare prose: a thread, every other pane
 (a Project's page, Settings, a file, a preview), and every destination page
 (Inbox, Board, Archive, Review, Projects, Agents, Automations, Artifacts, Image
 generator). A start screen (a welcome or a new thread) is the one exception and
-stays open on the ground. The veil is one rule in `surface.css` keyed on the
+stays open on the ground, but only its stage. A tool's pane is never on the
+ground: a dock tile, the dock's overview, the Environment section and the bottom
+panel are the pane colour, opaque, wherever a ground is on (beside a start
+screen and beside a thread, on an opaque window and under Glass; `surface.css`).
+A fill at 94%, the sidebar's colour at 72% under a veil, and a blur of the
+ground were each tried there, and the desktop window, which draws no backdrop
+blur, showed the ground's cells and streaks behind a pull request's title and
+the Environment rows (maintainer requests 2026-11-15 and 2026-11-16). The veil is one rule in `surface.css` keyed on the
 pane kind and the destination layers, never a colour per screen; a page drawn
 over the panes clears their veil so the two never stack. Increased contrast turns the ground off; reduced motion
 shows an animated picture's still frame. It is chosen in Settings ›

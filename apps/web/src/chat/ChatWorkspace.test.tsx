@@ -780,7 +780,7 @@ describe("Chat host queue", () => {
     );
     expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
     expect(screen.getByLabelText("Message")).toHaveValue("Keep this");
-    expect(screen.getByText(/host message queue is unavailable.*draft/i)).toBeVisible();
+    expect(screen.getByText(/message queue is unavailable.*draft/i)).toBeVisible();
   });
 });
 
@@ -811,7 +811,7 @@ describe("ChatWorkspace", () => {
     const row = await screen.findByRole("group", { name: "Browser origin approval" });
     await user.click(within(row).getByRole("button", { name: "Approve once" }));
     expect(await within(row).findByRole("alert")).toHaveTextContent(
-      "Browser approval could not be sent. Keep this request open and retry.",
+      "Could not send the browser approval. Keep this open and try again.",
     );
     expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
   });
@@ -1140,25 +1140,31 @@ describe("ChatWorkspace", () => {
     vi.mocked(client.listToolApprovals).mockResolvedValue([approval]);
     const listToolApprovals = vi.mocked(client.listToolApprovals);
     const commits: Array<string> = [];
+    // A running turn's header shows a clock that commits once a second. Pin
+    // the clock so the only work left in the window is polling.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse(now));
+    try {
+      render(
+        <Profiler id="chat-workspace" onRender={(_, phase) => commits.push(phase)}>
+          <ChatWorkspace
+            controller={controllerFixture({ activeView: viewWithAttempt("streaming") })}
+            extensionClient={client}
+            providerSnapshot={providerSnapshot()}
+          />
+        </Profiler>,
+      );
 
-    render(
-      <Profiler id="chat-workspace" onRender={(_, phase) => commits.push(phase)}>
-        <ChatWorkspace
-          controller={controllerFixture({ activeView: viewWithAttempt("streaming") })}
-          extensionClient={client}
-          providerSnapshot={providerSnapshot()}
-        />
-      </Profiler>,
-    );
+      await screen.findByRole("group", { name: "Extension tool approval" });
+      await waitFor(() => expect(listToolApprovals.mock.calls.length).toBeGreaterThan(2), {
+        timeout: 2_500,
+      });
+      const commitsAfterPolling = commits.length;
+      await new Promise((resolve) => setTimeout(resolve, 600));
 
-    await screen.findByRole("group", { name: "Extension tool approval" });
-    await waitFor(() => expect(listToolApprovals.mock.calls.length).toBeGreaterThan(2), {
-      timeout: 2_500,
-    });
-    const commitsAfterPolling = commits.length;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-
-    expect(commits.length).toBe(commitsAfterPolling);
+      expect(commits.length).toBe(commitsAfterPolling);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("polls tool approvals rarely while no turn is running", async () => {
@@ -1945,24 +1951,24 @@ describe("ChatWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
     expect(controller.sendTurn).toHaveBeenLastCalledWith("Ship this plan", [], [], [], [], []);
 
-    const document = new File(["notes"], "notes.txt", { type: "text/plain" });
-    await user.upload(screen.getByLabelText("Choose attachment file"), document);
-    expect(
-      screen.getByText("notes.txt is unavailable to the selected provider and model."),
-    ).toBeVisible();
+    // A file the model does not take natively, and whose bytes are not text,
+    // has nothing Chat can give the model and is refused before upload.
+    const bundle = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00])], "bundle.zip", {
+      type: "application/zip",
+    });
+    await user.upload(screen.getByLabelText("Choose attachment file"), bundle);
+    expect(await screen.findByText(/^bundle\.zip is not text/)).toBeVisible();
     expect(upload).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-    expect(controller.sendTurn).toHaveBeenLastCalledWith("Ship this plan", [], [], [], [], []);
 
-    const docx = new File(["document"], "proposal.docx", {
-      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    });
-    await user.upload(screen.getByLabelText("Choose attachment file"), docx);
-    expect(
-      screen.getByText("proposal.docx is unavailable to the selected provider and model."),
-    ).toBeVisible();
-    expect(upload).toHaveBeenCalledTimes(2);
+    // A text file uploads for any model: the host gives the model its text.
+    const notes = new File(["notes"], "notes.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Choose attachment file"), notes);
+    finishUpload();
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(3));
+    expect(upload).toHaveBeenLastCalledWith(
+      expect.objectContaining({ displayName: "notes.txt", mediaType: "text/plain" }),
+    );
   });
 
   it("keeps send blocked until every image from one paste has uploaded", async () => {
@@ -2853,7 +2859,7 @@ describe("ChatWorkspace", () => {
     );
     await user.click(await screen.findByRole("button", { name: "Rewind" }));
 
-    expect(await screen.findByText(/The conversation changed while this was open/)).toBeVisible();
+    expect(await screen.findByText(/The conversation changed\. Close this/)).toBeVisible();
     expect(execute).not.toHaveBeenCalled();
   });
 

@@ -1575,7 +1575,7 @@ and shows no channel switch; Octant's running identity permits `stable` and
 row (What's new, Check for updates, Relaunch to update), the same ready and
 refusal notices, the same Automatic checks row and "What a check sends"
 disclosure, and the same copy style. In place of the switch is one quiet line
-saying Nightly gets a new build of what is being built every night, and there
+saying "Octant Nightly gets a new build every night.", and there
 is no install row. Automatic checks
 start off until Nightly's own stored choice is read. Invalid or redirected
 preference files leave them off. What's new, its bundled announcement, and its acknowledgement also stay

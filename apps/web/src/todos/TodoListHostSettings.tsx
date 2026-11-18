@@ -29,7 +29,7 @@ export const TodoListHostSettingsContext = createContext<TodoListHostSettingsVal
 const THIS_HOST = "this-host";
 
 const FACT =
-  "One computer keeps your to-do list, and every window and phone you connect shows it. A computer you choose is reached through this window's own pairing with it.";
+  "One computer keeps your to-do list. Every window and phone you connect shows it. A computer you choose is reached through this window's pairing with it.";
 
 /** Settings › To-dos: which computer keeps the person's list. */
 export function TodoListHostSettings() {
@@ -67,10 +67,10 @@ export function TodoListHostSettings() {
         <SettingRow
           description={
             locked
-              ? "This computer already keeps to-dos, so the list stays here. Moving a list to another computer is not built yet."
+              ? "This computer already keeps to-dos, so the list stays here. Moving it is not possible yet."
               : computers.length === 0
-                ? "Pair this computer with another one in Other computers to keep the list there."
-                : "The list can move only while this computer keeps no to-dos."
+                ? "To keep the list on another computer, pair it in Other computers."
+                : "The list can move only while this computer has no to-dos."
           }
           label="Keep the list on"
           scope="host"

@@ -1,8 +1,9 @@
 import { useId, useRef, useState, type ReactNode } from "react";
-import { Camera, FolderOpen, Plus } from "lucide-react";
+import { Camera, FolderOpen, Plus } from "../ui/icons";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
+import { useComposerMenuActions } from "./ComposerMenuActions";
 import { WindowCaptureDialog, windowCaptureBridge } from "./WindowCaptureDialog";
 
 export interface ComposerAttachButtonProps {
@@ -39,7 +40,10 @@ export function ComposerAttachButton(props: ComposerAttachButtonProps) {
   const inputId = useId();
   const [capturing, setCapturing] = useState(false);
   const capture = windowCaptureBridge(window.octantHost);
-  const threadActions = props.threadActions ?? [];
+  // What the thread's own controls registered (its info, a plan to propose)
+  // follows what the surface passes.
+  const registered = useComposerMenuActions();
+  const threadActions = [...(props.threadActions ?? []), ...registered];
   function canChoose(): boolean {
     if (props.busy === true) return false;
     if (props.refusedReason === undefined) return true;

@@ -15,6 +15,7 @@ import { decodeProjectId } from "@octant/contracts/projects";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { ProjectReviewModule } from "../dockModules/ProjectReviewModule";
 import { DockProjectPullRequestReviewTool } from "./DockProjectPullRequestReviewTool";
 
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
@@ -65,6 +66,35 @@ function detailView(
 }
 
 describe("DockProjectPullRequestReviewTool", () => {
+  it("keeps a placeholder on every frame from the chunk's load to the review, in one place", async () => {
+    let resolve: (view: ReturnType<typeof detailView>) => void = () => undefined;
+    const refresh = vi.fn(
+      () =>
+        new Promise<ReturnType<typeof detailView>>((done) => {
+          resolve = done;
+        }),
+    );
+    const { container } = render(
+      <ProjectReviewModule load={async () => detailView()} query={query} refresh={refresh} />,
+    );
+    const frames: Array<string> = [];
+    const record = () => {
+      const loading = container.textContent?.includes("Loading review") === true;
+      const review = container.querySelector(".code-pr-review") !== null;
+      frames.push(loading ? "placeholder" : review ? "review" : "neither");
+    };
+    record();
+    const observer = new MutationObserver(record);
+    observer.observe(container, { subtree: true, childList: true, characterData: true });
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    resolve(detailView());
+    expect(await screen.findByText("Adds manual refresh.", { selector: "p" })).toBeVisible();
+    observer.disconnect();
+    expect(frames[0]).toBe("placeholder");
+    expect(frames).not.toContain("neither");
+    expect(frames.at(-1)).toBe("review");
+  });
+
   it("formats a PR description while refusing embedded HTML and remote image loads", async () => {
     const view = detailView(
       "A **clear change** with [documentation](https://example.com/docs).\n\n<img src='https://example.com/tracker' onerror='alert(1)' />\n\n![Badge](https://example.com/badge.png)",

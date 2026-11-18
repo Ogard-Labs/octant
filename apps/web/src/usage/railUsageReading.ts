@@ -119,15 +119,21 @@ export function readingAgePhrase(observedAt: string, now: number): string | unde
   return hours >= 48 ? `Last read ${Math.floor(hours / 24)}d ago` : `Last read ${hours}h ago`;
 }
 
-/** "Resets in 2h 52m","Resets in 1d 4h", or nothing when the reset is unknown or past. */
-export function resetPhrase(resetsAt: string | undefined, now: number): string | undefined {
+/** The time until a reset as "1d 19h", "4h 59m" or "12m", or nothing when the reset is unknown or past. */
+export function resetCountdown(resetsAt: string | undefined, now: number): string | undefined {
   if (resetsAt === undefined) return undefined;
   const minutes = Math.round((Date.parse(resetsAt) - now) / 60_000);
   if (!Number.isFinite(minutes) || minutes <= 0) return undefined;
   const days = Math.floor(minutes / 1440);
   const hours = Math.floor((minutes % 1440) / 60);
   const rest = minutes % 60;
-  if (days > 0) return `Resets in ${days}d ${hours}h`;
-  if (hours > 0) return `Resets in ${hours}h ${rest}m`;
-  return `Resets in ${rest}m`;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${rest}m`;
+  return `${rest}m`;
+}
+
+/** "Resets in 2h 52m","Resets in 1d 4h", or nothing when the reset is unknown or past. */
+export function resetPhrase(resetsAt: string | undefined, now: number): string | undefined {
+  const countdown = resetCountdown(resetsAt, now);
+  return countdown === undefined ? undefined : `Resets in ${countdown}`;
 }

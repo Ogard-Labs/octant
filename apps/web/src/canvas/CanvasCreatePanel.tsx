@@ -60,33 +60,38 @@ export function CanvasCreatePanel(props: CanvasCreatePanelProps) {
     };
   }, [client]);
 
-  if (create === undefined) return null;
+  if (create === undefined && importHtml === undefined) return null;
 
   return (
     <section aria-label="Create Canvas" data-testid="canvas-create-panel">
-      <CreateCanvasDraft
-        context={props.context}
-        recipes={recipes}
-        {...(props.onAskAgentToFill === undefined
-          ? {}
-          : { onAskAgentToFill: props.onAskAgentToFill })}
-        onCreate={async (request) => {
-          setDenial(null);
-          const result = await create(request);
-          if (result.kind === "denied") {
-            setDenial(result.message);
-            return null;
-          }
-          createdCard.current = result.card;
-          return result.receipt;
-        }}
-        // Reported after any fill-in ask, because a caller may close this
-        // panel on creation and the ask must not depend on it staying open.
-        onSettled={(receipt) => {
-          const card = createdCard.current;
-          if (card !== null) props.onCreated?.(receipt, card);
-        }}
-      />
+      {/* A paired browser imports a page but has no plain create yet, so it
+          is offered the import alone rather than a draft every submit of
+          which the host would refuse. */}
+      {create === undefined ? null : (
+        <CreateCanvasDraft
+          context={props.context}
+          recipes={recipes}
+          {...(props.onAskAgentToFill === undefined
+            ? {}
+            : { onAskAgentToFill: props.onAskAgentToFill })}
+          onCreate={async (request) => {
+            setDenial(null);
+            const result = await create(request);
+            if (result.kind === "denied") {
+              setDenial(result.message);
+              return null;
+            }
+            createdCard.current = result.card;
+            return result.receipt;
+          }}
+          // Reported after any fill-in ask, because a caller may close this
+          // panel on creation and the ask must not depend on it staying open.
+          onSettled={(receipt) => {
+            const card = createdCard.current;
+            if (card !== null) props.onCreated?.(receipt, card);
+          }}
+        />
+      )}
       {denial ? (
         <OctantAlert testId="canvas-create-panel-denial" tone="warning">
           {denial}

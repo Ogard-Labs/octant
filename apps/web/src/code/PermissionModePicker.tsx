@@ -1,12 +1,12 @@
-import type { PermissionMode } from "@octant/contracts/providers";
+import type { PermissionMode, ProviderExecutionPolicy } from "@octant/contracts/providers";
 import {
   AUTO_UNSUPPORTED_REASON,
   fullAccessSandboxSupported,
-  hostSandboxRefusal,
+  hostProviderTurnRefusal,
   threadAccessOf,
 } from "@octant/domain/guardrail-policy";
 import type { ProviderInstanceId } from "@octant/contracts/providers";
-import type { PickerGroup } from "@octant/domain";
+import { clampTurnAccessPosture, type PickerGroup } from "@octant/domain";
 import type { AutoReview } from "./autoReview";
 import {
   ListChecks,
@@ -14,14 +14,17 @@ import {
   ShieldAlert,
   ShieldCheck,
   ShieldQuestionMark,
-  type LucideIcon,
-} from "lucide-react";
-import { useId } from "react";
+  type IconComponent,
+} from "../ui/icons";
+import { useContext, useEffect, useId, useState } from "react";
+import { ComposerOutsideContentMark } from "../composer/OutsideContentNotice";
+import { TaskAccessContext } from "./TaskAccessContext";
 import { useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useFullAccessWarning, type FullAccessWarningScope } from "./FullAccessWarning";
 import {
   OctantMenuCheckboxItem,
+  OctantMenuItem,
   OctantMenuGroup,
   OctantMenuGroupLabel,
   OctantMenuPopup,
@@ -30,11 +33,13 @@ import {
   OctantMenuRadioGroup,
   OctantMenuRadioItem,
   OctantMenuRoot,
+  OctantMenuSeparator,
   OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
+import { useSideWithRoom } from "../ui/base/popupSide";
 
-const PROVIDER_REVIEW_DETAIL = "The provider's own reviewer approves each action.";
-const SHIELD_REVIEW_DETAIL = "Octant Shield approves each action and asks you when unsure.";
+const PROVIDER_REVIEW_DETAIL = "The provider's reviewer approves each action.";
+const SHIELD_REVIEW_DETAIL = "Octant Shield approves, and asks when unsure.";
 
 /** What Auto means for this thread, by who reviews it. */
 export function autoDetail(review: AutoReview | undefined): string {
@@ -70,13 +75,13 @@ export const PERMISSION_MODE_OPTIONS: ReadonlyArray<{
   {
     id: "accept-edits",
     label: "Accept edits",
-    detail: "Edits files in the folder. Asks before commands.",
+    detail: "Edits files freely. Asks before commands.",
   },
-  { id: "plan", label: "Plan", detail: "Read-only. No commands or file changes." },
+  { id: "plan", label: "Plan", detail: "Read-only. No commands or edits." },
   {
     id: "full-access",
     label: "Full access",
-    detail: "No sandbox and no prompts. Every action is still recorded.",
+    detail: "No sandbox, no prompts. Still recorded.",
   },
 ];
 
@@ -89,13 +94,30 @@ export const PERMISSION_MODE_LABEL: Readonly<Record<PermissionMode, string>> = {
 };
 
 /** One icon per mode, so the row's icon-only control says the mode at a glance. */
-const PERMISSION_MODE_ICON: Readonly<Record<PermissionMode, LucideIcon>> = {
+const PERMISSION_MODE_ICON: Readonly<Record<PermissionMode, IconComponent>> = {
   auto: ShieldCheck,
   "ask-first": ShieldQuestionMark,
   "accept-edits": PencilLine,
   plan: ListChecks,
   "full-access": ShieldAlert,
 };
+
+/**
+ * Whether a running turn keeps a narrower posture than the thread now holds.
+ * A narrower pick applies to the running turn at once; a wider one waits for
+ * the next turn, which is what the mode's tooltip then says.
+ */
+export function runningTurnKeepsNarrowerMode(input: {
+  readonly turnRunning: boolean;
+  readonly turnPolicy: ProviderExecutionPolicy | undefined;
+  readonly threadPolicy: ProviderExecutionPolicy;
+}): boolean {
+  if (!input.turnRunning || input.turnPolicy === undefined) return false;
+  return (
+    clampTurnAccessPosture({ requested: input.turnPolicy, thread: input.threadPolicy }) !==
+    input.threadPolicy
+  );
+}
 
 export interface PermissionModePickerProps {
   readonly value: PermissionMode;
@@ -122,23 +144,23 @@ export interface PermissionModePickerProps {
    */
   readonly modes?: ReadonlyArray<PermissionMode>;
   /**
-   * The thread's opt-in sandbox at Full access. With a handler, the picker
-   * offers "Keep the sandbox" under Full access; without one it offers none.
+   * The shared Strict preference, independent of autonomy. A previous sandbox
+   * choice stays visibly marked as legacy until the person replaces it.
    */
-  readonly fullAccessSandbox?: boolean;
-  readonly onFullAccessSandboxChange?: (sandboxed: boolean) => void;
+  readonly strict?: boolean;
+  readonly legacyStrict?: boolean;
+  readonly onStrictChange?: (sandboxed: boolean | "inherit") => void;
   /**
    * Whether this thread's runtime can keep the sandbox at Full access. When it
    * cannot, the choice stays listed but disabled, with the reason.
    */
   readonly fullAccessSandboxSupported?: boolean;
   /**
-   * Whether Strict is on for this thread: its own choice, else its Project's
-   * and Settings' default. With a handler, the picker offers Strict at every
-   * mode; without one it offers none. The host decides what Strict does.
+   * Whether a running turn still holds a narrower mode than the one shown. A
+   * wider mode takes effect from the next turn, so the tooltip says so rather
+   * than leave a running turn's asks reading as a broken Full access.
    */
-  readonly strict?: boolean;
-  readonly onStrictChange?: (strict: boolean) => void;
+  readonly appliesFromNextMessage?: boolean;
 }
 
 /**
@@ -148,9 +170,20 @@ export interface PermissionModePickerProps {
  */
 export const STRICT_DETAIL =
   "Adds Octant's own limits on top of the provider's: a fixed environment, provider telemetry off, secret files closed to every tool, and asks again after outside content. Some workflows that work in the provider's own app stop working.";
-const STRICT_WINDOWS_DETAIL = "Strict needs Octant's sandbox, which does not run on Windows yet.";
+/**
+ * The menu's one-line form of the same trade-off. The full list took five
+ * lines under a two-word name and outweighed every mode above it; Settings,
+ * which has the room, keeps the list.
+ */
+const STRICT_MENU_DETAIL = "Octant's own limits on top of the provider's.";
+const STRICT_WINDOWS_DETAIL = "Strict needs a sandbox Windows doesn't have yet.";
 
-const SANDBOX_DETAIL = "No prompts, but writes stay in the folder and secret files stay closed.";
+/** What a level below Full access runs with on Windows, said wherever it is offered. */
+export const WINDOWS_PROVIDER_APPROVALS_DETAIL =
+  "On Windows the provider's own approvals decide; Octant's sandbox does not run here.";
+
+const SANDBOX_DETAIL =
+  "Strict restores Octant's protection rules and required approvals. Some workflows that work in the provider's own app remain unavailable under Strict.";
 const SANDBOX_UNSUPPORTED_DETAIL =
   "This provider can't keep the sandbox at Full access yet. Use Claude, Codex or an Octant Harness model.";
 
@@ -160,38 +193,107 @@ const SANDBOX_UNSUPPORTED_DETAIL =
  */
 export function PermissionModePicker(props: PermissionModePickerProps) {
   const idPrefix = useId();
+  const popupSide = useSideWithRoom<HTMLButtonElement>("top");
+  const taskAccess = useContext(TaskAccessContext);
+  const [policySelected, setPolicySelected] = useState(false);
+  const [inheritedStrict, setInheritedStrict] = useState<{
+    readonly threadId: string;
+    readonly value: boolean;
+    readonly legacy: boolean;
+  }>();
+  const sandboxClient = taskAccess?.sandboxRestrictionsClient;
+  const sandboxThreadId = taskAccess?.subject.aggregateId;
+  useEffect(() => {
+    setPolicySelected(false);
+
+    if (sandboxClient === undefined || sandboxThreadId === undefined) return;
+    const controller = new AbortController();
+    const refresh = () => {
+      void sandboxClient
+        .settings({ kind: "session", threadId: sandboxThreadId }, controller.signal)
+        .then((snapshot) => {
+          if (!controller.signal.aborted) {
+            setPolicySelected(snapshot.strict === true && snapshot.policy !== undefined);
+            if (snapshot.strict !== undefined)
+              setInheritedStrict({
+                threadId: sandboxThreadId,
+                legacy: snapshot.running
+                  ? snapshot.activeLegacyStrict === true
+                  : snapshot.legacyStrict === true,
+                value: snapshot.running
+                  ? (snapshot.activeStrict ?? snapshot.strict)
+                  : snapshot.strict,
+              });
+          }
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    const timer = setInterval(refresh, 3000);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [sandboxClient, sandboxThreadId, props.strict]);
   const autoSupported =
     props.autoReview === undefined ? props.autoSupported : props.autoReview.status === "reviewer";
   const unsupportedReason =
     props.autoReview?.status === "none" ? props.autoReview.reason : AUTO_UNSUPPORTED_REASON;
   const autoFallsBack = props.value === "auto" && !autoSupported;
   const warning = useFullAccessWarning(props.warningScope ?? "machine");
-  // A host without Octant's sandbox (Windows today) runs only Full access with
-  // the sandbox off. The host refuses the rest; the picker shows them
-  // unavailable with that reason rather than offering a choice it refuses.
+  // A host without Octant's sandbox (Windows today) runs the levels below Full
+  // access with the provider's own approvals and claims no sandbox there; it
+  // refuses only what needs Octant's sandbox (Strict below Full access, and
+  // Keep the sandbox). The picker shows those unavailable with the host's
+  // reason rather than offering a choice it refuses.
   const hostPlatform = useHostPlatform();
+  const effectiveStrict =
+    inheritedStrict !== undefined && inheritedStrict.threadId === sandboxThreadId
+      ? inheritedStrict.value
+      : (props.strict ?? false);
+  const legacyStrict =
+    inheritedStrict !== undefined && inheritedStrict.threadId === sandboxThreadId
+      ? inheritedStrict.legacy
+      : props.legacyStrict === true;
+  const sandboxed = props.value === "full-access" && (effectiveStrict || policySelected);
+  const modeLabel = autoFallsBack ? "Ask first" : PERMISSION_MODE_LABEL[props.value];
+  const triggerLabel = effectiveStrict
+    ? `${modeLabel} · ${legacyStrict ? "Legacy sandbox" : "Strict"}`
+    : modeLabel;
   const hostRefusalOf = (mode: PermissionMode) =>
-    hostSandboxRefusal({ platform: hostPlatform, access: threadAccessOf(mode) });
-  const sandboxHostRefusal = hostSandboxRefusal({
+    hostProviderTurnRefusal({
+      platform: hostPlatform,
+      access: threadAccessOf(mode),
+      strict: effectiveStrict,
+    });
+  const sandboxHostRefusal = hostProviderTurnRefusal({
     platform: hostPlatform,
     access: { executionPolicy: "full-access", fullAccessSandbox: true },
+    strict: false,
   });
-  const sandboxed = props.value === "full-access" && props.fullAccessSandbox === true;
-  const strictUnavailable = hostPlatform === "win32" && props.strict !== true;
-  const triggerLabel = autoFallsBack
-    ? "Ask first"
-    : sandboxed
-      ? "Full access · Sandboxed"
-      : PERMISSION_MODE_LABEL[props.value];
+  const withoutOctantSandbox = (mode: PermissionMode, detail: string | undefined) =>
+    hostPlatform === "win32" && mode !== "full-access"
+      ? `${detail === undefined ? "" : `${detail} `}${WINDOWS_PROVIDER_APPROVALS_DETAIL}`
+      : detail;
   const detailOf = (id: PermissionMode) =>
     id === "auto"
       ? autoDetail(props.autoReview)
       : PERMISSION_MODE_OPTIONS.find((option) => option.id === id)?.detail;
-  const triggerDetail = autoFallsBack
+  const modeDetail = autoFallsBack
     ? unsupportedReason
     : sandboxed
       ? SANDBOX_DETAIL
-      : detailOf(props.value);
+      : withoutOctantSandbox(props.value, detailOf(props.value));
+  const nextMessageNote =
+    props.appliesFromNextMessage === true
+      ? `${triggerLabel} applies from your next message.`
+      : undefined;
+  const triggerDetail =
+    nextMessageNote === undefined
+      ? modeDetail
+      : modeDetail === undefined
+        ? nextMessageNote
+        : `${modeDetail} ${nextMessageNote}`;
   const sandboxSupported = props.fullAccessSandboxSupported !== false;
   const shownMode: PermissionMode = autoFallsBack ? "ask-first" : props.value;
   const ModeIcon = PERMISSION_MODE_ICON[shownMode];
@@ -205,10 +307,14 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
       : PERMISSION_MODE_OPTIONS.filter((option) => props.modes?.includes(option.id) === true);
   return (
     <>
-      <OctantMenuRoot>
+      <ComposerOutsideContentMark fullAccess={props.value === "full-access"} />
+      {/* A composer popup is Octant's float, never the system's menu: each mode
+          carries a line of detail that a system menu cannot show. */}
+      <OctantMenuRoot onOpenChange={popupSide.settle}>
         {/* An icon per mode in the composer's row; its name and tooltip state the
             mode. Only Full access adds its words, in the warning ink. */}
         <OctantMenuTrigger
+          ref={popupSide.trigger}
           aria-label={`Mode: ${triggerLabel}`}
           aria-description={triggerDetail}
           className="code-composer-choice__trigger"
@@ -232,7 +338,14 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
           ) : null}
         </OctantMenuTrigger>
         <OctantMenuPortal>
-          <OctantMenuPositioner side="top">
+          {/* Above the button at the foot of a thread, below it on a start
+              screen, 4px clear of it and never over it: a menu that cannot fit
+              shifts sideways rather than cover its trigger. */}
+          <OctantMenuPositioner
+            align="start"
+            collisionAvoidance={{ side: "flip", align: "shift", fallbackAxisSide: "none" }}
+            side={popupSide.side}
+          >
             <OctantMenuPopup>
               <OctantMenuRadioGroup
                 value={props.value}
@@ -251,7 +364,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                     hostRefusal ??
                     (option.id === "auto" && !autoSupported
                       ? unsupportedReason
-                      : detailOf(option.id));
+                      : withoutOctantSandbox(option.id, detailOf(option.id)));
                   return (
                     <OctantMenuRadioItem
                       aria-describedby={`${idPrefix}-${option.id}-note`}
@@ -275,60 +388,61 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                   );
                 })}
               </OctantMenuRadioGroup>
-              {props.value === "full-access" && props.onFullAccessSandboxChange !== undefined ? (
+              {/* The switches are not modes: one rule between the radio choices
+                  and them, so Strict does not read as another mode. */}
+              {props.onStrictChange !== undefined ? <OctantMenuSeparator /> : null}
+              {props.onStrictChange !== undefined ? (
                 <OctantMenuGroup>
                   <OctantMenuCheckboxItem
                     aria-describedby={`${idPrefix}-sandbox-note`}
-                    checked={props.fullAccessSandbox === true}
+                    checked={effectiveStrict}
                     // Turning the sandbox on is refused where the runtime can't
                     // keep it; turning an inherited one off is always allowed,
                     // because that is what a refused turn asks the person to do.
                     disabled={
                       props.disabled === true ||
-                      ((!sandboxSupported || sandboxHostRefusal !== undefined) &&
-                        props.fullAccessSandbox !== true)
+                      ((!sandboxSupported || sandboxHostRefusal !== undefined) && !effectiveStrict)
                     }
-                    onCheckedChange={(checked) => {
-                      if (props.disabled === true) return;
-                      props.onFullAccessSandboxChange?.(checked === true);
-                    }}
-                  >
-                    <span className="flex min-w-0 flex-col">
-                      <span>Keep the sandbox</span>
-                      <span className="oct-menu-detail" id={`${idPrefix}-sandbox-note`}>
-                        {sandboxHostRefusal ??
-                          (sandboxSupported ? SANDBOX_DETAIL : SANDBOX_UNSUPPORTED_DETAIL)}
-                      </span>
-                    </span>
-                  </OctantMenuCheckboxItem>
-                </OctantMenuGroup>
-              ) : null}
-              {props.onStrictChange === undefined ? null : (
-                <OctantMenuGroup>
-                  <OctantMenuCheckboxItem
-                    aria-describedby={`${idPrefix}-strict-note`}
-                    checked={props.strict === true}
-                    // Turning Strict off is always allowed where it is on;
-                    // turning it on needs Octant's sandbox.
-                    disabled={props.disabled === true || strictUnavailable}
                     onCheckedChange={(checked) => {
                       if (props.disabled === true) return;
                       props.onStrictChange?.(checked === true);
                     }}
                   >
                     <span className="flex min-w-0 flex-col">
-                      <span>Strict</span>
-                      <span className="oct-menu-detail" id={`${idPrefix}-strict-note`}>
-                        {strictUnavailable ? STRICT_WINDOWS_DETAIL : STRICT_DETAIL}
+                      <span>{legacyStrict ? "Legacy sandbox" : "Strict"}</span>
+                      <span className="oct-menu-detail" id={`${idPrefix}-sandbox-note`}>
+                        {sandboxHostRefusal ??
+                          (sandboxSupported ? STRICT_MENU_DETAIL : SANDBOX_UNSUPPORTED_DETAIL)}
                       </span>
                     </span>
                   </OctantMenuCheckboxItem>
                 </OctantMenuGroup>
+              ) : null}
+              {props.onStrictChange !== undefined ? (
+                <OctantMenuItem
+                  disabled={props.disabled === true}
+                  onClick={() => props.onStrictChange?.("inherit")}
+                >
+                  Use Project’s Strict preference
+                </OctantMenuItem>
+              ) : null}
+              {legacyStrict && props.onStrictChange !== undefined ? (
+                <OctantMenuItem onClick={() => props.onStrictChange?.(true)}>
+                  Use Strict protections instead of the legacy sandbox
+                </OctantMenuItem>
+              ) : null}
+              {taskAccess?.onOpenSandboxRestrictions === undefined ? null : (
+                <OctantMenuItem onClick={taskAccess.onOpenSandboxRestrictions}>
+                  Configure protections…
+                </OctantMenuItem>
               )}
               {props.profileName === undefined ? null : (
-                <OctantMenuGroup>
-                  <OctantMenuGroupLabel>Started under {props.profileName}</OctantMenuGroupLabel>
-                </OctantMenuGroup>
+                <>
+                  <OctantMenuSeparator />
+                  <OctantMenuGroup>
+                    <OctantMenuGroupLabel>Started under {props.profileName}</OctantMenuGroupLabel>
+                  </OctantMenuGroup>
+                </>
               )}
             </OctantMenuPopup>
           </OctantMenuPositioner>

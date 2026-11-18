@@ -1,4 +1,4 @@
-import { AlarmClock } from "lucide-react";
+import { AlarmClock } from "../ui/icons";
 
 /**
  * The line over a turn a follow-up sent into its thread, so a reader can tell

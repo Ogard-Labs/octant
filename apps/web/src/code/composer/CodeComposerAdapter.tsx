@@ -19,7 +19,6 @@ import {
 } from "../../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
-import { StartSuggestionChip } from "../../composer/StartSuggestionChip";
 import type { CodeCheckoutId, CodeRepositoryId } from "@octant/contracts/code";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import {
@@ -49,7 +48,7 @@ import {
 } from "@octant/domain/code-worktree-source-policy";
 import { suggestCodeDeliveryOutcome } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { FolderOpen, Network } from "lucide-react";
+import { FolderOpen, Network, type IconComponent } from "../../ui/icons";
 import { serverCodeSelectionRefusal, serverCodeThreadProviderGroups } from "./serverCodeComposer";
 import {
   useCallback,
@@ -66,6 +65,7 @@ import {
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
 import { providerFamilyForThread } from "../../providers/providerFamily";
+import { ComposerStartTray } from "../../composer/ComposerStartTray";
 import { ThreadComposer } from "../../composer/ThreadComposer";
 import { WelcomeHeading } from "../../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
@@ -76,7 +76,7 @@ import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { CodeBranchSelector } from "./CodeBranchSelector";
 import { threadAccessOf } from "@octant/domain/guardrail-policy";
 import { PermissionModePicker } from "../PermissionModePicker";
-import { CodeWorkspaceSelector } from "./CodeWorkspaceSelector";
+import { CodeWhereControl, type CodeWhereControlProps } from "./CodeWhereControl";
 import { CodeWorktreeSourceControl } from "./CodeWorktreeSourceControl";
 import { useCodeWorktreeSourcePreview } from "./useCodeWorktreeSourcePreview";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
@@ -169,6 +169,12 @@ export interface CodeComposerAdapterProps {
   readonly createDisabledReason?: string;
   readonly onCancelFirstTurn?: () => void;
   readonly folderControl?: ReactNode;
+  /** The working-folder fields, drawn as the "Subfolder" row of the Where panel. */
+  readonly subfolderControl?: ReactNode;
+  readonly subfolderName?: string;
+  readonly subfolderValid?: boolean;
+  /** The Project's remembered workspace and how to change it; absent where it cannot be recorded. */
+  readonly rememberedWorkspace?: CodeWhereControlProps["remembered"];
   readonly projectSetup?: ReactNode;
   /**
    * Optional GitHub repository selection slot rendered on the context tray.
@@ -229,6 +235,10 @@ export interface CodeComposerAdapterProps {
 export interface CodeComposerSuggestion {
   readonly id: string;
   readonly label: string;
+  /** One short line under the label: what the agent will do. */
+  readonly detail: string;
+  /** The glyph that leads the card. */
+  readonly icon: IconComponent;
   readonly prompt: string;
 }
 
@@ -782,7 +792,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
     if (imageSupport === false) {
-      images.refuse("The selected model does not accept images. Choose an image-capable model.");
+      images.refuse("This model cannot read images. Pick one that can.");
       return true;
     }
     return images.consumePaste(items);
@@ -827,23 +837,59 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         <span>{server.location}</span>
       </span>
     ) : null;
+  const branchPicker = hasProject ? (
+    <CodeBranchSelector
+      key={String(props.projectId)}
+      branch={resolvedBaseBranch ?? "Default branch"}
+      loading={refsLoading}
+      onOpen={loadWorktreeRefs}
+      onSelectRef={handleSelectRef}
+      onStartFromOriginChange={setStartFromOriginOverride}
+      presentation="row"
+      remoteName={resolvedWorktreeRemote}
+      startFromOrigin={startFromOrigin}
+      startFromOriginAvailable={
+        preferredRemote.status === "selected" || worktreeRemote !== undefined
+      }
+      {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
+      {...(props.creating === true ? { disabled: true } : {})}
+    />
+  ) : null;
+  const sourceControl =
+    props.projectId === undefined ? null : (
+      <CodeWorktreeSourceControl
+        branch={resolvedBaseBranch ?? "Default branch"}
+        {...(props.execute !== undefined ? { onRefresh: sourcePreview.refresh } : {})}
+        onSelectRemote={setWorktreeRemote}
+        onStartFromOriginChange={setStartFromOriginOverride}
+        remoteFacts={worktreeRemoteFacts}
+        resolution={
+          props.execute !== undefined
+            ? sourcePreview.resolution
+            : (props.worktreeResolution ?? { kind: "idle" })
+        }
+        selectedRemote={resolvedWorktreeRemote}
+        startFromOrigin={startFromOrigin}
+      />
+    );
   const branchControl = hasProject ? (
     <>
       {serverLocation}
-      <CodeBranchSelector
-        key={String(props.projectId)}
+      <CodeWhereControl
+        baseBranchPicker={branchPicker}
+        sourceControl={sourceControl}
         branch={resolvedBaseBranch ?? "Default branch"}
-        loading={refsLoading}
-        onOpen={loadWorktreeRefs}
-        onSelectRef={handleSelectRef}
-        onStartFromOriginChange={setStartFromOriginOverride}
-        remoteName={resolvedWorktreeRemote}
-        startFromOrigin={startFromOrigin}
-        startFromOriginAvailable={
-          preferredRemote.status === "selected" || worktreeRemote !== undefined
-        }
-        {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
+        onWorkspaceChange={setWorkspaceOverride}
+        worktreeBranch={defaultDeliveryBranchIntent(resolvedBaseBranch ?? "", shortId)}
+        workspace={workspace}
         {...(props.creating === true ? { disabled: true } : {})}
+        {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
+        {...(props.subfolderControl === undefined ? {} : { subfolder: props.subfolderControl })}
+        {...(props.subfolderName === undefined ? {} : { subfolderName: props.subfolderName })}
+        {...(props.subfolderValid === undefined ? {} : { subfolderValid: props.subfolderValid })}
+        {...(props.rememberedWorkspace === undefined || isServer
+          ? {}
+          : { remembered: props.rememberedWorkspace })}
       />
     </>
   ) : null;
@@ -865,7 +911,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     <section aria-label="New Code thread" className="code-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          {props.heading ?? <WelcomeHeading projectChosen={props.projectId !== undefined} />}
+          {props.heading ?? (
+            <WelcomeHeading
+              projectChosen={props.projectId !== undefined}
+              {...(props.projectId !== undefined && props.projectName !== undefined
+                ? { projectName: props.projectName }
+                : {})}
+            />
+          )}
         </div>
         <div className="composer-stack">
           <ThreadComposer
@@ -881,7 +934,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     {
                       key: "project-unavailable",
                       tone: "warning" as const,
-                      text: "The selected Project is unavailable. Choose another Project.",
+                      text: "That Project is unavailable. Pick another.",
                     },
                   ]
                 : []),
@@ -946,31 +999,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 props.selectedProviderInstanceId === undefined
                   ? undefined
                   : String(props.selectedProviderInstanceId),
-              alternatives: {
-                groups: props.providerGroups,
-                onSelect: props.onSelectProvider,
-                selectedModelId:
-                  props.selectedModelId === undefined ? undefined : String(props.selectedModelId),
-              },
             }}
             startContext={
-              <div className="composer-tray composer-tray--start" aria-label="Thread context">
-                <div className="composer-tray__leading">
-                  {projectControl}
-                  {branchControl}
-                  {environmentControl}
-                </div>
-                <div className="composer-tray__trailing">
-                  {hasProject ? (
-                    <CodeWorkspaceSelector
-                      onChange={setWorkspaceOverride}
-                      value={workspace}
-                      {...(props.creating === true ? { disabled: true } : {})}
-                    />
-                  ) : null}
-                  {props.createFromControl}
-                </div>
-              </div>
+              <ComposerStartTray
+                project={projectControl}
+                branch={branchControl}
+                environment={environmentControl}
+                createFrom={props.createFromControl}
+              />
             }
             chips={
               <>
@@ -1077,7 +1113,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       imageSupport,
                       images.attach,
                       images.refuse,
-                      "The selected model does not accept images. Choose an image-capable model.",
+                      "This model cannot read images. Pick one that can.",
                     )
                   }
                 />
@@ -1161,53 +1197,46 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
 
         {props.projectSetup}
 
-        {/* Start from origin only decides where a new worktree branches from.
-              Binding the current checkout resolves no source, so the control
-              would be a lie rather than a choice. */}
-        {props.projectId === undefined || workspace !== "managed-worktree" ? null : (
-          <CodeWorktreeSourceControl
-            branch={resolvedBaseBranch ?? "Default branch"}
-            {...(props.execute !== undefined ? { onRefresh: sourcePreview.refresh } : {})}
-            onSelectRemote={setWorktreeRemote}
-            onStartFromOriginChange={setStartFromOriginOverride}
-            remoteFacts={worktreeRemoteFacts}
-            resolution={
-              props.execute !== undefined
-                ? sourcePreview.resolution
-                : (props.worktreeResolution ?? { kind: "idle" })
-            }
-            selectedRemote={resolvedWorktreeRemote}
-            startFromOrigin={startFromOrigin}
-          />
-        )}
-
         {/* Settings for what the composer starts (a new coordinator's) belong
             to the box itself, so they come before the suggestions and cards. */}
         {props.afterComposer}
         {/* The prompts sit directly under the composer they fill in, and the
-            cards follow. Under the cards they were a screen away from the
-            box they act on. A draft of only spaces is empty to submit, so it
-            is empty here too: the suggestions stay reachable instead of
-            disappearing behind a stray space. */}
-        {props.suggestions === undefined ||
-        props.suggestions.length === 0 ||
-        trimmed !== "" ? null : (
-          <div aria-label="Suggested prompts" className="code-home__suggestions" role="group">
-            {props.suggestions.map((suggestion) => (
-              <StartSuggestionChip
-                aria-describedby={`${suggestionDescriptionId}-${suggestion.id}`}
-                aria-label={suggestion.label}
-                disabled={props.creating}
-                key={suggestion.id}
-                onClick={() => applySuggestion(suggestion)}
-                title={suggestion.prompt}
-              >
-                {suggestion.label}
-                <span className="sr-only" id={`${suggestionDescriptionId}-${suggestion.id}`}>
-                  {suggestion.prompt}
-                </span>
-              </StartSuggestionChip>
-            ))}
+            list follows. Under the list they were a screen away from the
+            box they act on. Each is a card: a glyph, what it is, and one line
+            on what the agent will do. A draft of only spaces is empty to
+            submit, so it is empty here too. Once the person has typed, the
+            cards step out of sight and out of reach but keep their place:
+            removed, the list under them jumped up on the first keystroke. */}
+        {props.suggestions === undefined || props.suggestions.length === 0 ? null : (
+          <div
+            aria-hidden={trimmed === "" ? undefined : true}
+            aria-label="Suggested prompts"
+            className="code-home__suggestions"
+            data-away={trimmed === "" ? undefined : "true"}
+            role="group"
+          >
+            {props.suggestions.map((suggestion) => {
+              const Icon = suggestion.icon;
+              return (
+                <OctantButton
+                  aria-describedby={`${suggestionDescriptionId}-${suggestion.id}`}
+                  aria-label={suggestion.label}
+                  disabled={props.creating === true || trimmed !== ""}
+                  key={suggestion.id}
+                  onClick={() => applySuggestion(suggestion)}
+                  title={suggestion.prompt}
+                  type="button"
+                  variant="ghost"
+                >
+                  <Icon aria-hidden={true} className="code-home__suggestion-icon" size={16} />
+                  <span className="draft-thread__intent-label">{suggestion.label}</span>
+                  <span className="draft-thread__intent-description">{suggestion.detail}</span>
+                  <span className="sr-only" id={`${suggestionDescriptionId}-${suggestion.id}`}>
+                    {suggestion.prompt}
+                  </span>
+                </OctantButton>
+              );
+            })}
           </div>
         )}
         {/* Running now comes before what waits below: a running thread is what

@@ -10,7 +10,7 @@ import { waitForReconnect } from "../lib/waitForReconnect";
 import { waitUntilDocumentVisible } from "../polling/documentVisibility";
 import { XtermTerminalAdapter, type XtermAdapterRuntime } from "../code/XtermTerminalAdapter";
 import { useTypographyProjection } from "../theme/TypographyProvider";
-import { DockMiniCard } from "./DockShelf";
+import { DockMiniCard, type DockCardPages } from "./DockShelf";
 
 /** The smallest size Settings allows for terminal text, so a card holds as many columns as it can. */
 const MINI_TERMINAL_FONT_SIZE = 8;
@@ -62,6 +62,8 @@ export function DockTerminalCard(props: {
   readonly loadRuntime?: () => Promise<XtermAdapterRuntime>;
   readonly onHide: () => void;
   readonly onExpand: () => void;
+  /** The thread's terminal sessions; choosing one shows it in its pane. */
+  readonly sessions?: DockCardPages;
   readonly threadId: CodeThreadId;
 }) {
   const [tail, setTail] = useState<TerminalTail>({ kind: "loading" });
@@ -243,6 +245,7 @@ export function DockTerminalCard(props: {
       onHide={props.onHide}
       onEngagementChange={onEngagementChange}
       onExpand={expand}
+      pages={props.sessions}
       previewLabel="Show Terminal, live preview"
       surface="terminal"
       title="Terminal"

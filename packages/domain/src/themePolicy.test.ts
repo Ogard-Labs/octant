@@ -7,6 +7,8 @@ import {
   type ThemeSettings,
 } from "@octant/contracts/theme";
 import {
+  DEFAULT_CHARACTER_SET,
+  cleanCharacterSet,
   enforceSidebarBackgroundAccessibility,
   resolveEffectiveSidebarBackground,
   resolveEffectiveThemeMode,
@@ -328,6 +330,7 @@ describe("application background policy", () => {
     expect(resolveAppBackground(settings)).toEqual({
       ...resolvedDefaults,
       kind: "characters",
+      characters: { characterSet: DEFAULT_CHARACTER_SET, density: 50, speed: 50, pattern: "cycle" },
       backgroundId: null,
       backgroundAnimated: true,
     });
@@ -336,6 +339,47 @@ describe("application background policy", () => {
       backgroundAnimated: false,
     });
     expect(resolveAppBackground({ ...settings, increasedContrast: true }).kind).toBe("none");
+  });
+
+  it("cleans typed characters and refuses what the field cannot draw", () => {
+    expect(cleanCharacterSet(" 0 1 1 0 ")).toEqual({ status: "ok", characterSet: "01" });
+    expect(cleanCharacterSet("·•●")).toEqual({ status: "ok", characterSet: "·•●" });
+    expect(cleanCharacterSet("  ")).toEqual({ status: "refused", reason: "empty" });
+    expect(cleanCharacterSet("a😀")).toEqual({ status: "refused", reason: "unsupported" });
+    expect(cleanCharacterSet("a\u202e")).toEqual({ status: "refused", reason: "unsupported" });
+    expect(cleanCharacterSet("a\u0007")).toEqual({ status: "refused", reason: "unsupported" });
+    const many = Array.from({ length: 65 }, (_, i) => String.fromCodePoint(0x4e00 + i)).join("");
+    expect(cleanCharacterSet(many)).toEqual({ status: "refused", reason: "too-long" });
+  });
+
+  it("gives the character field the default set, density and speed, and carries a person's own", () => {
+    const settings: ThemeSettings = {
+      ...baseSettings,
+      appBackground: { ...baseSettings.appBackground, kind: "characters" },
+    };
+    expect(resolveAppBackground(settings).characters).toEqual({
+      characterSet: DEFAULT_CHARACTER_SET,
+      density: 50,
+      speed: 50,
+      pattern: "cycle",
+    });
+    const own = resolveAppBackground({
+      ...settings,
+      appBackground: {
+        ...settings.appBackground,
+        characterSet: "01",
+        characterDensity: 80,
+        characterSpeed: 0,
+        characterPattern: "rings",
+      },
+    });
+    expect(own.characters).toEqual({
+      characterSet: "01",
+      density: 80,
+      speed: 0,
+      pattern: "rings",
+    });
+    expect(own.backgroundAnimated).toBe(false);
   });
 
   it("moves the dithered pixel field unless a person chose Still or reduced motion holds it", () => {
@@ -355,6 +399,8 @@ describe("application background policy", () => {
       backgroundAnimated: true,
       // The field is always printed: dither unless a person picked plain pixels.
       effect: { kind: "dither", cell: 4, levels: 5 },
+      // A row saved before scenes existed draws Drift.
+      scene: "drift",
     });
     const still = {
       ...settings,
@@ -368,6 +414,31 @@ describe("application background policy", () => {
     };
     expect(resolveAppBackground(pixelate).effect.kind).toBe("pixelate");
     expect(resolveAppBackground({ ...settings, increasedContrast: true }).kind).toBe("none");
+  });
+
+  it("draws the scene a pixel ground chose, and falls back to Drift for a picture it has no photo for", () => {
+    const pixels = (extra: Record<string, unknown>): ThemeSettings => ({
+      ...baseSettings,
+      appBackground: { ...baseSettings.appBackground, kind: "pixels", ...extra } as never,
+    });
+    expect(resolveAppBackground(pixels({ scene: "ridges" }))).toMatchObject({
+      kind: "pixels",
+      scene: "ridges",
+      backgroundId: null,
+    });
+    expect(resolveAppBackground(pixels({ scene: "picture", backgroundId: photoId }))).toMatchObject(
+      { scene: "picture", backgroundId: photoId },
+    );
+    expect(resolveAppBackground(pixels({ scene: "picture" }))).toMatchObject({
+      scene: "drift",
+      backgroundId: null,
+    });
+    expect(
+      resolveAppBackground({
+        ...baseSettings,
+        appBackground: { ...baseSettings.appBackground, kind: "characters" },
+      }).scene,
+    ).toBeUndefined();
   });
 
   it("waves a printed picture only when a person chose Wave, and never under reduced motion", () => {
@@ -482,7 +553,7 @@ describe("application background policy", () => {
     expect(dithered.effect).toEqual({ kind: "dither", cell: 6, levels: 4 });
   });
 
-  it("runs under the sidebar only when the ground is everywhere and a person asked for it", () => {
+  it("runs under the sidebar whenever the ground is behind everything, and not otherwise", () => {
     const everywhere = resolveAppBackground({
       ...baseSettings,
       appBackground: { ...baseSettings.appBackground, scope: "everywhere", coversSidebar: true },

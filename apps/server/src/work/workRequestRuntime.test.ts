@@ -704,6 +704,7 @@ describe("WorkRequestRuntime", () => {
       readonly input: string;
       readonly review: ShieldReviewPort["review"] | undefined;
       readonly answerFails?: boolean;
+      readonly requiresUser?: boolean;
       readonly extraFolders?: ReadonlyArray<string>;
       readonly event?: ProviderRuntimeEvent;
       readonly readThread?: () => { readonly access: "plan"; readonly planReturnAccess: "auto" };
@@ -722,7 +723,12 @@ describe("WorkRequestRuntime", () => {
         ...(input.readThread === undefined ? {} : { readThread: input.readThread }),
       });
       const connection = {
-        subscribe: Effect.succeed(Stream.succeed(input.event ?? approval)),
+        subscribe: Effect.succeed(
+          Stream.succeed({
+            ...(input.event ?? approval),
+            ...(input.requiresUser ? { requiresUser: true } : {}),
+          }),
+        ),
         answerApproval,
         answerUserInput: () => Effect.void,
         interrupt: () => Effect.void,
@@ -752,6 +758,21 @@ describe("WorkRequestRuntime", () => {
       );
       return { record, answerApproval, reviewed, received };
     }
+
+    it("keeps a Strict escape with the person even when Shield would approve it", async () => {
+      const review = vi.fn(async () => decision("allow"));
+      const turn = await runTurn({
+        tool: "Bash",
+        input: '{"command":"git status","dangerouslyDisableSandbox":true}',
+        review,
+        requiresUser: true,
+      });
+      expect(review).not.toHaveBeenCalled();
+      expect(turn.answerApproval).not.toHaveBeenCalled();
+      expect(turn.received).toContainEqual(
+        expect.objectContaining({ kind: "approval-request", requiresUser: true }),
+      );
+    });
 
     for (const { runtime, tool, input } of runtimes) {
       it(`answers ${runtime}'s allowed call once without asking the person`, async () => {

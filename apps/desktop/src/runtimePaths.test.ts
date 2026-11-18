@@ -1,5 +1,15 @@
+import { join } from "node:path";
+import {
+  desktopIdentity,
+  desktopWindowStorageDirectory,
+} from "@octant/host-runtime/desktop-identity";
 import { describe, expect, it } from "vitest";
-import { resolveDesktopNodeRuntime, resolveDesktopHostRoot } from "./runtimePaths";
+import {
+  desktopUserDataDirectory,
+  resolveDesktopHostRoot,
+  resolveDesktopHostRuntimePaths,
+  resolveDesktopNodeRuntime,
+} from "./runtimePaths";
 
 describe("packaged desktop worker runtime", () => {
   it("uses an independent macOS executable and physical host tree without changing the GUI entry", () => {
@@ -29,5 +39,49 @@ describe("packaged desktop worker runtime", () => {
       expect(resolveDesktopNodeRuntime(options)).toBe(options.execPath);
       expect(resolveDesktopHostRoot(options)).toBe(options.appRoot);
     }
+  });
+});
+
+describe("desktop user data folder for the compile cache", () => {
+  const stable = desktopIdentity("stable");
+  const appData = "/Users/someone/Library/Application Support";
+
+  it("is the data folder OCTANT_DATA_DIR names, the same one main sets as userData", () => {
+    const configured = "/private/tmp/octant-test-data";
+    const env = { OCTANT_DATA_DIR: configured };
+    const expected = desktopWindowStorageDirectory(
+      stable,
+      resolveDesktopHostRuntimePaths(configured, appData, "darwin", env, {
+        createDataDirectory: false,
+      }).dataDirectory,
+      appData,
+    );
+    const chosen = desktopUserDataDirectory({
+      identity: stable,
+      appDataDirectory: appData,
+      platform: "darwin",
+      env,
+    });
+    expect(chosen).toBe(expected);
+    expect(chosen).not.toBe(join(appData, "Octant"));
+  });
+
+  it("is the default Octant folder without OCTANT_DATA_DIR and absent on Windows", () => {
+    expect(
+      desktopUserDataDirectory({
+        identity: stable,
+        appDataDirectory: appData,
+        platform: "darwin",
+        env: {},
+      }),
+    ).toBe(join(appData, "Octant"));
+    expect(
+      desktopUserDataDirectory({
+        identity: stable,
+        appDataDirectory: "C:\\Users\\someone\\AppData\\Roaming",
+        platform: "win32",
+        env: {},
+      }),
+    ).toBeUndefined();
   });
 });

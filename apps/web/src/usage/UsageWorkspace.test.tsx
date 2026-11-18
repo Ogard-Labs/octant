@@ -263,7 +263,7 @@ describe("UsageWorkspace", () => {
     render(<UsageWorkspace client={client} />);
 
     expect(
-      await screen.findByText(/Every total below is a floor, not a complete figure/),
+      await screen.findByText(/Every total below is a minimum, not a complete figure/),
     ).toBeVisible();
   });
 
@@ -324,7 +324,7 @@ describe("UsageWorkspace", () => {
     );
     expect(screen.getByText(/Highest-usage day: 2026-07-24/)).toBeInTheDocument();
     expect(screen.getByText(/Highest-usage model: gpt-4o/)).toBeInTheDocument();
-    expect(screen.getByText(/Monetary cost: Unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/Cost: unavailable/)).toBeInTheDocument();
   });
 
   it("reports records the host refused to aggregate", async () => {

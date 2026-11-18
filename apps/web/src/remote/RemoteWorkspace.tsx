@@ -19,6 +19,7 @@ import { CodeThreadWorkspace } from "../code/CodeThreadWorkspace";
 import { useCodeController } from "../code/useCodeController";
 import { RemoteAccessDefaults } from "./RemoteAccessDefaults";
 import { RemoteCoordinatorProposals } from "./RemoteCoordinatorProposals";
+import { RemoteProjectTools } from "./RemoteProjectTools";
 import { RemoteCodeThreadStart, RemoteWorkThreadStart } from "./RemoteThreadStart";
 import { useProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -217,6 +218,15 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
           workThreadClient={props.clients.workThread}
         />
       ) : null}
+      {props.actsAsHostPerson === true && props.mode !== "chat" ? (
+        <RemoteProjectTools
+          key={`tools-${props.mode}`}
+          mode={props.mode}
+          projectBrowserClient={props.clients.projectBrowser}
+          projectClient={props.clients.project}
+          projectTerminalClient={props.clients.projectTerminal}
+        />
+      ) : null}
       <OctantDialogPresence>
         {canvas === undefined ||
         canvas.client !== props.clients.canvas ||
@@ -264,6 +274,15 @@ function RemoteChatSurface(
   });
   const [chatProjectId, setChatProjectId] = useState<ProjectId>();
   const [createError, setCreateError] = useState<string>();
+  // The host takes an HTML import only from a device its own person paired,
+  // so only that session's Canvas tools offer it.
+  const canvasClient = useMemo(
+    () =>
+      props.actsAsHostPerson
+        ? { ...props.clients.canvas, importHtml: props.clients.canvasImportHtml }
+        : props.clients.canvas,
+    [props.actsAsHostPerson, props.clients.canvas, props.clients.canvasImportHtml],
+  );
   const controller = useChatController({
     client: props.clients.chat,
     ...(activeThreadId === undefined ? {} : { activeThreadId }),
@@ -328,7 +347,7 @@ function RemoteChatSurface(
     >
       {activeThreadId === undefined ? null : (
         <ChatWorkspace
-          canvasClient={props.clients.canvas}
+          canvasClient={canvasClient}
           controller={controller}
           {...(props.extensionClient === undefined
             ? {}

@@ -227,9 +227,41 @@ export type AppBackgroundEffect = typeof AppBackgroundEffect.Type;
 export const AppBackgroundMotion = Schema.Literal("still", "pulse", "wave");
 export type AppBackgroundMotion = typeof AppBackgroundMotion.Type;
 
+/**
+ * What the pixel ground draws. Ridges are layered horizon lines with a sun
+ * glow on the horizon, Burst is a soft radial burst of rays toward a corner,
+ * Drift is diagonal streaks, and Picture prints a person's photo in the same
+ * two tones. Absent on a pixel ground saved before scenes existed, which
+ * resolves to Drift, the nearest to the drifting field those rows drew.
+ */
+export const AppBackgroundScene = Schema.Literal("ridges", "burst", "drift", "picture");
+export type AppBackgroundScene = typeof AppBackgroundScene.Type;
+
 /** CSS pixels per effect cell, and colour steps per channel for dither. */
 export const AppBackgroundEffectCell = Schema.Int.pipe(Schema.between(2, 16));
 export const AppBackgroundEffectTones = Schema.Int.pipe(Schema.between(2, 16));
+
+/**
+ * The characters the character field draws, one code point per cell. No
+ * controls, format or bidi characters, separators, whitespace, combining marks
+ * or emoji, so every stored cell is one plain glyph the field can measure.
+ */
+export const AppBackgroundCharacterSet = Schema.String.pipe(
+  Schema.pattern(/^[^\p{C}\p{Z}\p{M}\s\p{Extended_Pictographic}]{1,64}$/u),
+);
+export type AppBackgroundCharacterSet = typeof AppBackgroundCharacterSet.Type;
+
+/**
+ * Which pattern the character field draws: each of its three in turn
+ * (`cycle`, what an absent value means) or one of them held.
+ */
+export const AppBackgroundCharacterPattern = Schema.Literal(
+  "cycle",
+  "blotches",
+  "currents",
+  "rings",
+);
+export type AppBackgroundCharacterPattern = typeof AppBackgroundCharacterPattern.Type;
 
 const AppBackgroundTuning = {
   // Retired with the drawn dot pattern: rows written while it existed carry
@@ -249,6 +281,13 @@ const AppBackgroundTuning = {
   effectCell: Schema.optionalWith(AppBackgroundEffectCell, { default: () => 3 }),
   effectTones: Schema.optionalWith(AppBackgroundEffectTones, { default: () => 8 }),
   motion: Schema.optional(AppBackgroundMotion),
+  /** What the pixel ground draws; read by no other kind. */
+  scene: Schema.optional(AppBackgroundScene),
+  /** What the character field draws, how much of it shows, and how fast it moves; absent means the default field. */
+  characterSet: Schema.optional(AppBackgroundCharacterSet),
+  characterDensity: Schema.optional(AppBackgroundPercent),
+  characterSpeed: Schema.optional(AppBackgroundPercent),
+  characterPattern: Schema.optional(AppBackgroundCharacterPattern),
 };
 
 /** Retired: the drawn dot pattern. It decodes and resolves to the plain page. */
@@ -279,12 +318,15 @@ const CharactersAppBackground = Schema.Struct({
 }).annotations(strict);
 
 /**
- * A field of square cells in the theme's own ink, its brightness drifting in
- * slow waves and printed through an ordered dither (or plain pixels). It
- * carries no picture; the effect cell and tones size it.
+ * The pixel ground: square cells in the theme's own ink at a few ordered-dither
+ * levels, with the accent as one glow, drawn as a built-in scene (ridges,
+ * burst, drift) or as a person's photo in the same two tones. The effect cell
+ * and tones size it.
  */
 const PixelsAppBackground = Schema.Struct({
   kind: Schema.Literal("pixels"),
+  /** The photo the Picture scene prints, from the shared image library. */
+  backgroundId: Schema.optional(SidebarBackgroundId),
   ...AppBackgroundTuning,
 }).annotations(strict);
 
@@ -316,12 +358,12 @@ export const AppBackground = Schema.Union(
 export type AppBackground = typeof AppBackground.Type;
 
 // The retired pattern kind still decodes so older rows load. A new install
-// starts on the soft gradient: a flat page made the start screens read as an
-// empty grey box. Rows saved since the ground existed carry their own choice,
-// "none" included, so this reaches fresh installs and Reset only.
+// starts on the character field: a flat page made the start screens read as an
+// empty grey box, and a coloured glow behind the heading competed with it.
+// Rows saved since the ground existed carry their own choice, "none"
+// included, so this reaches fresh installs and Reset only.
 export const DEFAULT_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackground)({
-  kind: "builtin",
-  presetId: "soft-glow",
+  kind: "characters",
 });
 
 // What a row written before the ground existed replays as. Those people saw
@@ -337,16 +379,53 @@ const PLAIN_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackground)({ k
 export const ThemeStyle = Schema.Literal("default", "vivid", "mono");
 export type ThemeStyle = typeof ThemeStyle.Type;
 
+/** How firmly the derived washes and edges draw: one step each way from standard. */
+export const ThemeCustomContrast = Schema.Literal("soft", "standard", "firm");
+export type ThemeCustomContrast = typeof ThemeCustomContrast.Type;
+
+/**
+ * The seeds a Custom preset is built from for one mode: the ground (the page
+ * colour), the ink (the text colour), an accent, and a contrast step. Every
+ * other role is derived from them.
+ */
+export const ThemeCustomSeeds = Schema.Struct({
+  ground: ThemeHexColor,
+  ink: ThemeHexColor,
+  accent: ThemeHexColor,
+  contrast: ThemeCustomContrast,
+}).annotations(strict);
+export type ThemeCustomSeeds = typeof ThemeCustomSeeds.Type;
+
+/** The id the preset pickers use for the preset built from the seeds. */
+export const CUSTOM_THEME_PRESET_ID = "custom";
+
 export const ThemeSettings = Schema.Struct({
   mode: ThemeMode,
   lightPresetId: Schema.optional(ThemePresetId),
   darkPresetId: Schema.optional(ThemePresetId),
-  // Retired: nothing ever read these four. They stay optional so journal
+  /**
+   * How much room rows and gutters take. Absent reads as comfortable. Optional
+   * so rows written before the control existed still decode.
+   */
+  density: Schema.optional(ThemeDensity),
+  /**
+   * Seeds for the Custom preset, per mode. Optional so older rows decode; the
+   * Custom preset resolves only for a mode that has them.
+   */
+  customThemeLight: Schema.optional(ThemeCustomSeeds),
+  customThemeDark: Schema.optional(ThemeCustomSeeds),
+  /**
+   * Grayscale text smoothing on a Mac: "auto" and "on" smooth, and the
+   * interface's weights step up with it so text stays strong; "off" leaves the
+   * system default, which draws fuller, grainier strokes at the plain weights.
+   * Absent reads as "on", the default since 2026-11-16; a stored "off" stays
+   * off. Optional so old rows decode.
+   */
+  fontSmoothing: Schema.optional(ThemeFontSmoothing),
+  // Retired: nothing ever read these two. They stay optional so journal
   // events and projection rows written while they existed still replay, and
   // new settings no longer carry them.
-  density: Schema.optional(ThemeDensity),
   translucency: Schema.optional(ThemeTranslucency),
-  fontSmoothing: Schema.optional(ThemeFontSmoothing),
   timestampFormat: Schema.optional(ThemeTimestampFormat),
   typography: ThemeTypography,
   semanticOverrides: ThemeSemanticOverrides,
@@ -377,20 +456,42 @@ export const ThemeSettings = Schema.Struct({
 }).annotations(strict);
 export type ThemeSettings = typeof ThemeSettings.Type;
 
-/** The tint each glass level uses until a person sets one, by theme mode. */
+/**
+ * The coat each glass level lays over the window until a person sets a Tint, by
+ * theme mode: one coat of the workspace colour, in percent. Raised from 84/70
+ * (light) and 66/50 (dark) because the text of apps behind the window read
+ * through the thinner coat (maintainer request, 2026-11-15); a stored Tint is
+ * kept as the person set it.
+ */
 export const GLASS_TINT_DEFAULTS = {
-  light: { subtle: 78, strong: 62 },
-  dark: { subtle: 58, strong: 32 },
+  light: { subtle: 88, strong: 76 },
+  dark: { subtle: 74, strong: 58 },
 } as const;
+
+/**
+ * The thinnest coat painted, by theme mode, whatever Tint is saved. At the
+ * former 62% dark coat the window's grey matched a dark desktop and the glass
+ * read as a solid fill, so the floor now counts on the native material's own
+ * tint under the coat instead of a bare white or black desktop. The saved value
+ * is untouched; only the paint is clamped.
+ */
+export const GLASS_TINT_FLOOR = { light: 45, dark: 45 } as const;
+
+/**
+ * Below these coats the secondary and muted inks fall under 4.5:1 over the worst
+ * desktop, so the muted role takes the secondary ink (data-octant-glass-thin).
+ */
+export const GLASS_TINT_SECONDARY_FLOOR = { light: 72, dark: 77 } as const;
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   mode: "system",
+  fontSmoothing: "on",
   typography: {
     ui: {
       // The platform face (SF Pro on a Mac): it is what makes Octant read as
       // a native app. Geist stays bundled as a choice in Appearance.
       family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      size: 13,
+      size: 14,
       weight: 400,
     },
     editor: {

@@ -892,7 +892,16 @@ function checklistEvents(
     }
     position += 1;
     taskIds.push(taskId);
-    results.push(event(context, { kind: "task-progress", taskId, status, summary }));
+    const running = normalized(jsonString(todo, "activeForm") ?? "", SUMMARY_MAX_CHARACTERS);
+    results.push(
+      event(context, {
+        kind: "task-progress",
+        taskId,
+        status,
+        summary,
+        ...(running === undefined ? {} : { runningSummary: running }),
+      }),
+    );
   }
   // A list with items but none readable is one Claude refuses; keep the panel.
   if (results.length === 0 && todos.length > 0) return [{ kind: "ignored" }];
@@ -913,7 +922,19 @@ function taskListEvents(context: ClaudeEventContext): ReadonlyArray<ClaudeMapped
     if (summary === undefined || status === undefined) continue;
     const taskId = context.taskList.panelTaskId(task.id, context.makeTaskId);
     taskIds.push(taskId);
-    results.push(event(context, { kind: "task-progress", taskId, status, summary }));
+    const running =
+      task.activeForm === undefined
+        ? undefined
+        : normalized(task.activeForm, SUMMARY_MAX_CHARACTERS);
+    results.push(
+      event(context, {
+        kind: "task-progress",
+        taskId,
+        status,
+        summary,
+        ...(running === undefined ? {} : { runningSummary: running }),
+      }),
+    );
   }
   return [...results, event(context, { kind: "task-list", taskIds })];
 }
@@ -2008,6 +2029,18 @@ function artifactApprovalDescription(
     replaced === undefined
       ? ""
       : `, replacing the page at ${replaced}${input.force === true ? " even if it changed since" : ""}`;
+  const action = typeof input.action === "string" ? input.action : "publish";
+  if (action === "read" || action === "list" || action === "quickstart") {
+    return `Claude asks to ${action} Claude artifacts on your claude.ai account.`;
+  }
+  if (action !== "publish") {
+    return `Claude asks to ${normalized(action, LABEL_MAX_CHARACTERS)} a page on your claude.ai account${replaced === undefined ? "" : ` (${replaced})`}.`;
+  }
+  // A publish from a type with no local file sends what Claude made in the
+  // turn, not a file from this computer.
+  if (target === undefined && typeof input.file_path !== "string") {
+    return `Publish a page Claude made to your claude.ai account${replacing}.`;
+  }
   return `Publish ${target ?? "a Project file"} to your claude.ai account${replacing}. It leaves this computer.`;
 }
 

@@ -1,4 +1,5 @@
-import { Check, CircleDashed, CircleX } from "lucide-react";
+import { Check, CircleDashed, CircleX } from "../ui/icons";
+import { InfoTip, PaneBar } from "../shell/PaneBar";
 import { useId } from "react";
 import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -19,12 +20,11 @@ export function DeviceSetup(props: {
   const computer = thisComputerName(useHostPlatform());
   return (
     <section aria-labelledby={headingId} className="device-card">
-      <h2 className="device-card__title" id={headingId}>
-        {props.title}
-      </h2>
-      <p className="device-card__lede">
-        {props.note ?? `Octant checks these on ${computer}. Nothing is installed for you.`}
-      </p>
+      <PaneBar title={<span id={headingId}>{props.title}</span>}>
+        <InfoTip
+          text={props.note ?? `Octant checks these on ${computer}. Nothing is installed for you.`}
+        />
+      </PaneBar>
       <ul className="device-checks">
         {props.checks.map((check) => (
           <li data-state={check.state} key={check.id}>

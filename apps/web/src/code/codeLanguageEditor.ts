@@ -113,6 +113,7 @@ const REFUSAL_TEXT: Readonly<Record<CodeLanguageRefusalReason, string>> = {
   "checkout-mismatch": "the thread moved to another checkout",
   "file-outside-thread": "the host no longer holds this file open",
   "path-outside-checkout": "the file resolves outside the checkout",
+  "sandbox-read-denied": "sandbox restrictions block this host-owned file read",
   "no-reach": "this window cannot reach the thread",
   "turned-off": "they are off in Settings › Code",
   "no-language-server": "no language server reads this file",
@@ -160,7 +161,7 @@ export function languageStatusText(state: CodeLanguageEditorState): string | und
     case "off":
       return "Language services are off. Turn them on in Settings › Code.";
     case "unsupported-platform":
-      return "Language services are not available on this host's platform.";
+      return "Language services are not available here: they run on macOS and Linux, and on Windows outside Strict.";
     case "refused":
       return `Language services are unavailable: ${REFUSAL_TEXT[state.reason]}.`;
     case "crashed":

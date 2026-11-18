@@ -40,7 +40,7 @@ export function CodeUtilityModule(
   ) {
     return unavailable(
       "iOS Simulator",
-      "This thread has no discovered Xcode project or Apple toolchain connection.",
+      "No Xcode project or Apple toolchain found for this thread.",
     );
   }
   const tab = codeUtilityTab(props.surface, threadId, props.appleProjectPath, props.utilityTabId);

@@ -1,4 +1,5 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
+import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
 import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import { CodeProviderFileReview } from "./CodeProviderFileReview";
 import type { CodeReviewLineSelection } from "./CodeLocalReview";
@@ -20,7 +21,28 @@ import type {
 } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
+import { Ellipsis, Info, ListChecks, RefreshCw } from "../ui/icons";
+import { OctantIconButton } from "../ui/base/OctantButton";
+import {
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuRoot,
+  OctantMenuTrigger,
+} from "../ui/base/OctantMenu";
+import { MenuEntries } from "../shell/DockBarRow";
+import { ReviewDiffShownContext, ReviewToolbarSlotContext } from "./reviewToolbarSlot";
+import { useDockBarControls, type DockBarItem } from "../shell/dockBarControls";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { parseUnifiedDiff, diffModelRowSources, type ParsedDiffFile } from "./unifiedDiff";
@@ -29,10 +51,12 @@ import { CodeSelectedHunks } from "./CodeSelectedHunks";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantCheckbox } from "../ui/base/OctantCheckbox";
-import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { OctantAlert } from "../ui/base/OctantAlert";
-import { readCodeDiffLayout, writeCodeDiffLayout } from "./codeDiffLayoutPreference";
+import {
+  clearCodeDiffLayout,
+  readCodeDiffLayout,
+  writeCodeDiffLayout,
+} from "./codeDiffLayoutPreference";
 
 type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
 type RunReviewed = Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>;
@@ -104,6 +128,12 @@ export interface CodeDiffPaneProps {
     readonly value: boolean;
     readonly onChange: (value: boolean) => void;
   };
+  /** Re-reads the comparison and what hangs off it (findings, checks). */
+  readonly onRefresh?: () => void;
+  /** Quiet status after the counts: checks and findings, as small chips. */
+  readonly statusTrail?: ReactNode;
+  /** Words that explain the review's scope, shown on an info icon's tooltip. */
+  readonly info?: string;
 }
 
 type ContentState =
@@ -158,7 +188,28 @@ export function CodeDiffPane(props: CodeDiffPaneProps) {
     );
   }
   if (props.diff.state === "loading") return <OctantEmpty state="loading" title="Loading diff" />;
-  return <OctantAlert tone="warning">{props.diff.message}</OctantAlert>;
+  return <ChangesUnreadable message={props.diff.message} onRetry={props.onRefresh} />;
+}
+
+/**
+ * The comparison cannot be read: the pane's one state, in the shared pattern,
+ * with the host's sentence as its reason and the one way out.
+ */
+function ChangesUnreadable(props: {
+  readonly message: string;
+  readonly onRetry: (() => void) | undefined;
+}) {
+  return (
+    <OctantEmpty
+      {...(props.onRetry === undefined
+        ? {}
+        : { action: { label: "Try again", onClick: props.onRetry } })}
+      message={checkoutUnreadableReason(props.message)}
+      role="alert"
+      state="warning"
+      title="Changes can't be read"
+    />
+  );
 }
 
 function AvailableDiff(
@@ -177,6 +228,10 @@ function AvailableDiff(
   const [selectedPath, setSelectedPath] = useState<string | undefined>(() =>
     savedReview?.kind === "review" ? savedReview.path : undefined,
   );
+  const toolbarSlot = useContext(ReviewToolbarSlotContext);
+  const diffShown = useContext(ReviewDiffShownContext);
+  const [hunksOpen, setHunksOpen] = useState(false);
+  const [jump, setJump] = useState<{ readonly path: string }>();
   const [providerReadsAvailable, setProviderReadsAvailable] = useState(false);
   const [providerFile, setProviderFile] = useState<{
     readonly path: string;
@@ -364,55 +419,211 @@ function AvailableDiff(
   const selected =
     files.find((file) => file.path === selectedPath) ?? (selectionMissing ? undefined : files[0]);
   const trackedPath = selected === undefined ? undefined : tracked.get(selected.path);
+  const changedCount = files.length > 0 ? files.length : props.snapshot.changedPaths.length;
+  const totals =
+    content.kind === "ready"
+      ? files.reduce(
+          (sum, file) => ({
+            additions: sum.additions + file.additions,
+            deletions: sum.deletions + file.deletions,
+          }),
+          { additions: 0, deletions: 0 },
+        )
+      : undefined;
+  const hunkInputs =
+    props.diff.state === "available" &&
+    props.createOperationId !== undefined &&
+    props.createGitOperationId !== undefined &&
+    props.executionPolicy !== undefined
+      ? {
+          diff: props.diff,
+          executionPolicy: props.executionPolicy,
+          createOperationId: props.createOperationId,
+          createGitOperationId: props.createGitOperationId,
+        }
+      : undefined;
+  // Layout and whitespace are set once and stay, so they live in one menu
+  // rather than as two buttons that sit on the bar all day. The menu's button
+  // wears a dot while either is off its default, and Reset puts both back.
+  const defaultLayout: CodeDiffLayout = props.defaultLayout ?? "unified";
+  const whitespaceLabel =
+    props.diff.state === "turn" ? "Ignore edge whitespace" : "Ignore whitespace";
+  const viewActive = [
+    layout === defaultLayout
+      ? undefined
+      : `Layout: ${layout === "unified" ? "Unified" : "Side by side"}`,
+    props.ignoreWhitespace?.value === true ? `${whitespaceLabel} on` : undefined,
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(", ");
+  const viewChoices = [
+    {
+      id: "layout-unified",
+      label: "Unified",
+      choice: "radio" as const,
+      checked: layout === "unified",
+    },
+    {
+      id: "layout-side-by-side",
+      label: "Side by side",
+      choice: "radio" as const,
+      checked: layout === "side-by-side",
+    },
+    ...(props.ignoreWhitespace === undefined
+      ? []
+      : [
+          {
+            id: "whitespace",
+            label: whitespaceLabel,
+            choice: "check" as const,
+            checked: props.ignoreWhitespace.value,
+          },
+        ]),
+    ...(viewActive === "" ? [] : [{ id: "reset", label: "Reset" }]),
+  ];
+  const chooseLayout = (next: CodeDiffLayout) => {
+    choseLayout.current = true;
+    setLayout(next);
+    writeCodeDiffLayout(threadId, next);
+  };
+  const chooseView = (id: string) => {
+    if (id === "layout-unified") chooseLayout("unified");
+    else if (id === "layout-side-by-side") chooseLayout("side-by-side");
+    else if (id === "whitespace") props.ignoreWhitespace?.onChange(!props.ignoreWhitespace.value);
+    else if (id === "reset") {
+      // Back to following Settings: the stored choice is forgotten, not
+      // replaced by today's default.
+      choseLayout.current = false;
+      clearCodeDiffLayout(threadId);
+      setLayout(defaultLayout);
+      if (props.ignoreWhitespace?.value === true) props.ignoreWhitespace.onChange(false);
+    } else if (id === "hunks") setHunksOpen((open) => !open);
+  };
+  // In a pane the diff's controls are the bar's actions, after the view switch:
+  // one toolbar. A row of their own under the bar held four icons at its right
+  // end and nothing else.
+  const barItems: ReadonlyArray<DockBarItem> =
+    toolbarSlot !== undefined || !diffShown
+      ? []
+      : [
+          {
+            kind: "menu" as const,
+            id: "diff-more",
+            label: "More review actions",
+            icon: Ellipsis,
+            items: viewChoices,
+            ...(viewActive === "" ? {} : { active: viewActive }),
+            onSelect: chooseView,
+          },
+          ...(props.onRefresh === undefined
+            ? []
+            : [
+                {
+                  kind: "button" as const,
+                  id: "diff-refresh",
+                  label: "Refresh review",
+                  icon: RefreshCw,
+                  onSelect: props.onRefresh,
+                },
+              ]),
+          ...(hunkInputs === undefined
+            ? []
+            : [
+                {
+                  kind: "button" as const,
+                  id: "diff-hunks",
+                  label: "Select Git hunks",
+                  icon: ListChecks,
+                  pressed: hunksOpen,
+                  onSelect: () => setHunksOpen((open) => !open),
+                },
+              ]),
+        ];
+  const barHosted = useDockBarControls(barItems) !== undefined;
+  const controls = (
+    <div className="code-diff-pane__controls">
+      {props.onRefresh === undefined ? null : (
+        <OctantIconButton label="Refresh review" onClick={props.onRefresh} size="icon-sm">
+          <RefreshCw aria-hidden="true" size={14} />
+        </OctantIconButton>
+      )}
+      <OctantMenuRoot>
+        <OctantMenuTrigger
+          aria-label="More review actions"
+          {...(viewActive === "" ? {} : { "aria-description": viewActive, "data-active": "true" })}
+          className="octant-menu__trigger window-no-drag"
+        >
+          <Ellipsis aria-hidden="true" size={14} />
+        </OctantMenuTrigger>
+        <OctantMenuPortal>
+          <OctantMenuPositioner>
+            <OctantMenuPopup aria-label="More review actions">
+              <MenuEntries
+                item={{
+                  kind: "menu",
+                  id: "diff-more",
+                  label: "More review actions",
+                  icon: Ellipsis,
+                  items: [
+                    ...viewChoices,
+                    ...(hunkInputs === undefined
+                      ? []
+                      : [{ id: "hunks", label: "Select Git hunks" }]),
+                  ],
+                  onSelect: chooseView,
+                }}
+              />
+            </OctantMenuPopup>
+          </OctantMenuPositioner>
+        </OctantMenuPortal>
+      </OctantMenuRoot>
+    </div>
+  );
 
   return (
     <section aria-label="Review" className="code-diff-pane">
-      <header className="code-diff-pane__toolbar">
-        <div>
-          <h1>{props.snapshot.title}</h1>
-        </div>
-        <p>
-          {props.snapshot.changedPaths.length.toLocaleString("en")}{" "}
-          {props.snapshot.changedPaths.length === 1 ? "changed path" : "changed paths"}
-        </p>
-        <OctantToggleGroup<CodeDiffLayout>
-          aria-label="Diff layout"
-          onValueChange={(value) => {
-            const selected = value[0];
-            if (selected === undefined) return;
-            choseLayout.current = true;
-            setLayout(selected);
-            writeCodeDiffLayout(threadId, selected);
-          }}
-          value={[layout]}
-        >
-          <OctantToggleGroupItem value="unified">Unified</OctantToggleGroupItem>
-          <OctantToggleGroupItem value="side-by-side">Side by side</OctantToggleGroupItem>
-        </OctantToggleGroup>
-        {props.ignoreWhitespace === undefined ? null : (
-          <label className="check">
-            <OctantCheckbox
-              checked={props.ignoreWhitespace.value}
-              onChange={(event) => props.ignoreWhitespace?.onChange(event.target.checked)}
-            />
-            <span>
-              {props.diff.state === "turn" ? "Ignore edge whitespace" : "Ignore whitespace"}
-            </span>
-          </label>
-        )}
-      </header>
+      <h1 className="sr-only">{props.snapshot.title}</h1>
+      {toolbarSlot === undefined ? (
+        barHosted ? null : (
+          <header className="code-diff-pane__toolbar">{controls}</header>
+        )
+      ) : toolbarSlot === null ? null : (
+        createPortal(controls, toolbarSlot)
+      )}
+      <div className="code-diff-pane__status">
+        <span className="code-diff-pane__totals">
+          {changedCount.toLocaleString("en")} {changedCount === 1 ? "file" : "files"} changed
+          {totals === undefined ? null : (
+            <>
+              {" · "}
+              <span className="code-diff-pane__file-additions">
+                +{totals.additions.toLocaleString("en")}
+              </span>{" "}
+              <span className="code-diff-pane__file-deletions">
+                −{totals.deletions.toLocaleString("en")}
+              </span>
+            </>
+          )}
+        </span>
+        <span className="code-diff-pane__trail">
+          {props.statusTrail}
+          {props.info === undefined ? null : (
+            <OctantIconButton className="code-diff-pane__info" label={props.info} size="icon-sm">
+              <Info aria-hidden="true" size={14} />
+            </OctantIconButton>
+          )}
+        </span>
+      </div>
 
-      {props.diff.state === "available" &&
-      props.createOperationId !== undefined &&
-      props.createGitOperationId !== undefined &&
-      props.executionPolicy !== undefined ? (
+      {hunksOpen && hunkInputs !== undefined ? (
         <CodeSelectedHunks
           client={props.client}
-          threadId={props.diff.threadId}
-          checkoutId={props.diff.checkoutId}
-          executionPolicy={props.executionPolicy}
-          createOperationId={props.createOperationId}
-          createGitOperationId={props.createGitOperationId}
+          threadId={hunkInputs.diff.threadId}
+          checkoutId={hunkInputs.diff.checkoutId}
+          executionPolicy={hunkInputs.executionPolicy}
+          createOperationId={hunkInputs.createOperationId}
+          createGitOperationId={hunkInputs.createGitOperationId}
+          startOpen
           {...(props.requestApproval === undefined
             ? {}
             : { requestApproval: props.requestApproval })}
@@ -420,7 +631,7 @@ function AvailableDiff(
       ) : null}
 
       {props.staleNotice === undefined ? null : (
-        <OctantAlert className="code-diff-pane__warning" tone="warning">
+        <OctantAlert className="code-diff-pane__warning" layout="row" tone="warning">
           <strong>{props.staleNotice.message}</strong>
           <OctantButton
             size="sm"
@@ -434,7 +645,7 @@ function AvailableDiff(
       )}
 
       {evidence.truncated === true ? (
-        <OctantAlert className="code-diff-pane__warning" tone="warning">
+        <OctantAlert className="code-diff-pane__warning" layout="row" tone="warning">
           <strong>This diff is truncated and is not complete.</strong>
           <p>{evidence.byteLength.toLocaleString("en")} bytes retained</p>
         </OctantAlert>
@@ -442,12 +653,12 @@ function AvailableDiff(
 
       {content.kind === "loading" ? <OctantEmpty state="loading" title="Loading diff" /> : null}
       {content.kind === "unavailable" ? (
-        <OctantAlert tone="warning">{content.message}</OctantAlert>
+        <ChangesUnreadable message={content.message} onRetry={props.onRefresh} />
       ) : null}
       {content.kind === "ready" &&
       props.requestedCodeReviewFile !== undefined &&
       !files.some((file) => file.path === props.requestedCodeReviewFile?.path) ? (
-        <OctantAlert tone="warning">
+        <OctantAlert layout="row" tone="warning">
           The receipt’s file is not in this current comparison. Its original per-turn diff was not
           retained here; no line has been retargeted.
         </OctantAlert>
@@ -457,7 +668,7 @@ function AvailableDiff(
       ) : null}
 
       {selectionMissing ? (
-        <OctantAlert tone="warning">
+        <OctantAlert layout="row" tone="warning">
           The previously selected file is absent from this captured version. Existing notes keep
           their original anchors; choose another file.
         </OctantAlert>
@@ -495,84 +706,64 @@ function AvailableDiff(
           </nav>
         )
       ) : !sideBySide ? (
-        <div
-          className="code-diff-pane__stack"
-          ref={reviewStack}
-          onScroll={(event) =>
-            viewStore?.write(viewKey, {
-              kind: "review",
-              ...(selectedPath === undefined ? {} : { path: selectedPath }),
-              scrollTop: event.currentTarget.scrollTop,
-            })
-          }
-        >
-          <UnifiedDiffList
-            files={displayFiles}
-            getScrollElement={() => reviewStack.current}
-            {...(props.diff.state === "available" && providerReadsAvailable
-              ? { onReadProviderFile: readProviderFile }
-              : {})}
-            {...(props.requestedCodeReviewFile === undefined
-              ? {}
-              : { requestedFile: props.requestedCodeReviewFile })}
-            {...(props.onSelectReviewLine === undefined
-              ? {}
-              : {
-                  onSelectLine: ({
-                    text,
-                    ...line
-                  }: {
-                    path: string;
-                    side: "original" | "modified";
-                    line: number;
-                    text: string;
-                  }) =>
-                    props.onSelectReviewLine?.(
-                      {
-                        ...line,
-                        reviewOperationId: operationId,
-                        ...(props.snapshot.captureCursor === undefined
-                          ? {}
-                          : { captureCursor: props.snapshot.captureCursor }),
-                      },
+        <div className="code-diff-pane__body">
+          <ChangedFiles files={files} onChoose={(path) => setJump({ path })} />
+          <div
+            className="code-diff-pane__stack"
+            ref={reviewStack}
+            onScroll={(event) =>
+              viewStore?.write(viewKey, {
+                kind: "review",
+                ...(selectedPath === undefined ? {} : { path: selectedPath }),
+                scrollTop: event.currentTarget.scrollTop,
+              })
+            }
+          >
+            <UnifiedDiffList
+              files={displayFiles}
+              getScrollElement={() => reviewStack.current}
+              {...(props.diff.state === "available" && providerReadsAvailable
+                ? { onReadProviderFile: readProviderFile }
+                : {})}
+              {...(jump !== undefined
+                ? { requestedFile: jump }
+                : props.requestedCodeReviewFile === undefined
+                  ? {}
+                  : { requestedFile: props.requestedCodeReviewFile })}
+              {...(props.onSelectReviewLine === undefined
+                ? {}
+                : {
+                    onSelectLine: ({
                       text,
-                    ),
-                })}
-            {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
-          />
+                      ...line
+                    }: {
+                      path: string;
+                      side: "original" | "modified";
+                      line: number;
+                      text: string;
+                    }) =>
+                      props.onSelectReviewLine?.(
+                        {
+                          ...line,
+                          reviewOperationId: operationId,
+                          ...(props.snapshot.captureCursor === undefined
+                            ? {}
+                            : { captureCursor: props.snapshot.captureCursor }),
+                        },
+                        text,
+                      ),
+                  })}
+              {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
+            />
+          </div>
         </div>
       ) : (
         <div className="code-diff-pane__body">
-          <nav aria-label="Changed files" className="code-diff-pane__files">
-            <ul>
-              {files.map((file) => (
-                <li key={file.id}>
-                  <OctantButton
-                    aria-current={file.id === selected.id}
-                    className="code-diff-pane__file"
-                    onClick={() => choosePath(file.path)}
-                    type="button"
-                    variant="bare"
-                  >
-                    <span className="code-diff-pane__file-path">{file.path}</span>
-                    <span className="code-diff-pane__file-change">
-                      {CHANGE_LABELS[file.change]}
-                    </span>
-                    {file.binary ? null : (
-                      <span className="code-diff-pane__file-counts">
-                        <span className="code-diff-pane__file-additions">
-                          +{file.additions.toLocaleString("en")}
-                        </span>
-                        <span className="code-diff-pane__file-deletions">
-                          −{file.deletions.toLocaleString("en")}
-                        </span>
-                      </span>
-                    )}
-                  </OctantButton>
-                </li>
-              ))}
-            </ul>
-          </nav>
+          <ChangedFiles
+            currentId={selected.id}
+            files={files}
+            onChoose={(path) => choosePath(path)}
+          />
 
           <div className="code-diff-pane__detail">
             <div className="code-diff-pane__detail-header">
@@ -678,6 +869,74 @@ function AvailableDiff(
         </div>
       )}
     </section>
+  );
+}
+
+const CHANGE_LETTERS: Readonly<Record<ParsedDiffFile["change"], string>> = {
+  created: "A",
+  deleted: "D",
+  modified: "M",
+  renamed: "R",
+};
+
+/** The changed files, each a row that takes the diff to that file. */
+function ChangedFiles(props: {
+  readonly files: ReadonlyArray<ParsedDiffFile>;
+  readonly currentId?: string;
+  readonly onChoose: (path: string) => void;
+}) {
+  return (
+    <nav aria-label="Changed files" className="code-diff-pane__files">
+      <ul>
+        {props.files.map((file) => {
+          const slash = file.path.lastIndexOf("/");
+          return (
+            <li key={file.id}>
+              <OctantButton
+                aria-current={file.id === props.currentId}
+                className="code-diff-pane__file"
+                onClick={() => props.onChoose(file.path)}
+                title={file.path}
+                type="button"
+                variant="bare"
+              >
+                <span
+                  aria-hidden="true"
+                  className="code-diff-pane__file-status"
+                  data-change={file.change}
+                >
+                  {CHANGE_LETTERS[file.change]}
+                </span>
+                <span className="sr-only">{CHANGE_LABELS[file.change]}: </span>
+                <span className="code-diff-pane__file-path">
+                  {/* One left-to-right run inside the box that cuts from the
+                      start: without it the box's own direction moved a leading
+                      dot to the far end (".config/x" drew as "config/x."). */}
+                  <bdi className="code-diff-pane__file-run">
+                    {slash < 0 ? null : (
+                      <span className="code-diff-pane__file-folder">
+                        {file.path.slice(0, slash + 1)}
+                      </span>
+                    )}
+                    <span className="code-diff-pane__file-name">{file.path.slice(slash + 1)}</span>
+                  </bdi>
+                </span>
+                {file.binary ? null : (
+                  <span className="code-diff-pane__file-counts">
+                    <span className="code-diff-pane__file-additions">
+                      +{file.additions.toLocaleString("en")}
+                    </span>
+                    <span className="code-diff-pane__file-deletions">
+                      −{file.deletions.toLocaleString("en")}
+                    </span>
+                  </span>
+                )}
+              </OctantButton>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
   );
 }
 

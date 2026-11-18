@@ -4,7 +4,9 @@ import {
   createMobileWorkThread,
   fetchMobileWorkProjects,
   listMobileWorkProjects,
+  listMobileWorkRequests,
   loadMobileWorkThread,
+  resolveMobileWorkApproval,
   loadMobileWorkTranscript,
   sendMobileWorkTurn,
 } from "./mobileWorkClient";
@@ -372,5 +374,99 @@ describe("mobile work follow-through", () => {
       attachmentIds: [photoId],
     });
     expect(started[0]).toMatchObject({ attachmentIds: [photoId] });
+  });
+});
+
+describe("mobile Work level-change asks", () => {
+  const pendingLevelChange = {
+    requestId: "11111111-1111-4111-8111-111111111111",
+    projectId,
+    threadId,
+    providerInstanceId,
+    providerSessionId: "55555555-5555-4555-8555-555555555555",
+    providerRequestId: "provider-req-1",
+    detail: {
+      kind: "approval",
+      action: "exit-plan",
+      description: "The plan is ready.",
+      levelChange: { to: "ask-first", plan: "1. Read.\n2. Change." },
+    },
+    status: "pending",
+    requestedAt: now,
+    version: 3,
+  } as const;
+
+  it("lists only the thread's pending requests, scoped by its Project", async () => {
+    const calls: Array<{ path: string; query?: string }> = [];
+    const settled = {
+      ...pendingLevelChange,
+      requestId: "66666666-6666-4666-8666-666666666666",
+      status: "resolved",
+      resolution: { kind: "approval", approved: true },
+      settledAt: now,
+    };
+    const port: MobileRemoteTransport = {
+      hostId,
+      authenticatedFetch: (async (input: { path: string; query?: string }) => {
+        calls.push(input);
+        return new Response(JSON.stringify({ requests: [pendingLevelChange, settled] }));
+      }) as MobileRemoteTransport["authenticatedFetch"],
+    };
+    const requests = await listMobileWorkRequests(port, { threadId, projectId });
+    expect(requests.map((request) => String(request.requestId))).toEqual([
+      pendingLevelChange.requestId,
+    ]);
+    expect(calls[0]?.path).toBe("/api/work/requests");
+    expect(Object.fromEntries(new URLSearchParams(calls[0]?.query))).toEqual({
+      projectId,
+      threadId,
+    });
+  });
+
+  it("answers with yes or no against the version the phone read, and nothing else", async () => {
+    const bodies: Array<unknown> = [];
+    const port: MobileRemoteTransport = {
+      hostId,
+      authenticatedFetch: (async (input: { body?: string }) => {
+        bodies.push(JSON.parse(input.body ?? "{}"));
+        return new Response(
+          JSON.stringify({
+            kind: "work-request-resolved",
+            request: {
+              ...pendingLevelChange,
+              status: "resolved",
+              resolution: { kind: "approval", approved: false },
+              settledAt: now,
+              version: 4,
+            },
+          }),
+        );
+      }) as MobileRemoteTransport["authenticatedFetch"],
+    };
+    const [listed] = await listMobileWorkRequests(
+      {
+        hostId,
+        authenticatedFetch: (async () =>
+          new Response(
+            JSON.stringify({ requests: [pendingLevelChange] }),
+          )) as MobileRemoteTransport["authenticatedFetch"],
+      },
+      { threadId, projectId },
+    );
+    if (listed === undefined) throw new Error("The pending ask was not listed.");
+    const result = await resolveMobileWorkApproval({
+      transport: port,
+      request: listed,
+      approved: false,
+    });
+    expect(result.kind).toBe("work-request-resolved");
+    expect(bodies).toEqual([
+      {
+        kind: "resolve-work-request",
+        requestId: pendingLevelChange.requestId,
+        expectedVersion: 3,
+        resolution: { kind: "approval", approved: false },
+      },
+    ]);
   });
 });

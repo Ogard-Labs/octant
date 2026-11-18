@@ -63,6 +63,7 @@ const VALUE_PLACEHOLDERS: Readonly<Record<Exclude<PlaceKind, "private-network">,
 };
 
 const RUNTIME_LABELS: Readonly<Record<SafeNetworkRefusalView["runtime"], string>> = {
+  terminal: "Terminal",
   claude: "Claude",
   "claude-sandbox": "Claude commands",
   codex: "Codex",

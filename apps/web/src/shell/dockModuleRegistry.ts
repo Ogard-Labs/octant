@@ -73,6 +73,9 @@ export const dockModuleInputs = {
     "windowCapability",
   ],
   files: [
+    "codeController",
+    "codeThreadView",
+    "hostBridge",
     "onOpenFile",
     "projectExtraFolders",
     "serverUrl",

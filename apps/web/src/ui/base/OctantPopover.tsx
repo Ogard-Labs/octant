@@ -1,4 +1,4 @@
-import { useCallback, type ComponentProps, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, type ComponentProps, type ReactNode } from "react";
 import { buttonVariants } from "../shadcn/button";
 import { cn } from "../shadcn/utils";
 import {
@@ -10,6 +10,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "../shadcn/popover";
+import { useSideWithRoom } from "./popupSide";
 import { OctantTooltip } from "./OctantTooltip";
 
 export interface OctantPopoverProps {
@@ -19,9 +20,18 @@ export interface OctantPopoverProps {
   /** Keeps a tall picker on its preferred axis instead of falling back to a side rail. */
   readonly collisionAvoidance?: ComponentProps<typeof PopoverPositioner>["collisionAvoidance"];
   readonly description?: string;
+  /**
+   * Keeps the popup's content mounted while it is closed, for a popup whose
+   * fields hold unsaved input that closing must not discard.
+   */
+  readonly keepMounted?: boolean;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly side?: "top" | "bottom";
+  /**
+   * "inline-end" opens beside the trigger, for a row inside another popup
+   * that opens a list of its own, like a submenu.
+   */
+  readonly side?: "top" | "bottom" | "inline-end";
   readonly sideOffset?: number;
   /**
    * Accessible name for the popup, rendered as an own sr-only heading. Omit
@@ -65,7 +75,27 @@ export function OctantPopover(props: OctantPopoverProps) {
   // argument; a stable wrapper keeps the adapter's `(open: boolean) => void`
   // contract honest without giving Base UI a new function identity on every
   // render, which previously reset its own mount-transition tracking.
-  const handleOpenChange = useCallback((open: boolean) => onOpenChange(open), [onOpenChange]);
+  const besideTrigger = props.side === "inline-end";
+  const {
+    side: roomSide,
+    trigger,
+    settle,
+  } = useSideWithRoom<HTMLButtonElement>(
+    props.side === undefined || besideTrigger ? "bottom" : props.side,
+  );
+  const side = besideTrigger ? "inline-end" : roomSide;
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      settle(open);
+      onOpenChange(open);
+    },
+    [onOpenChange, settle],
+  );
+  // An owner can also open the popover itself, without a press on the trigger.
+  const isOpen = props.open;
+  useLayoutEffect(() => {
+    settle(isOpen);
+  }, [isOpen, settle]);
 
   const variantClassName =
     props.triggerVariant === undefined
@@ -82,12 +112,15 @@ export function OctantPopover(props: OctantPopoverProps) {
     <PopoverTrigger
       aria-label={props.triggerLabel}
       className={cn("window-no-drag", variantClassName, props.triggerClassName)}
+      ref={trigger}
       {...(props.triggerVariant === undefined
         ? {}
         : {
             "data-variant": props.triggerVariant === "ghost-icon" ? "ghost" : props.triggerVariant,
           })}
-      title={props.triggerTooltip === undefined ? props.triggerLabel : undefined}
+      // The native tooltip names a chip whose words may be cut; while the
+      // popup is open it would sit on top of the popup's first rows.
+      title={props.triggerTooltip === undefined && !props.open ? props.triggerLabel : undefined}
       {...props.triggerDataAttributes}
       {...(props.triggerAriaPressed === undefined
         ? {}
@@ -108,14 +141,14 @@ export function OctantPopover(props: OctantPopoverProps) {
       ) : (
         <OctantTooltip label={props.triggerTooltip}>{triggerButton}</OctantTooltip>
       )}
-      <PopoverPortal>
+      <PopoverPortal {...(props.keepMounted === true ? { keepMounted: true } : {})}>
         <PopoverPositioner
           align={props.align ?? "start"}
           className="z-[var(--oct-z-popup)] window-no-drag"
           {...(props.collisionAvoidance === undefined
             ? {}
             : { collisionAvoidance: props.collisionAvoidance })}
-          side={props.side ?? "bottom"}
+          side={side}
           sideOffset={props.sideOffset ?? 4}
         >
           <PopoverPopup

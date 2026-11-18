@@ -1,4 +1,4 @@
-import { Cloud, Laptop } from "lucide-react";
+import { Cloud, Laptop } from "../ui/icons";
 
 export interface EnvironmentMarkProps {
   readonly kind: "local" | "remote";

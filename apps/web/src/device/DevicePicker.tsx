@@ -1,4 +1,5 @@
 import { useId, useRef, useState, type KeyboardEvent } from "react";
+import { InfoTip, PaneBar } from "../shell/PaneBar";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { DeviceChoice } from "./deviceModel";
 import { deviceStateWord } from "./DeviceToolbar";
@@ -38,12 +39,9 @@ export function DevicePicker(props: {
   };
   return (
     <section aria-labelledby={headingId} className="device-card">
-      <h2 className="device-card__title" id={headingId}>
-        {props.title}
-      </h2>
-      <p className="device-card__lede">
-        Booting starts it in the background. Closing this tab leaves it running.
-      </p>
+      <PaneBar title={<span id={headingId}>{props.title}</span>}>
+        <InfoTip text="Booting starts it in the background. Closing this tab leaves it running." />
+      </PaneBar>
       {choosable.length === 0 ? (
         <p className="device-card__lede">No device is available to start.</p>
       ) : (

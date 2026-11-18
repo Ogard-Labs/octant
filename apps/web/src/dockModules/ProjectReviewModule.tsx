@@ -12,7 +12,7 @@ export function ProjectReviewModule(props: DockProjectPullRequestReviewToolProps
     <DockModuleBoundary
       key={`${props.query.projectId}:${props.query.repositoryOwner}/${props.query.repositoryName}:${props.query.number}`}
     >
-      <Suspense fallback={loading("Review")}>
+      <Suspense fallback={loading("review")}>
         <Review {...props} />
       </Suspense>
     </DockModuleBoundary>

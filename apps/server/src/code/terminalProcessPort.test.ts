@@ -14,6 +14,8 @@ import {
 } from "node:fs";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import { makeProcessConfinementLive, ProcessConfinementError } from "../process/seatbeltProfile";
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
+import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import {
   ensureNodePtySpawnHelperExecutable,
   shellStateEnvironment,
@@ -23,6 +25,7 @@ import {
 const directories: string[] = [];
 
 afterEach(() => {
+  configureSandboxRestrictionsAuthority(undefined);
   for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -40,6 +43,90 @@ function confinedOptions(overrides: ConstructorParameters<typeof TerminalProcess
 }
 
 describe("TerminalProcessPort", () => {
+  it.skipIf(
+    (process.platform !== "linux" && process.platform !== "darwin") ||
+      (process.platform === "linux" && !existsSync("/usr/bin/bwrap")),
+  )(
+    "confines a Full access terminal's real writes under Strict and leaves an explicit Strict-off terminal native",
+    async () => {
+      const base = realpathSync(mkdtempSync(join(tmpdir(), "octant-terminal-policy-")));
+      directories.push(base);
+      const project = join(base, "project"),
+        work = join(base, "work"),
+        authority = join(base, "authority"),
+        external = join(base, "external"),
+        shared = join(base, "shared");
+      for (const path of [project, work, authority, external, shared])
+        mkdirSync(path, { mode: 0o700 });
+      const selection = decodeSandboxPolicySelection({
+        policy: {
+          schemaVersion: 1,
+          revision: 1,
+          filesystem: { readOnlyRoots: [], readWriteRoots: [shared], protectedPaths: [] },
+          network: "deny",
+          hostServices: "blocked",
+          credentials: "existing-policy",
+        },
+        context: {
+          root: project,
+          hostId: "host",
+          projectId: "20000000-0000-4000-8000-000000000001",
+          checkoutId: "checkout",
+          sessionId: "terminal-native",
+          provider: "terminal",
+        },
+      });
+      configureSandboxRestrictionsAuthority({
+        active: () => selection,
+        validateSelection: (value) => value === selection,
+        beginTurn: () => ({ status: "refused", message: "unused" }),
+        storageDirectory: () => authority,
+        deny: () => undefined,
+        registerCleanup: () => () => undefined,
+      });
+      const port = new TerminalProcessPort({
+        confinement: makeProcessConfinementLive(),
+        temporaryDirectory: work,
+        shellStateDirectory: join(base, "state"),
+        networkEgress: "none",
+      });
+      const run = async (strict: boolean) => {
+        const handle = port.start({
+          shell: "/bin/sh",
+          cwd: project,
+          stateScope: "project:native",
+          strict,
+          ...(strict ? { sandboxPolicy: selection } : {}),
+          executionPolicy: "full-access",
+          command: `if printf x > '${join(external, "outside")}'; then printf outside-allowed; else printf outside-denied; fi; printf durable > '${join(project, "allowed")}'; printf granted > '${join(shared, "allowed")}'; printf terminal-done`,
+          additionalReadRoots: [external],
+          environment: { PATH: "/usr/bin:/bin", HOME: project },
+          columns: 80,
+          rows: 24,
+        });
+        let output = "";
+        handle.onData((chunk) => {
+          output += chunk;
+        });
+        const exited = new Promise<number>((resolve) =>
+          handle.onExit(({ exitCode }) => resolve(exitCode)),
+        );
+        try {
+          await handle.receiptReady;
+          expect(await exited).toBe(0);
+          return output;
+        } finally {
+          await handle.close();
+        }
+      };
+      expect(await run(true)).toContain("outside-denied");
+      expect(existsSync(join(external, "outside"))).toBe(false);
+      expect(await readFile(join(project, "allowed"), "utf8")).toBe("durable");
+      expect(await readFile(join(shared, "allowed"), "utf8")).toBe("granted");
+      expect(await run(false)).toContain("outside-allowed");
+      expect(await readFile(join(external, "outside"), "utf8")).toBe("x");
+    },
+  );
   it("runs a saved command as the process and reports its exit code without terminal input", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-action-process-"));
     directories.push(directory);

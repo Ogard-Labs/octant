@@ -9,7 +9,7 @@ import { useId, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
-import { Folder } from "lucide-react";
+import { Folder } from "../ui/icons";
 import { ProjectIcon } from "./ProjectIcon";
 
 export type MoveThreadOutcome =
@@ -114,8 +114,8 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
         &ldquo;{props.threadTitle}&rdquo; keeps its history and its access level, and stays a{" "}
         {props.mode === "work" ? "Work task" : "Code thread"}.{" "}
         {props.mode === "work"
-          ? "It can move to another Work Project whose folder is the same as, or contains, the folder it works in."
-          : "It can move to another Code Project bound to the same repository folder."}
+          ? "It can move to another Work Project whose folder is the same as, or contains, its folder."
+          : "It can move to another Code Project with the same repository folder."}
       </p>
       {candidates.length === 0 ? (
         <p>

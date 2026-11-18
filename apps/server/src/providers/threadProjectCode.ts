@@ -24,6 +24,8 @@ export interface ThreadProjectCodeSources {
   readonly exists?: (path: string) => Promise<boolean>;
   /** Whether the provider's own CLI already trusts the Project's folder; absent reads none. */
   readonly readProviderCliTrust?: ProviderCliProjectTrust;
+  /** Strict for the thread, read at the call; absent reads Strict. */
+  readonly readStrict?: (threadId: string) => boolean;
 }
 
 /**
@@ -58,7 +60,12 @@ export async function readThreadProjectCode(
   return projectCodeTrust({
     driverKind: instance.driverKind,
     projectType: project.type,
-    trusted: projectTrustsProvider(project, instance.driverKind, sources.readProviderCliTrust),
+    trusted: projectTrustsProvider(
+      project,
+      instance.driverKind,
+      sources.readProviderCliTrust,
+      sources.readStrict?.(input.threadId) ?? true,
+    ),
     present: present.filter((path): path is string => path !== undefined),
   });
 }

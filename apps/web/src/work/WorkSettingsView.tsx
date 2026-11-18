@@ -1,3 +1,7 @@
+import {
+  StrictPreferenceControl,
+  strictPreferenceValue,
+} from "../settings/StrictPreferenceControl";
 import type { ProviderRegistrySnapshot, WorkDefaultAccess } from "@octant/contracts";
 import { buildModelPickerGroups } from "@octant/domain";
 import { useMemo } from "react";
@@ -8,13 +12,12 @@ import type { WorkSettingsController } from "./useWorkSettings";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { FULL_ACCESS_WARNING, useFullAccessWarning } from "../code/FullAccessWarning";
-import { STRICT_DETAIL } from "../code/PermissionModePicker";
 
 const ACCESS_NOTES: Readonly<Record<WorkDefaultAccess, string>> = {
-  auto: "The provider's own reviewer approves each command and file change. Providers without a reviewer ask first.",
-  "ask-first": "The agent asks before it runs a command or changes a file in the Project folder.",
+  auto: "The provider's own reviewer approves each command and file change. Without one, it asks you.",
+  "ask-first": "Asks before running a command or changing a file in the Project folder.",
   "auto-accept-edits":
-    "The agent edits files inside the Project folder without asking, and asks before commands. Anything outside the folder is still refused.",
+    "Edits files in the Project folder without asking. Asks before commands. Anything outside the folder is refused.",
   "full-access": FULL_ACCESS_WARNING,
 };
 
@@ -62,7 +65,7 @@ export function WorkSettingsView(props: {
 
   return (
     <SettingsSection
-      description="What a new Work thread starts with. Threads that already exist keep what they started with."
+      description="What new Work threads start with. Existing threads keep theirs."
       title="New threads"
     >
       <div className="settings-feedback-slot" aria-live="polite">
@@ -128,33 +131,22 @@ export function WorkSettingsView(props: {
           {warning.dialog}
         </SettingRow>
         <SettingRow
-          description="New Work threads at Full access run without prompts but keep writes in the Project folder and secret files closed. Works with Codex and Octant Harness models; a task can turn it off from its mode picker."
-          focused={props.focusedSetting === "work-full-access-sandbox"}
-          label="Keep the sandbox at Full access"
-          scope="host"
-          settingId="work-full-access-sandbox"
-        >
-          <OctantSwitch
-            checked={settings.defaultFullAccessSandbox === true}
-            disabled={props.controller.busy}
-            label="Keep the sandbox at Full access"
-            onCheckedChange={(checked) =>
-              void props.controller.update({ defaultFullAccessSandbox: checked })
-            }
-          />
-        </SettingRow>
-        <SettingRow
-          description={`${STRICT_DETAIL} Off, each provider follows its own sandbox, permission modes and settings. A Project or a task can choose for itself.`}
-          focused={props.focusedSetting === "work-strict"}
+          description="Strict keeps provider sign-ins, SSH keys and cloud credentials protected. It applies at every access level and preserves required approvals. Changes apply to the next turn."
+          focused={
+            props.focusedSetting === "work-strict" ||
+            props.focusedSetting === "work-full-access-sandbox"
+          }
           label="Strict"
           scope="host"
           settingId="work-strict"
         >
-          <OctantSwitch
-            checked={settings.defaultStrict === true}
+          <StrictPreferenceControl
+            value={strictPreferenceValue(settings)}
             disabled={props.controller.busy}
-            label="Strict"
-            onCheckedChange={(checked) => void props.controller.update({ defaultStrict: checked })}
+            onChange={(value) => {
+              if (typeof value === "boolean")
+                void props.controller.update({ defaultStrict: value });
+            }}
           />
         </SettingRow>
         <SettingRow

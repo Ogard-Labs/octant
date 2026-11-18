@@ -1288,6 +1288,41 @@ describe("mapClaudeMessage", () => {
     expect([...first, ...second].some((event) => event.kind === "tool-start")).toBe(false);
   });
 
+  it("carries Claude's running wording for a checklist item and leaves it unset when absent", () => {
+    const ctx = context();
+    const events = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-running-wording",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-todo-wording",
+            toolName: "TodoWrite",
+            input: {
+              todos: [
+                {
+                  content: "Run the test suite",
+                  status: "in_progress",
+                  activeForm: "Running the test suite",
+                },
+                { content: "Commit", status: "pending" },
+              ],
+            },
+          },
+        ],
+        usage,
+      }),
+    ).filter((event) => event.kind === "task-progress");
+
+    expect(events).toMatchObject([
+      { summary: "Run the test suite", runningSummary: "Running the test suite" },
+      { summary: "Commit" },
+    ]);
+    expect(events[1]).not.toHaveProperty("runningSummary");
+  });
+
   it("shows a plan Claude hands over in Plan as marked reply text, not as a tool row", () => {
     const ctx = context();
     const handedOver = eventValues(
@@ -1466,6 +1501,34 @@ describe("mapClaudeMessage", () => {
             ? `list ${event.taskIds.join(",")}`
             : event.kind,
       );
+
+    it("keeps the running wording a task was created with through later updates", () => {
+      const ctx = context();
+      call(
+        ctx,
+        "create-wording",
+        "TaskCreate",
+        { subject: "Run the test suite", description: "d", activeForm: "Running the test suite" },
+        { task: { id: "1", subject: "Run the test suite" } },
+      );
+      const moved = call(
+        ctx,
+        "update-wording",
+        "TaskUpdate",
+        { taskId: "1", status: "in_progress" },
+        {
+          success: true,
+          taskId: "1",
+          updatedFields: ["status"],
+          statusChange: { from: "pending", to: "in_progress" },
+        },
+      );
+      expect(moved.find((event) => event.kind === "task-progress")).toMatchObject({
+        status: "in-progress",
+        summary: "Run the test suite",
+        runningSummary: "Running the test suite",
+      });
+    });
 
     it("restates the whole task list after each create, update, and list", () => {
       const ctx = context();

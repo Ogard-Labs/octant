@@ -4,7 +4,7 @@ import type {
   McpServerConnectionState,
 } from "@octant/contracts/extension-rpc";
 import { useState, type ReactNode } from "react";
-import { SettingsSection } from "../settings/primitives";
+import { SettingsSection, SettingsSkeletonRows } from "../settings/primitives";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -68,10 +68,10 @@ export interface ServerConnectionsProps {
   /** Whether this is the Octant window on the host: only it may sign in or reconnect. */
   readonly localHost: boolean;
   readonly disabled: boolean;
+  /** The first read has not answered: the list shows its shape, not a failure. */
+  readonly loading?: boolean;
   /** Told after a Reconnect or a sign-in change, so the listing is read again. */
   readonly onChanged: () => void;
-  /** The view switch, kept in the first section's actions like the other views. */
-  readonly actions?: ReactNode;
 }
 
 /**
@@ -104,13 +104,11 @@ export function ServerConnections(props: ServerConnectionsProps) {
   };
 
   return (
-    <SettingsSection
-      actions={props.actions}
-      className="extensions-settings__section"
-      title="Server connections"
-    >
+    <SettingsSection className="extensions-settings__section" title="Server connections">
       <div className="extensions-settings__body">
-        {props.servers === undefined ? (
+        {props.loading === true ? (
+          <SettingsSkeletonRows label="Reading server connections…" rows={3} />
+        ) : props.servers === undefined ? (
           <p className="extensions-settings__state" role="status">
             Server connections could not be read.
           </p>

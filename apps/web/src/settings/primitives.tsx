@@ -1,5 +1,5 @@
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "../ui/icons";
 import {
   createContext,
   useContext,
@@ -504,6 +504,42 @@ export function SettingsState(props: {
   );
 }
 
+/**
+ * The rows of a list before its data arrives, at the height a Settings row
+ * has, so the list is the size it will be and nothing below it moves when the
+ * answer lands.
+ */
+export function SettingsSkeletonRows(props: {
+  /** Spoken in place of the shapes. */
+  readonly label: string;
+  readonly rows?: number;
+}) {
+  const rows = Array.from({ length: props.rows ?? 3 }, (_unused, index) => index);
+  return (
+    <div className="settings-skeleton" role="status">
+      <span className="sr-only">{props.label}</span>
+      <div aria-hidden="true" className="settings-skeleton__rows">
+        {rows.map((row) => (
+          <span className="skeleton settings-skeleton__row" key={row} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** A command's own words: collapsed, fixed in height and scrollable, so a long answer never grows the page. */
+export function SettingsOutputWell(props: {
+  readonly summary: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <details className="settings-output-well">
+      <summary>{props.summary}</summary>
+      <pre tabIndex={0}>{props.children}</pre>
+    </details>
+  );
+}
+
 /** Optional details keep their controls mounted so closing them preserves drafts. */
 export function SettingsDisclosure(props: {
   readonly title: string;
@@ -513,11 +549,17 @@ export function SettingsDisclosure(props: {
   readonly className?: string;
   /** Opens on mount, for a deep link that lands on a control inside. */
   readonly defaultOpen?: boolean;
+  readonly settingId?: string;
+  readonly focused?: boolean;
 }) {
+  const summary = useRef<HTMLElement>(null);
+  useRevealedFocus(summary, props.focused === true);
   const variant = props.variant ?? "section";
   return (
     <OctantCollapsible
       {...(props.defaultOpen === true ? { open: true } : {})}
+      data-setting-id={props.settingId}
+      summaryProps={{ ref: summary }}
       chevron={variant === "inline" ? "start" : "end"}
       chevronSize={variant === "inline" ? 12 : 14}
       className={[

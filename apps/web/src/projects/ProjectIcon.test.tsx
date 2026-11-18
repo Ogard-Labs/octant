@@ -5,6 +5,7 @@ import { StrictMode } from "react";
 import {
   ProjectIcon,
   ProjectIconContext,
+  ProjectIconPrefetch,
   ProjectIconProvider,
   createProjectIconSource,
 } from "./ProjectIcon";
@@ -166,5 +167,84 @@ describe("Project icon", () => {
     fireEvent.error(image);
     expect(await view.findByTestId("glyph")).toBeInTheDocument();
     expect(view.container.querySelector("img")).toBeNull();
+  });
+
+  it("sends the chosen picture to the host and every mark of the Project asks again", async () => {
+    let call = 0;
+    const urls = ["blob:before", "blob:after"];
+    URL.createObjectURL = vi.fn(() => urls[Math.min(call - 1, 1)] ?? "blob:after");
+    const fetcher = vi.fn(async (_input: URL | RequestInfo, init?: RequestInit) => {
+      if (init?.method === "PUT") return new Response(null, { status: 204 });
+      call += 1;
+      return {
+        ok: true,
+        status: 200,
+        blob: async () => new Blob(["x"]),
+        headers: new Headers({
+          "x-octant-project-icon-source": call > 1 ? "custom" : "found",
+          "x-octant-project-icon-found": "1",
+        }),
+      };
+    }) as unknown as typeof fetch;
+    const source = createProjectIconSource({
+      serverUrl: "http://127.0.0.1:1/",
+      windowCapability: "c",
+      fetcher,
+    });
+    const first = mount(source);
+    const second = mount(source);
+    await waitFor(() =>
+      expect(first.container.querySelector("img")?.getAttribute("src")).toBe("blob:before"),
+    );
+
+    const outcome = await source.choose?.("p1", new File(["x"], "mark.png", { type: "image/png" }));
+
+    expect(outcome).toEqual({ status: "changed" });
+    const put = vi.mocked(fetcher).mock.calls.find(([, init]) => init?.method === "PUT");
+    expect(new Headers(put?.[1]?.headers).get("content-type")).toBe("image/png");
+    await waitFor(() => {
+      expect(first.container.querySelector("img")?.getAttribute("src")).toBe("blob:after");
+      expect(second.container.querySelector("img")?.getAttribute("src")).toBe("blob:after");
+    });
+    expect(source.details?.("p1")).toEqual({ custom: true, foundAvailable: true });
+  });
+
+  it("returns the host's reason when it refuses the picture", async () => {
+    const fetcher = vi.fn(async () =>
+      Response.json(
+        { category: "too-large", message: "That image is larger than 256 KB." },
+        { status: 413 },
+      ),
+    ) as unknown as typeof fetch;
+    const source = createProjectIconSource({
+      serverUrl: "http://127.0.0.1:1/",
+      windowCapability: "c",
+      fetcher,
+    });
+
+    expect(await source.choose?.("p1", new File(["x"], "mark.png", { type: "image/png" }))).toEqual(
+      {
+        status: "refused",
+        message: "That image is larger than 256 KB.",
+      },
+    );
+  });
+
+  it("draws a Project's picture on the first frame after a mode switch because it was asked for before any row showed it", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:prefetched");
+    const { source, fetcher } = sourceFor(200);
+    const projects = render(
+      <ProjectIconContext.Provider value={source}>
+        <ProjectIconPrefetch projectIds={["p1", "p2"]} />
+      </ProjectIconContext.Provider>,
+    );
+    await waitFor(() => expect(source.peek("p2")).toBe("blob:prefetched"));
+    projects.unmount();
+
+    // The other mode's list mounts its rows now: the first render has the image, never the letter tile.
+    const view = mount(source);
+    expect(view.queryByTestId("glyph")).toBeNull();
+    expect(view.container.querySelector("img")?.getAttribute("src")).toBe("blob:prefetched");
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

@@ -40,7 +40,7 @@ import {
   threadAccessOf,
   type PickerGroup,
 } from "@octant/domain";
-import { ChevronDown, CirclePause, FileText, X } from "lucide-react";
+import { ChevronDown, CirclePause, FileText, X } from "../ui/icons";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
@@ -87,6 +87,7 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController } from "./useCodeController";
+import { TurnSubagentRows, type TurnSubagentWindow } from "../agents/threadSubagents";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { CodeCheckoutBar } from "./CodeCheckoutBar";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
@@ -138,6 +139,7 @@ import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
 import { CodeTurnReviewPreviewCard } from "./CodeTurnReviewPreviewCard";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
+import { runningStepTitle, settledTurnFoldsActivity } from "../transcript/turnActivity";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
@@ -147,6 +149,7 @@ import {
   forkMergeBackDisclosure,
   forkMergeBackOutcomeMessage,
 } from "./providerSwitchHandoff";
+import { TurnActions } from "../transcript/TurnActions";
 import {
   TurnHeader,
   TurnTime,
@@ -176,12 +179,17 @@ import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControl
 import { boundsInsideViewport } from "../browser/useNativeBrowserSurface";
 import { observeComposerPlacement } from "./codeWorkspaceApprovals";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
+import { EmptyThreadStart } from "./EmptyThreadStart";
 import { ScaffoldPicker } from "../scaffolds/ScaffoldPicker";
 import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
 import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker";
 import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
-import { PermissionModePicker, threadKeepsFullAccessSandbox } from "./PermissionModePicker";
+import {
+  PermissionModePicker,
+  runningTurnKeepsNarrowerMode,
+  threadKeepsFullAccessSandbox,
+} from "./PermissionModePicker";
 import { ThreadGuardrailLevel } from "./GuardrailLevelIndicator";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
@@ -978,6 +986,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   };
   const messages = props.controller.conversation;
+  const subagentWindows = codeSubagentWindows(messages);
   // Only a coordinator's worker carries a host move's reason.
   const continuedOnFallback =
     view?.thread.coordinatorThreadId === undefined || view.thread.coordinatorChoice === undefined
@@ -1578,7 +1587,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   }
 
-  async function changeStrict(strict: boolean) {
+  async function changeStrict(strict: boolean | "inherit") {
     props.controller.setAccessNotice(undefined);
     setAccessChanging(true);
     try {
@@ -1588,25 +1597,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         expectedVersion: thread.version,
         executionPolicy: thread.executionPolicy,
         permissionPersistence: thread.permissionPersistence,
-        ...(thread.autoApprove === true ? { autoApprove: true } : {}),
-        strict,
-      });
-    } finally {
-      setAccessChanging(false);
-    }
-  }
-
-  async function changeFullAccessSandbox(sandboxed: boolean) {
-    props.controller.setAccessNotice(undefined);
-    setAccessChanging(true);
-    try {
-      await props.controller.execute({
-        kind: "change-code-thread-access",
-        threadId: thread.id,
-        expectedVersion: thread.version,
-        executionPolicy: "full-access",
-        permissionPersistence: thread.permissionPersistence,
-        fullAccessSandbox: sandboxed,
+        strict: strict === "inherit" ? null : strict,
       });
     } finally {
       setAccessChanging(false);
@@ -1819,7 +1810,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             role="log"
             aria-live="polite"
           >
-            <div className="code-thread-workspace__transcript thread-column">
+            <div className="code-thread-workspace__transcript code-thread-workspace__transcript--empty thread-column">
               {props.controller.conversationHistory === "loading" ? (
                 <OctantEmpty
                   message="Loading the existing thread transcript from this host."
@@ -1828,33 +1819,32 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 />
               ) : showEmptyConversation ? (
                 <>
-                  <p className="code-thread-workspace__empty" role="status">
-                    No messages yet. Send a prompt to start this thread.
-                  </p>
                   {/* A thread on an empty checkout has nothing to talk about yet.
                     Offering the curated scaffolds here, and only here, keeps the
                     choice next to the moment it matters. */}
-                  {presets.available ? (
-                    <WorkspacePresetPicker
-                      busy={presets.busy}
-                      {...(presets.message === undefined ? {} : { message: presets.message })}
-                      onApply={(preset) => void presets.apply(preset)}
-                      presets={presets.presets}
-                      skills={presets.skills}
-                    />
-                  ) : null}
-                  {scaffolds.available ? (
-                    <ScaffoldPicker
-                      busy={scaffolds.busy}
-                      entries={scaffolds.entries}
-                      {...(scaffolds.lastRun === undefined ? {} : { lastRun: scaffolds.lastRun })}
-                      {...(scaffolds.message === undefined ? {} : { message: scaffolds.message })}
-                      onStart={(entry, directoryName) => {
-                        void scaffolds.start(entry, directoryName);
-                      }}
-                      runnable={scaffolds.runnable}
-                    />
-                  ) : null}
+                  <EmptyThreadStart title={thread.title}>
+                    {presets.available ? (
+                      <WorkspacePresetPicker
+                        busy={presets.busy}
+                        {...(presets.message === undefined ? {} : { message: presets.message })}
+                        onApply={(preset) => void presets.apply(preset)}
+                        presets={presets.presets}
+                        skills={presets.skills}
+                      />
+                    ) : null}
+                    {scaffolds.available ? (
+                      <ScaffoldPicker
+                        busy={scaffolds.busy}
+                        entries={scaffolds.entries}
+                        {...(scaffolds.lastRun === undefined ? {} : { lastRun: scaffolds.lastRun })}
+                        {...(scaffolds.message === undefined ? {} : { message: scaffolds.message })}
+                        onStart={(entry, directoryName) => {
+                          void scaffolds.start(entry, directoryName);
+                        }}
+                        runnable={scaffolds.runnable}
+                      />
+                    ) : null}
+                  </EmptyThreadStart>
                 </>
               ) : null}
             </div>
@@ -2022,6 +2012,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   message.at !== undefined
                     ? turnWorkedFor("completed", message.startedAt, message.at)
                     : undefined;
+                const workedForInFold =
+                  workedFor !== undefined &&
+                  activity !== undefined &&
+                  settledTurnFoldsActivity(activity);
                 return (
                   <div className="code-thread-workspace__row">
                     {handoff === "provider" ? (
@@ -2188,17 +2182,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         ) : (
                           <>
                             <TurnHeader
-                              copyValue={message.text}
-                              onFork={
-                                message.operationId !== undefined &&
-                                message.status === "completed" &&
-                                props.onOpenCodeThread !== undefined
-                                  ? () => void forkFrom(message)
-                                  : undefined
-                              }
-                              forkDisabled={forking}
                               outcome={turnHeaderOutcome(message.status)}
-                              {...(workedFor === undefined ? {} : { workedFor })}
+                              {...(workedFor === undefined || workedForInFold ? {} : { workedFor })}
+                              {...(message.startedAt === undefined
+                                ? {}
+                                : { startedAt: message.startedAt })}
+                              step={runningStepTitle(activity)}
                               provider={
                                 message.providerInstanceId === undefined ||
                                 message.modelId === undefined
@@ -2208,7 +2197,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                       modelId: message.modelId,
                                     })
                               }
-                              {...(message.status === undefined || message.status === "completed"
+                              {...(message.status === undefined ||
+                              message.status === "completed" ||
+                              // The running line is the header's own: "Working · 12s · step".
+                              message.status === "incomplete"
                                 ? {}
                                 : {
                                     label: turnStatusLabel(
@@ -2233,9 +2225,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                               />
                             )}
                             {gallery}
-                            {activity === undefined ? null : (
+                            {activity === undefined ? (
+                              <CodeTurnSubagents window={subagentWindows.get(message.id)} />
+                            ) : (
                               <TurnActivityRows
                                 activity={activity}
+                                {...(workedForInFold && workedFor !== undefined
+                                  ? { workedFor }
+                                  : {})}
                                 publishedSnapshotRuntime={(toolCallId) =>
                                   publishedSnapshotRunRuntimeFor(props.canvasClient, {
                                     mode: "code",
@@ -2249,6 +2246,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                   message.status === "failed" ||
                                   message.status === "interrupted"
                                 }
+                                {...subagentWindowProp(subagentWindows.get(message.id))}
                               />
                             )}
                             {/* An assistant reply is markdown — a plan arrives as a
@@ -2398,6 +2396,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             restoring={restoring}
                           />
                         ) : null}
+                        {delivered || message.role !== "assistant" ? null : (
+                          <TurnActions
+                            // A reply that failed live has no journaled update
+                            // time yet; the turn's start is the time it has.
+                            at={message.at ?? message.startedAt}
+                            copyValue={message.text}
+                            forkDisabled={forking}
+                            latest={message === lastReply}
+                            onFork={
+                              message.operationId !== undefined &&
+                              message.status === "completed" &&
+                              props.onOpenCodeThread !== undefined
+                                ? () => void forkFrom(message)
+                                : undefined
+                            }
+                            outcome={turnHeaderOutcome(message.status)}
+                          />
+                        )}
                       </TurnActionMenu>
                     </article>
                     <SteeredChildResults
@@ -2707,19 +2723,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               />
             </ThreadInfo>
           }
+          // The Environment panel names the Project, branch, folder and pull
+          // requests of a local checkout, so the row under the box does not. A
+          // thread on a server has no checkout there to read: the row keeps
+          // saying where it runs, and its Git.
           context={
-            <CodeCheckoutBar
-              {...(props.onCreatePullRequest === undefined
-                ? {}
-                : { onCreatePullRequest: props.onCreatePullRequest })}
-              {...(serverProject === undefined ? {} : { serverLocation: serverProject.location })}
-              {...(serverProject === undefined || props.onOpenGit === undefined
-                ? {}
-                : { onOpenServerGit: props.onOpenGit })}
-              {...(props.onOpenReview === undefined
-                ? {}
-                : { onOpenReview: () => props.onOpenReview?.() })}
-            />
+            serverProject === undefined ? undefined : (
+              <CodeCheckoutBar
+                {...(props.onCreatePullRequest === undefined
+                  ? {}
+                  : { onCreatePullRequest: props.onCreatePullRequest })}
+                serverLocation={serverProject.location}
+                {...(props.onOpenGit === undefined ? {} : { onOpenServerGit: props.onOpenGit })}
+              />
+            )
           }
           className="thread-composer code-thread-workspace__composer thread-column"
           chips={
@@ -2959,13 +2976,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   {...(profileName === undefined ? {} : { profileName })}
                   warningScope={{ projectId: String(thread.projectId) }}
                   value={permissionModeOf(thread)}
-                  fullAccessSandbox={thread.fullAccessSandbox === true}
+                  strict={
+                    thread.strict ??
+                    (thread.fullAccessSandbox === true && thread.executionPolicy === "full-access"
+                      ? true
+                      : props.strictDefault === true)
+                  }
+                  legacyStrict={thread.strict === undefined && thread.fullAccessSandbox === true}
                   fullAccessSandboxSupported={threadKeepsFullAccessSandbox(
                     providerGroups,
                     thread.providerInstanceId,
                   )}
-                  onFullAccessSandboxChange={(sandboxed) => void changeFullAccessSandbox(sandboxed)}
-                  strict={thread.strict ?? props.strictDefault === true}
+                  appliesFromNextMessage={runningTurnKeepsNarrowerMode({
+                    turnRunning:
+                      props.controller.turnStatus === "running" ||
+                      props.controller.turnStatus === "waiting",
+                    turnPolicy: messages.findLast((message) => message.role === "user")
+                      ?.executionPolicy,
+                    threadPolicy: thread.executionPolicy,
+                  })}
                   onStrictChange={(strict) => void changeStrict(strict)}
                 />
               </>
@@ -3256,6 +3285,7 @@ function codeTurnActions(input: {
         ...(input.checkpointBusy ? { disabled: true } : {}),
       });
       actions.push({
+        destructive: true,
         label: "Forget",
         value: "checkpoint-forget",
         ...(input.checkpointBusy ? { disabled: true } : {}),
@@ -3507,4 +3537,52 @@ function continuedOnFallbackPlacement(
         String(message.operationId) === String(prompt.operationId),
     );
   return { afterId: (reply ?? prompt).id, reason };
+}
+
+/**
+ * The span each reply's turn owns: from its prompt's start until the next
+ * prompt's. A subagent belongs to the turn that was running when it started,
+ * because the host links a subagent to the thread, not to a turn. A reply
+ * whose turn has no recorded start owns none.
+ */
+function codeSubagentWindows(
+  messages: ReadonlyArray<CodeConversationMessage>,
+): ReadonlyMap<string, TurnSubagentWindow> {
+  const windows = new Map<string, TurnSubagentWindow>();
+  let from: string | undefined;
+  const replies: Array<{ readonly id: string; readonly from: string }> = [];
+  const close = (until: string | undefined) => {
+    for (const reply of replies.splice(0)) {
+      windows.set(
+        reply.id,
+        until === undefined ? { from: reply.from } : { from: reply.from, until },
+      );
+    }
+  };
+  for (const message of messages) {
+    if (message.role === "user") {
+      // A prompt still being composed here has no start yet, so it ends no span.
+      if (message.at !== undefined) close(message.at);
+      from = message.at;
+      continue;
+    }
+    const start = from ?? message.startedAt;
+    if (start === undefined) continue;
+    // A reply after a prompt with no recorded start begins its own span, which
+    // ends the earlier replies' so no subagent is listed under two turns.
+    if (from === undefined) close(start);
+    replies.push({ id: message.id, from: start });
+  }
+  close(undefined);
+  return windows;
+}
+
+function CodeTurnSubagents(props: { readonly window: TurnSubagentWindow | undefined }) {
+  return props.window === undefined ? null : <TurnSubagentRows window={props.window} />;
+}
+
+function subagentWindowProp(window: TurnSubagentWindow | undefined): {
+  readonly subagents?: TurnSubagentWindow;
+} {
+  return window === undefined ? {} : { subagents: window };
 }

@@ -18,7 +18,14 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { SettingGroup, SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
+import {
+  SettingGroup,
+  SettingRow,
+  SettingsOutputWell,
+  SettingsSection,
+  SettingsSkeletonRows,
+  SettingsState,
+} from "../settings/primitives";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -379,7 +386,7 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
           >
             {step.message}
             {step.output.trim() === "" ? null : (
-              <pre className="provider-tooling__output">{step.output}</pre>
+              <SettingsOutputWell summary="Show the output">{step.output}</SettingsOutputWell>
             )}
           </OctantAlert>
         ) : null}
@@ -413,7 +420,7 @@ function ConfiguredSection(props: {
       title="Already configured"
     >
       {loaded.kind === "loading" ? (
-        <SettingsState kind="loading">Asking {props.product}…</SettingsState>
+        <SettingsSkeletonRows label={`Asking ${props.product}…`} rows={4} />
       ) : loaded.kind === "unavailable" ? (
         <SettingsState kind="error">{loaded.message}</SettingsState>
       ) : (
@@ -450,13 +457,17 @@ function SectionList(props: {
         <SettingsState kind="error">
           {section.message ?? `${props.product} could not list this.`}
           {section.lines.length === 0 ? null : (
-            <pre className="provider-tooling__output">{section.lines.join("\n")}</pre>
+            <SettingsOutputWell summary="Show the answer as it came">
+              {section.lines.join("\n")}
+            </SettingsOutputWell>
           )}
         </SettingsState>
       ) : section.status === "unreadable" ? (
         <SettingsState kind="empty">
           Octant could not read how {props.product} answered, so it shows the answer as it came:
-          <pre className="provider-tooling__output">{section.lines.join("\n")}</pre>
+          <SettingsOutputWell summary="Show the answer as it came">
+            {section.lines.join("\n")}
+          </SettingsOutputWell>
         </SettingsState>
       ) : section.entries.length === 0 ? (
         <SettingsState kind="empty">None added yet.</SettingsState>

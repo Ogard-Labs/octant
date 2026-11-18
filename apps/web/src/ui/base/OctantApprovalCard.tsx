@@ -1,4 +1,4 @@
-import { CirclePause } from "lucide-react";
+import { CirclePause } from "../icons";
 import type { ReactNode } from "react";
 import { cn } from "../shadcn/utils";
 

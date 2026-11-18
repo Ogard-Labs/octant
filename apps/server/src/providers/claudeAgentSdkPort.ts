@@ -1,3 +1,5 @@
+import { claudeSandboxToolchainReads } from "./claudeSandboxToolchain";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import {
   forkSession as forkClaudeSession,
   listSessions as listClaudeSessions,
@@ -45,7 +47,12 @@ import type { ClaudeProcessPort, SpawnClaudeCodeProcess } from "./claudeProcess"
 import type { ClaudeTaskToolOutput } from "./claudeTaskList";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
-export type ClaudePermissionMode = "default" | "bypassPermissions" | "plan" | "auto";
+export type ClaudePermissionMode =
+  | "default"
+  | "acceptEdits"
+  | "bypassPermissions"
+  | "plan"
+  | "auto";
 
 export type ClaudeToolDecision =
   | { readonly behavior: "allow"; readonly updatedInput?: Readonly<Record<string, unknown>> }
@@ -89,6 +96,8 @@ export interface ClaudePreToolRequest {
   readonly input: unknown;
   readonly toolUseId: string;
   readonly signal: AbortSignal;
+  /** The subagent that made the call, by the runtime's agent id; absent for the session's own. */
+  readonly agentId?: string;
 }
 
 export interface ClaudeSandboxSettings {
@@ -118,17 +127,35 @@ export interface ClaudeSandboxSettings {
   readonly network?: ClaudeSandboxNetwork;
 }
 
-export type ClaudeSandboxNetwork =
+export type ClaudeSandboxNetwork = (
   | { readonly httpProxyPort: number }
-  | { readonly allowedDomains: readonly ["*"] };
+  | { readonly allowedDomains: readonly ["*"] }
+) & {
+  readonly allowAllUnixSockets?: false;
+  readonly allowUnixSockets?: readonly [];
+  readonly allowLocalBinding?: false;
+  readonly allowMachLookup?: readonly [];
+};
 
 /** The SDK's own copy of a sandbox network setting, so a caller's value is never shared. */
-function sdkSandboxNetwork(
-  network: ClaudeSandboxNetwork,
-): { httpProxyPort: number } | { allowedDomains: string[] } {
-  return "httpProxyPort" in network
-    ? { httpProxyPort: network.httpProxyPort }
-    : { allowedDomains: [...network.allowedDomains] };
+function sdkSandboxNetwork(network: ClaudeSandboxNetwork) {
+  return {
+    ...(network.allowAllUnixSockets === undefined
+      ? {}
+      : { allowAllUnixSockets: network.allowAllUnixSockets }),
+    ...(network.allowLocalBinding === undefined
+      ? {}
+      : { allowLocalBinding: network.allowLocalBinding }),
+    ...("httpProxyPort" in network
+      ? { httpProxyPort: network.httpProxyPort }
+      : { allowedDomains: [...network.allowedDomains] }),
+    ...(network.allowUnixSockets === undefined
+      ? {}
+      : { allowUnixSockets: [...network.allowUnixSockets] }),
+    ...(network.allowMachLookup === undefined
+      ? {}
+      : { allowMachLookup: [...network.allowMachLookup] }),
+  };
 }
 
 /**
@@ -167,6 +194,8 @@ export interface ClaudeOpenQueryInput {
   readonly effort?: ClaudeEffortLevel;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox?: boolean;
+  readonly strict?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
   /**
    * Whether the harness may answer approval prompts via its native `auto`
    * permission mode. The driver only sends `auto` when this is true and the
@@ -227,8 +256,21 @@ export interface ClaudeOpenQueryInput {
   /** Decoder attestation for the one in-process server owned by this adapter. */
   readonly managedToolServer?: boolean;
   readonly sandbox?: ClaudeSandboxSettings;
+  /**
+   * Outside Strict in Work and Code outside Plan: Claude Code's own permission
+   * modes and sandbox decide, as on its own. Accept edits runs `acceptEdits`,
+   * and Octant sends no sandbox settings (unless a Full access thread kept
+   * its sandbox), so the person's own Claude settings configure it.
+   */
+  readonly ownPermissions?: true;
   readonly canUseTool: (request: ClaudeToolRequest) => Promise<ClaudeToolDecision>;
   readonly preToolUse: (request: ClaudePreToolRequest) => Promise<ClaudePreToolDecision>;
+  /**
+   * The person's messages waiting for a subagent, taken once its next tool
+   * call reaches the hook, by the runtime's agent id. They reach the
+   * subagent as the hook's added context, beside whatever the hook decided.
+   */
+  readonly subagentMessages?: (agentId: string) => string | undefined;
 }
 
 export interface ClaudeModelInfo {
@@ -647,6 +689,15 @@ export interface ClaudeQueryPort {
     taskId: string,
   ) => Effect.Effect<"requested" | "unsupported", ProviderFailure>;
   /**
+   * Sends the one foreground task a tool call started (a subagent or a
+   * command) to the background, by that call's tool-use id; the call returns
+   * at once and the turn goes on. `not-found` when no foreground task
+   * matches, `unsupported` when the runtime offers no background control.
+   */
+  readonly backgroundTask: (
+    toolUseId: string,
+  ) => Effect.Effect<"backgrounded" | "not-found" | "unsupported", ProviderFailure>;
+  /**
    * Kills this query's runtime process tree outright, without asking it to
    * stop first. Only this query's own process is signalled.
    */
@@ -737,9 +788,12 @@ interface ClaudeAgentSdkHookOptions {
 interface ClaudeAgentSdkHookOutput {
   readonly hookSpecificOutput?: {
     readonly hookEventName: "PreToolUse";
-    readonly permissionDecision: "allow" | "deny" | "ask";
+    /** Absent decides nothing, so Claude Code's own rules decide. */
+    readonly permissionDecision?: "allow" | "deny" | "ask";
     readonly permissionDecisionReason?: string;
     readonly updatedInput?: Readonly<Record<string, unknown>>;
+    /** Text the model reads with the call: a person's message for a subagent. */
+    readonly additionalContext?: string;
   };
 }
 
@@ -837,6 +891,15 @@ export interface ClaudeNativeQueryOptions {
  * is on. Claude's own memory stays off by flag as well as by its environment
  * switch, unless the account keeps its own memory.
  */
+/**
+ * Whether a session reads the person's own Claude settings file, where their
+ * sandbox and permission rules live. Claude's own permission modes decide
+ * only in such a session (`claudeOwnPermissions`).
+ */
+export function claudeReadsPersonSettings(setup: ProviderNativeSetup | undefined): boolean {
+  return claudeNativeQueryOptions(setup).settingSources.includes("user");
+}
+
 export function claudeNativeQueryOptions(
   setup: ProviderNativeSetup | undefined,
   ownMemory = false,
@@ -907,7 +970,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly agents: Readonly<Record<string, never>>;
   readonly plugins: readonly [];
   readonly includePartialMessages: true;
-  readonly sandbox?: ClaudeSandboxSettings;
+  readonly sandbox?: ClaudeSandboxSettings | { readonly enabled: false };
   readonly spawnClaudeCodeProcess: SpawnClaudeCodeProcess;
   readonly canUseTool: (
     toolName: string,
@@ -961,6 +1024,7 @@ export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
   readonly interrupt: () => Promise<unknown>;
   /** Older runtimes cannot stop one task without interrupting the turn. */
   readonly stopTask?: (taskId: string) => Promise<void>;
+  readonly backgroundTasks?: (toolUseId?: string) => Promise<boolean>;
   readonly setPermissionMode: (mode: ClaudePermissionMode) => Promise<void>;
   readonly initializationResult: () => Promise<unknown>;
   /** The runtime's own account of its window; older runtimes do not answer. */
@@ -994,6 +1058,8 @@ export interface ClaudeAgentSdkPortOptions {
   readonly spawnClaudeCodeProcess: ClaudeProcessPort["spawn"];
   readonly sdk?: ClaudeAgentSdkBridge;
   readonly inputCapacity?: number;
+  /** The host's platform; defaults to the running one. */
+  readonly platform?: NodeJS.Platform;
 }
 
 const DEFAULT_INPUT_CAPACITY = 1;
@@ -1119,11 +1185,39 @@ function isExactPathTuple(value: unknown, expected: string): boolean {
  * at Guarded and Reviewed. Plan's read-only rule and a Full access thread
  * that kept its sandbox are held by the sandbox itself, not only the hook.
  */
-export function claudeSandboxLetsCommandsOut(policy: ProviderExecutionPolicy): boolean {
-  return policy === "approval-gated" || policy === "auto-accept-edits";
+export function claudeSandboxLetsCommandsOut(
+  policy: ProviderExecutionPolicy,
+  strict = false,
+): boolean {
+  return (
+    policy === "approval-gated" ||
+    policy === "auto-accept-edits" ||
+    (policy === "full-access" && strict)
+  );
 }
 
-function isValidSandboxNetwork(network: unknown): boolean {
+function isValidSandboxNetwork(network: unknown, blocked = false): boolean {
+  if (blocked) {
+    if (typeof network !== "object" || network === null || Array.isArray(network)) return false;
+    const value = network as Record<string, unknown>;
+    if (
+      value.allowAllUnixSockets !== false ||
+      value.allowLocalBinding !== false ||
+      !Array.isArray(value.allowUnixSockets) ||
+      value.allowUnixSockets.length !== 0 ||
+      !Array.isArray(value.allowMachLookup) ||
+      value.allowMachLookup.length !== 0
+    )
+      return false;
+    const {
+      allowAllUnixSockets: _all,
+      allowLocalBinding: _bind,
+      allowUnixSockets: _unix,
+      allowMachLookup: _mach,
+      ...base
+    } = value;
+    return isValidSandboxNetwork(base);
+  }
   if (hasExactKeys(network, SANDBOX_OPEN_NETWORK_KEYS)) {
     return isExactPathTuple(network.allowedDomains, "*");
   }
@@ -1136,12 +1230,36 @@ function isValidSandboxNetwork(network: unknown): boolean {
   );
 }
 
-function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
+function hasValidSandbox(input: ClaudeOpenQueryInput, platform: NodeJS.Platform): boolean {
+  // Claude Code has no command sandbox on Windows, so a launch there carries
+  // none: one asking for it with `failIfUnavailable` would leave every
+  // command unable to run. Its permission modes hold the turn instead.
+  if (platform === "win32")
+    return (
+      input.sandbox === undefined &&
+      input.strict !== true &&
+      input.fullAccessSandbox !== true &&
+      input.sandboxPolicy === undefined
+    );
   try {
+    const sandboxedFullAccess =
+      input.executionPolicy === "full-access" &&
+      (input.fullAccessSandbox === true || input.strict === true);
     if (
-      input.executionPolicy !== "approval-gated" &&
-      input.executionPolicy !== "auto-accept-edits" &&
-      !(input.executionPolicy === "full-access" && input.fullAccessSandbox === true)
+      process.platform === "win32" &&
+      input.strict !== true &&
+      input.fullAccessSandbox !== true &&
+      input.sandboxPolicy === undefined
+    )
+      return input.sandbox === undefined;
+    if (
+      (input.executionPolicy !== "approval-gated" &&
+        input.executionPolicy !== "auto-accept-edits" &&
+        !sandboxedFullAccess) ||
+      (input.ownPermissions === true &&
+        input.strict !== true &&
+        input.sandboxPolicy === undefined &&
+        !sandboxedFullAccess)
     ) {
       return input.sandbox === undefined;
     }
@@ -1151,23 +1269,45 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
     if (!hasExactKeys(rest, SANDBOX_KEYS)) return false;
     // A network setting is only ever the proxy port or every host: anything
     // that would let the sandbox pick its own sockets or bindings is refused.
-    if (network !== undefined && !isValidSandboxNetwork(network)) return false;
+    if (
+      network !== undefined &&
+      !isValidSandboxNetwork(
+        network,
+        input.strict === true &&
+          (input.sandboxPolicy?.policy.hostServices === "blocked" ||
+            input.sandboxPolicy?.policy.network === "deny" ||
+            (input.sandbox?.network !== undefined && "httpProxyPort" in input.sandbox.network)),
+      )
+    )
+      return false;
     if (
       sandbox.enabled !== true ||
       sandbox.failIfUnavailable !== true ||
       sandbox.autoAllowBashIfSandboxed !== false ||
-      sandbox.allowUnsandboxedCommands !== claudeSandboxLetsCommandsOut(input.executionPolicy) ||
+      sandbox.allowUnsandboxedCommands !==
+        claudeSandboxLetsCommandsOut(input.executionPolicy, input.strict === true) ||
       !hasExactKeys(sandbox.filesystem, SANDBOX_FILESYSTEM_KEYS)
     ) {
       return false;
     }
     const roots = [input.projectRoot, ...(input.additionalDirectories ?? [])];
-    const matchesRoots = (paths: ReadonlyArray<string>) =>
-      paths.length === roots.length && paths.every((path, index) => path === roots[index]);
+    const configured = input.strict === true ? input.sandboxPolicy?.policy.filesystem : undefined;
+    const matchesRoots = (paths: ReadonlyArray<string>, read: boolean) => {
+      const expected = [
+        ...roots,
+        ...(read && input.attachmentsFolder !== undefined ? [input.attachmentsFolder] : []),
+        ...(read ? (configured?.readOnlyRoots ?? []) : []),
+        ...(configured?.readWriteRoots ?? []),
+        ...(read && input.strict === true ? claudeSandboxToolchainReads() : []),
+      ];
+      return (
+        paths.length === expected.length && paths.every((path, index) => path === expected[index])
+      );
+    };
     return (
       isExactPathTuple(sandbox.filesystem.denyRead, "/") &&
-      matchesRoots(sandbox.filesystem.allowRead) &&
-      matchesRoots(sandbox.filesystem.allowWrite)
+      matchesRoots(sandbox.filesystem.allowRead, true) &&
+      matchesRoots(sandbox.filesystem.allowWrite, false)
     );
   } catch {
     return false;
@@ -1276,22 +1416,24 @@ function liveBridge(): ClaudeAgentSdkBridge {
         plugins: [...invocation.options.plugins],
         ...(sandbox === undefined
           ? {}
-          : {
-              sandbox: {
-                enabled: sandbox.enabled,
-                failIfUnavailable: sandbox.failIfUnavailable,
-                autoAllowBashIfSandboxed: sandbox.autoAllowBashIfSandboxed,
-                allowUnsandboxedCommands: sandbox.allowUnsandboxedCommands,
-                filesystem: {
-                  denyRead: [...sandbox.filesystem.denyRead],
-                  allowRead: [...sandbox.filesystem.allowRead],
-                  allowWrite: [...sandbox.filesystem.allowWrite],
+          : sandbox.enabled === false
+            ? { sandbox: { enabled: false } }
+            : {
+                sandbox: {
+                  enabled: sandbox.enabled,
+                  failIfUnavailable: sandbox.failIfUnavailable,
+                  autoAllowBashIfSandboxed: sandbox.autoAllowBashIfSandboxed,
+                  allowUnsandboxedCommands: sandbox.allowUnsandboxedCommands,
+                  filesystem: {
+                    denyRead: [...sandbox.filesystem.denyRead],
+                    allowRead: [...sandbox.filesystem.allowRead],
+                    allowWrite: [...sandbox.filesystem.allowWrite],
+                  },
+                  ...(sandbox.network === undefined
+                    ? {}
+                    : { network: sdkSandboxNetwork(sandbox.network) }),
                 },
-                ...(sandbox.network === undefined
-                  ? {}
-                  : { network: sdkSandboxNetwork(sandbox.network) }),
-              },
-            }),
+              }),
         hooks: {
           PreToolUse: [{ hooks: [...invocation.options.hooks.PreToolUse[0].hooks] }],
           UserPromptSubmit: [{ hooks: [...invocation.options.hooks.UserPromptSubmit[0].hooks] }],
@@ -1374,6 +1516,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
   const sdk = options.sdk ?? liveBridge();
   const copySession = sdk.forkSession;
   const inputCapacity = options.inputCapacity ?? DEFAULT_INPUT_CAPACITY;
+  const platform = options.platform ?? process.platform;
 
   return {
     openQuery: (input) => {
@@ -1382,12 +1525,37 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           failure("invalid-configuration", "Claude input capacity must be a positive integer."),
         );
       }
-      if (!hasValidSandbox(input)) {
+      // Octant leaves its sandbox and gate only to the person's own settings,
+      // so a launch that would read none of them fails closed.
+      if (input.ownPermissions === true && !claudeReadsPersonSettings(input.nativeSetup)) {
+        return Effect.fail(
+          failure(
+            "invalid-configuration",
+            "Claude's own permissions need the person's Claude settings.",
+          ),
+        );
+      }
+      if (
+        input.ownPermissions === true &&
+        (input.strict === true || input.sandboxPolicy !== undefined)
+      ) {
+        return Effect.fail(
+          failure(
+            "invalid-configuration",
+            "Strict cannot delegate its boundary to native permission rules.",
+          ),
+        );
+      }
+      if (!hasValidSandbox(input, platform)) {
         return Effect.fail(
           failure("invalid-configuration", "Claude sandbox configuration is invalid."),
         );
       }
-      const expectedMode = permissionMode(input.executionPolicy, input.autoApprove);
+      const expectedMode = permissionMode(
+        input.executionPolicy,
+        input.autoApprove,
+        input.ownPermissions === true,
+      );
       const acquire = Effect.tryPromise({
         try: async () => {
           const prompt = new BoundedAsyncInput<ClaudeAgentSdkInputMessage>(inputCapacity);
@@ -1435,7 +1603,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
             },
           );
           const bindSpawn = options.spawnClaudeCodeProcess({
+            runtimeExecutable: input.binaryPath,
+            ...(input.strict === undefined ? {} : { strict: input.strict }),
             projectRoot: input.projectRoot,
+            ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
             ...(input.additionalDirectories === undefined
               ? {}
               : { extraFolders: input.additionalDirectories }),
@@ -1600,6 +1771,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     },
                   };
                 }
+                const agentId =
+                  typeof hookInput.agent_id === "string" && hookInput.agent_id !== ""
+                    ? hookInput.agent_id
+                    : undefined;
                 const decision = await input.preToolUse({
                   sessionId: hookInput.session_id,
                   projectRoot: hookInput.cwd,
@@ -1607,11 +1782,19 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   input: hookInput.tool_input,
                   toolUseId,
                   signal: callback.signal,
+                  ...(agentId === undefined ? {} : { agentId }),
                 });
-                if (decision.behavior === "own-rules") return {};
+                const note = agentId === undefined ? undefined : input.subagentMessages?.(agentId);
+                const additionalContext = note === undefined ? {} : { additionalContext: note };
+                if (decision.behavior === "own-rules") {
+                  return note === undefined
+                    ? {}
+                    : { hookSpecificOutput: { hookEventName: "PreToolUse", ...additionalContext } };
+                }
                 return {
                   hookSpecificOutput: {
                     hookEventName: "PreToolUse",
+                    ...additionalContext,
                     permissionDecision: decision.behavior,
                     ...(decision.behavior === "deny"
                       ? { permissionDecisionReason: decision.message }
@@ -1628,6 +1811,16 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
             );
             const flagSettings: ClaudeFlagSettings = {
               ...native.settings,
+              // Reading native sandbox settings must not turn disabled
+              // account hooks or memory back on through the same home file.
+              ...(input.strict === false && input.tools.includes("Bash")
+                ? {
+                    ...(input.nativeSetup?.hooks === true
+                      ? {}
+                      : { disableAllHooks: true as const }),
+                    ...(input.ownMemory === true ? {} : { autoMemoryEnabled: false as const }),
+                  }
+                : {}),
               // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is
               // excluded. Keep the explicit selection local to this query.
               ...(input.executionPolicy === "plan" &&
@@ -1672,7 +1865,12 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               ...(input.executionPolicy === "full-access"
                 ? { allowDangerouslySkipPermissions: true }
                 : {}),
-              settingSources: native.settingSources,
+              settingSources:
+                input.strict === false &&
+                input.executionPolicy !== "plan" &&
+                input.tools.includes("Bash")
+                  ? Array.from(new Set([...native.settingSources, "user" as const]))
+                  : native.settingSources,
               skills: native.skills,
               mcpServers: {},
               strictMcpConfig: native.strictMcpConfig,
@@ -1683,21 +1881,23 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               agents: {},
               plugins: [],
               includePartialMessages: true,
-              ...(input.sandbox === undefined
-                ? {}
-                : {
-                    sandbox: {
-                      ...input.sandbox,
-                      filesystem: {
-                        denyRead: [...input.sandbox.filesystem.denyRead] as ["/"],
-                        allowRead: [...input.sandbox.filesystem.allowRead] as [string],
-                        allowWrite: [...input.sandbox.filesystem.allowWrite] as [string],
+              ...(input.sandboxPolicy !== undefined && input.strict !== true
+                ? { sandbox: { enabled: false as const } }
+                : input.sandbox === undefined
+                  ? {}
+                  : {
+                      sandbox: {
+                        ...input.sandbox,
+                        filesystem: {
+                          denyRead: [...input.sandbox.filesystem.denyRead] as ["/"],
+                          allowRead: [...input.sandbox.filesystem.allowRead] as [string],
+                          allowWrite: [...input.sandbox.filesystem.allowWrite] as [string],
+                        },
+                        ...(input.sandbox.network === undefined
+                          ? {}
+                          : { network: input.sandbox.network }),
                       },
-                      ...(input.sandbox.network === undefined
-                        ? {}
-                        : { network: input.sandbox.network }),
-                    },
-                  }),
+                    }),
               // The SDK composes the launch and its `SpawnOptions` carry no
               // bound root or posture, so this query's own are bound to the
               // callback here.
@@ -2089,6 +2289,16 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   await stop.call(query, taskId);
                   return "requested" as const;
                 }, "task stop"),
+              backgroundTask: (toolUseId) =>
+                request(async () => {
+                  const background = query?.backgroundTasks;
+                  if (background === undefined) return "unsupported" as const;
+                  // Always with the one call's id: without it the runtime
+                  // backgrounds every foreground task, as Ctrl+B does.
+                  return (await background.call(query, toolUseId))
+                    ? ("backgrounded" as const)
+                    : ("not-found" as const);
+                }, "task background"),
               setPermissionMode: (mode) =>
                 request(() => query!.setPermissionMode(mode), "permission update"),
               supportedModels: () =>

@@ -4,7 +4,7 @@ import {
   decodeTodoId,
   type TodoCommand,
 } from "@octant/contracts/todos";
-import { Folder, Hash, X } from "lucide-react";
+import { Folder, Hash, X } from "../ui/icons";
 import { useId, useState, type RefObject } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";

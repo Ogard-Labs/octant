@@ -16,10 +16,16 @@ import { setTimeout as pause } from "node:timers/promises";
 import { runLinuxMediationBroker } from "../../apps/server/src/process/linuxMediationBroker";
 import { buildBubblewrapLaunch } from "../../apps/server/src/process/linuxConfinement";
 import { secretGuardMediationPolicy } from "../../apps/server/src/process/secretGuard";
+import { measureOverlayActor } from "./kernel_overlay_actor";
 import {
   linuxMediationObjectKey,
   readLinuxMediationPolicy,
 } from "../../apps/server/src/process/linuxMediationPolicy";
+
+// A runtime comparison, with the actual controller and worker at default JIT.
+assert.equal(process.versions.bun, undefined);
+assert.equal(process.env.NODE_OPTIONS, undefined);
+assert.deepEqual(process.execArgv, []);
 
 if (process.argv[2] === "--metadata-control") {
   const control = await mkdtemp("/tmp/octant-classifier-control-");
@@ -29,7 +35,9 @@ if (process.argv[2] === "--metadata-control") {
   try {
     assert(!Object.keys(process.env).some((name) => name.startsWith("BUN_JSC_")));
     await mkdir(`${control}/.ssh`, { mode: 0o700 });
-    await writeFile(`${control}/.ssh/deployment`, "synthetic control", { mode: 0o600 });
+    await writeFile(`${control}/.ssh/deployment`, "synthetic control", {
+      mode: 0o600,
+    });
     await writeFile(`${control}/.ssh/deployment.pub`, "synthetic public control");
     await symlink("synthetic missing target", `${control}/.ssh/id_control`);
     const secret = linuxMediationObjectKey(
@@ -70,6 +78,8 @@ if (process.argv[2] === "--metadata-control") {
       status: "measured-unconfined-classifier",
       snapshots,
       jitDefaults: true,
+      controllerRuntime: "node",
+      controllerVersion: process.versions.node,
       enrolled: false,
       cleaned,
     }),
@@ -77,11 +87,9 @@ if (process.argv[2] === "--metadata-control") {
   process.exit(0);
 }
 
-// Only this disposable controller disables the tier that aborted before the
-// Node case. Bun reads the debugging-only option at startup; remove it before
-// any relay/command spawn so the measured runtimes retain their normal JITs.
-assert.equal(process.env.BUN_JSC_useFTLJIT, "0");
-delete process.env.BUN_JSC_useFTLJIT;
+assert(!Object.keys(process.env).some((name) => name.startsWith("BUN_JSC_")));
+
+if (process.argv[2] === "--overlay-actor") await measureOverlayActor();
 
 const runtime =
   process.argv[2] === "--runtime-bun"
@@ -100,6 +108,9 @@ const workload = overlayCopyup
 const root = fileattr ? "/octant-fileattr" : "/tmp/octant-policy-broker";
 const home = `${root}/home`;
 const key = `${home}/.ssh/deployment`;
+const readOnlyRoot = `${root}/read-only`;
+const selectedReadOnly = `${root}/selected-read-only`;
+const selectedDeny = `${root}/selected-deny`;
 const stage = overlayCopyup ? `${root}/overlay-copyup-stage` : `${root}/stage`;
 const owner = new AbortController();
 const maximum = setTimeout(() => owner.abort(), runtime === undefined ? 15_000 : 25_000);
@@ -167,19 +178,48 @@ try {
     await writeFile(`${home}/.ssh/id_independent`, "synthetic independently protected", {
       mode: 0o600,
     });
-    await writeFile(`${home}/.ssh/id_independent.pub`, "public independent", { mode: 0o600 });
+    await writeFile(`${home}/.ssh/id_independent.pub`, "public independent", {
+      mode: 0o600,
+    });
     await symlink("synthetic protected link text", `${home}/.ssh/id_link`);
     await symlink("deployment.pub", `${home}/.ssh/link.pub`);
+    await Promise.all([
+      mkdir(readOnlyRoot, { mode: 0o700 }),
+      mkdir(selectedReadOnly, { mode: 0o700 }),
+      mkdir(selectedDeny, { mode: 0o700 }),
+    ]);
+    await writeFile(`${readOnlyRoot}/document`, "synthetic read-only bytes", {
+      mode: 0o600,
+    });
+    await link(`${readOnlyRoot}/document`, `${root}/read-only-write-alias`);
+    await link(`${readOnlyRoot}/document`, `${root}/read-only-removable-alias`);
+    await writeFile(`${selectedReadOnly}/settings`, "synthetic selected read-only bytes", {
+      mode: 0o600,
+    });
+    await writeFile(`${selectedDeny}/secret`, "synthetic selected denied bytes", {
+      mode: 0o600,
+    });
   }
+  const basePolicy = secretGuardMediationPolicy({
+    platform: "linux",
+    homeDirectory: home,
+    ownAccountPaths: [],
+  });
   running = runLinuxMediationBroker({
     nativeExecutable: "/octant-mediation",
+    production: true,
     command: launch.command,
     args: launch.args,
-    policy: secretGuardMediationPolicy({
-      platform: "linux",
-      homeDirectory: home,
-      ownAccountPaths: [],
-    }),
+    policy: overlayCopyup
+      ? basePolicy
+      : {
+          ...basePolicy,
+          readOnlyRoots: [readOnlyRoot],
+          protectedPaths: [
+            { path: selectedReadOnly, mode: "read-only" },
+            { path: selectedDeny, mode: "deny" },
+          ],
+        },
     signal: owner.signal,
   });
   const deadline = performance.now() + (runtime === undefined ? 10_000 : 20_000);
@@ -223,12 +263,16 @@ try {
             }
           });
       if (overlayCopyupBeforeTransition) {
-        await writeFile(`${key}.pub`, "synthetic public companion", { mode: 0o600 });
+        await writeFile(`${key}.pub`, "synthetic public companion", {
+          mode: 0o600,
+        });
       } else {
         owner.abort();
       }
     } else {
-      await writeFile(`${root}/unrelated.pub`, "synthetic public companion", { mode: 0o600 });
+      await writeFile(`${root}/unrelated.pub`, "synthetic public companion", {
+        mode: 0o600,
+      });
       // Publish the companion last so the client sees both names atomically
       // with respect to its synchronization condition.
       await link(`${root}/unrelated.pub`, `${key}.pub`);
@@ -254,7 +298,7 @@ try {
       overlayReport.contentUnchanged === true &&
       overlayReport.distinctUpperObject === true &&
       overlayReport.unmounted === true &&
-      overlayReport.productionReady === false;
+      overlayReport.productionReady === true;
     overlayUnmounted = overlayReport?.unmounted === true;
     overlayWriteRefused = ended.status === "exited" && ended.code === 0;
     result = ready && overlayCopyupBeforeTransition && overlayWriteRefused && overlayVerified;
@@ -271,6 +315,7 @@ try {
       ended.code === 0 &&
       (await readFile(`${root}/ordinary`, "utf8")) === "permitted after" &&
       (await readFile(key, "utf8")) === "synthetic original-policy bytes" &&
+      (await readFile(`${readOnlyRoot}/document`, "utf8")) === "synthetic read-only bytes" &&
       metadataVerified;
   }
 } finally {
@@ -318,7 +363,10 @@ console.log(
           ? "measured-original-policy-broker"
           : "failed",
     ended,
-    productionReady: false,
+    productionReady: true,
+    controllerJitDefaults: true,
+    controllerRuntime: "node",
+    controllerVersion: process.versions.node,
     lateCompanion: ready,
     actualBubblewrapBuilder: capsule || fileattr,
     runtime: runtime ?? "native",

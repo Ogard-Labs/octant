@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
+import {
+  DEFAULT_SIDEBAR_BACKGROUND,
+  DEFAULT_THEME_SETTINGS,
+  decodeThemeSettings,
+} from "@octant/contracts/theme";
 import { importThemeSettings, serializeOctantTheme } from "./import";
 
 describe("safe theme settings import/export", () => {
@@ -9,11 +13,14 @@ describe("safe theme settings import/export", () => {
       mode: "dark" as const,
       density: "compact" as const,
     };
-    expect(importThemeSettings(JSON.parse(serializeOctantTheme(settings)))).toEqual(settings);
+    expect(importThemeSettings(JSON.parse(serializeOctantTheme(settings)))).toEqual({
+      settings,
+      missing: [],
+    });
   });
 
   it("maps only known VS Code colors and rejects executable or remote content", () => {
-    const settings = importThemeSettings({
+    const { settings } = importThemeSettings({
       name: "Local theme",
       type: "dark",
       colors: { "octant.focus-ring": "#ffcc00", "editor.background": "#111113" },
@@ -149,5 +156,83 @@ describe("vs code theme import validation", () => {
 
   it("rejects invalid type values", () => {
     expect(() => importVsCodeTheme({ type: "high-contrast" })).toThrow(ThemeImportError);
+  });
+});
+
+describe("importing a theme file whose photos this computer lacks", () => {
+  const PHOTO = "11111111-1111-4111-8111-111111111111";
+  const OTHER = "22222222-2222-4222-8222-222222222222";
+  const file = (overrides: Record<string, unknown>) =>
+    JSON.parse(
+      serializeOctantTheme(decodeThemeSettings({ ...DEFAULT_THEME_SETTINGS, ...overrides })),
+    );
+  const photoGround = {
+    appBackground: {
+      kind: "photo",
+      backgroundId: PHOTO,
+      characterSet: "01",
+      scope: "everywhere",
+      photoOpacity: 60,
+    },
+  };
+
+  it("keeps every photo when no library has been read", () => {
+    const input = file({
+      ...photoGround,
+      sidebarBackground: { ...DEFAULT_SIDEBAR_BACKGROUND, kind: "custom", backgroundId: PHOTO },
+    });
+    const result = importThemeSettings(input);
+    expect(result.missing).toEqual([]);
+    expect(result.settings.appBackground).toMatchObject({ kind: "photo", backgroundId: PHOTO });
+    expect(result.settings.sidebarBackground).toMatchObject({ kind: "custom" });
+  });
+
+  it("keeps a photo the library holds", () => {
+    const result = importThemeSettings(file(photoGround), { photoIds: new Set([PHOTO]) });
+    expect(result.missing).toEqual([]);
+    expect(result.settings.appBackground).toMatchObject({ kind: "photo", backgroundId: PHOTO });
+  });
+
+  it("turns a missing ground photo into the plain page with the same tuning", () => {
+    const result = importThemeSettings(file(photoGround), { photoIds: new Set([OTHER]) });
+    expect(result.missing).toEqual(["background-photo"]);
+    expect(result.settings.appBackground).toMatchObject({
+      kind: "none",
+      characterSet: "01",
+      scope: "everywhere",
+      photoOpacity: 60,
+    });
+    expect("backgroundId" in result.settings.appBackground).toBe(false);
+  });
+
+  it("drops a missing Picture photo and keeps the Pixels ground", () => {
+    const result = importThemeSettings(
+      file({ appBackground: { kind: "pixels", scene: "picture", backgroundId: PHOTO } }),
+      { photoIds: new Set() },
+    );
+    expect(result.missing).toEqual(["background-photo"]);
+    expect(result.settings.appBackground).toMatchObject({ kind: "pixels", scene: "picture" });
+    expect("backgroundId" in result.settings.appBackground).toBe(false);
+  });
+
+  it("drops a dead photo quietly from a Pixels ground that draws another scene", () => {
+    const result = importThemeSettings(
+      file({ appBackground: { kind: "pixels", scene: "ridges", backgroundId: PHOTO } }),
+      { photoIds: new Set() },
+    );
+    expect(result.missing).toEqual([]);
+    expect(result.settings.appBackground).toMatchObject({ kind: "pixels", scene: "ridges" });
+    expect("backgroundId" in result.settings.appBackground).toBe(false);
+  });
+
+  it("gives a missing sidebar photo the sidebar's default and says so", () => {
+    const result = importThemeSettings(
+      file({
+        sidebarBackground: { ...DEFAULT_SIDEBAR_BACKGROUND, kind: "custom", backgroundId: PHOTO },
+      }),
+      { photoIds: new Set() },
+    );
+    expect(result.missing).toEqual(["sidebar-photo"]);
+    expect(result.settings.sidebarBackground).toEqual(DEFAULT_SIDEBAR_BACKGROUND);
   });
 });

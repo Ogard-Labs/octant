@@ -110,6 +110,108 @@ describe("StartQuickTools", () => {
     expect(dock).toHaveTextContent(String(projectId));
   });
 
+  it("opens straight into the Project terminal or browser the header button asked for, and reports which is open", async () => {
+    const execute = vi.fn(async (command: { readonly kind: string }) =>
+      command.kind === "start"
+        ? { kind: "project-terminal", terminal: { state: "running" } }
+        : { kind: "project-terminal", terminal: { state: "exited" } },
+    );
+    const services = {
+      hostId: LOCAL_HOST_ID,
+      projectTerminalClient: { execute } as never,
+      projectBrowserClient: { execute: vi.fn() } as never,
+    };
+    const open = vi.fn();
+    const consume = vi.fn();
+    const placement = (request?: { tool: "terminal" | "browser"; nonce: number }) => (
+      <StartQuickToolsContext.Provider value={services}>
+        <StartQuickToolsPlacementContext.Provider
+          value={{
+            projectId,
+            chooseProject: vi.fn(),
+            request,
+            consumeRequest: consume,
+            reportOpen: open,
+          }}
+        >
+          <StartQuickTools projectId={projectId} />
+        </StartQuickToolsPlacementContext.Provider>
+      </StartQuickToolsContext.Provider>
+    );
+    const { rerender } = render(placement({ tool: "terminal", nonce: 1 }));
+    expect(await screen.findByRole("complementary", { name: "Project terminal" })).toBeVisible();
+    // The panel renders before the effect that reports it open, so wait for the report.
+    await waitFor(() => expect(consume).toHaveBeenCalled());
+    await waitFor(() => expect(open).toHaveBeenLastCalledWith("terminal"));
+
+    rerender(placement({ tool: "browser", nonce: 2 }));
+    expect(await screen.findByRole("complementary", { name: "Project browser" })).toBeVisible();
+    await waitFor(() => expect(open).toHaveBeenLastCalledWith("browser"));
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "stop", projectId })),
+    );
+  });
+
+  it("starts one shell when the header button is pressed twice before the first has started", async () => {
+    let finishStart: (() => void) | undefined;
+    const execute = vi.fn((command: { readonly kind: string }) =>
+      command.kind === "start"
+        ? new Promise((resolve) => {
+            finishStart = () =>
+              resolve({ kind: "project-terminal", terminal: { state: "running" } });
+          })
+        : Promise.resolve({ kind: "project-terminal", terminal: { state: "exited" } }),
+    );
+    const services = {
+      hostId: LOCAL_HOST_ID,
+      projectTerminalClient: { execute } as never,
+      projectBrowserClient: { execute: vi.fn() } as never,
+    };
+    const placement = (nonce: number) => (
+      <StartQuickToolsContext.Provider value={services}>
+        <StartQuickToolsPlacementContext.Provider
+          value={{
+            projectId,
+            chooseProject: vi.fn(),
+            request: { tool: "terminal", nonce },
+            consumeRequest: vi.fn(),
+            reportOpen: vi.fn(),
+          }}
+        >
+          <StartQuickTools projectId={projectId} />
+        </StartQuickToolsPlacementContext.Provider>
+      </StartQuickToolsContext.Provider>
+    );
+    const { rerender } = render(placement(1));
+    rerender(placement(2));
+    rerender(placement(3));
+    finishStart?.();
+
+    expect(await screen.findByRole("complementary", { name: "Project terminal" })).toBeVisible();
+    expect(execute.mock.calls.filter(([command]) => command.kind === "start")).toHaveLength(1);
+  });
+
+  it("stops a shell that finishes starting after the panel has gone", async () => {
+    let finishStart: (() => void) | undefined;
+    const execute = vi.fn((command: { readonly kind: string }) =>
+      command.kind === "start"
+        ? new Promise((resolve) => {
+            finishStart = () =>
+              resolve({ kind: "project-terminal", terminal: { state: "running" } });
+          })
+        : Promise.resolve({ kind: "project-terminal", terminal: { state: "exited" } }),
+    );
+    const user = userEvent.setup();
+    const view = renderTools(execute);
+    await user.click(screen.getByRole("button", { name: "Terminal" }));
+    view.unmount();
+    finishStart?.();
+
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "stop", projectId })),
+    );
+  });
+
   it("starts a terminal in an extra folder the Project lists, and in the main folder otherwise", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async () => ({

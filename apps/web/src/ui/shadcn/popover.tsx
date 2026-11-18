@@ -4,7 +4,7 @@ import { cn } from "./utils";
 
 /*
  * The popup is a floating overlay, so it keeps a shadow — shadows are reserved
- * for things that genuinely float. `--octant-shadow-overlay` already carries a
+ * for things that genuinely float. `--octant-shadow-pop` already carries a
  * 1px hairline inside the token, so it needs no separate border or ring; the
  * style adds one because its own shadow does not.
  *
@@ -47,7 +47,7 @@ export function PopoverPopup({
   return (
     <PopoverPrimitive.Popup
       className={cn(
-        "z-[var(--oct-z-popup)] rounded-xl bg-popover p-2 text-sm text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+        "z-[var(--oct-z-popup)] rounded-(--oct-radius-lg) bg-popover p-2 text-sm text-popover-foreground shadow-[var(--octant-shadow-pop)] outline-none",
         className,
       )}
       data-slot="popover-content"

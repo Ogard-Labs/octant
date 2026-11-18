@@ -1,5 +1,5 @@
 import { OctantCheckbox } from "../../ui/base/OctantCheckbox";
-import { Play } from "lucide-react";
+import { Play } from "../../ui/icons";
 import { useMemo, useState } from "react";
 import {
   decodeBenchmarkRunStartRequest,

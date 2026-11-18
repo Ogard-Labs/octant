@@ -38,7 +38,7 @@ describe("ModeSwitcher", () => {
     expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByText("Octant")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Work" })).not.toHaveAttribute("aria-current");
-    expect(cssRule('.mode[aria-current="page"]')).toContain("box-shadow:");
+    expect(cssRule('.mode[aria-current="page"]')).not.toContain("box-shadow:");
     const iconFrames = group.querySelectorAll(".mode__icon-frame");
     expect(iconFrames).toHaveLength(2);
     for (const frame of iconFrames) {

@@ -1,4 +1,5 @@
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
+import { TurnSubagentRows } from "../agents/threadSubagents";
 import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
 import { ConversationInputs } from "../continuity/ConversationInputs";
@@ -9,7 +10,6 @@ import type {
   ChatAttemptOutcome,
   ChatAttemptAnsweredQuestion,
   ChatContentBody,
-  ChatContentReference,
   ChatThreadView,
   ChatTurnId,
   ChatTurnRouteDecision,
@@ -22,6 +22,7 @@ import { attemptReplyText, resolvedContent } from "./chatReply";
 import type { PickerGroup } from "@octant/domain";
 import { threadHandoffDisclosure } from "../providers/conversationHandoff";
 import { providerModelLabel } from "../providers/providerModelLabel";
+import { TurnActions } from "../transcript/TurnActions";
 import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import {
@@ -33,7 +34,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { CircleCheck } from "lucide-react";
+import { CircleCheck } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
@@ -43,7 +44,11 @@ import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
-import { toolStepsActivity } from "../transcript/turnActivity";
+import {
+  runningStepTitle,
+  settledTurnFoldsActivity,
+  toolStepsActivity,
+} from "../transcript/turnActivity";
 import { useToolCallRecordsReader } from "../transcript/toolCallRecordsReader";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
@@ -193,7 +198,7 @@ const attemptFailureSentences: Record<string, string> = {
   "missing-turn-bound": "The spend ceiling refused this turn's cost estimate.",
   "no-visible-reply": "The provider finished without producing a reply.",
   "output-budget-exceeded":
-    "The turn streamed more output than Octant keeps and was stopped; the reply so far is kept.",
+    "The reply got longer than Octant keeps, so it was stopped. What came before is kept.",
   overrun: "The turn exceeded its spend ceiling.",
   "provider-failed": "The provider reported a failure.",
   protocol: "The provider did not answer the turn protocol correctly.",
@@ -201,10 +206,10 @@ const attemptFailureSentences: Record<string, string> = {
   "research-failed": "Research failed during this turn.",
   "research-timed-out": "Research did not return before the turn deadline.",
   "stale-resume": "The provider could not resume its earlier session.",
-  "stop-unconfirmed": "Stop was not confirmed. The provider may still be running this response.",
+  "stop-unconfirmed": "Stop was not confirmed. The provider may still be working.",
   "timed-out": "The provider stopped responding and the turn timed out.",
   "tool-failed": "An app-managed tool call failed during this turn.",
-  "tool-timed-out": "An app-managed tool call did not return before the turn deadline.",
+  "tool-timed-out": "A tool call did not finish before the time limit.",
   unauthenticated: "The provider requires authentication.",
   unauthorized: "The provider refused this turn's authorization.",
   unavailable: "The provider is unavailable.",
@@ -641,6 +646,13 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                     ? { onSnoozeAtReset: props.onSnoozeAtUsageReset }
                     : {})}
                   previousAttempt={turn.attempts[index - 1]}
+                  subagentsFrom={attempt.createdAt}
+                  {...subagentsUntil(
+                    turn.attempts[index + 1]?.createdAt ??
+                      turns
+                        .slice((turnIndexById.get(String(turn.id)) ?? turns.length) + 1)
+                        .find((later) => later.attempts.length > 0)?.attempts[0]?.createdAt,
+                  )}
                   providerGroups={props.providerGroups}
                   citations={citationsByAttempt.get(String(attempt.id)) ?? NO_CITATIONS}
                   tailAttempt={
@@ -774,6 +786,7 @@ function chatTurnActions(input: {
         ...(checkpointDisabled ? { disabled: true } : {}),
       });
       actions.push({
+        destructive: true,
         label: "Forget",
         value: "checkpoint-forget",
         ...(checkpointDisabled ? { disabled: true } : {}),
@@ -848,6 +861,11 @@ function chatQuestionDraftRequestId(attempt: ChatAttempt): string {
 // memoized block a fresh array on every render of the transcript.
 const NO_CITATIONS: ChatThreadView["citations"] = [];
 
+/** The next attempt's start, as an optional prop: the latest attempt owns everything after it. */
+function subagentsUntil(at: string | undefined): { readonly subagentsUntil?: string } {
+  return at === undefined ? {} : { subagentsUntil: at };
+}
+
 const AttemptBlock = memo(function AttemptBlock(props: {
   readonly questionDraftScope: string;
   readonly attempt: ChatAttempt;
@@ -865,6 +883,9 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly onFork: (() => void) | undefined;
   readonly forkDisabled: boolean;
   readonly previousAttempt: ChatAttempt | undefined;
+  /** When this attempt started, and when the next one did: the subagents it started fall between. */
+  readonly subagentsFrom: string;
+  readonly subagentsUntil?: string;
   readonly providerGroups: ChatTranscriptProps["providerGroups"];
   /** This attempt is the conversation's tail — the only stop a resume can continue. */
   readonly tailAttempt: boolean;
@@ -879,6 +900,14 @@ const AttemptBlock = memo(function AttemptBlock(props: {
       ? undefined
       : responseContents.map((content) => content!.body).join("");
   const toolActivity = toolStepsActivity(props.attempt.toolSteps, props.attempt.toolStepsTruncated);
+  const workedFor = turnWorkedFor(
+    props.attempt.outcome,
+    props.attempt.createdAt,
+    props.attempt.updatedAt,
+  );
+  // The duration lives in the fold's summary when the turn folds; otherwise in the header.
+  const workedForInFold =
+    workedFor !== undefined && toolActivity !== undefined && settledTurnFoldsActivity(toolActivity);
   const toolCallRecords = useToolCallRecordsReader({
     serverUrl: props.serverUrl,
     windowCapability: props.windowCapability,
@@ -938,9 +967,6 @@ const AttemptBlock = memo(function AttemptBlock(props: {
       >
         <TurnHeader
           at={props.attempt.updatedAt}
-          copyValue={responseBody}
-          onFork={props.attempt.outcome === "completed" ? props.onFork : undefined}
-          forkDisabled={props.forkDisabled}
           outcome={props.attempt.outcome}
           {...(props.attempt.pendingQuestion === undefined
             ? {}
@@ -949,19 +975,9 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           {...(props.providerGroups === undefined
             ? {}
             : { provider: providerModelLabel(props.providerGroups, props.attempt) })}
-          {...(canRegenerate && props.onRetryAttempt !== undefined
-            ? {
-                onRegenerate: () => props.onRetryAttempt?.(props.attempt.turnId, props.attempt.id),
-              }
-            : {})}
-          {...(() => {
-            const workedFor = turnWorkedFor(
-              props.attempt.outcome,
-              props.attempt.createdAt,
-              props.attempt.updatedAt,
-            );
-            return workedFor === undefined ? {} : { workedFor };
-          })()}
+          {...(workedFor === undefined || workedForInFold ? {} : { workedFor })}
+          startedAt={props.attempt.createdAt}
+          step={runningStepTitle(toolActivity)}
         />
         <HarnessRetryStatus
           events={
@@ -981,9 +997,17 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                 ]
           }
         />
-        {toolActivity === undefined ? null : (
+        {toolActivity === undefined ? (
+          <TurnSubagentRows
+            window={{
+              from: props.subagentsFrom,
+              ...(props.subagentsUntil === undefined ? {} : { until: props.subagentsUntil }),
+            }}
+          />
+        ) : (
           <TurnActivityRows
             activity={toolActivity}
+            {...(workedForInFold && workedFor !== undefined ? { workedFor } : {})}
             running={props.attempt.outcome === "queued" || props.attempt.outcome === "streaming"}
             settled={
               props.attempt.outcome === "completed" ||
@@ -992,6 +1016,10 @@ const AttemptBlock = memo(function AttemptBlock(props: {
               props.attempt.outcome === "cancelled"
             }
             {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
+            subagents={{
+              from: props.subagentsFrom,
+              ...(props.subagentsUntil === undefined ? {} : { until: props.subagentsUntil }),
+            }}
           />
         )}
         {props.attempt.tasks === undefined || props.attempt.tasks.length === 0 ? null : (
@@ -1002,6 +1030,9 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                 id: task.taskId,
                 state: task.state,
                 summary: task.summary,
+                ...(task.runningSummary === undefined
+                  ? {}
+                  : { runningSummary: task.runningSummary }),
               })),
             }}
           />
@@ -1103,6 +1134,19 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             response
           </OctantButton>
         ) : null}
+        <TurnActions
+          at={props.attempt.updatedAt}
+          copyValue={responseBody}
+          forkDisabled={props.forkDisabled}
+          latest={props.tailAttempt}
+          onFork={props.onFork}
+          outcome={props.attempt.outcome}
+          {...(canRegenerate && props.onRetryAttempt !== undefined
+            ? {
+                onRegenerate: () => props.onRetryAttempt?.(props.attempt.turnId, props.attempt.id),
+              }
+            : {})}
+        />
       </article>
     </>
   );

@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { X } from "../ui/icons";
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";

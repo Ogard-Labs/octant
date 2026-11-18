@@ -36,7 +36,7 @@ page outline's links into it, and a deep link to a setting inside it, open it
 first. Opened, it lists every
 bundled provider driver in the Model endpoints row style. Agent runtimes and
 model endpoints are two sections. A row is one link named with its state
-("Codex CLI, off. Open setup") and shows the mark, the name, "Agent runtime ·
+("Codex, off. Open setup") and shows the mark, the name, "Agent runtime ·
 Bundled" or "Model endpoint · Bundled", and the state in words beside the same
 dot shapes. The states are Ready, Sign in to use, Partly working, Checking…,
 Not checked yet, Found, not added, Not looked for yet, Not on this host, Not
@@ -129,6 +129,50 @@ profile’s Setup section, including after returning to Settings. Creation store
 per-instance account-directory allocation. Desktop creation still requires
 a key and saves it through native IPC. A browser-supplied secret is refused
 before profile creation; host-local credential authority is unchanged.
+
+### Claude gateway accounts
+
+A Claude account signs in with a Claude subscription, an Anthropic API key, or
+a **Gateway** (maintainer decision, 2026-11-18): the person's own gateway that
+speaks the Anthropic API, such as a company proxy. The wizard's Sign-in step
+and the account's Authentication setting offer all three. Gateway asks for the
+gateway's **address** and its **token**.
+
+- **Address.** Kept in the account's configuration (`gatewayBaseUrl`, present
+  exactly when the account signs in through a gateway). It must be HTTPS, or
+  plain HTTP only on this computer or a private network, judged by the
+  [Ollama address rule](#endpoint-address-and-stored-key); a plain-HTTP
+  address on the local network shows the same warning that prompts and
+  replies travel unencrypted. It may have a path (a trailing slash is
+  dropped) but no credentials, query or fragment.
+- **Token.** Stored, replaced and removed exactly as a Claude API key is: the
+  same credential broker and host credential store, the desktop app over
+  native IPC, `octant provider key set "Profile name"` on the host, or a
+  paired device. A browser without credential authority creates the account
+  without its token and shows the host-terminal guidance above; a token typed
+  there is refused before the account is created. Changing the address, or
+  moving between a gateway and Anthropic's own API, deletes the stored token
+  or key, so a credential is never sent somewhere it was not entered for.
+- **This computer's gateway.** When the host's own environment sets
+  `ANTHROPIC_BASE_URL` to an address Octant accepts, the wizard's Gateway
+  choice offers **Use the address from this computer's environment**, which
+  fills the address only when the person presses it. The host sends the
+  address and whether `ANTHROPIC_AUTH_TOKEN` is set, never a token value, and
+  when one is set the field says Octant does not read it and the account needs
+  its own.
+- **Launch.** The account runs in its own account directory, like an API-key
+  account, with `ANTHROPIC_BASE_URL` set to its address and
+  `ANTHROPIC_AUTH_TOKEN` set to its broker-resolved token, and every other
+  ambient Anthropic and Claude credential stripped (`ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, and outside Strict the host's own
+  `ANTHROPIC_BASE_URL`). No other account receives its address or token, and
+  Octant does not rotate, fail over or balance between accounts. Credentials
+  never appear in process arguments.
+- **Connection check.** Check connection reads the account's model list
+  through the gateway as an API-key account's check reads Anthropic's, and a
+  missing token reads as a missing key, with guidance to store the token.
+  Claude artifacts and
+  plan limits are not offered: a gateway has no claude.ai account.
 
 ## Octant Harness model endpoints
 
@@ -257,7 +301,24 @@ broker reads the profile in place on each renewal as the AWS CLI does
 and keeps the key pair; the server stores only the pointer, the journal
 names only the reference, and a refusal names its cause (no such profile,
 no current single sign-on session, a `credential_process` that printed no
-credentials, or a profile that only assumes a role, which is not read yet). Add endpoint's Amazon Bedrock card opens its
+credentials, a role that asks for an MFA code, a role AWS refused to let
+the source assume, or a source Octant does not read). A profile with a
+`role_arn` is built (maintainer request, 2026-11-18): the broker assumes
+the role at the token service, from the credentials of its
+`source_profile` (which may itself assume a role, up to five in a row, a
+cycle refused), from the broker's environment keys for
+`credential_source = Environment`, or with `AssumeRoleWithWebIdentity` and
+the token in `web_identity_token_file`. It honours `role_session_name`,
+`external_id`, `duration_seconds` and the profile's `region` (the regional
+token service, else the global one), signs `AssumeRole` with its own
+Signature Version 4 signer, and keeps the role's credentials in the grant
+until five minutes before they expire, then assumes the role again. A role
+with `mfa_serial` is refused with a sentence saying so, since Connect
+profile has no place to type a code; `credential_source` of instance or
+container metadata stays unsupported, as those answer only on that
+machine's own network. Strict changes nothing here. Codex's own Bedrock
+providers resolve the profile in the Codex runtime and do not use this
+path. Add endpoint's Amazon Bedrock card opens its
 own Connect: Name, Region (where the models run), Access portal, Portal
 region, Account ID, Role (the permission set), and Model IDs (1 to 64, since
 Bedrock lists none a role may use), each with a one-line hint, and no key or
@@ -303,20 +364,49 @@ control supplies its accessible name.
 ### Additional CLI accounts
 
 Every Claude and Codex provider card offers Add account in its details, beside
-Check connection. It opens the same manual form that Add provider manually
-opens, expanded, with that driver chosen, the card's binary path filled in, and
-a suggested name ("<card name> (2)", the next free number) focused for editing.
-It adds no route and no authority: the host still assigns the account directory
-and the form shows the sign-in guidance for an additional account. A created
-account closes the form again, so the suggested name is not offered twice.
-Cards for other drivers, and the single runtime card on a provider's own
-page, have no Add account.
+Check connection, and the Providers page keeps Add provider manually. Both open
+one wizard, in place, as a dialog over the page (maintainer request,
+2026-11-14): the page does not scroll to a form. The dialog is 560px wide and
+520px high on every step, never resizes between steps, and scrolls its steps
+inside; Back, Next and Cancel sit in a fixed footer, and a step indicator is
+at the top. A refusal or validation message has a reserved slot above the
+footer, so saying it moves nothing.
 
-The manual Claude and Codex account forms give the account directory, accent
-and sign-in guidance full-width setting rows. The compact provider/name/binary
-fields may share columns; account rows must not become cells in that row.
-When the Settings pane is narrow, controls stack below their labels and help,
-keeping every input and the submit action reachable without horizontal clipping.
+1. **Provider.** Cards with icon, name and a one-line description for every
+   agent runtime the page offers, saying whether the host found it. A card
+   that cannot be added here says why on the card. Opened from a card's Add
+   account, the card's provider is chosen.
+2. **Sign-in.** The provider's existing authentication choices as radio cards
+   (a subscription or the provider's own login, an API key, or for Claude a
+   [gateway](#claude-gateway-accounts)), each saying
+   what will happen. An API key goes only through the existing secret-store
+   path: it is read from the field when the account is created and never kept
+   in page state.
+3. **Details.** The name (suggested as "<card name> (2)", the next free
+   number), the accent for Claude and Codex, and under Advanced the detected
+   binary with Change… and the read-only account directory the host assigns.
+   Add at the end of this step is the only step that creates the account,
+   through the same create commands as before; Cancel before it adds nothing.
+4. **Connect.** For Claude and Codex the exact sign-in command for the new
+   account (naming the directory the host assigned) with a copy button, and for
+   other runtimes the provider's sign-in guidance; Check connection shows the
+   host's own answer inline, ready or the refusal reason and next step.
+5. **Done.** A summary, and Finish.
+
+The wizard adds no route and no authority. It covers the agent runtimes the
+Providers page offers; HTTP model endpoints keep Octant Harness › Model
+endpoints, and image profiles keep Image generation. Cards for other drivers,
+and the single runtime card on a provider's own page, have no Add account.
+
+Every Claude subscription card and every Codex card also offers **Sign in**
+beside Check connection. The host runs the account's own sign-in command,
+which opens the browser; the card then says to finish signing in there, offers
+the sign-in page again, and checks every two seconds until the CLI is done,
+when it says Signed in and checks the connection. A Claude card also takes the
+code a Claude sign-in page shows when the browser could not reach the CLI. A
+failed sign-in shows the CLI's own last line. The same account steps work from
+the person's own terminal on the host with `octant account add`, `list`,
+`sign-in`, `status` and `remove`; Octant's own terminals do not carry them.
 
 ### Claude artifacts
 
@@ -336,7 +426,7 @@ Code's usage telemetry to Anthropic for this account's Work and Code threads
 that use them. Error reports and conversation uploads stay off." The wording
 states only what the setting changes. Turning the switch on opens a
 confirmation that repeats the warning, with Cancel focused; cancelling leaves
-it off. Turning it off needs no confirmation. An API-key account cannot
+it off. Turning it off needs no confirmation. An API-key or gateway account cannot
 enable it ("Claude artifacts need a claude.ai sign-in"), nor can a host that
 exports its own opt-out: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, or a
 truthy `DISABLE_TELEMETRY` or `DO_NOT_TRACK` (the card says the computer's own
@@ -345,7 +435,7 @@ telemetry opt-out keeps Claude Code's telemetry and Claude artifacts off).
 The switch is the account's `artifactDelivery` field, changed only by the
 `set-claude-artifact-delivery` provider command and journaled as an ordinary
 `provider.instance-configuration-changed@1`. Creating an account or saving
-its configuration never sets it; a saved change to API-key authentication
+its configuration never sets it; a saved change to API-key or gateway authentication
 clears it. The provider route refuses the command from anything but this
 host's own window, and remote forwarding never admits provider commands. The
 command keeps the running runtime, its readiness, and its models, and reports

@@ -359,3 +359,132 @@ export function makePiNativeSessions(options: {
           }),
   };
 }
+
+/** Octant's own session file for one Octant session id, when exactly one header names it. */
+function octantSessionFile(
+  octantDirectory: string,
+  sessionId: string,
+):
+  | {
+      readonly path: string;
+      readonly name: string;
+      readonly header: PiSessionHeader;
+      readonly size: number;
+    }
+  | undefined {
+  if (!SESSION_ID.test(sessionId)) return undefined;
+  const matches = sessionFiles(octantDirectory).filter((path) =>
+    path.endsWith(`_${sessionId}.jsonl`),
+  );
+  if (matches.length !== 1) return undefined;
+  const path = matches[0];
+  if (path === undefined) return undefined;
+  const read = readHeader(path);
+  if (read === undefined || read.header.id !== sessionId) return undefined;
+  return {
+    path,
+    name: path.slice(octantDirectory.length + 1),
+    header: read.header,
+    size: read.size,
+  };
+}
+
+function entryId(line: string): string | undefined {
+  try {
+    const entry: unknown = JSON.parse(line);
+    if (typeof entry !== "object" || entry === null || !("id" in entry)) return undefined;
+    return typeof entry.id === "string" && SESSION_ID.test(entry.id) ? entry.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The id of the last entry Pi wrote to an Octant session: where its newest
+ * turn ends, the anchor a later fork or rewind cuts at. Pi appends each entry
+ * as one JSON line with its own `id` (Pi's session file format reference), so
+ * only the file's tail is read. Undefined when the file or a whole last entry
+ * cannot be read.
+ */
+export function piSessionLastEntryId(
+  octantSessionDirectory: string,
+  sessionId: string,
+): string | undefined {
+  try {
+    const file = octantSessionFile(octantSessionDirectory, sessionId);
+    if (file === undefined) return undefined;
+    const descriptor = openSync(file.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const size = fstatSync(descriptor).size;
+      const length = Math.min(HEADER_BYTES, size);
+      const buffer = Buffer.alloc(length);
+      readSync(descriptor, buffer, 0, length, size - length);
+      // The first line read is either the header or, in a tail that starts
+      // mid-file, possibly torn; neither is an entry.
+      const last = buffer
+        .toString("utf8")
+        .split("\n")
+        .slice(1)
+        .filter((line) => line.trim().length > 0)
+        .at(-1);
+      return last === undefined ? undefined : entryId(last);
+    } finally {
+      closeSync(descriptor);
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Copies an Octant Pi session through one of its entries into a new session
+ * under `sessionId`, as Pi's own fork does: a new file whose header names the
+ * new id and records the file it came from in `parentSession`, holding the
+ * source's entries up to and including the anchor, so Pi resumes the copy
+ * with the anchor as its leaf. The source is never written. Undefined when
+ * the copy cannot be exact (no such session or entry, another folder, a file
+ * too large), so the host hands the conversation over as text instead.
+ */
+export function forkPiSession(input: {
+  readonly octantSessionDirectory: string;
+  readonly sourceSessionId: string;
+  readonly sessionId: string;
+  readonly anchor: string;
+  readonly projectRoot: string;
+}): "forked" | undefined {
+  if (!SESSION_ID.test(input.sessionId) || !SESSION_ID.test(input.anchor)) return undefined;
+  const source = octantSessionFile(input.octantSessionDirectory, input.sourceSessionId);
+  if (
+    source === undefined ||
+    source.header.cwd !== input.projectRoot ||
+    source.size > MAX_ADOPTED_SESSION_BYTES ||
+    // An Octant session that already has a history keeps it.
+    sessionFiles(input.octantSessionDirectory).some((path) =>
+      path.endsWith(`_${input.sessionId}.jsonl`),
+    )
+  )
+    return undefined;
+  const [, ...entries] = readFileSync(source.path, "utf8").split("\n");
+  const through = entries.findIndex((line) => entryId(line) === input.anchor);
+  if (through < 0) return undefined;
+  const header = { ...source.header, id: input.sessionId, parentSession: source.path };
+  const prefix = source.name.slice(0, -`_${input.sourceSessionId}.jsonl`.length);
+  const target = join(input.octantSessionDirectory, `${prefix}_${input.sessionId}.jsonl`);
+  const descriptor = openSync(
+    target,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
+  let written = false;
+  try {
+    writeFileSync(
+      descriptor,
+      `${[JSON.stringify(header), ...entries.slice(0, through + 1)].join("\n")}\n`,
+    );
+    written = true;
+  } finally {
+    closeSync(descriptor);
+    if (!written) rmSync(target, { force: true });
+  }
+  return "forked";
+}

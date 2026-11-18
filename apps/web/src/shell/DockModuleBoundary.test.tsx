@@ -19,5 +19,5 @@ it("contains a failing tool while the conversation stays available", () => {
     </>,
   );
   expect(screen.getByText("The conversation remains here")).toBeVisible();
-  expect(screen.getByRole("alert")).toHaveTextContent("This tool could not be displayed");
+  expect(screen.getByRole("alert")).toHaveTextContent("This tool could not load");
 });

@@ -4,7 +4,16 @@ import {
   BrowserAutomationClientFailure,
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -12,6 +21,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { threadImageOffers } from "../composer/threadImageOffers";
 import { BrowserWorkspace, RENDERER_OVERLAY_SELECTOR } from "./BrowserWorkspace";
 import { boundsInsideViewport } from "./useNativeBrowserSurface";
+import {
+  browserTabPageOf,
+  publishBrowserTabPage,
+  resetBrowserTabPages,
+  useBrowserTabPages,
+} from "./browserTabPages";
 
 /** The toolbar's trailing more menu holds the actions that have no button of their own. */
 async function openMore(): Promise<void> {
@@ -210,6 +225,32 @@ function stubNativeSurfaceDom(): () => void {
 }
 
 describe("BrowserWorkspace", () => {
+  it("keeps the dock's name for a tab while its pane is still loading", () => {
+    resetBrowserTabPages();
+    const browser = client();
+    browser.inspectThread = vi.fn(() => new Promise<never>(() => undefined)) as never;
+    const tab = {
+      kind: "browser",
+      id: "90000000-0000-4000-8000-000000000010",
+      mode: "work",
+      title: "Browser",
+      threadId,
+    } as const;
+    publishBrowserTabPage(String(threadId), "dock-tab", {
+      title: "Earned",
+      url: "https://www.example.org/",
+    });
+    const view = render(
+      <BrowserWorkspace client={browser} dockTabId="dock-tab" tab={tab as never} />,
+    );
+    const stored = renderHook(() => useBrowserTabPages());
+    expect(browserTabPageOf(stored.result.current, String(threadId), "dock-tab")?.title).toBe(
+      "Earned",
+    );
+    view.unmount();
+    resetBrowserTabPages();
+  });
+
   // Opening a page records it as recent; a later test must not start from it.
   afterEach(() => globalThis.localStorage.clear());
 
@@ -271,6 +312,30 @@ describe("BrowserWorkspace", () => {
     expect(styles.indexOf(".browser-workspace__chrome")).toBeGreaterThan(-1);
     expect(styles.indexOf(".browser-workspace__chrome")).toBeLessThan(
       styles.indexOf(".browser-workspace__native"),
+    );
+  });
+
+  it("lays the notes and the tool band under the page at their own heights, outranking the workspace's grid", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    // The workspace's grid is declared at one class's weight in a later sheet,
+    // so the notes layout needs two: while the grid won, the row's 45% cap
+    // measured its own row and cut its text in half.
+    const band = styles.match(/\n\.browser-annotate \{([^}]*)\}/)?.[1] ?? "";
+    // One height whatever is armed or said, so a live page never resizes for a tool.
+    expect(band).toMatch(/height:\s*44px/);
+    expect(band).toMatch(/flex:\s*0 0 auto/);
+    expect(styles).toMatch(
+      /\.browser-workspace\.browser-workspace--feedback \{\s*display: flex;\s*flex-direction: column;/,
+    );
+    const row = styles.match(/\n\.product-feedback \{([^}]*)\}/)?.[1] ?? "";
+    expect(row).toMatch(/flex:\s*0 0 auto/);
+    expect(row).toMatch(/max-height:\s*min\(45%, 420px\)/);
+  });
+
+  it("stands a thread's recovery state in the middle of the pane", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(styles).toMatch(
+      /:is\(\.code-thread-workspace, \.work-thread-workspace, \.chat-workspace\)\s*> \.shell-state:not\(\.shell-state--page, \[data-state="loading"\]\) \{\s*margin: auto;/,
     );
   });
 
@@ -391,6 +456,202 @@ describe("BrowserWorkspace", () => {
     enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     await waitFor(() => expect(onContextCreated).toHaveBeenCalledWith(context.contextId));
+  });
+
+  it("makes the first Browser tab the thread's shared page and gives the next its own page, address and title", async () => {
+    // A stand-in that answers as the host does: an ordinary Open returns the
+    // thread's shared page when it has one, and only an Open that asks for a
+    // page of its own gets a new one. A page moves only to a site it was
+    // opened for.
+    type Page = { readonly context: typeof context; url?: string; title?: string };
+    const pages = new Map<string, Page>();
+    let shared: string | undefined;
+    const snapshotOf = (contextId: string, failure?: object) => {
+      const page = pages.get(contextId)!;
+      return {
+        status: failure === undefined ? "running" : "failed",
+        threadId,
+        context: page.context,
+        ...(page.url === undefined
+          ? {}
+          : {
+              observation: {
+                contextId,
+                actionId: context.actionId,
+                correlationId: context.correlationId,
+                authority,
+                url: page.url,
+                title: page.title,
+                observedAt: "2026-07-27T20:01:00.000Z",
+                stale: false,
+              },
+            }),
+        ...(failure === undefined ? {} : { failure }),
+        evidence: [],
+      } as any;
+    };
+    const browser = client();
+    vi.mocked(browser.create).mockImplementation(async (input) => {
+      const own =
+        input.dedicated === true || (input.ownPageWhenShared === true && shared !== undefined);
+      if (!own && shared !== undefined) return snapshotOf(shared);
+      const contextId = `60000000-0000-4000-8000-00000000010${String(pages.size + 1)}`;
+      pages.set(contextId, { context: { ...context, contextId, policy: input.policy as any } });
+      if (!own) shared = contextId;
+      return snapshotOf(contextId);
+    });
+    vi.mocked(browser.act).mockImplementation(async (request) => {
+      const contextId = String(request.contextId);
+      const page = pages.get(contextId)!;
+      if (request.kind !== "navigate" || request.target === undefined) return snapshotOf(contextId);
+      const target = new URL(request.target);
+      const admits = page.context.policy.allowedOrigins;
+      if (!admits.includes("*") && !admits.includes(target.origin)) {
+        return snapshotOf(contextId, {
+          category: "policy-denied",
+          reason: "origin-not-approved",
+          message: "The requested site is outside this page's approved origins.",
+        });
+      }
+      page.url = target.href;
+      page.title = `Page on port ${target.port}`;
+      return snapshotOf(contextId);
+    });
+    vi.mocked(browser.inspect).mockImplementation(async (input) =>
+      snapshotOf(String(input.contextId)),
+    );
+    vi.mocked(browser.inspectThread).mockImplementation(async () =>
+      shared === undefined
+        ? ({ status: "ready", threadId, evidence: [] } as any)
+        : snapshotOf(shared),
+    );
+    const onContextCreated = vi.fn();
+    // Both start fresh, as every tab opened from the tool row does.
+    const first = render(
+      <BrowserWorkspace
+        client={browser}
+        startFresh
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000001" as any,
+          mode: "code",
+          title: "Browser",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+    const second = render(
+      <BrowserWorkspace
+        client={browser}
+        onContextCreated={onContextCreated}
+        startFresh
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000099" as any,
+          mode: "code",
+          title: "Browser 2",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+    const open = async (pane: typeof first, address: string) => {
+      const view = within(pane.container);
+      fireEvent.change(view.getByRole("textbox", { name: "Browser URL" }), {
+        target: { value: address },
+      });
+      fireEvent.click(await view.findByRole("button", { name: "Start browser" }));
+    };
+
+    await open(first, "http://127.0.0.1:4101/");
+    await within(first.container).findByText("Page on port 4101");
+    await open(second, "http://127.0.0.1:4102/");
+    await within(second.container).findByText("Page on port 4102");
+
+    // The first tab opened the thread's shared page, the one the agent's tool
+    // uses; the second asked for a page of its own and is bound to it.
+    // This pane has no desktop Browser, so each page holds the site typed: the
+    // headless Browser cannot keep a typed address's redirect off this
+    // computer's network.
+    expect(
+      vi.mocked(browser.create).mock.calls.map(([input]) => input.policy.allowedOrigins),
+    ).toEqual([["http://127.0.0.1:4101"], ["http://127.0.0.1:4102"]]);
+    // Both asked the host to choose; neither chose for itself.
+    expect(
+      vi
+        .mocked(browser.create)
+        .mock.calls.map(([input]) => [input.ownPageWhenShared, input.dedicated]),
+    ).toEqual([
+      [true, undefined],
+      [true, undefined],
+    ]);
+    expect(pages.size).toBe(2);
+    const own = [...pages.keys()].find((contextId) => contextId !== shared);
+    expect(onContextCreated).toHaveBeenCalledWith(own);
+    // Each tab shows its own page: address, title, and no refusal over either.
+    for (const [pane, port, other] of [
+      [first, "4101", "4102"],
+      [second, "4102", "4101"],
+    ] as const) {
+      const view = within(pane.container);
+      expect(view.getByRole("textbox", { name: "Browser URL" })).toHaveValue(
+        `http://127.0.0.1:${port}/`,
+      );
+      expect(view.getByText(`Page on port ${port}`)).toBeInTheDocument();
+      expect(view.queryByText(`Page on port ${other}`)).toBeNull();
+      expect(view.queryByText(/approved origins/)).toBeNull();
+    }
+  });
+
+  it.each([
+    {
+      name: "a move to another site",
+      failure: {
+        category: "policy-denied",
+        reason: "origin-not-approved",
+        refusedOrigin: "https://www.elsewhere.example",
+        message:
+          "The page moved to https://www.elsewhere.example, which is outside this page's approved origins. Call stop, then navigate to the intended URL, keeping the same profile argument if one was used, to request that site's approval. For SSO in the Octant app's Browser, call sign-in so the person can finish signing in.",
+      },
+      shown:
+        "This address leads to www.elsewhere.example, a different site, so it was not opened. To go there, type www.elsewhere.example in the address bar.",
+    },
+    {
+      name: "a request for another site",
+      failure: {
+        category: "policy-denied",
+        reason: "origin-not-approved",
+        message:
+          "The requested site is outside this page's approved origins. Call stop, then navigate to the intended URL, keeping the same profile argument if one was used, to request that site's approval. For SSO in the Octant app's Browser, call sign-in so the person can finish signing in.",
+      },
+      shown:
+        "This page is open for one site only, so a request for another site was refused. To browse another site here, type its address in the address bar.",
+    },
+  ])("tells the person about $name in their own words, never the agent's", async (row) => {
+    const browser = client();
+    vi.mocked(browser.inspectThread).mockResolvedValue(
+      decodeBrowserAutomationSnapshot({
+        status: "failed",
+        threadId,
+        context,
+        failure: row.failure,
+        evidence: [],
+      }),
+    );
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000001" as any,
+          mode: "code",
+          title: "Browser",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+
+    expect(await screen.findByText(row.shown)).toBeVisible();
+    expect(screen.queryByText(/Call stop|approved origins|call sign-in/)).toBeNull();
   });
 
   it("refreshes when an agent creates or changes the thread-owned Browser context", async () => {
@@ -522,7 +783,14 @@ describe("BrowserWorkspace", () => {
         }}
       />,
     );
-    expect(screen.getByText("Browser unavailable")).toBeInTheDocument();
+    // One line and one muted line, with no eyebrow over them.
+    expect(screen.getByText("Browser needs a thread")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Open it from a Work or Code thread. A page is isolated to the thread that owns it.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Browser unavailable")).not.toBeInTheDocument();
   });
 
   it("creates a server-owned context and navigates through the normalized client", async () => {
@@ -973,6 +1241,34 @@ describe("BrowserWorkspace", () => {
           { timeout: DRAWING_OPENS_WITHIN_MS },
         );
       }
+
+      it("opens the drawing on the tool chosen in the page's toolbar, and ends it from there", async () => {
+        render(<BrowserWorkspace canDrawOnPage client={drawable()} tab={tab} />);
+        const tools = await screen.findByRole(
+          "toolbar",
+          { name: "Page tools" },
+          { timeout: DRAWING_OPENS_WITHIN_MS },
+        );
+        // Nothing is armed, so there is nothing to cancel.
+        expect(within(tools).getByRole("button", { name: "Cancel" })).toBeDisabled();
+        await act(async () => {});
+        fireEvent.click(within(tools).getByRole("button", { name: "Box on page" }));
+        const drawing = await screen.findByRole(
+          "toolbar",
+          { name: "Drawing tools" },
+          { timeout: DRAWING_OPENS_WITHIN_MS },
+        );
+        expect(within(drawing).getByRole("button", { name: "Box" })).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        );
+        // One drawing at a time: the band's drawing tools wait for this one.
+        expect(within(tools).getByRole("button", { name: "Draw on page" })).toBeDisabled();
+        fireEvent.click(within(tools).getByRole("button", { name: "Discard the drawing" }));
+        await waitFor(() =>
+          expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull(),
+        );
+      });
 
       function drag(layer: Element, from: [number, number], to: [number, number]) {
         vi.spyOn(layer, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 400, 200));
@@ -1469,6 +1765,47 @@ describe("BrowserWorkspace", () => {
     expect(screen.getByText("Browser unavailable")).toBeVisible();
   });
 
+  it("tells the person an expired page in their words and opens it again from the last address", async () => {
+    const browser = client();
+    vi.mocked(browser.create).mockRejectedValueOnce(
+      new BrowserAutomationClientFailure(
+        "context-expired",
+        "The Browser page expired. It used the Private profile. Call navigate with the intended URL to open a new Private page.",
+      ),
+    );
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000014" as any,
+          mode: "work",
+          title: "Browser",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+
+    enterAddress("https://example.com");
+    fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This Private page expired.");
+    expect(screen.queryByText(/Call navigate/)).not.toBeInTheDocument();
+    expect(vi.mocked(browser.create)).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("button", { name: "Open again" }));
+    await waitFor(() => expect(vi.mocked(browser.create)).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(browser.create).mock.calls[1]?.[0].policy.allowedOrigins).toEqual(
+      vi.mocked(browser.create).mock.calls[0]?.[0].policy.allowedOrigins,
+    );
+    expect(screen.queryByText("This Private page expired.")).not.toBeInTheDocument();
+  });
+
+  it("lays a Browser notice out as a quiet row with no tinted box", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+    const rule = styles.slice(styles.indexOf(".browser-workspace__message {"));
+    const body = rule.slice(0, rule.indexOf("}"));
+    expect(body).not.toMatch(/background|border/);
+  });
+
   it("clears a local failure when an agent advances the authoritative Browser context", async () => {
     const browser = client();
     vi.mocked(browser.inspectThread)
@@ -1563,12 +1900,14 @@ describe("BrowserWorkspace", () => {
           }}
         />,
       );
-      expect(
-        await screen.findByText(
-          "Element selection is not available in this embedded Browser presentation yet.",
-        ),
-      ).toBeVisible();
-      expect(screen.getByRole("button", { name: "Point at something" })).toBeDisabled();
+      // The reason is the tool's own tooltip: a line of its own under the page
+      // would resize the page.
+      const point = await screen.findByRole("button", { name: "Point at something" });
+      await waitFor(() => expect(point).toBeDisabled());
+      expect(point).toHaveAttribute(
+        "title",
+        "Point at something. Element selection is not available in this embedded Browser presentation yet.",
+      );
     } finally {
       restoreDom();
     }
@@ -1842,6 +2181,61 @@ describe("BrowserWorkspace", () => {
         expect(screen.getByRole("button", { name: "Take over" })).toBeVisible();
         expect(screen.getByRole("img", { name: /idle/ })).toBeVisible();
         expect(await moreActionNames()).not.toContain("Take over");
+      } finally {
+        restore();
+      }
+    });
+
+    it("offers Take over on the tab that holds the thread's shared page, and not on a tab with a page of its own", async () => {
+      const restore = widthOfToolbar(640);
+      try {
+        // Every tab opened from the tool row starts fresh. This one holds the
+        // page the thread shares with its agent.
+        const browser = holdingClient();
+        const shared = render(
+          <BrowserWorkspace
+            client={browser}
+            startFresh
+            tab={{
+              kind: "browser",
+              id: "90000000-0000-4000-8000-000000000032" as any,
+              mode: "work",
+              title: "Browser",
+              threadId: threadId as any,
+              contextId: context.contextId as any,
+            }}
+          />,
+        );
+        expect(await screen.findByRole("button", { name: "Take over" })).toBeVisible();
+        shared.unmount();
+
+        // This one holds a page of its own, which no agent reaches.
+        const ownContext = { ...context, contextId: "60000000-0000-4000-8000-000000000077" };
+        vi.mocked(browser.inspect).mockResolvedValue({
+          status: "running",
+          threadId,
+          context: ownContext,
+          evidence: [],
+        } as any);
+        render(
+          <BrowserWorkspace
+            client={browser}
+            startFresh
+            tab={{
+              kind: "browser",
+              id: "90000000-0000-4000-8000-000000000033" as any,
+              mode: "work",
+              title: "Browser 2",
+              threadId: threadId as any,
+              contextId: ownContext.contextId as any,
+            }}
+          />,
+        );
+        await screen.findByRole("button", { name: "More Browser actions" });
+        await act(async () => {});
+        expect(screen.queryByRole("button", { name: "Take over" })).toBeNull();
+        expect(await moreActionNames()).not.toContain("Take over");
+        expect(browser.takeOver).not.toHaveBeenCalled();
       } finally {
         restore();
       }
@@ -2608,6 +3002,57 @@ describe("BrowserWorkspace", () => {
       // Every later poll asks for the replacement, never the stopped context.
       const asked = vi.mocked(browser.inspect).mock.calls.map(([input]) => input.contextId);
       expect(new Set(asked)).toEqual(new Set([replacement.contextId]));
+    });
+
+    it("keeps a tool-row tab's page the thread's shared page across a profile switch", async () => {
+      // The tab holds the shared page; switching profile stops it, so the
+      // thread has no shared page when the replacement opens.
+      const browser = client();
+      const replacement = { ...context, contextId: "60000000-0000-4000-8000-0000000000ab" };
+      vi.mocked(browser.inspect).mockImplementation(
+        async ({ contextId }: { contextId: string }) =>
+          ({
+            status: "running",
+            threadId,
+            context: contextId === context.contextId ? context : replacement,
+            observation: {
+              contextId,
+              actionId: context.actionId,
+              correlationId: context.correlationId,
+              authority,
+              url: "https://example.com/start",
+              revision: 1,
+              observedAt: "2026-07-27T20:01:00.000Z",
+              stale: false,
+            },
+            evidence: [],
+          }) as any,
+      );
+      vi.mocked(browser.create).mockResolvedValue({
+        status: "running",
+        threadId,
+        context: replacement,
+        evidence: [],
+      } as any);
+      render(
+        <BrowserWorkspace
+          client={browser}
+          hostBridge={nativeBridge}
+          startFresh
+          tab={{ ...tab, contextId: context.contextId as any }}
+        />,
+      );
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Browser profile: Private" }));
+      await user.click(await screen.findByRole("menuitemradio", { name: "Personal" }));
+
+      await waitFor(() => expect(browser.create).toHaveBeenCalled());
+      // The host decides, as for any tool-row tab: the tab does not ask for a
+      // page of its own because it is switching profile.
+      expect(vi.mocked(browser.create).mock.calls[0]?.[0]).toMatchObject({
+        ownPageWhenShared: true,
+      });
+      expect(vi.mocked(browser.create).mock.calls[0]?.[0].dedicated).toBeUndefined();
     });
 
     it("says in words when the host refuses a profile page", async () => {

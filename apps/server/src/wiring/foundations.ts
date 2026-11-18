@@ -43,6 +43,7 @@ import {
 } from "../work/workTurnProjection";
 import type { ServerStart } from "./serverShape";
 import {
+  createHostStrictResolver,
   createProjectStrictResolver,
   createStrictResolver,
   type StrictReads,
@@ -273,10 +274,12 @@ export function wireFoundations(deps: FoundationsDependencies) {
   } satisfies StrictReads;
   const resolveThreadStrict = createStrictResolver(strictReads);
   const resolveProjectStrict = createProjectStrictResolver(strictReads);
+  const resolveHostStrict = createHostStrictResolver(strictReads);
 
   return {
     resolveThreadStrict,
     resolveProjectStrict,
+    resolveHostStrict,
     threadWakeups,
     codeSessionConversation,
     conversationInputTransfer,

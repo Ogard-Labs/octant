@@ -3,7 +3,7 @@ import type {
   ExtensionCommandFailure,
   UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
-import { Plus, X } from "lucide-react";
+import { Plus, X } from "../ui/icons";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useSecretStoresClient } from "../settings/SecretStoresClientContext";
 import { thisComputerName, useHostPlatform } from "../platform";

@@ -1,5 +1,5 @@
 import type { ThreadPlanStepId, ThreadPlanStepStatus } from "@octant/contracts";
-import { Check, CheckCircle2, ListChecks, LoaderCircle } from "lucide-react";
+import { Check, CheckCircle2, ListChecks, LoaderCircle } from "../ui/icons";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";

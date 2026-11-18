@@ -3,12 +3,16 @@ import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { unavailable } from "./moduleState";
 import { WorkFilesPanel } from "../work/WorkFilesPanel";
 import { CodeFileExplorerPanel } from "../code/CodeFileExplorerPanel";
+import { CodeFilesViewer } from "../code/CodeFilesViewer";
 import { decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
 import { Suspense } from "react";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
+  | "codeController"
+  | "codeThreadView"
+  | "hostBridge"
   | "onOpenFile"
   | "projectExtraFolders"
   | "serverUrl"
@@ -40,6 +44,28 @@ export default function FilesModule(props: Props) {
   }
   if (props.subject.mode !== "code") {
     return unavailable("Files", "Files opens from a Code thread.");
+  }
+  const explorer = {
+    ...(props.subject.checkoutId === undefined ? {} : { checkoutId: props.subject.checkoutId }),
+    ...(props.projectExtraFolders === undefined ? {} : { extraFolders: props.projectExtraFolders }),
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    threadId: decodeCodeThreadId(props.subject.threadId),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  };
+  // A file opens in this tool, beside the thread. Without the thread's
+  // controller (a surface that has none) the tree can only hand the path on.
+  if (props.codeController !== undefined) {
+    return (
+      <Suspense fallback={<OctantEmpty state="loading" title="Loading files" />}>
+        <CodeFilesViewer
+          controller={props.codeController}
+          explorer={explorer}
+          hostBridge={props.hostBridge}
+          onOpenInMainArea={props.onOpenFile}
+          view={props.codeThreadView ?? props.codeController.activeView}
+        />
+      </Suspense>
+    );
   }
   return (
     <Suspense fallback={<OctantEmpty state="loading" title="Loading files" />}>

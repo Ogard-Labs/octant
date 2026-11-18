@@ -173,6 +173,43 @@ def install_metadata_writes(kernel: Path) -> None:
     path.write_text(include_bridge(source))
 
 
+def install_stacked_open_scopes(kernel: Path) -> None:
+    # OverlayFS has no atomic_open operation, so its file open callback runs
+    # after pathname/parent locks are gone and before copy-up or backing open.
+    # Other stacked filesystems remain fail-closed until separately audited.
+    path = kernel / "fs/overlayfs/file.c"
+    source = path.read_text()
+    declaration = "static int ovl_open(struct inode *inode, struct file *file)\n{"
+    declarations = (declaration + "\n"
+                    "\tstruct dentry *dentry = file_dentry(file);\n"
+                    "\tstruct file *realfile;\n"
+                    "\tstruct path realpath;\n"
+                    "\tstruct ovl_file *of;\n"
+                    "\tint err;\n\n")
+    admission = "\toctant_open_scope(file);\n\n"
+    verified = ("\terr = ovl_verify_lowerdata(dentry);\n"
+                "\tif (err)\n"
+                "\t\treturn err;\n\n")
+    backing = ("\tif (S_ISREG(inode->i_mode)) {\n"
+               "\t\terr = octant_open_backing(ovl_inode_realdata(inode));\n"
+               "\t\tif (err)\n"
+               "\t\t\treturn err;\n"
+               "\t}\n\n")
+    resolved = ("\tif (!realpath.dentry)\n"
+                "\t\treturn -EIO;\n\n"
+                "\terr = octant_open_backing(d_inode(realpath.dentry));\n"
+                "\tif (err)\n"
+                "\t\treturn err;\n")
+    original_resolved = "\tif (!realpath.dentry)\n\t\treturn -EIO;\n"
+    if (source.count(declarations) != 1 or source.count("octant_open_scope(") != 0 or
+            source.count(verified) != 1 or source.count(original_resolved) != 1):
+        raise ValueError("Pinned OverlayFS open scope entry differs")
+    source = source.replace(declarations, declarations + admission, 1)
+    source = source.replace(verified, verified + backing, 1)
+    source = source.replace(original_resolved, resolved, 1)
+    path.write_text(include_bridge(source))
+
+
 def install_fileattr_writes(kernel: Path) -> None:
     path = kernel / "fs/file_attr.c"
     source = path.read_text()
@@ -677,6 +714,7 @@ def install_epochs(kernel: Path, native: Path) -> None:
     install_scm(kernel)
     install_metadata(kernel)
     install_metadata_writes(kernel)
+    install_stacked_open_scopes(kernel)
     install_fileattr_writes(kernel)
     install_fileattr_reads(kernel)
     install_seek_reads(kernel)

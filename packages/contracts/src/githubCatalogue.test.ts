@@ -100,6 +100,12 @@ describe("GitHub catalogue contracts", () => {
         page: { items: [item], freshness: { status: "fresh" } },
       }),
     ).toMatchObject({ kind: "assigned-work", page: { items: [item] } });
+    expect(
+      decodeGithubCatalogueReadResponse({
+        kind: "assigned-work",
+        page: { items: [{ ...item, draft: true }], freshness: { status: "fresh" } },
+      }),
+    ).toMatchObject({ page: { items: [{ draft: true }] } });
     expect(() =>
       decodeGithubCatalogueReadResponse({
         kind: "assigned-work",

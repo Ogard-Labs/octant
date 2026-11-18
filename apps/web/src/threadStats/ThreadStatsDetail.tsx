@@ -1,6 +1,6 @@
 import { threadStats, threadStatsInputOf, turnDetail, type TurnDetailRow } from "@octant/domain";
 import type { TurnMetricsRecord } from "@octant/contracts";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "../ui/icons";
 import { useEffect, useId, useMemo, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";

@@ -3,8 +3,12 @@ import { accessSync, constants, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import {
   MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS,
+  MAX_PULL_REQUEST_CHECK_COUNT,
+  MAX_PULL_REQUEST_LINE_COUNT,
   type CodeProjectPullRequestMergeMethod,
   type CodeThreadId,
+  type PullRequestCheckCounts,
+  type PullRequestMerging,
 } from "@octant/contracts";
 import { childProcessEnvironment } from "../childProcessEnvironment";
 
@@ -126,6 +130,10 @@ export type GhPullRequestReviewResult =
         mergeability?: "mergeable" | "conflicting" | "unknown";
         updatedAt?: string;
         matchesDeliveryBranch: boolean;
+        additions?: number;
+        deletions?: number;
+        checkCounts?: PullRequestCheckCounts;
+        merging?: PullRequestMerging;
       }>;
       description: string;
       diff: string;
@@ -185,6 +193,13 @@ export interface GhActivePullRequestRow {
    * repository, not of this one.
    */
   readonly crossRepository: boolean;
+  /** Absent when the read did not carry the count; absent is not zero. */
+  readonly additions?: number;
+  readonly deletions?: number;
+  /** Checks passed out of counted; see `PullRequestCheckCounts`. */
+  readonly checkCounts?: PullRequestCheckCounts;
+  /** Set only on an open pull request that is on its way in. */
+  readonly merging?: PullRequestMerging;
 }
 
 export type GhActivePullRequestListResult =
@@ -213,7 +228,18 @@ const ACTIVE_PR_LIST_FIELDS = [
   "statusCheckRollup",
   "reviewDecision",
   "reviewRequests",
+  "additions",
+  "deletions",
+  "autoMergeRequest",
 ].join(",");
+
+/**
+ * `gh pr list` has no merge-queue field, so one read-only GraphQL query per
+ * listed repository names the open pull requests that sit in the queue. Its
+ * failure leaves "queued" unrecorded and never fails the list.
+ */
+const MERGE_QUEUE_QUERY =
+  "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number isInMergeQueue}}}}";
 
 const MAX_PR_REVIEW_ITEMS = 500;
 const MAX_PR_DESCRIPTION_BYTES = 256 * 1024;
@@ -235,6 +261,9 @@ const PR_VIEW_FIELDS = [
   "statusCheckRollup",
   "reviews",
   "comments",
+  "additions",
+  "deletions",
+  "autoMergeRequest",
 ].join(",");
 
 export class GhPullRequestPort {
@@ -607,6 +636,10 @@ export class GhPullRequestPort {
         mergeability: detail?.mergeability ?? "unknown",
         ...(detail?.updatedAt === undefined ? {} : { updatedAt: detail.updatedAt }),
         matchesDeliveryBranch: false,
+        ...(detail?.additions === undefined ? {} : { additions: detail.additions }),
+        ...(detail?.deletions === undefined ? {} : { deletions: detail.deletions }),
+        ...(detail?.checkCounts === undefined ? {} : { checkCounts: detail.checkCounts }),
+        ...(detail?.merging === undefined ? {} : { merging: detail.merging }),
       },
       description: detail?.description ?? "",
       diff: diff?.text ?? "",
@@ -727,7 +760,67 @@ export class GhPullRequestPort {
     if (result.timedOut === true) return { status: "timeout" };
     if (result.exitCode !== 0) return classifyActiveListFailure(result);
     const rows = decodeActivePullRequests(result.stdout);
-    return rows === undefined ? { status: "malformed" } : { status: "ok", rows };
+    if (rows === undefined) return { status: "malformed" };
+    if (!rows.some((row) => row.state === "open")) return { status: "ok", rows };
+    const queued = await this.#queuedNumbers(request, signal);
+    if (queued.size === 0) return { status: "ok", rows };
+    return {
+      status: "ok",
+      rows: rows.map((row) =>
+        row.state === "open" && queued.has(row.number) ? { ...row, merging: "queued" } : row,
+      ),
+    };
+  }
+
+  /**
+   * Numbers of open pull requests in the repository's merge queue. Any failure
+   * (command, timeout, shape) answers an empty set: "queued" is then simply not
+   * recorded and the list read stands.
+   */
+  async #queuedNumbers(
+    request: { readonly owner: string; readonly name: string },
+    signal: AbortSignal,
+  ): Promise<ReadonlySet<number>> {
+    const queued = new Set<number>();
+    let result: GhCommandResult;
+    try {
+      result = await this.#command.run(
+        [
+          "api",
+          "graphql",
+          "-f",
+          `query=${MERGE_QUEUE_QUERY}`,
+          // -f keeps owner and name strings: -F would turn a repository named
+          // `true` or `2048` into a boolean or integer GraphQL rejects.
+          "-f",
+          `owner=${request.owner}`,
+          "-f",
+          `name=${request.name}`,
+        ],
+        { environment: this.#environment, stdin: undefined },
+        signal,
+      );
+    } catch {
+      return queued;
+    }
+    if (result.timedOut === true || result.exitCode !== 0) return queued;
+    let value: unknown;
+    try {
+      value = JSON.parse(result.stdout);
+    } catch {
+      return queued;
+    }
+    const data = isRecord(value) ? value.data : undefined;
+    const repository = isRecord(data) ? data.repository : undefined;
+    const pullRequests = isRecord(repository) ? repository.pullRequests : undefined;
+    const nodes = isRecord(pullRequests) ? pullRequests.nodes : undefined;
+    if (!Array.isArray(nodes)) return queued;
+    for (const node of nodes) {
+      if (isRecord(node) && node.isInMergeQueue === true && typeof node.number === "number") {
+        queued.add(node.number);
+      }
+    }
+    return queued;
   }
 
   async #viewReviewDetail(
@@ -977,6 +1070,10 @@ interface GhPullRequestReviewDetail {
     body: string;
   }>[];
   readonly comments: readonly Readonly<{ author: string; body: string }>[];
+  readonly additions?: number;
+  readonly deletions?: number;
+  readonly checkCounts?: PullRequestCheckCounts;
+  readonly merging?: PullRequestMerging;
 }
 
 function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefined {
@@ -1024,6 +1121,7 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
     checks: decodeChecks(value.statusCheckRollup),
     reviews: decodeReviews(value.reviews),
     comments: decodeComments(value.comments),
+    ...optionalFacts(value, state),
   };
 }
 
@@ -1122,9 +1220,64 @@ function decodeActivePullRequests(
       reviewRequestedFrom: reviewRequestLogins(item.reviewRequests),
       failingChecks: decodeFailingChecks(item.statusCheckRollup),
       crossRepository: item.isCrossRepository === true,
+      ...optionalFacts(item, state),
     });
   }
   return rows;
+}
+
+/**
+ * The three facts a row may or may not carry. A field the read did not return
+ * stays absent, never zero. Auto-merge only counts on an open pull request.
+ */
+function optionalFacts(
+  value: Record<string, unknown>,
+  state: GhActivePullRequestRow["state"] | "draft",
+): Readonly<{
+  additions?: number;
+  deletions?: number;
+  checkCounts?: PullRequestCheckCounts;
+  merging?: PullRequestMerging;
+}> {
+  const additions = lineCount(value.additions);
+  const deletions = lineCount(value.deletions);
+  const checkCounts = countChecks(value.statusCheckRollup);
+  const open = state === "open" || state === "draft";
+  return {
+    ...(additions === undefined ? {} : { additions }),
+    ...(deletions === undefined ? {} : { deletions }),
+    ...(checkCounts === undefined ? {} : { checkCounts }),
+    ...(open && isRecord(value.autoMergeRequest) ? { merging: "auto-merge" as const } : {}),
+  };
+}
+
+function lineCount(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return undefined;
+  return Math.min(value, MAX_PULL_REQUEST_LINE_COUNT);
+}
+
+/**
+ * Passed out of counted, by the same states `summarizeChecks` reads: a success
+ * passes, a failure or a pending check is counted and does not, and a neutral,
+ * skipped, cancelled, stale or unknown check is left out. A rollup that reads
+ * "passing" therefore has `passed === total`.
+ */
+function countChecks(value: unknown): PullRequestCheckCounts | undefined {
+  if (!Array.isArray(value)) return undefined;
+  let passed = 0;
+  let total = 0;
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const state = normalizeCheckState(entry);
+    if (state === "success") passed += 1;
+    else if (state !== "failure" && state !== "pending") continue;
+    total += 1;
+  }
+  if (total === 0) return undefined;
+  return {
+    passed: Math.min(passed, MAX_PULL_REQUEST_CHECK_COUNT),
+    total: Math.min(total, MAX_PULL_REQUEST_CHECK_COUNT),
+  };
 }
 
 function normalizePullRequestState(value: unknown): GhActivePullRequestRow["state"] | undefined {

@@ -1,4 +1,8 @@
-import type { ThemeSemanticOverrideEntry, ThemeSettings } from "@octant/contracts/theme";
+import {
+  CUSTOM_THEME_PRESET_ID,
+  type ThemeSemanticOverrideEntry,
+  type ThemeSettings,
+} from "@octant/contracts/theme";
 import { meetsContrast } from "./contrast";
 import { parseHexColor } from "./color";
 import {
@@ -8,6 +12,7 @@ import {
   isKnownThemeTokenRole,
   MONO_STYLE_TOKENS,
 } from "./tokens";
+import { customThemeTokens } from "./customPreset";
 import { resolveThemePresetTokens, type ThemePreset } from "./presets";
 
 export interface DroppedOverride {
@@ -111,7 +116,15 @@ export function resolveEffectiveTokens(
 ): ResolvedTheme {
   const mode = resolveMode(settings, systemPrefersDark);
   const selectedPresetId = mode === "light" ? settings.lightPresetId : settings.darkPresetId;
-  const preset = resolveThemePresetTokens(selectedPresetId, mode, contributedPresets);
+  const customSeeds = mode === "light" ? settings.customThemeLight : settings.customThemeDark;
+  const custom =
+    selectedPresetId === CUSTOM_THEME_PRESET_ID && customSeeds !== undefined
+      ? customThemeTokens(customSeeds, mode)
+      : undefined;
+  const preset =
+    custom?.status === "built"
+      ? custom.tokens
+      : resolveThemePresetTokens(selectedPresetId, mode, contributedPresets);
   const base: Record<string, string> =
     settings.style === "mono" || settings.increasedContrast
       ? withMonoRoles(preset, mode)

@@ -18,7 +18,7 @@ import {
   type PointerEvent,
   type RefObject,
 } from "react";
-import { ChevronLeft, Play, RotateCcw, X } from "lucide-react";
+import { ChevronLeft, Play, RotateCcw, X } from "../../ui/icons";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";

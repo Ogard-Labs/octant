@@ -76,7 +76,10 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
     IntegrationsWiring,
     "githubCapabilityService" | "githubExtensionSnapshot" | "githubIntegrationIsEffective"
   > &
-  Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection"> &
+  Pick<
+    FoundationsWiring,
+    "providerRuntimeRegistry" | "workThreadProjection" | "resolveProjectStrict"
+  > &
   Pick<ComputerUseWiring, "desktopRecipeKeys" | "offeredDesktopProviders"> &
   Pick<HarnessStateWiring, "serverProjectStore"> & {
     /** The moves this host keeps, whose departures open a moved thread's tombstone. */
@@ -101,6 +104,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     options,
     persistence,
     providerRuntimeRegistry,
+    resolveProjectStrict,
     spendCeilingHolder,
     windowAuthorityStore,
     workThreadProjection,
@@ -401,6 +405,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       },
       offeredDesktopProviders,
       desktopRecipeKeys,
+      resolveProjectStrict,
     });
     // Memory changes a thread's agent asked for wait for the window whose
     // turn raised them, like the routine proposals, so they ride the same

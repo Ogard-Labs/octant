@@ -190,6 +190,10 @@
   background: color-mix(in oklab, var(--oct-fg) 5%, transparent);
 }
 
+.working-now__row:active:not(:disabled) .working-now__face {
+  background: var(--oct-wash-pressed);
+}
+
 .working-now__head {
   display: flex;
   min-width: 0;
@@ -312,7 +316,13 @@
   background: color-mix(in oklab, var(--oct-fg) 5%, transparent);
 }
 
+.pull-requests-card__row:active:not(:disabled) .pull-requests-card__face {
+  background: var(--oct-wash-pressed);
+}
+
 .pull-requests-card__title {
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -322,15 +332,43 @@
 .pull-requests-card__facts {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
-  align-items: baseline;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 2px var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .pull-requests-card__reference,
-.pull-requests-card__ci,
-.pull-requests-card__review {
+.pull-requests-card__status {
   min-width: 0;
+}
+
+/* One dot and one word: the row's state, in the semantic ink and never colour alone. */
+.pull-requests-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.pull-requests-card__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-meta);
+}
+
+.pull-requests-card__status[data-tone="positive"] .pull-requests-card__dot {
+  background: var(--oct-success-fg);
+}
+
+.pull-requests-card__status[data-tone="warning"] .pull-requests-card__dot {
+  background: var(--oct-warn-fg);
+}
+
+.pull-requests-card__status[data-tone="negative"] .pull-requests-card__dot {
+  background: var(--oct-danger-fg);
 }
 
 .pull-requests-card__more.pull-requests-card__more {

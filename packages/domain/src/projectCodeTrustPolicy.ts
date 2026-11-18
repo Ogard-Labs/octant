@@ -40,7 +40,7 @@ export const PROJECT_CODE_ENTRIES: Readonly<
     { path: ".mcp.json", kind: "mcp-servers" },
     { path: ".claude/skills", kind: "skills" },
   ],
-  codex: [],
+  codex: [{ path: ".codex/config.toml", kind: "settings" }],
   opencode: [
     { path: "opencode.jsonc", kind: "settings" },
     { path: "opencode.json", kind: "settings" },

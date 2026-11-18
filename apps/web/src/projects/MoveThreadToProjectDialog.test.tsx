@@ -63,7 +63,7 @@ describe("move dialog Project icons", () => {
       screen.getByRole("button", { name: /Taxes/ }).querySelector("img.project-icon"),
     ).not.toBeNull();
     expect(
-      screen.getByRole("button", { name: /All docs/ }).querySelector("svg.lucide-folder"),
+      screen.getByRole("button", { name: /All docs/ }).querySelector("svg.octant-icon-folder"),
     ).not.toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { subscriptionDescriptorIdOf } from "@octant/domain";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "../../ui/icons";
 import { useId, type ReactNode } from "react";
 import { ChatOnlyVerify } from "../../providers/ChatOnlyVerify";
 import { ProviderGlyph } from "../../providers/ProviderGlyph";

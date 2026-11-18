@@ -1,5 +1,9 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import { MAX_CONTEXT_SIDEBAR_WIDTH, MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import {
+  MAX_CONTEXT_SIDEBAR_WIDTH,
+  MIN_CONTEXT_SIDEBAR_WIDTH,
+  type WorkspaceLayoutNode,
+} from "@octant/contracts/shell";
 
 export type RightUtilityDockSurfaceId =
   | "environment"
@@ -124,48 +128,146 @@ export type RightUtilityDockResolution =
 export const MULTI_INSTANCE_DOCK_SURFACES: ReadonlySet<string> = new Set(["browser", "terminal"]);
 
 /**
- * The width a page or a shell needs to be usable. At the 420px default (and
- * at the narrower widths people had dragged it to) a Browser showed a phone
- * layout of every site and the tab strip had room for one name; opening a
- * Browser or a Terminal widens a narrower dock to this for as long as such a
- * tab stays open. It is not saved: when it was, one Browser left every later
- * Environment and Plan half a window wide.
+ * The width a tool needs to be usable. At the 420px default (and at the
+ * narrower widths people had dragged it to) a Browser showed a phone layout of
+ * every site, a Review had no room for a diff and the tab strip had room for
+ * one name; opening any tool widens a narrower tool column to this for as long
+ * as one stays open. It is not saved: when it was, one Browser left every later
+ * tool column half a window wide.
  */
 export const WORKBENCH_DOCK_WIDTH = 640;
 
 /**
- * Two columns of tools side by side need two usable widths. At 640px each got
- * about 300px, too narrow for a simulator's device or a page's layout, so a
- * dock showing two columns widens to this until the person sizes it. Not saved,
- * for the reason the workbench width is not.
+ * Every tool has one of two size classes, and this is the one place they are
+ * told apart.
+ *
+ * - **Flexible** tools draw a page, a diff, a device, a shell or a file tree,
+ *   and use whatever room there is: they open at the workbench width and are
+ *   resized between a minimum and the dock's ceiling.
+ * - **Fixed** tools are panels of rows and figures (Vitals, Plan, Agents,
+ *   Delivery and the rest). They always have the compact width and no resize
+ *   handle, whatever opens or closes beside them. Environment is fixed too, as
+ *   its own strip.
  */
-export const TILED_DOCK_WIDTH = 840;
+export const FLEXIBLE_DOCK_SURFACES: ReadonlySet<string> = new Set([
+  "browser",
+  "terminal",
+  "review",
+  "canvas",
+  "document",
+  "files",
+  "ios-simulator",
+  "android-emulator",
+  "desktop",
+]);
+
+/** The width every fixed panel-like tool has. */
+export const COMPACT_DOCK_WIDTH = 360;
+
+/** The narrowest a flexible tool column is resized to. */
+export const FLEXIBLE_DOCK_MIN_WIDTH = 480;
 
 /**
- * One width whatever the dock is showing, so a click inside it moves nothing.
- * The empty launcher used to take the 280px minimum while every tool took the
- * stored width, so opening Environment from it threw the dock from 280px to the
- * stored 960px and squeezed the thread beside it. A Browser or Terminal tab that
- * needs more holds that width even while another tab is in front. It is worked
- * out from the open tabs, so a tab restored after a restart gets it too.
+ * Whether the tool column is fixed: tools are open and every one is a panel.
+ * A flexible tool beside a fixed one gives the column the flexible rules.
+ * Environment is its own strip and does not count.
+ */
+export function dockColumnIsFixed(tabSurfaces: ReadonlyArray<string>): boolean {
+  const tools = tabSurfaces.filter((surface) => surface !== "environment");
+  return tools.length > 0 && !tools.some((surface) => FLEXIBLE_DOCK_SURFACES.has(surface));
+}
+
+/** The smallest a flexible column may be dragged to where the window has room for it. */
+export function flexibleDockMinimum(ceiling: number): number {
+  return Math.min(FLEXIBLE_DOCK_MIN_WIDTH, ceiling);
+}
+
+/**
+ * The width two columns of tools ask for where the window has it: each column
+ * the narrowest a flexible tool is resized to. A layout with two columns widens
+ * to it only where the window holds the thread's minimum and Environment beside
+ * it (the stylesheet decides, since it knows the room); with less room than
+ * this the two columns share what there is, down to `TILED_DOCK_MIN_WIDTH`.
+ */
+export const TILED_DOCK_WIDTH = 960;
+
+/** A tool column is never drawn narrower than this beside another: tools are built for it. */
+export const DOCK_COLUMN_MIN_WIDTH = 280;
+
+/**
+ * What the dock keeps of its tool room for itself: its resize handle is a 7px
+ * column of its own while Environment is closed, and a pixel goes to rounding.
+ * Counted in the floor below so a place beside is never offered in a room
+ * whose tile area then measures under two columns and stacks them.
+ */
+const DOCK_EDGE_ALLOWANCE = 8;
+
+/**
+ * The least tool room in which two columns stand side by side; under it they
+ * stack and no place beside is offered. A tool reaches a second column only
+ * when a person puts it there (a drop on a tile's side, or its menu), so the
+ * floor is the columns' own. Asking for the whole 960px refused the drop on a
+ * 1920px screen with the sidebar and Environment open, where 716px of tool
+ * room holds two 358px columns, and left no way to stand a tool up as a narrow
+ * column beside another.
+ */
+export const TILED_DOCK_MIN_WIDTH = 2 * DOCK_COLUMN_MIN_WIDTH + DOCK_EDGE_ALLOWANCE;
+
+/**
+ * The Environment strip: a thin, static column at the dock's leading edge. It
+ * has one width, with no handle, so nothing a tool does beside it moves it.
+ * The stylesheet reads it as `--octant-dock-env-width`, set by the shell.
+ */
+export const ENVIRONMENT_STRIP_WIDTH = 300;
+
+/**
+ * One width for the tool columns whatever the dock is showing, so a click inside
+ * it moves nothing. A column holding only fixed tools is the compact width, and
+ * a person's dragged width never changes it. Otherwise any open tool holds the
+ * workbench width at least, even while another tab is in front, and it is worked out from the
+ * open tabs so a tab restored after a restart gets it too. Environment is its
+ * own strip and never asks for tool width.
  */
 export function resolveDockPresentationWidth(input: {
   readonly storedWidth: number;
-  /** The person sized the dock since a Browser or Terminal last opened, so it stays as they left it. */
+  /** The person sized the dock since a tool last opened, so it stays as they left it. */
   readonly widthChosen: boolean;
   readonly tabSurfaces: ReadonlyArray<string>;
-  /** How many columns of tool tiles the dock shows; one when it shows a single tool. */
-  readonly tileColumns?: number;
 }): number {
-  if (input.widthChosen) return input.storedWidth;
-  const holdsWorkbench = input.tabSurfaces.some(
-    (surface) => surface === "browser" || surface === "terminal",
-  );
-  const wanted = Math.max(
-    holdsWorkbench ? WORKBENCH_DOCK_WIDTH : 0,
-    (input.tileColumns ?? 1) >= 2 ? TILED_DOCK_WIDTH : 0,
-  );
-  return Math.max(input.storedWidth, wanted);
+  if (dockColumnIsFixed(input.tabSurfaces)) return COMPACT_DOCK_WIDTH;
+  if (input.widthChosen) return Math.max(input.storedWidth, FLEXIBLE_DOCK_MIN_WIDTH);
+  const holdsTool = input.tabSurfaces.some((surface) => surface !== "environment");
+  return Math.max(input.storedWidth, holdsTool ? WORKBENCH_DOCK_WIDTH : 0);
+}
+
+/**
+ * The width two columns of tools ask for where the window has the room for it:
+ * the side-by-side width until the person sizes the dock, then the width they
+ * dragged to, down to the two columns' floor. Where the room is missing the
+ * tool columns keep `resolveDockPresentationWidth` and stack, so a second
+ * column never takes width from the thread or moves Environment. A dragged
+ * width under 960px used to be raised back to 960px, so with two columns the
+ * handle moved and nothing followed: the thread could not be given room back
+ * without closing a column.
+ */
+export function resolveTwoColumnDockWidth(input: {
+  readonly storedWidth: number;
+  readonly widthChosen: boolean;
+}): number {
+  return input.widthChosen ? Math.max(input.storedWidth, TILED_DOCK_MIN_WIDTH) : TILED_DOCK_WIDTH;
+}
+
+/**
+ * The dock's whole width: the Environment strip when it is open, plus the tool
+ * columns when any tool is shown. Environment alone is exactly the strip.
+ */
+export function dockTotalWidth(input: {
+  readonly toolsWidth: number;
+  readonly environmentOpen: boolean;
+  readonly toolsShown: boolean;
+}): number {
+  if (!input.environmentOpen) return input.toolsWidth;
+  return ENVIRONMENT_STRIP_WIDTH + (input.toolsShown ? input.toolsWidth : 0);
 }
 
 /**
@@ -179,35 +281,119 @@ export function dockWidthCeiling(
   workspaceWidth: number | undefined,
   options: {
     readonly tileColumns?: number;
+    /** What stands beside the tool columns and is not theirs to take: the Environment strip. */
+    readonly reservedWidth?: number;
     readonly viewportWidth?: number | undefined;
+    /** What the panes of a split keep between them: `splitPrimaryMinimum`. */
+    readonly primaryMinimum?: number | undefined;
   } = {},
 ): number {
   if (workspaceWidth === undefined) return MAX_CONTEXT_SIDEBAR_WIDTH;
-  // Two columns of tools need what the thread's own minimum leaves, not half:
-  // at 1440px with the sidebar open, half gave two columns of 243px, under
-  // what a tool is built for. The primary minimum is the one the stylesheet's
-  // grid uses (560px from 1100px up, 360px below), so the handle stops where
-  // the layout would.
-  const room =
-    (options.tileColumns ?? 1) >= 2
-      ? workspaceWidth -
-        ((options.viewportWidth ?? Number.POSITIVE_INFINITY) >= WIDE_VIEWPORT
-          ? TILED_PRIMARY_MIN
-          : NARROW_PRIMARY_MIN)
-      : workspaceWidth / 2;
+  // What the thread's minimum and Environment leave, the same for one column
+  // and two: the primary minimum is the one the stylesheet's grid uses (560px
+  // from 1100px up, 360px below), so the handle stops where the layout would.
+  // One column also stops at half the workspace.
+  // The thread box (the thread and its Environment section) never gets
+  // narrower than `threadBoxMinimum`, whether or not the section is open.
+  const left =
+    workspaceWidth -
+    Math.max(
+      threadBoxMinimum(workspaceWidth, options.viewportWidth),
+      (options.reservedWidth ?? 0) +
+        Math.max(
+          options.primaryMinimum ?? 0,
+          (options.viewportWidth ?? Number.POSITIVE_INFINITY) >= WIDE_VIEWPORT
+            ? WIDE_PRIMARY_MIN
+            : NARROW_PRIMARY_MIN,
+        ),
+    );
+  const room = (options.tileColumns ?? 1) >= 2 ? left : Math.min(left, workspaceWidth / 2);
   return Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, Math.max(MIN_CONTEXT_SIDEBAR_WIDTH, Math.floor(room)));
 }
 
 /**
- * The thread column's minimum beside two columns of tools, from 1100px up. One
- * column keeps `--octant-wide-primary-min` (560px); at 560px, two tools could
- * never stand side by side in a 1440px window with the sidebar open, so a
- * second column asks the thread for 440px instead. The stylesheet mirrors it
- * as `--octant-tiled-primary-min`.
+ * The thread column's minimum from 1100px up, whatever stands beside it: one
+ * tool, several, or two columns of them. The stylesheet mirrors it as
+ * `--octant-wide-primary-min`. A smaller minimum beside two columns (440px)
+ * let a second tool squeeze the thread and move Environment.
  */
-export const TILED_PRIMARY_MIN = 440;
-const NARROW_PRIMARY_MIN = 360;
+export const WIDE_PRIMARY_MIN = 560;
+/** The least the thread column is ever given beside the dock. */
+export const NARROW_PRIMARY_MIN = 360;
 const WIDE_VIEWPORT = 1100;
+
+/**
+ * The narrowest the thread box (the thread and its Environment section, open
+ * or not) is in a workspace of this width, whatever stands in the tool region.
+ * The thread header's tool row ends on this line, 8px in, so nothing that
+ * opens, closes, stacks or moves beside the thread moves the row: the tool
+ * region takes only the room past it. It is the thread's own minimum, or what
+ * a tool region at its asked width (640px) leaves where that is more, up to
+ * the thread's minimum and the section together. The stylesheet mirrors it as
+ * `--octant-thread-box-min`. Measured before (1800px window, 2026-11-16): the
+ * row stood at x 1532 with nothing open, 960 with one tool and 996 once
+ * Environment joined it.
+ */
+export function threadBoxMinimum(
+  workspaceWidth: number,
+  viewportWidth: number | undefined = undefined,
+): number {
+  const primaryMinimum =
+    (viewportWidth ?? Number.POSITIVE_INFINITY) >= WIDE_VIEWPORT
+      ? WIDE_PRIMARY_MIN
+      : NARROW_PRIMARY_MIN;
+  // What the grid gives the thread at least: its minimum, less only where a
+  // 280px tool column would not fit beside it, never under 360px.
+  const threadMinimum = Math.max(
+    NARROW_PRIMARY_MIN,
+    Math.min(primaryMinimum, workspaceWidth - MIN_CONTEXT_SIDEBAR_WIDTH),
+  );
+  return Math.min(
+    primaryMinimum + ENVIRONMENT_STRIP_WIDTH,
+    Math.max(workspaceWidth - WORKBENCH_DOCK_WIDTH, threadMinimum),
+  );
+}
+
+/**
+ * The header width under which a pane's title and a button per tool do not
+ * both fit, so the row folds into one Tools menu. It is also the least each
+ * pane of a split keeps beside the dock.
+ */
+export const PANE_TOOLS_COLLAPSE_WIDTH = 440;
+
+/**
+ * The title bar width under which the tool buttons at its end fold into one
+ * Tools menu: below it the bar cannot hold a pane's title, a button per tool
+ * and the window's own controls. Read from the bar, never from the pane's
+ * header, whose width the row itself changes.
+ */
+export const TITLE_BAR_TOOLS_COLLAPSE_WIDTH = 640;
+
+/** The divider between two panes of a split (`.workspace-split__resize`). */
+const SPLIT_DIVIDER_WIDTH = 7;
+
+/** How many panes stand side by side across the workspace at its widest row. */
+export function sideBySidePanes(layout: WorkspaceLayoutNode): number {
+  if (layout.kind === "pane") return 1;
+  const first = sideBySidePanes(layout.first);
+  const second = sideBySidePanes(layout.second);
+  return layout.orientation === "horizontal" ? first + second : Math.max(first, second);
+}
+
+/**
+ * What the panes of a split keep between them beside the dock: 440px each and
+ * their dividers, so every pane's header still holds its title and its tool
+ * buttons. The tool region gives first, down to its own minimum. A split used
+ * to share the one thread minimum: at 1800px two threads with a tool open
+ * stood 409px wide each and both rows folded to Tools. Absent for one pane.
+ */
+export function splitPrimaryMinimum(layout: WorkspaceLayoutNode | undefined): number | undefined {
+  if (layout === undefined) return undefined;
+  const panes = sideBySidePanes(layout);
+  return panes < 2
+    ? undefined
+    : panes * PANE_TOOLS_COLLAPSE_WIDTH + (panes - 1) * SPLIT_DIVIDER_WIDTH;
+}
 
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {

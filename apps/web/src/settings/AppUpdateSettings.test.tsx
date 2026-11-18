@@ -112,7 +112,7 @@ describe("AppUpdateSettings", () => {
       expect(screen.getByRole("button", { name })).toBeTruthy();
     }
     expect(screen.getByText("What a check sends")).toBeTruthy();
-    expect(screen.getByText(/gets a new build of what is being built every night/)).toBeTruthy();
+    expect(screen.getByText(/gets a new build every night/)).toBeTruthy();
     expect(screen.queryByText("Install Octant Nightly")).toBeNull();
     for (const name of ["Stable", "Preview", "Nightly"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();

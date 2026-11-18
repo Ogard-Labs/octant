@@ -20,6 +20,9 @@
 .code-board .board-card:hover {
   background: var(--oct-fg-soft);
 }
+.code-board .board-card:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
 
 .code-board .board-card-top {
   align-items: center;
@@ -122,6 +125,9 @@
 .board-card-pr:hover {
   border-color: var(--oct-border);
   background: var(--oct-fg-soft);
+}
+.board-card-pr:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
 }
 
 .board-card-pr .icon {

@@ -1,4 +1,4 @@
-import { Check, Copy, FolderOpen, Pencil, Trash2 } from "lucide-react";
+import { Check, Copy, FolderOpen, Pencil, Trash2 } from "../ui/icons";
 import { useRef, useState, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";

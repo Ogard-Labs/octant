@@ -981,8 +981,9 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   // JSON bodies within the listener's default budget.
   ...(
     [
-      ["/api/chat/attachments", "POST", "chat", CHAT_ATTACHMENT_MEDIA_TYPES, false],
-      // Work and Code take a file of any type (maintainer decision, 2026-11-16).
+      // Every mode takes a file of any type (maintainer decision, 2026-11-16):
+      // Chat decides at send whether its model takes it natively or as text.
+      ["/api/chat/attachments", "POST", "chat", CHAT_ATTACHMENT_MEDIA_TYPES, true],
       ["/api/work/attachments", "PUT", "work", WORK_ATTACHMENT_MEDIA_TYPES, true],
       ["/api/code/attachments", "PUT", "code", CODE_ATTACHMENT_MEDIA_TYPES, true],
     ] as const
@@ -1064,6 +1065,19 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     kind: "exact" as const,
     path: "/api/provider-usage-limits/refresh",
     methods: ["POST"] as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/sandbox-restrictions",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/sandbox-restrictions/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 131_072,
   },
   {
     kind: "exact" as const,

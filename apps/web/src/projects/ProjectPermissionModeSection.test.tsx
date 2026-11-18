@@ -61,10 +61,8 @@ describe("Project default mode", () => {
         project={project("code", { defaultPermissionMode: "full-access" })}
       />,
     );
-    await userEvent.click(
-      screen.getByRole("combobox", { name: "Sandbox at Full access for this Project" }),
-    );
-    await userEvent.click(await screen.findByRole("option", { name: "Keep the sandbox" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Strict for this Project" }));
+    await userEvent.click(await screen.findByRole("option", { name: "On" }));
     expect(onChange).toHaveBeenLastCalledWith("full-access", true);
 
     rerender(
@@ -77,11 +75,9 @@ describe("Project default mode", () => {
         })}
       />,
     );
-    await userEvent.click(
-      screen.getByRole("combobox", { name: "Sandbox at Full access for this Project" }),
-    );
+    await userEvent.click(screen.getByRole("combobox", { name: "Strict for this Project" }));
     await userEvent.click(await screen.findByRole("option", { name: "Same as Settings" }));
-    expect(onChange).toHaveBeenLastCalledWith("full-access", "settings");
+    expect(onChange).toHaveBeenLastCalledWith("full-access", "inherit");
   });
 
   it("keeps a Project's remembered Full access when only its sandbox changes", async () => {
@@ -92,10 +88,8 @@ describe("Project default mode", () => {
         project={project("code", { codeAccessPersistence: "project-default" })}
       />,
     );
-    await userEvent.click(
-      screen.getByRole("combobox", { name: "Sandbox at Full access for this Project" }),
-    );
-    await userEvent.click(await screen.findByRole("option", { name: "Keep the sandbox" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Strict for this Project" }));
+    await userEvent.click(await screen.findByRole("option", { name: "On" }));
     // The Project remembered Full access before modes existed, so it has no mode
     // of its own; sending none would read as "follow Settings" and drop it.
     expect(onChange).toHaveBeenLastCalledWith("full-access", true);

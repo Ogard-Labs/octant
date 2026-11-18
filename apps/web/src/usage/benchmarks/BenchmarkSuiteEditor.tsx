@@ -1,5 +1,5 @@
 import { OctantCheckbox } from "../../ui/base/OctantCheckbox";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "../../ui/icons";
 import { useState, type ReactNode } from "react";
 import type { BenchmarkRegexFlags } from "@octant/contracts";
 import { OctantAlert } from "../../ui/base/OctantAlert";

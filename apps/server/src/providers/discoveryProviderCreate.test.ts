@@ -7,7 +7,7 @@ function makeCandidate(
 ): Pick<DiscoveryCandidate, "driverKind" | "displayName" | "binaryPath"> {
   return {
     driverKind: "codex",
-    displayName: "Codex CLI",
+    displayName: "Codex",
     binaryPath: "/opt/homebrew/bin/codex",
     ...overrides,
   };
@@ -29,7 +29,7 @@ describe("createProviderFromDiscoveryCandidate", () => {
         kind: "create-codex-provider",
         instanceId: "00000000-0000-4000-8000-000000000901",
         expectedVersion: 0,
-        displayName: "Codex CLI",
+        displayName: "Codex",
         binaryPath: "/opt/homebrew/bin/codex",
         enabled: false,
       },

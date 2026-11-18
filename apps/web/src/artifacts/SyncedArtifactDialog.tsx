@@ -347,8 +347,8 @@ function PublicationChoices(props: {
       {!preview.available ? (
         <p className="oct-row-detail">
           {preview.deletionPending
-            ? "Synchronized deletion is queued; it will be sent when this computer can reach the store."
-            : "Turn sync on and check this task’s write authority to publish."}
+            ? "Deletion is queued. It is sent when this computer can reach the store."
+            : "Turn sync on and check this task’s write access to publish."}
         </p>
       ) : null}
       <ul className="synced-artifact__versions">
@@ -465,7 +465,7 @@ function PublicationChoices(props: {
                 {batch.state === "running" ? "Stop publication" : "Resume publication"}
               </OctantButton>
               <span className="oct-meta">
-                Stopping takes effect after the current upload and survives a restart.
+                Stopping waits for the current upload and lasts across restarts.
               </span>
             </div>
           )}

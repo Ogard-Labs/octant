@@ -4,7 +4,12 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeProjectId, type ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import type { SidebarRowPropertyVisibility } from "@octant/contracts/shell";
-import { ProjectThreadList, ProjectThreadRows } from "./ProjectThreadList";
+import {
+  ProjectThreadList,
+  ProjectThreadRows,
+  threadRowAgeFact,
+  threadRowShortAge,
+} from "./ProjectThreadList";
 import { mergeThreadRowActions } from "./mergeThreadRowActions";
 import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { SidebarRowPropertiesContext } from "../shell/sidebarRowProperties";
@@ -71,11 +76,14 @@ describe("ProjectThreadRows", () => {
     );
 
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    expect(within(row).getByText("#12")).toBeVisible();
+    expect(within(row).getByText("#12 open")).toBeVisible();
     expect(within(row).getByText("2h")).toBeVisible();
-    expect(
-      within(row).getByRole("img", { name: "Pull request #12 · open · checks passing" }),
-    ).toHaveAttribute("data-state", "open");
+    expect(within(row).getByTitle("Pull request #12 · open · checks passing")).toHaveAttribute(
+      "data-state",
+      "open",
+    );
+    // One name for the whole row: title first, then the pull request, then the time.
+    expect(row).toHaveAccessibleName(/^Controller foundation, pull request #12 open, Updated .+\d/);
   });
 
   it("keeps a long thread list bounded to the visible window", async () => {
@@ -133,10 +141,10 @@ describe("ProjectThreadRows", () => {
 
     expect(screen.getByTitle("Claude")).toBeVisible();
     expect(screen.queryByText("gpt-5.6-luna")).toBeNull();
+    // The provider's mark ends the row's last line: here the title line.
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    const provider = row.querySelector(".sidebar-navigation__thread-provider");
-    const title = row.querySelector(".sidebar-navigation__thread-copy");
-    expect(provider?.nextElementSibling).toBe(title);
+    const main = row.querySelector(".sidebar-navigation__thread-main");
+    expect(main?.lastElementChild).toBe(row.querySelector(".sidebar-navigation__thread-provider"));
   });
 
   it.each([
@@ -144,34 +152,62 @@ describe("ProjectThreadRows", () => {
       activity: "working",
       unread: true,
       woke: true,
-      label: "Working · Snooze ended · New activity",
+      word: "Working",
+      label: "Controller foundation, Working, Snooze ended, New activity",
     },
-    { activity: "attention", unread: true, woke: false, label: "Needs attention · New activity" },
-    { activity: "unread", unread: true, woke: true, label: "Snooze ended · New activity" },
-  ] as const)("combines overlapping row states into one trailing indicator: $label", (state) => {
-    render(<ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, ...state }]} />);
+    {
+      activity: "attention",
+      unread: true,
+      woke: false,
+      word: "Needs you",
+      label: "Controller foundation, Needs attention, New activity",
+    },
+    {
+      activity: "unread",
+      unread: true,
+      woke: true,
+      word: "Snooze ended",
+      label: "Controller foundation, Snooze ended, New activity",
+    },
+  ] as const)(
+    "says the strongest of overlapping states in words and names them all: $label",
+    (state) => {
+      render(<ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, ...state }]} />);
+      const row = screen.getByRole("button", { name: /Controller foundation/ });
+      expect(row).toHaveAccessibleName(state.label);
+      const words = row.querySelectorAll(".sidebar-navigation__thread-state");
+      expect(words).toHaveLength(1);
+      expect(words[0]).toHaveTextContent(state.word);
+    },
+  );
+
+  it("gives a running turn's elapsed time beside the word Working", () => {
+    const fourteenMinutesAgo = new Date(Date.now() - 14 * 60_000).toISOString();
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, activity: "working", turnStartedAt: fourteenMinutesAgo }]}
+      />,
+    );
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    const indicator = within(row).getByRole("img", { name: state.label });
-    expect(within(row).getAllByRole("img")).toHaveLength(1);
-    expect(row.lastElementChild).toBe(indicator);
-    expect(row.firstElementChild).toHaveClass("sidebar-navigation__thread-provider");
-    expect(within(row).queryByText("Woke")).toBeNull();
+    expect(within(row).getByText("Working 14m")).toBeVisible();
   });
 
-  it("marks an unread thread with a dot at the end of its row and clears it when read", () => {
+  it("marks an unread thread with a named dot beside its time and clears it when read", () => {
     const { rerender } = render(
       <ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, unread: true }]} />,
     );
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    const dot = within(row).getByRole("img", { name: "New activity" });
-    expect(dot).toHaveAttribute("data-activity", "unread");
-    // The mark ends the row: the title comes first, the dot last.
-    expect(row.lastElementChild).toBe(dot);
+    expect(row.querySelector(".sidebar-navigation__thread-unread-dot")).toHaveAttribute(
+      "title",
+      "New activity",
+    );
+    expect(row).toHaveAccessibleName("Controller foundation, New activity");
 
     rerender(
       <ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, unread: false }]} />,
     );
-    expect(within(row).queryByRole("img", { name: "New activity" })).toBeNull();
+    expect(row.querySelector(".sidebar-navigation__thread-unread-dot")).toBeNull();
   });
 
   it("marks every thread the window has open, not only the focused one", () => {
@@ -264,7 +300,7 @@ describe("ProjectThreadRows", () => {
     expect(screen.queryByText("feature/x")).toBeNull();
   });
 
-  it("says a thread needs attention through a labelled dot rather than a badge", () => {
+  it("says a thread needs attention in words rather than a badge", () => {
     render(
       <ProjectThreadRows
         onSelectThread={vi.fn()}
@@ -272,7 +308,7 @@ describe("ProjectThreadRows", () => {
       />,
     );
 
-    expect(screen.getByRole("img", { name: "Needs attention" })).toBeVisible();
+    expect(screen.getByText("Needs you")).toBeVisible();
     expect(screen.queryByText("active")).toBeNull();
   });
 
@@ -307,6 +343,26 @@ describe("ProjectThreadRows", () => {
     await userEvent.click(await screen.findByRole("menuitem", { name: "Pin" }));
 
     expect(onPinThread).toHaveBeenCalledWith("thread-one", true);
+  });
+
+  it("draws Archive in the danger ink in a thread's right-click menu and no other row", async () => {
+    render(
+      <ProjectThreadRows
+        actions={{ onArchiveThread: vi.fn(), onPinThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+
+    expect(await screen.findByRole("menuitem", { name: "Archive" })).toHaveAttribute(
+      "data-destructive",
+    );
+    expect(screen.getByRole("menuitem", { name: "Pin" })).not.toHaveAttribute("data-destructive");
   });
 
   it("places a thread in a new split pane from its own right-click menu", async () => {
@@ -346,11 +402,11 @@ describe("ProjectThreadRows", () => {
 
     const menu = document.querySelector(".thread-row-context-menu");
     expect(menu).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Copy" })).toBeVisible();
     expect(screen.queryByRole("menuitem", { name: "Copy title" })).toBeNull();
     expect(menu?.querySelectorAll(".thread-row-context-menu__icon").length).toBeGreaterThan(0);
 
-    await userEvent.hover(screen.getByRole("menuitem", { name: "Copy" }));
+    await userEvent.hover(screen.getByRole("menuitem", { name: "More" }));
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "Copy" }));
     expect(await screen.findByRole("menuitem", { name: "Copy title" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Copy thread ID" })).toBeVisible();
     await userEvent.click(screen.getByRole("menuitem", { name: "Copy title" }));
@@ -441,6 +497,7 @@ describe("ProjectThreadRows", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
 
     expect(screen.queryByRole("menuitem", { name: "Complete follow-up" })).toBeNull();
     await userEvent.click(await screen.findByRole("menuitem", { name: "Mark for follow-up" }));
@@ -464,6 +521,7 @@ describe("ProjectThreadRows", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
 
     expect(screen.queryByRole("menuitem", { name: "Mark for follow-up" })).toBeNull();
     await userEvent.click(await screen.findByRole("menuitem", { name: "Complete follow-up" }));
@@ -486,6 +544,7 @@ describe("ProjectThreadRows", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Export…" }));
 
     expect(onExportThread).toHaveBeenCalledWith("thread-one", "Controller foundation");
@@ -505,6 +564,7 @@ describe("ProjectThreadRows", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Hand off…" }));
 
     expect(onHandOffThread).toHaveBeenCalledWith("thread-one", "Controller foundation");
@@ -524,6 +584,7 @@ describe("ProjectThreadRows", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Move to Project…" }));
 
     expect(onMoveToProject).toHaveBeenCalledWith(
@@ -544,8 +605,56 @@ describe("ProjectThreadRows", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
-    await screen.findByRole("menuitem", { name: "Pin" });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
+    await screen.findByRole("menuitem", { name: "Copy" });
     expect(screen.queryByRole("menuitem", { name: "Move to Project…" })).toBeNull();
+  });
+
+  it("keeps the top level to the everyday groups, files the rest under More, and ends with Archive", async () => {
+    const onExportThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{
+          onPinThread: vi.fn(),
+          onPinInPane: vi.fn(),
+          onStartRenameThread: vi.fn(),
+          onMarkThreadUnread: vi.fn(),
+          onCompleteThread: vi.fn(),
+          onSnoozeThread: vi.fn(),
+          onAttachAsContext: vi.fn(),
+          onMarkFollowUp: vi.fn(),
+          onExportThread,
+          onHandOffThread: vi.fn(),
+          onLeaveNoTrace: vi.fn(),
+          onArchiveThread: vi.fn(),
+        }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+
+    const top = within(await screen.findByRole("menu", { name: /Actions for/ }))
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent);
+    expect(top).toEqual([
+      "Pin in pane",
+      "Pin",
+      "Rename",
+      "Mark as unread",
+      "Put away",
+      "Snooze",
+      "More",
+      "Archive",
+    ]);
+
+    await userEvent.hover(screen.getByRole("menuitem", { name: "More" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Export…" }));
+    expect(onExportThread).toHaveBeenCalledWith("thread-one", "Controller foundation");
   });
 
   it("offers no export when the host resolves no export client", async () => {
@@ -1222,7 +1331,7 @@ describe("completing and snoozing from a thread row", () => {
     expect(onSnoozeThread).not.toHaveBeenCalled();
   });
 
-  it("marks a row whose snooze ended with one labelled clock", () => {
+  it("says a row whose snooze ended in words", () => {
     render(
       <ProjectThreadRows
         onSelectThread={vi.fn()}
@@ -1235,8 +1344,7 @@ describe("completing and snoozing from a thread row", () => {
         ]}
       />,
     );
-    const woke = screen.getByRole("img", { name: "Snooze ended" });
-    expect(woke).toHaveAttribute("title", "Snooze ended");
+    const woke = screen.getByText("Snooze ended");
     expect(screen.getByRole("button", { name: /Controller foundation/ })).toContainElement(woke);
   });
 
@@ -1293,13 +1401,12 @@ describe("ProjectThreadRows display properties", () => {
     renderRows(projectsDefaults);
 
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    expect(within(row).getByText("#12")).toBeVisible();
+    expect(within(row).getByText("#12 open")).toBeVisible();
     expect(within(row).getByText("feature/x")).toBeVisible();
-    expect(
-      within(row).getByRole("img", { name: "Pull request #12 · open · checks passing" }),
-    ).toBeVisible();
     expect(within(row).getByText("2h")).toBeVisible();
-    expect(row.querySelector(".sidebar-navigation__thread-status")).not.toBeNull();
+    expect(row).toHaveAccessibleName(
+      /^Controller foundation, feature\/x, pull request #12 open, Updated .+\d/,
+    );
   });
 
   it("omits a hidden property without leaving a gap in its place", () => {
@@ -1312,13 +1419,11 @@ describe("ProjectThreadRows display properties", () => {
     });
 
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    expect(within(row).queryByText("#12")).toBeNull();
+    expect(within(row).queryByText("#12 open")).toBeNull();
     expect(within(row).queryByText("feature/x")).toBeNull();
-    expect(
-      within(row).queryByRole("img", { name: "Pull request #12 · open · checks passing" }),
-    ).toBeNull();
     expect(within(row).queryByText("2h")).toBeNull();
-    expect(row.querySelector(".sidebar-navigation__thread-status")).toBeNull();
+    expect(row.querySelector(".sidebar-navigation__thread-state")).toBeNull();
+    expect(row).toHaveAccessibleName("Controller foundation");
     // Nothing is left in their place: the copy holds the title alone.
     expect(row.querySelector(".sidebar-navigation__thread-copy")?.children).toHaveLength(1);
   });
@@ -1387,6 +1492,10 @@ describe("coordinator threads in a thread row's menu", () => {
     });
   }
 
+  async function openMore() {
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
+  }
+
   it("offers Make coordinator on an ordinary thread and Stop coordinating on a coordinator", async () => {
     const onSetCoordinator = vi.fn();
     const { rerender } = render(
@@ -1397,6 +1506,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     expect(screen.queryByRole("menuitem", { name: "Stop coordinating" })).toBeNull();
     // Make coordinator offers the worker-level choice the New coordinator draft offers.
     await userEvent.hover(await screen.findByRole("menuitem", { name: "Make coordinator" }));
@@ -1408,6 +1518,7 @@ describe("coordinator threads in a thread row's menu", () => {
     expect(onSetCoordinator).toHaveBeenCalledWith("thread-one", true, undefined);
 
     await openMenu(/Controller foundation/);
+    await openMore();
     await userEvent.hover(await screen.findByRole("menuitem", { name: "Make coordinator" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Full access" }));
     expect(onSetCoordinator).toHaveBeenLastCalledWith("thread-one", true, "full-access");
@@ -1420,6 +1531,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     await userEvent.click(await screen.findByRole("menuitem", { name: "Stop coordinating" }));
     expect(onSetCoordinator).toHaveBeenLastCalledWith("thread-one", false);
   });
@@ -1431,9 +1543,10 @@ describe("coordinator threads in a thread row's menu", () => {
       <ProjectThreadRows actions={actions} onSelectThread={vi.fn()} threads={[thread]} />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     await screen.findByRole("menuitem", { name: "Make coordinator" });
     expect(screen.queryByRole("menuitem", { name: "Coordinator limits…" })).toBeNull();
-    await userEvent.keyboard("{Escape}");
+    await userEvent.keyboard("{Escape}{Escape}");
 
     rerender(
       <ProjectThreadRows
@@ -1443,6 +1556,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     await userEvent.click(await screen.findByRole("menuitem", { name: "Coordinator limits…" }));
     expect(onEditCoordinatorBounds).toHaveBeenCalledExactlyOnceWith("thread-one");
   });
@@ -1457,6 +1571,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     const off = await screen.findByRole("menuitemcheckbox", {
       name: "Wake when a message arrives",
     });
@@ -1472,6 +1587,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     const on = await screen.findByRole("menuitemcheckbox", { name: "Wake when a message arrives" });
     expect(on).toHaveAttribute("aria-checked", "true");
     await userEvent.click(on);
@@ -1492,12 +1608,14 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Work brief/);
+    await openMore();
     await userEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: "Wake when a message arrives" }),
     );
     expect(work.onSetMessageWake).toHaveBeenCalledExactlyOnceWith("work-one", true);
 
     await openMenu(/Chat question/);
+    await openMore();
     await screen.findByRole("menuitemcheckbox", { name: "Continue after restart" });
     expect(
       screen.queryByRole("menuitemcheckbox", { name: "Wake when a message arrives" }),
@@ -1516,6 +1634,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     expect(screen.queryByRole("menuitem", { name: "Make coordinator" })).toBeNull();
     const wake = await screen.findByRole("menuitemcheckbox", { name: "Wake for coordinator" });
     expect(wake).toHaveAttribute("aria-checked", "true");
@@ -1530,6 +1649,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     expect(
       await screen.findByRole("menuitemcheckbox", { name: "Wake for coordinator" }),
     ).toHaveAttribute("aria-checked", "false");
@@ -1544,6 +1664,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     await screen.findByRole("menuitemcheckbox", { name: "Wake when a message arrives" });
     expect(screen.queryByRole("menuitem", { name: "Stop coordinating" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Make coordinator" })).toBeNull();
@@ -1558,6 +1679,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     await screen.findByRole("menuitem", { name: "Make coordinator" });
     expect(screen.queryByRole("menuitemcheckbox", { name: "Wake for coordinator" })).toBeNull();
   });
@@ -1683,5 +1805,44 @@ describe("coordinators in a Project's thread list", () => {
     );
     expect(document.querySelector("[data-thread-id='worker-working']")).toBeNull();
     sessionStorage.clear();
+  });
+});
+
+describe("A thread row's short age", () => {
+  const now = new Date(2026, 10, 14, 12, 0, 0).getTime();
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+  const MINUTE = 60_000;
+  const HOUR = 60 * MINUTE;
+  const DAY = 24 * HOUR;
+
+  it("reads now under a minute and never rounds a minute up to the next unit", () => {
+    expect(threadRowShortAge(ago(59_000), now)).toBe("now");
+    expect(threadRowShortAge(ago(MINUTE), now)).toBe("1m");
+    expect(threadRowShortAge(ago(59 * MINUTE + 40_000), now)).toBe("59m");
+    expect(threadRowShortAge(ago(HOUR), now)).toBe("1h");
+    expect(threadRowShortAge(ago(23 * HOUR + 50 * MINUTE), now)).toBe("23h");
+  });
+
+  it("counts days to six, then weeks, then years, never past three characters", () => {
+    expect(threadRowShortAge(ago(DAY), now)).toBe("1d");
+    expect(threadRowShortAge(ago(6 * DAY + 23 * HOUR), now)).toBe("6d");
+    expect(threadRowShortAge(ago(7 * DAY), now)).toBe("1w");
+    expect(threadRowShortAge(ago(34 * DAY), now)).toBe("4w");
+    expect(threadRowShortAge(ago(70 * DAY), now)).toBe("10w");
+    expect(threadRowShortAge(ago(364 * DAY), now)).toBe("52w");
+    expect(threadRowShortAge(ago(800 * DAY), now)).toBe("2y");
+  });
+
+  it("carries the full date and time as the row's tooltip", () => {
+    const updatedAt = ago(3 * DAY);
+    const fact = threadRowAgeFact({ updatedAt }, true, now);
+    expect(fact?.label).toBe("3d");
+    expect(fact?.title).toBe(
+      `Updated ${new Date(updatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`,
+    );
+  });
+
+  it("is absent while Last updated is hidden", () => {
+    expect(threadRowAgeFact({ updatedAt: ago(DAY) }, false, now)).toBeUndefined();
   });
 });

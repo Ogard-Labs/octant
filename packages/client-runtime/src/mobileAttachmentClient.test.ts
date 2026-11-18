@@ -52,26 +52,8 @@ function recordingTransport(answer: (request: Recorded) => Response): {
 }
 
 describe("what a phone may attach to a thread", () => {
-  it("offers a Chat thread the camera, the library, and files of the kinds its model takes", () => {
-    expect(mobileAttachmentOffer("chat", option(["image", "document"]))).toEqual({
-      sources: ["camera", "library", "file"],
-      mediaTypes: [
-        "text/plain",
-        "image/png",
-        "image/jpeg",
-        "image/webp",
-        "image/gif",
-        "application/pdf",
-      ],
-    });
-    expect(mobileAttachmentOffer("chat", option(["document"]))).toEqual({
-      sources: ["file"],
-      mediaTypes: ["text/plain", "application/pdf"],
-    });
-  });
-
-  it("offers Work and Code threads any file, and the camera only when the thread's model takes images", () => {
-    for (const mode of ["work", "code"] as const) {
+  it("offers every thread any file, and the camera only when the thread's model takes images", () => {
+    for (const mode of ["chat", "work", "code"] as const) {
       expect(mobileAttachmentOffer(mode, option(["image", "document"]))).toEqual({
         sources: ["camera", "library", "file"],
         mediaTypes: ["*/*"],
@@ -81,11 +63,15 @@ describe("what a phone may attach to a thread", () => {
         mediaTypes: ["*/*"],
       });
     }
+    // A Chat model that reads text alone still takes a text file, as text.
+    expect(mobileAttachmentOffer("chat", option([]))).toEqual({
+      sources: ["file"],
+      mediaTypes: ["*/*"],
+    });
   });
 
   it("offers nothing when the host does not list the thread's model as ready", () => {
     expect(mobileAttachmentOffer("chat", undefined)).toEqual({ sources: [], mediaTypes: [] });
-    expect(mobileAttachmentOffer("chat", option([]))).toEqual({ sources: [], mediaTypes: [] });
   });
 });
 

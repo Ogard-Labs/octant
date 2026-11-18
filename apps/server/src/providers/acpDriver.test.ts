@@ -1,4 +1,5 @@
 import {
+  decodeProviderInstance,
   decodeProviderInstanceId,
   decodeProviderSessionId,
   type ProviderFailure,
@@ -18,6 +19,7 @@ import { makeAcpDriver, type AcpClientPort, type AcpDriverOptions } from "./acpD
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
 import { sanitizeAcpEnvironment } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpProviderProfile } from "./acpProfiles";
+import { addedAcpAgentProfile } from "./addedAcpAgent";
 import { AcpFailure, type AcpNewSessionResult, type AcpConfigOptionsResult } from "./acpProtocol";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
@@ -1157,13 +1159,138 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(offered.probed.models[0]?.inputModalities).toEqual(["text", "image"]);
     expect(offered.sent._tag).toBe("Right");
     expect(offered.prompt).toHaveBeenCalledWith(expect.any(String), expect.any(String), [
-      { mimeType: "image/png", data: "AQID" },
+      { type: "image", mimeType: "image/png", data: "AQID" },
     ]);
     const textOnly = await run(false);
     expect(textOnly.probed.capabilities.nativeAttachments).toBe("unsupported");
     expect(textOnly.probed.models[0]?.inputModalities).toEqual(["text"]);
     expect(textOnly.sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
     expect(textOnly.prompt).not.toHaveBeenCalled();
+  });
+
+  it("sends an attached document as an embedded resource only to an agent that advertises embedded context", async () => {
+    const notes = {
+      attachmentId: "file-1",
+      displayName: "notes.md",
+      mediaType: "text/markdown",
+      bytes: new TextEncoder().encode("# Plan\n"),
+    };
+    const report = {
+      attachmentId: "file-2",
+      displayName: "report.pdf",
+      mediaType: "application/pdf",
+      bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x00, 0xff]),
+    };
+    const run = async (embeddedContext: boolean) => {
+      const f = fixture(profile);
+      Object.assign(f.connection.initialized.agentCapabilities, {
+        promptCapabilities: { image: false, embeddedContext },
+      });
+      const probed = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+      const sent = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            return yield* Effect.either(
+              connection.send({
+                sessionId,
+                prompt: "read these",
+                attachments: [notes, report],
+                tools: [],
+              }),
+            );
+          }),
+        ),
+      );
+      return { probed, sent, prompt: f.client.prompt };
+    };
+    const embedded = await run(true);
+    expect(embedded.probed.capabilities.nativeAttachments).toBe("supported");
+    expect(embedded.probed.models[0]?.inputModalities).toEqual(["text", "document"]);
+    expect(embedded.sent._tag).toBe("Right");
+    // Text goes as text; bytes that are not UTF-8 text go as a base64 blob.
+    expect(embedded.prompt).toHaveBeenCalledWith(expect.any(String), expect.any(String), [
+      {
+        type: "resource",
+        resource: {
+          uri: "attachment:file-1/notes.md",
+          mimeType: "text/markdown",
+          text: "# Plan\n",
+        },
+      },
+      {
+        type: "resource",
+        resource: {
+          uri: "attachment:file-2/report.pdf",
+          mimeType: "application/pdf",
+          blob: Buffer.from(report.bytes).toString("base64"),
+        },
+      },
+    ]);
+    const textOnly = await run(false);
+    expect(textOnly.probed.capabilities.nativeAttachments).toBe("unsupported");
+    expect(textOnly.sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(textOnly.prompt).not.toHaveBeenCalled();
+  });
+
+  it("lets a Work or Code launch read the thread's attachments folder, and a Chat launch none", async () => {
+    const attachmentsFolder = "/data/code-threads/thread-1";
+    const launched = async (mode: "code" | "chat") => {
+      const f = fixture(profile);
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({
+              instanceId,
+              projectRoot,
+              mode,
+              attachmentsFolder,
+            });
+            // An agent that cannot run read-only refuses Chat before it launches.
+            yield* Effect.either(
+              connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+            );
+          }),
+        ),
+      );
+      return f.starts.at(-1);
+    };
+    expect((await launched("code"))?.readOnlyFolders).toEqual([attachmentsFolder]);
+    expect((await launched("chat"))?.readOnlyFolders).toBeUndefined();
+  });
+
+  it("refuses an image to an agent that advertised embedded context but not image prompts", async () => {
+    const f = fixture(profile);
+    Object.assign(f.connection.initialized.agentCapabilities, {
+      promptCapabilities: { image: false, embeddedContext: true },
+    });
+    await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    const sent = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          return yield* Effect.either(
+            connection.send({
+              sessionId,
+              prompt: "look",
+              attachments: [
+                {
+                  attachmentId: "image-1",
+                  displayName: "screen.png",
+                  mediaType: "image/png",
+                  bytes: new Uint8Array([1, 2, 3]),
+                },
+              ],
+              tools: [],
+            }),
+          );
+        }),
+      ),
+    );
+    expect(sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(f.client.prompt).not.toHaveBeenCalled();
   });
 
   it("reports app-managed tools only when the ACP handshake advertises HTTP MCP", async () => {
@@ -1179,7 +1306,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(supported.capabilities.appManagedTools).toBe("supported");
   });
 
-  it("reports app-managed tools on Linux as on macOS, and not on Windows", async () => {
+  it("reports app-managed tools on Linux and Windows as on macOS, and not on a host whose launches cannot reach the bridge", async () => {
     const probed = (platform: NodeJS.Platform) =>
       withProcessPlatform(platform, () =>
         Effect.runPromise(
@@ -1187,7 +1314,8 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         ),
       );
     expect((await probed("linux")).capabilities.appManagedTools).toBe("supported");
-    expect((await probed("win32")).capabilities.appManagedTools).toBe("unsupported");
+    expect((await probed("win32")).capabilities.appManagedTools).toBe("supported");
+    expect((await probed("freebsd")).capabilities.appManagedTools).toBe("unsupported");
   });
 
   it("registers the exact app tool catalogue before an HTTP-capable ACP session starts", async () => {
@@ -1226,8 +1354,9 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     ] as const;
 
     // Linux carries the bridge as macOS does: the launch reaches its port
-    // on the shared host network or through the forwarder's relay.
-    for (const platform of ["darwin", "linux"] as const) {
+    // on the shared host network or through the forwarder's relay. A Windows
+    // launch runs with no Octant sandbox and reaches loopback directly.
+    for (const platform of ["darwin", "linux", "win32"] as const) {
       await withProcessPlatform(platform, () =>
         Effect.runPromise(
           Effect.scoped(
@@ -1248,8 +1377,8 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         ),
       );
     }
-    expect(bridgeFactory).toHaveBeenCalledTimes(2);
-    expect(bridgeClose).toHaveBeenCalledTimes(2);
+    expect(bridgeFactory).toHaveBeenCalledTimes(3);
+    expect(bridgeClose).toHaveBeenCalledTimes(3);
   });
 
   it("refuses app tools before session creation on a host whose confinement cannot carry the bridge", async () => {
@@ -1270,7 +1399,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     const tools = [
       { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
     ] as const;
-    const refusal = await withProcessPlatform("win32", () =>
+    const refusal = await withProcessPlatform("freebsd", () =>
       Effect.runPromise(
         Effect.scoped(
           Effect.flip(
@@ -4096,5 +4225,94 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
       .filter((profile) => profile.refusesProject !== undefined)
       .map((profile) => profile.kind);
     expect(refusing.sort()).toEqual(["gemini", "qwen"]);
+  });
+});
+
+describe("an added ACP agent's model selection", () => {
+  const added = decodeProviderInstance({
+    id: instanceId,
+    displayName: "My agent",
+    driverKind: "acp-agent",
+    configuration: {
+      kind: "acp-agent",
+      source: { kind: "local", command: binaryPath },
+      args: ["acp"],
+      install: { executable: binaryPath, integrity: "local-command" },
+      trusted: true,
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 3,
+    createdAt: "2026-11-18T10:00:00.000Z",
+    updatedAt: "2026-11-18T10:00:00.000Z",
+  });
+  if (added.driverKind !== "acp-agent") throw new Error("not an added agent");
+  const profile = addedAcpAgentProfile(added);
+
+  async function start(session: AcpNewSessionResult) {
+    const { driver, client } = fixture(profile);
+    client.newSession.mockImplementationOnce(async () => session);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+    return client;
+  }
+
+  it("sets the model with session/set_model when the session reports models and no model option, and selects no mode", async () => {
+    const client = await start({
+      sessionId: "agent-session-models",
+      models: {
+        currentModelId: "agent-other",
+        availableModels: [
+          { modelId: "agent-other", name: "Other" },
+          { modelId, name: "Agent K2" },
+        ],
+      },
+    });
+    expect(client.call).toHaveBeenCalledWith("session/set_model", {
+      sessionId: "agent-session-models",
+      modelId,
+    });
+    expect(client.setConfigOption).not.toHaveBeenCalled();
+  });
+
+  it("sets the model through the config option when the session reports one", async () => {
+    const client = await start({
+      sessionId: "agent-session-options",
+      configOptions: [
+        {
+          type: "select",
+          id: "model",
+          name: "Model",
+          currentValue: "agent-other",
+          options: [
+            { value: "agent-other", name: "Other" },
+            { value: modelId, name: "Agent K2" },
+          ],
+        },
+      ],
+    });
+    expect(client.setConfigOption).toHaveBeenCalledWith("agent-session-options", "model", modelId);
+    expect(client.setConfigOption).not.toHaveBeenCalledWith(
+      "agent-session-options",
+      "mode",
+      expect.anything(),
+    );
+    expect(client.call).not.toHaveBeenCalledWith("session/set_model", expect.anything());
+  });
+
+  it("leaves a session that already opened on the model alone", async () => {
+    const client = await start({
+      sessionId: "agent-session-current",
+      models: { currentModelId: modelId, availableModels: [{ modelId, name: "Agent K2" }] },
+    });
+    expect(client.call).not.toHaveBeenCalledWith("session/set_model", expect.anything());
+    expect(client.setConfigOption).not.toHaveBeenCalled();
   });
 });

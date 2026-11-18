@@ -42,6 +42,8 @@ const CACHE_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relativ
   { name: "Chat attachments", relative: "chat/threads" },
   { name: "Work attachments", relative: "work-threads" },
   { name: "Code attachments", relative: "code-threads" },
+  // V8 code the host and desktop compiled, reused so the next launch starts faster.
+  { name: "Compiled code cache", relative: "compile-cache" },
   { name: "Generated images", relative: "generated-images" },
   { name: "Browser captures", relative: "browser-captures" },
   { name: "Agent messages", relative: "agent-messages" },

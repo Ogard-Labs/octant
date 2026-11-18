@@ -3,10 +3,14 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import {
   decodeAppBackground,
+  type AppBackground,
   DEFAULT_APP_BACKGROUND,
   type SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
+import { DEFAULT_CHARACTER_SET } from "@octant/domain/theme-policy";
+import type { ContributedGround } from "@octant/plugin-host/grounds";
+import { PluginGroundsContext } from "../theme/pluginGrounds";
 import { AppBackgroundSettings, type BackgroundImageLibrary } from "./AppBackgroundSettings";
 
 afterEach(cleanup);
@@ -83,7 +87,6 @@ describe("AppBackgroundSettings", () => {
 
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByRole("img", { name: "No photo chosen" })).toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Choose an uploaded photo" }));
     expect(photos.list).toHaveBeenCalled();
     await user.click(await screen.findByRole("radio", { name: "harbour.png" }));
 
@@ -119,7 +122,7 @@ describe("AppBackgroundSettings", () => {
     });
   });
 
-  it("saves dithered pixels in one choice, then sizes, shades, and stills the field", async () => {
+  it("saves the pixel ground in one choice, then picks its scene, sizes, shades, and stills it", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const { rerender } = render(
@@ -131,8 +134,14 @@ describe("AppBackgroundSettings", () => {
     );
 
     await user.click(screen.getByRole("combobox", { name: "Application background" }));
-    await user.click(await screen.findByRole("option", { name: "Dithered pixels" }));
-    expect(onChange).toHaveBeenLastCalledWith({ ...dials, kind: "pixels" });
+    await user.click(await screen.findByRole("option", { name: "Pixel ground" }));
+    // It opens on Ridges at the four shades the scenes are drawn for.
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...dials,
+      kind: "pixels",
+      scene: "ridges",
+      effectTones: 4,
+    });
 
     const field = { ...DEFAULT_APP_BACKGROUND, kind: "pixels" as const };
     rerender(<AppBackgroundSettings background={field} library={library()} onChange={onChange} />);
@@ -145,6 +154,15 @@ describe("AppBackgroundSettings", () => {
     );
     expect(screen.getByRole("slider", { name: "Pixel size" })).toBeInTheDocument();
     expect(screen.getByRole("slider", { name: "Colours" })).toBeInTheDocument();
+    // A row saved before scenes existed shows Drift; the picker offers all four.
+    const scene = screen.getByRole("combobox", { name: "Pixel ground scene" });
+    expect(scene).toHaveTextContent("Drift");
+    await user.click(scene);
+    expect(await screen.findAllByRole("option")).toHaveLength(4);
+    await user.click(screen.getByRole("option", { name: "Burst" }));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "pixels", scene: "burst" }),
+    );
     const motion = screen.getByRole("group", { name: "Background motion" });
     expect(within(motion).getByRole("button", { name: "Wave" })).toHaveAttribute(
       "aria-pressed",
@@ -154,7 +172,25 @@ describe("AppBackgroundSettings", () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ motion: "still" }));
   });
 
-  it("saves pulsing characters as the ground in one choice, keeping every dial", async () => {
+  it("saves a photo under the Picture scene as part of the pixel ground, not as a photo ground", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "pixels", scene: "picture" }}
+        library={library()}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(await screen.findByRole("radio", { name: "harbour.png" }));
+
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "pixels", scene: "picture", backgroundId: PHOTO_ID }),
+    );
+  });
+
+  it("saves the ASCII field as the ground in one choice, keeping every dial", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(
@@ -166,7 +202,7 @@ describe("AppBackgroundSettings", () => {
     );
 
     await user.click(screen.getByRole("combobox", { name: "Application background" }));
-    await user.click(await screen.findByRole("option", { name: "Pulsing characters" }));
+    await user.click(await screen.findByRole("option", { name: "ASCII field" }));
 
     expect(onChange).toHaveBeenLastCalledWith({ ...dials, kind: "characters" });
   });
@@ -255,7 +291,6 @@ describe("AppBackgroundSettings", () => {
     // The list answers late and knows nothing of the upload.
     settleList([photo(PHOTO_ID, "harbour.png")]);
 
-    await user.click(await screen.findByRole("button", { name: "Choose an uploaded photo" }));
     expect(await screen.findByRole("radio", { name: "sunrise.png" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "harbour.png" })).toBeInTheDocument();
   });
@@ -462,7 +497,7 @@ describe("AppBackgroundSettings", () => {
     expect(screen.getByRole("radio", { name: "Warm walnut" })).toBeChecked();
   });
 
-  it("starts a fresh install on the soft gradient picture", () => {
+  it("starts a fresh install on the character field", () => {
     render(
       <AppBackgroundSettings
         background={DEFAULT_APP_BACKGROUND}
@@ -472,9 +507,8 @@ describe("AppBackgroundSettings", () => {
     );
 
     expect(screen.getByRole("combobox", { name: "Application background" })).toHaveTextContent(
-      "Built-in picture",
+      "ASCII field",
     );
-    expect(screen.getByRole("radio", { name: "Soft glow" })).toBeChecked();
   });
 
   it("shows a ground saved as the retired dot pattern as None, with nothing to tune", () => {
@@ -493,7 +527,7 @@ describe("AppBackgroundSettings", () => {
     expect(screen.queryByRole("combobox", { name: "Where the background shows" })).toBeNull();
   });
 
-  it("offers the sidebar only once the ground is behind everything", async () => {
+  it("has no separate sidebar switch when the ground is behind everything", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const walnut = {
@@ -518,11 +552,344 @@ describe("AppBackgroundSettings", () => {
         onChange={onChange}
       />,
     );
-    await user.click(screen.getByRole("switch", { name: "Cover the sidebar" }));
+    expect(screen.queryByRole("switch", { name: "Cover the sidebar" })).not.toBeInTheDocument();
+  });
+
+  it("says the photo was added and shows it in the gallery, marked as the one in use", async () => {
+    const user = userEvent.setup();
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "photo", backgroundId: PHOTO_ID as never }}
+        library={library()}
+        onChange={vi.fn()}
+      />,
+    );
+
+    await user.upload(
+      screen.getByLabelText("Choose a photo to upload"),
+      new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "sunrise.png", { type: "image/png" }),
+    );
+
+    expect(await screen.findByText("Photo added.")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "sunrise.png" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "harbour.png" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("marks the photo in use in the gallery and uses another one when it is clicked", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "photo", backgroundId: PHOTO_ID as never }}
+        library={library({
+          list: vi.fn(async () => [
+            photo(PHOTO_ID, "harbour.png"),
+            photo(UPLOADED_ID, "sunrise.png"),
+          ]),
+        })}
+        onChange={onChange}
+      />,
+    );
+
+    const current = await screen.findByRole("radio", { name: "harbour.png" });
+    expect(current).toHaveAttribute("aria-checked", "true");
+    await user.click(await screen.findByRole("radio", { name: "sunrise.png" }));
+
     expect(onChange).toHaveBeenLastCalledWith({
-      ...walnut,
-      scope: "everywhere",
-      coversSidebar: true,
+      ...dials,
+      kind: "photo",
+      backgroundId: UPLOADED_ID,
+    });
+  });
+
+  it("removes a photo only after the person confirms, and never offers it for the photo in use", async () => {
+    const user = userEvent.setup();
+    const remove = vi.fn(async () => undefined);
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "photo", backgroundId: PHOTO_ID as never }}
+        library={library({
+          list: vi.fn(async () => [
+            photo(PHOTO_ID, "harbour.png"),
+            photo(UPLOADED_ID, "sunrise.png"),
+          ]),
+          remove,
+        })}
+        onChange={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("radio", { name: "sunrise.png" });
+    expect(screen.queryByRole("button", { name: "Remove harbour.png" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove sunrise.png" }));
+    expect(remove).not.toHaveBeenCalled();
+    await user.click(
+      within(screen.getByRole("group", { name: "Remove sunrise.png?" })).getByRole("button", {
+        name: "Keep",
+      }),
+    );
+    expect(screen.getByRole("radio", { name: "sunrise.png" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Remove sunrise.png" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Remove sunrise.png?" })).getByRole("button", {
+        name: "Remove",
+      }),
+    );
+
+    expect(remove).toHaveBeenCalledExactlyOnceWith(UPLOADED_ID);
+    await waitFor(() =>
+      expect(screen.queryByRole("radio", { name: "sunrise.png" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Photo removed.")).toBeInTheDocument();
+  });
+
+  it("keeps a photo the host refuses to remove and says why", async () => {
+    const user = userEvent.setup();
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "photo", backgroundId: PHOTO_ID as never }}
+        library={library({
+          list: vi.fn(async () => [
+            photo(PHOTO_ID, "harbour.png"),
+            photo(UPLOADED_ID, "sunrise.png"),
+          ]),
+          remove: vi.fn(async () => {
+            throw new Error("The sidebar is showing this photo, so it cannot be deleted.");
+          }),
+        })}
+        onChange={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("radio", { name: "sunrise.png" });
+    await user.click(screen.getByRole("button", { name: "Remove sunrise.png" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Remove sunrise.png?" })).getByRole("button", {
+        name: "Remove",
+      }),
+    );
+
+    expect(await screen.findByText(/cannot be deleted/)).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "sunrise.png" })).toBeInTheDocument();
+  });
+
+  describe("character field customization", () => {
+    const characters = { ...DEFAULT_APP_BACKGROUND, kind: "characters" as const };
+
+    async function openCustomize(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByText("Customize"));
+    }
+
+    it("offers Customize only while the character field is the ground", () => {
+      const { rerender } = render(
+        <AppBackgroundSettings
+          background={{ ...DEFAULT_APP_BACKGROUND, kind: "none" }}
+          onChange={vi.fn()}
+        />,
+      );
+      expect(screen.queryByText("Customize")).toBeNull();
+      rerender(<AppBackgroundSettings background={characters} onChange={vi.fn()} />);
+      expect(screen.getByText("Customize")).toBeInTheDocument();
+    });
+
+    it("updates the ground as a person types their own characters", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(<AppBackgroundSettings background={characters} onChange={onChange} />);
+      await openCustomize(user);
+      const field = screen.getByRole("textbox", { name: "Characters" });
+      await user.clear(field);
+      await user.type(field, "01");
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: "characters", characterSet: "01" }),
+      );
+    });
+
+    it("keeps the last good set and says why when an emoji is typed", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(
+        <AppBackgroundSettings
+          background={{ ...characters, characterSet: "01" }}
+          onChange={onChange}
+        />,
+      );
+      await openCustomize(user);
+      const field = screen.getByRole("textbox", { name: "Characters" });
+      await user.type(field, "😀");
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByText(/Emoji and spaces are left out/)).toBeInTheDocument();
+    });
+
+    it("moves density and speed on the ground", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(<AppBackgroundSettings background={characters} onChange={onChange} />);
+      await openCustomize(user);
+      fireEvent.change(screen.getByRole("slider", { name: "Density" }), {
+        target: { value: "80" },
+      });
+      expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ characterDensity: 80 }));
+      fireEvent.change(screen.getByRole("slider", { name: "Speed" }), { target: { value: "0" } });
+      expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ characterSpeed: 0 }));
+    });
+
+    it("resets the characters, density and speed to the default field", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(
+        <AppBackgroundSettings
+          background={{
+            ...characters,
+            characterSet: "01",
+            characterDensity: 80,
+            characterSpeed: 10,
+            characterPattern: "rings",
+          }}
+          onChange={onChange}
+        />,
+      );
+      await openCustomize(user);
+      await user.click(screen.getByRole("button", { name: "Reset" }));
+      const next = onChange.mock.calls.at(-1)?.[0];
+      expect(next).toMatchObject({ kind: "characters" });
+      expect(next).not.toHaveProperty("characterSet");
+      expect(next).not.toHaveProperty("characterDensity");
+      expect(next).not.toHaveProperty("characterSpeed");
+      expect(next).not.toHaveProperty("characterPattern");
+    });
+
+    it("saves the chosen pattern once on pick, and shows all in turn when none is stored", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      const onPreview = vi.fn();
+      render(
+        <AppBackgroundSettings background={characters} onChange={onChange} onPreview={onPreview} />,
+      );
+      await openCustomize(user);
+      const pattern = screen.getByRole("combobox", { name: "Character pattern" });
+      expect(pattern).toHaveTextContent("All in turn");
+      await user.click(pattern);
+      expect(await screen.findAllByRole("option")).toHaveLength(4);
+      await user.click(screen.getByRole("option", { name: "Rings" }));
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: "characters", characterPattern: "rings" }),
+      );
+    });
+
+    describe("grounds from plugins", () => {
+      const nightDots: ContributedGround = {
+        id: "plugin:pkg:dots",
+        displayName: "Night dots",
+        pluginName: "Night pack",
+        ground: { characterSet: "AB", characterDensity: 60, characterPattern: "rings" },
+      };
+      const renderWith = (
+        grounds: ReadonlyArray<ContributedGround>,
+        background: AppBackground = characters,
+        onChange = vi.fn(),
+      ) =>
+        render(
+          <PluginGroundsContext.Provider value={grounds}>
+            <AppBackgroundSettings background={background} onChange={onChange} />
+          </PluginGroundsContext.Provider>,
+        );
+
+      it("lists a plugin's grounds under From plugins, and no group when there are none", async () => {
+        const user = userEvent.setup();
+        const first = renderWith([]);
+        await openCustomize(user);
+        await user.click(screen.getByRole("combobox", { name: "Starter character set" }));
+        expect(await screen.findByRole("option", { name: "Binary" })).toBeInTheDocument();
+        expect(screen.queryByText("From plugins")).toBeNull();
+        first.unmount();
+
+        renderWith([nightDots]);
+        await openCustomize(user);
+        await user.click(screen.getByRole("combobox", { name: "Starter character set" }));
+        expect(await screen.findByText("From plugins")).toBeInTheDocument();
+        expect(
+          await screen.findByRole("option", { name: "Night dots (Night pack)" }),
+        ).toBeInTheDocument();
+      });
+
+      it("copies a picked ground's values into the person's ground and saves once", async () => {
+        const user = userEvent.setup();
+        const onChange = vi.fn();
+        renderWith([nightDots], { ...characters, characterSpeed: 10 }, onChange);
+        await openCustomize(user);
+        await user.click(screen.getByRole("combobox", { name: "Starter character set" }));
+        await user.click(await screen.findByRole("option", { name: "Night dots (Night pack)" }));
+        expect(onChange).toHaveBeenCalledTimes(1);
+        const saved = onChange.mock.calls[0]?.[0];
+        expect(saved).toMatchObject({
+          kind: "characters",
+          characterSet: "AB",
+          characterDensity: 60,
+          characterPattern: "rings",
+        });
+        expect(saved).not.toHaveProperty("characterSpeed");
+        expect(JSON.stringify(saved)).not.toContain("plugin:");
+        expect(screen.getByRole("textbox", { name: "Characters" })).toHaveValue("AB");
+      });
+
+      it("drops a disabled plugin's ground from the menu while the person's copy stays", async () => {
+        const user = userEvent.setup();
+        const copy = { ...characters, characterSet: "AB", characterDensity: 60 };
+        const { rerender } = renderWith([nightDots], copy);
+        await openCustomize(user);
+        rerender(
+          <PluginGroundsContext.Provider value={[]}>
+            <AppBackgroundSettings background={copy} onChange={vi.fn()} />
+          </PluginGroundsContext.Provider>,
+        );
+        await user.click(screen.getByRole("combobox", { name: "Starter character set" }));
+        await screen.findByRole("option", { name: "Binary" });
+        expect(screen.queryByRole("option", { name: /Night dots/ })).toBeNull();
+        expect(screen.getByRole("textbox", { name: "Characters" })).toHaveValue("AB");
+      });
+    });
+
+    it("previews slider and typing changes and saves once when the person lets go", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      const onPreview = vi.fn();
+      render(
+        <AppBackgroundSettings background={characters} onChange={onChange} onPreview={onPreview} />,
+      );
+      await openCustomize(user);
+      const density = screen.getByRole("slider", { name: "Density" });
+      fireEvent.change(density, { target: { value: "60" } });
+      fireEvent.change(density, { target: { value: "70" } });
+      expect(onPreview).toHaveBeenCalledTimes(2);
+      expect(onChange).not.toHaveBeenCalled();
+      fireEvent.pointerUp(density);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ characterDensity: 70 }));
+      const field = screen.getByRole("textbox", { name: "Characters" });
+      await user.clear(field);
+      await user.type(field, "01");
+      expect(onChange).toHaveBeenCalledTimes(1);
+      await user.keyboard("{Enter}");
+      expect(onChange).toHaveBeenCalledTimes(2);
+      expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ characterSet: "01" }));
+    });
+
+    it("clears the typed text and the note when Reset is pressed", async () => {
+      const user = userEvent.setup();
+      render(<AppBackgroundSettings background={characters} onChange={vi.fn()} />);
+      await openCustomize(user);
+      const field = screen.getByRole("textbox", { name: "Characters" });
+      await user.type(field, "😀");
+      expect(screen.getByText(/Emoji and spaces are left out/)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Reset" }));
+      expect(screen.queryByText(/Emoji and spaces are left out/)).toBeNull();
+      expect(field).toHaveValue(DEFAULT_CHARACTER_SET);
     });
   });
 });

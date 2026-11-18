@@ -1,7 +1,7 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { CodeFileId, CodeFileMetadata, CodeRelativePath } from "@octant/contracts/code";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronRight, File, Folder, FolderOpen, RefreshCw, Search, X } from "lucide-react";
+import { ChevronRight, Code, File, FileText, Image, RefreshCw, Search, X } from "../ui/icons";
 import {
   useEffect,
   useLayoutEffect,
@@ -46,7 +46,65 @@ export type CodeFileExplorerEntry =
         | { readonly status: "unavailable"; readonly reason: string };
     };
 
+/** How a file differs from the checkout's last commit, for the mark at its row's end. */
+export type CodeFileChange = "modified" | "added";
+
+const CODE_EXTENSIONS = new Set([
+  "c",
+  "cc",
+  "cjs",
+  "cpp",
+  "cs",
+  "css",
+  "go",
+  "h",
+  "html",
+  "java",
+  "js",
+  "json",
+  "jsx",
+  "kt",
+  "mjs",
+  "py",
+  "rb",
+  "rs",
+  "scss",
+  "sh",
+  "sql",
+  "swift",
+  "toml",
+  "ts",
+  "tsx",
+  "xml",
+  "yaml",
+  "yml",
+]);
+const DOCUMENT_EXTENSIONS = new Set(["md", "mdx", "rst", "txt"]);
+const IMAGE_EXTENSIONS = new Set(["avif", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp"]);
+
+/** The glyph kind a file name earns: code, document, image, or a plain file. */
+export function fileKindOf(name: string): "code" | "document" | "image" | "file" {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return "file";
+  const extension = name.slice(dot + 1).toLowerCase();
+  if (CODE_EXTENSIONS.has(extension)) return "code";
+  if (DOCUMENT_EXTENSIONS.has(extension)) return "document";
+  if (IMAGE_EXTENSIONS.has(extension)) return "image";
+  return "file";
+}
+
+function FileGlyph(props: { readonly name: string }) {
+  const kind = fileKindOf(props.name);
+  const Glyph =
+    kind === "code" ? Code : kind === "document" ? FileText : kind === "image" ? Image : File;
+  return <Glyph aria-hidden="true" data-file-kind={kind} size={16} />;
+}
+
 export interface CodeFileExplorerProps {
+  /** Files that differ from the last commit, by path. */
+  readonly changes?: ReadonlyMap<string, CodeFileChange>;
+  /** A double click: the viewer keeps the file open instead of previewing it. */
+  readonly onKeepFile?: (entry: Extract<CodeFileExplorerEntry, { readonly kind: "file" }>) => void;
   readonly entries: ReadonlyArray<CodeFileExplorerEntry>;
   readonly loading?: boolean;
   readonly onOpenFile: (entry: Extract<CodeFileExplorerEntry, { readonly kind: "file" }>) => void;
@@ -329,6 +387,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
             "aria-setsize": siblingPosition.setSize,
           }),
       "data-index": index,
+      "data-muted": quietPath(label) ? "true" : undefined,
       "data-path": label,
       ref: virtualized ? virtualizer.measureElement : undefined,
       role: "treeitem" as const,
@@ -349,12 +408,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
           type="button"
           variant="bare"
         >
-          <ChevronRight aria-hidden="true" className="code-file-explorer__chevron" size={16} />
-          {open ? (
-            <FolderOpen aria-hidden="true" size={14} />
-          ) : (
-            <Folder aria-hidden="true" size={14} />
-          )}
+          <ChevronRight aria-hidden="true" className="code-file-explorer__chevron" size={12} />
           <FileName name={pathBasename(entry.path)} />
         </OctantButton>
       );
@@ -374,7 +428,8 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
       (normalized !== "" || duplicateBasenames.has(name))
         ? pathBasename(parent)
         : undefined;
-    const title = `${label}${availability === undefined ? "" : ` ${availability}`}`;
+    const change = props.changes?.get(label);
+    const title = `${label}${availability === undefined ? "" : ` ${availability}`}${change === undefined ? "" : ` (${change})`}`;
     return (
       <OctantButton
         {...rowProps}
@@ -384,17 +439,22 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
         disabled={unavailable}
         key={`file:${entry.fileId}:${entry.path}`}
         onClick={() => props.onOpenFile(entry)}
+        onDoubleClick={() => props.onKeepFile?.(entry)}
         title={title}
         type="button"
         variant="bare"
       >
-        <File aria-hidden="true" size={14} />
+        <span aria-hidden="true" className="code-file-explorer__chevron-slot" />
+        <FileGlyph name={name} />
         <FileName name={name} />
         {parentHint === undefined ? null : (
           <span className="code-file-explorer__hint">{parentHint}</span>
         )}
         {availability === undefined ? null : (
           <small className="code-file-explorer__detail">{availability}</small>
+        )}
+        {change === undefined ? null : (
+          <span aria-hidden="true" className="code-file-explorer__mark" data-change={change} />
         )}
       </OctantButton>
     );
@@ -447,19 +507,6 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
         )}
       </div>
 
-      {props.truncated === true ? (
-        <p className="code-file-explorer__status" role="status">
-          Octant listed part of this repository. The file tree is incomplete.
-        </p>
-      ) : null}
-
-      {incomplete ? (
-        <p className="code-file-explorer__status" role="status">
-          Showing the first {MAX_CODE_FILE_EXPLORER_ENTRIES.toLocaleString("en")} entries. The file
-          tree is incomplete.
-        </p>
-      ) : null}
-
       {visible.length === 0 ? (
         props.loading === true && props.entries.length === 0 ? (
           <OctantEmpty state="loading" title="Loading files" />
@@ -499,10 +546,36 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
                 })
               : visible.map((entry, index) => renderEntry(entry, index))}
           </div>
+          {incomplete ? (
+            <div className="code-file-explorer__more" role="status">
+              Showing the first {MAX_CODE_FILE_EXPLORER_ENTRIES.toLocaleString("en")} entries
+            </div>
+          ) : null}
         </div>
       )}
     </section>
   );
+}
+
+/** Folders that hold what a checkout generates or tools keep, which a reader rarely opens. */
+const QUIET_FOLDERS: ReadonlySet<string> = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  "target",
+  "coverage",
+  "vendor",
+  "__pycache__",
+]);
+
+/**
+ * Whether a path is a dotfolder, a dotfile or inside an ignored folder, so its
+ * row is drawn in the quiet ink. A hint for reading the tree, never a rule of
+ * what may be opened.
+ */
+function quietPath(path: string): boolean {
+  return path.split("/").some((segment) => segment.startsWith(".") || QUIET_FOLDERS.has(segment));
 }
 
 function entryLevel(path: CodeRelativePath): number {

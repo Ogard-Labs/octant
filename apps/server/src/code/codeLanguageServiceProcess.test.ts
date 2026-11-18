@@ -27,6 +27,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { decodeCodeLanguageReadRequest } from "@octant/contracts/code-language";
+import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import type {
   CodeLanguageDocumentResult,
   CodeLanguageReadResult,
@@ -37,6 +38,7 @@ import {
   type ProcessConfinementPort,
   type ProcessConfinementPrepareInput,
 } from "../process/seatbeltProfile";
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
 import { deriveCodeFileId } from "./codeFileIdentity";
 import { withProjectExtraFolders } from "./codeProjectFolderRoot";
 import {
@@ -56,6 +58,7 @@ const roots: string[] = [];
 const services: CodeLanguageService[] = [];
 
 afterEach(async () => {
+  configureSandboxRestrictionsAuthority(undefined);
   await Promise.all(services.splice(0).map((service) => service.close()));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -172,6 +175,11 @@ function harness(input: {
   readonly approvals?: CodeLanguageServiceOptions["approvals"];
   readonly egress?: LanguageServerEgress;
   readonly threadTainted?: CodeLanguageServiceOptions["threadTainted"];
+  readonly threadStrict?: CodeLanguageServiceOptions["threadStrict"];
+  readonly processes?: Pick<
+    NonNullable<ConstructorParameters<typeof LanguageServerProcessPort>[0]>,
+    "platform" | "stopWindowsTree"
+  >;
   readonly usesProjectToolchain?: CodeLanguageServiceOptions["usesProjectToolchain"];
 }): Harness {
   const state = {
@@ -189,6 +197,7 @@ function harness(input: {
     confinement: input.confinement,
     ...(input.receipts === undefined ? {} : { receiptDirectory: input.receipts }),
     ...(input.egress === undefined ? {} : { egress: input.egress }),
+    ...input.processes,
   });
   const service = new CodeLanguageService({
     authority: {
@@ -231,6 +240,7 @@ function harness(input: {
     ...(input.watcher === undefined ? {} : { watcher: input.watcher }),
     ...(input.approvals === undefined ? {} : { approvals: input.approvals }),
     ...(input.threadTainted === undefined ? {} : { threadTainted: input.threadTainted }),
+    ...(input.threadStrict === undefined ? {} : { threadStrict: input.threadStrict }),
     ...(input.usesProjectToolchain === undefined
       ? {}
       : { usesProjectToolchain: input.usesProjectToolchain }),
@@ -629,6 +639,39 @@ describe("Code language service authority", () => {
     expect(other.test.launches()).toBe(0);
   });
 
+  it("starts a server unconfined on Windows for a thread outside Strict, stops its tree, and refuses a Strict thread", async () => {
+    let strict = false;
+    const stopped: number[] = [];
+    const { test } = fake("normal", {
+      platform: "windows",
+      threadStrict: () => strict,
+      confinement: {
+        prepare: () => {
+          throw new Error("A Windows language server is never prepared through confinement.");
+        },
+      },
+      processes: {
+        platform: "win32",
+        stopWindowsTree: async (pid) => {
+          stopped.push(pid);
+          process.kill(pid, "SIGKILL");
+          return "stopped";
+        },
+      },
+    });
+    const fileId = syncedFileId(await test.open("b.ts"));
+    expect(test.launches()).toBe(1);
+    expect((await test.diagnostics(fileId)).status).toBe("diagnostics");
+
+    strict = true;
+    expect(await test.diagnostics(fileId)).toEqual({
+      status: "refused",
+      reason: "unsupported-platform",
+    });
+    await test.service.close();
+    expect(stopped.length).toBeGreaterThan(0);
+  });
+
   it("answers turned-off once the person turns the server off, and stops the one running", async () => {
     const { test, paths } = fake();
     const fileId = syncedFileId(await test.open("b.ts"));
@@ -938,6 +981,57 @@ describe("Code language service reads for an agent", () => {
       reason: "path-outside-checkout",
     });
     expect(test.launches()).toBe(0);
+  });
+
+  it("refuses host-owned agent reads that require object-level sandbox mediation", async () => {
+    for (const policy of [
+      {
+        filesystem: {
+          readOnlyRoots: [],
+          readWriteRoots: [],
+          protectedPaths: [{ path: "/protected/source.ts", mode: "deny" as const }],
+        },
+        credentials: "existing-policy" as const,
+      },
+      {
+        filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+        credentials: "isolated" as const,
+      },
+    ]) {
+      const { test, paths } = fake();
+      const selection = decodeSandboxPolicySelection({
+        policy: {
+          schemaVersion: 1,
+          revision: 1,
+          ...policy,
+          network: "existing-policy",
+          hostServices: "blocked",
+        },
+        context: {
+          root: paths.checkout,
+          hostId: "host",
+          projectId: test.state.thread.projectId,
+          threadId: test.state.thread.id,
+          checkoutId: test.state.thread.checkoutId,
+          sessionId: `sandbox-${policy.credentials}`,
+          provider: "codex",
+        },
+      });
+      configureSandboxRestrictionsAuthority({
+        validateSelection: () => true,
+        active: () => selection,
+        beginTurn: () => ({ status: "refused", message: "unused" }),
+        storageDirectory: () => undefined,
+        deny: () => undefined,
+        registerCleanup: () => () => undefined,
+      });
+      expect(await test.agent("b.ts")).toEqual({
+        status: "refused",
+        reason: "sandbox-read-denied",
+      });
+      expect(test.launches()).toBe(0);
+      configureSandboxRestrictionsAuthority(undefined);
+    }
   });
 
   it("reads a file in an extra folder by absolute path, in a server of its own, and refuses a folder beside it", async () => {

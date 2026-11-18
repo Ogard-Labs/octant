@@ -24,6 +24,7 @@ const domTestFilesWithoutJsx = [
   "src/settings/useSettingsRoute.test.ts",
   "src/shell/useLaunchSession.test.ts",
   "src/shell/useShellPresentation.test.ts",
+  "src/theme/appBackdropAscii.test.ts",
   "src/theme/appBackdropCharacters.test.ts",
   "src/theme/appBackdropFlowing.test.ts",
   "src/theme/appBackdropPrint.test.ts",

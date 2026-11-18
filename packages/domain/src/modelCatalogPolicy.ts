@@ -101,13 +101,14 @@ const nativeToolRuntimeDrivers: ReadonlySet<ProviderDriverKind> = new Set([
   "opencode",
   "pi",
   ...ACP_AGENT_KINDS,
+  "acp-agent",
 ]);
 
 export function isNativeToolRuntimeDriver(driverKind: ProviderDriverKind): boolean {
   return nativeToolRuntimeDrivers.has(driverKind);
 }
 
-// Native agent runtimes (Codex CLI, Claude SDK, OpenCode, ACP drivers) supply
+// Native agent runtimes (Codex, Claude SDK, OpenCode, ACP drivers) supply
 // tool execution from the provider runtime rather than a direct-model
 // tool-calling loop, so their probes intentionally omit model-level
 // tool-calling evidence. For those drivers a ready probe with a verified
@@ -266,6 +267,8 @@ function binaryOf(instance: ProviderInstance): string | undefined {
     case "pi-rpc":
     case "claude-agent-sdk":
       return instance.configuration.binaryPath;
+    case "acp-agent":
+      return instance.configuration.install?.executable;
     default:
       return isAcpAgentInstance(instance) ? instance.configuration.binaryPath : undefined;
   }

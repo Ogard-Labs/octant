@@ -94,9 +94,8 @@
 }
 
 /* ── Button ────────────────────────────────────────────────────────────
-   A filled button is a raised tile: light on its top edge, a short shadow
-   under it. Pressing darkens the fill and sinks the shadow; nothing moves.
-   Ghost draws no tile. */
+   A filled button is a flat fill: no bevel, gradient or shadow. Pointing at it
+   and pressing it change the fill; nothing moves. Ghost draws no fill. */
 .oct-button {
   display: inline-flex;
   flex: none;
@@ -115,33 +114,27 @@
   line-height: 1;
   white-space: nowrap;
   cursor: default;
-  box-shadow: var(--octant-shadow-control);
-  transition:
-    background-color var(--oct-motion-fast) var(--oct-ease-color),
-    box-shadow var(--oct-motion-fast) var(--oct-ease-color);
+  transition: background-color var(--oct-motion-fast) var(--oct-ease-color);
 }
 .oct-button:hover {
   background: color-mix(in oklab, var(--octant-control), var(--octant-text-primary) 5%);
 }
 .oct-button:active {
   background: var(--octant-control-pressed);
-  box-shadow: var(--octant-shadow-control-pressed);
 }
 .oct-button:active,
 .oct-icon-button:active {
   transition-duration: 0s;
 }
 .oct-button--primary {
-  background: var(--octant-accent-sheen), var(--octant-accent);
+  background: var(--octant-accent);
   color: var(--octant-primary-foreground);
-  box-shadow: var(--octant-shadow-primary);
 }
 .oct-button--primary:hover {
-  background: var(--octant-accent-sheen), color-mix(in srgb, var(--octant-accent) 88%, transparent);
+  background: color-mix(in srgb, var(--octant-accent) 88%, transparent);
 }
 .oct-button--primary:active {
   background: var(--octant-accent);
-  box-shadow: var(--octant-shadow-control-pressed);
 }
 .oct-button--primary:focus-visible {
   outline-color: var(--oct-focus-edge-on-accent);
@@ -228,14 +221,14 @@
 }
 
 /* ── Card ──────────────────────────────────────────────────────────────
-   A discrete object on a pane: the card fill, a rim brighter along its top
-   edge, a short drop. Rows inside it are divided by a hairline inset by the
+   A discrete object on a pane: the card fill and one hairline, no shadow. Rows inside it are divided by a hairline inset by the
    card's own padding, so the line starts where the text does. */
 .oct-card {
   overflow: hidden;
   border-radius: var(--oct-radius-md);
   background: var(--octant-card);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-hairline);
+  outline-offset: -1px;
 }
 .oct-card__body {
   padding: var(--oct-space-4);
@@ -257,12 +250,11 @@
 }
 
 /* ── Well ──────────────────────────────────────────────────────────────
-   Cut in: darker than what it sits in, an inner top shadow, a light line
-   under its bottom edge. What is chosen in a well is a raised control again. */
+   Darker than what it sits in, flat: no inner shadow. What is chosen in a well
+   is a flat control fill. */
 .oct-well {
   border-radius: var(--oct-radius-sm);
   background: var(--octant-well);
-  box-shadow: var(--octant-shadow-well);
 }
 .oct-segmented {
   display: inline-flex;
@@ -286,14 +278,12 @@
 .oct-segmented__item[aria-pressed="true"] {
   background: var(--octant-control);
   color: var(--oct-fg);
-  box-shadow: var(--octant-shadow-control);
 }
 
 /* ── Menu ──────────────────────────────────────────────────────────────
    A floating surface, frosted over whatever is behind it: the float fill
-   at partial strength over a blur, a sheen along the lit top edge, and the pop
-   shadow, which draws the rim, the one outer hairline and the lift (the menu
-   sets no border). Rows are at the shared menu row height, standing in from the
+   at partial strength over a blur, and the pop shadow, which draws the one
+   outer hairline and the lift (the menu sets no border). Rows are at the shared menu row height, standing in from the
    edge by the menu inset, at the control radius. A reduced-transparency
    preference puts the opaque float fill back. */
 .oct-menu {
@@ -302,7 +292,7 @@
   flex-direction: column;
   padding: var(--oct-menu-inset);
   border-radius: var(--oct-radius-md);
-  background: var(--octant-float-sheen), var(--octant-float-glass);
+  background: var(--octant-float-glass);
   backdrop-filter: var(--octant-float-blur);
   -webkit-backdrop-filter: var(--octant-float-blur);
   box-shadow: var(--octant-shadow-pop);
@@ -418,7 +408,6 @@
 }
 .oct-nav-row[aria-current="page"] {
   background: var(--octant-control);
-  box-shadow: var(--octant-shadow-selected);
 }
 
 @media (prefers-reduced-motion: reduce) {

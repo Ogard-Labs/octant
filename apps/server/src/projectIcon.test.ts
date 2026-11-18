@@ -47,6 +47,27 @@ describe("Project icon lookup", () => {
     expect(found.status === "found" && found.mediaType).toBe("image/x-icon");
   });
 
+  it("finds a monorepo's favicon in its web app when the root has none", async () => {
+    const root = await folder();
+    await mkdir(join(root, "apps", "web", "public"), { recursive: true });
+    await writeFile(join(root, "apps", "web", "public", "favicon.svg"), SVG);
+
+    const found = await findProjectIcon(root);
+
+    expect(found.status === "found" && found.mediaType).toBe("image/svg+xml");
+  });
+
+  it("prefers a root icon over one inside a monorepo app", async () => {
+    const root = await folder();
+    await writeFile(join(root, "favicon.ico"), ICO);
+    await mkdir(join(root, "packages", "web", "public"), { recursive: true });
+    await writeFile(join(root, "packages", "web", "public", "favicon.svg"), SVG);
+
+    const found = await findProjectIcon(root);
+
+    expect(found.status === "found" && found.mediaType).toBe("image/x-icon");
+  });
+
   it("answers none for a folder without an icon", async () => {
     expect(await findProjectIcon(await folder())).toEqual({ status: "none" });
   });

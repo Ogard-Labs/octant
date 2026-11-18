@@ -7,6 +7,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Schema } from "effect";
+import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { decodeWindowId, ToolEgressRuleId, type AggregateId } from "@octant/contracts";
 import {
   RUNTIME_NETWORK_AGGREGATE,
@@ -183,6 +184,79 @@ function proxyOf(endpoint: EgressProxyEndpoint) {
 }
 
 describe("provider runtime network", () => {
+  it("does not give a personal terminal the provider's inference endpoints", async () => {
+    const host = runtimeHost();
+    const launch = await started(
+      host.network.start({
+        runtime: "terminal",
+        root: "/projects/app",
+        executionPolicy: "approval-gated",
+      }),
+    );
+    const result = await openTunnel(
+      proxyOf(launch.endpoint),
+      "api.openai.com:443",
+      basicAuthorization(tokenOf(launch.environment)),
+    );
+    sockets.push(result.socket);
+    expect(result.status).toBe(403);
+    expect(host.dialed).toEqual([]);
+  });
+  it("grants only an exact local service through the scoped proxy and closes its live tunnel on release", async () => {
+    const origin = await tcpFixture();
+    const neighbor = await tcpFixture();
+    const host = runtimeHost({ resolve: () => ["127.0.0.1"] });
+    const sandboxPolicy = decodeSandboxPolicySelection({
+      policy: {
+        schemaVersion: 1,
+        revision: 1,
+        filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+        network: "deny",
+        credentials: "existing-policy",
+        hostServices: "blocked",
+        localServices: [{ host: "127.0.0.1", port: origin.port }],
+      },
+      context: {
+        root: "/projects/app",
+        hostId: "host",
+        projectId,
+        checkoutId: "checkout",
+        sessionId: "local-service-session",
+        provider: "codex",
+      },
+    });
+    const launch = await started(
+      host.network.start({
+        runtime: "codex",
+        root: "/projects/app",
+        executionPolicy: "full-access",
+        sandboxPolicy,
+      }),
+    );
+    const authorization = basicAuthorization(tokenOf(launch.environment));
+    const allowed = await openTunnel(
+      proxyOf(launch.endpoint),
+      `127.0.0.1:${origin.port}`,
+      authorization,
+    );
+    expect(allowed.status).toBe(200);
+    sockets.push(allowed.socket);
+    expect(await roundTrip(allowed.socket, "ping", 4)).toBe("ping");
+    for (const target of [
+      `127.0.0.1:${neighbor.port}`,
+      `localhost:${origin.port}`,
+      `unlisted.example:${origin.port}`,
+      `[::1]:${origin.port}`,
+      `127.0.0.2:${origin.port}`,
+    ]) {
+      const refused = await openTunnel(proxyOf(launch.endpoint), target, authorization);
+      sockets.push(refused.socket);
+      expect(refused.status, target).toBe(403);
+    }
+    expect(host.dialed).toEqual([{ address: "127.0.0.1", port: origin.port }]);
+    await launch.release();
+    await waitFor(() => allowed.socket.destroyed);
+  });
   it("lets a runtime reach its provider's own endpoint and refuses an unlisted host with the host named, journaling both", async () => {
     const origin = await tcpFixture();
     const host = runtimeHost({ routes: new Map([["93.184.216.10", origin.port]]) });
@@ -1098,108 +1172,134 @@ describe.skipIf(process.platform !== "darwin")("a wrapped runtime under Seatbelt
 describe.runIf(process.platform === "linux" && existsSync("/usr/bin/bwrap"))(
   "a wrapped runtime under Bubblewrap",
   () => {
-    it("reaches a trusted server and its own tool bridge through its proxy, is refused the rest, and cannot go around it", async () => {
-      const answer = (body: string) =>
-        createHttpServer((_request, response) => {
-          response.writeHead(200, { "content-type": "text/plain" });
-          response.end(body);
-        });
-      const trusted = answer("TRUSTED-ORIGIN");
-      const other = answer("OTHER-ORIGIN");
-      const bridge = answer("TOOL-BRIDGE");
-      for (const server of [trusted, other, bridge]) {
-        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-      }
-      const portOf = (server: HttpServer) => {
-        const address = server.address();
-        return typeof address === "object" && address !== null ? address.port : 0;
-      };
-      const planted = mkdtempSync("/tmp/octant-runtime-capsule-");
-      directories.push(planted);
-      try {
-        const root = join(planted, "project");
-        const work = join(planted, "work");
-        const sockets = join(planted, "sockets");
-        mkdirSync(root);
-        mkdirSync(work, { mode: 0o700 });
-        mkdirSync(sockets, { mode: 0o700 });
-        const host = runtimeHost({ socketDirectory: sockets });
-        host.store.set({
-          scope: { kind: "account" },
-          places: [{ kind: "private-network", tag: "this-mac", port: portOf(trusted) }],
-          principal: "local-window",
-        });
-        const network = await started(
-          host.network.start({
-            runtime: "pi",
-            root,
-            executionPolicy: "approval-gated",
-            loopbackPorts: [portOf(bridge)],
-          }),
-        );
-        expect(network.endpoint.kind).toBe("unix-socket");
-        const curl = "curl -s -m 5";
-        const script = [
-          `${curl} http://127.0.0.1:${String(portOf(trusted))}/; echo " trusted-exit=$?"`,
-          `${curl} -o /dev/null -w 'other-status=%{http_code}' http://127.0.0.1:${String(portOf(other))}/; echo " other-exit=$?"`,
-          `${curl} --noproxy '*' http://127.0.0.1:${String(portOf(bridge))}/; echo " bridge-exit=$?"`,
-          `${curl} --noproxy '*' http://127.0.0.1:${String(portOf(trusted))}/; echo " direct-exit=$?"`,
-          `${curl} -o /dev/null -w 'name-status=%{http_connect}' https://unlisted.example/; echo " name-exit=$?"`,
-        ].join("; ");
-        const launch = makeProcessConfinementLive({ platform: "linux" }).prepare({
-          executable: "/bin/sh",
-          args: ["-c", script],
-          boundRoot: root,
-          temporaryDirectory: work,
-          networkEgress: { kind: "proxied", endpoint: network.endpoint },
-          loopbackRelayPorts: [portOf(bridge)],
-          allowFileReadStar: true,
-        });
-        const output = await new Promise<string>((resolve) => {
-          execFile(
-            launch.command,
-            [...launch.args],
-            {
-              cwd: root,
-              env: { PATH: "/usr/bin:/bin", HOME: work, ...network.environment },
-              timeout: 30_000,
-            },
-            (_error, stdout, stderr) => resolve(`${stdout}${stderr}`),
+    it.each([false, true])(
+      "reaches only permitted services through the native proxy with an explicit Strict policy: %s",
+      async (strict) => {
+        const answer = (body: string) =>
+          createHttpServer((_request, response) => {
+            response.writeHead(200, { "content-type": "text/plain" });
+            response.end(body);
+          });
+        const trusted = answer("TRUSTED-ORIGIN");
+        const other = answer("OTHER-ORIGIN");
+        const bridge = answer("TOOL-BRIDGE");
+        for (const server of [trusted, other, bridge]) {
+          await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+        }
+        const portOf = (server: HttpServer) => {
+          const address = server.address();
+          return typeof address === "object" && address !== null ? address.port : 0;
+        };
+        const planted = mkdtempSync("/tmp/octant-runtime-capsule-");
+        directories.push(planted);
+        try {
+          const root = join(planted, "project");
+          const work = join(planted, "work");
+          const sockets = join(planted, "sockets");
+          mkdirSync(root);
+          mkdirSync(work, { mode: 0o700 });
+          mkdirSync(sockets, { mode: 0o700 });
+          const sandboxPolicy = strict
+            ? decodeSandboxPolicySelection({
+                policy: {
+                  schemaVersion: 1,
+                  revision: 1,
+                  filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+                  network: "deny",
+                  hostServices: "blocked",
+                  credentials: "existing-policy",
+                  localServices: [{ host: "127.0.0.1", port: portOf(trusted) }],
+                },
+                context: {
+                  root,
+                  hostId: "host",
+                  projectId,
+                  checkoutId: "checkout",
+                  sessionId: "native-local-service",
+                  provider: "pi",
+                },
+              })
+            : undefined;
+          const host = runtimeHost({ socketDirectory: sockets });
+          host.store.set({
+            scope: { kind: "account" },
+            places: [{ kind: "private-network", tag: "this-mac", port: portOf(trusted) }],
+            principal: "local-window",
+          });
+          const network = await started(
+            host.network.start({
+              runtime: "pi",
+              root,
+              executionPolicy: "approval-gated",
+              loopbackPorts: [portOf(bridge)],
+              ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
+            }),
           );
-        });
-        expect(output).toContain("TRUSTED-ORIGIN trusted-exit=0");
-        expect(output).toContain("other-status=403");
-        expect(output).not.toContain("OTHER-ORIGIN");
-        expect(output).toContain("TOOL-BRIDGE bridge-exit=0");
-        expect(output).not.toMatch(/TRUSTED-ORIGIN direct-exit/);
-        expect(output).toMatch(/direct-exit=[1-9]/);
-        expect(output).toContain("name-status=403");
-        await network.release();
-        const summary = host
-          .events(RUNTIME_NETWORK_AGGREGATE)
-          .find((event) => event.eventName === RUNTIME_NETWORK_EVENT_NAMES.launchSummarized);
-        expect(summary?.payload).toMatchObject({
-          entries: expect.arrayContaining([
-            expect.objectContaining({
-              host: "127.0.0.1",
-              port: portOf(trusted),
-              decision: "allowed",
-            }),
-            expect.objectContaining({
-              host: "127.0.0.1",
-              port: portOf(bridge),
-              decision: "allowed",
-            }),
-            expect.objectContaining({
-              host: "127.0.0.1",
-              port: portOf(other),
-              decision: "refused",
-            }),
-          ]),
-        });
-      } finally {
-        for (const server of [trusted, other, bridge]) server.close();
-      }
-    });
+          expect(network.endpoint.kind).toBe("unix-socket");
+          const curl = "curl -s -m 5";
+          const script = [
+            `${curl} http://127.0.0.1:${String(portOf(trusted))}/; echo " trusted-exit=$?"`,
+            `${curl} -o /dev/null -w 'other-status=%{http_code}' http://127.0.0.1:${String(portOf(other))}/; echo " other-exit=$?"`,
+            `${curl} --noproxy '*' http://127.0.0.1:${String(portOf(bridge))}/; echo " bridge-exit=$?"`,
+            `${curl} --noproxy '*' http://127.0.0.1:${String(portOf(trusted))}/; echo " direct-exit=$?"`,
+            `${curl} -o /dev/null -w 'name-status=%{http_connect}' https://unlisted.example/; echo " name-exit=$?"`,
+          ].join("; ");
+          const launch = makeProcessConfinementLive({ platform: "linux" }).prepare({
+            executable: "/bin/sh",
+            args: ["-c", script],
+            boundRoot: root,
+            temporaryDirectory: work,
+            networkEgress: { kind: "proxied", endpoint: network.endpoint },
+            loopbackRelayPorts: [portOf(bridge)],
+            allowFileReadStar: true,
+            ...(sandboxPolicy === undefined ? {} : { sandboxPolicy, sandboxProviderChannel: true }),
+          });
+          const output = await new Promise<string>((resolve) => {
+            execFile(
+              launch.command,
+              [...launch.args],
+              {
+                cwd: root,
+                env: { PATH: "/usr/bin:/bin", HOME: work, ...network.environment },
+                timeout: 30_000,
+              },
+              (_error, stdout, stderr) => resolve(`${stdout}${stderr}`),
+            );
+          });
+          expect(output).toContain("TRUSTED-ORIGIN trusted-exit=0");
+          expect(output).toContain("other-status=403");
+          expect(output).not.toContain("OTHER-ORIGIN");
+          expect(output).toContain("TOOL-BRIDGE bridge-exit=0");
+          expect(output).not.toMatch(/TRUSTED-ORIGIN direct-exit/);
+          expect(output).toMatch(/direct-exit=[1-9]/);
+          expect(output).toContain("name-status=403");
+          await network.release();
+          const summary = host
+            .events(RUNTIME_NETWORK_AGGREGATE)
+            .find((event) => event.eventName === RUNTIME_NETWORK_EVENT_NAMES.launchSummarized);
+          expect(summary?.payload).toMatchObject({
+            entries: expect.arrayContaining([
+              expect.objectContaining({
+                host: "127.0.0.1",
+                port: portOf(trusted),
+                decision: "allowed",
+              }),
+              expect.objectContaining({
+                host: "127.0.0.1",
+                port: portOf(bridge),
+                decision: "allowed",
+              }),
+              expect.objectContaining({
+                host: "127.0.0.1",
+                port: portOf(other),
+                decision: "refused",
+              }),
+            ]),
+          });
+        } finally {
+          for (const server of [trusted, other, bridge]) server.close();
+        }
+      },
+    );
   },
 );

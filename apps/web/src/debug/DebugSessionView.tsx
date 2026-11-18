@@ -18,7 +18,7 @@ import {
   Play,
   Redo2,
   Square,
-} from "lucide-react";
+} from "../ui/icons";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import {
   useEffect,

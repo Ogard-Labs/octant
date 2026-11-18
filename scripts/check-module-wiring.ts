@@ -88,10 +88,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   // ── Remaining ──
   [
-    "packages/plugin-host/src/acpAgents.ts",
-    "Launch policy and registry list for adding any ACP agent, ahead of its host side (Settings' add, trust and enable flow and a provider instance on the shared ACP stack), which Provider runtimes: Any ACP agent records as not built. Remove once that host side imports it.",
-  ],
-  [
     "apps/server/src/remote/remoteExitEvidenceADriver.ts",
     "Browser-realm bundle entry built by remoteExitEvidenceA.smoke.test.ts via `bun build`; excluded from the server tsconfig on purpose. Remove once that evidence is served by a product caller or the smoke is retired.",
   ],
@@ -191,7 +187,7 @@ function isExemptByShape(path: string): boolean {
   if (isTestScaffolding(path)) return true;
   if (path.endsWith(".d.ts")) return true;
   // Process entry points are launched by path or config, never imported.
-  if (/(^|\/)(main|bin|index|preload)\.(ts|tsx)$/.test(path)) return true;
+  if (/(^|\/)(main|bootstrap|bin|index|preload)\.(ts|tsx)$/.test(path)) return true;
   if (path.endsWith("Cli.ts")) return true;
   // Platform variants are selected by the bundler from the base specifier.
   if (/\.(web|native|ios|android)\.(ts|tsx)$/.test(path)) return true;
@@ -414,11 +410,13 @@ function collectReferences(
     // product use either; counting it would hide every module only it depends on.
     if (islands.has(file.path)) continue;
 
-    // Electron loads dedicated preloads from bundled output, so there is no
-    // TypeScript import edge. Count only literal entries declared by tsdown.
+    // Bundled process entries (including Electron preloads and server workers)
+    // are launched from built paths, so there is no TypeScript import edge.
+    // Count only literal array or object values declared by tsdown.
     if (file.path.endsWith("/tsdown.config.ts")) {
-      for (const entry of file.content.matchAll(/\bentry\s*:\s*\[([^\]]*)\]/g)) {
-        for (const literal of (entry[1] ?? "").matchAll(/["']([^"']+\.(?:ts|tsx))["']/g)) {
+      for (const entry of file.content.matchAll(/\bentry\s*:\s*(?:\[([^\]]*)\]|\{([^}]*)\})/g)) {
+        const declaration = entry[1] ?? entry[2] ?? "";
+        for (const literal of declaration.matchAll(/["']([^"']+\.(?:ts|tsx))["']/g)) {
           const source = literal[1];
           if (source === undefined) continue;
           const target = normalizeJoin(dirname(file.path), source);

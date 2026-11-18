@@ -686,6 +686,7 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     "dialog",
     "downloadLimits",
     "pageTool",
+    "startedBy",
   ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
   if (!(BrowserActionKind.literals as ReadonlyArray<unknown>).includes(value.kind)) return false;
@@ -709,6 +710,9 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
           (file) => typeof file === "string" && file.length <= 4096 && file.startsWith("/"),
         ))) &&
     (value.downloads === undefined || value.downloads === "hold") &&
+    // Only a navigation is ever the person's own; see `BrowserSurfaceAction`.
+    (value.startedBy === undefined ||
+      (value.startedBy === "person" && value.kind === "navigate")) &&
     (value.dialog === undefined || Schema.is(BrowserDialogAnswer)(value.dialog)) &&
     (value.pageTool === undefined || Schema.is(BrowserPageToolCall)(value.pageTool)) &&
     (value.downloadLimits === undefined || isDownloadLimits(value.downloadLimits)) &&

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw } from "../ui/icons";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { StrictMode, useState, type ReactNode } from "react";
@@ -85,6 +85,7 @@ function Dock(props: { readonly layout: DockTileLayout; readonly onRefresh?: () 
       onFocusTile={() => {}}
       onHideTile={() => {}}
       onMoveTile={() => {}}
+      onPlaceTile={() => {}}
       onResizeColumn={() => {}}
       onResizeColumns={() => {}}
       onShowTileAlone={() => {}}
@@ -151,20 +152,13 @@ afterEach(() => {
 });
 
 describe("a tool's controls in its tile's bar", () => {
-  it("stands the tool's words and status, then its actions, between its name and Arrange and Close, in that order", () => {
+  it("stands the tool's words and status, then its actions, between its name and Close, in that order", () => {
     render(<Dock layout={two} />);
     const region = screen.getByRole("region", { name: "one" });
     const names = within(region)
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label") ?? button.textContent);
-    expect(names).toEqual([
-      "View A",
-      "View B",
-      "Refresh things",
-      "Thing actions",
-      "Arrange one",
-      "Close one",
-    ]);
+    expect(names).toEqual(["View A", "View B", "Refresh things", "Thing actions", "Close one"]);
     expect(within(region).getAllByText("3 things").length).toBeGreaterThan(0);
     expect(region.querySelectorAll(".dock-tile__bar")).toHaveLength(1);
     expect(screen.getByText("tiled, view a")).toBeInTheDocument();
@@ -247,30 +241,29 @@ describe("a tool's controls in its tile's bar", () => {
 });
 
 describe("a tool shown alone", () => {
-  it("draws no tile bar and one slim row holding only the tool's controls", () => {
+  it("draws the same one bar a tiled tool has: its name, its controls and Close", () => {
     render(<Dock layout={alone} />);
-    expect(document.querySelector(".dock-tile__bar")).toBeNull();
-    const rows = document.querySelectorAll(".dock-tile__row");
-    expect(rows).toHaveLength(1);
-    expect(screen.getByText("alone, view a")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Arrange one" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Close one" })).toBeNull();
-    expect(within(rows[0] as HTMLElement).queryByText("one")).toBeNull();
-    expect(screen.getByRole("button", { name: "Refresh things" })).toBeInTheDocument();
-  });
-
-  it("draws no row at all for a tool that hands up no controls", () => {
-    render(<Dock layout={aloneWithoutControls} />);
-    expect(document.querySelector(".dock-tile__bar")).toBeNull();
+    const bars = document.querySelectorAll(".dock-tile__bar");
+    expect(bars).toHaveLength(1);
     expect(document.querySelector(".dock-tile__row")).toBeNull();
-    expect(screen.getByText("plain alone")).toBeInTheDocument();
+    expect(screen.getByText("tiled, view a")).toBeInTheDocument();
+    expect(within(bars[0] as HTMLElement).getByText("one")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh things" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close one" })).toBeInTheDocument();
   });
 
-  it("folds the row's controls by the same steps as a bar's", () => {
+  it("ends a bar with Close alone: arranging is a drag or the bar's menu, never a button", () => {
+    render(<Dock layout={aloneWithoutControls} />);
+    expect(document.querySelectorAll(".dock-tile__bar")).toHaveLength(1);
+    expect(screen.getByText("plain tiled")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Arrange / })).toBeNull();
+  });
+
+  it("folds its controls by the same steps as a tiled bar's", () => {
     barOfWidth(200);
     render(<Dock layout={alone} />);
     expect(screen.getByRole("button", { name: "View A, Things view" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refresh things" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More one actions" })).toBeInTheDocument();
   });
 });
 
@@ -303,23 +296,18 @@ describe("a tool in the bottom panel", () => {
 });
 
 describe("the bar's sizes", () => {
-  it("holds the bar and the single row to 32px on the bar's insets, with 4px between controls", () => {
-    for (const selector of [".dock-tile__bar", ".dock-tile__row"]) {
-      expect(rule(selector)).toMatch(/height:\s*32px/);
-    }
+  it("holds every pane's bar to the title band's height on the 12px and 8px insets, with 4px between controls", () => {
+    expect(rule(".dock-tile__bar")).toMatch(/height:\s*var\(--oct-title-rail-h\)/);
     expect(rule(".dock-tile__bar")).toMatch(
-      /padding:\s*0 var\(--oct-space-2\) 0 var\(--oct-space-3\)/,
-    );
-    expect(rule(".dock-tile__row")).toMatch(
       /padding:\s*0 var\(--oct-space-2\) 0 var\(--oct-space-3\)/,
     );
     expect(rule(".dock-tile__tool-actions")).toMatch(/gap:\s*var\(--oct-space-1\)/);
   });
 
-  it("draws every bar control at 24px with a 14px glyph and the word switch as a 28px tray of 24px segments", () => {
+  it("draws every bar control at 24px with a 16px glyph and the word switch as a 28px tray of 24px segments", () => {
     expect(rule(".dock-tile__control")).toMatch(/width:\s*24px/);
     expect(rule(".dock-tile__control")).toMatch(/height:\s*24px/);
-    expect(rule(".dock-tile__control > svg")).toMatch(/width:\s*var\(--oct-icon-sm\)/);
+    expect(rule(".dock-tile__control > svg")).toMatch(/width:\s*var\(--oct-icon-md\)/);
     expect(rule(".dock-bar-switch")).toMatch(/height:\s*28px/);
     // The ruler that decides the fold is plain spans with these classes, so the
     // sizes must be here as well as on the shared toggle group.
@@ -367,17 +355,17 @@ describe("the slot a host keeps", () => {
 
   it("redraws a control when its tool registers it again with a new name, and clears it on unmount", () => {
     const { rerender } = render(
-      <DockBarTestHost placement="alone">
+      <DockBarTestHost placement="tiled">
         <Registrant id="a" label="Refresh a" />
       </DockBarTestHost>,
     );
     rerender(
-      <DockBarTestHost placement="alone">
+      <DockBarTestHost placement="tiled">
         <Registrant id="a" label="Refresh again" />
       </DockBarTestHost>,
     );
     expect(screen.getByRole("button", { name: "Refresh again" })).toBeInTheDocument();
-    rerender(<DockBarTestHost placement="alone">{null}</DockBarTestHost>);
+    rerender(<DockBarTestHost placement="tiled">{null}</DockBarTestHost>);
     expect(screen.queryByRole("button")).toBeNull();
   });
 
@@ -408,6 +396,7 @@ describe("a bar that holds status text and a tool's name", () => {
       onFocusTile={() => {}}
       onHideTile={() => {}}
       onMoveTile={() => {}}
+      onPlaceTile={() => {}}
       onResizeColumn={() => {}}
       onResizeColumns={() => {}}
       onShowTileAlone={() => {}}
@@ -437,8 +426,8 @@ describe("a bar that holds status text and a tool's name", () => {
     if (text === undefined) throw new Error("The status text is not drawn.");
     expect(text).toBeVisible();
     // Counted at its measured width: the bar's room (300 less insets, the name
-    // and Arrange and Close) holds it and the one More button.
-    expect(120 + 4 + 28).toBeLessThanOrEqual(300 - 20 - (14 + 4 + 40) - 60);
+    // and Close) holds it and the one More button.
+    expect(120 + 4 + 28).toBeLessThanOrEqual(300 - 20 - (14 + 4 + 40) - 28);
     expect(screen.getByText("one", { selector: ".dock-tile__name" })).toBeInTheDocument();
   });
 
@@ -523,6 +512,7 @@ describe("a tile that changes between tiled and alone", () => {
         onFocusTile={() => {}}
         onHideTile={() => {}}
         onMoveTile={() => {}}
+        onPlaceTile={() => {}}
         onResizeColumn={() => {}}
         onResizeColumns={() => {}}
         onShowTileAlone={() => {}}
@@ -536,7 +526,7 @@ describe("a tile that changes between tiled and alone", () => {
     expect(screen.getByLabelText("Draft")).toBe(input);
     expect(input).toHaveValue("keep me");
     expect(input).toHaveFocus();
-    expect(document.querySelector(".dock-tile__bar")).toBeNull();
+    expect(document.querySelectorAll(".dock-tile__bar")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Refresh draft" })).toBeInTheDocument();
     rerender(layoutOf(two));
     expect(screen.getByLabelText("Draft")).toBe(input);
@@ -596,6 +586,7 @@ function dockOf(tool: ReactNode, layout: DockTileLayout = two) {
       onFocusTile={() => {}}
       onHideTile={() => {}}
       onMoveTile={() => {}}
+      onPlaceTile={() => {}}
       onResizeColumn={() => {}}
       onResizeColumns={() => {}}
       onShowTileAlone={() => {}}
@@ -621,7 +612,6 @@ describe("controls a tool draws itself", () => {
         name: "Versions",
       }),
     ).toBe(versions);
-    expect(screen.getByRole("button", { name: "Arrange one" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Close one" })).toBeInTheDocument();
   });
 

@@ -1,5 +1,5 @@
 import type { ReplyDetailLevel } from "@octant/contracts/shell";
-import { ChevronDown, ListCollapse } from "lucide-react";
+import { ChevronDown, ListCollapse } from "../ui/icons";
 import { createContext, useContext, type ReactNode } from "react";
 import { octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantMenu } from "../ui/base/OctantMenu";

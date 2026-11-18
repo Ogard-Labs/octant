@@ -24,7 +24,7 @@ import {
   startingShutdownChoice,
   type MoveEligibility,
 } from "@octant/domain";
-import { Briefcase, CircleCheck, MessageSquare, SquareCode } from "lucide-react";
+import { Briefcase, CircleCheck, MessageSquare, SquareCode } from "../../ui/icons";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { OctantBadge } from "../../ui/base/OctantBadge";
 import { OctantButton } from "../../ui/base/OctantButton";

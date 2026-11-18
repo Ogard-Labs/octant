@@ -26,6 +26,7 @@ import {
   decodeThreadRetentionThreadId,
   decodeWorkTurnRequestId,
   decodeCodeThreadId,
+  decodeWorkThreadId,
   decodeCodeOperationId,
   MAX_CODE_OPERATION_REPLAY_LIMIT,
 } from "@octant/contracts";
@@ -46,6 +47,7 @@ import { WorkFileListingService } from "./work/workFileListingService";
 import { WorkThreadService } from "./work/workThreadService";
 import { WorkTurnService } from "./work/workTurnService";
 import { makePublishedSnapshotSource } from "./publishedSnapshotSource";
+import { makeClaudeLibraryPublishes } from "./claudeLibraryPublishes";
 import { assertReadableChatThread } from "./chat/chatService";
 import { createThreadReadAuthority } from "./threadReadAuthority";
 import type { PublishedSnapshotRunRequest, WindowId } from "@octant/contracts";
@@ -251,6 +253,7 @@ export function startOctantServer(
       threadWakeups,
       resolveThreadStrict,
       resolveProjectStrict,
+      resolveHostStrict,
     } = wireFoundations({ latencyStats, options, persistence });
     const {
       agentRunParentAuthority,
@@ -284,6 +287,7 @@ export function startOctantServer(
       octantInstructions,
       octantInstructionsRoutes,
       protectedFilesRoutes,
+      sandboxRestrictionsRoutes,
       todoRoutes,
       todos,
       processAuthorityNow,
@@ -295,10 +299,10 @@ export function startOctantServer(
       unsubscribeThreadArchivals,
       windowAuthorityStore,
     } = wireAuthority({
+      workThreadProjection,
       browserAuthority,
       options,
       persistence,
-      workThreadProjection,
     });
     const {
       agentRunInteractions,
@@ -518,6 +522,7 @@ export function startOctantServer(
       options,
       persistence,
       providerRuntimeRegistry,
+      resolveProjectStrict,
       spendCeilingHolder,
       threadMoveState,
       windowAuthorityStore,
@@ -585,6 +590,7 @@ export function startOctantServer(
       providerAvailabilityMarks,
     } = yield* wireProviders({
       resolveThreadStrict,
+      resolveHostStrict,
       hostResourceBudget,
       serverRegistry,
       providerRuntimeNetwork,
@@ -768,6 +774,25 @@ export function startOctantServer(
       resolveCanvasWorkspace,
       snapshotCanvas,
     } = wireCanvas({
+      claudePublishes: makeClaudeLibraryPublishes({
+        workThreads: () =>
+          workThreadProjection.list().map((thread) => ({
+            id: String(thread.id),
+            projectId: thread.projectId,
+            title: thread.title,
+          })),
+        workTurns: (threadId) => workTurnProjection.listForThread(decodeWorkThreadId(threadId)),
+        codeThreads: () =>
+          persistence.readCodeThreads().map((thread) => ({
+            id: String(thread.id),
+            projectId: thread.projectId,
+            title: thread.title,
+          })),
+        codeSummary: (threadId) => {
+          const summary = codeBoardEventStore.summaryForThread(decodeCodeThreadId(threadId));
+          return summary.status === "ok" ? summary.frames : undefined;
+        },
+      }),
       // Work and Code are wired below; a request only arrives after startup.
       findPublishedSnapshot: (windowId: WindowId, request: PublishedSnapshotRunRequest) =>
         makePublishedSnapshotSource({
@@ -1026,6 +1051,7 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      providerRuntimeNetwork,
       resolveThreadStrict,
       resolveProjectStrict,
       onWindowRevoked,
@@ -1888,6 +1914,7 @@ export function startOctantServer(
       personMemoryRoutes,
       octantInstructionsRoutes,
       protectedFilesRoutes,
+      sandboxRestrictionsRoutes,
       todoRoutes,
       providerOAuthRoutes,
       providerRoutes,

@@ -88,6 +88,7 @@ function library(
     readonly synced?: ReadonlyArray<unknown>;
     readonly tags?: Readonly<Record<string, ReadonlyArray<string>>>;
     readonly threadHoldsCanvas?: boolean;
+    readonly claudePublishes?: ReadonlyArray<unknown>;
   } = {},
 ) {
   const entries = [
@@ -145,9 +146,118 @@ function library(
     ...(options.threadHoldsCanvas === undefined
       ? {}
       : { threadHoldsCanvas: () => options.threadHoldsCanvas === true }),
+    ...(options.claudePublishes === undefined
+      ? {}
+      : {
+          claudePublishes: () => options.claudePublishes as never,
+          claudeAccountName: (account: string) =>
+            account === "claude-work" ? "Claude (work)" : undefined,
+        }),
     clock: () => "2026-08-18T10:00:00.000Z" as never,
   });
 }
+
+const storefront = "20000000-0000-4000-8000-000000000001";
+const oldIdeas = "20000000-0000-4000-8000-000000000002";
+function publish(overrides: Record<string, unknown>) {
+  return {
+    url: "https://claude.ai/artifact/hero",
+    title: "Hero",
+    artifactType: "Design",
+    account: "claude-work",
+    projectId: storefront,
+    mode: "work",
+    threadId: "70000000-0000-4000-8000-000000000002",
+    threadTitle: "Landing page",
+    toolCallId: "call-1",
+    publishedAt: "2026-08-18T08:00:00.000Z",
+    sequence: 1,
+    ...overrides,
+  };
+}
+
+describe("Claude pages in the artifact library", () => {
+  const publishes = [
+    publish({}),
+    // An update to the same page is a version of it, not a second entry.
+    publish({
+      toolCallId: "call-2",
+      publishedAt: "2026-08-18T09:30:00.000Z",
+      sequence: 2,
+      snapshot: "html",
+    }),
+    publish({
+      url: "https://claude.ai/artifact/notes",
+      title: "Notes",
+      artifactType: undefined,
+      account: "claude-personal",
+      projectId: oldIdeas,
+      mode: "code",
+      toolCallId: "call-3",
+    }),
+  ];
+
+  it("lists pages published from Octant beside Canvas documents, one entry per page with its versions", () => {
+    const listing = library({ claudePublishes: publishes }).list(
+      { tab: "all" } as never,
+      localWindow,
+    );
+    expect(listing.entries.length).toBe(2);
+    expect(listing.claude).toEqual([
+      expect.objectContaining({
+        url: "https://claude.ai/artifact/hero",
+        title: "Hero",
+        artifactType: "Design",
+        account: "claude-work",
+        accountName: "Claude (work)",
+        projectName: "Storefront",
+        threadTitle: "Landing page",
+        toolCallId: "call-2",
+        versionCount: 2,
+        snapshot: "html",
+      }),
+      expect.objectContaining({ title: "Notes", artifactType: "Page", projectName: "Old ideas" }),
+    ]);
+    expect(listing.claudeTypes).toEqual(["Design", "Page"]);
+    expect(listing.claudeAccounts?.map((account) => account.account).sort()).toEqual([
+      "claude-personal",
+      "claude-work",
+    ]);
+  });
+
+  it("filters by source, Claude type and account, and keeps Claude pages out of tag and Canvas kind views", () => {
+    const service = library({ claudePublishes: publishes });
+    const claudeOnly = service.list({ tab: "all", source: "claude" } as never, localWindow);
+    expect(claudeOnly.entries).toEqual([]);
+    expect(claudeOnly.claude?.length).toBe(2);
+    expect(service.list({ tab: "all", source: "canvas" } as never, localWindow).claude).toBe(
+      undefined,
+    );
+    expect(
+      service
+        .list({ tab: "all", claudeType: "Page" } as never, localWindow)
+        .claude?.map((page) => page.title),
+    ).toEqual(["Notes"]);
+    expect(
+      service
+        .list({ tab: "all", account: "claude-work" } as never, localWindow)
+        .claude?.map((page) => page.title),
+    ).toEqual(["Hero"]);
+    expect(service.list({ tab: "all", kind: "diagram" } as never, localWindow).claude).toBe(
+      undefined,
+    );
+    expect(service.list({ tab: "by-tag" } as never, localWindow).claude).toBe(undefined);
+  });
+
+  it("clamps a paired device to the Projects it may see, as for Canvas documents", () => {
+    const remote = library({ claudePublishes: publishes }).list(
+      { tab: "all" } as never,
+      pairedDevice,
+    );
+    expect(remote.claude?.map((page) => page.title)).toEqual(["Hero"]);
+    expect(remote.claudeAccounts?.map((account) => account.account)).toEqual(["claude-work"]);
+  });
+});
 
 describe("reading the host's artifact library", () => {
   it("gathers artifacts from every Project on this host, newest first", () => {

@@ -1,4 +1,4 @@
-import { BookOpen, ChevronDown, ChevronUp, Puzzle, Search, X } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronUp, Puzzle, Search, X } from "../ui/icons";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type {
@@ -455,6 +455,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       )}
     </OctantToggleGroup>
   );
+  // One strip at the head of every view, in every load state, so the switch
+  // never moves when the view or the data changes.
+  const switchBar = <div className="extensions-settings__switch">{viewSwitch}</div>;
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [snapshot, setSnapshot] = useState<ExtensionSnapshot | undefined>();
   const [effective, setEffective] = useState<ExtensionEffectiveSnapshot | undefined>();
@@ -462,6 +465,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [connections, setConnections] = useState<ReadonlyArray<McpServerConnection> | undefined>();
   // Only the newest read lands, so an older answer cannot replace a newer one.
   const connectionsEpoch = useRef(0);
+  // False until the first answer, so the list shows its shape, not a failure.
+  const [connectionsRead, setConnectionsRead] = useState(false);
   const loadConnections = useCallback(async () => {
     const epoch = ++connectionsEpoch.current;
     let next: ReadonlyArray<McpServerConnection> | undefined;
@@ -470,7 +475,10 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     } catch {
       next = undefined;
     }
-    if (epoch === connectionsEpoch.current) setConnections(next);
+    if (epoch === connectionsEpoch.current) {
+      setConnections(next);
+      setConnectionsRead(true);
+    }
   }, [props.client]);
   const [failure, setFailure] = useState<FailureBanner | undefined>();
   const [marketplaceQuery, setMarketplaceQuery] = useState("");
@@ -1025,6 +1033,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         {props.showHeading === false ? null : (
           <h2 id="extensions-settings-heading">Skills &amp; Extensions</h2>
         )}
+        {switchBar}
         <p className="extensions-settings__state" role="status" aria-label="Extensions unavailable">
           Extensions are unavailable.
         </p>
@@ -1043,6 +1052,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         {props.showHeading === false ? null : (
           <h2 id="extensions-settings-heading">Skills &amp; Extensions</h2>
         )}
+        {switchBar}
         <p className="extensions-settings__state" role="status">
           Loading extensions…
         </p>
@@ -1175,14 +1185,11 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           </p>
         </>
       )}
+      {switchBar}
       {view === "account-tools" && props.accountTools !== undefined ? (
-        <>
-          <div className="extensions-settings__switch">{viewSwitch}</div>
-          {props.accountTools}
-        </>
+        props.accountTools
       ) : view === "library" ? (
         <LibraryView
-          actions={viewSwitch}
           {...(props.accountTools === undefined
             ? {}
             : { onOpenAccountTools: () => setView("account-tools") })}
@@ -1229,7 +1236,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             disabled={installing || importingLocal}
             localHost={props.client.toolGrantsAvailable}
             onChanged={() => void loadConnections()}
-            actions={viewSwitch}
+            loading={!connectionsRead}
             servers={connections}
           />
           <SettingsSection className="extensions-settings__section" title="Extension packages">
@@ -1615,7 +1622,6 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         </>
       ) : view === "connectors" ? (
         <ConnectorsView
-          actions={viewSwitch}
           client={props.client}
           disabled={installing || importingLocal}
           localHost={props.client.toolGrantsAvailable}
@@ -1628,11 +1634,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         />
       ) : (
         <>
-          <SettingsSection
-            actions={viewSwitch}
-            className="extensions-settings__section"
-            title="Extension catalog"
-          >
+          <SettingsSection className="extensions-settings__section" title="Extension catalog">
             {!marketplaceFetchesEnabled ? (
               <p className="extensions-settings__state" role="status">
                 Marketplace fetches are off in Settings → Skills &amp; Extensions → Marketplace.

@@ -136,8 +136,13 @@ describe("the dock Canvas tool", () => {
     );
 
     expect(await screen.findByRole("button", { name: "Open Quarterly summary" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Canvas" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Open Roadmap" }));
     expect(screen.getByText(`canvas:${secondId}:Roadmap`)).toBeVisible();
+    // The pane bar names the open document and keeps the way back as a named icon button.
+    expect(screen.getByRole("heading", { name: "Roadmap" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "All canvases" }));
+    expect(screen.getByRole("button", { name: "Open Roadmap" })).toBeVisible();
   });
 
   it("offers sending a comment to the agent only when the window can reach the host", async () => {

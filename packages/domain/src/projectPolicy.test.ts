@@ -1010,6 +1010,19 @@ describe("Project extra folders", () => {
     }
   });
 
+  it("refuses the home folder under Strict even once the person confirms it", () => {
+    expect(() =>
+      addProjectExtraFolder(work(), {
+        canonicalRoot: "/Users/example",
+        actor,
+        addedAt: updatedAt,
+        homeDirectory: home,
+        homeFolderConfirmed: true,
+        strict: true,
+      }),
+    ).toThrow(/Strict/);
+  });
+
   it("refuses the home folder, anything above it, system folders and secret folders", () => {
     for (const candidate of [
       "/Users/example",

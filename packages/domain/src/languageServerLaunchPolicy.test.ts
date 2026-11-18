@@ -162,6 +162,71 @@ describe("language server launch policy", () => {
     });
   });
 
+  it("starts every class unconfined on Windows outside Strict, keeping repository tooling's steps, and refuses under Strict", () => {
+    for (const launchClass of classes) {
+      expect(
+        decideLanguageServerLaunch({
+          launchClass,
+          posture: "approval-gated",
+          platform: "windows",
+          startedBy: "local-window",
+          shellCommandApproval: "granted",
+          strict: false,
+        }),
+      ).toEqual({ status: "launch", shape: { launchClass, confinement: "none" } });
+      for (const strict of [true, undefined]) {
+        expect(
+          decideLanguageServerLaunch({
+            launchClass,
+            posture: "full-access",
+            platform: "windows",
+            startedBy: "local-window",
+            shellCommandApproval: "granted",
+            strict,
+          }),
+        ).toEqual({ status: "refused", reason: "unsupported-platform" });
+      }
+    }
+    const tooling = {
+      launchClass: "repo-tooling",
+      posture: "approval-gated",
+      platform: "windows",
+      startedBy: "local-window",
+      shellCommandApproval: "granted",
+      strict: false,
+    } as const;
+    expect(decideLanguageServerLaunch({ ...tooling, posture: "plan" })).toEqual({
+      status: "refused",
+      reason: "plan-read-only",
+    });
+    expect(decideLanguageServerLaunch({ ...tooling, startedBy: "remote-device" })).toEqual({
+      status: "refused",
+      reason: "local-host-required",
+    });
+    expect(decideLanguageServerLaunch({ ...tooling, shellCommandApproval: "absent" })).toEqual({
+      status: "refused",
+      reason: "approval-required",
+    });
+    expect(
+      decideAgentReadThroughRepositoryTooling({
+        posture: "approval-gated",
+        platform: "windows",
+        server: "running",
+        shellCommandApproval: "granted",
+        strict: false,
+      }),
+    ).toEqual({ status: "read" });
+    expect(
+      decideAgentReadThroughRepositoryTooling({
+        posture: "approval-gated",
+        platform: "windows",
+        server: "running",
+        shellCommandApproval: "granted",
+        strict: true,
+      }),
+    ).toEqual({ status: "refused", reason: "unsupported-platform" });
+  });
+
   it("refuses every class on a platform without a confinement backend", () => {
     for (const launchClass of classes) {
       for (const platform of ["windows", "other"] as const) {
@@ -236,7 +301,9 @@ describe("language server launch policy", () => {
               const decision = decideLanguageServerLaunch(input);
               const actual = decision.status === "launch" ? "launch" : decision.reason;
               const network =
-                decision.status === "launch" ? decision.shape.network : "not-launched";
+                decision.status === "launch" && "network" in decision.shape
+                  ? decision.shape.network
+                  : "not-launched";
               const want = expected(input);
               const wantNetwork =
                 want !== "launch"

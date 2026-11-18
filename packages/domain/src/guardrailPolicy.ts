@@ -21,6 +21,7 @@ import { isNativeHarnessDriverKind } from "./providerPolicy";
  */
 export interface ThreadAccess {
   readonly executionPolicy: ProviderExecutionPolicy;
+  readonly strict?: boolean | undefined;
   readonly autoApprove?: boolean | undefined;
   /**
    * Opt-in sandbox at Full access: when the posture is `full-access` and this
@@ -142,6 +143,7 @@ export function fullAccessSandboxSupported(driverKind: ProviderDriverKind): bool
     driverKind === "pi" ||
     driverKind === "opencode" ||
     isAcpAgentKind(driverKind) ||
+    driverKind === "acp-agent" ||
     isNativeHarnessDriverKind(driverKind)
   );
 }
@@ -162,36 +164,144 @@ export function refusesFullAccessSandbox(input: {
 }
 
 /**
- * Why a level cannot run on a Windows host. Every level below Full access, and
- * Full access with the sandbox kept, runs inside Octant's process sandbox, and
- * Windows has no sandbox Octant can use yet: its launcher is built but has not
- * run a real provider on a person's Windows machine. A turn there is refused
- * rather than run with less confinement than its level promises.
+ * Why one of Octant's own terminals or commands refuses on a Windows host.
+ * Outside Strict they run there unconfined at every level, as a person's own
+ * terminal and a provider's own commands do in other agent workspaces on
+ * Windows, each command still asking as its level asks. Strict, and Full
+ * access with the sandbox kept, need Octant's sandbox, and Windows has none
+ * Octant can use yet: its launcher is built but has not run on a person's
+ * Windows machine. A provider turn is judged by {@link hostProviderTurnRefusal}.
  */
 export const WINDOWS_SANDBOX_MISSING_REASON =
-  "This level needs Octant's process sandbox, which Windows does not have yet. On this computer only Full access runs; switch the thread to Full access with the sandbox off, or run it on a Mac or Linux host.";
+  "This needs Octant's sandbox, which Windows does not have yet. Under Strict, or with the sandbox kept at Full access, Octant's own terminals and commands do not run on this computer; turn Strict off (and Keep the sandbox off) for this thread, or run it on a Mac or Linux host.";
 
 /**
- * Whether a turn at `access` needs Octant's process sandbox: every level
- * below Full access, and Full access with the sandbox kept.
- */
-export function levelNeedsSandbox(access: ThreadAccess): boolean {
-  return access.executionPolicy !== "full-access" || access.fullAccessSandbox === true;
-}
-
-/**
- * Why a turn, terminal or command at `access` refuses on this host, or
- * undefined when it may run. The caller passes the level the work runs at
- * (a turn's clamped level, not only the thread's stored one), and the host's
- * own platform.
+ * Why one of Octant's own terminals or commands at `access` refuses on this
+ * host, or undefined when it may run. The caller passes the level the work
+ * runs at (a turn's clamped level, not only the thread's stored one), the
+ * thread's resolved Strict value, and the host's own platform. A caller that
+ * cannot say whether the work is Strict gets Strict's answer.
  */
 export function hostSandboxRefusal(input: {
   readonly platform: string | undefined;
   readonly access: ThreadAccess;
+  readonly strict?: boolean | undefined;
 }): string | undefined {
-  return input.platform === "win32" && levelNeedsSandbox(input.access)
+  if (input.platform !== "win32") return undefined;
+  return input.strict !== false ||
+    input.access.strict === true ||
+    (input.access.executionPolicy === "full-access" && input.access.fullAccessSandbox === true)
     ? WINDOWS_SANDBOX_MISSING_REASON
     : undefined;
+}
+
+/**
+ * Why Strict refuses on a Windows host at every level. The shared Strict
+ * control is independent of autonomy and Windows has no admitted Octant
+ * sandbox. A native approval mode cannot substitute for its confinement.
+ */
+export const WINDOWS_STRICT_REFUSAL =
+  "Strict needs a sandbox Windows doesn't have yet. Turn Strict off for this thread to run it with the provider's own approvals, or run it on a Mac or Linux host.";
+
+/** Why Full access with the sandbox kept refuses on a Windows host. */
+export const WINDOWS_KEPT_SANDBOX_REFUSAL =
+  "Keeping the sandbox at Full access needs a sandbox Windows doesn't have yet. Turn Keep the sandbox off, or run it on a Mac or Linux host.";
+
+/**
+ * Why a Chat provider launch refuses on a Windows host. Chat has no folder or
+ * shell. Codex (no execution environment), Claude (no file or shell tool) and
+ * Pi (no built-in tool) are configured that way natively and start there
+ * outside Strict. OpenCode's permission rules can deny its file and shell
+ * tools, but its command templates run shell substitutions and its plugins
+ * run code in its own process outside those rules; an ACP agent's client
+ * capabilities decide only whether it uses Octant's file and terminal
+ * methods, and no reviewed agent profile can be told to drop its own built-in
+ * file and shell tools. Only Octant's sandbox holds those two to Chat's rule.
+ */
+export const WINDOWS_CHAT_PROVIDER_REFUSAL =
+  "This provider keeps Chat without a folder or shell only inside Octant's sandbox, which Windows doesn't have yet. On this computer use Codex, Claude, Pi or an Octant Harness model for Chat, or this provider in Work or Code.";
+
+/**
+ * Why a provider turn at `access` refuses on this host, or undefined when it
+ * may start. On Windows a turn below Full access runs with the provider's own
+ * approvals and no Octant sandbox claimed, so only what needs Octant's sandbox
+ * refuses there: Strict below Full access and Full access with the sandbox
+ * kept. Octant's own terminals and commands keep {@link hostSandboxRefusal}.
+ */
+export function hostProviderTurnRefusal(input: {
+  readonly platform: string | undefined;
+  readonly access: ThreadAccess;
+  readonly strict: boolean;
+}): string | undefined {
+  if (input.platform !== "win32") return undefined;
+  if (input.strict || input.access.strict === true) return WINDOWS_STRICT_REFUSAL;
+  if (input.access.executionPolicy === "full-access") {
+    return input.access.fullAccessSandbox === true ? WINDOWS_KEPT_SANDBOX_REFUSAL : undefined;
+  }
+  return input.strict ? WINDOWS_STRICT_REFUSAL : undefined;
+}
+
+/**
+ * How one provider launch runs on a Windows host, decided from that launch's
+ * own mode, level and Strict value, so no earlier launch or cached read admits
+ * another. `unconfined` starts the provider with no Octant sandbox: at Full
+ * access with no approvals, below it with the provider's own approvals, every
+ * ask still answered and journaled on the server. A launch that does not say
+ * whether it is Strict is Strict.
+ */
+export type WindowsProviderLaunch =
+  | { readonly status: "unconfined"; readonly approvals: "none" | "provider" }
+  | { readonly status: "refused"; readonly reason: string };
+
+export function windowsProviderLaunch(input: {
+  readonly mode: "chat" | "work" | "code";
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox?: boolean | undefined;
+  readonly strict?: boolean | undefined;
+  /**
+   * Whether this provider's Chat launch has no file or shell tool by its own
+   * configuration, so Chat's rule holds without Octant's sandbox.
+   */
+  readonly chatWithoutFolderOrShell?: boolean | undefined;
+}): WindowsProviderLaunch {
+  if (input.mode === "chat" && input.chatWithoutFolderOrShell !== true)
+    return { status: "refused", reason: WINDOWS_CHAT_PROVIDER_REFUSAL };
+  if (input.strict === true) return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
+  if (input.executionPolicy === "full-access") {
+    return input.fullAccessSandbox === true
+      ? { status: "refused", reason: WINDOWS_KEPT_SANDBOX_REFUSAL }
+      : { status: "unconfined", approvals: "none" };
+  }
+  if (input.strict !== false) return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
+  return { status: "unconfined", approvals: "provider" };
+}
+
+/**
+ * Whether a Windows host reads a provider's version and model catalog with no
+ * Octant sandbox, for a read that serves no one thread: while new threads start
+ * at open Full access, or while neither the Code nor the Work default in
+ * Settings is Strict, since the turns such a read serves then run unconfined.
+ */
+export function hostReadsProviderCatalogUnconfined(input: {
+  readonly code?:
+    | {
+        readonly defaultExecutionPolicy: ProviderExecutionPolicy;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+        readonly defaultStrict?: boolean | undefined;
+      }
+    | undefined;
+  readonly work?:
+    | {
+        readonly defaultAccess: WorkAccess;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+        readonly defaultStrict?: boolean | undefined;
+      }
+    | undefined;
+}): boolean {
+  return (
+    hostStartsThreadsAtOpenFullAccess(input) ||
+    (input.code?.defaultStrict !== true && input.work?.defaultStrict !== true)
+  );
 }
 
 /**
@@ -497,7 +607,12 @@ export function chosenAutoReviewer(input: {
  * confirmation).
  */
 export function shieldRoutesApprovals(driverKind: ProviderDriverKind): boolean {
-  if (isNativeHarnessDriverKind(driverKind) || isAcpAgentKind(driverKind)) return true;
+  if (
+    isNativeHarnessDriverKind(driverKind) ||
+    isAcpAgentKind(driverKind) ||
+    driverKind === "acp-agent"
+  )
+    return true;
   return (
     driverKind === "claude" ||
     driverKind === "codex" ||
@@ -613,13 +728,29 @@ export function guardrailLowered(from: PermissionMode, to: PermissionMode): bool
  * else off (Full access stays open, as it always was).
  */
 export function defaultFullAccessSandboxFor(input: {
-  readonly project?: { readonly defaultFullAccessSandbox?: boolean | undefined } | undefined;
-  readonly settings?: { readonly defaultFullAccessSandbox?: boolean | undefined } | undefined;
+  readonly project?:
+    | {
+        readonly defaultStrict?: boolean | undefined;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+      }
+    | undefined;
+  readonly settings?:
+    | {
+        readonly defaultStrict?: boolean | undefined;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+      }
+    | undefined;
 }): boolean {
-  return (
-    input.project?.defaultFullAccessSandbox ?? input.settings?.defaultFullAccessSandbox ?? false
-  );
+  if (input.project?.defaultStrict !== undefined) return false;
+  if (input.project?.defaultFullAccessSandbox !== undefined)
+    return input.project.defaultFullAccessSandbox;
+  if (input.settings?.defaultStrict !== undefined) return false;
+  return input.settings?.defaultFullAccessSandbox ?? false;
 }
+
+/** Why the host refuses `octant agent --full-access` for a thread Strict covers. */
+export const STRICT_REFUSES_FULL_ACCESS_RUN_FLAG =
+  "Strict is on for this thread, and Strict refuses the per-run Full access flag. Turn Strict off for the thread, its Project or in Settings to use it.";
 
 /**
  * Whether Strict is on for one launch or call: the thread's own choice, else
@@ -675,6 +806,22 @@ export function guardrailScopeOf(input: {
 /** Why an allow answered after the thread's posture changed is refused. */
 export const APPROVAL_POSTURE_CHANGED_MESSAGE =
   "This thread's permissions changed since this was asked, so it asks again.";
+
+/** Why an answer to an ask that nothing waits on any more is refused. */
+export const APPROVAL_NOT_WAITING_MESSAGE =
+  "This request is no longer waiting for an answer. It was answered, withdrawn, or its turn ended.";
+
+/** Why an answer to a question that nothing waits on any more is refused. */
+export const QUESTION_NOT_WAITING_MESSAGE =
+  "This question is no longer waiting for an answer. It was answered, withdrawn, or its turn ended.";
+
+/** Why an allow is refused while the thread or its turn is in Plan. */
+export const APPROVAL_REFUSED_IN_PLAN_MESSAGE =
+  "Plan can't approve this. Deny it, or leave Plan and send a new message.";
+
+/** Why an answer is refused when the provider session that asked is gone. */
+export const APPROVAL_SESSION_GONE_MESSAGE =
+  "The provider session that asked is no longer connected, so the answer could not be delivered.";
 
 /**
  * The posture a pending approval is asked under, as one comparable value: the

@@ -16,6 +16,7 @@ import { readProcessIdentity } from "../process/nodeOwnedProcessReceipt";
 import { stopWindowsProcessTree, windowsSystemProgram } from "../process/windowsProcessTree";
 import { terminalShellFor } from "../code/terminalShell";
 import { createNativeHarnessShell } from "./nativeHarnessShell";
+import type { NativeHarnessShellRun } from "./nativeHarnessTools";
 import {
   createWindowsFullAccessShellPort,
   windowsScriptFileName,
@@ -196,18 +197,47 @@ describe("the harness shell at Full access on a Windows host", () => {
         scriptFileName: () => windowsScriptFileName(shell()),
         scriptText: (command) => windowsScriptText(shell(), command),
       });
+      const stop = new AbortController();
       const running = harness.run({
         command:
           "$child = Start-Process -PassThru -WindowStyle Hidden -FilePath ping.exe -ArgumentList '-n','300','127.0.0.1'; Set-Content -LiteralPath child.pid -Value $child.Id; Start-Sleep -Seconds 300",
         cwd: checkout,
         timeoutMs: 280_000,
+        signal: stop.signal,
       });
-      await vi.waitFor(() => expect(existsSync(join(checkout, "child.pid"))).toBe(true), {
-        timeout: 30_000,
+      let endedEarly: NativeHarnessShellRun | undefined;
+      void running.then((run) => {
+        endedEarly = run;
       });
-      await vi.waitFor(() => expect(readdirSync(receiptDirectory)).toHaveLength(1), {
-        timeout: 30_000,
+      onTestFailed(() => {
+        console.log(JSON.stringify({ endedEarly }));
+        console.log(windowsProcessList());
       });
+      try {
+        // Waits for the command to start its program and keep its receipt, or
+        // for the run to end, whichever comes first, so a run that ends early
+        // fails here with its own result. It once waited a bare 30 seconds and
+        // showed nothing of a run that had already ended. The bound sits above
+        // the 60-second Windows identity read, past which the receipt fails
+        // and the run ends unowned.
+        await vi.waitFor(
+          () => {
+            if (endedEarly !== undefined) return;
+            if (!existsSync(join(checkout, "child.pid")))
+              throw new Error("The command has not started its program yet.");
+            if (readdirSync(receiptDirectory).length !== 1)
+              throw new Error("The command has no receipt yet.");
+          },
+          { timeout: 90_000, interval: 100 },
+        );
+        expect(endedEarly).toBeUndefined();
+      } catch (error) {
+        // A failed start still ends the command and its program, through the
+        // harness's own cancellation.
+        stop.abort();
+        await running;
+        throw error;
+      }
       const childPid = Number(readFileSync(join(checkout, "child.pid"), "utf8").trim());
       const receiptName = readdirSync(receiptDirectory)[0] ?? "";
       const receipt = JSON.parse(readFileSync(join(receiptDirectory, receiptName), "utf8")) as {
@@ -222,7 +252,6 @@ describe("the harness shell at Full access on a Windows host", () => {
       };
       onTestFailed(() => {
         console.log(JSON.stringify(evidence));
-        console.log(windowsProcessList());
       });
       try {
         // The restart: a fresh port over the same receipts, as the next start builds.
@@ -244,7 +273,7 @@ describe("the harness shell at Full access on a Windows host", () => {
         await stopWindowsProcessTree(childPid);
       }
     },
-    120_000,
+    180_000,
   );
 
   it.runIf(process.platform === "win32")(

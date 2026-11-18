@@ -338,10 +338,10 @@ describe("provider Settings presentation", () => {
       observedAt: "2026-07-14T10:00:00.000Z",
     });
 
-    expect(providerProcessFailureSummary("OpenCode CLI", observed)).toBe(
-      "OpenCode CLI exited with code 65 during launch.",
+    expect(providerProcessFailureSummary("OpenCode", observed)).toBe(
+      "OpenCode exited with code 65 during launch.",
     );
-    expect(providerProcessFailureSummary("OpenCode CLI", undefined)).toBeUndefined();
+    expect(providerProcessFailureSummary("OpenCode", undefined)).toBeUndefined();
   });
 });
 

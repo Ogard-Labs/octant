@@ -1,4 +1,5 @@
 import { createWorkspaceViewStore, WorkspaceViewStateContext } from "../shell/workspaceViewState";
+import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeOperationResult } from "@octant/contracts/code-operations";
 import {
@@ -8,9 +9,12 @@ import {
 } from "@octant/contracts";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { CodeDiffPane, type CodeDiffProjection } from "./CodeDiffPane";
+import { chooseReviewView, reviewMenuRows, reviewViewIsOn } from "./reviewMenuTestHelpers";
 
 const DIFF = [
   "diff --git a/src/index.ts b/src/index.ts",
@@ -30,7 +34,7 @@ const DIFF = [
 
 /** The side-by-side layout is where the file list and the editor live. */
 async function chooseSideBySide() {
-  await userEvent.setup().click(await screen.findByRole("button", { name: "Side by side" }));
+  await chooseReviewView("Side by side");
 }
 
 describe("CodeDiffPane", () => {
@@ -150,6 +154,48 @@ describe("CodeDiffPane", () => {
     sessionStorage.clear();
   });
 
+  it("shows one state with the host's reason and Try again when the changes cannot be read", async () => {
+    const user = userEvent.setup();
+    const onRefresh = vi.fn();
+    render(
+      <CodeDiffPane
+        client={client()}
+        diff={{ state: "unavailable", message: "The checkout folder is missing." }}
+        loadRuntime={runtime().loadRuntime}
+        onRefresh={onRefresh}
+      />,
+    );
+    const state = screen.getByRole("alert");
+    expect(state).toHaveTextContent("Changes can't be read");
+    expect(state).toHaveTextContent("The checkout folder is missing.");
+    // The one state is the whole pane: no file list and no second notice.
+    expect(screen.queryByRole("navigation", { name: "Changed files" })).toBeNull();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    await user.click(within(state).getByRole("button", { name: "Try again" }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("says a folder that cannot be opened in the person's words, not the host's about its authority", () => {
+    render(
+      <CodeDiffPane
+        client={client()}
+        diff={{ state: "unavailable", message: "Code checkout authority is unavailable." }}
+        loadRuntime={runtime().loadRuntime}
+        onRefresh={vi.fn()}
+      />,
+    );
+    const state = screen.getByRole("alert");
+    // Files gets "Code file authority is unavailable." for the same folder:
+    // both panes give the one reason.
+    expect(state).toHaveTextContent(
+      checkoutUnreadableReason("Code file authority is unavailable."),
+    );
+    expect(state).toHaveTextContent(
+      "The thread's folder can't be opened. It may have been moved, renamed or deleted, or this window no longer has access to it.",
+    );
+    expect(state).not.toHaveTextContent("authority");
+  });
+
   it("stacks every changed file with its numbered lines by default", async () => {
     render(
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
@@ -167,7 +213,17 @@ describe("CodeDiffPane", () => {
       "1313 export { answer };",
     ]);
     expect(screen.getByRole("region", { name: "README.md" })).toBeVisible();
-    expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Changed files" })).toBeInTheDocument();
+  });
+
+  it("draws a changed file's path as one left-to-right run, so a dot-folder keeps its leading dot", () => {
+    // The row cuts a long path from its start by running right to left; the
+    // path itself must not, or ".config/x" draws as "config/x.".
+    const css = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
+    const run = css.slice(css.indexOf("\n.code-diff-pane__file-run {"));
+    const body = run.slice(0, run.indexOf("}"));
+    expect(body).toMatch(/direction:\s*ltr/);
+    expect(body).toMatch(/unicode-bidi:\s*isolate/);
   });
 
   it("keeps the selected captured path and editor identity across reordered versions, and explicitly refuses to retarget a missing path", async () => {
@@ -215,7 +271,7 @@ describe("CodeDiffPane", () => {
       />,
     );
     await chooseSideBySide();
-    await userEvent.setup().click(screen.getByRole("button", { name: "README.mdadded+1−0" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "added:README.md+1−0" }));
     await waitFor(() => expect(fixture.options?.modelUriBase).toContain("README.md"));
     const loads = fixture.loadRuntime.mock.calls.length;
     mounted.rerender(
@@ -227,7 +283,7 @@ describe("CodeDiffPane", () => {
         ignoreWhitespace={{ value: true, onChange: vi.fn() }}
       />,
     );
-    expect(screen.getByRole("button", { name: "README.mdadded+1−0" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "added:README.md+1−0" })).toHaveAttribute(
       "aria-current",
       "true",
     );
@@ -267,7 +323,7 @@ describe("CodeDiffPane", () => {
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
     );
     await screen.findByRole("region", { name: "src/index.ts" });
-    expect(screen.queryByRole("checkbox", { name: "Ignore whitespace" })).not.toBeInTheDocument();
+    expect(await reviewMenuRows()).toEqual(["Unified", "Side by side"]);
 
     view.rerender(
       <CodeDiffPane
@@ -277,9 +333,83 @@ describe("CodeDiffPane", () => {
         loadRuntime={runtime().loadRuntime}
       />,
     );
-    await userEvent.setup().click(screen.getByRole("checkbox", { name: "Ignore whitespace" }));
+    expect(await reviewMenuRows()).toEqual(["Unified", "Side by side", "Ignore whitespace"]);
+    await chooseReviewView("Ignore whitespace");
 
     expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it.each([320, 640])(
+    "keeps the toolbar row and the status row with every named control in a %ipx pane",
+    async (width) => {
+      render(
+        <div style={{ width, height: 400 }}>
+          <CodeDiffPane
+            client={client()}
+            diff={available()}
+            ignoreWhitespace={{ value: false, onChange: vi.fn() }}
+            loadRuntime={runtime().loadRuntime}
+            onRefresh={vi.fn()}
+          />
+        </div>,
+      );
+      await screen.findByRole("region", { name: "src/index.ts" });
+      const pane = screen.getByRole("region", { name: "Review" });
+      const toolbar = pane.querySelector(".code-diff-pane__toolbar") as HTMLElement;
+      expect(toolbar).not.toBeNull();
+      // Layout and whitespace are one menu in the bar; Refresh stays on it.
+      for (const name of ["More review actions", "Refresh review"]) {
+        expect(within(toolbar).getByRole("button", { name })).toBeInTheDocument();
+      }
+      expect(within(toolbar).queryByRole("button", { name: "Unified" })).toBeNull();
+      const status = pane.querySelector(".code-diff-pane__status") as HTMLElement;
+      expect(status).toHaveTextContent("2 files changed");
+    },
+  );
+
+  it("keeps the review's bars from shrinking so the content below cannot cover them", () => {
+    const css = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
+    const block = (selector: string) => {
+      const from = css.lastIndexOf(`\n${selector} {`);
+      expect(from, selector).toBeGreaterThanOrEqual(0);
+      return css.slice(from, css.indexOf("}", from));
+    };
+    expect(block(".code-diff-pane > .code-diff-pane__toolbar")).toMatch(/flex:\s*none/);
+    expect(block(".code-diff-pane > .code-diff-pane__toolbar")).toMatch(/flex-wrap:\s*wrap/);
+    expect(block(".git-history__toolbar")).toMatch(/flex:\s*none/);
+    // The status line is one row that never wraps: the marks shorten instead.
+    expect(block(".code-diff-pane__status")).toMatch(/flex:\s*none/);
+    expect(block(".code-diff-pane__status")).toMatch(/white-space:\s*nowrap/);
+    expect(block(".code-diff-pane__status")).not.toMatch(/flex-wrap/);
+    expect(block(".code-diff-pane__body")).toMatch(/overflow:\s*auto/);
+    expect(block(".code-diff-pane__body")).toMatch(/flex:\s*1 1 0/);
+  });
+
+  it("lets the checks and findings words leave a narrow tile before anything is cut", () => {
+    const css = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
+    const from = css.indexOf("@container git-history (max-width: 519px) {");
+    expect(from).toBeGreaterThanOrEqual(0);
+    const query = css.slice(from, css.indexOf("\n}\n", from));
+    expect(query).toContain(".review-status-chip__words {");
+    expect(query).toMatch(/clip-path:\s*inset\(50%\)/);
+    // The words are hidden by clipping, never by display, so they stay the name.
+    expect(query).not.toMatch(/display:\s*none/);
+  });
+
+  it("draws every diff line at the one diff line height", () => {
+    const read = (file: string) => readFileSync(resolve(import.meta.dirname, file), "utf8");
+    const tokens = read("../styles/octant.css");
+    expect(tokens.match(/^\s*--oct-line-diff:/gm)).toHaveLength(1);
+    const table = read("../styles/code.css");
+    const from = table.indexOf("\n.unified-diff__table {");
+    expect(table.slice(from, table.indexOf("}", from))).toMatch(
+      /line-height:\s*var\(--oct-line-diff\)/,
+    );
+    // The pull request's diff reads the same token; the description's original
+    // source shares the wrapper and is left at the code block's reading size.
+    expect(read("./project-pull-request-review.css")).toMatch(
+      /code-block__pre\):not\(\s*\.code-pr-review__source \*\s*\)\s*\{[^}]*line-height:\s*var\(--oct-line-diff\)/,
+    );
   });
 
   it("loads exact Git evidence and compares one changed file at a time", async () => {
@@ -311,10 +441,13 @@ describe("CodeDiffPane", () => {
     await chooseSideBySide();
 
     const files = await screen.findByRole("navigation", { name: "Changed files" });
+    expect(
+      [...files.querySelectorAll("bdi.code-diff-pane__file-run")].map((run) => run.textContent),
+    ).toContain("src/index.ts");
     const entries = within(files).getAllByRole("button");
     expect(entries.map((entry) => entry.textContent)).toEqual([
-      "src/index.tsmodified+1−1",
-      "README.mdadded+1−0",
+      "Mmodified: src/index.ts+1−1",
+      "Aadded: README.md+1−0",
     ]);
     expect(entries[0]).toHaveAttribute("aria-current", "true");
   });
@@ -338,13 +471,10 @@ describe("CodeDiffPane", () => {
 
     expect(await screen.findByRole("region", { name: "src/index.ts" })).toBeVisible();
     expect(fixture.loadRuntime).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Side by side" }));
+    await chooseReviewView("Side by side");
     await waitFor(() => expect(fixture.options?.renderSideBySide).toBe(true));
-    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    await user.click(screen.getByRole("button", { name: "Unified" }));
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
+    await chooseReviewView("Unified");
     expect(await screen.findByRole("region", { name: "README.md" })).toBeVisible();
   });
 
@@ -572,7 +702,7 @@ describe("CodeDiffPane", () => {
     );
     await chooseSideBySide();
     expect(await screen.findByRole("button", { name: "Discard changes" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "README.mdadded+1−0" }));
+    await user.click(screen.getByRole("button", { name: "added:README.md+1−0" }));
     expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
   });
 
@@ -585,10 +715,7 @@ describe("CodeDiffPane", () => {
         loadRuntime={runtime().loadRuntime}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
     expect(screen.getByRole("navigation", { name: "Changed files" })).toBeVisible();
   });
 
@@ -601,10 +728,7 @@ describe("CodeDiffPane", () => {
         loadRuntime={runtime().loadRuntime}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Unified" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await reviewViewIsOn("Unified")).toBe(true);
 
     rerender(
       <CodeDiffPane
@@ -614,10 +738,7 @@ describe("CodeDiffPane", () => {
         loadRuntime={runtime().loadRuntime}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
   });
 
   it("keeps a chosen layout when storage refuses the write and the Settings default later changes", async () => {
@@ -628,11 +749,8 @@ describe("CodeDiffPane", () => {
     const { rerender } = render(
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
     );
-    await user.click(await screen.findByRole("button", { name: "Side by side" }));
-    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await chooseReviewView("Side by side");
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
 
     rerender(
       <CodeDiffPane
@@ -642,10 +760,7 @@ describe("CodeDiffPane", () => {
         loadRuntime={runtime().loadRuntime}
       />,
     );
-    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
     setItem.mockRestore();
   });
 
@@ -654,11 +769,8 @@ describe("CodeDiffPane", () => {
     const first = render(
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
     );
-    await user.click(await screen.findByRole("button", { name: "Side by side" }));
-    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await chooseReviewView("Side by side");
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
     first.unmount();
 
     const otherThread = {
@@ -668,20 +780,14 @@ describe("CodeDiffPane", () => {
     const other = render(
       <CodeDiffPane client={client()} diff={otherThread} loadRuntime={runtime().loadRuntime} />,
     );
-    expect(await screen.findByRole("button", { name: "Unified" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
+    expect(await reviewViewIsOn("Unified")).toBe(true);
+    expect(screen.getByRole("navigation", { name: "Changed files" })).toBeInTheDocument();
     other.unmount();
 
     render(
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
     );
-    expect(await screen.findByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
   });
 });
 

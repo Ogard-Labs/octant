@@ -18,10 +18,10 @@ import {
   PinOff,
   RefreshCw,
   Terminal,
-} from "lucide-react";
+} from "../ui/icons";
 import { Fragment, useEffect, useRef, useState } from "react";
+import { relativeTimeLabel } from "../lib/relativeTime";
 import type { CodeController, CodeThreadNavigationItem } from "./useCodeController";
-import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -78,6 +78,8 @@ export type CodeOverviewProps =
       ) => Promise<boolean>;
       readonly creating?: boolean;
       readonly errorMessage?: string;
+      /** Starts a thread from the Project page when the list is empty. */
+      readonly onNewThread?: () => void;
       readonly pendingMessage?: string;
       readonly showQuickStart?: boolean;
     };
@@ -366,28 +368,43 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
     (thread) => String(thread.projectId) === String(props.projectId),
   );
 
-  return (
-    <section aria-label="Code Project Overview" className="code-project-overview">
-      <CodeProjectSessions
-        boardState={boardState}
-        cards={cards}
-        navigationThreads={navigationThreads}
-        onRenameThread={(threadId, title) =>
-          void props.controller.renameThread(threadId as CodeThreadId, title)
-        }
-        onPinThread={(threadId, pinned) =>
-          void props.controller.pinThread(threadId as CodeThreadId, pinned)
-        }
-        onOpenThread={props.onOpenThread}
-        onRetry={() => setReload((current) => current + 1)}
-        {...(props.showQuickStart === undefined ? {} : { showQuickStart: props.showQuickStart })}
-      />
+  const sessions = (
+    <CodeProjectSessions
+      boardState={boardState}
+      cards={cards}
+      navigationThreads={navigationThreads}
+      onRenameThread={(threadId, title) =>
+        void props.controller.renameThread(threadId as CodeThreadId, title)
+      }
+      onPinThread={(threadId, pinned) =>
+        void props.controller.pinThread(threadId as CodeThreadId, pinned)
+      }
+      onOpenThread={props.onOpenThread}
+      onRetry={() => setReload((current) => current + 1)}
+      {...(props.onNewThread === undefined ? {} : { onNewThread: props.onNewThread })}
+      {...(props.showQuickStart === undefined ? {} : { showQuickStart: props.showQuickStart })}
+    />
+  );
+  const side = (
+    <>
       <CodeProjectPlanner {...props} />
       <CodeProjectCoordinatorStarting controller={props.controller} projectId={props.projectId} />
       <CodeProjectCoordinatorWorkerListing
         controller={props.controller}
         projectId={props.projectId}
       />
+    </>
+  );
+  // On the Project page (no quick start) the planner and Starting workers are
+  // the side column's cards. The page floats them beside the list, and a float
+  // sits no higher than the content before it, so they come first in the source.
+  const sideFirst = props.showQuickStart === false;
+
+  return (
+    <section aria-label="Code Project Overview" className="code-project-overview">
+      {sideFirst ? side : null}
+      {sessions}
+      {sideFirst ? null : side}
       {props.showQuickStart === false ? null : (
         <CodeProjectQuickStart
           controller={props.controller}
@@ -450,6 +467,7 @@ function CodeProjectSessions(props: {
   readonly onPinThread?: (threadId: string, pinned: boolean) => void;
   readonly onOpenThread: (threadId: CodeThreadId) => void;
   readonly onRetry: () => void;
+  readonly onNewThread?: () => void;
   readonly showQuickStart?: boolean;
 }) {
   const cardsByThread = new Map(props.cards.map((card) => [String(card.threadId), card]));
@@ -498,9 +516,18 @@ function CodeProjectSessions(props: {
           <p>{props.boardState.message}</p>
         </OctantAlert>
       ) : rows.length === 0 ? (
-        <p className="code-project-overview__note" role="status">
-          {props.showQuickStart === false ? "No threads yet." : "No threads yet. Start one below."}
-        </p>
+        <div className="code-project-overview__empty">
+          <p className="code-project-overview__note" role="status">
+            {props.showQuickStart === false
+              ? "No threads yet."
+              : "No threads yet. Start one below."}
+          </p>
+          {props.onNewThread === undefined || props.showQuickStart !== false ? null : (
+            <OctantButton onClick={props.onNewThread} size="sm" type="button" variant="secondary">
+              New thread
+            </OctantButton>
+          )}
+        </div>
       ) : (
         <ul className="code-project-overview__threads">
           {rows.map((row) => (
@@ -534,8 +561,8 @@ function CodeProjectThreadRow(props: {
   const [renaming, setRenaming] = useState(false);
   const { row } = props;
   const pinned = row.thread?.pinned === true;
-  const facts = collapsedThreadFacts(row.card);
-  const detail = detailThreadFacts(row.card);
+  const meta = glanceThreadFacts(row.card);
+  const detail = [...detailThreadFacts(row.card, row.thread)];
   return (
     <article className="code-project-thread">
       {renaming && props.onRename !== undefined ? (
@@ -566,6 +593,7 @@ function CodeProjectThreadRow(props: {
           >
             <span>{row.title}</span>
           </OctantButton>
+          <ThreadStateMark row={row} />
           {props.onPin === undefined ? null : (
             <OctantButton
               aria-label={pinned ? `Unpin ${row.title}` : `Pin ${row.title}`}
@@ -584,37 +612,20 @@ function CodeProjectThreadRow(props: {
           )}
         </div>
       )}
-      {/* State, posture, and facts read as one line under the title, so a
-          row scans left to right instead of splitting its state off to the
-          far edge of a wide page. */}
+      {/* The row's quiet line: branch, change count and age. What a person
+          rarely needs (staged, committed ahead, checks, why it is blocked)
+          waits behind Details. */}
       <div className="code-project-thread__meta">
-        <span className="code-project-thread__chips">
-          <ThreadStateBadge row={row} />
-          {row.thread?.unread === true ? (
-            <OctantBadge variant="default">New activity</OctantBadge>
-          ) : null}
-          {(row.thread?.followUp ?? row.card?.followUp) === true ? (
-            <span className="tag">Follow-up</span>
-          ) : null}
-          {pinned ? <span className="tag">Pinned</span> : null}
-        </span>
-        {/* The access policy is a standing posture, not a state or a control,
-            so it reads as quiet text beside the facts rather than as a chip. */}
-        {row.thread === undefined ? null : (
-          <span className="code-project-thread__posture">
-            {policyLabel(row.thread.executionPolicy)}
+        {meta.map((fact) => (
+          <span key={fact.key} title={fact.title}>
+            {fact.value}
           </span>
-        )}
-        {facts.length === 0 ? null : (
-          <ul className="code-project-thread__facts" aria-label="Thread facts">
-            {facts.map((fact) => (
-              <li key={fact.label}>
-                <span className="code-project-thread__fact-label">{fact.label}</span>
-                <span>{fact.value}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        ))}
+        {row.thread?.unread === true ? <span className="tag">New activity</span> : null}
+        {(row.thread?.followUp ?? row.card?.followUp) === true ? (
+          <span className="tag">Follow-up</span>
+        ) : null}
+        {pinned ? <span className="tag">Pinned</span> : null}
       </div>
       {detail.length === 0 ? null : (
         <OctantCollapsible className="code-project-thread__more" summary="Details">
@@ -637,22 +648,32 @@ function CodeProjectThreadRow(props: {
  * projected from more evidence; the lifecycle stands in only when the board
  * has no card for the thread. Both are server-reported, never invented here.
  */
-function ThreadStateBadge({ row }: { readonly row: ThreadRowModel }) {
+function ThreadStateMark({ row }: { readonly row: ThreadRowModel }) {
+  const state = threadState(row);
+  if (state === undefined) return null;
+  return (
+    <span className="code-project-thread__status" data-state={state.tone}>
+      <span aria-hidden="true" className="code-project-thread__status-dot" />
+      {state.label}
+    </span>
+  );
+}
+
+type ThreadStateTone = "ready" | "active" | "attention" | "done" | "danger" | "quiet";
+
+function threadState(
+  row: ThreadRowModel,
+): { readonly label: string; readonly tone: ThreadStateTone } | undefined {
   if (row.card !== undefined) {
-    return (
-      <span className={boardStatusBadgeClass(row.card.status)}>
-        {boardStatusLabel(row.card.status)}
-      </span>
-    );
+    return { label: boardStatusLabel(row.card.status), tone: boardStatusTone(row.card.status) };
   }
   if (row.thread !== undefined) {
-    return (
-      <span className={lifecycleBadgeClass(row.thread.lifecycle)}>
-        {lifecycleSummary(row.thread.lifecycle)}
-      </span>
-    );
+    return {
+      label: lifecycleSummary(row.thread.lifecycle),
+      tone: lifecycleTone(row.thread.lifecycle),
+    };
   }
-  return null;
+  return undefined;
 }
 
 interface ThreadFact {
@@ -660,17 +681,61 @@ interface ThreadFact {
   readonly value: string;
 }
 
+interface GlanceFact {
+  readonly key: string;
+  readonly value: string;
+  readonly title?: string;
+}
+
 /**
- * Only facts the host actually reported become rows. An unknown, unavailable,
- * or zero-valued facet is absence, not a fact, so it renders nothing rather
- * than a placeholder sentence.
+ * What a row shows without opening it: the branch, the size of the change and
+ * how long ago it last moved. Only facts the host reported appear; an unknown
+ * or zero facet is absence, not a placeholder sentence.
  */
-function collapsedThreadFacts(card: CodeBoardCard | undefined): ReadonlyArray<ThreadFact> {
+function glanceThreadFacts(card: CodeBoardCard | undefined): ReadonlyArray<GlanceFact> {
   if (card === undefined) return [];
-  const facts: ThreadFact[] = [];
+  const facts: GlanceFact[] = [];
   if (card.worktree.kind === "available") {
-    facts.push({ label: "Branch", value: headLabel(card.worktree.head) });
+    facts.push({ key: "branch", value: headLabel(card.worktree.head) });
   }
+  if (
+    card.changedFiles.kind === "observed" &&
+    (card.changedFiles.insertions > 0 || card.changedFiles.deletions > 0)
+  ) {
+    facts.push({
+      key: "diffstat",
+      value: withStaleness(
+        `+${card.changedFiles.insertions.toLocaleString("en")} −${card.changedFiles.deletions.toLocaleString("en")}`,
+        card.changedFiles.freshness,
+      ),
+    });
+  }
+  if (card.lastMeaningfulActivityAt !== null) {
+    const at = String(card.lastMeaningfulActivityAt);
+    facts.push({
+      key: "age",
+      value: relativeTimeLabel(at),
+      title: new Date(at).toLocaleString(),
+    });
+  }
+  return facts;
+}
+
+/**
+ * The disclosure carries the facts that are true but rarely the reason to
+ * glance at the board: the full change count, checks, review, why a thread is
+ * blocked, paths, the confirmed delivery target and trailing activity.
+ * Everything here is still host-reported, only tucked away.
+ */
+function detailThreadFacts(
+  card: CodeBoardCard | undefined,
+  thread: CodeThreadNavigationItem | undefined,
+): ReadonlyArray<ThreadFact> {
+  const facts: ThreadFact[] = [];
+  if (thread !== undefined) {
+    facts.push({ label: "Access", value: policyLabel(thread.executionPolicy) });
+  }
+  if (card === undefined) return facts;
   if (card.changedFiles.kind === "observed") {
     facts.push({
       label: "Changes",
@@ -706,17 +771,6 @@ function collapsedThreadFacts(card: CodeBoardCard | undefined): ReadonlyArray<Th
   if (card.blockingReason !== undefined) {
     facts.push({ label: "Blocked", value: card.blockingReason });
   }
-  return facts;
-}
-
-/**
- * The disclosure carries the facts that are true but rarely the reason to
- * glance at the board: paths, the confirmed delivery target, and trailing
- * activity. Everything here is still host-reported, only tucked away.
- */
-function detailThreadFacts(card: CodeBoardCard | undefined): ReadonlyArray<ThreadFact> {
-  if (card === undefined) return [];
-  const facts: ThreadFact[] = [];
   if (card.worktree.kind === "available") {
     facts.push({ label: "Worktree", value: String(card.worktree.path) });
   }
@@ -761,28 +815,28 @@ function childAgentsLabel(agents: CodeBoardCard["childAgents"]): string | undefi
   return parts.length === 0 ? undefined : parts.join(" · ");
 }
 
-function boardStatusBadgeClass(status: CodeBoardCard["status"]): string {
+function boardStatusTone(status: CodeBoardCard["status"]): ThreadStateTone {
   switch (status) {
     case "ready":
-      return "badge";
+      return "ready";
     case "in-progress":
-      return "badge badge-accent";
+      return "active";
     case "waiting":
-      return "badge badge-warn";
+      return "attention";
     case "done":
-      return "badge badge-ok";
+      return "done";
   }
 }
 
-function lifecycleBadgeClass(lifecycle: CodeThreadNavigationItem["lifecycle"]): string {
+function lifecycleTone(lifecycle: CodeThreadNavigationItem["lifecycle"]): ThreadStateTone {
   switch (lifecycle) {
     case "waiting":
-      return "badge badge-warn";
+      return "attention";
     case "interrupted":
-      return "badge badge-danger";
+      return "danger";
     case "active":
     case "archived":
-      return "badge";
+      return "quiet";
   }
 }
 

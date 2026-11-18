@@ -12,6 +12,10 @@ import {
   WorkTurnLookupResult,
   ProjectBootstrap,
   decodeHostAnswer,
+  decodeWorkRequestCommand,
+  type WorkRequest,
+  WorkRequestCommandResult,
+  WorkRequestList,
 } from "@octant/contracts";
 import {
   MobileInboxFailure,
@@ -323,4 +327,61 @@ export async function createMobileWorkFromPrompt(input: {
     );
   }
   return row;
+}
+
+/**
+ * The Work thread's requests waiting on a person, oldest first. The host scopes
+ * the list to what this device may answer; the phone filters nothing in.
+ */
+export async function listMobileWorkRequests(
+  transport: MobileRemoteTransport,
+  thread: { readonly threadId: string; readonly projectId: string },
+  signal?: AbortSignal,
+): Promise<ReadonlyArray<WorkRequest>> {
+  const query = new URLSearchParams({
+    projectId: thread.projectId,
+    threadId: thread.threadId,
+  }).toString();
+  const list = await decodeJson(
+    await transport.authenticatedFetch({
+      method: "GET",
+      path: "/api/work/requests",
+      query,
+      ...(signal === undefined ? {} : { signal }),
+    }),
+    decodeHostAnswer(WorkRequestList),
+    "Could not load the Work thread's requests from the host.",
+  );
+  return list.requests.filter(
+    (request) => request.status === "pending" && String(request.threadId) === thread.threadId,
+  );
+}
+
+/**
+ * Answers a pending Work approval. The host applies what approving means (a
+ * level change moves the thread through its ordinary access rule) and
+ * journals the answer as this device; the phone sends only yes or no and the
+ * version it read.
+ */
+export async function resolveMobileWorkApproval(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly request: Pick<WorkRequest, "requestId" | "version">;
+  readonly approved: boolean;
+}): Promise<WorkRequestCommandResult> {
+  const command = decodeWorkRequestCommand({
+    kind: "resolve-work-request",
+    requestId: input.request.requestId,
+    expectedVersion: input.request.version,
+    resolution: { kind: "approval", approved: input.approved },
+  });
+  return decodeJson(
+    await input.transport.authenticatedFetch({
+      method: "POST",
+      path: "/api/work/requests/commands",
+      body: JSON.stringify(command),
+      contentType: "application/json",
+    }),
+    decodeHostAnswer(WorkRequestCommandResult),
+    "The host did not take that answer.",
+  );
 }

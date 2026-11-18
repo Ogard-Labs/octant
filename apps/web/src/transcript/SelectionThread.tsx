@@ -1,6 +1,6 @@
 import { followSelectionWithin } from "./selectionOwner";
 import type { ProjectId } from "@octant/contracts/projects";
-import { MessageSquarePlus } from "lucide-react";
+import { MessageSquarePlus } from "../ui/icons";
 import {
   createContext,
   useCallback,

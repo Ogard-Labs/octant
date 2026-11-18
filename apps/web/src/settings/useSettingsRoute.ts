@@ -1,3 +1,4 @@
+import type { SandboxRestrictionsScope } from "@octant/contracts/sandbox-policy";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SettingsDeepLink, SettingsSectionId, SettingsSettingId } from "@octant/contracts";
 import {
@@ -9,6 +10,7 @@ import {
 } from "./registry";
 
 export interface SettingsRouteController {
+  readonly sandboxScope: SandboxRestrictionsScope | undefined;
   readonly activeSection: SettingsSectionId;
   readonly focusedSetting: SettingsSettingId | undefined;
   readonly openSection: (sectionId: SettingsSectionId) => void;
@@ -44,6 +46,7 @@ export function useSettingsRoute(options: UseSettingsRouteOptions): SettingsRout
     return firstSection ?? "general";
   };
 
+  const [sandboxScope, setSandboxScope] = useState(initialDeepLink?.sandboxScope);
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(computeInitial);
   const [focusedSetting, setFocusedSetting] = useState<SettingsSettingId | undefined>(undefined);
 
@@ -89,6 +92,7 @@ export function useSettingsRoute(options: UseSettingsRouteOptions): SettingsRout
     (link: SettingsDeepLink) => {
       const resolved = resolveDeepLink(registry, capabilities, link);
       if (resolved === undefined) return;
+      setSandboxScope(link.sandboxScope);
       setActiveSection(resolved.section.id);
       setFocusedSetting(resolved.settingId);
     },
@@ -98,13 +102,22 @@ export function useSettingsRoute(options: UseSettingsRouteOptions): SettingsRout
   return useMemo(
     () => ({
       activeSection,
+      sandboxScope,
       focusedSetting,
       openSection,
       focusSetting,
       applyDeepLink,
       clearFocus,
     }),
-    [activeSection, focusedSetting, openSection, focusSetting, applyDeepLink, clearFocus],
+    [
+      activeSection,
+      sandboxScope,
+      focusedSetting,
+      openSection,
+      focusSetting,
+      applyDeepLink,
+      clearFocus,
+    ],
   );
 }
 

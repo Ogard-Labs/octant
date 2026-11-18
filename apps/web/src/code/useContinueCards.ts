@@ -6,6 +6,8 @@ const RUNNING_LIMIT = 5;
 
 export type ContinueCards =
   | { readonly kind: "idle" }
+  /** The board is being read for the first time: the list holds the section's place. */
+  | { readonly kind: "loading" }
   | {
       readonly kind: "ready";
       /** The threads to pick back up: the latest ones that are not running. */
@@ -37,12 +39,17 @@ export function useContinueCards(
   loadBoard: ((query: CodeBoardQuery) => Promise<CodeBoardView>) | undefined,
   changeRevision: number,
 ): ContinueCards {
-  const [cards, setCards] = useState<ContinueCards>({ kind: "idle" });
+  const [cards, setCards] = useState<ContinueCards>({
+    kind: loadBoard === undefined ? "idle" : "loading",
+  });
   useEffect(() => {
     if (loadBoard === undefined) {
       setCards({ kind: "idle" });
       return;
     }
+    // Reading for the first time is "loading", not an empty section: an empty
+    // answer drew zero rows, then the rows arrived and everything below moved.
+    setCards((previous) => (previous.kind === "idle" ? { kind: "loading" } : previous));
     let cancelled = false;
     loadBoard({ version: 1 }).then(
       (view) => {
@@ -57,7 +64,10 @@ export function useContinueCards(
       },
       () => {
         // A board that cannot be read says nothing new, so the section keeps
-        // whatever it was already showing.
+        // whatever it was already showing, and a first read that fails stops
+        // waiting rather than holding a placeholder for ever.
+        if (!cancelled)
+          setCards((previous) => (previous.kind === "loading" ? { kind: "idle" } : previous));
       },
     );
     return () => {

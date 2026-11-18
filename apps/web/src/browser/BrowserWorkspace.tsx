@@ -2,6 +2,7 @@ import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useBrowserAccountProfiles } from "./useBrowserAccountProfiles";
 import { browserProfileFromChoice, formatBrowserElementSnapshot } from "@octant/domain";
 import { browserProfileLabel } from "./browserProfileCopy";
+import { livePageOf, publishBrowserTabPage } from "./browserTabPages";
 import type { BrowserAgentAvailability } from "@octant/contracts";
 import { agentAvailabilityNote } from "./BrowserAgentStatus";
 import { useElementWidth } from "./useElementWidth";
@@ -53,14 +54,18 @@ import {
   LoaderCircle,
   LockKeyhole,
   LogOut,
+  MessageSquarePlus,
   MousePointerClick,
   PanelRight,
   PenLine,
+  RefreshCcw,
+  Square,
+  Type,
   RotateCw,
   ShieldCheck,
   Undo2,
   X,
-} from "lucide-react";
+} from "../ui/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MiddleTruncatedText } from "../lib/MiddleTruncatedText";
 import { OctantButton, OctantIconButton, octantButtonClassName } from "../ui/base/OctantButton";
@@ -69,6 +74,8 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
+import { BrowserAnnotateBar, type AnnotateTool } from "./BrowserAnnotateBar";
+import type { MarkupTool } from "./BrowserMarkupBar";
 import { useProductFeedback, type ProductFeedback } from "./useProductFeedback";
 import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
 import type { BrowserElementSnapshot } from "@octant/contracts/product-feedback";
@@ -84,6 +91,8 @@ import {
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useLocalServersController } from "../environment/useLocalServersController";
 import { readRecentBrowserPages, recordRecentBrowserPage } from "./recentBrowserPages";
+import { recallPageFavicon, rememberPageFavicon } from "./pageFavicons";
+import { PageFavicon } from "../shell/PageFavicon";
 import { BrowserProfileControl, browserProfileMenuItems } from "./BrowserProfileControl";
 import {
   BrowserExtensionsButton,
@@ -181,6 +190,11 @@ export interface BrowserWorkspaceProps {
    * picture goes: a Browser with no thread composer beside it offers nothing.
    */
   readonly canDrawOnPage?: boolean;
+  /**
+   * The dock tab this pane is the page of. With it the pane reports its page's
+   * live title and address, which name the tab in the dock.
+   */
+  readonly dockTabId?: string;
 }
 
 export function BrowserWorkspace(props: BrowserWorkspaceProps) {
@@ -218,6 +232,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   // The person's own kept capture while it is being drawn on; its marks live in
   // the stage and are dropped with it.
   const [markupPicture, setMarkupPicture] = useState<string>();
+  // The drawing tool the person chose in the page's toolbar, and whether the
+  // list of notes is open above it.
+  const [markupTool, setMarkupTool] = useState<MarkupTool>("pen");
+  const [notesOpen, setNotesOpen] = useState(false);
   // Each Draw on page press holds a number; leaving the page, changing context,
   // or unmounting moves it on, so a still that arrives late is not opened over a
   // page the person has already left.
@@ -240,6 +258,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const [ownedContextId, setOwnedContextId] = useState<BrowserContextId | undefined>(
     props.tab.contextId,
   );
+  // Which of the thread's pages a Browser tab opened from the tool row shows:
+  // the thread's shared page, which the agent's Browser tool uses, or a page
+  // of its own. Unknown until the tab opens a page or reads which it holds.
+  const [ownPage, setOwnPage] = useState<boolean>();
+  // Whether the thread already has its shared page, as the last read saw it.
+  const [threadHasSharedPage, setThreadHasSharedPage] = useState(false);
   const [nativeSupported, setNativeSupported] = useState(false);
   const accounts = useBrowserAccountProfiles(props.client, nativeSupported);
   // Where the next page keeps its site data. A new page opens Private unless the
@@ -373,6 +397,35 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     useRef<BrowserActionRequest["expectedObservationRevision"]>(undefined);
   const remoteActionTail = useRef<Promise<void>>(Promise.resolve());
   const activeContext = snapshot?.context?.state === "active";
+  // A tab that comes back bound to a page (the dock remembers it) did not open
+  // that page in this mount, so it asks once which of the thread's pages it is.
+  const shownContextId = snapshot?.context?.contextId;
+  useEffect(() => {
+    const threadId = props.tab.threadId;
+    if (
+      props.startFresh !== true ||
+      threadId === undefined ||
+      shownContextId === undefined ||
+      ownPage !== undefined
+    ) {
+      return;
+    }
+    let current = true;
+    void props.client
+      .inspectThread({ threadId, freshPicture: false })
+      .then((thread) => {
+        if (!current) return;
+        setOwnPage(
+          !(
+            sharedPageIsLive(thread) && String(thread.context?.contextId) === String(shownContextId)
+          ),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [ownPage, props.client, props.startFresh, props.tab.threadId, shownContextId]);
   const nativeContext = nativeSupported && snapshot?.context?.presentation !== "headless";
   const nativeSurface = useNativeBrowserSurface({
     ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
@@ -530,6 +583,27 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     if (committedAddress === undefined || !/^https?:/i.test(committedAddress)) return;
     setRecentPages(recordRecentBrowserPage(committedAddress));
   }, [committedAddress]);
+  // The dock names this tab for the page shown here. A page the person drives
+  // natively is known only to the pane, not to the server's last read; title
+  // and address come from the same source so a label never pairs one page's
+  // title with another's address.
+  const livePage = livePageOf({
+    activeContext,
+    native: nativeContext ? nativeState : undefined,
+    observation: snapshot?.observation,
+  });
+  const liveTitle = livePage?.title;
+  const liveAddress = livePage?.url;
+  const reportThreadId = props.tab.threadId === undefined ? undefined : String(props.tab.threadId);
+  useEffect(() => {
+    if (props.dockTabId === undefined || reportThreadId === undefined) return;
+    publishBrowserTabPage(reportThreadId, props.dockTabId, { title: liveTitle, url: liveAddress });
+  }, [liveAddress, liveTitle, props.dockTabId, reportThreadId]);
+  const shownFavicon = snapshot?.observation?.faviconDataUrl;
+  useEffect(() => {
+    if (committedAddress !== undefined && shownFavicon !== undefined)
+      rememberPageFavicon(committedAddress, shownFavicon);
+  }, [committedAddress, shownFavicon]);
   const secureAddress = committedAddress?.toLocaleLowerCase().startsWith("https:") === true;
   const addressSecurityLabel =
     committedAddress === undefined ? "Address" : secureAddress ? "Secure HTTPS" : "Not secure HTTP";
@@ -622,6 +696,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         // A fresh tab reads only the thread's admission fact. Its current page
         // belongs to another tab until this one creates its own context.
         if (fresh) {
+          setThreadHasSharedPage(sharedPageIsLive(next));
           setStatus("ready");
           return;
         }
@@ -645,7 +720,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             localFailureRevision.current = undefined;
           }
           setStatus(next.status);
-          setMessage(next.failure?.message);
+          setMessage(snapshotFailureNotice(next.failure));
         }
       } catch (error) {
         if (!active || controller.signal.aborted) return;
@@ -695,11 +770,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         aria-label="Browser automation"
         className="browser-workspace browser-workspace--state"
       >
+        {/* A pane's state: the mark, one line, one muted line with the
+            reason. An eyebrow over the title made it three. */}
         <OctantEmpty
-          eyebrow="Browser unavailable"
-          message="The host requires one exact owning thread before it can create an isolated context."
+          message="Open it from a Work or Code thread. A page is isolated to the thread that owns it."
           state="neutral"
-          title="Open Browser from a Work or Code thread"
+          title="Browser needs a thread"
         />
       </section>
     );
@@ -755,16 +831,38 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         policy: {
           profileMode: "isolated",
           ...(profile === undefined ? {} : { profile }),
-          allowedOrigins: [origin],
+          // A Private page admits every site, for the person and the agent
+          // alike; a signed-in profile asks per site, and a local server's
+          // own certificate is accepted for its one origin only. The headless
+          // Browser cannot keep a typed address's redirect off this computer's
+          // network, so there the person's page holds the site they typed.
+          allowedOrigins: [
+            profile === undefined && prepared?.acceptsLocalCertificate !== true && nativeSupported
+              ? ANY_BROWSER_ORIGIN
+              : origin,
+          ],
           credentialFieldProtection: true,
           maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
           sessionTimeoutMs: 300_000,
           ...(prepared?.acceptsLocalCertificate === true ? { acceptsLocalCertificate: true } : {}),
         },
+        // Every Browser tab opened from the tool row starts fresh, the first
+        // one too. The first becomes the thread's shared page, which the
+        // agent's tool uses; a tab opened while that page is live gets a page
+        // of its own. The host decides which as it opens the page: an ordinary
+        // Open answers with the shared page, so a second tab that asked the
+        // ordinary way showed the first tab's page and was refused its site,
+        // and a tab that looked first and then asked could lose a race.
         // A tab bound to one context is replaced by a context of its own, never by
         // whatever shared context the thread already holds.
-        ...(switchingProfile.current ? { dedicated: true } : {}),
+        ...(props.startFresh === true
+          ? { ownPageWhenShared: true }
+          : switchingProfile.current
+            ? { dedicated: true }
+            : {}),
       });
+      // The host chose; the tab asks which page it now holds.
+      if (props.startFresh === true) setOwnPage(undefined);
       setScope(resolved);
       update(next);
       if (next.context !== undefined) {
@@ -893,7 +991,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
    * credential-field refusal, the journal record and the origin's taint all
    * apply as they do for any capture.
    */
-  async function startMarkup(): Promise<void> {
+  async function startMarkup(tool: MarkupTool = "pen"): Promise<void> {
+    setMarkupTool(tool);
     const readCapture = props.client.readCapture;
     const threadId = props.tab.threadId;
     if (readCapture === undefined || threadId === undefined) return;
@@ -1044,7 +1143,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     unchangedPolls.current = 0;
     setSnapshot(next);
     setStatus(next.status);
-    setMessage(next.failure?.message);
+    setMessage(snapshotFailureNotice(next.failure));
   }
 
   function queueRemoteAction(
@@ -1097,7 +1196,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     const targetOrigin = new URL(target).origin;
     const allowed = snapshot?.context?.policy.allowedOrigins.some(
       (origin) =>
-        // The agent's Private page at Full access admits every site.
+        // A Private page admits every site.
         origin === ANY_BROWSER_ORIGIN ||
         new URL(normalizeBrowserUrl(origin)).origin === targetOrigin,
     );
@@ -1262,6 +1361,123 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       feedback.preview !== undefined ||
       feedback.pending.length > 0);
   const feedbackNotice = feedbackPointing.message ?? feedback.message;
+  // The page's annotation tools, in one toolbar under the page. Each stands
+  // for something the Browser could already do; a tool the page, the thread or
+  // this build cannot offer is not drawn.
+  const canAnnotate =
+    activeContext && props.canDrawOnPage === true && props.tab.threadId !== undefined;
+  const canDraw =
+    canAnnotate && props.client.takeCapture !== undefined && props.client.readCapture !== undefined;
+  const drawing = markupPicture !== undefined;
+  const drawHint = pointingAny
+    ? "Finish or cancel pointing at an element first"
+    : drawing
+      ? "A drawing is already open"
+      : "On a screenshot kept with this thread";
+  const drawTool = (id: MarkupTool, label: string, icon: AnnotateTool["icon"]): AnnotateTool => ({
+    id: `draw-${id}`,
+    label,
+    hint: drawHint,
+    icon,
+    disabled: capturing || drawing || pointingAny,
+    onPress: () => void startMarkup(id),
+    group: "draw",
+  });
+  const annotateTools: ReadonlyArray<AnnotateTool> = [
+    ...(canAnnotate && feedback.available
+      ? [
+          {
+            id: "pick",
+            label: elementPicking.pointing ? "Stop picking" : "Pick element",
+            hint: elementPicking.pointing
+              ? "Click an element on the page, or press Escape to stop"
+              : (feedbackSelectionUnavailable ??
+                (feedbackPointing.pointing
+                  ? "Finish or cancel pointing at an element first"
+                  : "Adds the element's selector, markup and style to the message")),
+            icon: <MousePointerClick aria-hidden="true" size={16} />,
+            pressed: elementPicking.pointing,
+            disabled:
+              !elementPicking.pointing &&
+              (feedbackSelectionUnavailable !== undefined || feedbackPointing.pointing),
+            onPress: () => {
+              setCaptureNotice(undefined);
+              elementPicking.toggle();
+            },
+            group: "point",
+          } satisfies AnnotateTool,
+        ]
+      : []),
+    ...(showFeedback
+      ? [
+          {
+            id: "note",
+            label: feedbackPointing.pointing
+              ? "Cancel pointing"
+              : feedback.preview === undefined
+                ? "Point at something"
+                : "Choose another element",
+            hint: feedbackPointing.pointing
+              ? "Click the thing you mean. Pointing will not click it or send a message"
+              : elementPicking.pointing
+                ? "Finish or stop picking an element first"
+                : (feedbackSelectionUnavailable ?? "Leaves a note on it for your next message"),
+            icon: <MessageSquarePlus aria-hidden="true" size={16} />,
+            pressed: feedbackPointing.pointing,
+            disabled:
+              feedback.busy ||
+              (!feedbackPointing.pointing &&
+                (feedbackSelectionUnavailable !== undefined || elementPicking.pointing)),
+            onPress: feedbackPointing.toggle,
+            group: "point",
+          } satisfies AnnotateTool,
+        ]
+      : []),
+    ...(canDraw
+      ? [
+          drawTool("pen", "Draw on page", <PenLine aria-hidden="true" size={16} />),
+          drawTool("box", "Box on page", <Square aria-hidden="true" size={16} />),
+          drawTool("text", "Text on page", <Type aria-hidden="true" size={16} />),
+        ]
+      : []),
+    ...(showFeedback
+      ? [
+          {
+            id: "refresh",
+            label: "Refresh notes",
+            icon: <RefreshCcw aria-hidden="true" size={16} />,
+            disabled: feedback.busy || feedbackPointing.pointing,
+            onPress: () => void feedback.refresh(),
+            group: "notes",
+          } satisfies AnnotateTool,
+        ]
+      : []),
+  ];
+  const armed = feedbackPointing.pointing || elementPicking.pointing || drawing;
+  const annotateBar: ReadonlyArray<AnnotateTool> =
+    annotateTools.length === 0
+      ? annotateTools
+      : [
+          ...annotateTools,
+          {
+            id: "end",
+            label: drawing ? "Discard the drawing" : "Cancel",
+            hint: armed ? undefined : "Nothing is armed",
+            icon: <X aria-hidden="true" size={16} />,
+            disabled: !armed,
+            onPress: () => {
+              if (feedbackPointing.pointing) feedbackPointing.toggle();
+              else if (elementPicking.pointing) elementPicking.toggle();
+              else if (drawing) closeMarkup();
+            },
+            group: "end",
+          },
+        ];
+  const annotateStatus = feedbackPointing.pointing
+    ? "Click the thing you mean"
+    : elementPicking.pointing
+      ? "Click an element, or Esc to stop"
+      : feedbackNotice;
 
   const agentDriving = nativeState?.control === "agent";
   const agentNote = agentAvailabilityNote(agentAvailability);
@@ -1285,27 +1501,35 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   // person needs; Hand back moves into the more menu.
   const ownerHolds =
     activeContext && snapshot?.ownerController !== undefined && props.client.takeOver !== undefined;
-  const holdAction = ownerHolds
-    ? ({
-        hold: "reclaim",
-        label: "Reclaim locally",
-        title: "Stop remote owner control and keep the page held locally",
-      } as const)
-    : activeContext && personHasPage && props.client.handBack !== undefined
-      ? ({
-          hold: "hand-back",
-          label: "Hand back",
-          title: "You have the page. Hand it back to let the agent use it again.",
-        } as const)
-      : activeContext &&
-          snapshot?.waitingForPerson === undefined &&
-          props.client.takeOver !== undefined
+  // Take over and Hand back hold the thread's shared page, the one the agent
+  // uses. A tab that shows a page of its own, which no agent reaches, offers
+  // neither: asked from there, the host would hold the shared page and answer
+  // with that page's picture. A tab that does not yet know which page it
+  // holds waits to offer them.
+  const holdAction =
+    props.startFresh === true && ownPage !== false
+      ? undefined
+      : ownerHolds
         ? ({
-            hold: "take-over",
-            label: "Take over",
-            title: "Hold the agent's Browser calls while you use the page",
+            hold: "reclaim",
+            label: "Reclaim locally",
+            title: "Stop remote owner control and keep the page held locally",
           } as const)
-        : undefined;
+        : activeContext && personHasPage && props.client.handBack !== undefined
+          ? ({
+              hold: "hand-back",
+              label: "Hand back",
+              title: "You have the page. Hand it back to let the agent use it again.",
+            } as const)
+          : activeContext &&
+              snapshot?.waitingForPerson === undefined &&
+              props.client.takeOver !== undefined
+            ? ({
+                hold: "take-over",
+                label: "Take over",
+                title: "Use the page yourself. The agent can take it back when it needs it",
+              } as const)
+            : undefined;
   const holdIcon = (hold: "hand-back" | "take-over" | "reclaim") =>
     hold === "hand-back" ? (
       <Undo2 aria-hidden="true" size={16} />
@@ -1581,7 +1805,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   return (
     <section
       aria-label="Browser automation"
-      className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}${showFeedback ? " browser-workspace--feedback" : ""}`}
+      className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}${showFeedback || annotateTools.length > 0 ? " browser-workspace--feedback" : ""}`}
     >
       <OctantDialogPresence>
         {pendingTaskProfile === undefined ? null : (
@@ -1780,7 +2004,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         </span>
       </header>
       {taskProfileSupported && !props.startFresh && taskProfileRead === "error" ? (
-        <OctantAlert tone="warning">
+        <OctantAlert layout="row" tone="warning">
           The task’s default could not be loaded. Its saved choice has not changed.
           <OctantButton
             type="button"
@@ -1808,11 +2032,21 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       ) : null}
       {notice === undefined ? null : (
         <OctantAlert
-          className={
-            message === undefined && captureNoticeTone !== "warning"
-              ? "browser-workspace__notice"
-              : "browser-workspace__message"
+          action={
+            message !== undefined && isExpiredPageNotice(message) ? (
+              <OctantButton
+                disabled={starting || url.trim() === ""}
+                onClick={() => void (activeContext ? navigate() : startFromAddress())}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Open again
+              </OctantButton>
+            ) : undefined
           }
+          className="browser-workspace__message"
+          layout="row"
           tone={message === undefined ? captureNoticeTone : "warning"}
         >
           {notice}
@@ -1889,10 +2123,15 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
                         variant="ghost"
                       >
                         <span className="browser-workspace__server">
-                          <Globe2
-                            aria-hidden="true"
-                            className="browser-workspace__recent-icon"
-                            size={14}
+                          <PageFavicon
+                            fallback={
+                              <Globe2
+                                aria-hidden="true"
+                                className="browser-workspace__recent-icon"
+                                size={14}
+                              />
+                            }
+                            src={recallPageFavicon(page.url)}
                           />
                           <span className="browser-workspace__server-text">
                             <span className="browser-workspace__server-name">{host}</span>
@@ -1912,13 +2151,13 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           ) : null}
           {serverSuggestions.length > 0 || recentSuggestions.length > 0 ? (
             <p className="browser-workspace__local-note">
-              A page opens isolated to this thread and shared with its agent.
+              {startNote(props.startFresh === true && threadHasSharedPage)}
             </p>
           ) : (
             <div className="browser-workspace__empty">
               <ShieldCheck aria-hidden="true" size={20} />
               <h2>Open a private Browser session</h2>
-              <p>The page is isolated to this thread and shared with its agent.</p>
+              <p>{startNote(props.startFresh === true && threadHasSharedPage)}</p>
               <OctantButton
                 aria-label="Start browser"
                 disabled={starting || url.trim() === ""}
@@ -1940,6 +2179,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           {markupPicture === undefined ? null : (
             <BrowserMarkupStage
               dataUrl={markupPicture}
+              initialTool={markupTool}
               notice={markupNotice}
               onAddToChat={addMarkupToMessage}
               onClose={closeMarkup}
@@ -1960,6 +2200,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         <div className="browser-workspace__markup-page">
           <BrowserMarkupStage
             dataUrl={markupPicture}
+            initialTool={markupTool}
             notice={markupNotice}
             onAddToChat={addMarkupToMessage}
             onClose={closeMarkup}
@@ -2036,15 +2277,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           crops={feedback.crops}
           preview={feedback.preview}
           previewExpired={feedback.previewExpired}
-          {...(feedbackNotice === undefined ? {} : { message: feedbackNotice })}
-          {...(feedbackSelectionUnavailable === undefined
-            ? {}
-            : { selectionUnavailable: feedbackSelectionUnavailable })}
+          listOpen={notesOpen}
           pointing={feedbackPointing.pointing}
-          {...(elementPicking.pointing
-            ? { selectionUnavailable: "Finish or stop picking an element first." }
-            : {})}
-          onTogglePointing={feedbackPointing.toggle}
           onCancel={() => {
             feedbackPointing.cancel();
             void feedback.cancel();
@@ -2052,7 +2286,22 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           onSubmit={feedback.commit}
           onUpdate={feedback.update}
           onDiscard={(note) => void feedback.discard(note)}
-          onRefresh={() => void feedback.refresh()}
+        />
+      )}
+      {annotateTools.length === 0 ? null : (
+        <BrowserAnnotateBar
+          notes={
+            showFeedback
+              ? {
+                  count: feedback.pending.length,
+                  included: feedback.pending.filter((note) => note.included !== false).length,
+                  open: notesOpen,
+                  onToggle: () => setNotesOpen((open) => !open),
+                }
+              : undefined
+          }
+          status={annotateStatus}
+          tools={annotateBar}
         />
       )}
     </section>
@@ -2210,6 +2459,74 @@ function captureNotKeptNotice(
   return `This screenshot could not be kept: ${why[reason]}.`;
 }
 
+/** Whether a read of the thread shows its shared page open or opening. */
+function sharedPageIsLive(thread: BrowserAutomationSnapshot): boolean {
+  return thread.context?.state === "active" || thread.context?.state === "creating";
+}
+
+/**
+ * The host words an expired page for the agent that must call navigate again.
+ * The person gets one short sentence and an Open again action instead.
+ */
+function failureNotice(category: string, hostMessage: string): string {
+  if (category === "stale") {
+    return "That page has closed, for example when Octant restarted. Open it again from Recent or the address bar.";
+  }
+  if (category === "context-expired") return expiredPageNotice(hostMessage);
+  return hostMessage;
+}
+
+/**
+ * Who a page opened here is for. A Browser tab opened while the thread's
+ * shared page is live opens a page of its own, which the agent's Browser tool
+ * never reaches: that tool works on the shared page, the first one opened.
+ */
+function startNote(ownPage: boolean): string {
+  return ownPage
+    ? "A page opens isolated to this thread and is yours alone. The agent uses the thread's first Browser page."
+    : "A page opens isolated to this thread and shared with its agent.";
+}
+
+/**
+ * The host words an expired page and a site refusal for the agent that has to
+ * recover from it ("Call stop, then navigate…"), and that text was shown in
+ * the window as it stood. The person reads what happened and what they can
+ * do; the agent keeps its own text in the tool result.
+ */
+function snapshotFailureNotice(
+  failure: BrowserAutomationSnapshot["failure"] | undefined,
+): string | undefined {
+  if (failure === undefined) return undefined;
+  if (failure.category === "context-expired") return expiredPageNotice(failure.message);
+  if (failure.category !== "policy-denied" || failure.reason !== "origin-not-approved") {
+    return failure.message;
+  }
+  const site = siteOf(failure.refusedOrigin);
+  return site === undefined
+    ? "This page is open for one site only, so a request for another site was refused. To browse another site here, type its address in the address bar."
+    : `This address leads to ${site}, a different site, so it was not opened. To go there, type ${site} in the address bar.`;
+}
+
+function siteOf(origin: string | undefined): string | undefined {
+  if (origin === undefined) return undefined;
+  try {
+    return new URL(origin).host;
+  } catch {
+    return undefined;
+  }
+}
+
+function expiredPageNotice(hostMessage: string): string {
+  if (/\bPrivate profile\b/.test(hostMessage)) return "This Private page expired.";
+  if (/\bProject profile\b/.test(hostMessage)) return "This Project page expired.";
+  if (/\bPersonal profile\b/.test(hostMessage)) return "This Personal page expired.";
+  return "This page expired.";
+}
+
+function isExpiredPageNotice(message: string): boolean {
+  return /^This (?:Private |Project |Personal )?page expired\.$/.test(message);
+}
+
 function applyFailure(
   error: unknown,
   setStatus: (status: BrowserWorkspaceStatus) => void,
@@ -2225,11 +2542,7 @@ function applyFailure(
             ? "stale"
             : "failed",
     );
-    setMessage(
-      error.category === "stale"
-        ? "That page has closed, for example when Octant restarted. Open it again from Recent or the address bar."
-        : error.message,
-    );
+    setMessage(failureNotice(error.category, error.message));
     return;
   }
   setStatus("failed");

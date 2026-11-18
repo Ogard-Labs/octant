@@ -205,7 +205,8 @@ describe("AgentsCenter", () => {
     render(
       <AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [item] })) })} />,
     );
-    await userEvent.click(screen.getByRole("button", { name: /^History$/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Filter" }));
+    await userEvent.click(await screen.findByRole("menuitemradio", { name: "History" }));
     await userEvent.click(await screen.findByRole("button", { name: summary.task }));
     expect(screen.queryByRole("button", { name: /^Steer$/ })).not.toBeInTheDocument();
   });
@@ -241,7 +242,14 @@ describe("AgentsCenter", () => {
     render(<AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [] })) })} />);
     const title = await screen.findByText("No agent runs yet");
     expect(title.closest("[role='status']")).toHaveClass("surface-empty");
-    expect(screen.getByText("Child agents appear here after a thread starts one.")).toBeVisible();
+    expect(screen.getByText(/Helpers a thread starts for part of its work/)).toBeVisible();
+  });
+
+  it("offers search and filters only once there are runs to filter", async () => {
+    render(<AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [] })) })} />);
+    await screen.findByText("No agent runs yet");
+    expect(screen.queryByRole("group", { name: "Agents Center controls" })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search tasks, roles, threads")).not.toBeInTheDocument();
   });
 
   it("opens a parent thread without creating another hierarchy", async () => {
@@ -257,14 +265,66 @@ describe("AgentsCenter", () => {
     });
   });
 
-  it("uses accessible toggle groups for status and mode filters", async () => {
+  it("narrows runs from one Filter menu that counts active choices and resets them", async () => {
     const user = userEvent.setup();
     render(<AgentsCenter client={createClient()} />);
     expect(await screen.findByText(summary.task)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "History" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "History" }));
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    expect(await screen.findByRole("group", { name: "Status" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Mode" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Reset filters" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("menuitemradio", { name: "History" }));
     expect(await screen.findByText("No agent runs match these filters")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear filters" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Filter, 1 active" })).toBeVisible();
+    await user.click(screen.getByRole("menuitemradio", { name: "Work" }));
+    expect(screen.getByRole("button", { name: "Filter, 2 active" })).toBeVisible();
+
+    await user.click(screen.getByRole("menuitem", { name: "Reset filters" }));
+    expect(screen.getByRole("button", { name: "Filter" })).toBeVisible();
+    expect(await screen.findByText(summary.task)).toBeInTheDocument();
+  });
+
+  it("keeps Open thread in the row for keyboard focus but out of its resting controls", async () => {
+    render(<AgentsCenter client={createClient()} onOpenThread={vi.fn()} />);
+    const open = await screen.findByRole("button", { name: "Open thread" });
+    // The stylesheet reveals this class while the row is hovered or focused
+    // and always on touch; at rest it is transparent but still in the tab order.
+    expect(open).toHaveClass("agents-center-row__open-thread");
+    open.focus();
+    expect(open).toHaveFocus();
+  });
+
+  it("lists runs as a table with a column head and each row's status and run time", async () => {
+    const stopped = decodeAgentRunCenterSummary({
+      ...summary,
+      lifecycleStatus: "completed",
+      createdAt: "2026-08-01T10:00:00.000Z",
+      updatedAt: "2026-08-01T10:12:00.000Z",
+      usage: { inputTokens: 12_000, outputTokens: 3_000 },
+    });
+    const { container } = render(
+      <AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [stopped] })) })} />,
+    );
+    const open = await screen.findByRole("button", { name: summary.task });
+    const head = container.querySelector(".agents-table__head");
+    expect(head).toHaveTextContent("AgentStatusStartedRun timeUsage");
+    expect(open).toHaveTextContent("Completed");
+    expect(open).toHaveTextContent("15k");
+    // A stopped run carries no end time, so its run time stays blank.
+    expect(container.querySelector("[id$='-time']")).toHaveTextContent(/^$/);
+  });
+
+  it("leaves usage blank for a run whose provider reported none", async () => {
+    const unreported = decodeAgentRunCenterSummary({ ...summary, usageQuality: "unavailable" });
+    const { container } = render(
+      <AgentsCenter
+        client={createClient({ center: vi.fn(async () => ({ items: [unreported] })) })}
+      />,
+    );
+    await screen.findByRole("button", { name: summary.task });
+    expect(container.querySelector("[id$='-usage']")).toHaveTextContent(/^$/);
   });
 
   it("keeps the rows on screen while a changed filter is in flight", async () => {
@@ -282,7 +342,8 @@ describe("AgentsCenter", () => {
     render(<AgentsCenter client={createClient({ center })} />);
     expect(await screen.findByText(summary.task)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "History" }));
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "History" }));
 
     // The previous answer stays until the new one arrives; marking the list
     // busy is the feedback, not a full-pane loading screen.
@@ -410,7 +471,8 @@ describe("AgentsCenter", () => {
     const onOpenCanvas = vi.fn();
     render(<AgentsCenter client={createClient({ snapshotCanvas })} onOpenCanvas={onOpenCanvas} />);
     await user.click(await screen.findByRole("button", { name: "Graph" }));
-    await user.click(screen.getByRole("button", { name: "Save as Canvas" }));
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Save as Canvas" }));
     expect(snapshotCanvas).toHaveBeenCalledWith(summary.parentThreadId);
     expect(await screen.findByText("Saved the graph as a Canvas.")).toBeVisible();
     expect(onOpenCanvas).toHaveBeenCalledWith({
@@ -440,7 +502,8 @@ describe("AgentsCenter", () => {
       />,
     );
     await user.click(await screen.findByRole("button", { name: "Graph" }));
-    await user.click(screen.getByRole("button", { name: "Save as Canvas" }));
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Save as Canvas" }));
     expect(snapshotCanvas).not.toHaveBeenCalled();
     expect(await screen.findByText("Select a run first.")).toBeVisible();
   });
@@ -475,7 +538,8 @@ describe("AgentsCenter", () => {
     );
     await user.click(await screen.findByRole("button", { name: "Graph" }));
     await user.click(screen.getByRole("button", { name: "Code work" }));
-    await user.click(screen.getByRole("button", { name: "Save as Canvas" }));
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Save as Canvas" }));
     expect(snapshotCanvas).toHaveBeenCalledWith(other.parentThreadId);
   });
 

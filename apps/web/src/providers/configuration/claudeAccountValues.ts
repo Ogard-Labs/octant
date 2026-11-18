@@ -22,16 +22,20 @@ export function parseClaudeAccountAccent(value: string): ClaudeAccountAccent | u
 export function claudeConfigurationFromFields(input: {
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
+  /** A gateway account's address; ignored for any other sign-in. */
+  readonly gatewayBaseUrl?: string;
   readonly accent: string;
   readonly configDirectory?: string;
   readonly reassignDirectory?: boolean;
 }): ClaudeProviderConfiguration {
   const configDirectory = input.configDirectory?.trim() ?? "";
   const accent = parseClaudeAccountAccent(input.accent.trim());
+  const gatewayBaseUrl = input.gatewayBaseUrl?.trim() ?? "";
   return {
     kind: "claude-agent-sdk",
     binaryPath: input.binaryPath,
     authentication: input.authentication,
+    ...(input.authentication === "gateway" ? { gatewayBaseUrl } : {}),
     ...(input.reassignDirectory === true || configDirectory.length === 0
       ? {}
       : { configDirectory }),

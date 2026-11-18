@@ -130,6 +130,27 @@ describe("a session's native setup read from the journal", () => {
     ).toMatchObject({ projectCode: true });
   });
 
+  it("loads a Project's own code on the provider CLI's trust only outside Strict", () => {
+    const threadId = "70000000-0000-4000-8000-000000000106";
+    const launch = (strict: boolean) =>
+      sessionNativeSetup(
+        {
+          ...sources(codex(), codeProject()),
+          readProviderCliTrust: () => true,
+          readStrict: () => strict,
+        },
+        {
+          providerInstanceId: codex().id,
+          projectId,
+          threadId,
+          mode: "code",
+          executionPolicy: "approval-gated",
+        },
+      );
+    expect(launch(false)).toMatchObject({ projectCode: true });
+    expect(launch(true)).toMatchObject({ projectCode: false });
+  });
+
   it("never lets a Project's trust reach a Chat thread", () => {
     const setup = sessionNativeSetup(
       sources(codex({ nativeSetup: true }), codeProject({ nativeProviders: ["codex"] })),

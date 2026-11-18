@@ -298,4 +298,17 @@ describe("worktreePreviewToResolution", () => {
       ),
     ).toEqual({ kind: "failed", reason: "fetch-rejected" });
   });
+
+  it("names a branch handed over as a full ref the way the person picked it", () => {
+    expect(
+      describeWorktreeSource(
+        {
+          kind: "local",
+          branch: "refs/heads/main",
+          resolvedHead: "856aa4b0000000000000000000000000000000000",
+        },
+        () => new Date(),
+      )?.label,
+    ).toBe("Local main · 856aa4b");
+  });
 });

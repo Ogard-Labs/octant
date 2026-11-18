@@ -6,8 +6,8 @@ import type {
 } from "@octant/contracts";
 import type { ModelPickerSelection, PickerGroup, PickerModel } from "@octant/domain";
 import { findPickerModel, pickerCatalogs, providerAccountAccent } from "@octant/domain";
-import { Check, Clock, Plus, RotateCcw, Search, Star } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Check, Lightning, Plus, Search, Star, Target } from "../ui/icons";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   modelFavoriteKey,
   readModelFavorites,
@@ -22,7 +22,6 @@ import { readableModelId } from "./providerModelLabel";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { OctantSlider } from "../ui/base/OctantSlider";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { rememberModelChoice } from "./modelChoiceMemory";
 import { readRecentModels, rememberModel } from "./modelRecents";
@@ -44,7 +43,7 @@ export interface ComposerModelPickerModelOption {
 
 /**
  * Whether an option names how hard the model should think. The picker keeps
- * that one on a level slider beside the other declared model settings.
+ * that one on a segmented level control beside the other declared settings.
  */
 export function isComposerReasoningOption(option: {
   readonly id: string;
@@ -53,8 +52,24 @@ export function isComposerReasoningOption(option: {
   return /(reasoning|effort|thinking|thought)/i.test(`${option.id} ${option.displayName}`);
 }
 
+/** Whether an option is the speed or service tier: Standard beside Fast. */
+export function isComposerServiceTierOption(option: {
+  readonly id: string;
+  readonly displayName: string;
+}): boolean {
+  return /(service.?tier|speed)/i.test(`${option.id} ${option.displayName}`);
+}
+
+/** The first rows a long list shows before "Show more" reveals the rest. */
+const FIRST_ROWS = 5;
+/** How many rows carry a ⌘ digit hint. */
+const SHORTCUT_ROWS = 9;
+/** Everything the arrow keys walk: model rows and the Show more row. */
+const NAV_SELECTOR = '[role="option"]:not(:disabled), [data-picker-nav]:not(:disabled)';
+
 /** Sentinel meaning “use the provider default” rather than a declared value. */
 const DEFAULT_LEVEL_ID = "__default__";
+const STANDARD_TIER_ID = "__standard__";
 
 export interface ComposerModelPickerProps {
   readonly threadId?: string;
@@ -155,6 +170,15 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   const modelsElement = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [catalogFilter, setCatalogFilter] = useState<string | undefined>(undefined);
+  // The list whose "Show more" was pressed; any other list starts short again.
+  const [expandedKey, setExpandedKey] = useState<string | undefined>(undefined);
+  const searchElement = useRef<HTMLInputElement>(null);
+  // The latest rows that carry a ⌘ digit and the function that chooses one; the
+  // document listener below reads them so it is bound once per open.
+  const shortcuts = useRef<{
+    readonly rows: ReadonlyArray<ModelRow>;
+    readonly choose: (row: ModelRow) => void;
+  }>({ rows: [], choose: () => undefined });
   const [favorites, setFavorites] = useState<ReadonlySet<string>>(() => readModelFavorites());
   const [recentModels, setRecentModels] = useState<ReadonlyArray<string>>(() => readRecentModels());
   const ariaLabel = props.ariaLabel ?? "Provider and model";
@@ -209,6 +233,39 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
       return stillAvailable ? current : (railIdFor(selectedGroup) ?? railIdFor(props.groups[0]));
     });
   }, [open, props.groups, selectedGroup, harnessGroups.length]);
+
+  // While the picker is open, ⌘1…⌘9 choose the numbered row, and a printable key
+  // typed anywhere inside it goes to the search field. Nothing is bound while it
+  // is closed, so no shortcut is global.
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.metaKey && !event.ctrlKey && !event.altKey && /^[1-9]$/.test(event.key)) {
+        const row = shortcuts.current.rows[Number(event.key) - 1];
+        event.preventDefault();
+        event.stopPropagation();
+        if (row !== undefined) shortcuts.current.choose(row);
+        return;
+      }
+      const target = event.target;
+      if (
+        !(target instanceof HTMLElement) ||
+        target.closest(".composer-model-picker__menu") === null ||
+        event.key.length !== 1 ||
+        event.key === " " ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        target.closest("input, textarea, select, [contenteditable]") !== null
+      )
+        return;
+      event.preventDefault();
+      setQuery((current) => current + event.key);
+      searchElement.current?.focus();
+    }
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [open]);
 
   useThreadControlNavigation(props.threadId, "provider", () => {
     if (controlsDisabled) return;
@@ -319,14 +376,47 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         : [],
     );
   const levelOption = modelOptions.find(isComposerReasoningOption);
+  const tierOption = modelOptions.find(
+    (option) => !isComposerReasoningOption(option) && isComposerServiceTierOption(option),
+  );
+  const extraOptions =
+    props.onModelOptionChange === undefined
+      ? []
+      : modelOptions.filter((option) => option !== levelOption && option !== tierOption);
+  // Standard is the provider's own choice, so it is the segment for "no value"
+  // unless the provider also declares a value of that name.
+  const tierSegments: ReadonlyArray<ChoiceSegment> =
+    tierOption === undefined
+      ? []
+      : [
+          {
+            id: STANDARD_TIER_ID,
+            label: "Standard",
+            value: tierOption.values.includes("standard") ? "standard" : undefined,
+          },
+          ...tierOption.values
+            .filter((value) => value !== "standard")
+            .map((value) => ({
+              id: value,
+              label: levelLabel(value),
+              value,
+              ...(value === "fast" || value === "priority" ? { fast: true } : {}),
+            })),
+        ];
+  const tierSelectedId =
+    tierOption?.value !== undefined &&
+    tierSegments.some((segment) => segment.id === tierOption.value)
+      ? tierOption.value
+      : STANDARD_TIER_ID;
   const levelValue =
     levelOption !== undefined &&
     levelOption.value !== undefined &&
     levelOption.values.includes(levelOption.value)
       ? levelOption.value
       : DEFAULT_LEVEL_ID;
-  // Stop 0 is the provider default; stop i is values[i - 1], so the knob
-  // never has to point at a value the model does not declare.
+  // Stop 0 is the provider default; stop i is values[i - 1], so the trigger
+  // never names a value the model does not declare.
+  const levelSelectedId = levelValue === DEFAULT_LEVEL_ID ? undefined : levelValue;
   const levelIndex =
     levelOption === undefined || levelValue === DEFAULT_LEVEL_ID
       ? 0
@@ -378,6 +468,36 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     : catalogs.length > 1 && filteringCatalog === undefined
       ? groupByCatalog(models, catalogs)
       : [{ catalog: undefined, rows: models }];
+  // A long list shows its first rows and a quiet "Show more"; the list scrolls
+  // inside the fixed frame, so revealing the rest never grows it. A search
+  // shows every match, and the chosen model is never left behind the fold.
+  const listKey = `${String(activeRailId)}:${filteringCatalog ?? ""}`;
+  const orderedRows = blocks.flatMap((block) => block.rows);
+  const selectedPosition = orderedRows.findIndex(
+    (row) =>
+      props.selectedProviderInstanceId === row.group.instance.id &&
+      props.selectedModelId === row.picker.model.id,
+  );
+  const rowLimit =
+    searching || expandedKey === listKey
+      ? orderedRows.length
+      : Math.max(FIRST_ROWS, selectedPosition + 1);
+  const hiddenRowCount = Math.max(0, orderedRows.length - rowLimit);
+  let rowBudget = rowLimit;
+  const shownBlocks = blocks
+    .map((block) => {
+      const rows = block.rows.slice(0, rowBudget);
+      rowBudget -= rows.length;
+      return { catalog: block.catalog, rows };
+    })
+    .filter((block) => block.rows.length > 0);
+  const rowKeyOf = (row: ModelRow) =>
+    `${String(row.group.instance.id)}:${row.sectionLabel}:${String(row.picker.model.id)}`;
+  // Only rows that can be chosen are numbered, so ⌘N always lands on a model.
+  const shortcutRows = shownBlocks
+    .flatMap((block) => block.rows)
+    .filter((row) => row.picker.unavailableReason === undefined)
+    .slice(0, SHORTCUT_ROWS);
 
   function changeModelOption(id: string, value: string | undefined) {
     if (
@@ -414,6 +534,33 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     );
   }
 
+  function chooseRow(row: ModelRow) {
+    if (row.picker.unavailableReason !== undefined) return;
+    rememberModel(row.group.instance.id, row.picker.model.id);
+    if (props.rememberChoice !== false)
+      rememberModelChoice({
+        providerInstanceId: row.group.instance.id,
+        modelId: row.picker.model.id,
+      });
+    // The menu stays open: the next thing a person often does is set
+    // the reasoning level for the model they just chose.
+    selectModel({
+      providerInstanceId: row.group.instance.id,
+      modelId: row.picker.model.id,
+    });
+  }
+  shortcuts.current = { rows: shortcutRows, choose: chooseRow };
+
+  function showMore() {
+    const before = modelsElement.current?.querySelectorAll(NAV_SELECTOR).length ?? 0;
+    setExpandedKey(listKey);
+    // The button that was pressed leaves with the fold; focus moves to the
+    // first row it revealed so the keyboard keeps its place.
+    requestAnimationFrame(() => {
+      modelsElement.current?.querySelectorAll<HTMLElement>(NAV_SELECTOR)[before - 1]?.focus();
+    });
+  }
+
   function renderModelRow(row: ModelRow, showCatalog: boolean) {
     const { picker, sectionId, sectionLabel, group } = row;
     const modelId = picker.model.id;
@@ -425,6 +572,8 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     // The generic "all models" section adds nothing next to the provider name;
     // only informative sections get a suffix. The catalog is left out when a
     // heading directly above the row already names it.
+    // A mixed list (Favorites, Recent, a search) names the account under the
+    // model: two accounts of one provider share a mark.
     const detail = [
       searching || favoritesActive || recentActive ? group.instance.displayName : undefined,
       showCatalog ? picker.catalog : undefined,
@@ -436,6 +585,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     ]
       .filter((part): part is string => part !== undefined)
       .join(" · ");
+    const shortcutIndex = shortcutRows.findIndex((entry) => rowKeyOf(entry) === rowKeyOf(row));
     // A Chat-only model on an endpoint Octant drives can be proven otherwise.
     // Work and Code list it disabled, so the action is always there; Chat lists
     // every model, so only the one in use carries it.
@@ -446,49 +596,44 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
       picker.toolsVerifiable === true &&
       (unavailable || selected || verifyNote !== undefined);
     return (
-      <div
-        className={`composer-model-picker__row${selected ? " composer-model-picker__row--selected" : ""}`}
-        key={`${String(group.instance.id)}:${sectionLabel}:${String(modelId)}`}
-      >
+      <div className="composer-model-picker__row" key={rowKeyOf(row)}>
         <OctantButton
           aria-label={presentedModelName(picker.model)}
           aria-description={detail === "" ? undefined : detail}
+          aria-keyshortcuts={shortcutIndex < 0 ? undefined : `Meta+${shortcutIndex + 1}`}
           aria-selected={selected}
-          className={`composer-model-picker__model${selected ? " composer-model-picker__model--selected" : ""}${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
+          className={`composer-model-picker__model${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
           disabled={unavailable || controlsDisabled}
-          onClick={() => {
-            if (unavailable) return;
-            rememberModel(group.instance.id, modelId);
-            if (props.rememberChoice !== false)
-              rememberModelChoice({ providerInstanceId: group.instance.id, modelId });
-            // The menu stays open: the next thing a person often does is set
-            // the reasoning level for the model they just chose.
-            selectModel({ providerInstanceId: group.instance.id, modelId });
-          }}
+          onClick={() => chooseRow(row)}
           role="option"
           title={picker.unavailableReason}
           type="button"
           variant="ghost"
         >
-          {/* A list mixed from several providers (Favorites, Recent, a search)
-              leads each row with its provider's mark; one provider's own list
-              would only repeat the same mark down the column. */}
-          {searching || favoritesActive || recentActive ? (
-            <ProviderGlyph
-              className="composer-model-picker__model-glyph"
-              displayName={group.instance.displayName}
-              driverKind={group.instance.driverKind}
-              size={16}
-            />
-          ) : null}
+          {/* Every row leads with its provider's mark, as the tab it came from
+              does, so a mixed list (Favorites, Recent, a search) reads the same
+              as one provider's. */}
+          <ProviderGlyph
+            className="composer-model-picker__model-glyph"
+            displayName={group.instance.displayName}
+            driverKind={group.instance.driverKind}
+            size={16}
+          />
           <span className="composer-model-picker__model-copy">
-            <span className="oct-menu-option composer-model-picker__model-name">
-              {presentedModelName(picker.model)}
+            <span className="composer-model-picker__model-title">
+              <span className="oct-menu-option composer-model-picker__model-name">
+                {presentedModelName(picker.model)}
+              </span>
             </span>
             {detail === "" ? null : (
               <span className="composer-model-picker__model-detail">{detail}</span>
             )}
           </span>
+          {/* The chosen model carries a check, never a fill; it stands just before
+              the ⌘ digit so both keep the row's trailing edge. */}
+          {selected && !unavailable ? (
+            <Check aria-hidden="true" className="composer-model-picker__model-check" size={16} />
+          ) : null}
           {/* A Chat-only model that can be verified says so once, in the
               "Chat only · Verify tools" line under it. */}
           {unavailable &&
@@ -499,9 +644,11 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             <OctantBadge className="composer-model-picker__model-badge" variant="secondary">
               {compactUnavailableLabel(picker.unavailableReason)}
             </OctantBadge>
-          ) : selected ? (
-            <Check aria-hidden="true" className="composer-model-picker__model-check" size={16} />
-          ) : null}
+          ) : shortcutIndex < 0 ? null : (
+            <kbd aria-hidden="true" className="composer-model-picker__hint">
+              {`⌘${shortcutIndex + 1}`}
+            </kbd>
+          )}
         </OctantButton>
         {offersToolVerification ? (
           <div className="composer-model-picker__verify">
@@ -653,6 +800,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           if (next) {
             setQuery("");
             setCatalogFilter(undefined);
+            setExpandedKey(undefined);
             setFavorites(readModelFavorites());
             setRecentModels(readRecentModels());
             setActiveRailId(railIdFor(selectedGroup) ?? railIdFor(props.groups[0]));
@@ -661,7 +809,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         }}
         open={open}
         side={props.menuSide ?? "top"}
-        sideOffset={8}
+        sideOffset={4}
         title="Choose provider and model"
         trigger={
           <>
@@ -717,7 +865,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               type="button"
               variant="bare"
             >
-              <Clock aria-hidden="true" size={20} />
+              <Target aria-hidden="true" size={20} />
               <span className="composer-model-picker__rail-label">Recent</span>
             </OctantButton>
           </OctantTooltip>
@@ -755,12 +903,11 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             <OctantInput
               autoFocus
               aria-label="Search models"
+              ref={searchElement}
               onKeyDown={(event) => {
                 if (event.key !== "ArrowDown") return;
                 event.preventDefault();
-                modelsElement.current
-                  ?.querySelector<HTMLButtonElement>('[role="option"]:not(:disabled)')
-                  ?.focus();
+                modelsElement.current?.querySelector<HTMLElement>(NAV_SELECTOR)?.focus();
               }}
               onChange={(event) => setQuery(event.currentTarget.value)}
               placeholder="Search models…"
@@ -837,13 +984,16 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             onKeyDown={(event) => {
               if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
               const options = Array.from(
-                event.currentTarget.querySelectorAll<HTMLButtonElement>(
-                  '[role="option"]:not(:disabled)',
-                ),
+                event.currentTarget.querySelectorAll<HTMLElement>(NAV_SELECTOR),
               );
               const current = options.findIndex((option) => option === event.target);
               if (current < 0) return;
               event.preventDefault();
+              // Up from the first row returns to the search field.
+              if (current === 0 && event.key === "ArrowUp") {
+                searchElement.current?.focus();
+                return;
+              }
               const next =
                 event.key === "Home"
                   ? 0
@@ -872,7 +1022,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                         : `No ${filteringCatalog} models from this provider.`}
               </p>
             ) : (
-              blocks.map((block) => {
+              shownBlocks.map((block) => {
                 const rows = block.rows.map((row) =>
                   renderModelRow(row, block.catalog === undefined),
                 );
@@ -890,122 +1040,161 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                 );
               })
             )}
+            {hiddenRowCount === 0 ? null : (
+              <OctantButton
+                className="composer-model-picker__more"
+                data-picker-nav=""
+                onClick={showMore}
+                type="button"
+                variant="bare"
+              >
+                Show more
+              </OctantButton>
+            )}
           </div>
         </div>
         <p className="sr-only">↓ Browse · Enter select · Esc close</p>
-        {configuration === undefined &&
-        (modelOptions.length === 0 || props.onModelOptionChange === undefined) ? null : (
+        {configuration === undefined && props.onModelOptionChange === undefined ? null : (
           <div
             aria-label="Model settings"
             aria-busy={selectionPending}
             className="composer-model-picker__settings"
             role="group"
           >
-            {configuration?.choices.map((choice) => {
-              const candidates = configuredModels.filter((row) =>
-                configuration.choices.every(
-                  (other) =>
-                    other.id === choice.id ||
-                    row.picker.model.configuration?.choices.some(
-                      (candidate) => candidate.id === other.id && candidate.value === other.value,
-                    ),
-                ),
-              );
-              return (
-                <label className="composer-model-picker__setting" key={choice.id}>
-                  <span>{choice.displayName}</span>
-                  <OctantSelectField
-                    aria-label={choice.displayName}
-                    disabled={controlsDisabled || candidates.length < 2}
-                    value={String(props.selectedModelId)}
-                    options={candidates.map((row) => ({
-                      id: String(row.picker.model.id),
-                      label:
-                        row.picker.model.configuration?.choices.find(
-                          (candidate) => candidate.id === choice.id,
-                        )?.value ?? row.picker.model.displayName,
-                    }))}
-                    onValueChange={(id) => {
-                      const target = candidates.find((row) => String(row.picker.model.id) === id);
-                      if (target === undefined) return;
-                      const selection = {
-                        providerInstanceId: target.group.instance.id,
-                        modelId: target.picker.model.id,
-                      };
-                      rememberModel(selection.providerInstanceId, selection.modelId);
-                      const values = Object.fromEntries(
-                        modelOptions.flatMap((option) =>
-                          option.value !== undefined &&
-                          target.picker.model.options.some(
-                            (candidate) =>
-                              candidate.id === option.id &&
-                              candidate.kind === "selection" &&
-                              candidate.values.includes(option.value ?? ""),
-                          )
-                            ? [[option.id, option.value]]
-                            : [],
+            {configuration === undefined && extraOptions.length === 0 ? null : (
+              <div className="composer-model-picker__extras">
+                {configuration?.choices.map((choice) => {
+                  const candidates = configuredModels.filter((row) =>
+                    configuration.choices.every(
+                      (other) =>
+                        other.id === choice.id ||
+                        row.picker.model.configuration?.choices.some(
+                          (candidate) =>
+                            candidate.id === other.id && candidate.value === other.value,
                         ),
-                      );
-                      if (props.rememberChoice !== false) {
-                        rememberModelChoice(selection);
-                        for (const [id, value] of Object.entries(values))
-                          rememberModelChoice(selection, { id, value });
-                      }
-                      selectModel(
-                        Object.keys(values).length === 0
-                          ? selection
-                          : { ...selection, modelOptionValues: values },
-                      );
-                    }}
-                  />
-                </label>
-              );
-            })}
-            {levelOption === undefined || props.onModelOptionChange === undefined ? null : (
-              <LevelSlider
-                displayName={levelOption.displayName}
-                disabled={controlsDisabled}
-                labels={["Default", ...levelOption.values.map(levelLabel)]}
-                onIndexChange={(index) =>
-                  changeModelOption(
-                    levelOption.id,
-                    index === 0 ? undefined : levelOption.values[index - 1],
-                  )
-                }
-                index={levelIndex}
-              />
-            )}
-            {props.onModelOptionChange === undefined
-              ? null
-              : modelOptions
-                  .filter((option) => !isComposerReasoningOption(option))
-                  .map((option) => (
-                    <label className="composer-model-picker__setting" key={option.id}>
-                      <span>{option.displayName}</span>
+                    ),
+                  );
+                  return (
+                    <label className="composer-model-picker__setting" key={choice.id}>
+                      <span>{choice.displayName}</span>
                       <OctantSelectField
-                        aria-label={option.displayName}
-                        disabled={controlsDisabled}
-                        value={
-                          option.value !== undefined && option.values.includes(option.value)
-                            ? option.value
-                            : DEFAULT_LEVEL_ID
-                        }
-                        options={[
-                          { id: DEFAULT_LEVEL_ID, label: "Default" },
-                          ...option.values.map((value) => ({
-                            id: value,
-                            label: levelLabel(value),
-                          })),
-                        ]}
-                        onValueChange={(value) =>
-                          changeModelOption(
-                            option.id,
-                            value === DEFAULT_LEVEL_ID ? undefined : value,
-                          )
-                        }
+                        aria-label={choice.displayName}
+                        disabled={controlsDisabled || candidates.length < 2}
+                        value={String(props.selectedModelId)}
+                        options={candidates.map((row) => ({
+                          id: String(row.picker.model.id),
+                          label:
+                            row.picker.model.configuration?.choices.find(
+                              (candidate) => candidate.id === choice.id,
+                            )?.value ?? row.picker.model.displayName,
+                        }))}
+                        onValueChange={(id) => {
+                          const target = candidates.find(
+                            (row) => String(row.picker.model.id) === id,
+                          );
+                          if (target === undefined) return;
+                          const selection = {
+                            providerInstanceId: target.group.instance.id,
+                            modelId: target.picker.model.id,
+                          };
+                          rememberModel(selection.providerInstanceId, selection.modelId);
+                          const values = Object.fromEntries(
+                            modelOptions.flatMap((option) =>
+                              option.value !== undefined &&
+                              target.picker.model.options.some(
+                                (candidate) =>
+                                  candidate.id === option.id &&
+                                  candidate.kind === "selection" &&
+                                  candidate.values.includes(option.value ?? ""),
+                              )
+                                ? [[option.id, option.value]]
+                                : [],
+                            ),
+                          );
+                          if (props.rememberChoice !== false) {
+                            rememberModelChoice(selection);
+                            for (const [id, value] of Object.entries(values))
+                              rememberModelChoice(selection, { id, value });
+                          }
+                          selectModel(
+                            Object.keys(values).length === 0
+                              ? selection
+                              : { ...selection, modelOptionValues: values },
+                          );
+                        }}
                       />
                     </label>
-                  ))}
+                  );
+                })}
+                {extraOptions.map((option) => (
+                  <label className="composer-model-picker__setting" key={option.id}>
+                    <span>{option.displayName}</span>
+                    <OctantSelectField
+                      aria-label={option.displayName}
+                      disabled={controlsDisabled}
+                      value={
+                        option.value !== undefined && option.values.includes(option.value)
+                          ? option.value
+                          : DEFAULT_LEVEL_ID
+                      }
+                      options={[
+                        { id: DEFAULT_LEVEL_ID, label: "Default" },
+                        ...option.values.map((value) => ({
+                          id: value,
+                          label: levelLabel(value),
+                        })),
+                      ]}
+                      onValueChange={(value) =>
+                        changeModelOption(option.id, value === DEFAULT_LEVEL_ID ? undefined : value)
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+            {props.onModelOptionChange === undefined ? null : (
+              <>
+                {/* Both rows are always here, so a model without reasoning levels
+                    or a faster tier leaves the frame as it was and says why. */}
+                <section className="composer-model-picker__reasoning">
+                  <div className="composer-model-picker__setting-head">
+                    <span className="composer-model-picker__setting-label">
+                      {levelOption?.displayName ?? "Reasoning"}
+                    </span>
+                    <span className="composer-model-picker__setting-value">{selectedLabel}</span>
+                  </div>
+                  <SegmentedChoice
+                    ariaLabel={`${levelOption?.displayName ?? "Reasoning"} level`}
+                    clearable
+                    disabled={controlsDisabled}
+                    onChoose={(segment) => {
+                      if (levelOption !== undefined)
+                        changeModelOption(levelOption.id, segment?.value);
+                    }}
+                    selectedId={levelSelectedId}
+                    segments={orderedLevels(levelOption?.values ?? []).map((value) => ({
+                      id: value,
+                      label: levelLabel(value),
+                      value,
+                    }))}
+                    unavailableReason="This model has no reasoning levels."
+                  />
+                </section>
+                <section className="composer-model-picker__tier">
+                  <SegmentedChoice
+                    ariaLabel={tierOption?.displayName ?? "Service tier"}
+                    disabled={controlsDisabled}
+                    onChoose={(segment) => {
+                      if (tierOption !== undefined)
+                        changeModelOption(tierOption.id, segment?.value);
+                    }}
+                    selectedId={tierSelectedId}
+                    segments={tierSegments}
+                    unavailableReason="This model has no faster tier."
+                  />
+                </section>
+              </>
+            )}
           </div>
         )}
       </OctantPopover>
@@ -1023,113 +1212,85 @@ function levelLabel(value: string): string {
   return value.length === 0 ? value : `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}`;
 }
 
+const LEVEL_RANK = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
 /**
- * The reasoning/effort choice as a discrete slider: the model's declared
- * levels are the stops, the provider default is the first one, and the knob
- * snaps to a stop. A row of segments needed a tap per level and overflowed
- * the menu past six of them; the slider keeps every level in the same width
- * and lets the reader hear which stop the knob sits on.
+ * Levels read from least to most thinking. A provider may list them the other
+ * way round; names this list does not know keep the provider's own order.
  */
-function LevelSlider(props: {
-  readonly displayName: string;
+function orderedLevels(values: ReadonlyArray<string>): ReadonlyArray<string> {
+  if (!values.every((value) => LEVEL_RANK.includes(value))) return values;
+  return [...values].sort((a, b) => LEVEL_RANK.indexOf(a) - LEVEL_RANK.indexOf(b));
+}
+
+interface ChoiceSegment {
+  readonly id: string;
+  readonly label: string;
+  /** What the option is set to; absent means the provider's own choice. */
+  readonly value: string | undefined;
+  readonly fast?: boolean;
+}
+
+/**
+ * A row of segments for one setting: the chosen one sits raised in accent ink,
+ * and a press shows at once instead of waiting for the saved value to come
+ * back. With no segments it keeps the same height and says why in one line.
+ */
+function SegmentedChoice(props: {
+  readonly ariaLabel: string;
   readonly disabled: boolean;
-  readonly labels: ReadonlyArray<string>;
-  readonly index: number;
-  readonly onIndexChange: (index: number) => void;
+  readonly segments: ReadonlyArray<ChoiceSegment>;
+  readonly selectedId: string | undefined;
+  readonly unavailableReason: string;
+  /** A second press on the chosen segment clears it back to the default. */
+  readonly clearable?: boolean;
+  /** Absent means the choice was cleared. */
+  readonly onChoose: (segment: ChoiceSegment | undefined) => void;
 }) {
-  const [dragIndex, setDragIndex] = useState<number | undefined>();
-  // The chosen level shows at once. The thread's saved level comes back over a
-  // round trip; reading only that made the knob snap back to the old stop
-  // after every click and then jump forward, which felt like a slow web page.
-  const [pendingIndex, setPendingIndex] = useState<number | undefined>();
-  useEffect(() => setPendingIndex(undefined), [props.index]);
-  const index = dragIndex ?? pendingIndex ?? props.index;
-  function commit(next: number) {
-    setPendingIndex(next);
-    props.onIndexChange(next);
-  }
-  const label = props.labels[index] ?? "Default";
-  const stopCount = props.labels.length;
-  const intensity = stopCount <= 1 ? 0 : index / (stopCount - 1);
-  return (
-    <div
-      className="composer-model-picker__level"
-      // The higher the level, the denser and brighter the fill: the control
-      // says how much thinking was asked for before the label is read.
-      style={{ "--composer-model-picker-intensity": intensity } as CSSProperties}
-    >
-      <div className="composer-model-picker__level-reading">
-        <span className="composer-model-picker__level-label">{props.displayName}</span>
-        <strong className="composer-model-picker__level-value">{label}</strong>
-        <OctantButton
-          aria-label="Reset reasoning to provider default"
-          title="Reset reasoning to provider default"
-          disabled={props.disabled || index === 0}
-          onClick={() => commit(0)}
-          size="icon"
-          variant="ghost"
-          type="button"
-        >
-          <RotateCcw aria-hidden="true" size={14} />
+  // The chosen segment shows at once. The thread's saved value comes back over
+  // a round trip; reading only that made the highlight snap back to the old
+  // segment after every press and then jump forward.
+  const [pending, setPending] = useState<{ readonly id: string | undefined } | undefined>();
+  useEffect(() => setPending(undefined), [props.selectedId]);
+  const selectedId = pending === undefined ? props.selectedId : pending.id;
+  if (props.segments.length === 0) {
+    return (
+      <div
+        aria-label={props.ariaLabel}
+        className="segmented composer-model-picker__segments"
+        role="group"
+      >
+        <OctantButton className="segment" disabled type="button" variant="bare">
+          {props.unavailableReason}
         </OctantButton>
       </div>
-      <div className="composer-model-picker__level-row">
-        <span aria-hidden="true" className="composer-model-picker__level-end">
-          Faster
-        </span>
-        <div className="composer-model-picker__level-control">
-          <div aria-hidden="true" className="composer-model-picker__level-track">
-            <span
-              className="composer-model-picker__level-fill"
-              style={
-                {
-                  "--composer-model-picker-level-fill": `${stopCount <= 1 ? 0 : (index / (stopCount - 1)) * 100}%`,
-                } as CSSProperties
-              }
-            />
-            <span className="composer-model-picker__level-stops">
-              {props.labels.map((stop, position) => (
-                <span key={`${position}:${stop}`} title={stop} />
-              ))}
-            </span>
-          </div>
-          <OctantSlider
-            className="composer-model-picker__reasoning-slider"
-            aria-label={`${props.displayName} level`}
-            aria-valuemax={stopCount - 1}
-            aria-valuemin={0}
-            aria-valuenow={index}
-            aria-valuetext={label}
-            disabled={props.disabled}
-            min={0}
-            max={stopCount - 1}
-            step={1}
-            value={index}
-            onPointerDown={(event) => {
-              event.currentTarget.setPointerCapture?.(event.pointerId);
-              setDragIndex(props.index);
-            }}
-            onLostPointerCapture={() => setDragIndex(undefined)}
-            onPointerCancel={() => setDragIndex(undefined)}
-            onPointerUp={(event) => {
-              const next = event.currentTarget.valueAsNumber;
-              setDragIndex(undefined);
-              commit(next);
-            }}
-            onChange={(event) => {
-              const next = event.currentTarget.valueAsNumber;
-              // Existing threads persist through versioned commands. Preview the
-              // drag locally and send its final value once, rather than racing a
-              // command for every intermediate stop against the same version.
-              if (dragIndex !== undefined) setDragIndex(next);
-              else commit(next);
-            }}
-          />
-        </div>
-        <span aria-hidden="true" className="composer-model-picker__level-end">
-          Smarter
-        </span>
-      </div>
+    );
+  }
+  return (
+    <div
+      aria-label={props.ariaLabel}
+      className="segmented composer-model-picker__segments"
+      role="group"
+    >
+      {props.segments.map((segment) => (
+        <OctantButton
+          aria-pressed={segment.id === selectedId}
+          className="segment"
+          disabled={props.disabled}
+          key={segment.id}
+          onClick={() => {
+            const chosen = segment.id === selectedId;
+            if (chosen && props.clearable !== true) return;
+            setPending({ id: chosen ? undefined : segment.id });
+            props.onChoose(chosen ? undefined : segment);
+          }}
+          type="button"
+          variant="bare"
+        >
+          {segment.fast === true ? <Lightning aria-hidden="true" size={14} /> : null}
+          {segment.label}
+        </OctantButton>
+      ))}
     </div>
   );
 }

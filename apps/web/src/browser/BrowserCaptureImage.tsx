@@ -1,7 +1,7 @@
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { BrowserCapture, BrowserThreadId } from "@octant/contracts";
 import { browserRecordingStillFrame } from "@octant/domain";
-import { Play } from "lucide-react";
+import { Play } from "../ui/icons";
 import { useEffect, useMemo, useState } from "react";
 
 export function BrowserCaptureImage(props: {

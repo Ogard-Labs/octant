@@ -243,6 +243,7 @@ describe("keyboard attach from a thread row", () => {
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     row.focus();
     await user.pointer({ target: row, keys: "[MouseRight]" });
+    await user.hover(await screen.findByRole("menuitem", { name: "More" }));
     const item = await screen.findByRole("menuitem", { name: "Attach as context" });
     item.focus();
     await user.keyboard("{Enter}");

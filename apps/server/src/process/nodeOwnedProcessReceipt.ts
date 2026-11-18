@@ -517,6 +517,19 @@ export async function reconcileWindowsProcessReceipts(
 
 const WINDOWS_RECONCILE_TIMEOUT_MS = 15_000;
 
+/**
+ * How long one Windows identity read may take. The read starts Windows
+ * PowerShell, and its first start on a fresh machine is slow. On windows-2025
+ * the harness receipt test, an early Windows PowerShell start in its job,
+ * took 3.5 to 10.8 seconds end to end when it passed, and twice its command
+ * never started its program at all, which is what a read outlasting the
+ * former 10-second bound produces: the receipt fails, and the harness stops
+ * the live command as one nothing could find after a crash. A failed read
+ * stops a command while a slow one only delays its receipt, so the bound
+ * sits well above a cold start.
+ */
+const WINDOWS_IDENTITY_READ_TIMEOUT_MS = 60_000;
+
 /** Runs one program with an exact argument list and no shell; answers its stdout. */
 export type WindowsIdentityRead = (program: string, args: ReadonlyArray<string>) => Promise<string>;
 
@@ -534,7 +547,7 @@ export async function readWindowsProcessIdentity(
   read: WindowsIdentityRead = async (program, args) =>
     (
       await execFileAsync(program, [...args], {
-        timeout: 10_000,
+        timeout: WINDOWS_IDENTITY_READ_TIMEOUT_MS,
         maxBuffer: 4_096,
         windowsHide: true,
       })

@@ -49,6 +49,8 @@ import {
   ProcessConfinementError,
   type ProcessConfinementPort,
 } from "./seatbeltProfile";
+import { WINDOWS_PROCESS_ENVIRONMENT_NAMES } from "./windowsEnvironment";
+import { stopWindowsProcessTree } from "./windowsProcessTree";
 
 export interface ConfinedVersionProbeLaunch {
   readonly command: string;
@@ -247,7 +249,15 @@ export function execVersionRead(
 }
 
 function endProcessGroup(child: ChildProcess): void {
-  if (child.pid === undefined || process.platform === "win32") return;
+  if (child.pid === undefined) return;
+  // Windows has no process groups; the tree stop ends the program and what it
+  // started, where nothing ended them before. A program that already exited
+  // is left alone: its pid may now name another process's tree.
+  if (process.platform === "win32") {
+    if (child.exitCode === null && child.signalCode === null)
+      void stopWindowsProcessTree(child.pid);
+    return;
+  }
   try {
     process.kill(-child.pid, "SIGKILL");
   } catch {
@@ -280,6 +290,10 @@ function versionReadEnvironment(
     if (
       INHERITED_NAMES.has(name) ||
       name.startsWith("LC_") ||
+      // A Windows program needs its system folder and profile names, spelled
+      // in any case (`Path`, `SystemRoot`); without them a version read ran a
+      // program that could not find the system.
+      (process.platform === "win32" && WINDOWS_PROCESS_ENVIRONMENT_NAMES.has(name.toUpperCase())) ||
       // A value under the scratch names the one path this launch may write; a
       // host cannot have known it, because the directory did not exist yet.
       value === scratchDirectory ||

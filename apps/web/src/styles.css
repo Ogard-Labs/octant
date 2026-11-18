@@ -35,9 +35,11 @@
 @import "./styles/agents-center.css";
 @import "./styles/palette.css";
 @import "./styles/project-threads.css";
+@import "./styles/project-overview.css";
 @import "./styles/surface.css";
 @import "./styles/board.css";
 @import "./styles/colour.css";
+@import "./styles/window-inactive.css";
 
 :root {
   color-scheme: dark;
@@ -95,7 +97,7 @@
   --octant-float-line: color-mix(in oklab, var(--octant-float) 88%, var(--octant-text-primary));
   --octant-text-primary: #f5f5f7;
   --octant-text-secondary: #bcbcc2;
-  --octant-text-muted: #949494;
+  --octant-text-muted: #a8a8ad;
   --octant-text-primary-high-contrast: #ffffff;
   --octant-text-secondary-high-contrast: #c9c8c3;
   --octant-text-muted-high-contrast: #a5a4a0;
@@ -106,129 +108,45 @@
   --octant-divider-strong: #8a8a8a;
   --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
-  /* One material, five levels (see DESIGN.md, "Depth and material"). Every
-     surface takes a fill one step lighter than what it sits on, a rim that is
-     brighter along its top edge (an inset line, then an inset ring), and a
-     shadow that seats it. On a near-black page a shadow cannot show, so the
-     lift is the fill and the rim; the shadow helps where a surface crosses
-     something lighter. Light is a token, not a colour in a recipe, so a
-     preset or a custom accent changes it in one place. */
-  --octant-rim: rgb(255 255 255 / 10%);
-  --octant-rim-top: rgb(255 255 255 / 30%);
-  /* Glass lets light out along its lower edge too: a fainter line inside the
-     bottom of a panel, a card and a floating surface. */
-  --octant-rim-low: rgb(255 255 255 / 7%);
-  --octant-rim-float: rgb(255 255 255 / 44%);
-  --octant-sheen: rgb(255 255 255 / 4.5%);
-  --octant-edge-light: rgb(255 255 255 / 10%);
-  --octant-control-top: rgb(255 255 255 / 32%);
-  --octant-control-low: rgb(0 0 0 / 36%);
-  --octant-control-rim: rgb(255 255 255 / 8%);
-  --octant-control-drop: 0 1px 2px rgb(0 0 0 / 65%), 0 3px 8px -3px rgb(0 0 0 / 60%);
-  /* The control's vertical gradient (lighter on top) drawn as an inset shadow,
-     so a recipe that sets its own fill still gets it. */
-  --octant-control-lift: inset 0 12px 10px -8px rgb(255 255 255 / 13%);
-  --octant-card-lift: inset 0 16px 14px -12px var(--octant-sheen);
-  --octant-card-drop: 0 1px 2px rgb(0 0 0 / 28%), 0 10px 22px -14px rgb(0 0 0 / 55%);
-  /* A well is cut in: darker, an inner top shadow, a light line under it. */
+  /* Soft and flat (see DESIGN.md, "Depth and material"). A surface at rest has
+     no shadow, bevel, rim or gradient: it is a flat fill one step from its
+     ground, and a pointed-at or pressed state is a change of fill. Only what
+     floats over content (a menu, popover, dialog, sheet, toast, tooltip) casts
+     a shadow, and it is one hairline and one soft drop. The resting tokens
+     stay as names so a recipe reads what a surface is, and each is `none`. */
   --octant-well: rgb(0 0 0 / 34%);
-  --octant-shadow-well:
-    inset 0 1px 2px rgb(0 0 0 / 70%), inset 0 0 0 1px rgb(0 0 0 / 40%),
-    0 1px 0 rgb(255 255 255 / 7%);
-  /* Level 1: a narrow window's tile panel (a wide window's panes are flat, see
-     shell.css). Its top is lit twice: a bright band as deep as the
-     slab's edge, which ends above the first line of anything a panel holds,
-     over a long, soft fall of the sheen. Both are fills under the panel's
-     content, never over its text. */
-  --octant-panel-band: linear-gradient(180deg, var(--octant-edge-light), transparent 7px);
-  --octant-panel-sheen: linear-gradient(180deg, var(--octant-sheen), transparent 96px);
-  /* The seat stays inside the 8px gap between two panels (its soft edge ends
-     within 8px of the box), so a panel looks the same whatever its neighbour's
-     order, and no tile's shadow darkens the top of the one beneath it. */
-  /* The rim and the seat are two tokens: a panel's own content paints over
-     an inset shadow, so the rim is also drawn by a pseudo-element above the
-     content (see shell.css), and the seat stays on the panel's box. */
-  --octant-shadow-panel-rim:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 -1px 0 var(--octant-rim-low),
-    inset 0 0 0 1px var(--octant-rim);
-  --octant-shadow-panel-seat: 0 0 0 0.5px #000, 0 1px 1px rgb(0 0 0 / 60%), 0 5px 8px -7px #000;
-  --octant-shadow-panel: var(--octant-shadow-panel-rim), var(--octant-shadow-panel-seat);
-  /* Level 2: a card on a panel. A card is a hair smaller in shadow than a
-     control's tile: it lies on the panel instead of standing on it. */
-  --octant-shadow-xs:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 -1px 0 var(--octant-rim-low),
-    inset 0 0 0 1px var(--octant-rim), 0 1px 2px rgb(0 0 0 / 30%);
-  --octant-shadow-sm:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 -1px 0 var(--octant-rim-low),
-    inset 0 0 0 1px var(--octant-rim), var(--octant-card-lift), var(--octant-card-drop);
-  /* Level 3: a control, and the composer's box, which is a container with a
-     longer shadow. */
-  --octant-shadow-control:
-    inset 0 1px 0 var(--octant-control-top), inset 0 -1px 0 var(--octant-control-low),
-    inset 0 0 0 1px var(--octant-control-rim), var(--octant-control-lift),
-    var(--octant-control-drop);
-  --octant-shadow-control-pressed:
-    inset 0 1px 2px rgb(0 0 0 / 55%), inset 0 0 0 1px var(--octant-control-rim);
-  --octant-shadow-selected: var(--octant-shadow-control);
-  --octant-shadow-md:
-    inset 0 1px 0 var(--octant-control-top), inset 0 -1px 0 var(--octant-control-low),
-    inset 0 0 0 1px var(--octant-control-rim), var(--octant-control-lift),
-    0 1px 2px rgb(0 0 0 / 40%), 0 14px 30px -14px rgb(0 0 0 / 70%);
-  --octant-shadow-lg:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 -1px 0 var(--octant-rim-low),
-    inset 0 0 0 1px var(--octant-rim), 0 10px 18px -8px rgb(0 0 0 / 54%),
-    0 24px 48px -16px rgb(0 0 0 / 70%);
-  /* A raised card on the window's glass: its edge is a light rim, since the
-     opaque border is near black on the grey a desktop shows through. */
-  --octant-shadow-raised-glass: var(--octant-shadow-sm);
-  /* Level 4: something that floats. A light rim along the top and around, a
-     dark line outside it, and two shadows: a short one that seats it and a
-     long one that lifts it. */
-  --octant-shadow-overlay:
-    inset 0 1px 0 var(--octant-rim-float), inset 0 -1px 0 var(--octant-rim-low),
-    inset 0 0 0 1px var(--octant-rim-top), 0 0 0 0.5px rgb(0 0 0 / 90%),
-    0 6px 14px -4px rgb(0 0 0 / 60%), 0 30px 60px -18px rgb(0 0 0 / 80%);
-  --octant-shadow-pop:
-    inset 0 1px 0 var(--octant-rim-float), inset 0 -1px 0 var(--octant-rim-low),
-    inset 0 0 0 1px var(--octant-rim-top), 0 0 0 0.5px rgb(0 0 0 / 90%),
-    0 12px 24px -8px rgb(0 0 0 / 60%), 0 40px 96px -24px rgb(0 0 0 / 80%);
+  --octant-shadow-well: none;
+  --octant-shadow-xs: none;
+  --octant-shadow-sm: none;
+  --octant-shadow-control: none;
+  --octant-shadow-control-pressed: none;
+  --octant-shadow-selected: none;
+  --octant-shadow-md: none;
+  --octant-shadow-lg: none;
+  --octant-shadow-primary: none;
+  --octant-shadow-raised-glass: none;
+  /* Level 4: something that floats. One hairline outside the edge and one soft
+     drop that lifts it. */
+  --octant-shadow-overlay: 0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%);
+  --octant-shadow-pop: 0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%);
   /* A floating surface is frosted: the lifted fill at 66% over a blur of what
-     is behind it, with a sheen at its top. The blur also dims what is behind
-     to under half. That is what lets the fill be this clear: a white page
-     behind a dark menu lands the fill about where the old 88% fill did, and
-     over the app's own dark page the meta ink reads better than it did
-     (4.54:1 from 4.04:1). Light has its own pair below. Where the person asks
-     for less transparency, or more contrast, the fill is the opaque float. */
-  /* The sheen is a strip along the lit top edge only. It ends above the first
-     line of anything a surface holds, so the meta ink on a menu's top row or a
-     dialog's title band sits on the plain float fill, as it did before. */
-  --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 14%), transparent 8px);
+     is behind it. The blur also dims what is behind to under half. That is what
+     lets the fill be this clear: a white page behind a dark menu lands the fill
+     about where the old 88% fill did, and over the app's own dark page the meta
+     ink reads better than it did. Light has its own pair below. Where the
+     person asks for less transparency, or more contrast, the fill is the opaque
+     float. */
   --octant-float-glass: color-mix(in srgb, var(--octant-float) 66%, transparent);
   --octant-float-blur: blur(40px) saturate(180%) brightness(0.45);
-  /* The primary action: the accent as a gradient with a soft glow under it.
-     The gradient only ever moves the fill AWAY from the label's colour, for
-     any accent and any label, so no stop is less legible than the flat accent.
-     The colour away from the label is the label's own lightness turned over
-     (white for a dark label, black for a light one), taken from the theme's
-     published `--octant-primary-foreground` rather than guessed from the mode.
-     Its strength follows the same lightness: a white overlay is strongest at
-     the top (the tile is lit from above) and a black one at the bottom. */
-  --octant-accent-away: oklch(from var(--octant-primary-foreground) calc((0.5 - l) * 1000) 0 0);
-  --octant-accent-sheen: linear-gradient(
-    180deg,
-    oklch(from var(--octant-accent-away) l c h / calc(0.04 + 0.14 * l)),
-    oklch(from var(--octant-accent-away) l c h / calc(0.18 - 0.14 * l))
-  );
-  --octant-shadow-primary:
-    inset 0 1px 0 rgb(255 255 255 / 45%), inset 0 -1px 0 rgb(0 0 0 / 22%),
-    inset 0 0 0 1px rgb(0 0 0 / 12%), 0 1px 2px rgb(0 0 0 / 45%),
-    0 6px 16px -6px color-mix(in srgb, var(--octant-accent) 75%, transparent);
+  --octant-accent-sheen: none;
   --octant-glass-blur: 24px;
   --octant-glass-saturate: 150%;
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 72%, transparent);
   --octant-glass-border: rgb(255 255 255 / 13%);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 18%);
   --octant-wide-primary-min: 360px;
+  /* The least the thread column is ever given beside the dock. */
+  --octant-narrow-primary-min: 360px;
   --octant-context-sidebar-min: 280px;
   --octant-success-surface: #16281f;
   --octant-success-text: #6bb299;
@@ -249,7 +167,7 @@
   /* The same faces the settings default to, so the first paint before
      settings load is not a different font that swaps a moment later. */
   --octant-ui-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --octant-ui-font-size: 13px;
+  --octant-ui-font-size: 14px;
   --octant-ui-font-weight: 400;
   --octant-editor-font-family:
     "Geist Mono Variable", "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono",
@@ -266,7 +184,7 @@
   --octant-terminal-font-ligatures: none;
   font-family: var(--octant-ui-font-family);
   font-size: var(--octant-ui-font-size);
-  font-weight: var(--octant-ui-font-weight);
+  font-weight: calc(var(--octant-ui-font-weight) + var(--oct-weight-smooth-lift, 0));
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -333,62 +251,41 @@ html[data-octant-theme-mode="light"] {
   --octant-text-secondary-high-contrast: #3a3a3a;
   --octant-text-muted-high-contrast: #565656;
   --octant-scrim: #000000;
-  --octant-rim: rgb(16 24 40 / 8%);
-  --octant-rim-top: #ffffff;
-  --octant-rim-low: transparent;
-  --octant-rim-float: #ffffff;
-  --octant-sheen: rgb(255 255 255 / 0%);
-  --octant-edge-light: transparent;
-  --octant-control-top: #ffffff;
-  --octant-control-low: rgb(16 24 40 / 10%);
-  --octant-control-rim: rgb(16 24 40 / 13%);
-  --octant-control-drop: 0 1px 1.5px rgb(16 24 40 / 14%), 0 3px 8px -4px rgb(16 24 40 / 20%);
-  --octant-control-lift: inset 0 10px 8px -8px #ffffff;
-  --octant-card-lift: inset 0 14px 12px -12px #ffffff;
-  --octant-card-drop: 0 1px 2px rgb(16 24 40 / 8%), 0 10px 20px -14px rgb(16 24 40 / 26%);
-  --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 60%), transparent 8px);
   /* A light menu keeps a fuller fill, and the blur draws what is behind it
      toward a pale grey first (lower contrast, then brighter): a black page
      behind a white menu cannot be dimmed out of the way. */
   --octant-float-glass: color-mix(in srgb, var(--octant-float) 78%, transparent);
   --octant-float-blur: blur(40px) saturate(180%) contrast(0.5) brightness(1.5);
-  --octant-well: rgb(16 24 40 / 5%);
-  --octant-shadow-well:
-    inset 0 1px 2px rgb(16 24 40 / 16%), inset 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 0 #ffffff;
-  --octant-shadow-panel-seat:
-    0 0 0 0.5px rgb(16 24 40 / 14%), 0 1px 2px rgb(16 24 40 / 9%),
-    0 6px 10px -8px rgb(16 24 40 / 34%);
-  --octant-shadow-xs:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim),
-    0 1px 2px rgb(16 24 40 / 8%);
-  --octant-shadow-sm:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim), var(--octant-card-lift),
-    var(--octant-card-drop);
-  --octant-shadow-control:
-    inset 0 1px 0 var(--octant-control-top), inset 0 -1px 0 var(--octant-control-low),
-    inset 0 0 0 1px var(--octant-control-rim), var(--octant-control-lift),
-    var(--octant-control-drop);
-  --octant-shadow-control-pressed:
-    inset 0 1px 2px rgb(16 24 40 / 22%), inset 0 0 0 1px var(--octant-control-rim);
-  --octant-shadow-selected: var(--octant-shadow-control);
-  --octant-shadow-md:
-    inset 0 1px 0 #ffffff, inset 0 0 0 1px var(--octant-control-rim), var(--octant-control-lift),
-    0 1px 2px rgb(16 24 40 / 10%), 0 14px 28px -16px rgb(16 24 40 / 36%);
-  --octant-shadow-lg:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim),
-    0 10px 18px -6px rgb(16 24 40 / 14%), 0 24px 48px -14px rgb(16 24 40 / 18%);
-  --octant-shadow-raised-glass: var(--octant-shadow-sm);
-  --octant-shadow-overlay:
-    inset 0 1px 0 var(--octant-rim-float), inset 0 0 0 1px var(--octant-control-rim),
-    0 0 0 0.5px rgb(16 24 40 / 20%), 0 6px 14px -4px rgb(16 24 40 / 16%),
-    0 30px 60px -18px rgb(16 24 40 / 40%);
-  --octant-shadow-pop:
-    inset 0 1px 0 var(--octant-rim-float), inset 0 0 0 1px var(--octant-control-rim),
-    0 0 0 0.5px rgb(16 24 40 / 20%), 0 12px 24px -8px rgb(16 24 40 / 16%),
-    0 40px 96px -24px rgb(16 24 40 / 40%);
+  /* The theme's own ink, so a tinted preset's tray is not a bluish grey. */
+  --octant-well: color-mix(in srgb, var(--octant-text-primary) 5%, transparent);
+  --octant-shadow-overlay: 0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%);
+  --octant-shadow-pop: 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%);
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 60%, transparent);
   --octant-glass-border: color-mix(in srgb, var(--octant-border-strong) 72%, transparent);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 65%);
+}
+
+/* Floats are dense in the desktop app, whether Glass is on or off. The
+   packaged window is transparent, and its renderer does not draw a backdrop
+   filter there, so a menu, a sheet or a notice at 66% showed the thread's sharp
+   text through a third of it and a blur could not hide that. Text never sits on
+   a fill that only a blur makes readable. The host's word that glass is on
+   already folds in system reduced transparency, high contrast and thermals, so
+   that branch keeps its exclusions; the native host branch does not, because a
+   denser float is always allowed. A browser keeps the frosted float, which works
+   over its opaque page. Declared after the dark and light blocks so it wins in
+   both. */
+html[data-octant-host-vibrancy="active"]:not(
+  [data-octant-reduced-transparency="true"],
+  [data-octant-increased-contrast="true"]
+) {
+  --octant-float-glass: color-mix(in srgb, var(--octant-float) 96%, transparent);
+  --octant-float-blur: none;
+}
+
+html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) {
+  --octant-float-glass: color-mix(in srgb, var(--octant-float) 96%, transparent);
+  --octant-float-blur: none;
 }
 
 /* Every Octant-owned scroll surface inherits one quiet, visible scrollbar.
@@ -549,7 +446,6 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
     transparent
   );
   opacity: 0;
-  transition: opacity var(--oct-motion-fast) ease;
 }
 
 .thread-activity-pip__card:hover .thread-activity-pip__controls,
@@ -587,7 +483,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   background: var(--octant-surface-raised);
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-sm);
-  box-shadow: var(--octant-shadow-lg);
+  box-shadow: var(--octant-shadow-overlay);
 }
 
 .thread-activity-pip__collapsed-controls button {
@@ -900,15 +796,14 @@ strong {
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
   text-align: left;
-  transition:
-    background-color var(--oct-motion-fast) ease,
-    border-color var(--oct-motion-fast) ease,
-    color var(--oct-motion-fast) ease;
 }
 
 .octant-menu__trigger:hover,
 .octant-menu__trigger[data-popup-open] {
   background: var(--octant-control-hover);
+}
+.octant-menu__trigger:active {
+  background: var(--octant-control-pressed);
 }
 
 .octant-menu__positioner {
@@ -917,61 +812,10 @@ strong {
   outline: 0;
 }
 
-.octant-menu__popup {
-  width: max-content;
-  min-width: min(248px, calc(100vw - 16px));
-  max-width: min(320px, calc(100vw - 16px));
-  padding: 4px;
-  color: var(--octant-text-primary);
-  background: var(--octant-float);
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-overlay);
-  outline: 0;
-}
-
-.octant-menu__item {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 18px;
-  align-items: center;
-  gap: var(--oct-space-2);
-  min-height: 42px;
-  padding: var(--oct-space-1) var(--oct-space-2);
-  color: var(--octant-text-secondary);
-  border-radius: var(--oct-radius-sm);
-  cursor: default;
-  outline: 0;
-  user-select: none;
-}
-
-.octant-menu__item[data-highlighted] {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.octant-menu__item-icon,
 .octant-menu__indicator {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-.octant-menu__item-copy {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.octant-menu__item-label {
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-medium);
-}
-
-.octant-menu__item-description {
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.35;
-  white-space: normal;
 }
 
 /* A check mark says which item is chosen; it is not a focus cue, and the
@@ -984,9 +828,6 @@ strong {
 .new-project {
   border: 0;
   cursor: default;
-  transition:
-    background-color var(--oct-motion-fast) ease,
-    color var(--oct-motion-fast) ease;
 }
 
 .new-project {
@@ -1068,7 +909,14 @@ strong {
 }
 
 .activity-nav__group > .sidebar-section {
-  color: var(--octant-text-secondary);
+  color: var(--oct-meta);
+}
+
+/* A status group's heading stands 8px clear of the rows above it: the list's
+   own 8px gap, with no margin on top of it (the two summed to 16px between
+   groups). The first group stands the same 8px below the Project filter row. */
+.project-nav__toolbar + .activity-nav {
+  margin-top: var(--oct-space-2);
 }
 
 .activity-nav__group {
@@ -1085,10 +933,11 @@ strong {
      it. */
   height: auto;
   min-height: 0;
+  /* Both margins take the recipe's 1px transparent border back, so the word
+     starts on the icon column and the count ends on the right edge. */
+  width: calc(100% + 2px);
   gap: var(--oct-space-1);
-  /* The recipe keeps a 1px transparent border for its outlined variants; the
-     margin takes that pixel back so the word starts where the labels do. */
-  margin-inline-start: -1px;
+  margin-inline: -1px;
   padding: 0;
   font: inherit;
 }
@@ -1096,10 +945,15 @@ strong {
 /* The button paints its own ink, so the heading's secondary ink is set on the
    word. */
 .activity-nav__fold > span:first-child {
-  color: var(--oct-muted);
+  color: var(--oct-meta);
+}
+
+.activity-nav__fold > svg {
+  color: var(--oct-meta);
 }
 
 .activity-nav__fold-count {
+  margin-inline-start: auto;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-regular);
@@ -1123,12 +977,6 @@ strong {
 
 .activity-nav__threads {
   display: grid;
-  gap: 2px;
-}
-
-.sidebar-navigation__thread-copy {
-  display: grid;
-  min-width: 0;
   gap: 2px;
 }
 
@@ -1189,6 +1037,38 @@ strong {
   overflow: hidden;
 }
 
+/* The narrowest the thread box (the thread and its Environment section, open
+   or not) gets in this workspace, whatever stands in the tool region:
+   threadBoxMinimum. It is the thread's own minimum, or what a tool region at
+   its asked width (640px) leaves where that is more, up to the thread's
+   minimum and the section together. The tool region takes only the room past
+   it, and the thread header's tool row ends on it (see .workspace-pane__lead),
+   so opening or closing Environment or a tool, stacking one, or a second
+   column never moves the row. The shell publishes the workspace's width; in
+   the grid's own template the fallback is the same number. */
+.workspace-layer {
+  --octant-thread-box-min: min(
+    calc(var(--octant-wide-primary-min) + var(--octant-env-strip-width, 300px)),
+    max(
+      calc(var(--octant-workspace-width, 100%) - 640px),
+      max(
+        var(--octant-narrow-primary-min),
+        min(var(--octant-wide-primary-min), calc(var(--octant-workspace-width, 100%) - 280px))
+      )
+    )
+  );
+  /* What the thread column keeps beside the dock: its minimum, whatever more
+     the thread box's minimum asks of it once the open section's width is
+     taken off, and in a split 440px for each pane side by side
+     (splitPrimaryMinimum), so the tool region gives before a pane's header
+     loses its tool buttons. */
+  --octant-dock-thread-keep: max(
+    var(--octant-wide-primary-min),
+    calc(var(--octant-thread-box-min) - var(--octant-dock-env-width, 0px)),
+    var(--octant-split-primary-min, 0px)
+  );
+}
+
 .workspace-layer--bottom-panel-open {
   grid-template-rows:
     minmax(320px, 1fr)
@@ -1208,17 +1088,39 @@ strong {
   grid-row: 1 / -1;
 }
 
-/* Two columns of tools drop the half-of-the-workspace term and ask the thread
-   for less than one column does (--octant-tiled-primary-min, set on the shell
-   beside --octant-wide-primary-min), as dockWidthCeiling does for the handle. */
+/* Two columns of tools stand side by side only where the window holds the
+   thread's minimum, Environment and two columns at their floor (568px of
+   tools, TILED_DOCK_MIN_WIDTH: two 280px columns and the dock's own handle).
+   The step term is 0 below that room and past
+   any width above it, so the dock takes the two-column width, or all the room
+   there is when that is less, and keeps the one-column width, with its tiles
+   stacked, under the floor: a second column never takes the thread under its
+   minimum or moves Environment. dockWidthCeiling stops the handle at the same
+   room. */
 .workspace-layer--wide-context-open[data-dock-tile-columns="2"] {
+  --octant-dock-tool-room: calc(
+    100% - var(--octant-dock-thread-keep) - var(--octant-dock-env-width, 0px)
+  );
   grid-template-columns:
-    minmax(var(--octant-tiled-primary-min, var(--octant-wide-primary-min)), 1fr)
     minmax(
+      max(
+        var(--octant-narrow-primary-min),
+        min(var(--octant-wide-primary-min), calc(100% - var(--octant-context-sidebar-min)))
+      ),
+      1fr
+    )
+    max(
       var(--octant-context-sidebar-min),
       min(
-        var(--octant-context-sidebar-width, 360px),
-        calc(100% - var(--octant-tiled-primary-min, var(--octant-wide-primary-min)))
+        calc(100% - var(--octant-dock-thread-keep)),
+        var(--octant-context-two-column-width, var(--octant-context-sidebar-width, 360px)),
+        max(
+          min(
+            var(--octant-context-sidebar-width, 360px),
+            calc(50% + var(--octant-dock-env-width, 0px))
+          ),
+          calc((var(--octant-dock-tool-room) - 567px) * 9999)
+        )
       )
     );
 }
@@ -1228,16 +1130,27 @@ strong {
   grid-row: 2;
 }
 
+/* The thread box keeps its minimum (--octant-thread-box-min; the thread
+   itself 560px from 1100px up) and the dock takes what is left, up to the
+   width it asks for and, for one column of tools, half the workspace. Only when the window cannot hold the dock's own minimum beside
+   that (Environment and one 280px tool column) does the thread give, never
+   under 360px. */
 .workspace-layer--wide-context-open {
   grid-template-columns:
-    minmax(var(--octant-wide-primary-min), 1fr)
     minmax(
+      max(
+        var(--octant-narrow-primary-min),
+        min(var(--octant-wide-primary-min), calc(100% - var(--octant-context-sidebar-min)))
+      ),
+      1fr
+    )
+    max(
       var(--octant-context-sidebar-min),
-      /* dockWidthCeiling: half the workspace, and never past the primary
-         column's own minimum. The handle stops at the same half. */ min(
+      /* dockWidthCeiling: what the primary column's minimum leaves, and for
+         one column never past half the workspace. The handle stops there too. */ min(
         var(--octant-context-sidebar-width, 360px),
-        calc(100% - var(--octant-wide-primary-min)),
-        50%
+        calc(100% - var(--octant-dock-thread-keep)),
+        calc(50% + var(--octant-dock-env-width, 0px))
       )
     );
 }
@@ -1374,7 +1287,6 @@ strong {
   background: var(--octant-border);
   content: "";
   pointer-events: none;
-  transition: background-color var(--oct-motion-fast) ease;
 }
 
 .workspace-split[data-orientation="horizontal"] > .workspace-split__resize {
@@ -1464,22 +1376,25 @@ strong {
   align-items: center;
   gap: 4px;
   margin-right: var(--octant-window-chrome-reserved-width, 148px);
-  padding: 2px 0 2px 4px;
+  /* Where the header's content starts. A variable, because the lead's width
+     is measured from the pane's edge and has to take it off. */
+  --pane-header-start: 4px;
+  padding: 2px 0 2px var(--pane-header-start);
 }
 
-/* A header that shows a title (data-header-kind="title") starts its text on
-   the edge of the thread's text column below, so the eye reads one line down
-   from the title to the transcript. The edge is read from the column's own
-   width (`--oct-thread-column`, one property both rules use): half of what the
-   pane leaves beside it, never under the 20px the panel's gutter holds. The
+/* A header that shows a title (data-header-kind="title") starts its text 20px
+   after the stage's left edge, on the thread column's own inset (the 40px
+   gutter is 20px a side), so the mark stands over the transcript's left edge as
+   the band's actions end over its right edge: left-aligned and vertically
+   centred in the band. The edge is the
+   pane's own, so the title does not move when a thread opens or closes or the
+   dock opens; only a resize or toggle of the sidebar moves the stage. The
    grip's own 4px padding and 1px border are taken off so the text, not the
-   grip's fill, stands on it. The percentage is the pane's width, as the
-   column's is. A header that shows content tabs keeps its own insets: the
-   tabs lead it, and no title is there to line up. */
+   grip's fill, stands on the 20px. A header that shows content tabs keeps its
+   own insets: the tabs lead it, and no title is there to line up. */
 .workspace-pane__header[data-header-kind="title"] {
-  --pane-title-edge: max(var(--oct-space-5), calc((100% - var(--oct-thread-column)) / 2));
-  --pane-title-start: calc(var(--pane-title-edge) - var(--oct-space-1) - 1px);
-  padding-left: var(--pane-title-start);
+  --pane-title-start: calc(var(--oct-space-5) - var(--oct-space-1) - 1px);
+  --pane-header-start: var(--pane-title-start);
 }
 
 /* Only the top-right pane shares its edge with window controls. Reserving
@@ -1492,6 +1407,74 @@ strong {
 }
 .shell--wide-context-open .workspace-pane__header {
   margin-right: 0;
+}
+
+/* One pane and its Environment section are one box under one header. The
+   section stands beside the pane and starts under the band, so the pane's
+   header runs on over it: the tool buttons at its end stand above the section,
+   and stay where they are when the section opens or closes. With nothing after
+   the section the box ends at the window's edge, where the window's own
+   controls are, and the header stops before them as it does with no dock at
+   all. A split keeps every header inside its own pane: the section shows the
+   focused pane's thread, which need not be the pane it stands beside. */
+.shell[data-thread-environment] .workspace-root > .workspace-pane > .workspace-pane__header {
+  margin-right: calc(-1 * var(--octant-dock-env-width, 0px));
+}
+.shell[data-thread-environment="alone"]
+  .workspace-root
+  > .workspace-pane
+  > .workspace-pane__header {
+  margin-right: calc(
+    var(--octant-window-chrome-reserved-width, 148px) - var(--octant-dock-env-width, 0px)
+  );
+}
+/* The pane's column clips what it holds; in this one state its header is let
+   out sideways over the section, and nothing is let out up or down. */
+.shell[data-thread-environment]
+  :is(.primary-workspace-layer, .workspace):not(:has(.workspace-split)) {
+  overflow-x: visible;
+  overflow-y: clip;
+}
+
+/* The header's lead: the title, the free run that moves the window, and the
+   pane's tool buttons. It ends where the thread box ends at its narrowest
+   (--octant-thread-box-min from the pane's left edge), and the buttons stand
+   8px in from that line. Nothing that opens beside the thread takes the box
+   under that width, so nothing moves the buttons: not Environment, not the
+   first tool or the last, not a second one stacking, not a second column.
+   Measured before (1800px window): x 1532 with nothing open, 960 with one
+   tool, 996 with Environment beside it. A pane narrower than the line (one of
+   a split, a small window) ends its lead at its own edge. The title gives way
+   before the buttons do. */
+.workspace-pane__lead {
+  display: flex;
+  flex: 0 1 calc(var(--octant-thread-box-min, 100%) - var(--pane-header-start));
+  min-width: 0;
+  align-items: center;
+  align-self: stretch;
+  gap: 4px;
+}
+
+.workspace-pane__tools {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-right: var(--oct-space-2);
+}
+
+/* A start screen has no title to show, so its header is the tool row alone,
+   laid over the band where the row has always stood. It takes no row of the
+   pane and only the buttons take the pointer. */
+.workspace-pane__header[data-header-kind="tools"] {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  min-height: var(--oct-title-rail-h);
+  pointer-events: none;
+}
+.workspace-pane__header[data-header-kind="tools"] .workspace-pane__tools {
+  pointer-events: auto;
 }
 
 /* The request rides inside the grip with the title, so it keeps the title's
@@ -1514,10 +1497,10 @@ strong {
    exists. */
 html[data-octant-native-host="true"] .workspace-pane__header {
   z-index: 6;
-  padding-left: var(--oct-space-3);
+  --pane-header-start: var(--oct-space-3);
 }
 html[data-octant-native-host="true"] .workspace-pane__header[data-header-kind="title"] {
-  padding-left: var(--pane-title-start);
+  --pane-header-start: var(--pane-title-start);
 }
 
 /* Reader rails replace the pane rather than opening beside it. Their opaque
@@ -1545,33 +1528,37 @@ html[data-octant-native-host="true"]
    browser has no traffic-light reserve, but it still needs the Show sidebar
    and New thread cluster kept clear of the pane tab. */
 .shell--sidebar-collapsed .workspace-pane__header {
-  padding-left: var(--octant-window-chrome-leading-width, 148px);
+  --pane-header-start: var(--octant-window-chrome-leading-width, 148px);
 }
 .shell--sidebar-collapsed .workspace-pane__header[data-header-kind="title"] {
-  padding-left: max(var(--octant-window-chrome-leading-width, 148px), var(--pane-title-start));
+  --pane-header-start: calc(
+    var(--octant-window-chrome-leading-width, 148px) + var(--pane-title-start)
+  );
 }
 
 /* Native header padding must not cover the leading controls when navigation
    is collapsed. Only the top-left pane shares that part of the title bar. */
 html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header {
-  padding-left: var(--octant-window-chrome-leading-width, 148px);
+  --pane-header-start: var(--octant-window-chrome-leading-width, 148px);
 }
 html[data-octant-native-host="true"]
   .shell--sidebar-collapsed
   .workspace-pane__header[data-header-kind="title"] {
-  padding-left: max(var(--octant-window-chrome-leading-width, 148px), var(--pane-title-start));
+  --pane-header-start: calc(
+    var(--octant-window-chrome-leading-width, 148px) + var(--pane-title-start)
+  );
 }
 .shell--sidebar-collapsed
   .workspace-split[data-orientation="horizontal"]
   > :last-child
   .workspace-pane__header {
-  padding-left: var(--oct-space-3);
+  --pane-header-start: var(--oct-space-3);
 }
 .shell--sidebar-collapsed
   .workspace-split[data-orientation="vertical"]
   > :last-child
   .workspace-pane__header {
-  padding-left: var(--oct-space-3);
+  --pane-header-start: var(--oct-space-3);
 }
 .shell--sidebar-collapsed
   .workspace-split[data-orientation="horizontal"]
@@ -1581,7 +1568,7 @@ html[data-octant-native-host="true"]
   .workspace-split[data-orientation="vertical"]
   > :last-child
   .workspace-pane__header[data-header-kind="title"] {
-  padding-left: var(--pane-title-start);
+  --pane-header-start: var(--pane-title-start);
 }
 
 /* The grip is the pane's one drag handle: the environment mark, the title,
@@ -1614,9 +1601,6 @@ html[data-octant-native-host="true"]
   font-weight: var(--oct-weight-medium);
   user-select: none;
   -webkit-user-select: none;
-  transition:
-    background-color var(--oct-motion-fast) ease,
-    color var(--oct-motion-fast) ease;
 }
 
 .workspace-pane__grip:hover {
@@ -1627,7 +1611,6 @@ html[data-octant-native-host="true"]
 .workspace-pane__grip > svg {
   flex: 0 0 auto;
   opacity: 0.45;
-  transition: opacity var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .workspace-pane__grip:hover > svg,
@@ -1683,16 +1666,25 @@ html[data-octant-native-host="true"]
    is mostly gone or past its own cap. The cap is in ch because the handle
    shrink-wraps its content: a share of it clipped short Project names. */
 .workspace-pane__context {
+  display: inline-flex;
   flex: 0 1 auto;
   min-width: 0;
   max-width: 32ch;
+  align-items: center;
+  gap: var(--oct-space-2);
   overflow: hidden;
-  color: var(--oct-meta);
+  color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-regular);
   line-height: var(--oct-leading-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-pane__context-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .workspace-pane__crumb {
@@ -1728,7 +1720,7 @@ html[data-octant-native-host="true"]
 /* A narrow pane, as in a split, does the same: the breadcrumb cut both parts
    to "auroradocs-… / please open w…", and neither could be read. The title
    keeps the whole room and names the Project in its tooltip. */
-.workspace-pane__header {
+.workspace-pane__lead {
   container-name: pane-header;
   container-type: inline-size;
 }
@@ -1851,17 +1843,15 @@ html[data-octant-native-host="true"]
   white-space: nowrap;
 }
 
+/* Fill, radius and shadow are the shared float's, from components.css; it
+   stands above the dock like any menu, at the popup layer. */
 .workspace-disclosure {
   position: absolute;
-  z-index: 20;
+  z-index: var(--oct-z-popup);
   display: grid;
   width: max-content;
   min-width: 196px;
-  padding: 4px;
-  background: var(--octant-float);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-overlay);
+  padding: var(--oct-menu-inset);
 }
 
 .workspace-tab-launcher {
@@ -1911,6 +1901,9 @@ html[data-octant-native-host="true"]
 .workspace-disclosure__action:focus-visible {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
+}
+.workspace-disclosure__action:active {
+  background: var(--octant-control-pressed);
 }
 
 /* Separates "what kind of tab" from "which one", so the two lists do not read
@@ -2040,10 +2033,6 @@ html[data-octant-native-host="true"]
   cursor: default;
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
-  transition:
-    background-color var(--oct-motion-fast) var(--oct-ease-standard),
-    border-color var(--oct-motion-fast) var(--oct-ease-standard),
-    color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .shell-boundary__action:hover {
@@ -2441,6 +2430,9 @@ html[data-octant-native-host="true"]
 .endpoint-row__link:hover {
   background: var(--oct-fg-soft);
 }
+.endpoint-row__link:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
 
 .endpoint-mark {
   display: grid;
@@ -2830,6 +2822,9 @@ html[data-octant-native-host="true"]
 
 .endpoint-kind:hover {
   background: var(--oct-fg-soft);
+}
+.endpoint-kind:active {
+  background: var(--oct-wash-pressed);
 }
 
 .endpoint-kind__text {
@@ -3596,6 +3591,16 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   box-shadow: none;
 }
 
+/* A state that is all a thread has to show (the service is disconnected, the
+   surface failed) stands in the middle of the pane. As the workspace's first
+   child it sat in the pane's top corner, flush to both edges, and read as a
+   card that had lost its place. A loading line keeps the top, where the
+   content it stands in for will start. */
+:is(.code-thread-workspace, .work-thread-workspace, .chat-workspace)
+  > .shell-state:not(.shell-state--page, [data-state="loading"]) {
+  margin: auto;
+}
+
 /* Without the card around it, a filled well would be the only raised shape
    left in the state; the glyph carries the severity on its own. */
 .shell-state [data-slot="empty-media"] {
@@ -3839,6 +3844,9 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
 }
+.folder-picker__breadcrumb:active {
+  background: var(--octant-control-pressed);
+}
 
 .folder-picker__breadcrumb--current {
   cursor: default;
@@ -3875,6 +3883,9 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
 
 .folder-picker__item:hover {
   background: var(--octant-control-hover);
+}
+.folder-picker__item:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--octant-control-pressed);
 }
 
 .folder-picker__item-nav {
@@ -3977,7 +3988,7 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
    right. Name, address, and state sit in fixed columns so the state label
    lines up down the list instead of trailing each address's own width. */
 .thread-environment-dock .local-servers__row {
-  min-height: 32px;
+  min-height: var(--environment-row-h, 28px);
   gap: var(--oct-space-2);
   padding: 0;
 }
@@ -4012,9 +4023,6 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
 .thread-environment-dock .local-servers__more > span {
   display: none;
 }
-.thread-environment-dock .local-servers__row + .local-servers__row {
-  border-top: 1px solid var(--oct-hairline);
-}
 .thread-environment-dock .local-servers__name {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
@@ -4043,10 +4051,6 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.environment-pull-requests__list li + li {
-  border-top: 1px solid var(--oct-border);
 }
 
 .environment-pull-requests__row {
@@ -4117,7 +4121,10 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
 }
 
 .environment-pull-requests__all {
-  gap: var(--oct-space-1);
+  gap: var(--oct-space-2);
+  /* The recipe's own 1px edge: without it the arrow stands a pixel inside the
+     rows' chevron column. */
+  margin-inline-end: -1px;
   font-size: var(--oct-text-xs);
 }
 
@@ -4351,6 +4358,9 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
 .local-servers__more:hover,
 .local-servers__more:focus-visible {
   background: var(--oct-fg-soft);
+}
+.local-servers__more:active {
+  background: var(--oct-wash-pressed);
 }
 
 .local-servers__menu {
@@ -4899,47 +4909,18 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   .shell-state__spinner {
     animation: none;
   }
-  .octant-menu__trigger,
-  .octant-menu__item,
-  .new-project,
-  .workspace-split__resize::before,
-  .workspace-split__resize,
-  .settings-view__action,
-  .shell-boundary__action {
-    transition: none;
-  }
 }
 
 :root[data-octant-increased-contrast="true"] {
   --octant-text-primary: var(--octant-text-primary-high-contrast);
   --octant-text-secondary: var(--octant-text-secondary-high-contrast);
   --octant-text-muted: var(--octant-text-muted-high-contrast);
-  /* A gradient or a sheen only lowers the contrast between a label and its
-     fill, so increased contrast keeps the flat fill and keeps the rims. */
-  --octant-control-lift: 0 0 0 0 transparent;
-  --octant-card-lift: 0 0 0 0 transparent;
-  --octant-sheen: transparent;
-  --octant-edge-light: transparent;
-  --octant-accent-sheen: linear-gradient(transparent, transparent);
-  /* The rims are the edges a surface has when its fill is flat, so they take
-     the strong border: a 7% line was the edge of a panel that main drew with
-     the soft hairline and of a card that it drew with a border. */
-  --octant-rim: var(--octant-border-strong);
-  --octant-rim-top: var(--octant-border-strong);
-  --octant-rim-low: var(--octant-border-strong);
-  --octant-rim-float: var(--octant-border-strong);
-  --octant-control-top: var(--octant-border-strong);
-  --octant-control-rim: var(--octant-border-strong);
 }
 
 html[data-octant-increased-contrast="true"] .workspace-pane__header {
   border-color: var(--octant-border-strong);
 }
 
-html[data-octant-increased-contrast="true"] .octant-menu__popup,
-html[data-octant-increased-contrast="true"] .octant-menu__item[data-highlighted] {
-  border-color: var(--octant-border-strong);
-}
 html[data-octant-increased-contrast="true"] .workspace-pane[data-active="true"] {
   box-shadow: none;
   background: var(--octant-control-hover);
@@ -5029,14 +5010,17 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  /* Sources, results, and reasoning share one compact column. */
+  /* Providers, results with search, and reasoning share one column. */
   grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(320px, calc(100vw - 24px));
-  /* Short results fit their content; long catalogs scroll inside the same bound. */
-  height: auto;
-  /* At enlarged text sizes neither side of the composer fits the full box.
-     Use the positioner's available space so reasoning stays inside the window. */
-  max-height: min(440px, 70vh, var(--available-height, 440px), calc(100dvh - 24px));
+  width: min(360px, calc(100vw - 24px));
+  /* One frame for every tab: the list scrolls inside it, and a short or empty
+     list leaves it as it is, so choosing a provider never moves the popup or
+     its trigger edge. 376px holds the rail (44), the search (36), five 28px
+     rows with "Show more" and the list's padding (176) and the two controls
+     at the foot (114) with 6px to spare, so the common case shows no blank
+     band; a longer list scrolls (maintainer request, 2026-11-16). Only a
+     window too short for it shortens it, once, at open. */
+  height: min(376px, calc(100dvh - 24px), var(--available-height, 376px));
   padding: 0;
   overflow: hidden;
   /* Size and place only. The popover recipe paints the fill, the edge, and the
@@ -5044,16 +5028,26 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
      workspace's, so it was the one darker popup beside the menus. */
 }
 
-/* Model settings stay reachable when a long catalog or a short viewport
-   leaves only part of the picker visible. */
+/* The reasoning row and the service-tier row sit under the list in every
+   state, each behind a hairline, so the list scrolls above them and the frame
+   never changes. Pairing and other declared choices (when a model has them)
+   stack above, and scroll with the rest in a short window. */
 .composer-model-picker__settings {
   min-height: 0;
-  max-height: 45vh;
+  max-height: 200px;
   overflow-y: auto;
   display: grid;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-3);
   border-top: 1px solid var(--octant-border);
+}
+
+.composer-model-picker__settings > * + * {
+  border-top: 1px solid var(--octant-border);
+}
+
+.composer-model-picker__extras {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-menu-inset);
 }
 
 .composer-model-picker__setting {
@@ -5069,185 +5063,74 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   width: 100%;
 }
 
-.composer-model-picker__settings .composer-model-picker__level {
-  padding: 0;
-  border: 0;
+/* The two controls stand on the rows' box edge (the popup's 4px inset) and
+   share 8px above and below, so the gap between the blocks is the same on
+   both sides of the hairline. */
+.composer-model-picker__reasoning,
+.composer-model-picker__tier {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2) var(--oct-menu-inset);
 }
 
-/* The chosen model's effort/reasoning level, one tap from the list. The
-   declared levels are the slider's stops and the knob snaps to a stop. The
-   reading above names the level the knob sits on, and the ends below name the
-   range it moves in. */
-.composer-model-picker__level {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 0;
-  padding: var(--oct-space-1) var(--oct-space-3) var(--oct-space-2);
-  border-top: 1px solid var(--octant-border);
-}
-
-/* "Reasoning  High" reads as one phrase on the left, with reset on the right;
-   centring the value left it floating between two unrelated ends. */
-.composer-model-picker__level-reading {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+/* "Reasoning" on the left, the model it applies to on the right, on the rows'
+   text edge (4px popup inset plus the row's 8px). */
+.composer-model-picker__setting-head {
+  display: flex;
+  min-height: 20px;
   align-items: center;
+  justify-content: space-between;
   gap: var(--oct-space-2);
+  padding-inline: var(--oct-menu-row-inset);
+  font-size: var(--oct-text-xs);
 }
 
-.composer-model-picker__level-label {
+.composer-model-picker__setting-label {
   flex: 0 0 auto;
   color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
 }
 
-.composer-model-picker__level-reading > button {
-  justify-self: end;
-  width: 24px;
-  height: 24px;
-  min-height: 0;
-}
-
-/* The current level shares the slider's ink so the value and track read together. */
-.composer-model-picker__level-value {
-  min-inline-size: 0;
+.composer-model-picker__setting-value {
+  min-width: 0;
   overflow: hidden;
-  color: color-mix(
-    in oklab,
-    var(--octant-palette-purple) calc(var(--composer-model-picker-intensity, 0) * 100%),
-    var(--octant-text-primary)
-  );
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
+  color: var(--octant-text-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* "Faster" and "Smarter" sit on the slider's own line rather than a row of
-   their own beneath it. */
-.composer-model-picker__level-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--oct-space-2);
-}
-
-.composer-model-picker__level-control {
-  position: relative;
-  height: 24px;
-}
-
-.composer-model-picker__level-track {
-  position: absolute;
-  inset-inline: 9px;
-  top: 8px;
-  height: 8px;
-  border-radius: var(--oct-radius-pill);
-  background-color: color-mix(in srgb, var(--octant-text-muted) 18%, var(--octant-surface));
-  /* A faint dot grain runs the whole track, so the fill reads as the same
-     material growing denser rather than a bar laid on top. */
-  background-image: radial-gradient(
-    circle,
-    color-mix(in oklab, var(--octant-text-muted) 45%, transparent) 0.6px,
-    transparent 1.2px
-  );
-  background-size: 4px 4px;
-  pointer-events: none;
-}
-
-.composer-model-picker__level-fill {
-  position: absolute;
-  inset-block: 0;
-  left: 0;
-  width: var(--composer-model-picker-level-fill);
-  border-radius: inherit;
-  --level-tone: color-mix(
-    in oklab,
-    var(--octant-palette-purple) calc(35% + var(--composer-model-picker-intensity, 0) * 65%),
-    var(--octant-text-muted)
-  );
-  background-color: color-mix(
-    in oklab,
-    var(--level-tone) calc(25% + var(--composer-model-picker-intensity, 0) * 55%),
-    transparent
-  );
-  background-image: radial-gradient(
-    circle,
-    color-mix(
-        in oklab,
-        var(--oct-fg) calc(30% + var(--composer-model-picker-intensity, 0) * 60%),
-        transparent
-      )
-      0.7px,
-    transparent 1.3px
-  );
-  background-size: 4px 4px;
-  box-shadow: 0 0 calc(var(--composer-model-picker-intensity, 0) * 14px)
-    color-mix(
-      in oklab,
-      var(--level-tone) calc(var(--composer-model-picker-intensity, 0) * 70%),
-      transparent
-    );
-}
-
-.composer-model-picker__level-stops {
-  position: absolute;
-  inset: 0;
+/* The shared segmented tray, stretched to the row. The chosen segment is a
+   raised step in accent ink; the others stay quiet. */
+.composer-model-picker__segments.segmented {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  width: 100%;
+  /* A window narrower than the six labels (a phone under about 363px) scrolls
+     the track sideways; cutting the last level off would hide a choice. */
+  overflow-x: auto;
 }
 
-.composer-model-picker__level-stops > span {
-  width: 2px;
-  height: 2px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--octant-text-primary) 55%, transparent);
+/* Segments size to their words and share the rest equally, so no label is
+   ever clipped: six levels (Low to Ultra) read in full at the popup's width,
+   where equal-width segments cut "Extra high" to "Extra higl". The track is
+   always the row's width, so choosing a level moves nothing. */
+.composer-model-picker__segments > .segment {
+  flex: 1 1 auto;
+  min-width: auto;
+  height: var(--oct-tray-segment-h);
+  min-height: var(--oct-tray-segment-h);
+  padding-inline: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
 }
 
-.composer-model-picker__level-end {
+.composer-model-picker__segments > .segment[aria-pressed="true"] {
+  color: var(--octant-accent-text);
+  box-shadow: var(--oct-elev-subtle);
+}
+
+.composer-model-picker__segments > .segment:disabled {
   color: var(--octant-text-muted);
-  font-size: var(--oct-text-detail);
-}
-
-.composer-model-picker__reasoning-slider {
-  position: relative;
-  z-index: 1;
-  height: 24px;
-  background: transparent;
-}
-
-.composer-model-picker__level:has(.composer-model-picker__reasoning-slider:focus-visible) {
-  background: var(--octant-control-hover);
-}
-
-.composer-model-picker__level:has(.composer-model-picker__reasoning-slider:focus-visible)
-  .composer-model-picker__level-label {
-  color: var(--octant-text-primary);
-}
-
-.composer-model-picker__reasoning-slider::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: var(--oct-radius-pill);
-  background: transparent;
-}
-
-.composer-model-picker__level .composer-model-picker__reasoning-slider::-webkit-slider-thumb {
-  margin-top: -5px;
-  inline-size: 16px;
-  block-size: 16px;
-}
-
-.composer-model-picker__level .composer-model-picker__reasoning-slider::-moz-range-thumb {
-  inline-size: 16px;
-  block-size: 16px;
-}
-
-.composer-model-picker__reasoning-slider::-moz-range-track {
-  height: 6px;
-  border-radius: var(--oct-radius-pill);
-  background: transparent;
+  cursor: default;
 }
 
 .composer-model-picker__rail {
@@ -5257,7 +5140,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   padding: var(--oct-space-2);
   overflow-x: auto;
   scrollbar-width: thin;
-  border-bottom: 1px solid var(--octant-border);
 }
 
 .composer-model-picker__rail-item {
@@ -5274,9 +5156,12 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 /* The bare variant draws nothing, so the rail takes the ghost hover fill itself. */
 .composer-model-picker__rail-item:hover,
-.scaffolds__entry-button:hover,
 .folder-picker__item-nav:hover {
   background: var(--muted);
+}
+.composer-model-picker__rail-item:active,
+.folder-picker__item-nav:active {
+  background: var(--oct-wash-pressed);
 }
 
 /* The button recipe sizes every glyph inside a button to 1rem, which drew
@@ -5353,6 +5238,16 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   background: var(--claude-account-accent);
 }
 
+.claude-gateway-address {
+  display: grid;
+  gap: var(--oct-space-1);
+  justify-items: start;
+}
+
+.claude-gateway-address > input {
+  justify-self: stretch;
+}
+
 .claude-account-accent-picker {
   display: flex;
   flex-wrap: wrap;
@@ -5409,6 +5304,13 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   vertical-align: middle;
 }
 
+/* Under the Mono style a provider's logo is an ink mark like every other
+   glyph: it takes the colour of the text beside it. Increased contrast draws
+   the Mono style too, so it loses the colours with it. */
+:root[data-octant-style="mono"] .provider-glyph:not(.provider-glyph--monogram) {
+  color: inherit;
+}
+
 .provider-glyph--brand {
   background-color: currentColor;
   mask-position: center;
@@ -5440,11 +5342,12 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   flex-direction: column;
 }
 
-/* The field is the shared popover search; here it keeps its inset under the
-   catalog rail. */
-.composer-model-picker__search {
+/* The field is the shared filled 32px popover search, with no edge of its own;
+   this rule only stands it on the rows' box edge (the popup's 4px inset) and
+   leaves 4px to the list (maintainer request, 2026-11-16). */
+.composer-model-picker__pane .composer-model-picker__search {
   flex: 0 0 auto;
-  margin: var(--oct-space-2) var(--oct-space-2) var(--oct-space-1);
+  margin: 0 var(--oct-menu-inset) var(--oct-space-1);
 }
 
 /* Catalogs wrap onto as many short rows as they need, so every one is on
@@ -5480,6 +5383,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .composer-model-picker__catalog:hover {
   background: var(--octant-control-hover);
+}
+.composer-model-picker__catalog:active {
+  background: var(--octant-control-pressed);
 }
 
 .composer-model-picker__catalog--on {
@@ -5524,20 +5430,28 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
      shrink gives up height before the list scrolls, and its two lines then
      stand taller than the fill painted behind them. */
   flex: 0 0 auto;
-  grid-template-columns: minmax(0, 1fr) 28px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  min-height: var(--oct-menu-row-h);
+  align-items: stretch;
   border-radius: var(--oct-radius-sm);
+}
+
+/* A row with a second line (the account under a model in a mixed list) is the
+   menu's two-line row. */
+.composer-model-picker__row:has(.composer-model-picker__model-detail) {
+  min-height: var(--oct-menu-row-two-h);
+}
+
+.composer-model-picker__row > .composer-model-picker__star {
+  align-self: center;
 }
 
 .composer-model-picker__row:hover,
 .composer-model-picker__row:focus-within {
   background: var(--octant-control-hover);
 }
-
-/* The chosen model carries a check rather than a filled row, so it does not
-   read as the hovered one. */
-.composer-model-picker__row--selected {
-  background: transparent;
+.composer-model-picker__row:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--octant-control-pressed);
 }
 
 .composer-model-picker__model {
@@ -5581,7 +5495,50 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--octant-text-primary);
 }
 
+.composer-model-picker__model-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* The ⌘ digit that chooses the row while the picker is open: quiet meta text,
+   right-aligned in a fixed 24px column so every row's digit and the chosen
+   row's check (just before it) stand on one trailing edge. */
+.composer-model-picker__hint {
+  flex: 0 0 24px;
+  width: 24px;
+  color: var(--oct-meta);
+  font: inherit;
+  font-size: var(--oct-text-xs);
+  text-align: end;
+}
+
+/* "Show more" is the quiet last line of a long list, under the model names. */
+.composer-model-picker__more {
+  display: flex;
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: var(--oct-menu-row-h);
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 var(--oct-menu-row-inset) 0
+    calc(var(--oct-menu-row-inset) + 16px + var(--oct-menu-row-gap));
+  color: var(--octant-text-muted);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-detail);
+}
+
+.composer-model-picker__more:hover {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+.composer-model-picker__more:active {
+  background: var(--octant-control-pressed);
+}
+
 .composer-model-picker__model-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5675,7 +5632,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 @media (max-width: 640px) {
   .composer-model-picker__menu {
-    width: min(360px, calc(100vw - 32px));
+    width: min(360px, calc(100vw - 24px));
   }
 }
 .parallel-runs {
@@ -5733,79 +5690,216 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   gap: var(--oct-space-1);
 }
 
-.scaffolds {
+/*
+ * The empty thread's start block: a heading and hint, then one quiet surface
+ * (card fill, container radius, one hairline, no shadow) holding two labelled
+ * groups of list rows. It shares the thread column's edges with the composer,
+ * and sits low in the column so it rests above the composer instead of at the
+ * top-left of an otherwise blank transcript.
+ */
+.code-thread-workspace__conversation:not([data-transcript-window])
+  .code-thread-workspace__transcript--empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding-block: 24px 32px;
+}
+
+.empty-start {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: 520px;
-  margin: 12px auto 0;
-  padding: 12px;
+  gap: 4px;
+  min-width: 0;
+}
+
+.empty-start__title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-medium);
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-start__hint {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-detail);
+  line-height: 20px;
+}
+
+.empty-start__surface {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  margin-top: 16px;
+  overflow: hidden;
   border: 1px solid var(--octant-border-subtle);
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
   color: var(--octant-text-muted);
   font-size: var(--oct-text-detail);
 }
 
-.scaffolds__header {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-1);
-  color: var(--octant-text-primary);
+.empty-start__surface:empty {
+  display: none;
 }
 
-.scaffolds__list {
+.empty-start__group {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.empty-start__group + .empty-start__group {
+  border-top: 1px solid var(--octant-border-subtle);
+}
+
+.empty-start__label {
+  padding: 12px 12px 8px;
+}
+
+.empty-start__rows {
+  display: flex;
+  flex-direction: column;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.scaffolds__entry {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.empty-start__rows > li + li {
+  border-top: 1px solid var(--octant-border-subtle);
 }
 
-.scaffolds__entry-button {
-  display: flex;
-  flex-direction: column;
-  /* The button recipe is a centred, one-line, fixed-height control. Left as it
-     was, each entry kept that 32px box while its name and summary ran to two
-     lines, so one entry's name printed over the summary above it. */
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 2px;
+/* A row is fixed: two lines are 52px and a preset's third line makes it 72px,
+   so a long summary is cut to one line and nothing shifts on hover or load. */
+.empty-start__row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 12px;
+  box-sizing: border-box;
   width: 100%;
-  height: auto;
-  padding: 8px;
-  white-space: normal;
-  border: 1px solid var(--octant-border-subtle);
+  height: 52px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   color: inherit;
   font: inherit;
   text-align: left;
+  white-space: normal;
+}
+
+.empty-start__row--preset {
+  height: 72px;
+}
+
+.empty-start__row--action {
   cursor: default;
 }
 
-.scaffolds__entry-button[aria-pressed="true"] {
-  border-color: var(--octant-accent);
+.empty-start__row--action:hover:not(:disabled) {
+  background: var(--oct-wash-hover);
 }
 
-.scaffolds__entry-button:disabled {
-  cursor: default;
-  opacity: var(--oct-disabled-opacity);
+.empty-start__row--action:active:not(:disabled) {
+  background: var(--oct-wash-pressed);
 }
 
-.scaffolds__entry-name {
+.empty-start__row--action:disabled {
+  opacity: 1;
+}
+
+/* The glyph keeps its 16px wherever the row stands (an earlier measurement at
+   a 1000px window read 0px); at 320 to 1440px it measures 16px by 16px. */
+.empty-start__icon,
+.empty-start__chevron {
+  flex: none;
+  min-width: 16px;
+  margin-top: 2px;
+  color: var(--octant-text-muted);
+}
+
+.empty-start__row--action .empty-start__icon,
+.empty-start__row--action .empty-start__chevron {
+  align-self: start;
+}
+
+.empty-start__row--action .empty-start__chevron {
+  margin-top: 2px;
+}
+
+.empty-start__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.empty-start__name {
+  overflow: hidden;
   color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.scaffolds__entry-blocked {
-  margin: 0;
+.empty-start__summary {
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-start__row--action:disabled .empty-start__name,
+.empty-start__row--action:disabled .empty-start__icon,
+.empty-start__row--action:disabled .empty-start__chevron {
+  color: var(--octant-text-muted);
+}
+
+.empty-start__opens {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.empty-start__pane {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* What pressing the row does, said as a quiet word on the title's line. */
+.empty-start__apply {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
+  line-height: 20px;
+}
+
+/* A chosen template opens its directory form and command below the rows. */
+.empty-start__group > .scaffolds__start,
+.empty-start__group > .scaffolds__message,
+.empty-start__group > .scaffolds__output,
+.empty-start__group > .workspace-presets__skills,
+.empty-start__group > .workspace-presets__message {
+  margin: 0;
+  padding: 12px;
+  border-top: 1px solid var(--octant-border-subtle);
 }
 
 .scaffolds__start {
@@ -5849,13 +5943,20 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
   box-sizing: border-box;
-  flex: 0 1 auto;
+  /* It keeps its own height up to the cap and scrolls past it; the page above
+     gives way, never this row. */
+  flex: 0 0 auto;
   min-height: 0;
   max-height: min(45%, 420px);
   overflow: auto;
 }
 
-.browser-workspace--feedback {
+/* Named twice so it outranks the workspace's own grid, which is declared in a
+   later stylesheet at the same weight. While the grid won, the notes row sat in
+   an implicit row and its 45% cap measured that row, not the pane: the row was
+   cut to under half its own height and "Point at something" lost its lower
+   half (measured 20px of a 44px row, 2026-11-16). */
+.browser-workspace.browser-workspace--feedback {
   display: flex;
   flex-direction: column;
 }
@@ -5871,16 +5972,97 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .browser-workspace--feedback > .browser-workspace__native,
 .browser-workspace--feedback > .browser-workspace__remote,
+.browser-workspace--feedback > .browser-workspace__markup-page,
 .browser-workspace--feedback > .browser-workspace__start {
   flex: 1 1 0;
   min-height: 0;
 }
 
-.product-feedback__header {
-  display: flex;
+/* The page's tools: one band under the page with the toolbar centred in it.
+   The band has one height whatever is armed, said or counted, so a live page
+   (a window-level view placed by its rectangle) never resizes for a tool. What
+   the armed tool waits for reads at its left and the notes' count at its
+   right; both give way to the toolbar in a narrow pane. */
+.browser-annotate {
+  display: grid;
+  height: 44px;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  /* No gap between the columns: in a 280px pane the toolbar takes nearly the
+     whole band, and a gap the side columns could not give back pushed it 9px
+     off centre. The words beside it keep their own distance instead. */
+  padding: 0 var(--oct-space-3);
+  box-sizing: border-box;
+  border-top: 1px solid var(--octant-pane-line, var(--octant-border-subtle));
+}
+
+.browser-annotate__status {
+  min-width: 0;
+  margin: 0;
+  padding-inline-end: var(--oct-space-2);
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-annotate__notes {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+  padding-inline-start: var(--oct-space-2);
+  overflow: hidden;
+}
+
+/* One toolbar, a pill a step off the pane with round tools in it, the way the
+   composer's box holds its round buttons. Flat: a wash of the ink, no edge and
+   no shadow, since it stands in the band and not over the page. */
+.browser-annotate__pill {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--oct-space-1);
+  background: var(--oct-fill-4);
+  border-radius: var(--oct-radius-pill);
+}
+
+.browser-annotate__tool {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  place-items: center;
+  color: var(--oct-fg-2);
+  border-radius: 50%;
+}
+
+.browser-annotate__tool:hover:not(:disabled) {
+  color: var(--oct-fg);
+  background: var(--octant-control-hover);
+}
+.browser-annotate__tool:active:not(:disabled):not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--octant-control-pressed);
+}
+
+.browser-annotate__tool[aria-pressed="true"] {
+  color: var(--oct-fg);
+  background: var(--oct-fill-2);
+}
+
+.browser-annotate__tool:disabled {
+  opacity: 0.4;
+}
+
+.browser-annotate__rule {
+  width: 1px;
+  height: 16px;
+  flex: none;
+  margin: 0 var(--oct-space-1);
+  background: var(--octant-pane-line, var(--octant-border-subtle));
 }
 
 .product-feedback__composer {
@@ -6352,6 +6534,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
 }
+.composer-pool-control__trigger:active:not(:disabled) {
+  background: var(--octant-control-pressed);
+}
 
 .composer-pool-control__trigger:disabled {
   opacity: var(--oct-disabled-opacity);
@@ -6376,10 +6561,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   max-height: 320px;
   overflow: auto;
   padding: var(--oct-space-3);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--octant-surface-raised);
-  box-shadow: var(--octant-shadow-overlay);
 }
 
 .composer-pool-control__options {
@@ -6925,6 +7106,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
+.code-board__filters-toggle:active {
+  background: var(--oct-wash-pressed);
+}
 
 .code-board__filter-count {
   min-width: 18px;
@@ -6939,15 +7123,11 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .code-board__view-popover {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + var(--oct-space-1));
   right: 0;
   left: auto;
   max-width: 100%;
   z-index: 6;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--oct-elev-raised);
 }
 
 .code-board__filters-panel {
@@ -6958,10 +7138,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   max-height: calc(100vh - 220px);
   padding: var(--oct-space-3);
   overflow-y: auto;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--oct-elev-raised);
 }
 
 .code-board__filters-panel legend,
@@ -7105,6 +7281,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
+.code-board__card-details summary:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
 
 .code-board__view-popover {
   display: grid;
@@ -7184,10 +7363,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   font: inherit;
   text-align: left;
   cursor: default;
-}
-
-.code-board__card-open:hover .board-card-title {
-  text-decoration: underline;
 }
 
 .code-board__card-details {
@@ -7487,51 +7662,11 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--octant-danger-text);
 }
 
-/*
- * Curated workspace presets, offered beside the scaffolds and shaped like
- * them: the same card, the same list, so choosing an arrangement reads as the
- * same kind of decision as choosing a starting point.
- */
-.workspace-presets {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 520px;
-  margin: 12px auto 0;
-  padding: 12px;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: var(--oct-radius-sm);
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-detail);
-}
-
-.workspace-presets__header {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-1);
-  color: var(--octant-text-primary);
-}
-
-.workspace-presets__list,
 .workspace-presets__skills {
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-1);
-  margin: 0;
-  padding: 0;
   list-style: none;
-}
-
-.workspace-presets__entry {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.workspace-presets__entry p,
-.workspace-presets__panes {
-  margin: 2px 0 0;
 }
 
 .workspace-presets__skills li {
@@ -7542,10 +7677,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .workspace-presets__skill-status {
   color: var(--octant-text-muted);
-}
-
-.workspace-presets__message {
-  margin: 0;
 }
 
 .linear-issues {
@@ -7775,46 +7906,63 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   min-width: 0;
 }
 
-/* Workspace conversations and dock tools share one compact tab recipe. */
+/* Panel tabs (Files, Browser pages, the dock's tool row) share one recipe: a
+   28px tab in the control radius with a 14px leading mark, a 13px label, and a
+   16px close that always keeps its slot. The open tab has the raised control
+   fill and the primary ink; the others are secondary ink with a hover fill. */
+.content-tab,
+.panel-tabs {
+  --oct-tab-gap: calc(var(--oct-space-1) * 1.5);
+  --oct-tab-pad: calc(var(--oct-space-1) * 2.5);
+}
 .content-tab {
+  position: relative;
   display: inline-flex;
   flex: none;
   min-width: 0;
-  height: 26px;
-  max-width: 202px;
+  height: 28px;
+  max-width: 214px;
   gap: 0;
   align-items: center;
   padding: 0;
-  color: var(--oct-meta);
-  background: transparent;
+  /* A tab at rest is still a tab: a quiet wash of the ink in the tab's shape
+     and the secondary ink. Bare text beside one filled tab read as a label
+     and a link, not as a row of tabs. */
+  color: var(--oct-fg-2);
+  background: var(--oct-fill-4);
   border-radius: var(--oct-radius-sm);
 }
 .content-tab:hover {
   color: var(--oct-fg);
-  background: var(--oct-fg-soft);
+  background: var(--oct-fill-2);
 }
-/* The open tab is a neutral wash of the ink, like the open thread row: the
-   control role carries a tinted preset's hue and drew the tab as a coloured
-   button with a ring. */
+/* A press on the tab itself (its first child spans it), not on its close. */
+.content-tab:has(> :first-child:active) {
+  background: var(--oct-wash-pressed);
+}
+
+/* The open tab is clearly filled, in the primary ink, with no tinted ring. */
 .content-tab:has([role="tab"][aria-selected="true"]) {
   color: var(--oct-fg);
-  background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
+  background: var(--oct-fill-1);
 }
 .content-tab > .content-tab__select {
-  height: 26px;
-  min-height: 26px;
+  height: 28px;
+  min-height: 28px;
   min-width: 0;
   max-width: 180px;
-  gap: var(--oct-space-1);
-  padding: 0 8px;
-  font-size: var(--oct-text-xs);
+  gap: var(--oct-tab-gap);
+  padding: 0 var(--oct-tab-gap) 0 var(--oct-tab-pad);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
   transform: none;
 }
 .content-tab > .content-tab__close {
-  width: 22px;
-  min-width: 22px;
-  height: 24px;
-  min-height: 24px;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin-right: var(--oct-space-2);
   padding: 0;
   opacity: 0;
   transform: none;
@@ -7823,6 +7971,58 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .content-tab:focus-within > .content-tab__close,
 .content-tab:has([aria-selected="true"]) > .content-tab__close {
   opacity: 1;
+}
+/* Unsaved edits: a dot stands in the close slot until the tab is pointed at or
+   focused, when the close takes its place. Both stay in the slot, so nothing
+   moves. */
+.content-tab__dirty {
+  position: absolute;
+  top: 50%;
+  right: 13px;
+  width: 6px;
+  height: 6px;
+  background: var(--oct-fg);
+  border-radius: var(--oct-radius-pill);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+.content-tab[data-dirty="true"]:not(:hover):not(:focus-within) > .content-tab__dirty {
+  opacity: 1;
+}
+.content-tab[data-dirty="true"]:not(:hover):not(:focus-within) > .content-tab__close {
+  opacity: 0;
+}
+.content-tab__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.content-tab[data-preview="true"] .content-tab__label {
+  font-style: italic;
+}
+/* A panel's tab bar: its own row a step off the pane, a hairline under it, and
+   tabs that scroll sideways without a scrollbar. */
+.panel-tabs {
+  display: flex;
+  height: 36px;
+  min-width: 0;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-tab-gap);
+  padding: 0 var(--oct-space-2);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  background: var(--octant-sidebar-fill);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
+}
+.panel-tabs::-webkit-scrollbar {
+  display: none;
+}
+.panel-tabs > .panel-tabs__new {
+  flex: none;
 }
 /* A pane's conversation tabs are a row of equal chips: each open thread is
    its own soft card at a shared width, so the row reads as a set of open
@@ -7840,6 +8040,10 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .workspace-content-tabs .content-tab:hover {
   background: color-mix(in oklab, var(--oct-fg) 7%, transparent);
 }
+.workspace-content-tabs .content-tab:has(> :first-child:active) {
+  background: var(--oct-wash-pressed);
+}
+
 /* Picked for side by side: a step between a plain tab and the open one. */
 .workspace-content-tabs .content-tab[data-selected="true"] {
   background: color-mix(in oklab, var(--oct-fg) 8%, transparent);
@@ -7856,9 +8060,15 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   position: relative;
 }
 .workspace-content-tabs .content-tab > .content-tab__select {
-  padding-right: var(--oct-space-8);
+  padding: 0 var(--oct-space-8) 0 8px;
+  font-size: var(--oct-text-xs);
 }
 .workspace-content-tabs .content-tab > .content-tab__close {
+  width: 22px;
+  min-width: 22px;
+  height: 24px;
+  min-height: 24px;
+  margin: 0;
   position: absolute;
   top: 50%;
   right: var(--oct-space-1);

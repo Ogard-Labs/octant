@@ -59,11 +59,15 @@ export function coordinatorBoundsFor(
  * the person chose to let the thread act without asking. The level stays on
  * the thread as the ceiling for the workers it starts either way.
  *
- * Strict plugs in here: under Strict a coordinator keeps Plan's read-only
- * gate at every level.
+ * Following the level at Full access is a lift Octant made, so under the
+ * thread's Strict a coordinator keeps Plan's read-only gate at every level,
+ * Full access included, as before it.
  */
-export function coordinatorTurnPosture(level: ProviderExecutionPolicy): ProviderExecutionPolicy {
-  return level === "full-access" ? "full-access" : "plan";
+export function coordinatorTurnPosture(
+  level: ProviderExecutionPolicy,
+  strict: boolean,
+): ProviderExecutionPolicy {
+  return level === "full-access" && !strict ? "full-access" : "plan";
 }
 
 export interface CoordinatorRoleFacts {

@@ -426,7 +426,7 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
 
       {view.members.length === 0 ? null : (
         <SettingsSection
-          description="Revoking a computer writes a signed record. Your other computers ignore what it writes after that once they read it."
+          description="Revoking a computer writes a signed record. Once your other computers read it, they ignore what that computer writes."
           title="Computers"
           tone="danger"
         >
@@ -995,7 +995,7 @@ export function SyncStatusReadOnly(props: { readonly client: ReplicaSyncStatusCl
   return (
     <>
       <SyncStatusSection
-        description="Setting up sync, joining, and revoking happen in the Octant app on the host machine."
+        description="Set up sync, join, and revoke in the Octant app on the host computer."
         restoreFact
         standing={STANDING[view.thisComputer]}
         status={view.status}

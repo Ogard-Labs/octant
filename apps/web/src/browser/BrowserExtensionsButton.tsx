@@ -2,7 +2,7 @@ import type { BrowserAutomationClient } from "@octant/client-runtime/browser-aut
 import type { BrowserExtensionSummary } from "@octant/contracts/browser-extensions";
 import type { StoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import { browserExtensionsEnabledIn } from "@octant/domain";
-import { PuzzleIcon } from "lucide-react";
+import { PuzzleIcon } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { octantButtonClassName } from "../ui/base/OctantButton";
