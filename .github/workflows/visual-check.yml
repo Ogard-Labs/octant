@@ -1,0 +1,108 @@
+name: Visual check
+# Draws the key screens in a pinned Chromium and fails when one changed visibly.
+# A pull request with the `design change` label is an intended change: the run
+# writes the new baselines to the pull request's own branch and passes.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths:
+      - apps/web/**
+      - packages/theme/**
+      - packages/contracts/src/theme.ts
+      - DESIGN.md
+      - .github/workflows/visual-check.yml
+  push:
+    branches: [main]
+    paths:
+      - apps/web/**
+      - packages/theme/**
+      - packages/contracts/src/theme.ts
+      - DESIGN.md
+      - .github/workflows/visual-check.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: visual-check-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  visual:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      # A label on this repository's own branch lets the run commit baselines.
+      # A fork's token cannot push, so a fork compares and fails instead.
+      INTENDED: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'design change') && github.event.pull_request.head.repo.full_name == github.repository }}
+      FORK_LABELLED: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'design change') && github.event.pull_request.head.repo.full_name != github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The branch itself, so a baseline commit can be pushed to it.
+          ref: ${{ env.INTENDED == 'true' && github.head_ref || '' }}
+          persist-credentials: ${{ env.INTENDED == 'true' }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Read the pinned browser version
+        id: playwright
+        run: echo "version=$(bun -e 'console.log(require("playwright-core/package.json").version)')" >> "$GITHUB_OUTPUT"
+        working-directory: apps/web
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # The Chromium that goes with playwright-core, not the runner's Chrome,
+      # so the baselines do not move when the runner image updates its browser.
+      - name: Install the pinned Chromium
+        run: bunx playwright-core install --with-deps chromium
+        working-directory: apps/web
+      - name: Decide whether to write baselines
+        id: mode
+        run: |
+          update=false
+          if [ "$INTENDED" = "true" ]; then
+            subject="$(git log -1 --format=%s)"
+            author="$(git log -1 --format=%an)"
+            if [ "$subject" = "Update visual baselines" ] && [ "$author" = "github-actions[bot]" ]; then
+              echo "The latest commit is already the baseline commit; comparing only."
+            elif git log -1 --format=%B | grep -qF "[skip visual]"; then
+              echo "The latest commit asks to skip the baseline update; comparing only."
+            else
+              update=true
+            fi
+          fi
+          echo "update=$update" >> "$GITHUB_OUTPUT"
+      - name: Draw and compare the key screens
+        env:
+          CI: "true"
+          OCTANT_VISUAL_CHECK: "1"
+          OCTANT_VISUAL_UPDATE: ${{ steps.mode.outputs.update == 'true' && '1' || '' }}
+          OCTANT_QA_ARTIFACTS: ${{ runner.temp }}/visual-check
+        run: bun run --cwd apps/web visual:check
+      - name: Explain how to accept the change
+        if: failure()
+        run: |
+          if [ "$FORK_LABELLED" = "true" ]; then
+            echo "::error::A visual change from a fork cannot be approved here. Ask a maintainer to run scripts/visual-baselines-from-ci.ts ${{ github.run_id }} and push the baselines."
+          else
+            echo "::error::Intended? Add the \`design change\` label to this PR."
+          fi
+      - name: Commit the new baselines to the branch
+        if: steps.mode.outputs.update == 'true'
+        run: |
+          if [ -z "$(git status --porcelain -- apps/web/visual-baselines)" ]; then
+            echo "No baseline changed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- apps/web/visual-baselines
+          git commit -m "Update visual baselines"
+          git push origin "HEAD:${{ github.head_ref }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-check
+          path: ${{ runner.temp }}/visual-check
+          if-no-files-found: ignore
