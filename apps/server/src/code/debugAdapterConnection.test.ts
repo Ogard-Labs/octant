@@ -98,6 +98,71 @@ describe("the debug adapter connection", () => {
     expect(test.events).toEqual([{ event: "stopped", body: { reason: "breakpoint" } }]);
   });
 
+  it("reads events, responses and adapter requests fed through byte-at-a-time and batched chunks", async () => {
+    const test = connection();
+    const waiting = test.subject.request("threads");
+    await settle();
+    const stream = Buffer.concat([
+      frame({ seq: 1, type: "response", request_seq: 1, success: true, body: { threads: [] } }),
+      frame({ seq: 2, type: "event", event: "stopped", body: { reason: "breakpoint" } }),
+      frame({ seq: 3, type: "request", command: "runInTerminal", arguments: {} }),
+    ]);
+    for (const byte of stream) test.fromAdapter.write(Buffer.from([byte]));
+    expect(await waiting).toEqual({ status: "answered", body: { threads: [] } });
+    await settle();
+    expect(test.events).toEqual([{ event: "stopped", body: { reason: "breakpoint" } }]);
+    expect(test.refused).toEqual(["runInTerminal"]);
+    expect(test.written.at(-1)).toMatchObject({ request_seq: 3, success: false });
+  });
+
+  it("settles a request as closed when the stream ends inside a frame", async () => {
+    const test = connection();
+    const waiting = test.subject.request("threads");
+    test.fromAdapter.write('Content-Length: 40\r\n\r\n{"seq":9,"type":"response","re');
+    test.fromAdapter.end();
+    expect(await waiting).toEqual({ status: "closed" });
+    expect(test.subject.closed).toBe(true);
+  });
+
+  it("ends on a header that declares the length twice, badly, or not at all", async () => {
+    for (const header of [
+      "Content-Length: 5\r\nContent-Length: 5\r\n\r\n",
+      "Content-Length: five\r\n\r\n",
+      "Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n",
+    ]) {
+      const test = connection();
+      test.fromAdapter.write(header);
+      await settle();
+      expect(test.violations).toEqual(["malformed-frame"]);
+      expect(test.subject.closed).toBe(true);
+    }
+  });
+
+  it("ends on a header that fills the header bound without a delimiter", async () => {
+    const test = connection();
+    test.fromAdapter.write(`Content-Length: 1\r\nContent-Name: ${"x".repeat(8 * 1024)}`);
+    await settle();
+    expect(test.violations).toEqual(["malformed-frame"]);
+    expect(test.subject.closed).toBe(true);
+  });
+
+  it("assembles a body that arrives in more fragments than the queue holds", async () => {
+    const test = connection();
+    const framed = frame({
+      seq: 1,
+      type: "event",
+      event: "output",
+      body: { output: "x".repeat(400) },
+    });
+    const bodyStart = framed.indexOf("\r\n\r\n") + 4;
+    test.fromAdapter.write(framed.subarray(0, bodyStart));
+    for (let index = bodyStart; index < framed.byteLength; index += 3) {
+      test.fromAdapter.write(framed.subarray(index, index + 3));
+    }
+    await settle();
+    expect(test.events).toEqual([{ event: "output", body: { output: "x".repeat(400) } }]);
+  });
+
   it("ends on a frame declared past the cap before its body arrives, and on one that is not a frame", async () => {
     const oversize = connection();
     const waiting = oversize.subject.request("threads");
