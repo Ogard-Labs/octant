@@ -107,6 +107,15 @@ function serviceFixture(options: {
     readonly number: number;
     readonly observedAt: string;
   }>;
+  readonly observeIssueClosure?: (
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly issueNumber: number;
+      readonly closerNumber: number;
+    },
+    signal: AbortSignal,
+  ) => Promise<{ readonly closedAt: string; readonly title: string } | undefined>;
   readonly merge?: CodeProjectPullRequestMergePort;
   readonly mergeJournal?: Journal;
   readonly recordMerge?: (record: CodeProjectPullRequestMergeRecorded) => void;
@@ -173,7 +182,12 @@ function serviceFixture(options: {
       },
     },
     list: { listActive },
-    detail: { observeReviewByIdentity },
+    detail: {
+      observeReviewByIdentity,
+      ...(options.observeIssueClosure === undefined
+        ? {}
+        : { observeIssueClosure: options.observeIssueClosure }),
+    },
     ...(options.merge === undefined ? {} : { merge: options.merge }),
     ...(options.recordMerge === undefined ? {} : { recordMerge: options.recordMerge }),
     ...(options.recordDelivery === undefined ? {} : { recordDelivery: options.recordDelivery }),
@@ -2007,6 +2021,105 @@ describe("CodeProjectPullRequestService", () => {
       title: "\u754C".repeat(85),
       mergedBy: "octocat",
     });
+  });
+
+  it("trims a delivery title cut to the byte limit before recording", async () => {
+    const recordDelivery = vi.fn();
+    const { service } = serviceFixture({
+      recordDelivery,
+      detail: async () =>
+        ({
+          ...observedDetail,
+          pullRequest: {
+            ...observedDetail.pullRequest,
+            state: "merged",
+            title: `${"a".repeat(255)} rest`,
+            mergedAt: "2026-08-22T08:00:00Z",
+            mergedBy: "octocat",
+          },
+        }) satisfies GhPullRequestReviewResult,
+    });
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+
+    expect(recordDelivery).toHaveBeenCalledTimes(1);
+    expect(recordDelivery.mock.calls[0]?.[0]).toMatchObject({
+      kind: "prs-merged",
+      title: "a".repeat(255),
+    });
+  });
+
+  it("confirms each closing issue once and journals it for every linked thread", async () => {
+    const recordDelivery = vi.fn();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const observeIssueClosure = vi.fn(
+      async (request: {
+        readonly owner: string;
+        readonly name: string;
+        readonly issueNumber: number;
+        readonly closerNumber: number;
+      }) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        inFlight -= 1;
+        return { closedAt: "2026-08-22T09:00:00Z", title: `Issue ${request.issueNumber}` };
+      },
+    );
+    const witnesses = [
+      "20000000-0000-4000-8000-000000000001",
+      "20000000-0000-4000-8000-000000000002",
+      "20000000-0000-4000-8000-000000000003",
+    ].map(
+      (id, index) =>
+        ({
+          threadId: id,
+          projectId: String(projectA),
+          title: `Witness ${index + 1}`,
+          repository: { owner: "octant", name: "octant" },
+          deliveryBranch: "feature/manual-refresh",
+          pullRequestNumbers: [],
+        }) satisfies CodeProjectLinkedThreadFact,
+    );
+    const { service } = serviceFixture({
+      recordDelivery,
+      observeIssueClosure,
+      threads: witnesses,
+      detail: async () =>
+        ({
+          ...observedDetail,
+          pullRequest: {
+            ...observedDetail.pullRequest,
+            state: "merged",
+            mergedAt: "2026-08-22T08:00:00Z",
+            mergedBy: "octocat",
+            // The duplicate must not double the confirmation read.
+            closingIssueNumbers: [101, 102, 101],
+          },
+        }) satisfies GhPullRequestReviewResult,
+    });
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+
+    expect(observeIssueClosure).toHaveBeenCalledTimes(2);
+    expect(observeIssueClosure.mock.calls.map(([request]) => request.issueNumber)).toEqual([
+      101, 102,
+    ]);
+    // The confirmation reads stay inside the bounded GitHub fan-out.
+    expect(maxInFlight).toBeLessThanOrEqual(4);
+    const closures = recordDelivery.mock.calls.filter(
+      ([delivery]) => delivery.kind === "issues-closed",
+    );
+    expect(closures).toHaveLength(6);
+    expect(closures.map(([delivery]) => `${delivery.threadId}:${delivery.number}`).sort()).toEqual([
+      "20000000-0000-4000-8000-000000000001:101",
+      "20000000-0000-4000-8000-000000000001:102",
+      "20000000-0000-4000-8000-000000000002:101",
+      "20000000-0000-4000-8000-000000000002:102",
+      "20000000-0000-4000-8000-000000000003:101",
+      "20000000-0000-4000-8000-000000000003:102",
+    ]);
   });
 
   it("records a merged delivery performed by a GitHub app actor", async () => {

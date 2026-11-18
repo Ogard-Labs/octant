@@ -540,7 +540,7 @@ export class CodeProjectPullRequestService {
     this.#detailFreshness.set(key, { status: "fresh", lastSuccessfulRefreshAt: now });
     const threads = await this.#threads.list();
     const linkedThreads = this.#linkedThreads(authorized, detail, threads);
-    this.#recordObservedDelivery(authorized, observed, linkedThreads, signal);
+    await this.#recordObservedDelivery(authorized, observed, linkedThreads, signal);
     return this.#detailView({
       query: command,
       detail,
@@ -731,7 +731,7 @@ export class CodeProjectPullRequestService {
             threadId: decodeCodeThreadId(thread.threadId),
             title: thread.title,
           }));
-        this.#recordObservedDelivery(authorized, observed, linkedThreads, signal);
+        await this.#recordObservedDelivery(authorized, observed, linkedThreads, signal);
       }
       return {
         status: "merged",
@@ -1024,7 +1024,7 @@ export class CodeProjectPullRequestService {
           threads,
           knownRow.updatedAt,
         );
-        this.#recordObservedDelivery(repository, observed, observedRow.linkedThreads, signal);
+        await this.#recordObservedDelivery(repository, observed, observedRow.linkedThreads, signal);
         collected.push(observedRow);
       } else {
         knownIdentityRefreshFailed.add(String(repository.projectId));
@@ -1599,12 +1599,12 @@ export class CodeProjectPullRequestService {
    * is a fact the journal already watched; recording is best-effort so a
    * failed append never fails the refresh that surfaced it.
    */
-  #recordObservedDelivery(
+  async #recordObservedDelivery(
     repository: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>,
     observed: Extract<GhPullRequestReviewResult, { status: "observed" }>,
     linkedThreads: ReadonlyArray<{ readonly threadId: CodeThreadId; readonly title: string }>,
     signal: AbortSignal,
-  ): void {
+  ): Promise<void> {
     if (this.#recordDelivery === undefined) return;
     const pullRequest = observed.pullRequest;
     if (
@@ -1617,6 +1617,7 @@ export class CodeProjectPullRequestService {
     // an unparseable stamp skips the observation rather than sinking it.
     const mergedAt = deliveryOccurredAt(pullRequest.mergedAt);
     if (mergedAt === undefined) return;
+    const mergedTitle = deliveryTitleBytes(pullRequest.title);
     for (const thread of linkedThreads) {
       try {
         this.#recordDelivery(
@@ -1627,7 +1628,7 @@ export class CodeProjectPullRequestService {
             repositoryOwner: repository.repositoryOwner,
             repositoryName: repository.repositoryName,
             number: pullRequest.number,
-            ...(pullRequest.title === "" ? {} : { title: deliveryTitleBytes(pullRequest.title) }),
+            ...(mergedTitle === undefined ? {} : { title: mergedTitle }),
             occurredAt: mergedAt,
             mergedBy: pullRequest.mergedBy,
           }),
@@ -1635,24 +1636,64 @@ export class CodeProjectPullRequestService {
       } catch {
         // A malformed or rejected record must not fail the refresh.
       }
-      for (const issueNumber of pullRequest.closingIssueNumbers ?? []) {
-        void this.#recordIssueClosure(repository, pullRequest.number, issueNumber, thread, signal);
+    }
+    // One confirmation read per closing issue, bounded — not one per
+    // thread×issue pair — then the same proven closure is journaled for
+    // every linked thread that witnessed it.
+    const issueNumbers = [...new Set(pullRequest.closingIssueNumbers ?? [])];
+    if (issueNumbers.length === 0 || this.#detail.observeIssueClosure === undefined) return;
+    const closures = await mapConcurrentOrdered(
+      issueNumbers,
+      GITHUB_READ_CONCURRENCY,
+      (issueNumber) =>
+        this.#confirmedIssueClosure(repository, pullRequest.number, issueNumber, signal),
+    );
+    for (const closure of closures) {
+      if (closure === undefined) continue;
+      const closedAt = deliveryOccurredAt(closure.closedAt);
+      if (closedAt === undefined) continue;
+      const title = deliveryTitleBytes(closure.title);
+      for (const thread of linkedThreads) {
+        try {
+          this.#recordDelivery(
+            decodeActivityDeliveryObserved({
+              kind: "issues-closed",
+              projectId: repository.projectId,
+              threadId: thread.threadId,
+              repositoryOwner: repository.repositoryOwner,
+              repositoryName: repository.repositoryName,
+              number: closure.issueNumber,
+              ...(title === undefined ? {} : { title }),
+              occurredAt: closedAt,
+              closingPullRequest: {
+                repositoryOwner: repository.repositoryOwner,
+                repositoryName: repository.repositoryName,
+                number: pullRequest.number,
+              },
+            }),
+          );
+        } catch {
+          // A malformed or rejected record must not fail the refresh.
+        }
       }
     }
   }
 
-  async #recordIssueClosure(
+  /**
+   * The issue's own `ClosedEvent` confirmation, or undefined when the port
+   * cannot read it, the closer is not this pull request, or the read fails —
+   * one failed confirmation never drops the others.
+   */
+  async #confirmedIssueClosure(
     repository: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>,
     closerNumber: number,
     issueNumber: number,
-    thread: { readonly threadId: CodeThreadId },
     signal: AbortSignal,
-  ): Promise<void> {
-    if (this.#recordDelivery === undefined || this.#detail.observeIssueClosure === undefined) {
-      return;
-    }
+  ): Promise<
+    { readonly issueNumber: number; readonly closedAt: string; readonly title: string } | undefined
+  > {
     try {
-      const closure = await this.#detail.observeIssueClosure(
+      const closure = await this.#detail.observeIssueClosure?.(
         {
           owner: repository.repositoryOwner,
           name: repository.repositoryName,
@@ -1661,30 +1702,9 @@ export class CodeProjectPullRequestService {
         },
         signal,
       );
-      // Only a ClosedEvent naming this pull request in this repository earns
-      // the fact; a mere reference or a differently-closed issue stays out.
-      if (closure === undefined) return;
-      const closedAt = deliveryOccurredAt(closure.closedAt);
-      if (closedAt === undefined) return;
-      this.#recordDelivery(
-        decodeActivityDeliveryObserved({
-          kind: "issues-closed",
-          projectId: repository.projectId,
-          threadId: thread.threadId,
-          repositoryOwner: repository.repositoryOwner,
-          repositoryName: repository.repositoryName,
-          number: issueNumber,
-          ...(closure.title === "" ? {} : { title: deliveryTitleBytes(closure.title) }),
-          occurredAt: closedAt,
-          closingPullRequest: {
-            repositoryOwner: repository.repositoryOwner,
-            repositoryName: repository.repositoryName,
-            number: closerNumber,
-          },
-        }),
-      );
+      return closure === undefined ? undefined : { issueNumber, ...closure };
     } catch {
-      // Recording is best-effort; the next refresh re-attempts it.
+      return undefined;
     }
   }
 
@@ -1755,13 +1775,17 @@ function repositoryKey(projectId: ProjectId, owner: string, name: string): strin
  * GitHub title must not sink the whole observation — cut it at the byte limit
  * and drop the partial code point the cut may leave behind.
  */
-function deliveryTitleBytes(title: string): string {
+function deliveryTitleBytes(title: string): string | undefined {
   const bytes = Buffer.from(title, "utf8");
-  if (bytes.byteLength <= 256) return title;
-  return bytes
-    .subarray(0, 256)
-    .toString("utf8")
-    .replace(/\uFFFD+/u, "");
+  const cut =
+    bytes.byteLength <= 256
+      ? title
+      : bytes
+          .subarray(0, 256)
+          .toString("utf8")
+          .replace(/\uFFFD+/u, "");
+  const trimmed = cut.trim();
+  return trimmed === "" ? undefined : trimmed;
 }
 
 /** `gh` timestamps arrive without milliseconds; normalize to the contract's ISO form. */
