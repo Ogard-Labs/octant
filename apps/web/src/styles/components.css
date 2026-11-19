@@ -1789,12 +1789,6 @@ html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-
   gap: 0.4rem;
 }
 
-.ship-panel__title {
-  margin: 0;
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-}
-
 .ship-panel__note,
 .ship-panel__empty,
 .ship-panel__notice,

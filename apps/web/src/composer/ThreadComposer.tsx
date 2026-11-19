@@ -19,9 +19,10 @@ import {
   useRef,
   useState,
   type ReactNode,
+  lazy,
+  Suspense,
 } from "react";
 import { ArrowUp, Square } from "../ui/icons";
-import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
 import "./composer-plan-usage.css";
@@ -32,6 +33,11 @@ import {
   useActiveComposerThreadDropKey,
 } from "../chat/composerThreadDrop";
 
+const ComposerContextMeter = lazy(() =>
+  import("../context/ComposerContextMeter").then((module) => ({
+    default: module.ComposerContextMeter,
+  })),
+);
 /** One row with its 12px above and under is a 44px box; this leaves room for rounding. */
 const COMPOSER_ONE_ROW_MAX_HEIGHT = 52;
 
@@ -420,7 +426,9 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           <div className={trailingClassName}>
             {props.row.trailing}
             {props.row.approval}
-            <ComposerContextMeter />
+            <Suspense fallback={null}>
+              <ComposerContextMeter />
+            </Suspense>
           </div>
         </div>
       )}

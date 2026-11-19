@@ -59,22 +59,6 @@
   font-weight: var(--oct-weight-strong);
 }
 
-.canvas-block__callout--info {
-  border-left-color: var(--oct-accent-fg);
-}
-
-.canvas-block__callout--warning {
-  border-left-color: var(--oct-warn-fg);
-}
-
-.canvas-block__callout--danger {
-  border-left-color: var(--oct-danger-fg);
-}
-
-.canvas-block__callout--success {
-  border-left-color: var(--oct-success-fg);
-}
-
 .canvas-block__link {
   color: var(--oct-accent-fg);
   text-decoration: none;
@@ -641,10 +625,6 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-dasharray: var(--oct-ser-dash, none);
-}
-
-.canvas-block__chart-mark.is-area {
-  opacity: 0.22;
 }
 
 .canvas-block__chart-slice {
@@ -2286,12 +2266,6 @@
   gap: var(--oct-space-2);
 }
 
-.canvas-comments__title {
-  margin: 0;
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-}
-
 .canvas-comments__note {
   margin: 0;
   font-size: var(--oct-text-xs);
@@ -2682,10 +2656,6 @@
   border-radius: var(--oct-radius-sm);
   padding: 4px 8px;
   margin-top: 4px;
-}
-
-.canvas-mockup__node--chat-message {
-  justify-items: start;
 }
 
 /* A hotspot is the one live control in a drawing that is otherwise inert. It
@@ -3116,16 +3086,6 @@
   white-space: pre;
 }
 
-.canvas-block__diff-line--add {
-  color: var(--oct-success-fg);
-  background: var(--oct-success-soft);
-}
-
-.canvas-block__diff-line--remove {
-  color: var(--oct-danger-fg);
-  background: var(--oct-danger-soft);
-}
-
 .canvas-block__image-frame {
   display: flex;
   align-items: center;
@@ -3180,18 +3140,6 @@
   height: 8px;
   border-radius: var(--oct-radius-pill);
   background: var(--oct-meta);
-}
-
-.canvas-block__summary-item--success .canvas-block__summary-dot {
-  background: var(--oct-success);
-}
-
-.canvas-block__summary-item--warning .canvas-block__summary-dot {
-  background: var(--oct-warn);
-}
-
-.canvas-block__summary-item--danger .canvas-block__summary-dot {
-  background: var(--oct-danger);
 }
 
 .canvas-workspace-tab {
@@ -4179,11 +4127,6 @@
     radial-gradient(circle at 28px 4px, var(--oct-border) 3px, transparent 3.5px);
 }
 
-.canvas-mockup--desktop .canvas-mockup__chrome-dots,
-.canvas-mockup--browser .canvas-mockup__chrome-dots {
-  display: block;
-}
-
 .canvas-mockup__chrome-title {
   overflow: hidden;
   min-width: 0;
@@ -4243,11 +4186,6 @@
   min-width: 0;
 }
 
-.canvas-mockup--phone .canvas-mockup__columns,
-.canvas-mockup--dock-panel .canvas-mockup__columns {
-  flex-direction: column;
-}
-
 .canvas-mockup__header-slot {
   border-bottom: 1px solid var(--oct-border);
   padding: var(--oct-space-2) var(--oct-space-3);
@@ -4257,17 +4195,6 @@
   flex: 0 0 28%;
   border-right: 1px solid var(--oct-border);
   background: var(--oct-bg);
-}
-
-.canvas-mockup--tablet .canvas-mockup__sidebar-slot {
-  flex-basis: 34%;
-}
-
-.canvas-mockup--phone .canvas-mockup__sidebar-slot,
-.canvas-mockup--dock-panel .canvas-mockup__sidebar-slot {
-  flex-basis: auto;
-  border-right: 0;
-  border-bottom: 1px solid var(--oct-border);
 }
 
 .canvas-mockup__main {
@@ -4292,68 +4219,11 @@
   padding: var(--oct-space-2) var(--oct-space-3) 0;
 }
 
-.canvas-mockup__node--list-row {
-  border-bottom: 1px solid var(--oct-border);
-  padding: var(--oct-space-2) var(--oct-space-3);
-}
-
-.canvas-mockup__node--nav > ul > .canvas-mockup__node--list-row {
-  border-bottom: 0;
-  border-radius: var(--oct-radius-sm);
-}
-
-.canvas-mockup__node--list-row.is-on {
-  background: var(--oct-fill-2);
-}
-
-.canvas-mockup__node--list-row.is-on .canvas-mockup__label {
-  color: var(--oct-fg);
-  font-weight: var(--oct-weight-strong);
-}
-
-.canvas-mockup__node--card {
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  padding: var(--oct-space-3);
-}
-
-.canvas-mockup__node--sidebar {
-  padding: var(--oct-space-2) var(--oct-space-3);
-}
-
 .canvas-mockup__node--stack > ul,
 .canvas-mockup__node--card > ul,
 .canvas-mockup__modal-box > ul {
   display: grid;
   gap: var(--oct-space-2);
-}
-
-.canvas-mockup__node--row > ul,
-.canvas-mockup__node--header > ul {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--oct-space-2);
-}
-
-.canvas-mockup__node--grid > ul {
-  display: grid;
-  grid-template-columns: repeat(var(--canvas-mockup-grid-columns, 2), minmax(0, 1fr));
-  gap: var(--oct-space-2);
-}
-
-.canvas-mockup__node--header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-2);
-}
-
-.canvas-mockup__header-slot .canvas-mockup__node--nav > ul {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--oct-space-1);
 }
 
 .canvas-mockup__header-title,
@@ -4635,17 +4505,6 @@
   padding: var(--oct-space-3);
 }
 
-.canvas-mockup__node--toast {
-  position: absolute;
-  right: var(--oct-space-3);
-  bottom: var(--oct-space-3);
-  left: var(--oct-space-3);
-  z-index: 2;
-  display: flex;
-  justify-content: center;
-  padding: 0;
-}
-
 .canvas-mockup__toast {
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
@@ -4726,47 +4585,6 @@
   border-radius: var(--oct-radius-md);
 }
 
-.canvas-mockup--styled .canvas-mockup__node--card {
-  border-color: var(--oct-hairline-strong);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-bg);
-}
-
-.canvas-mockup--styled .canvas-mockup__node[data-tone="accent"] .canvas-mockup__button,
-.canvas-mockup--styled .canvas-mockup__switch.is-on,
-.canvas-mockup--styled .canvas-mockup__box.is-on {
-  border-color: var(--oct-accent);
-  background: var(--oct-accent);
-  color: var(--oct-accent-on);
-}
-
-.canvas-mockup--styled .canvas-mockup__switch.is-on .canvas-mockup__knob {
-  background: var(--oct-accent-on);
-}
-
-.canvas-mockup--styled .canvas-mockup__tab.is-shown {
-  border-bottom-color: var(--oct-accent);
-  color: var(--oct-accent-fg);
-}
-
-.canvas-mockup--styled .canvas-mockup__node[data-tone="danger"] .canvas-mockup__button {
-  border-width: 1px;
-  border-color: var(--oct-danger);
-  background: var(--oct-danger);
-  color: var(--oct-bg);
-}
-
-.canvas-mockup--styled .canvas-mockup__node[data-tone="warning"] .canvas-mockup__button {
-  border-width: 1px;
-  border-color: var(--oct-warn);
-  color: var(--oct-warn-fg);
-}
-
-.canvas-mockup--styled .canvas-mockup__node[data-tone="success"] .canvas-mockup__button {
-  border-color: var(--oct-success);
-  color: var(--oct-success-fg);
-}
-
 .canvas-mockup--styled
   .canvas-mockup__node[data-tone="accent"]
   :is(.canvas-mockup__badge, .canvas-mockup__toast) {
@@ -4796,10 +4614,6 @@
   border-color: transparent;
   background: var(--oct-danger-soft);
   color: var(--oct-danger-fg);
-}
-
-.canvas-mockup--styled .canvas-mockup__node--list-row.is-on {
-  background: color-mix(in oklab, var(--oct-accent) 12%, transparent);
 }
 
 /* System colours: hairlines become the system frame, filled marks become
@@ -4838,10 +4652,6 @@
 
   .canvas-mockup__tab.is-shown {
     border-bottom-color: CanvasText;
-  }
-
-  .canvas-mockup__node--list-row.is-on {
-    outline: 1px solid CanvasText;
   }
 
   .canvas-mockup__node--modal {

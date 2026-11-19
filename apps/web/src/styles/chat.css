@@ -64,13 +64,6 @@
   background: transparent;
 }
 
-.chat-workspace__meta {
-  margin: 4px 0 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.35;
-}
-
 /* The overflow trigger and its outcome receipt stack at the header's end.
    The receipt exists only after an action ran, so the column must not
    reserve height for it and push the title row apart when it is absent. */
@@ -262,15 +255,6 @@
 .chat-transcript__turn .turn-action-menu {
   display: grid;
   gap: 20px;
-}
-
-.chat-workspace__export {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  margin-inline-start: auto;
 }
 
 .chat-workspace__export-status {

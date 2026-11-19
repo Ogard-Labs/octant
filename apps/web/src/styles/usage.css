@@ -141,27 +141,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.usage-dashboard__quality-badge--exact {
-  border-style: solid;
-}
-
-.usage-dashboard__quality-badge--estimated {
-  border-style: dashed;
-}
-
-.usage-dashboard__quality-badge--reconciled {
-  border-style: double;
-}
-
-.usage-dashboard__quality-badge--stale {
-  border-style: dotted;
-}
-
-.usage-dashboard__quality-badge--unavailable {
-  color: var(--oct-warn-fg);
-  border-color: color-mix(in oklab, var(--oct-warn) 45%, transparent);
-}
-
 .usage-dashboard__unavailable-note,
 .usage-dashboard__error {
   padding: var(--oct-space-3) 12px;

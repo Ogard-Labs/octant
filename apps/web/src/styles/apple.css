@@ -250,9 +250,3 @@
   flex-wrap: wrap;
   gap: var(--oct-space-2);
 }
-
-.apple-simulator-frame--unavailable,
-.apple-simulator-frame--interrupted,
-.apple-simulator-frame--stale-after-restart {
-  color: var(--oct-muted);
-}

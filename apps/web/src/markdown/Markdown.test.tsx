@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { Markdown, MarkdownLinkActionsContext, settledMarkdownBlocks } from "./Markdown";
+import { Markdown, settledMarkdownBlocks } from "./Markdown";
+import { MarkdownLinkActionsContext } from "./markdownLinkActions";
 
 describe("Markdown", () => {
   // A link definition renders nothing and makes the renderer parse the whole

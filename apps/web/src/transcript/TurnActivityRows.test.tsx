@@ -7,7 +7,7 @@ import {
   TurnActivityRows,
 } from "./TurnActivityRows";
 import type { TurnActivity } from "./turnActivity";
-import { MarkdownLinkActionsContext } from "../markdown/Markdown";
+import { MarkdownLinkActionsContext } from "../markdown/markdownLinkActions";
 import type { ReplyDetailLevel } from "@octant/contracts/shell";
 import type { ReactNode } from "react";
 import { ReplyDetailContext } from "./replyDetail";

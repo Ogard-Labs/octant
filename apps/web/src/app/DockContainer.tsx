@@ -23,7 +23,7 @@ import { useMinuteTick } from "../polling/useMinuteTick";
 import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
 import type { createChatReadCursorStore } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
-import { composerContextOccupancy } from "../context/ComposerContextMeter";
+import { composerContextOccupancy } from "../context/composerContextMeterReading";
 import type { ComposerContextMeterProvider } from "../context/composerContextMeterScope";
 import { ProjectReviewModule as DockProjectPullRequestReviewTool } from "../dockModules/ProjectReviewModule";
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";

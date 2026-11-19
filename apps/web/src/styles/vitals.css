@@ -15,12 +15,6 @@
   font-size: var(--oct-text-sm);
 }
 
-.vitals__empty {
-  margin: 0;
-  padding-block: var(--oct-space-3);
-  color: var(--oct-muted);
-}
-
 .vitals__row {
   display: grid;
   gap: var(--oct-space-2);

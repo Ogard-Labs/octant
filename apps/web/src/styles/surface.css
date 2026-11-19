@@ -702,14 +702,6 @@
   padding-inline: var(--oct-space-2);
 }
 
-.welcome__hint {
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
-  text-align: center;
-}
-
 /* At phone width the tray stays on one row while it fits, which keeps
    "This computer" from sitting alone under two chips in Work. The leading
    chips wrap inside their own box when they cannot fit: Code carries three

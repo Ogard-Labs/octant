@@ -27,7 +27,7 @@ import {
   discardNewTaskDraftForPane,
   NewTaskDraftsContext,
 } from "./composer/useNewTaskPrompt";
-import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
+import { StreamRepliesContext } from "./transcript/streamReplies";
 import {
   REPLY_DETAIL_DESCRIPTIONS,
   REPLY_DETAIL_LABELS,
@@ -249,7 +249,7 @@ import {
   openDedicatedBrowserContext,
   releaseBrowserContext,
 } from "./browser/dedicatedBrowserContext";
-import { MarkdownLinkActionsContext } from "./markdown/Markdown";
+import { MarkdownLinkActionsContext } from "./markdown/markdownLinkActions";
 import { useDesktopWindowAuthority } from "./shell/useDesktopWindowAuthority";
 import { buildInboxAttentionItems, inboxWaitingThreadIds } from "./inbox/inboxModel";
 import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";

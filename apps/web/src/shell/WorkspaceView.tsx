@@ -85,7 +85,7 @@ import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
 import { SplitWorkspace, type PaneFacts, type SplitWorkspaceProps } from "./SplitWorkspace";
 import type { ExtraFolderChange, ProjectChange } from "../projects/useProjectController";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
-import { CoordinatorProposalCards } from "../code/CoordinatorProposalCards";
+
 import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
 import { EnvironmentFoldScope } from "../environment/environmentSections";
 import { hubAdministrationOf, ownerUnlockOf, type OctantHostBridge } from "./hostBridge";
@@ -175,7 +175,7 @@ import {
   openDedicatedBrowserContext,
   releaseBrowserContext,
 } from "../browser/dedicatedBrowserContext";
-import { MarkdownLinkActionsContext } from "../markdown/Markdown";
+import { MarkdownLinkActionsContext } from "../markdown/markdownLinkActions";
 import { openExternalUrl } from "./openExternalUrl";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
@@ -189,6 +189,11 @@ import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivity
 import { threadHasBrowserSurface } from "./browserActivityReveal";
 import type { ThreadProviderIdentity } from "./navigationModel";
 
+const CoordinatorProposalCards = lazy(() =>
+  import("../code/CoordinatorProposalCards").then((module) => ({
+    default: module.CoordinatorProposalCards,
+  })),
+);
 const ChatWorkspace = lazy(() =>
   import("../chat/ChatWorkspace").then((module) => ({ default: module.ChatWorkspace })),
 );
@@ -3044,49 +3049,51 @@ function coordinatorProposalsFor(
   );
   if (coordinator === undefined) return undefined;
   return (
-    <CoordinatorProposalCards
-      controller={codeController}
-      coordinatorThreadId={coordinator.threadId}
-      {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-      onOpenThread={(threadId) => {
-        const thread = codeController.bootstrap?.threads.find(
-          (candidate) => candidate.id === threadId,
-        );
-        props.onOpenCodeThread(threadId, thread?.title ?? "Code task", project.id);
-      }}
-      projectId={project.id}
-      projectName={project.name}
-      projectRoot={project.binding.canonicalRoot}
-      {...(project.connectedRepository === undefined
-        ? {}
-        : {
-            baseRepository: `${project.connectedRepository.owner}/${project.connectedRepository.repository}`,
-          })}
-      providerGroups={providerGroupsForProject(
-        project,
-        props.codeProviderGroups ?? props.draftProviderGroups ?? [],
-      )}
-      {...(props.draftSelectedProviderInstanceId === undefined
-        ? {}
-        : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-      {...(props.draftSelectedModelId === undefined
-        ? {}
-        : { selectedModelId: props.draftSelectedModelId })}
-      {...(props.onDraftSelectProvider === undefined
-        ? {}
-        : { onSelectProvider: props.onDraftSelectProvider })}
-      {...(props.onDraftCreateCodeThread === undefined
-        ? {}
-        : { onCreateThread: props.onDraftCreateCodeThread })}
-      {...(project.newThreadWorkspace === undefined
-        ? {}
-        : { newThreadWorkspace: project.newThreadWorkspace })}
-      {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
-      {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
-      {...(props.onDraftPendingMessage === undefined
-        ? {}
-        : { pendingMessage: props.onDraftPendingMessage })}
-    />
+    <Suspense fallback={null}>
+      <CoordinatorProposalCards
+        controller={codeController}
+        coordinatorThreadId={coordinator.threadId}
+        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+        onOpenThread={(threadId) => {
+          const thread = codeController.bootstrap?.threads.find(
+            (candidate) => candidate.id === threadId,
+          );
+          props.onOpenCodeThread(threadId, thread?.title ?? "Code task", project.id);
+        }}
+        projectId={project.id}
+        projectName={project.name}
+        projectRoot={project.binding.canonicalRoot}
+        {...(project.connectedRepository === undefined
+          ? {}
+          : {
+              baseRepository: `${project.connectedRepository.owner}/${project.connectedRepository.repository}`,
+            })}
+        providerGroups={providerGroupsForProject(
+          project,
+          props.codeProviderGroups ?? props.draftProviderGroups ?? [],
+        )}
+        {...(props.draftSelectedProviderInstanceId === undefined
+          ? {}
+          : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+        {...(props.draftSelectedModelId === undefined
+          ? {}
+          : { selectedModelId: props.draftSelectedModelId })}
+        {...(props.onDraftSelectProvider === undefined
+          ? {}
+          : { onSelectProvider: props.onDraftSelectProvider })}
+        {...(props.onDraftCreateCodeThread === undefined
+          ? {}
+          : { onCreateThread: props.onDraftCreateCodeThread })}
+        {...(project.newThreadWorkspace === undefined
+          ? {}
+          : { newThreadWorkspace: project.newThreadWorkspace })}
+        {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
+        {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
+        {...(props.onDraftPendingMessage === undefined
+          ? {}
+          : { pendingMessage: props.onDraftPendingMessage })}
+      />
+    </Suspense>
   );
 }
 

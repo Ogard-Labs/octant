@@ -1,7 +1,7 @@
 import type { ContextCompactionExecutor } from "@octant/contracts/context";
 import { useState } from "react";
 import { CompactSessionButton, CompactSessionConfirm } from "../context/CompactSession";
-import { composerContextReading } from "../context/ComposerContextMeter";
+import { composerContextReading } from "../context/composerContextMeterReading";
 import { useComposerContextMeterScope } from "../context/composerContextMeterScope";
 import { compactTokenCount, type ContextWindowSegment } from "../context/contextInspectorModel";
 import { compactionOffer } from "../context/sessionCompactionPresentation";

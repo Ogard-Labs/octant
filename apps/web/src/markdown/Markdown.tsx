@@ -1,3 +1,4 @@
+import { MarkdownLinkActionsContext, type MarkdownLinkActions } from "./markdownLinkActions";
 import {
   Children,
   createContext,
@@ -49,12 +50,6 @@ const TextTransform = createContext<MarkdownTextTransform | undefined>(undefined
  * its own thread, and every surface offers the host's external open. With no
  * provider the anchor still copies its URL and opens in a browser tab.
  */
-export interface MarkdownLinkActions {
-  readonly openInApp?: (url: string) => void;
-  readonly openExternal: (url: string) => void;
-}
-
-export const MarkdownLinkActionsContext = createContext<MarkdownLinkActions | undefined>(undefined);
 
 /**
  * The one Markdown renderer. Two hand-written parsers stood here before, each
