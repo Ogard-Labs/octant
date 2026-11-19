@@ -1,3 +1,4 @@
+import "../styles/files-viewer.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { CodeFileId, CodeFileMetadata, CodeRelativePath } from "@octant/contracts/code";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";

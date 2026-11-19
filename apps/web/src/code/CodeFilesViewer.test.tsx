@@ -198,7 +198,7 @@ describe("CodeFilesViewer", () => {
     // stylesheet takes the tab row and the viewer's own column away.
     const viewer = state.closest(".code-files-viewer");
     await waitFor(() => expect(viewer).toHaveAttribute("data-unavailable", "true"));
-    const styles = readFileSync(resolve(process.cwd(), "src/styles/code.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/files-viewer.css"), "utf8");
     expect(styles).toMatch(
       /\.code-files-viewer\[data-unavailable="true"\] > \.code-files-viewer__strip,\s*\.code-files-viewer\[data-unavailable="true"\] \.code-files-viewer__main \{\s*display: none;/,
     );

@@ -1,3 +1,4 @@
+import "../styles/files-viewer.css";
 import {
   decodeCodeProjectFilePath,
   type CodeCheckoutId,

@@ -2393,7 +2393,7 @@ describe("CodeThreadWorkspace", () => {
   });
 
   it("keeps the transcript top-aligned like a conversation instead of bottom-anchoring it", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles/code.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/code-thread.css"), "utf8");
     expect(styles).toMatch(/\.code-thread-workspace__transcript\s*\{[^}]*margin:\s*0 auto;/);
     expect(styles).not.toMatch(
       /\.code-thread-workspace__transcript\s*\{[^}]*margin:\s*auto auto 0;/,

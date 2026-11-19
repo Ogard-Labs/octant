@@ -3560,22 +3560,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   gap: var(--oct-space-1);
 }
 
-/*
- * The empty thread's start block: a heading and hint, then one quiet surface
- * (card fill, container radius, one hairline, no shadow) holding two labelled
- * groups of list rows. It shares the thread column's edges with the composer,
- * and sits low in the column so it rests above the composer instead of at the
- * top-left of an otherwise blank transcript.
- */
-.code-thread-workspace__conversation:not([data-transcript-window])
-  .code-thread-workspace__transcript--empty {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  justify-content: flex-end;
-  padding-block: 24px 32px;
-}
-
 .empty-start {
   display: flex;
   flex-direction: column;

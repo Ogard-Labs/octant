@@ -1,3 +1,4 @@
+import "../styles/files-viewer.css";
 import { useDockBarControls } from "../shell/dockBarControls";
 import type {
   PreviewHostId,

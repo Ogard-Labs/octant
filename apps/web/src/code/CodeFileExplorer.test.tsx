@@ -11,7 +11,10 @@ import {
 } from "./CodeFileExplorer";
 import { DockBarContext, type DockBarItem } from "../shell/dockBarControls";
 
-const codeStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
+const codeStylesheet = readFileSync(
+  resolve(import.meta.dirname, "../styles/files-viewer.css"),
+  "utf8",
+);
 const dockStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/dock.css"), "utf8");
 const systemStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/octant.css"), "utf8");
 
@@ -193,7 +196,7 @@ describe("CodeFileExplorer", () => {
   });
 
   it("keeps the list's row and column dimensions: 28px rows, 13px text, 12px indent, a 260px column", () => {
-    const code = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
+    const code = readFileSync(resolve(import.meta.dirname, "../styles/files-viewer.css"), "utf8");
     expect(code).toMatch(/\.code-file-explorer \{[^}]*--oct-file-row-h:\s*28px/);
     expect(code).toMatch(/\.code-file-explorer \{[^}]*--oct-tree-indent:\s*var\(--oct-space-3\)/);
     expect(code).toMatch(

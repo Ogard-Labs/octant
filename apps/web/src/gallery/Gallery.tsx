@@ -14,6 +14,8 @@ import "../styles.css";
 import "../styles/canvas-forms.css";
 import "../styles/canvas-design-player.css";
 import "../styles/canvas-inline.css";
+import "../styles/files-viewer.css";
+import "../styles/code-thread.css";
 import "../styles/work-list.css";
 import "../styles/github.css";
 import "../styles/linear-issues.css";

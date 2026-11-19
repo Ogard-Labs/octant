@@ -138,7 +138,7 @@ describe("the public-block visual language", () => {
 
   it("fades the transcript at its edges and keeps the rail's foot on screen", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const code = readFileSync(join(webRoot, "styles/code.css"), "utf8");
+    const code = readFileSync(join(webRoot, "styles/code-thread.css"), "utf8");
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
     const rail = readFileSync(join(webRoot, "shell/SidebarRail.tsx"), "utf8");
     // Chat, Work, and Code share one frame, so one fade: text under the title

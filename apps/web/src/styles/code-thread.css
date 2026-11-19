@@ -1,0 +1,441 @@
+.code-thread-workspace {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  flex: 1 1 auto;
+  flex-direction: column;
+  color: var(--oct-fg);
+  background: var(--oct-bg);
+}
+
+.code-thread-workspace__tool {
+  display: inline-flex;
+  height: auto;
+  min-height: var(--oct-control-height-sm);
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-3);
+  font-size: var(--oct-text-xs);
+}
+
+.code-thread-workspace__waiting {
+  display: flex;
+  flex: 0 0 auto;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 12px auto var(--oct-space-2);
+  padding-inline: var(--oct-space-1);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+}
+
+.code-thread-workspace__waiting svg {
+  flex: 0 0 auto;
+  color: var(--octant-warning-text);
+}
+
+/* Placement only: the recipe is the system's `.callout`, the measure the
+   shared `.thread-column`. A notice about this thread spans the thread's
+   own column, at its left edge, as wide as its content and no wider than
+   480px: running it edge to edge made it read as window chrome. */
+.code-thread-workspace__callout {
+  flex: 0 0 auto;
+  align-items: center;
+  width: fit-content;
+  max-width: min(480px, var(--oct-thread-column));
+  margin: 12px 0 0 max(0px, calc((100% - var(--oct-thread-column)) / 2));
+}
+
+/* A provider's question takes the approval row with its answer field. */
+.code-thread-workspace__provider-request > input {
+  flex: 1 1 200px;
+}
+
+/* Provider questions are actionable composer state. Keep them with the
+   composer at the foot of the thread so the answer never gets separated from
+   the message field by a long transcript. The shared request row supplies
+   its controls and neutral surface; this wrapper owns the stack and measure. */
+.code-thread-workspace__provider-requests {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.code-thread-workspace__provider-requests .approval-row {
+  width: 100%;
+}
+
+/* The scroll frame, its padding, and the fade at its edges are the system's
+   `.transcript-scroll`. (Code alone faded the top: cut off sharp right under
+   the waiting row, half a line of the answer read as printed over that row.) */
+.code-thread-workspace__conversation {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The frame is a flex column, and a windowed list holds only absolutely
+   placed rows, so it shrank to the frame's height. The scroll extent then
+   ended at the last mounted row rather than at the newest message, and
+   scrolling to the end stopped short until more rows mounted. */
+.code-thread-workspace__transcript {
+  position: relative;
+  flex: none;
+  margin: 0 auto;
+}
+
+.code-thread-workspace__conversation:not([data-transcript-window])
+  .code-thread-workspace__transcript {
+  display: grid;
+  gap: 20px;
+}
+
+.code-thread-workspace__message {
+  min-width: 0;
+  color: var(--oct-fg);
+}
+.code-checkout-bar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-3);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-checkout-bar:has(.code-checkout-bar__working-folder) {
+  flex-wrap: wrap;
+}
+.code-checkout-bar__working-folder {
+  flex: 1 0 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.code-checkout-bar__identity {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+.code-checkout-bar__project {
+  flex: 0 1 auto;
+  overflow: hidden;
+  min-width: 0;
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.code-checkout-bar__branch {
+  overflow: hidden;
+  min-width: 0;
+  font-family: var(--oct-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-checkout-bar__diffstat {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: var(--oct-space-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.code-checkout-bar__insertions {
+  color: var(--oct-success-fg);
+}
+
+.code-checkout-bar__deletions {
+  color: var(--oct-danger-fg);
+}
+
+/* The action is the last thing on the line, so the facts read first. */
+.code-checkout-bar__action {
+  margin-inline-start: auto;
+  height: 24px;
+  min-height: 24px;
+  padding-inline: 8px;
+}
+
+/* Under the composer the action is its icon alone, in a 28px cell like the
+   row's other icons: its name and tooltip say what it does, and the row holds
+   the Project, the branch and the diff before it. */
+.thread-composer__context .code-checkout-bar {
+  flex-wrap: nowrap;
+  gap: var(--oct-space-2);
+}
+.thread-composer__context .code-checkout-bar__identity {
+  gap: var(--oct-space-2);
+}
+/* The Project leads, so its icon stands under attach; the working folder
+   follows the facts instead of heading the row. */
+.thread-composer__context .code-checkout-bar__working-folder {
+  order: 1;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thread-composer__context .code-checkout-bar__project {
+  color: var(--oct-meta);
+}
+.thread-composer__context .code-checkout-bar__action {
+  order: 2;
+  flex: 0 0 auto;
+  width: var(--oct-composer-cell);
+  height: var(--oct-composer-cell);
+  min-height: var(--oct-composer-cell);
+  margin-inline-start: 0;
+  padding-inline: 0;
+}
+.thread-composer__context .code-checkout-bar__action span {
+  display: none;
+}
+
+/* The composer's frame, placement, input, chips, bottom row,
+   controls, and status line are the system's (`.composer`,
+   `.thread-composer`, `.composer-row`, `.composer-notices`, as in Chat and
+   Work); this block only pads the pieces the system does not know about. */
+
+/* Chips and attachments are frameless rows of the frame, so they take the
+   same gutter the system gives `.composer-chips`. */
+.code-thread-workspace__composer .thread-mention__chips,
+.code-thread-workspace__attachments {
+  margin: 0;
+  padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
+}
+
+/* Attached images, in the composer and on the message that carried them.
+   The chip itself is the system's; only the thumbnail and the name's
+   ellipsis are this surface's own. */
+.code-thread-workspace__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.code-thread-workspace__attachment {
+  max-width: 240px;
+}
+
+.code-thread-workspace__attachment-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--oct-fg-soft);
+}
+
+.code-thread-workspace__attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The transcript gallery reuses the attachment classes without the composer's
+   chip frame, so the message rows keep a frame and a readable thumbnail. */
+.code-thread-workspace__message .code-thread-workspace__attachments {
+  margin: var(--oct-space-1) 0 0;
+  padding: 0;
+}
+
+.code-thread-workspace__message .code-thread-workspace__attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-1) var(--oct-space-1);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.code-thread-workspace__message .code-thread-workspace__attachment-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--oct-radius-sm);
+}
+
+.code-thread-workspace__row {
+  display: grid;
+  min-width: 0;
+}
+
+/* What a provider switch handed over, under the divider that marks it. */
+.code-thread-workspace__handoff {
+  margin: 0 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-thread-workspace__checkpoint,
+.code-thread-workspace__fork,
+.code-thread-workspace__restore {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+  margin-top: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* What changed while a turn ran. A work product, so it is the one card
+   in a transcript whose replies are bare prose: a hairline ring on the card
+   fill, no lift. Rows carry no borders; the counts are the only hue, the same
+   diff ink the checkout strip uses. */
+.code-turn-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  max-width: 72ch;
+  margin-top: var(--oct-space-3);
+  padding: var(--oct-space-2) var(--oct-space-1) var(--oct-space-1);
+  background: var(--octant-card, var(--octant-workspace));
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.code-turn-files__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: 0 var(--oct-space-2) var(--oct-space-1);
+}
+
+.code-turn-files__title {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-turn-files__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.code-turn-files__row {
+  display: grid;
+  grid-template-columns: var(--oct-icon-md) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: 28px;
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-detail);
+}
+
+.code-turn-files__path {
+  display: flex;
+  min-width: 0;
+  font-family: var(--oct-font-mono);
+}
+
+/* The folder gives way before the name does: the name is what a person scans for. */
+.code-turn-files__directory {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-turn-files__name {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--octant-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-turn-files__counts {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: var(--oct-space-1);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.code-turn-files__insertions {
+  color: var(--oct-success-fg);
+}
+
+.code-turn-files__deletions {
+  color: var(--oct-danger-fg);
+}
+
+.code-turn-files__binary,
+.code-turn-files__note {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-turn-files__note {
+  margin: 0;
+  padding: var(--oct-space-1) var(--oct-space-2);
+}
+
+/* Layout only: the link recipe owns this control's paint. */
+.code-turn-files__fold {
+  align-self: flex-start;
+  height: auto;
+  min-height: 24px;
+  gap: var(--oct-space-1);
+  margin-inline-start: var(--oct-space-2);
+  padding: 0;
+  font-size: var(--oct-text-xs);
+}
+
+.code-turn-files__fold [data-open="true"] {
+  transform: rotate(180deg);
+}
+
+/* The bar controls' look is the system's `.composer-row` treatment
+   (octant.css); nothing to restate here. */
+
+.code-thread-workspace .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
+ * The empty thread's start block: a heading and hint, then one quiet surface
+ * (card fill, container radius, one hairline, no shadow) holding two labelled
+ * groups of list rows. It shares the thread column's edges with the composer,
+ * and sits low in the column so it rests above the composer instead of at the
+ * top-left of an otherwise blank transcript.
+ */
+.code-thread-workspace__conversation:not([data-transcript-window])
+  .code-thread-workspace__transcript--empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding-block: 24px 32px;
+}
