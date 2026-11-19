@@ -5,6 +5,8 @@ import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CredentialStore } from "@octant/host-runtime";
 import {
+  CANVAS_SCHEMA_VERSION,
+  CanvasChoiceBlock,
   EventActor,
   LOCAL_HOST_ID,
   ReplayCursor,
@@ -17,9 +19,20 @@ import {
   type ReplicaMembershipResult,
   type UtcTimestamp,
 } from "@octant/contracts";
+import {
+  buildCanvasPublicShareDocument,
+  buildCanvasStaticExportDocument,
+  canvasChoiceFormState,
+  canvasChoiceQuestionFingerprint,
+} from "@octant/domain";
 import { replicaArtifactHeads, replicaArtifactHidden } from "@octant/domain/replica-entry-policy";
 import type { ReplicaStore, ReplicaStorePutResult } from "@octant/plugin-api/replica-store";
+import { renderArtifactHtml, renderArtifactMarkdown } from "../canvas/artifactDocumentRender";
 import { ArtifactLibraryService } from "../canvas/artifactLibraryService";
+import {
+  CanvasChoiceAnswerService,
+  registerCanvasChoiceAnswerEvents,
+} from "../canvas/canvasChoiceAnswerService";
 import { CanvasCommentService, registerCanvasCommentEvents } from "../canvas/canvasCommentService";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -164,6 +177,7 @@ function computer(
     readonly stopAfter?: { readonly eventName: string; readonly times: number };
     readonly planMode?: boolean;
     readonly publicationAllowed?: () => boolean;
+    readonly clock?: () => string;
   } = {},
 ) {
   const saved = options.disk ?? disk();
@@ -171,8 +185,10 @@ function computer(
   const artifactProjection = new ReplicaArtifactProjection();
   const journal = new Journal({
     connection: saved.connection,
-    registry: registerCanvasCommentEvents(
-      registerReplicaStoreSettingsEvents(registerReplicaMembershipEvents(new EventRegistry())),
+    registry: registerCanvasChoiceAnswerEvents(
+      registerCanvasCommentEvents(
+        registerReplicaStoreSettingsEvents(registerReplicaMembershipEvents(new EventRegistry())),
+      ),
     ),
     projections: new ProjectionRegistry()
       .register(new AggregateHeadsProjection())
@@ -232,6 +248,27 @@ function computer(
     },
     { authorize: () => true },
   );
+  const choiceAnswers = new CanvasChoiceAnswerService(
+    {
+      journal,
+      projection: {
+        getById: (canvasId) => {
+          const versions = canvases.get(String(canvasId));
+          const current = versions?.at(-1);
+          return versions === undefined || current === undefined
+            ? undefined
+            : ({ currentVersion: current, versions } as never);
+        },
+      },
+      uuid: nextUuid,
+      actor,
+      now: () => (options.clock?.() ?? NOW) as UtcTimestamp,
+      committed: (canvasId, event) => {
+        void syncSlot.service?.choiceAnswerCommitted({ canvasId, event });
+      },
+    },
+    { authorize: () => true },
+  );
   const projects = new Map<string, string>([
     [ids.studioProject, "Launch"],
     [ids.laptopProject, "Field notes"],
@@ -257,6 +294,11 @@ function computer(
             change,
             writer: { instanceId: String(writer.instanceId), displayName: writer.displayName },
           });
+        },
+      },
+      choiceAnswers: {
+        adopt: ({ canvasId, change }) => {
+          choiceAnswers.adoptReplicaChange({ canvasId, change });
         },
       },
     }),
@@ -464,12 +506,54 @@ function computer(
     if (read.kind !== "ready") throw new Error("comments unavailable");
     return read;
   };
+  const answersOf = (canvasId: CanvasId) => {
+    const read = choiceAnswers.answers(canvasId, { mode: "work", projectId: null }, undefined);
+    if (read.kind !== "ready") throw new Error("choice answers unavailable");
+    return read;
+  };
+  const answer = (
+    canvasId: CanvasId,
+    changes: ReadonlyArray<
+      | {
+          readonly kind: "set";
+          readonly blockId: string;
+          readonly questionId: string;
+          readonly questionFingerprint: string;
+          readonly selectedOptionIds: ReadonlyArray<string>;
+          readonly customAnswer?: string;
+          readonly note?: string;
+          readonly acceptedRecommendation?: boolean;
+        }
+      | {
+          readonly kind: "clear";
+          readonly blockId: string;
+          readonly questionId: string;
+          readonly questionFingerprint: string;
+        }
+    >,
+  ) => {
+    const current = answersOf(canvasId);
+    const result = choiceAnswers.revise(
+      {
+        kind: "canvas-choice-answers-revise",
+        canvasId,
+        expectedSequence: current.sequence,
+        changes,
+      },
+      { mode: "work", projectId: null },
+      undefined,
+    );
+    if (result.kind !== "accepted") throw new Error(`answer refused: ${JSON.stringify(result)}`);
+  };
   return {
     name,
     disk: saved,
     journal,
     comment,
     threadsOf,
+    choiceAnswers,
+    answer,
+    answersOf,
     connection: saved.connection,
     settings,
     membership,
@@ -2441,5 +2525,460 @@ describe("Canvas comments through the replica", () => {
       body: "Only here.",
     });
     expect(eventsNamed(studio, REPLICA_ARTIFACT_EVENT_NAMES.commentQueued)).toEqual([]);
+  });
+});
+
+describe("Canvas decision-form answers through the replica", () => {
+  const decisionQuestion = (
+    prompt = "Which day should launch happen?",
+    options: ReadonlyArray<{ readonly id: string; readonly label: string }> = [
+      { id: "monday", label: "Monday" },
+      { id: "tuesday", label: "Tuesday" },
+    ],
+  ) => ({
+    id: "q1",
+    prompt,
+    selection: "single" as const,
+    options,
+  });
+
+  const decisionBlock = (question = decisionQuestion()): CanvasChoiceBlock =>
+    Schema.decodeUnknownSync(CanvasChoiceBlock)({
+      blockId: "decisions",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "choice",
+      prompt: "Launch decisions",
+      questions: [question],
+    });
+
+  const decisionVersion = (input: {
+    readonly canvasId?: CanvasId;
+    readonly versionId: string;
+    readonly sequence: number;
+    readonly question?: ReturnType<typeof decisionQuestion>;
+  }): CanvasVersion =>
+    decodeCanvasVersion({
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      canvasId: input.canvasId ?? ids.canvas,
+      versionId: input.versionId,
+      sequence: input.sequence,
+      definition: {
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        title: "Launch decisions",
+        provenance: {
+          hostId: "local",
+          projectId: ids.studioProject,
+          actor: { kind: "system", actorId: "88888888-8888-4888-8888-888888888888" },
+          providerInstanceId: "77777777-7777-4777-8777-777777777777",
+          modelId: "octant-test-model",
+          createdAt: NOW,
+          mode: "work",
+          threadId: ids.thread,
+        },
+        sourceManifest: [],
+        blocks: [decisionBlock(input.question)],
+      },
+      createdBy: { kind: "system", actorId: "88888888-8888-4888-8888-888888888888" },
+      createdAt: NOW,
+    });
+
+  const bindOn = (host: Computer, version: CanvasVersion) => {
+    host.canvases.set(String(version.canvasId), [version]);
+  };
+
+  it("carries a saved answer and note to another computer with author and time, and never republishes it", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    const question = decisionQuestion();
+    const fp = canvasChoiceQuestionFingerprint(question);
+    const v1 = decisionVersion({ versionId: ids.v1, sequence: 1, question });
+    await studio.commit(v1);
+    await laptop.sync.pull();
+
+    studio.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: ["monday"],
+        note: "Gives QA the whole weekend.",
+      },
+    ]);
+    await studio.sync.drain();
+    await laptop.sync.pull();
+
+    // Answers land on the aggregate even before the Canvas is open locally,
+    // and appear as soon as the Canvas opens.
+    bindOn(laptop, v1);
+    expect(laptop.answersOf(ids.canvas).answers).toEqual([
+      {
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: ["monday"],
+        selectedLabels: ["Monday"],
+        note: "Gives QA the whole weekend.",
+        author: { kind: "local-user", actorId: actor.actorId },
+        answeredAt: NOW,
+      },
+    ]);
+    expect(eventsNamed(laptop, REPLICA_ARTIFACT_EVENT_NAMES.choiceAnswerQueued)).toEqual([]);
+    expect(eventsNamed(studio, REPLICA_ARTIFACT_EVENT_NAMES.choiceAnswerQueued)).toHaveLength(1);
+  });
+
+  it("carries a clear from one computer to another", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    const question = decisionQuestion();
+    const fp = canvasChoiceQuestionFingerprint(question);
+    const v1 = decisionVersion({ versionId: ids.v1, sequence: 1, question });
+    await studio.commit(v1);
+    await laptop.sync.pull();
+    bindOn(laptop, v1);
+
+    studio.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: ["monday"],
+      },
+    ]);
+    await studio.sync.drain();
+    await laptop.sync.pull();
+    expect(laptop.answersOf(ids.canvas).answers).toHaveLength(1);
+
+    studio.answer(ids.canvas, [
+      {
+        kind: "clear",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+      },
+    ]);
+    await studio.sync.drain();
+    await laptop.sync.pull();
+    expect(laptop.answersOf(ids.canvas).answers).toEqual([]);
+  });
+
+  it("settles concurrent answers from two computers to the same answer, and lets a later causal answer win", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    let studioTime = "2026-10-08T10:00:00.000Z";
+    let laptopTime = "2026-10-08T10:00:00.000Z";
+    const studio = computer("Studio Mac", shared, { clock: () => studioTime });
+    const laptop = computer("MacBook Air", shared, { clock: () => laptopTime });
+    await studio.turnSyncOn();
+    await laptop.turnSyncOn();
+    expectKind(
+      await studio.membership.execute({ kind: "create-replica", displayName: studio.name }),
+      "replica-created",
+    );
+    await joinThrough(laptop, studio);
+
+    const question = decisionQuestion();
+    const fp = canvasChoiceQuestionFingerprint(question);
+    const v1 = decisionVersion({ versionId: ids.v1, sequence: 1, question });
+    await studio.commit(v1);
+    await laptop.sync.pull();
+    bindOn(laptop, v1);
+
+    // Both computers answer q1 concurrently without seeing each other's answer.
+    // Studio drains first; Laptop pulls BEFORE draining its own queued answer.
+    studio.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: ["monday"],
+        note: "Studio choice",
+      },
+    ]);
+    laptop.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: ["tuesday"],
+        note: "Laptop choice",
+      },
+    ]);
+    await studio.sync.drain();
+    await laptop.sync.sync();
+    await studio.sync.sync();
+
+    expect(studio.answersOf(ids.canvas).answers).toEqual(laptop.answersOf(ids.canvas).answers);
+    expect(studio.answersOf(ids.canvas).answers).toHaveLength(1);
+
+    // A third computer joining later restores the exact same settled answer.
+    const mini = computer("Mac mini", shared);
+    await mini.turnSyncOn();
+    await joinThrough(mini, studio);
+    await mini.sync.sync();
+    bindOn(mini, v1);
+    expect(mini.answersOf(ids.canvas).answers).toEqual(studio.answersOf(ids.canvas).answers);
+
+    // A causal update after seeing both wins even if its writer's clock is earlier.
+    studioTime = "2026-10-08T09:30:00.000Z";
+    laptopTime = "2026-10-08T09:30:00.000Z";
+    const chosen = studio.answersOf(ids.canvas).answers[0]?.selectedOptionIds[0];
+    const nextOption = chosen === "monday" ? "tuesday" : "monday";
+    studio.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: [nextOption],
+        note: "Final call after seeing both",
+      },
+    ]);
+    await studio.sync.drain();
+    await laptop.sync.pull();
+    await mini.sync.pull();
+
+    expect(laptop.answersOf(ids.canvas).answers[0]).toMatchObject({
+      selectedOptionIds: [nextOption],
+      note: "Final call after seeing both",
+    });
+    expect(mini.answersOf(ids.canvas).answers).toEqual(laptop.answersOf(ids.canvas).answers);
+  });
+
+  it("carries an answer whose question fingerprint no longer matches the Canvas head and reads it as stale", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    const oldQuestion = decisionQuestion("Which day should launch happen?");
+    const newQuestion = decisionQuestion("Which day should beta happen?", [
+      { id: "monday", label: "Monday" },
+      { id: "wednesday", label: "Wednesday" },
+    ]);
+    const oldFp = canvasChoiceQuestionFingerprint(oldQuestion);
+    const v1 = decisionVersion({ versionId: ids.v1, sequence: 1, question: oldQuestion });
+    const v2 = decisionVersion({ versionId: ids.v2a, sequence: 2, question: newQuestion });
+    await studio.commit(v1);
+    await laptop.sync.pull();
+    bindOn(laptop, v1);
+
+    // Studio advances to v2 with a revised question, while Laptop still holds v1
+    // and answers the old question.
+    await studio.commit(v2);
+    laptop.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: oldFp,
+        selectedOptionIds: ["monday"],
+        note: "Answered against launch prompt",
+      },
+    ]);
+    await laptop.sync.drain();
+    await studio.sync.pull();
+
+    const saved = studio.answersOf(ids.canvas).answers;
+    expect(saved).toHaveLength(1);
+    const form = canvasChoiceFormState(decisionBlock(newQuestion), saved);
+    expect(form.answered).toBe(0);
+    expect(form.questions[0]?.answer).toBeUndefined();
+    expect(form.questions[0]?.stale).toMatchObject({
+      questionFingerprint: oldFp,
+      selectedOptionIds: ["monday"],
+      selectedLabels: ["Monday"],
+      note: "Answered against launch prompt",
+    });
+  });
+
+  it("keeps saved answers and notes out of shares, public links, and exports", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    const question = decisionQuestion();
+    const fp = canvasChoiceQuestionFingerprint(question);
+    const v1 = decisionVersion({ versionId: ids.v1, sequence: 1, question });
+    await studio.commit(v1);
+    await laptop.sync.pull();
+    bindOn(laptop, v1);
+
+    const privateNote = "Do not leak this private note into shares or exports.";
+    studio.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: ["monday"],
+        note: privateNote,
+      },
+    ]);
+    await studio.sync.drain();
+    await laptop.sync.pull();
+    expect(laptop.answersOf(ids.canvas).answers[0]?.note).toBe(privateNote);
+
+    const shareDoc = buildCanvasStaticExportDocument({
+      request: {
+        schemaVersion: 1,
+        kind: "canvas-static-export",
+        exportId: nextUuid() as never,
+        canvasId: ids.canvas,
+        versionId: v1.versionId,
+        expectedSequence: 1,
+        hostId: LOCAL_HOST_ID,
+        mode: "work",
+        projectId: ids.studioProject as never,
+        actor: { kind: "local-user", actorId: actor.actorId },
+        consent: {
+          confirmedByUser: true,
+          acknowledgedSnapshotOnly: true,
+          acknowledgedNoLiveAuthority: true,
+        },
+      } as never,
+      current: v1,
+      exportedAt: NOW,
+    });
+    const publicLinkDoc = buildCanvasPublicShareDocument({
+      definition: v1.definition,
+      publishedAt: NOW,
+      markupAcknowledged: false,
+    });
+    const markdown = renderArtifactMarkdown(v1.definition);
+    const html = renderArtifactHtml(v1.definition);
+    if (markdown.kind !== "rendered" || html.kind !== "rendered") {
+      throw new Error("export render failed");
+    }
+
+    for (const serialized of [
+      JSON.stringify(shareDoc),
+      JSON.stringify(publicLinkDoc),
+      markdown.body,
+      html.body,
+    ]) {
+      expect(serialized).not.toContain(privateNote);
+      expect(serialized).not.toContain("selectedOptionIds");
+      expect(serialized).not.toContain("questionFingerprint");
+    }
+  });
+
+  it("rebuilds synced answers on journal replay, keeps unsynced or unsafe answers local, and refuses an unknown entry kind cleanly", async () => {
+    const store = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: store.store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    const question = decisionQuestion();
+    const fp = canvasChoiceQuestionFingerprint(question);
+    const v1 = decisionVersion({ versionId: ids.v1, sequence: 1, question });
+    await studio.commit(v1);
+    await laptop.sync.pull();
+
+    // A Canvas that never left this computer keeps its answers local.
+    const localOnly = decisionVersion({ canvasId: ids.second, versionId: ids.v2b, sequence: 1 });
+    studio.canvases.set(String(ids.second), [localOnly]);
+    studio.answer(ids.second, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: ["monday"],
+      },
+    ]);
+    expect(eventsNamed(studio, REPLICA_ARTIFACT_EVENT_NAMES.choiceAnswerQueued)).toEqual([]);
+
+    // An unsafe note fails the share filter and is never queued.
+    studio.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: ["monday"],
+        note: "See /Users/alice/private/secret.txt",
+      },
+    ]);
+    expect(eventsNamed(studio, REPLICA_ARTIFACT_EVENT_NAMES.choiceAnswerQueued)).toEqual([]);
+    expect(eventsNamed(studio, REPLICA_ARTIFACT_EVENT_NAMES.publishRefused)).toContainEqual({
+      eventName: REPLICA_ARTIFACT_EVENT_NAMES.publishRefused,
+      payload: {
+        canvasId: ids.canvas,
+        kind: "canvas-choice-answer",
+        reason: "unsafe-content",
+      },
+    });
+
+    // A safe answer syncs, and survives restart + replay on both computers.
+    studio.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: ["tuesday"],
+        note: "Replay check",
+      },
+    ]);
+    await studio.sync.drain();
+    await laptop.sync.pull();
+
+    const restartedLaptop = computer("MacBook Air", shared, { disk: laptop.disk });
+    bindOn(restartedLaptop, v1);
+    expect(restartedLaptop.answersOf(ids.canvas).answers).toEqual([
+      expect.objectContaining({
+        selectedOptionIds: ["tuesday"],
+        note: "Replay check",
+        author: { kind: "local-user", actorId: actor.actorId },
+        answeredAt: NOW,
+      }),
+    ]);
+
+    // An unknown future entry kind in the store (what an older reader sees when
+    // encountering a new entry kind) is refused cleanly as unreadable without
+    // blocking later entries from the same writer.
+    const nextSlot = 99;
+    const futurePayload = `${JSON.stringify({
+      format: "octant.replica-entry/2",
+      kind: "canvas-future-kind",
+      origin: {
+        instanceId: studio.id(),
+        displayName: studio.name,
+        sequence: nextSlot,
+        publicKey: studio.membershipProjection.state().local?.publicKey,
+      },
+    })}\n`;
+    store.files.set(
+      `${String(studio.id())}/${String(nextSlot)}.json`,
+      new TextEncoder().encode(futurePayload),
+    );
+    store.files.set(
+      `${String(studio.id())}/${String(nextSlot)}.sig`,
+      new TextEncoder().encode("AAAA"),
+    );
+    const pulled = expectKind(await restartedLaptop.membership.execute({ kind: "pull" }), "pulled");
+    expect(pulled.refused).toContainEqual({
+      instanceId: studio.id(),
+      sequence: nextSlot,
+      reason: "unreadable",
+    });
+
+    // Erasing the Project drops queued choice-answer events and rewrites kept ones to slot-erased.
+    studio.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: ["monday"],
+        note: "Will be erased before drain",
+      },
+    ]);
+    erasePurgedProjectData({
+      connection: studio.connection,
+      projectId: ids.studioProject,
+      canvasIds: [String(ids.canvas)],
+    });
+    studio.artifactProjection.evict([String(ids.canvas)]);
+    expect(eventsNamed(studio, REPLICA_ARTIFACT_EVENT_NAMES.choiceAnswerQueued)).toEqual([]);
   });
 });

@@ -17,6 +17,7 @@ import {
   decodeReplicaSyncStatusView,
   encodeReplicaEntry,
   isReplicaMembershipEntry,
+  replicaChoiceAnswerContentPreimage,
   replicaCommentContentPreimage,
   replicaEntryContentPreimage,
   replicaEntryRelativePaths,
@@ -531,6 +532,97 @@ describe("canvas comment entries", () => {
           { instanceId: ids.instance, sequence: 2 },
         ]),
       ),
+    ).toThrow();
+  });
+});
+
+describe("canvas choice-answer entries", () => {
+  const answerEntry = (change: unknown, after: unknown = []) => ({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "canvas-choice-answer",
+    origin: origin(4),
+    artifact: { canvasId: ids.canvas, hostId: "host-north", projectName: "Launch" },
+    after,
+    contentHash: hash,
+    change,
+  });
+  const saved = {
+    kind: "set",
+    answer: {
+      blockId: "decisions",
+      questionId: "q1",
+      questionFingerprint: "fp1",
+      selectedOptionIds: ["monday"],
+      selectedLabels: ["Monday"],
+      note: "Gives QA the weekend.",
+      acceptedRecommendation: true,
+      author: { kind: "local-user", actorId: ids.actor },
+      answeredAt: now,
+    },
+  };
+
+  it("round-trips a saved answer in a fixed key order, and is not a membership record", () => {
+    const decoded = decodeReplicaEntry(
+      answerEntry(saved, [{ instanceId: ids.instance, sequence: 3 }]),
+    );
+    const encoded = encodeReplicaEntry(decoded);
+    expect(Object.keys(JSON.parse(encoded) as object)).toEqual([
+      "format",
+      "kind",
+      "origin",
+      "artifact",
+      "after",
+      "contentHash",
+      "change",
+    ]);
+    expect(encodeReplicaEntry(decodeReplicaEntryText(encoded))).toBe(encoded);
+    expect(isReplicaMembershipEntry(decoded)).toBe(false);
+    const shuffled = {
+      answer: {
+        answeredAt: now,
+        author: saved.answer.author,
+        note: saved.answer.note,
+        selectedLabels: saved.answer.selectedLabels,
+        selectedOptionIds: saved.answer.selectedOptionIds,
+        questionFingerprint: saved.answer.questionFingerprint,
+        questionId: saved.answer.questionId,
+        blockId: saved.answer.blockId,
+        acceptedRecommendation: true,
+      },
+      kind: "set",
+    };
+    expect(replicaChoiceAnswerContentPreimage(shuffled as never)).toBe(
+      replicaChoiceAnswerContentPreimage(saved as never),
+    );
+  });
+
+  it("carries a clear, refuses duplicate writers in after, and refuses an unknown entry kind", () => {
+    const cleared = decodeReplicaEntry(
+      answerEntry({
+        kind: "clear",
+        blockId: "decisions",
+        questionId: "q1",
+        clearedBy: saved.answer.author,
+        clearedAt: now,
+      }),
+    );
+    expect(cleared.kind).toBe("canvas-choice-answer");
+    expect(encodeReplicaEntry(decodeReplicaEntryText(encodeReplicaEntry(cleared)))).toBe(
+      encodeReplicaEntry(cleared),
+    );
+    expect(() =>
+      decodeReplicaEntry(
+        answerEntry(saved, [
+          { instanceId: ids.instance, sequence: 1 },
+          { instanceId: ids.instance, sequence: 2 },
+        ]),
+      ),
+    ).toThrow();
+    expect(() =>
+      decodeReplicaEntry({
+        ...answerEntry(saved),
+        kind: "canvas-future-entry",
+      }),
     ).toThrow();
   });
 });

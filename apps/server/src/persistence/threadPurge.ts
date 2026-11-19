@@ -828,15 +828,15 @@ function deleteThreadScopedProjectionRows(connection: SqliteConnection, threadId
 
 /**
  * Artifact sync keeps its own copies of a Canvas: a queued publish carries
- * the bundle or the comment change, and an entry a pull kept - a version, a
- * tombstone, or a comment change - carries its exact text. Both live
- * under the replica aggregate, which the Canvas family walk does not reach,
- * so a purge erases them here. A queued publish of an erased Canvas is
- * dropped. A kept entry becomes a content-free erased slot, so its slot stays
- * settled and a later pull does not import the erased content again. Slots
- * this host published keep their content-free `published` record for the
- * same reason. The copy already in the store is the store's: nothing here
- * deletes from it.
+ * the bundle, comment change, or decision-form answer change, and an entry a
+ * pull kept - a version, a tombstone, a comment change, or a decision-form
+ * answer change - carries its exact text. Both live under the replica
+ * aggregate, which the Canvas family walk does not reach, so a purge erases
+ * them here. A queued publish of an erased Canvas is dropped. A kept entry
+ * becomes a content-free erased slot, so its slot stays settled and a later
+ * pull does not import the erased content again. Slots this host published
+ * keep their content-free `published` record for the same reason. The copy
+ * already in the store is the store's: nothing here deletes from it.
  */
 function eraseReplicaArtifactCopies(
   connection: SqliteConnection,
@@ -847,7 +847,7 @@ function eraseReplicaArtifactCopies(
       .prepare(
         `SELECT global_sequence FROM event_journal
          WHERE aggregate_type = ? AND (
-           (event_name IN (?, ?, ?) AND json_extract(payload_json, '$.artifact.canvasId') = ?)
+           (event_name IN (?, ?, ?, ?) AND json_extract(payload_json, '$.artifact.canvasId') = ?)
            OR (event_name IN (?, ?, ?, ?) AND json_extract(payload_json, '$.backfillId') IN (
              SELECT json_extract(payload_json, '$.backfillId') FROM event_journal
              WHERE event_name = ? AND json_extract(payload_json, '$.canvasId') = ?
@@ -858,6 +858,7 @@ function eraseReplicaArtifactCopies(
         REPLICA_MEMBERSHIP_AGGREGATE_TYPE,
         REPLICA_ARTIFACT_EVENT_NAMES.queued,
         REPLICA_ARTIFACT_EVENT_NAMES.commentQueued,
+        REPLICA_ARTIFACT_EVENT_NAMES.choiceAnswerQueued,
         REPLICA_ARTIFACT_EVENT_NAMES.backfillQueued,
         canvasId,
         REPLICA_ARTIFACT_EVENT_NAMES.backfillStarted,

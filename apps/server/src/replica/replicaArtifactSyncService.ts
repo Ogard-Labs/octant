@@ -41,16 +41,21 @@ import type {
 import { isCanvasShareSafeText } from "@octant/contracts/canvas-share";
 import type { HostId } from "@octant/contracts/host";
 import type { CanvasCommentEvent } from "@octant/contracts/canvas-board";
+import type { CanvasChoiceAnswerEvent } from "@octant/contracts/canvas-choice-answer";
 import {
   REPLICA_ENTRY_FORMAT,
   decodeReplicaArtifactEntry,
+  decodeReplicaChoiceAnswerEntry,
   decodeReplicaCommentEntry,
+  replicaChoiceAnswerContentPreimage,
   replicaCommentContentPreimage,
   replicaEntryContentPreimage,
   type ReplicaArtifactEntry,
   type ReplicaArtifactKeptOutcome,
   type ReplicaArtifactReconciled,
   type ReplicaCanvasEntry,
+  type ReplicaChoiceAnswerChange,
+  type ReplicaChoiceAnswerEntry,
   type ReplicaCommentChange,
   type ReplicaCommentEntry,
   type ReplicaContentHash,
@@ -64,6 +69,7 @@ import {
   reconcileReplicaEntry,
   replicaArtifactHeads,
   replicaArtifactStanding,
+  resolveReplicaChoiceAnswer,
   type ReplicaArtifactRecord,
   type ReplicaInstanceMembership,
   type ReplicaLocalState,
@@ -79,6 +85,7 @@ import {
 import {
   REPLICA_ARTIFACT_EVENT_NAMES,
   type ReplicaArtifactQueued,
+  type ReplicaChoiceAnswerQueued,
   type ReplicaCommentQueued,
 } from "./replicaArtifactEvents";
 import type {
@@ -112,6 +119,20 @@ export function replicaCommentTextLeavesSafely(change: ReplicaCommentChange): bo
   return change.kind === "comment" || change.kind === "reply"
     ? isCanvasShareSafeText(change.body)
     : true;
+}
+
+/** Whether a decision-form answer or note may leave this host, or come into it. */
+export function replicaChoiceAnswerTextLeavesSafely(change: ReplicaChoiceAnswerChange): boolean {
+  if (change.kind === "clear") return true;
+  const { answer } = change;
+  if (answer.customAnswer !== undefined && !isCanvasShareSafeText(answer.customAnswer)) {
+    return false;
+  }
+  if (answer.note !== undefined && !isCanvasShareSafeText(answer.note)) return false;
+  if (answer.selectedLabels !== undefined && !answer.selectedLabels.every(isCanvasShareSafeText)) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -161,6 +182,17 @@ export interface ReplicaArtifactImportPorts {
       readonly writer: { readonly instanceId: ReplicaInstanceId; readonly displayName: string };
     }) => void;
   };
+  /**
+   * Takes a decision-form answer or clear another computer wrote into this
+   * host's Canvas choice answers. Idempotent: an identical answer or clearing
+   * an already-unanswered question changes nothing.
+   */
+  readonly choiceAnswers?: {
+    readonly adopt: (input: {
+      readonly canvasId: CanvasId;
+      readonly change: ReplicaChoiceAnswerChange;
+    }) => void;
+  };
 }
 
 /** Refusals another slot arriving in the same read can lift. */
@@ -172,6 +204,7 @@ const KEPT: Record<
 > = {
   "append-version": "imported",
   "append-comment": "imported",
+  "append-choice-answer": "imported",
   "already-present": "already-present",
   "concurrent-head": "concurrent-head",
   tombstone: "tombstone",
@@ -262,6 +295,39 @@ export class ReplicaArtifactImport implements ReplicaArtifactReconciler {
         writer: { instanceId: entry.origin.instanceId, displayName: entry.origin.displayName },
       });
     }
+    if (entry.kind === "canvas-choice-answer" && result === "imported") {
+      const target =
+        entry.change.kind === "set"
+          ? {
+              blockId: String(entry.change.answer.blockId),
+              questionId: entry.change.answer.questionId,
+            }
+          : { blockId: String(entry.change.blockId), questionId: entry.change.questionId };
+      const localInstanceId = this.#ports.membership().local?.instanceId;
+      const existing = this.#ports
+        .artifacts()
+        .choiceAnswerRecords(
+          entry.artifact.canvasId,
+          target.blockId,
+          target.questionId,
+          localInstanceId,
+        );
+      const winner = resolveReplicaChoiceAnswer([
+        ...existing,
+        {
+          instanceId: entry.origin.instanceId,
+          sequence: entry.origin.sequence,
+          after: entry.after,
+          change: entry.change,
+        },
+      ]);
+      if (winner !== undefined) {
+        this.#ports.choiceAnswers?.adopt({
+          canvasId: entry.artifact.canvasId,
+          change: winner.change,
+        });
+      }
+    }
     this.#ports.journal.append({
       eventName: REPLICA_ARTIFACT_EVENT_NAMES.reconciled,
       payload: {
@@ -288,7 +354,9 @@ export class ReplicaArtifactImport implements ReplicaArtifactReconciler {
     const safe =
       read.entry.kind === "canvas-comment"
         ? replicaCommentTextLeavesSafely(read.entry.change)
-        : replicaArtifactTextLeavesSafely(read.entry.bundle.definition);
+        : read.entry.kind === "canvas-choice-answer"
+          ? replicaChoiceAnswerTextLeavesSafely(read.entry.change)
+          : replicaArtifactTextLeavesSafely(read.entry.bundle.definition);
     if (!safe) return { outcome: "refused", reason: "unsafe-content" };
     return reconcileReplicaEntry(
       this.#localState(membership, local.instanceId, listed, read.entry, restoring),
@@ -338,7 +406,9 @@ export class ReplicaArtifactImport implements ReplicaArtifactReconciler {
       measuredContentHash: sha256Hex(
         entry.kind === "canvas-comment"
           ? replicaCommentContentPreimage(entry.change)
-          : replicaEntryContentPreimage(entry),
+          : entry.kind === "canvas-choice-answer"
+            ? replicaChoiceAnswerContentPreimage(entry.change)
+            : replicaEntryContentPreimage(entry),
       ),
       // The pull verified the detached signature under the key the entry
       // names before handing it here; an entry that failed never arrives.
@@ -996,6 +1066,69 @@ export class ReplicaArtifactSyncService {
     }
   }
 
+  /**
+   * Queue a decision-form answer or clear a person made here, and publish it.
+   * Only a Canvas the replica already carries has its answers published: a
+   * Canvas that never left this host keeps its answers here too. Never throws:
+   * the answer already happened here.
+   */
+  async choiceAnswerCommitted(input: {
+    readonly canvasId: CanvasId;
+    readonly event: CanvasChoiceAnswerEvent;
+  }): Promise<void> {
+    try {
+      if (!this.#queues()) return;
+      const local = this.#ports.membershipState().local;
+      if (local === undefined) return;
+      const current = this.#ports.canvas(input.canvasId)?.currentVersion;
+      if (current !== undefined && this.#ports.planMode(current)) return;
+      const state = this.#ports.artifactState();
+      const synced = state.artifact(input.canvasId);
+      const queuedVersion = state.outbox.find((queued) =>
+        same(queued.artifact.canvasId, input.canvasId),
+      );
+      const artifact = synced ?? queuedVersion?.artifact;
+      if (artifact === undefined) return;
+      const change = choiceAnswerChangeOf(input.event);
+      if (!replicaChoiceAnswerTextLeavesSafely(change)) {
+        this.#ports.journal.append({
+          eventName: REPLICA_ARTIFACT_EVENT_NAMES.publishRefused,
+          payload: {
+            canvasId: input.canvasId,
+            kind: "canvas-choice-answer",
+            reason: "unsafe-content",
+          },
+        });
+        return;
+      }
+      const queued: ReplicaChoiceAnswerQueued = {
+        queueId: this.#ports.uuid(),
+        kind: "canvas-choice-answer",
+        artifact: {
+          canvasId: input.canvasId,
+          hostId:
+            synced?.originHostId ??
+            queuedVersion?.artifact.hostId ??
+            (String(local.instanceId) as HostId),
+          projectName: synced?.projectName ?? queuedVersion?.artifact.projectName ?? "Project",
+        },
+        // What this computer had seen of the others' choice answers on this
+        // Canvas. Its own earlier changes come first by its own sequence.
+        after: state
+          .choiceAnswersSeen(input.canvasId)
+          .filter((slot) => !same(slot.instanceId, local.instanceId)),
+        change,
+      };
+      this.#ports.journal.append({
+        eventName: REPLICA_ARTIFACT_EVENT_NAMES.choiceAnswerQueued,
+        payload: queued,
+      });
+      await this.drain();
+    } catch {
+      // A change that could not be queued stays on this computer.
+    }
+  }
+
   /** The restore of this computer's current identity, once one started. */
   restoreProgress(): ReplicaRestoreProgress | undefined {
     const local = this.#ports.membershipState().local;
@@ -1240,13 +1373,18 @@ export class ReplicaArtifactSyncService {
       const next = state.queue.find(
         (entry) =>
           entry.kind === "canvas-comment" ||
+          entry.kind === "canvas-choice-answer" ||
           entry.backfillId === undefined ||
           state.backfills.some(
             (batch) => batch.backfillId === entry.backfillId && batch.state === "running",
           ),
       );
       if (next === undefined) return;
-      if (next.kind !== "canvas-comment" && next.backfillId !== undefined) {
+      if (
+        next.kind !== "canvas-comment" &&
+        next.kind !== "canvas-choice-answer" &&
+        next.backfillId !== undefined
+      ) {
         const current = this.#ports.canvas(next.artifact.canvasId)?.currentVersion;
         if (
           current === undefined ||
@@ -1376,14 +1514,43 @@ function bundleFor(version: CanvasVersion, originHostId: HostId): ArtifactBundle
   });
 }
 
-/** The entry a queued version or comment change becomes at one slot. */
+/** The entry a queued version, comment, or choice-answer change becomes at one slot. */
 export function replicaCanvasEntryFor(
   queued: ReplicaQueuedEntry,
   origin: ReplicaArtifactEntry["origin"],
 ): ReplicaCanvasEntry {
-  return queued.kind === "canvas-comment"
-    ? replicaCommentEntryFor(queued, origin)
-    : replicaArtifactEntryFor(queued, origin);
+  if (queued.kind === "canvas-comment") return replicaCommentEntryFor(queued, origin);
+  if (queued.kind === "canvas-choice-answer") return replicaChoiceAnswerEntryFor(queued, origin);
+  return replicaArtifactEntryFor(queued, origin);
+}
+
+/** The entry a queued choice-answer change becomes at one slot. Rebuilt at the same slot it is the same bytes. */
+export function replicaChoiceAnswerEntryFor(
+  queued: ReplicaChoiceAnswerQueued,
+  origin: ReplicaChoiceAnswerEntry["origin"],
+): ReplicaChoiceAnswerEntry {
+  return decodeReplicaChoiceAnswerEntry({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "canvas-choice-answer",
+    origin,
+    artifact: queued.artifact,
+    after: queued.after,
+    contentHash: sha256Hex(replicaChoiceAnswerContentPreimage(queued.change)),
+    change: queued.change,
+  });
+}
+
+function choiceAnswerChangeOf(event: CanvasChoiceAnswerEvent): ReplicaChoiceAnswerChange {
+  if (event.kind === "set") {
+    return { kind: "set", answer: event.event.answer };
+  }
+  return {
+    kind: "clear",
+    blockId: event.event.blockId,
+    questionId: event.event.questionId,
+    clearedBy: event.event.clearedBy,
+    clearedAt: event.event.clearedAt,
+  };
 }
 
 /** The entry a queued comment change becomes at one slot. Rebuilt at the same slot it is the same bytes. */

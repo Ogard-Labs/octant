@@ -766,6 +766,7 @@ export function startOctantServer(
       artifactLibraryService,
       artifactMirrorRoutes,
       canvasAgentToolPort,
+      canvasChoiceAnswerService,
       canvasCommentService,
       canvasNetworkAccess,
       canvasPublicShareService,
@@ -1554,6 +1555,7 @@ export function startOctantServer(
       syncedArtifactRoutes,
     } = wireReplica({
       artifactLibraryService,
+      canvasChoiceAnswerService,
       canvasCommentService,
       canvasService,
       externalContentIngestionStore,

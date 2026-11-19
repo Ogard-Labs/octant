@@ -22,11 +22,14 @@ import {
   replicaEntryBundleAgrees,
   type ReplicaArtifactEntry,
   type ReplicaCanvasEntry,
+  type ReplicaChoiceAnswerChange,
+  type ReplicaChoiceAnswerEntry,
   type ReplicaCommentEntry,
   type ReplicaContentHash,
   type ReplicaInstanceId,
   type ReplicaSequenceRun,
   type ReplicaSignatureVerdict,
+  type ReplicaSlotRef,
 } from "@octant/contracts/replica-entry";
 import {
   CANVAS_MAX_BLOCKS,
@@ -42,6 +45,7 @@ import type { HostId } from "@octant/contracts/host";
 export const REPLICA_RECONCILE_OUTCOMES = [
   "append-version",
   "append-comment",
+  "append-choice-answer",
   "already-present",
   "concurrent-head",
   "tombstone",
@@ -295,22 +299,28 @@ export function reconcileReplicaEntry(
       throw new Error("Unexpected signature verdict: " + String(unexpected));
     }
   }
-  return entry.kind === "canvas-comment"
-    ? commentOutcome(localState, entry)
-    : artifactOutcome(localState, entry);
+  if (entry.kind === "canvas-comment") {
+    return orderedCanvasEntryOutcome(localState, entry, "append-comment");
+  }
+  if (entry.kind === "canvas-choice-answer") {
+    return orderedCanvasEntryOutcome(localState, entry, "append-choice-answer");
+  }
+  return artifactOutcome(localState, entry);
 }
 
 /**
- * A comment entry applies once its writer's earlier listed slots are
- * settled here and every slot its `after` names is applied or settled here,
- * so each computer applies comment changes in an order consistent with what
- * each writer had seen: a reply after its comment, a resolve or a deletion
- * after what it acts on, and a comment written after reading another after
- * that one.
+ * A comment or choice-answer entry applies once its writer's earlier listed
+ * slots are settled here and every slot its `after` names is applied or
+ * settled here, so each computer applies changes in an order consistent with
+ * what each writer had seen: a reply after its comment, a resolve or a
+ * deletion after what it acts on, a comment written after reading another
+ * after that one, and a decision-form answer or clear after what its writer
+ * saw.
  */
-function commentOutcome(
+function orderedCanvasEntryOutcome(
   state: ReplicaLocalState,
-  entry: ReplicaCommentEntry,
+  entry: ReplicaCommentEntry | ReplicaChoiceAnswerEntry,
+  outcome: "append-comment" | "append-choice-answer",
 ): ReplicaReconcileOutcome {
   if (state.measuredContentHash !== entry.contentHash) return refuse("hash-mismatch");
   const recorded = atSequence(state, entry);
@@ -328,7 +338,7 @@ function commentOutcome(
   for (const slot of [...state.applied, ...state.settledSlots]) {
     reached.add(`${String(slot.instanceId)}/${String(slot.sequence)}`);
   }
-  // A slot its writer's revocation refuses never applies here, so a comment
+  // A slot its writer's revocation refuses never applies here, so an entry
   // that saw it does not wait on it, as a writer's own earlier slots do not.
   if (
     entry.after.some(
@@ -347,7 +357,84 @@ function commentOutcome(
   ) {
     return refuse("names-local-artifact-as-foreign");
   }
-  return { outcome: "append-comment" };
+  return { outcome };
+}
+
+/**
+ * One choice-answer change on a single question `(blockId, questionId)`,
+ * either published/pulled at a replica slot `(instanceId, sequence)` or still
+ * waiting in this computer's local queue (`sequence === undefined`).
+ */
+export interface ReplicaChoiceAnswerRecord {
+  readonly instanceId: ReplicaInstanceId;
+  readonly sequence?: number;
+  readonly localOrder?: number;
+  readonly after: ReadonlyArray<ReplicaSlotRef>;
+  readonly change: ReplicaChoiceAnswerChange;
+}
+
+function choiceAnswerPrecedes(
+  earlier: ReplicaChoiceAnswerRecord,
+  later: ReplicaChoiceAnswerRecord,
+): boolean {
+  if (String(earlier.instanceId) === String(later.instanceId)) {
+    if (earlier.sequence !== undefined && later.sequence !== undefined) {
+      return earlier.sequence < later.sequence;
+    }
+    if (earlier.sequence !== undefined && later.sequence === undefined) return true;
+    if (earlier.sequence === undefined && later.sequence !== undefined) return false;
+    return (earlier.localOrder ?? 0) < (later.localOrder ?? 0);
+  }
+  const earlierSequence = earlier.sequence;
+  if (earlierSequence === undefined) return false;
+  return later.after.some(
+    (slot) =>
+      String(slot.instanceId) === String(earlier.instanceId) && slot.sequence >= earlierSequence,
+  );
+}
+
+function choiceAnswerOccurredAt(change: ReplicaChoiceAnswerChange): string {
+  return change.kind === "set" ? change.answer.answeredAt : change.clearedAt;
+}
+
+function compareChoiceAnswerRecords(
+  left: ReplicaChoiceAnswerRecord,
+  right: ReplicaChoiceAnswerRecord,
+): number {
+  const leftTime = choiceAnswerOccurredAt(left.change);
+  const rightTime = choiceAnswerOccurredAt(right.change);
+  const leftMs = Date.parse(leftTime);
+  const rightMs = Date.parse(rightTime);
+  if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) {
+    return leftMs - rightMs;
+  }
+  const timeOrder = leftTime.localeCompare(rightTime);
+  if (timeOrder !== 0) return timeOrder;
+  const instanceOrder = String(left.instanceId).localeCompare(String(right.instanceId));
+  if (instanceOrder !== 0) return instanceOrder;
+  const leftSeq = left.sequence ?? Number.MAX_SAFE_INTEGER;
+  const rightSeq = right.sequence ?? Number.MAX_SAFE_INTEGER;
+  if (leftSeq !== rightSeq) return leftSeq - rightSeq;
+  return (left.localOrder ?? 0) - (right.localOrder ?? 0);
+}
+
+/**
+ * The winning choice-answer change for one question across all changes held
+ * for it: any change another writer saw before writing its own is superseded,
+ * and concurrent maximal changes settle to one deterministic winner by time
+ * and writer identity, so every computer holding the same set of changes
+ * settles to the same answer regardless of arrival order.
+ */
+export function resolveReplicaChoiceAnswer(
+  records: ReadonlyArray<ReplicaChoiceAnswerRecord>,
+): ReplicaChoiceAnswerRecord | undefined {
+  if (records.length === 0) return undefined;
+  const maximal = records.filter(
+    (candidate) =>
+      !records.some((other) => other !== candidate && choiceAnswerPrecedes(candidate, other)),
+  );
+  const candidates = maximal.length > 0 ? maximal : records;
+  return [...candidates].sort(compareChoiceAnswerRecords).at(-1);
 }
 
 function artifactOutcome(

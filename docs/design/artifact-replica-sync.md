@@ -2,8 +2,9 @@
 
 This topic specification owns how artifact replicas are written, read, and
 reconciled: the entry format, the store contract, membership derivation,
-publish, pull, restore, comment sync, the synced library, binding, and store
-selection. Architecture owns what a replica is and its boundaries
+publish, pull, restore, comment and decision-form answer sync, the synced
+library, binding, and store selection. Architecture owns what a replica is and
+its boundaries
 ([Architecture: persistence](../architecture.md#persistence)) and the membership
 and store-endpoint security rules
 ([Architecture: security and authority](../architecture.md#security-and-authority)).
@@ -42,6 +43,19 @@ comment changes in an order its writers saw. Its other rules are a
 version's: signed, write-once, refused when its writer is not admitted,
 its hash does not match, it names a local artifact as foreign, or its
 text fails the share filter.
+A `canvas-choice-answer` entry carries one change to a Canvas decision form's
+saved answers — a saved answer (`set`, with the question fingerprint, chosen
+option ids and labels, optional written answer or note, recommendation flag,
+author, and time) or a `clear` (with author and time) — with the artifact
+origin, a content hash over the canonical change, and `after`: for each other
+computer, the newest choice-answer entry on that Canvas its writer held when
+the change was made. It reuses the comment entry's ordering and admission rules
+unchanged: signed, write-once, waiting as `sequence-gap` until its writer's
+earlier listed slots and every slot `after` names are applied or settled here,
+and refused when its writer is not admitted, its hash does not match, it names
+a local artifact as foreign, or its text fails the share filter. An older
+reader that does not know `canvas-choice-answer` fails closed and settles its
+slot as unreadable, as it does for any unknown entry kind.
 The detached signature covers an entry's encoded bytes whole - origin, kind,
 parents, the claimed content hash, and the bundle - so a rewrite of any of
 those is a different signature, not the same one the log recorded. The log
@@ -114,15 +128,16 @@ them in.
   entries fail closed.
 - **Kept slots.** A revocation names, as `kept`, which of the subject's
   slots at or before its cut its writer read as the subject's own valid
-  signed entries: membership records it held, and artifact and comment
-  entries it published, settled, or read in the revoke's own read. `kept`
+  signed entries: membership records it held, and artifact, comment, and
+  choice-answer entries it published, settled, or read in the revoke's own
+  read. `kept`
   is an encoding version (1) and ascending runs of sequences that never
   touch or overlap, all at or before the cut, at most 1,024 of them. A slot
   the revoker did not read as the subject's (empty, listed but not
   downloaded, a file that is not a valid record, or another writer's file)
   is not kept, and an entry the subject's key signed there does not count
   on any computer, whatever its kind; an artifact entry after it does not
-  wait on it, nor does a comment entry whose `after` names it. A revoker whose view needs more runs moves the cut earlier,
+  wait on it, nor does a comment or choice-answer entry whose `after` names it. A revoker whose view needs more runs moves the cut earlier,
   to the end of the last run that fits. A reader that does not know the
   encoding version fails closed on the whole record. A revocation without
   `kept`, as written before it existed, keeps every slot at or before its
@@ -253,7 +268,7 @@ them in.
   stopped publish, and its last store failure; artifact sync drops its
   queue, so nothing queued under the identity that left publishes, there or
   under a later identity in another store. Versions, tombstones, comments,
-  and settled slots stay, so the library and every Canvas's history are
+  decision-form answers, and settled slots stay, so the library and every Canvas's history are
   unchanged. Then Settings › Sync's switch turns off and the device key is
   deleted from the credential store; each step is journaled once it
   happened (`replica.left-cleanup@2`), and a step not journaled yet is
@@ -406,8 +421,8 @@ them in.
   versions and tombstones, so the library a restore ends with does not
   depend on the order it read them in, and every listed slot is read
   before it finishes; a version id already held keeps the body it was
-  first held with. Comment entries still wait on their writer's earlier
-  slots. Entries that wait on another slot are tried again within the
+  first held with. Comment and choice-answer entries still wait on their
+  writer's earlier slots. Entries that wait on another slot are tried again within the
   same read while others keep applying. After the last batch, one pull in
   writer order takes in what still waited, then the restore is finished.
   The journal holds `replica.restore-started@2` (the identity and the
@@ -456,6 +471,29 @@ them in.
   whether or not the Canvas is open here, and show once it is. A purge
   or Project erase drops queued comment changes and rewrites kept ones to
   content-free erased slots, as for versions.
+- **Decision-form answers.** The Canvas choice-answer service tells artifact
+  sync about each saved answer or clear a person makes on this host. Only a
+  Canvas the replica carries - one this host published or imported - has its
+  answers published; a Canvas that never left this host keeps them here, as
+  does Plan mode and sync off. Each change is queued in the same queue as
+  versions and comments (`replica.choice-answer-queued@2`) with `after` taken
+  at that moment; an answer whose chosen labels, written answer, or note fails
+  the share filter is journaled as a refused publish and never queued. A pulled
+  choice-answer entry is reconciled under the comment entry's ordering rule
+  and, before its slot is journaled as kept, settled against every change held
+  (or still queued locally) for that question via `resolveReplicaChoiceAnswer`:
+  any change another writer saw before writing its own is superseded, and
+  concurrent maximal changes settle to one deterministic winner by time and
+  writer identity, so every computer holding the same set of changes settles to
+  the same answer regardless of arrival order. The winning change is then taken
+  into the Canvas's `canvas-choice-answers` aggregate idempotently (an answer
+  whose question fingerprint no longer matches the Canvas head is still kept
+  and reads as stale, never as an answer to the revised question) and never
+  announced again, so it is not republished under this host's sequence. Answers
+  land on the aggregate whether or not the Canvas is open here, and show once
+  it is. A purge or Project erase drops queued choice-answer changes and
+  rewrites kept ones to content-free erased slots, as for versions and
+  comments.
 - **Library.** Imported versions and tombstones live in the in-memory
   `ReplicaArtifactProjection`, rebuilt from those events on every start;
   a restart part-way through a pull resumes from what was journaled and

@@ -18,6 +18,7 @@ import {
   type CanvasChoiceAnswersReviseResult,
   type CanvasId,
   type EventEnvelope,
+  type ReplicaChoiceAnswerChange,
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
@@ -56,6 +57,12 @@ export interface CanvasChoiceAnswerServiceOptions {
   readonly uuid: () => string;
   readonly actor: typeof EventActor.Type;
   readonly now: () => UtcTimestamp;
+  /**
+   * Told after a person's answer or clear is journaled here, so artifact sync
+   * can carry it to their other computers. A change taken in from another
+   * computer is not announced: it is already in the store.
+   */
+  readonly committed?: (canvasId: CanvasId, event: CanvasChoiceAnswerEvent) => void;
 }
 
 export interface CanvasChoiceAnswerServiceDependencies {
@@ -100,6 +107,7 @@ export class CanvasChoiceAnswerService {
   readonly #person: CanvasActor;
   readonly #now: () => UtcTimestamp;
   readonly #authorize: CanvasChoiceAnswerServiceDependencies["authorize"];
+  readonly #committed: CanvasChoiceAnswerServiceOptions["committed"];
   readonly #state = new Map<string, CanvasChoiceAnswerState>();
   #replayed = false;
 
@@ -114,6 +122,7 @@ export class CanvasChoiceAnswerService {
     this.#person = decodeCanvasActor({ kind: "local-user", actorId: this.#actor.actorId });
     this.#now = options.now;
     this.#authorize = dependencies.authorize;
+    this.#committed = options.committed;
   }
 
   /** The saved answers a workspace may read. An unauthorized read carries none. */
@@ -222,7 +231,52 @@ export class CanvasChoiceAnswerService {
     }
     const next = admitted.events.reduce(applyCanvasChoiceAnswerEvent, state);
     this.#state.set(String(canvasId), next);
+    for (const event of admitted.events) {
+      try {
+        this.#committed?.(canvasId, event);
+      } catch {
+        // The answer is journaled here; carrying it elsewhere cannot unwind it.
+      }
+    }
     return { kind: "accepted", canvasId, sequence: next.sequence };
+  }
+
+  /**
+   * Take in a decision-form answer or clear another of this person's computers
+   * wrote, as artifact sync verified and reconciled it. It is idempotent: an
+   * identical saved answer, or clearing a question that already has no answer,
+   * changes nothing. An answer whose question fingerprint no longer matches
+   * the Canvas head is still kept so the form and agent read it as stale. It
+   * does not announce `committed` (already in the store) and does not pass
+   * through `authorize` (no workspace asked for it; reads still do).
+   */
+  adoptReplicaChange(input: {
+    readonly canvasId: CanvasId;
+    readonly change: ReplicaChoiceAnswerChange;
+  }): "applied" | "unchanged" {
+    const state = this.#stateFor(input.canvasId);
+    const event = replicaChoiceAnswerEvent(input, state);
+    if (event === undefined) return "unchanged";
+    this.#journal.append({
+      aggregate: {
+        aggregateType: CANVAS_CHOICE_ANSWER_AGGREGATE_TYPE,
+        aggregateId: decodeAggregateId(String(input.canvasId)),
+      },
+      expectedVersion: state.sequence,
+      events: [
+        {
+          eventId: decodeEventId(this.#uuid()),
+          eventName: event.kind === "set" ? CANVAS_CHOICE_ANSWER_SET : CANVAS_CHOICE_ANSWER_CLEARED,
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#uuid()),
+          actor: this.#actor,
+          occurredAt: event.kind === "set" ? event.event.answer.answeredAt : event.event.clearedAt,
+          payload: event.event,
+        },
+      ],
+    });
+    this.#state.set(String(input.canvasId), applyCanvasChoiceAnswerEvent(state, event));
+    return "applied";
   }
 
   #stateFor(canvasId: CanvasId): CanvasChoiceAnswerState {
@@ -247,4 +301,50 @@ export class CanvasChoiceAnswerService {
       );
     }
   }
+}
+
+function replicaChoiceAnswerEvent(
+  input: { readonly canvasId: CanvasId; readonly change: ReplicaChoiceAnswerChange },
+  state: CanvasChoiceAnswerState,
+): CanvasChoiceAnswerEvent | undefined {
+  const sequence = state.sequence + 1;
+  if (input.change.kind === "clear") {
+    const { blockId, questionId, clearedBy, clearedAt } = input.change;
+    const held = state.answers.find(
+      (entry) => String(entry.blockId) === String(blockId) && entry.questionId === questionId,
+    );
+    if (held === undefined) return undefined;
+    return decodeCanvasChoiceAnswerEvent({
+      kind: "cleared",
+      event: { canvasId: input.canvasId, blockId, questionId, clearedBy, clearedAt, sequence },
+    });
+  }
+  const { answer } = input.change;
+  const held = state.answers.find(
+    (entry) =>
+      String(entry.blockId) === String(answer.blockId) && entry.questionId === answer.questionId,
+  );
+  if (held !== undefined && sameSavedAnswer(held, answer)) return undefined;
+  return decodeCanvasChoiceAnswerEvent({
+    kind: "set",
+    event: { canvasId: input.canvasId, answer, sequence },
+  });
+}
+
+function sameSavedAnswer(left: CanvasChoiceAnswer, right: CanvasChoiceAnswer): boolean {
+  return (
+    String(left.blockId) === String(right.blockId) &&
+    left.questionId === right.questionId &&
+    left.questionFingerprint === right.questionFingerprint &&
+    left.selectedOptionIds.length === right.selectedOptionIds.length &&
+    left.selectedOptionIds.every((id, index) => id === right.selectedOptionIds[index]) &&
+    (left.selectedLabels?.length ?? 0) === (right.selectedLabels?.length ?? 0) &&
+    (left.selectedLabels ?? []).every((label, index) => label === right.selectedLabels?.[index]) &&
+    left.customAnswer === right.customAnswer &&
+    left.note === right.note &&
+    left.acceptedRecommendation === right.acceptedRecommendation &&
+    left.author.kind === right.author.kind &&
+    String(left.author.actorId) === String(right.author.actorId) &&
+    left.answeredAt === right.answeredAt
+  );
 }

@@ -3202,7 +3202,7 @@ A `choice` block is also how an agent asks for many decisions at once: no questi
 - Answers are journaled facts of a `canvas-choice-answers` aggregate per Canvas, not document versions. The host stamps the `local-user` author; no agent operation writes an answer; a paired client reads and cannot write. A question an agent revised keeps its answer only when its fingerprint is unchanged.
 - Each pick saves as made; Send answers is the explicit act that wakes the agent, through the thread's message queue under its existing authority, and is never an approval.
 - _Accept every recommendation not yet answered_ answers only the questions with an unambiguous recommendation, never replaces an answer, and marks what it made.
-- The owning thread's `read` returns the answers (a question reworded after it was answered reads `stale`); shares, public links, exports, and artifact sync do not carry answers or notes.
+- The owning thread's `read` returns the answers (a question reworded after it was answered reads `stale`); shares, public links, and exports never carry answers or notes, while artifact sync carries saved answers, notes, and clears across the person's own computers for Canvases the replica carries under the share filter and the comment entry's ordering rules.
 
 Status: Built. Since: 2026-11-12. Live checks owed: rendered QA of a 24-question form and a real-provider smoke of an agent building and reading one. Detail: [Canvas: Decision forms](canvas.md#decision-forms).
 
@@ -3314,6 +3314,7 @@ Every committed Canvas version is queued for publish through the share filter, a
 - Nothing is queued without sync or a replica identity, nor for a Code thread under Plan mode. An imported entry is never republished.
 - Historical local versions require a reviewed destination and eligibility preview, explicit selection and consent; durable publication progress can stop and resume after restart without duplicating entries. Separate batches preserve known ancestry; a newly pulled deletion stops uploads, and only a published explicit Restore of the reviewed deletion slots permits resuming them. Nothing backfills automatically.
 - Synchronized deletion is a separate confirmed tombstone action over known versions, preserving local history. A local erase never publishes it and removes queued historical bundles locally. A deletion beside a concurrent revision stays visible until explicitly resolved.
+- For Canvases the replica carries, comments (`canvas-comment`) and decision-form answers and clears (`canvas-choice-answer`) travel through the same signed, write-once, share-filtered queue and `after`-ordered reconciliation; concurrent answers to the same question settle deterministically across computers, and stale fingerprints stay stale.
 
 Status: Built. Since: —. Detail: [Artifact replica sync: Artifact sync: publish and pull](artifact-replica-sync.md#artifact-sync-publish-and-pull).
 
