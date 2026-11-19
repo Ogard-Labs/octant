@@ -42,6 +42,7 @@ import {
   holdsOnlyStatusGrant,
   hubRosterSigningPayload,
   introduceGuests,
+  newDevicePrivateAddress,
   newMemberConfirmationSigningPayload,
   reconcileHeldGrants,
   rosterMemberWebOrigin,
@@ -1520,14 +1521,18 @@ export class SpokeLinkService {
         )
       : [];
     const raisedAt = decodeTimestamp(new Date(this.#options.now()).toISOString());
-    const raised = added.map((member) => ({
-      alertId: decodeAlertId(randomUUID()),
-      memberId: member.memberId,
-      name: member.name,
-      role: member.role,
-      identityKeyFingerprint: member.identityKeyFingerprint,
-      raisedAt,
-    }));
+    const raised = added.map((member) => {
+      const privateAddress = newDevicePrivateAddress(member.addresses);
+      return {
+        alertId: decodeAlertId(randomUUID()),
+        memberId: member.memberId,
+        name: member.name,
+        role: member.role,
+        identityKeyFingerprint: member.identityKeyFingerprint,
+        raisedAt,
+        ...(privateAddress === undefined ? {} : { privateAddress }),
+      };
+    });
     const alerts = [...(link.alerts ?? []), ...raised].slice(-MAX_ALERTS);
     // A guest the roster no longer lists loses its device here. A spoke the
     // roster no longer lists is out: the hub principal is revoked and every

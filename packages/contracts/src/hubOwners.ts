@@ -139,6 +139,13 @@ export const NewMemberAlert = Schema.Struct({
   role: HubMemberRole,
   identityKeyFingerprint: digest,
   raisedAt: UtcTimestamp,
+  /**
+   * The member's address on the private network, kept in the alert alone: the
+   * journal records that an alert was raised, never an address (maintainer
+   * decision, 2026-11-19). Absent when none is known yet, and on alerts raised
+   * before addresses were kept.
+   */
+  privateAddress: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
 }).annotations(strict);
 export type NewMemberAlert = typeof NewMemberAlert.Type;
 

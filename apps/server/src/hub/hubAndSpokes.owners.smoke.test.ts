@@ -1236,6 +1236,19 @@ describe("new-member alerts on a spoke", () => {
     expect(spoke.state.load().pendingDeviceRevocations).toBeUndefined();
   });
 
+  it("names a new computer's private-network address in the alert each spoke raises", async () => {
+    const { network, hub, spoke } = await startOwnerWorld();
+    const tablet = await startTablet(network);
+    await joinHub(hub, tablet, { owner: false });
+    await vi.waitFor(() => {
+      const status = spoke.spoke.status();
+      if (status.membership !== "member") throw new Error("Not a member.");
+      expect(
+        status.alerts.map((alert) => [alert.name, alert.role, alert.privateAddress]),
+      ).toContainEqual(["Tablet", "spoke", "100.101.102.106"]);
+    });
+  });
+
   it("raises an alert the hub cannot write, dismiss, or remove", async () => {
     const { network, hub, spoke, phone, authenticator } = await startOwnerWorld();
     listAsOwner(spoke, phone, authenticator);
