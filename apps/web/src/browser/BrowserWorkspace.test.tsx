@@ -308,7 +308,7 @@ describe("BrowserWorkspace", () => {
     expect(screen.getByRole("region", { name: "Browser automation" })).toBeVisible();
   });
   it("keeps compact browser chrome ahead of the live or remote page surface", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/browser-workspace.css"), "utf8");
 
     expect(styles.indexOf(".browser-workspace__chrome")).toBeGreaterThan(-1);
     expect(styles.indexOf(".browser-workspace__chrome")).toBeLessThan(
@@ -341,7 +341,7 @@ describe("BrowserWorkspace", () => {
   });
 
   it("draws the address field with the control corner and the field border, and no pill", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/browser-workspace.css"), "utf8");
     const field = styles.match(/\.browser-workspace__field \{([^}]*)\}/)?.[1] ?? "";
 
     expect(field).toMatch(/border-radius:\s*var\(--oct-radius-sm\)/);
@@ -1801,7 +1801,7 @@ describe("BrowserWorkspace", () => {
   });
 
   it("lays a Browser notice out as a quiet row with no tinted box", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/browser-workspace.css"), "utf8");
     const rule = styles.slice(styles.indexOf(".browser-workspace__message {"));
     const body = rule.slice(0, rule.indexOf("}"));
     expect(body).not.toMatch(/background|border/);

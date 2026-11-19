@@ -1,0 +1,25 @@
+.zen-root {
+  position: relative;
+  min-height: 100%;
+}
+
+.zen-root__shell--hidden {
+  display: none;
+}
+
+.zen-root__surface {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+/* While the Zen surface chunk loads, its frame placeholder centers one line
+   without the surface paint. Kept here: it renders before zen-surface.css. */
+.zen-surface-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  color: var(--oct-muted);
+}

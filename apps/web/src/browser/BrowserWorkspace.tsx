@@ -1,3 +1,4 @@
+import "../styles/browser-workspace.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useBrowserAccountProfiles } from "./useBrowserAccountProfiles";
 import { browserProfileFromChoice, formatBrowserElementSnapshot } from "@octant/domain";

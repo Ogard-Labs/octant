@@ -1,3 +1,4 @@
+import "../styles/preview.css";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";

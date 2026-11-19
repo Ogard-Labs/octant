@@ -266,13 +266,3 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
-
-/* ─── the Browser's empty and error states are left-aligned lines ─────── */
-.browser-workspace__empty,
-.browser-workspace__remote-empty,
-.browser-workspace__native-error {
-  place-content: start;
-  justify-items: start;
-  padding: var(--oct-space-3);
-  text-align: start;
-}

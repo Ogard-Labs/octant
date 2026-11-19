@@ -1,3 +1,4 @@
+import "../styles/work-list.css";
 import "../styles/inbox.css";
 import type { GithubCatalogueReadResponse } from "@octant/contracts";
 import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";

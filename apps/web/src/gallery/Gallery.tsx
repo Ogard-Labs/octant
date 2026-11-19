@@ -11,6 +11,8 @@ import { ColourRoles, IconScale, Radii, SpacingScale, TypeRoles } from "./founda
 import { OverlaySections } from "./overlays";
 import { PatternSections } from "./patterns";
 import "../styles.css";
+import "../styles/work-list.css";
+import "../styles/preview.css";
 import "../styles/inbox.css";
 import "../styles/review.css";
 import "../styles/debug.css";
@@ -29,6 +31,8 @@ import "../styles/prepare-to-shut-down.css";
 // Settings screens load this where they mount; the gallery shows two of its controls.
 import "../styles/settings.css";
 // The shared component/material layer loads last, as it does in the app.
+import "../styles/zen.css";
+import "../styles/browser-workspace.css";
 import "../styles/components.css";
 import "./gallery.css";
 

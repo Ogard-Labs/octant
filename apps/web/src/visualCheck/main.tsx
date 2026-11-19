@@ -8,6 +8,8 @@ import { ThemeTypographyProvider } from "../theme/TypographyProvider";
 import { IconDefaults } from "../ui/IconDefaults";
 import { SCENES, sceneById } from "./scenes";
 import "../styles.css";
+import "../styles/work-list.css";
+import "../styles/preview.css";
 import "../styles/inbox.css";
 import "../styles/review.css";
 import "../styles/debug.css";
@@ -26,6 +28,8 @@ import "../styles/thread-move-computer.css";
 import "../styles/prepare-to-shut-down.css";
 import "../styles/settings.css";
 // The shared component/material layer loads last, as it does in the app.
+import "../styles/zen.css";
+import "../styles/browser-workspace.css";
 import "../styles/components.css";
 import "./visualCheck.css";
 

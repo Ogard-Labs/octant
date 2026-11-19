@@ -1,3 +1,5 @@
+import "../styles/zen.css";
+import "../styles/zen-surface.css";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { useBrowserAccountProfiles } from "../browser/useBrowserAccountProfiles";
 import { browserProfileFromChoice, storedBrowserProfile } from "@octant/domain";

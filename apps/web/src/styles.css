@@ -15,10 +15,8 @@
 @import "./styles/chat.css";
 @import "./styles/code.css";
 @import "./styles/github.css";
-@import "./styles/work-list.css";
 @import "./styles/todos.css";
-@import "./styles/preview.css";
-@import "./styles/zen.css";
+@import "./styles/zen-root.css";
 @import "./styles/canvas-inline.css";
 @import "./styles/palette.css";
 @import "./styles/project-threads.css";
