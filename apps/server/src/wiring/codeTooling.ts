@@ -137,6 +137,7 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
   Pick<
     CodeWiring,
     | "canAccessCodeProject"
+    | "codeProjectAccess"
     | "codeFileWatch"
     | "codeWorkingDirectoryProbePath"
     | "listActivityRepositories"
@@ -172,6 +173,9 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     repositoryActivitySource,
     listActivityRepositories,
     canAccessCodeProject,
+    codeProjectAccess,
+    isPairedDeviceScope,
+    isRestrictedDeviceScope,
     serverConnection,
     serverProjectStore,
     codeFileWatch,
@@ -687,6 +691,17 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             : root;
         },
         canAccessProject: canAccessCodeProject,
+        // Independent of any current request's AsyncLocalStorage context so
+        // another window's commit does not drop a live Full-access window's
+        // server, and checks window/device liveness so a closed window or
+        // revoked paired device does not retain an unapproved server.
+        canAccessProjectLive: (scopeId, projectId) =>
+          codeProjectAccess.standingAuthority(projectId, () =>
+            codeProjectAccess.canAccessProject(scopeId, projectId),
+          ) ||
+          (isPairedDeviceScope(scopeId) &&
+            !isRestrictedDeviceScope(scopeId) &&
+            codeProjectAccess.hasActiveCodeProject(projectId)),
         // Read from the level the turn runs at (window session grant clamped
         // to any active turn posture), never only the thread's stored level.
         effectiveThread: (scopeId, thread) => {
@@ -728,6 +743,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             event.aggregateType === "code-thread" ||
             event.aggregateType === "code-checkout" ||
             event.aggregateType === "code-settings" ||
+            event.aggregateType === "window-workspace" ||
             event.eventName === "project.code-own-toolchain-changed@1" ||
             event.aggregateType === EXTENSION_AGGREGATE_TYPE,
         )

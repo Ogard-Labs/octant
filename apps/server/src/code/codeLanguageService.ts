@@ -209,6 +209,13 @@ export interface CodeLanguageAuthority {
   readonly readThreadFolder: (thread: CodeThread) => string | undefined;
   /** Reach: a local window's Project binding, or a paired device's Code reach. */
   readonly canAccessProject: (scopeId: WindowId, projectId: ProjectId) => boolean;
+  /**
+   * Whether a previously authorized scope is still live and reaches this
+   * Project, judged independently of any active request's AsyncLocalStorage
+   * context (for sweeps and crash restarts). Defaults to `canAccessProject`
+   * when omitted.
+   */
+  readonly canAccessProjectLive?: (scopeId: WindowId, projectId: ProjectId) => boolean;
   readonly effectiveThread: (scopeId: WindowId, thread: CodeThread) => CodeThread;
   readonly resolveRoot: (
     scopeId: WindowId,
@@ -1801,16 +1808,17 @@ export class CodeLanguageService {
 
   /**
    * Whether any window/thread pair that authorized this `repo-tooling` server
-   * at Full access is still active on its checkout at Full access.
+   * at Full access is still live and active on its checkout at Full access.
    */
   #fullAccessHolds(record: ServerRecord): boolean {
+    const canAccessLive = this.#authority.canAccessProjectLive ?? this.#authority.canAccessProject;
     let active = false;
     for (const [entryKey, entry] of record.fullAccessScopes) {
       const stored = this.#authority.readThread(entry.threadId);
       if (
         stored === undefined ||
         !isActiveThread(stored) ||
-        !this.#authority.canAccessProject(entry.scopeId, stored.projectId)
+        !canAccessLive(entry.scopeId, stored.projectId)
       ) {
         record.fullAccessScopes.delete(entryKey);
         continue;

@@ -21,18 +21,26 @@ import {
   decodeCodeProjectFilePath,
   decodeCodeRelativePath,
   decodeCodeThread,
+  decodeWindowId,
   type CodeCheckoutIdentity,
   type CodeFileId,
   type CodeThread,
   type WindowId,
 } from "@octant/contracts";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { decodeCodeLanguageReadRequest } from "@octant/contracts/code-language";
 import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import type {
   CodeLanguageDocumentResult,
   CodeLanguageReadResult,
 } from "@octant/contracts/code-language";
-import type { LanguageServerHostPlatform, PrincipalKind } from "@octant/domain";
+import {
+  contextKeyForProject,
+  defaultWindowWorkspace,
+  type LanguageServerHostPlatform,
+  type PrincipalKind,
+} from "@octant/domain";
+import { CodeProjectAccess } from "../codeProjectAccess";
 import {
   makeProcessConfinementLive,
   type ProcessConfinementPort,
@@ -176,6 +184,8 @@ function harness(input: {
   readonly egress?: LanguageServerEgress;
   readonly threadTainted?: CodeLanguageServiceOptions["threadTainted"];
   readonly threadStrict?: CodeLanguageServiceOptions["threadStrict"];
+  readonly canAccessProject?: CodeLanguageServiceOptions["authority"]["canAccessProject"];
+  readonly canAccessProjectLive?: CodeLanguageServiceOptions["authority"]["canAccessProjectLive"];
   readonly effectiveThread?: CodeLanguageServiceOptions["authority"]["effectiveThread"];
   readonly processes?: Pick<
     NonNullable<ConstructorParameters<typeof LanguageServerProcessPort>[0]>,
@@ -211,7 +221,10 @@ function harness(input: {
         String(thread.checkoutId) === String(state.checkout.id)
           ? input.checkout
           : state.folders.get(String(thread.id)),
-      canAccessProject: () => state.reach,
+      canAccessProject: input.canAccessProject ?? (() => state.reach),
+      ...(input.canAccessProjectLive === undefined
+        ? {}
+        : { canAccessProjectLive: input.canAccessProjectLive }),
       effectiveThread: input.effectiveThread ?? ((_scope, thread) => thread),
       resolveRoot: withProjectExtraFolders({
         resolve: (_scope, thread, checkout, relativePath) => ({
@@ -1290,6 +1303,89 @@ describe("Code language service reads for an agent", () => {
     effectivePosture = "plan";
     expect(await test.agent("b.ts")).toEqual({ status: "refused", reason: "plan-read-only" });
     expect(test.launches()).toBe(1);
+  });
+
+  it("keeps a live Full-access window's unapproved server across another window's request sweep, and retires it once that window closes", async () => {
+    const windowA = scopeId;
+    const windowB = decodeWindowId("10000000-0000-4000-8000-000000000002");
+    const paths = workspace();
+    const log = join(paths.root, "server.log");
+    const thread = codeThread({ executionPolicy: "full-access" });
+    const liveWindows = new Set<string>([String(windowA), String(windowB)]);
+    const workspaceFor = (id: WindowId) => ({
+      ...defaultWindowWorkspace(id),
+      contextByMode: {
+        ...defaultWindowWorkspace(id).contextByMode,
+        code: contextKeyForProject("code", LOCAL_HOST_ID, thread.projectId, paths.checkout),
+      },
+    });
+    const access = new CodeProjectAccess({
+      readWorkspace: (id) =>
+        String(id) === String(windowA) || String(id) === String(windowB)
+          ? workspaceFor(id)
+          : undefined,
+      hasActiveCodeProject: (projectId) => String(projectId) === String(thread.projectId),
+      isWindowLive: (id) => liveWindows.has(String(id)),
+    });
+    const test = harness({
+      ...paths,
+      component: { ...fakeComponent("normal", log), launchClass: "repo-tooling" },
+      confinement: passthrough,
+      approvals: { holds: () => false, record: () => "recorded" },
+      canAccessProject: (id, projectId) => access.canAccessProject(id, projectId),
+      canAccessProjectLive: (id, projectId) =>
+        access.standingAuthority(projectId, () => access.canAccessProject(id, projectId)),
+      egress: {
+        start: async () => ({
+          status: "listening",
+          endpoint: { kind: "loopback", port: 9 },
+          token: "language-server-egress",
+          close: async () => undefined,
+        }),
+      },
+    });
+    test.state.thread = thread;
+    test.state.threads = [thread];
+
+    const windowAContext = {
+      principal: { kind: "local-window" as const, windowId: windowA, capabilityGeneration: 1 },
+      scopeId: windowA,
+    };
+    const windowBContext = {
+      principal: { kind: "local-window" as const, windowId: windowB, capabilityGeneration: 1 },
+      scopeId: windowB,
+    };
+
+    const fileId = await access.run(windowAContext, async () =>
+      syncedFileId(await test.open("b.ts")),
+    );
+    expect(test.launches()).toBe(1);
+
+    // Window B committing a Code event triggers sweep inside Window B's
+    // AsyncLocalStorage request context; Window A's live Full-access server
+    // must remain running and keep its scope.
+    await access.run(windowBContext, async () => {
+      expect(access.canAccessProject(windowA, thread.projectId)).toBe(false);
+      await test.service.sweep();
+    });
+    await access.run(windowAContext, async () => {
+      expect((await test.diagnostics(fileId)).status).toBe("diagnostics");
+    });
+    expect(test.launches()).toBe(1);
+
+    // Once Window A closes, its persisted workspace remains behind, so plain
+    // canAccessProject outside a request context would still answer true;
+    // sweep must check liveness and retire the unapproved server.
+    liveWindows.delete(String(windowA));
+    expect(access.canAccessProject(windowA, thread.projectId)).toBe(true);
+    await test.service.sweep();
+    liveWindows.add(String(windowA));
+    await access.run(windowAContext, async () => {
+      expect(await test.diagnostics(fileId)).toEqual({
+        status: "refused",
+        reason: "file-outside-thread",
+      });
+    });
   });
 
   it("does not restart a crashed repository-tooling server for an agent's read, even at Full access", async () => {

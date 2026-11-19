@@ -1069,6 +1069,7 @@ export function startOctantServer(
       serverConnection,
       serverProjectStore,
       canAccessCodeProject,
+      codeProjectAccess,
       codeFileWatch,
       codeOperationRuntime,
       codeSessionAuthority,
