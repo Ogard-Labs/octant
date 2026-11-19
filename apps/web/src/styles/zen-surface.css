@@ -317,38 +317,42 @@
 }
 /* .visually-hidden is defined once, in octant.css. */
 
-.zen-surface__bar-anchor .zen-bar {
-  flex-wrap: wrap;
-  border-radius: var(--oct-radius-md);
-  max-width: 100%;
+@media (max-width: 720px) {
+  .zen-surface__bar-anchor .zen-bar {
+    flex-wrap: wrap;
+    border-radius: var(--oct-radius-md);
+    max-width: 100%;
+  }
+
+  .zen-surface__bar-anchor {
+    left: 12px;
+    right: 12px;
+    transform: none;
+    bottom: 12px;
+  }
+
+  .zen-surface__spaces-anchor {
+    left: 12px;
+    right: 12px;
+    transform: none;
+  }
+
+  .zen-surface__panel-anchor,
+  .zen-surface__manual-panel {
+    top: 52px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: calc(100% - 180px);
+    transform: none;
+  }
 }
 
-.zen-surface__bar-anchor {
-  left: 12px;
-  right: 12px;
-  transform: none;
-  bottom: 12px;
-}
-
-.zen-surface__spaces-anchor {
-  left: 12px;
-  right: 12px;
-  transform: none;
-}
-
-.zen-surface__panel-anchor,
-.zen-surface__manual-panel {
-  top: 52px;
-  right: 12px;
-  left: 12px;
-  width: auto;
-  max-height: calc(100% - 180px);
-  transform: none;
-}
-
-.zen-surface__canvas,
-.zen-el {
-  transition: none;
+@media (prefers-reduced-motion: reduce) {
+  .zen-surface__canvas,
+  .zen-el {
+    transition: none;
+  }
 }
 
 .zen-appearance__section {
@@ -750,12 +754,14 @@
   color: var(--oct-muted);
 }
 
-.zen-surface .zen-el,
-.zen-surface .zen-research:not(.zen-research--collapsed) {
-  background-color: color-mix(in srgb, var(--oct-glass-floor) 78%, transparent);
-  background-image: linear-gradient(var(--oct-glass-regular), var(--oct-glass-regular));
-  backdrop-filter: blur(var(--oct-glass-blur-regular)) saturate(170%);
-  -webkit-backdrop-filter: blur(var(--oct-glass-blur-regular)) saturate(170%);
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .zen-surface .zen-el,
+  .zen-surface .zen-research:not(.zen-research--collapsed) {
+    background-color: color-mix(in srgb, var(--oct-glass-floor) 78%, transparent);
+    background-image: linear-gradient(var(--oct-glass-regular), var(--oct-glass-regular));
+    backdrop-filter: blur(var(--oct-glass-blur-regular)) saturate(170%);
+    -webkit-backdrop-filter: blur(var(--oct-glass-blur-regular)) saturate(170%);
+  }
 }
 
 .zen-surface .zen-research__header {
@@ -763,13 +769,14 @@
 }
 /* Reduced transparency, increased contrast, or no backdrop blur: an opaque
    window with a plain edge, as every other Zen surface falls back. */
-
-.zen-surface .zen-el,
-.zen-surface .zen-research:not(.zen-research--collapsed) {
-  background-color: var(--oct-surface);
-  background-image: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+@media (prefers-reduced-transparency: reduce) {
+  .zen-surface .zen-el,
+  .zen-surface .zen-research:not(.zen-research--collapsed) {
+    background-color: var(--oct-surface);
+    background-image: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 
 html[data-octant-increased-contrast="true"] .zen-surface .zen-el,
