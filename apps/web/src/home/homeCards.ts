@@ -51,7 +51,7 @@ export interface HomeListContributor {
   readonly useRows: () => HomeListRead;
 }
 
-interface HomeCardIdentity {
+export interface HomeCardIdentity {
   /** Stable, lower-case, stored in settings; never reused for another card. */
   readonly id: string;
   readonly title: string;
@@ -102,8 +102,8 @@ export function isGridCard(definition: HomeCardDefinition): definition is HomeGr
 
 export type HomeCardDefinition = HomeGridCardDefinition | HomeListCardDefinition;
 
-export interface HomeCardPlacement {
-  readonly definition: HomeCardDefinition;
+export interface HomeCardPlacement<T extends HomeCardIdentity = HomeCardDefinition> {
+  readonly definition: T;
   readonly visible: boolean;
 }
 
@@ -116,13 +116,13 @@ export function isDefaultHomeCardCustomization(customization: HomeCardCustomizat
  * with whether it is on. A stored id the registry no longer knows is ignored;
  * a card the stored order does not name follows in registry order.
  */
-export function arrangeHomeCards(
-  definitions: ReadonlyArray<HomeCardDefinition>,
+export function arrangeHomeCards<T extends HomeCardIdentity>(
+  definitions: ReadonlyArray<T>,
   customization: HomeCardCustomization,
-): ReadonlyArray<HomeCardPlacement> {
+): ReadonlyArray<HomeCardPlacement<T>> {
   const offered = definitions.filter((definition) => definition.available);
   const unplaced = new Map(offered.map((definition) => [definition.id, definition]));
-  const ordered: HomeCardDefinition[] = [];
+  const ordered: T[] = [];
   for (const id of customization.order) {
     const definition = unplaced.get(id);
     if (definition === undefined) continue;
@@ -144,8 +144,8 @@ export function arrangeHomeCards(
  * so a default that changes later still reaches a person who never moved away
  * from it.
  */
-export function setHomeCardVisible(
-  definitions: ReadonlyArray<HomeCardDefinition>,
+export function setHomeCardVisible<T extends HomeCardIdentity>(
+  definitions: ReadonlyArray<T>,
   customization: HomeCardCustomization,
   id: string,
   visible: boolean,
@@ -164,8 +164,8 @@ export function setHomeCardVisible(
  * keeps ids of cards this window cannot offer right now, after the ones it
  * can, so a card that comes back keeps its place.
  */
-export function moveHomeCard(
-  definitions: ReadonlyArray<HomeCardDefinition>,
+export function moveHomeCard<T extends HomeCardIdentity>(
+  definitions: ReadonlyArray<T>,
   customization: HomeCardCustomization,
   id: string,
   toIndex: number,

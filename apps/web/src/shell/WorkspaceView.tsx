@@ -1918,6 +1918,31 @@ function draftRecentThreads(
   return [];
 }
 
+type StrippedHomeStart = Omit<NonNullable<WorkspaceViewProps["homeStart"]>, "codeActivity">;
+
+// Memoized per source object so a re-render hands the draft and welcome
+// surfaces the same stripped homeStart identity instead of a fresh copy.
+const strippedHomeStarts = new WeakMap<
+  NonNullable<WorkspaceViewProps["homeStart"]>,
+  StrippedHomeStart
+>();
+
+/**
+ * Drops the Code Home activity source from a start model handed to any
+ * surface that is not the Code Home welcome: a new-task draft, a Work draft
+ * or Chat's welcome share the model's cards but never mount the panel.
+ */
+function withoutCodeActivity(
+  homeStart: NonNullable<WorkspaceViewProps["homeStart"]>,
+): NonNullable<WorkspaceViewProps["homeStart"]> {
+  if (homeStart.codeActivity === undefined) return homeStart;
+  const stripped = strippedHomeStarts.get(homeStart);
+  if (stripped !== undefined) return stripped;
+  const { codeActivity: _codeActivity, ...rest } = homeStart;
+  strippedHomeStarts.set(homeStart, rest);
+  return rest;
+}
+
 function renderNonCodeTab(
   tab: WorkspaceTab,
   props: WorkspaceViewProps,
@@ -1930,6 +1955,7 @@ function renderNonCodeTab(
   },
   openProviderSettings: (() => void) | undefined,
   drafts: NewTaskDrafts | undefined,
+  codeHomeWelcome = false,
 ): React.ReactNode {
   // Code's and Work's welcome tab is only a routing placeholder. Keep one
   // start surface so a split or restored fallback never sends the reader
@@ -1954,6 +1980,7 @@ function renderNonCodeTab(
       canvasContext,
       openProviderSettings,
       drafts,
+      mode === "code",
     );
   }
   if (tab.kind === "draft-thread") {
@@ -2016,7 +2043,11 @@ function renderNonCodeTab(
           {...(props.onDraftPendingPromptConsumed === undefined
             ? {}
             : { onPendingPromptConsumed: props.onDraftPendingPromptConsumed })}
-          {...(props.homeStart === undefined ? {} : { homeStart: props.homeStart })}
+          {...(props.homeStart === undefined
+            ? {}
+            : {
+                homeStart: codeHomeWelcome ? props.homeStart : withoutCodeActivity(props.homeStart),
+              })}
           {...(draftProjectId === undefined ? {} : { projectId: draftProjectId })}
           {...(props.onDraftSelectProject === undefined
             ? {}
@@ -2856,7 +2887,9 @@ function renderNonCodeTab(
     <NewTaskDraftScopeContext.Provider value={`chat-welcome:${String(paneId)}`}>
       <ChatWelcome
         {...(recentThreads.length === 0 ? {} : { recentThreads })}
-        {...(props.homeStart === undefined ? {} : { homeStart: props.homeStart })}
+        {...(props.homeStart === undefined
+          ? {}
+          : { homeStart: withoutCodeActivity(props.homeStart) })}
         {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
         {...(props.selectedCreateHostId === undefined
           ? {}

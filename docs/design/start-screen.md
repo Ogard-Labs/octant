@@ -532,31 +532,41 @@ without figures, and leaving the start screen cancels the reads in flight.
 
 ### Activity timeframes
 
-A planned Code Home activity panel compares work over a named timeframe to
-the matching previous stretch. The panel itself is not built yet; the
-journal already keeps the history it will read, and the read that answers
-it is built.
+Code Home's start screen carries an **Activity** section below the card
+area; the New task draft and the other modes' starts share the card
+registry but never the panel. The section holds four cards — **Pull
+requests merged**, **Issues closed**, **Releases published** and
+**Successful runs** — each counting work over a named timeframe against
+the matching previous stretch. Its header holds one shared timeframe
+control, a **Refresh activity** button and a **Customize activity** dialog
+with the history source, a show/hide and reorder for each card, and a
+per-card timeframe pin shown at the card's header end. Every card draws
+the same rows — its count as the figure, one context line, and the source
+it read — so loading, empty, unavailable and ready cards keep one shape.
+The count itself opens a drill-down dialog listing the records (at most 25
+a page against the frozen snapshot); a run opens its thread, a pull
+request or issue opens its GitHub page. The context line compares the
+count to the previous stretch only when the read is complete, and every
+card always names where its answer came from — **Your GitHub account** or
+**Recorded by Octant**. Runs always read Octant's journal; the source
+choice applies to the three delivery cards.
 
 Recording is journaled: a confirmed pull-request merge, each issue closure
 it caused, and every finished run become one activity fact per linked
-thread; an issue outside the pull request's own repository is not counted. Facts dedupe by identity, so the same delivery witnessed by
-several threads counts once, and a run's first terminal state wins — a
-later finish for the same run is ignored. A delivery title longer than the
-contract's 256 UTF-8 bytes is cut on a code-point boundary before the fact
-is validated rather than dropping the record.
+thread; an issue outside the pull request's own repository is not counted. Facts dedupe by identity, so a delivery witnessed by several
+threads counts once, and a run's first terminal state wins. A delivery
+title longer than 256 UTF-8 bytes is cut on a code-point boundary rather
+than dropping the record. A run counts as canceled when the person stopped
+it: Chat, Work and agent runs journal a cancelled outcome, and a Code turn
+counts as canceled when the journal recorded the person's stop request
+before it was interrupted. Any other interruption, such as a restart,
+counts as failed.
 
-The read authorizes every record against the thread that witnessed it — a
-fact only an unreachable thread saw stays out — and freezes the answer in
-a snapshot. Pages of at most 25 rows come back from that snapshot, never
-from the live journal, so a fact journaled afterwards cannot move an open
-drill-down. Losing access to any witness, including one that counted only
-toward the comparison, or to the Project set expires the snapshot and the
-page answers `authorization-changed` with no totals. A comparison counts
-only over coverage the source actually has: a card whose history starts
-after the comparison window ends answers no comparison rather than a
-fabricated zero.
-
-A run counts as canceled when the person stopped it: Chat, Work and agent runs journal a cancelled outcome, and a Code turn counts as canceled when the journal recorded the person's stop request before it was interrupted. Any other interruption, such as a restart, counts as failed.
+The read authorizes every record against the thread that witnessed it and
+freezes the answer in a snapshot that the drill-down pages from. Losing
+access to any witness, including one that counted only toward the
+comparison, or a change to the Project set expires the snapshot, and the
+page answers `authorization-changed` with no totals.
 
 A GitHub source answers through the connected account's `gh` and counts
 only that account's own merges, closures and releases. Each card is a
@@ -566,20 +576,13 @@ release counts when that account created it and it was published inside
 the range. The release list is ordered by creation, so the walk stops 30
 days before the range begins, and a draft created earlier than that and
 published inside the range is not counted. A card reads partial only when a repository could not be read
-or a range holds more than 200 matches per repository, and a partial card
-shows no comparison.
-
-For Code Home, a confirmed repository access loss invalidates cached reads
-and frozen pages for that account and repository, even when it contributed
-only to a comparison. An older read still in flight cannot restore those
-records, and the initial view is refused the same way when the admitted
-Project or repository set itself changes while the read is gathered.
+or a range holds more than 200 matches per repository, and it says so when
+its read is partial, stale or unavailable.
 
 The choices are per device and travel inside the existing card
 order/visibility store: every card follows one shared timeframe, **This
-week** by default, reads the signed-in GitHub account by default, and up
-to four cards may be pinned to their own timeframe. No UI exposes these
-choices yet.
+week** by default, reads the signed-in GitHub account by default, and up to
+four cards may be pinned to their own timeframe.
 
 A timeframe resolves to a half-open
 `[start, end)` instant window plus an optional comparison window in the
@@ -596,6 +599,12 @@ preceding exact 24; **Total** runs unbounded to now with no comparison. A
 custom pair of strict `YYYY-MM-DD` dates covers both whole local days,
 refuses impossible or reversed dates, and compares the equally many civil
 days before it.
+
+For Code Home, a confirmed repository access loss invalidates cached reads
+and frozen pages for that account and repository, even when it contributed
+only to a comparison. An older read still in flight cannot restore those
+records, and the initial view is refused the same way when the admitted
+Project or repository set itself changes while the read is gathered.
 
 ## Needs you across surfaces
 

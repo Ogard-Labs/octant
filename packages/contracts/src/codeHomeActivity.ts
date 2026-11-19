@@ -111,9 +111,13 @@ export const ActivityWindow = Schema.Struct({
 })
   .annotations(strict)
   .pipe(
-    Schema.filter((window) => window.from === null || window.from < window.until, {
-      description: "an activity window whose start precedes its end",
-    }),
+    Schema.filter(
+      (window) => window.from === null || Date.parse(window.from) <= Date.parse(window.until),
+      {
+        description:
+          "an activity window whose start precedes or equals its end; equal bounds are a valid empty half-open window (a range starting at the current instant)",
+      },
+    ),
   );
 export type ActivityWindow = typeof ActivityWindow.Type;
 

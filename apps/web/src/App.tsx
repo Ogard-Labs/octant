@@ -5700,6 +5700,7 @@ function LaunchedShell(
       openAgentsCenter,
       openArchive,
       openArchivedThread,
+      openThreadRecord,
       openArtifactLibrary,
       openAutomationCenter,
       openRoutine,
@@ -5943,6 +5944,7 @@ function LaunchedShell(
     needsYouThreadProviders,
     needsYouAskClients,
     now: snoozeClockNow.getTime(),
+    onOpenExternal: rootLinkActions.openExternal,
     openRunningServiceLive,
     pendingRequestClient,
     remoteRunningServicesClient,
@@ -6632,6 +6634,27 @@ function LaunchedShell(
       undefined,
       projectId,
     );
+  }
+
+  // A record row names a thread that may sit outside live navigation (an
+  // activity record can outlast it): live navigation gets the select path,
+  // anything else reopens through the archive path.
+  function openThreadRecord(entry: ArchivedThreadEntry) {
+    const navigation =
+      entry.mode === "chat"
+        ? chatController.status === "ready"
+          ? chatController.navigation
+          : []
+        : entry.mode === "work"
+          ? workNavigation.navigation
+          : codeController.navigation;
+    if (navigation.some((candidate) => String(candidate.threadId) === entry.threadId)) {
+      if (entry.mode === "chat") selectChatThread(entry.threadId);
+      else if (entry.mode === "work") selectWorkThread(entry.threadId);
+      else selectCodeThread(entry.threadId);
+      return;
+    }
+    openArchivedThread(entry);
   }
 
   // The Project Overview sits below surfaces this file does not own, so the
