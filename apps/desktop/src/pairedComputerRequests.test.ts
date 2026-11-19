@@ -173,12 +173,19 @@ describe("a window's request to a paired computer", () => {
       expect(answer.status, JSON.stringify(change)).toBe("refused");
       expect(fetchFor).not.toHaveBeenCalled();
     }
-    for (const { method, path } of PAIRED_COMPUTER_ALLOWED_REQUESTS) {
+    for (const { method, path, requiredQuery } of PAIRED_COMPUTER_ALLOWED_REQUESTS) {
+      const filled = path.replaceAll(":id", "a1b2c3d4-0000-4000-8000-000000000001");
+      const query = new URLSearchParams(requiredQuery).toString();
       const { answer } = await ask({
         ...hello,
         method,
-        path: path === "/api/remote/hello" ? `${path}?clientNonce=abc` : path,
-        ...(method === "POST" ? { body: "{}" } : {}),
+        path:
+          path === "/api/remote/hello"
+            ? `${path}?clientNonce=abc`
+            : query === ""
+              ? filled
+              : `${filled}?${query}`,
+        ...(method === "GET" ? {} : { body: "{}" }),
       });
       expect(answer.status, `${method} ${path}`).toBe("answered");
     }
@@ -200,8 +207,73 @@ describe("a window's request to a paired computer", () => {
         "POST /api/code/local-servers/commands",
         "GET /api/todos",
         "POST /api/todos/commands",
+        "GET /api/code/bootstrap",
+        "GET /api/code/navigation",
+        "GET /api/code/threads/:id",
+        "GET /api/code/threads/:id/conversation",
+        "GET /api/code/threads/:id/conversation/window",
+        "GET /api/code/threads/:id/events",
+        "GET /api/code/threads/:id/operations/:id/events",
+        "POST /api/code/commands",
+        "PUT /api/code/evidence",
+        "GET /api/projects/bootstrap",
+        "GET /api/providers/bootstrap",
+        "GET /api/pending-requests",
       ],
     );
+  });
+
+  it("carries a Code thread's reads and commands to a paired computer", async () => {
+    const thread = "a1b2c3d4-0000-4000-8000-000000000001";
+    const operation = "a1b2c3d4-0000-4000-8000-000000000002";
+    for (const request of [
+      { method: "GET", path: "/api/code/bootstrap" },
+      { method: "GET", path: `/api/code/threads/${thread}` },
+      { method: "GET", path: `/api/code/threads/${thread}/conversation/window?limit=1` },
+      { method: "GET", path: `/api/code/threads/${thread}/events?afterSequence=4&wait=0` },
+      {
+        method: "GET",
+        path: `/api/code/threads/${thread}/operations/${operation}/events?afterCursor=0`,
+      },
+      { method: "GET", path: "/api/pending-requests" },
+      { method: "POST", path: "/api/code/commands", body: "{}" },
+    ]) {
+      const { answer } = await ask({ origin: ORIGIN, ...request });
+      expect(answer.status, `${request.method} ${request.path}`).toBe("answered");
+    }
+  });
+
+  it("refuses thread events that would wait, and an id segment that is not a UUID", async () => {
+    const thread = "a1b2c3d4-0000-4000-8000-000000000001";
+    for (const path of [
+      // Without wait=0 the host holds the read open past this channel's limit.
+      `/api/code/threads/${thread}/events?afterSequence=4`,
+      `/api/code/threads/${thread}/events?afterSequence=4&wait=1`,
+      "/api/code/threads/not-a-thread",
+      `/api/code/threads/${thread.toUpperCase()}`,
+      `/api/code/threads/${thread}/extra`,
+      "/api/code/threads/../bootstrap",
+    ]) {
+      const { answer, fetchFor } = await ask({ origin: ORIGIN, method: "GET", path });
+      expect(answer.status, path).toBe("refused");
+      expect(fetchFor).not.toHaveBeenCalled();
+    }
+  });
+
+  it("carries a thread's first prompt with its thread header, and PUT nowhere else", async () => {
+    const thread = "a1b2c3d4-0000-4000-8000-000000000001";
+    const { answer, sent } = await ask({
+      origin: ORIGIN,
+      method: "PUT",
+      path: "/api/code/evidence",
+      headers: { "content-type": "text/plain", "x-octant-code-thread-id": thread },
+      body: "Fix the failing test",
+    });
+    expect(answer.status).toBe("answered");
+    expect(sent.mock.calls[0]?.[1]?.headers).toMatchObject({ "x-octant-code-thread-id": thread });
+
+    const elsewhere = await ask({ origin: ORIGIN, method: "PUT", path: "/api/code/commands" });
+    expect(elsewhere.answer.status).toBe("refused");
   });
 
   it("refuses a header a signed request does not carry, a foreign cookie, and a body on GET", async () => {
