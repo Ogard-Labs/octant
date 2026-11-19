@@ -5,7 +5,7 @@ import {
   type TodoCommand,
   type TodoResult,
 } from "@octant/contracts/todos";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -95,6 +95,7 @@ describe("starting a thread from a to-do", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: /^To-dos/ }));
+    await act(() => vi.dynamicImportSettled());
     await user.click(await screen.findByRole("button", { name: "Start Draft the launch post" }));
     await user.click(await screen.findByRole("menuitem", { name: "Chat" }));
 
