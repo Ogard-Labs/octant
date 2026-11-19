@@ -767,6 +767,18 @@
 .zen-surface .zen-research__header {
   border-bottom-color: color-mix(in srgb, var(--oct-glass-stroke) 50%, transparent);
 }
+@media (prefers-reduced-transparency: no-preference) {
+  html[data-octant-native-host="true"]:where(
+      :not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+    )
+    .zen-surface
+    :is(.zen-research:not(.zen-research--collapsed), .zen-surface__empty) {
+    background: color-mix(in srgb, var(--octant-float) 96%, transparent);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
 /* Reduced transparency, increased contrast, or no backdrop blur: an opaque
    window with a plain edge, as every other Zen surface falls back. */
 @media (prefers-reduced-transparency: reduce) {
@@ -779,6 +791,10 @@
   }
 }
 
+html[data-octant-reduced-transparency="true"] .zen-surface .zen-surface__empty,
+html[data-octant-reduced-transparency="true"]
+  .zen-surface
+  .zen-research:not(.zen-research--collapsed),
 html[data-octant-increased-contrast="true"] .zen-surface .zen-el,
 html[data-octant-increased-contrast="true"]
   .zen-surface
