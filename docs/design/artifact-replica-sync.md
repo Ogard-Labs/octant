@@ -468,8 +468,8 @@ them in.
   another computer revises it, and a head already in its own history is not
   one; a single version from elsewhere that revises it is `ahead`. The
   host-wide library lists, for a local window or a paired device (maintainer
-  decision, 2026-11-12; not built yet: today for a local window only, and a
-  paired device sees none), each synced artifact
+  decision, 2026-11-12; server policy admits a person-paired device and refuses
+  hub-introduced devices; paired UI follow-up remains), each synced artifact
   this host holds no Canvas for, under the Project name it was filed under
   and the name of the computer that wrote the version shown, with its
   standing; a deleted one shows the version its tombstone named and the

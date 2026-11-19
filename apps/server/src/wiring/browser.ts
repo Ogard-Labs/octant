@@ -247,6 +247,14 @@ export function wireBrowser(deps: BrowserDependencies) {
         }
       }
     };
+    // Approvals and session, upload, and download permissions are reviewed by
+    // the host's own person: at a live window, or on a device that person
+    // paired, whose record then names the device.
+    const hostPersonScopes = createHostPersonScopes({
+      localWindows: () => windowAuthorityStore.listWindowIds(),
+      devices: () => readDeviceRegistrations(persistence.connection),
+      approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
+    });
     const browserToolApprovalService = new BrowserToolApprovalService({
       uuid: randomUUID,
       now: processAuthorityTime,
@@ -277,7 +285,7 @@ export function wireBrowser(deps: BrowserDependencies) {
           transfer,
         ),
       isHostScope: isRoutineHostScope,
-      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      isLocalWindow: hostPersonScopes.actsAsHostPerson,
       extensionsEnabledIn: (profile) => extensionFoldersFor(profile).length,
       profileLabel: async (profile) => {
         if (profile.kind !== "account") return undefined;
@@ -396,14 +404,6 @@ export function wireBrowser(deps: BrowserDependencies) {
           approvedWorkingFolderRoot(project, folderId),
       };
     };
-    // Session, upload and download permissions are reviewed by the host's own
-    // person: at a live window, or on a device that person paired, whose
-    // record then names the device.
-    const hostPersonScopes = createHostPersonScopes({
-      localWindows: () => windowAuthorityStore.listWindowIds(),
-      devices: () => readDeviceRegistrations(persistence.connection),
-      approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
-    });
     const personHoldsProject = createPersonProjectReach<ProjectId, "work" | "code">({
       windowHoldsProject: (scopeId, projectId, mode) =>
         windowHoldsProject(scopeId, projectId, mode),

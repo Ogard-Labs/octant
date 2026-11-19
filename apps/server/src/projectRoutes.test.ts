@@ -416,6 +416,21 @@ describe("Project routes", () => {
       expect.objectContaining({ kind: "change-code-project-own-toolchain" }),
       localUser,
     );
+
+    const paired = new Request("http://127.0.0.1/api/projects/commands", {
+      method: "POST",
+      headers,
+      body,
+    });
+    bindPrincipalRouteContext(paired, {
+      principal: {
+        kind: "remote-device",
+        deviceId: "90000000-0000-4000-8000-000000000001",
+        admittedBy: "host-person",
+      } as never,
+      scopeId: windowId,
+    });
+    expect((await route(paired))?.status).toBe(200);
   });
   it.each([
     {
@@ -432,7 +447,7 @@ describe("Project routes", () => {
       },
     },
   ] as const)(
-    "refuses a paired device turning on $kind while a local window keeps the route",
+    "admits a person-paired device and local window on $kind while refusing hub-introduced and restricted devices",
     async (setting) => {
       const executeProject = vi.fn(() => ({ kind: "code-project-agent-merge-changed" }));
       const route = routeFixture({ executeProject });
@@ -441,17 +456,37 @@ describe("Project routes", () => {
         "x-octant-window-capability": capability,
       };
       const body = JSON.stringify({ ...setting, projectId, expectedVersion: 1 });
-      const remote = new Request("http://127.0.0.1/api/projects/commands", {
+      for (const admittedBy of [undefined, "hub-roster"] as const) {
+        const remote = new Request("http://127.0.0.1/api/projects/commands", {
+          method: "POST",
+          headers,
+          body,
+        });
+        bindPrincipalRouteContext(remote, {
+          principal: {
+            kind: "remote-device",
+            ...(admittedBy === undefined ? {} : { admittedBy }),
+          } as never,
+          scopeId: windowId,
+        });
+        expect((await route(remote))?.status).toBe(403);
+      }
+      expect(executeProject).not.toHaveBeenCalled();
+
+      const paired = new Request("http://127.0.0.1/api/projects/commands", {
         method: "POST",
         headers,
         body,
       });
-      bindPrincipalRouteContext(remote, {
-        principal: { kind: "remote-device" } as never,
+      bindPrincipalRouteContext(paired, {
+        principal: {
+          kind: "remote-device",
+          deviceId: "90000000-0000-4000-8000-000000000001",
+          admittedBy: "host-person",
+        } as never,
         scopeId: windowId,
       });
-      expect((await route(remote))?.status).toBe(403);
-      expect(executeProject).not.toHaveBeenCalled();
+      expect((await route(paired))?.status).toBe(200);
 
       const local = new Request("http://127.0.0.1/api/projects/commands", {
         method: "POST",

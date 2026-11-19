@@ -384,8 +384,8 @@ the branch and its commits stay. A refusal (uncommitted changes, or a turn
 still running in the thread) is said in the
 section's feedback line and the row stays. With none kept it says so in one
 line; a paired device uses the section as a local window does (maintainer
-decision, 2026-11-12; not built yet: today a paired device sees the section
-as managed on the host machine)
+decision, 2026-11-12; server policy admits a person-paired device and refuses
+hub-introduced devices; paired UI follow-up remains)
 ([rules](../architecture.md#modes-chat-work-and-code)).
 **Worktrees on this computer** follows it: a first row says when the host last
 scanned ("Not scanned since Octant started" until then) and how many it found,

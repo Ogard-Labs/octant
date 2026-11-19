@@ -544,11 +544,13 @@ describe("desktop lease policy", () => {
     expect(desktopLeaseSettingsChangeAllowed("system", true)).toBe(false);
   });
 
-  it("lets only a person at a local window change the cap, never an agent or a paired device", () => {
+  it("lets a person at a local window or on a device they paired change the cap, never an agent or another device", () => {
     expect(desktopSpendCapChangeAllowed("local-user")).toBe(true);
-    expect(desktopSpendCapChangeAllowed("agent")).toBe(false);
+    expect(desktopSpendCapChangeAllowed("remote-device", true)).toBe(true);
+    expect(desktopSpendCapChangeAllowed("remote-device", false)).toBe(false);
     expect(desktopSpendCapChangeAllowed("remote-device")).toBe(false);
-    expect(desktopSpendCapChangeAllowed("system")).toBe(false);
+    expect(desktopSpendCapChangeAllowed("agent", true)).toBe(false);
+    expect(desktopSpendCapChangeAllowed("system", true)).toBe(false);
   });
 
   it("keeps a billed placement with a declared stop without a provider expiry, and no other billed one", () => {

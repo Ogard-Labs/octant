@@ -15151,29 +15151,48 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   use first. Built: stopping computer use, which such a device does for every
   session on the host
   ([Computer use plugin](#extensions-and-skills)); the Project switches for
-  agents writing Project memory, pushing to the default branch and commenting
-  on pull requests; a thread's wake-ups
-  ([wake-ups](#modes-chat-work-and-code)); Safe networks and Network limits;
-  local work resource limits; growing an MCP grant by answering any prompt
-  whose thread still stands in its Project; a Project terminal, the device's
-  own shell, ended when the device is revoked or goes quiet; a Private
-  Project browser page; making and changing agent grants, over the forwarded
-  `/api/agent-grants/commands` route and the paired browser's Agent access
-  settings; approving or declining a coordinator's proposed worker from the
-  paired browser and phone, as the coordinator asked for it; Canvas HTML
-  import, whose request names its Project in its workspace scope; and Full
-  access and extension install, built earlier. Each is journaled with the
-  device as the actor. The paired browser offers the Project terminal and
+  agents writing Project memory, pushing to the default branch, commenting
+  on pull requests, Project own toolchain, and Project image generation; a
+  thread's wake-ups ([wake-ups](#modes-chat-work-and-code)); Safe networks and
+  Network limits; local work resource limits; growing an MCP grant by
+  answering any prompt whose thread still stands in its Project; a Project
+  terminal, the device's own shell, ended when the device is revoked or goes
+  quiet; a Private Project browser page; making and changing agent grants,
+  over the forwarded `/api/agent-grants/commands` route and the paired
+  browser's Agent access settings; approving or declining a coordinator's
+  proposed worker from the paired browser and phone, as the coordinator asked
+  for it; Canvas HTML import, whose request names its Project in its workspace
+  scope; Full access and extension install; and server policy parity across
+  Settings › Permissions › Servers (including displaying an `octant-key`
+  public key, journaled as that device), Settings › Code › Worktrees and Xcode
+  cleanup, local leftover server confirmation and stop, billed desktop spend
+  cap, recipe machine listing, and disposable desktop preview grants, routine
+  notification and push-gateway settings, Canvas Allow network, answers,
+  boards, comments, design-system switches, refresh/action/share/export/public-link
+  controls, and unconfirmed export notice dismissal, Artifact library/tags/Claude
+  page copy/mirror/synced routes, thread export with captures and tool-call
+  records, Preview text editing, Browser task-profile, profile list/account-create/clear,
+  extensions, saved flows, captures/steps, download-save, take-over/hand-back,
+  and signed-in page snapshots, Provider OAuth/Cloud IAM/tooling/integration
+  authentication routes, Code and Work live tasks and native session adoption,
+  Project memory proposals, and replica store settings and membership
+  (maintainer decision, 2026-11-19). Each is journaled with the device as the
+  actor. Native-only hardware acts stay local-window-only (`/api/desktop/*`,
+  `/api/secret-stores/*`, Keychain browser cookie import,
+  `/api/browser/credential-use`, Finder/external-editor Preview handoff,
+  host-speaker read-aloud, native file-picker receipts, and desktop Browser
+  pane mouse input). The paired browser offers the Project terminal and
   Private page under **Project tools** in Work and Code, as a list of the
   Project's own tools, and **Import HTML…** alone in a Chat thread's Canvas
-  tools. The phone offers the same three from a thread's Views and panes
-  (the terminal as plain lines of output and a line to run), and answers
+  tools; paired web/phone UI screens for the remaining newly admitted surfaces
+  are UI follow-ups. The phone offers the same three from a thread's Views and
+  panes (the terminal as plain lines of output and a line to run), and answers
   every Work request a window can: the Plan block, a provider's tool
   approval, its questions and questionnaires, each with the version read and
   a tool or plan approval behind the phone's own confirmation.
   Designed, not built (maintainer request, 2026-11-18): the Browser's
-  Take over and Hand back, `sign-in`, profile pages and saved flows, through
-  a one-page lease carrying a closed input stream and person-only frames
+  dedicated streaming lease and UI for Take over, Hand back, `sign-in`,
+  profile pages and saved flows
   ([A paired device holds the page](design/browser-agent-tool.md#a-paired-device-holds-the-page),
   [what a device sees of a signed-in page](design/browser-profiles.md#what-a-paired-device-sees-of-a-signed-in-page));
   finishing a connector sign-in, by device authorization where the issuer
@@ -15185,8 +15204,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   [Server Projects: Paired devices](design/server-projects.md#paired-devices)).
   Each is listed in
   [Decisions and requirements](design/decisions.md#paired-devices-act-as-the-person).
-  Each owning section keeps its own "not built yet" line until it is
-  built. A device the host knows only through the hub's roster is unchanged.
+  Each owning section keeps its own UI or protocol follow-up note until
+  finished. A device the host knows only through the hub's roster is unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
   2026-11-16; partly built: Ollama off loopback, Bedrock's AWS profile and

@@ -1966,17 +1966,21 @@ export function wireWork(deps: WorkDependencies) {
     const workSessionRoutes = createWorkSessionRouteHandler({
       windowAuthorityStore,
       canOpenThread: (windowId, threadId) => {
-        if (isPairedDeviceScope(windowId)) return false;
+        const device = isPairedDeviceScope(windowId);
+        if (device && isRestrictedDeviceScope(windowId)) return false;
         try {
           const thread = workThreadProjection.read(threadId);
-          return thread !== undefined && windowHoldsProject(windowId, thread.projectId, "work");
+          if (thread === undefined) return false;
+          return device
+            ? persistence.readProject(thread.projectId)?.type === "work"
+            : windowHoldsProject(windowId, thread.projectId, "work");
         } catch {
           return false;
         }
       },
       liveTasks: (threadId) => outlivingWorkSessions.liveTasks(workSessionKey(threadId)),
       stopLiveTasks: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
-      isPerson: (windowId) => !isRoutineHostScope(windowId),
+      isPerson: (windowId) => !isRoutineHostScope(windowId) && !isRestrictedDeviceScope(windowId),
       nativeSessions: (windowId, threadId) => workTurnService.nativeSessions(windowId, threadId),
       adoptNativeSession: (windowId, threadId, nativeSessionId) =>
         workTurnService.adoptNativeSession(windowId, threadId, nativeSessionId),

@@ -146,6 +146,14 @@ describe("provider tooling routes", () => {
       expect((await handler(remote))?.status, path).toBe(401);
     }
     expect(runs).toEqual([]);
+
+    const paired = post("list", { providerInstanceId: ACCOUNT });
+    bindPrincipalRouteContext(paired, {
+      principal: { kind: "remote-device", admittedBy: "host-person" } as never,
+      scopeId: windowId,
+    });
+    expect((await handler(paired))?.status).toBe(200);
+    expect(runs.length).toBeGreaterThan(0);
   });
 
   it("refuses a malformed, oversized, or non-loopback request", async () => {

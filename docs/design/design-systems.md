@@ -121,8 +121,9 @@ this sense too.
   redrawn in it, while a design in the workspace theme or its own palette is
   left as made. Switching to none leaves brand designs their brand. The switch
   shows in history, so switching back undoes it. Both routes answer a paired
-  device as they do a local window (maintainer decision, 2026-11-12; not built
-  yet: today neither is admitted for a paired device).
+  device as they do a local window (maintainer decision, 2026-11-12; server
+  policy admits a person-paired device and refuses hub-introduced devices;
+  paired UI follow-up remains).
 - **Precedence.** A design system with tokens takes the place of the
   Project's brand kit: code and documents then share one palette. A Project
   whose design system carries no tokens, that has none, or that turned them

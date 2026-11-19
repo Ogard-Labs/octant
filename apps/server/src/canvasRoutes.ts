@@ -497,10 +497,10 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         return jsonResponse(decodePublishedSnapshotRunOutcome(outcome), 200, origin);
       }
 
-      // The design systems a Canvas may switch to: its own Project's. Like
-      // the switch itself, only the host window reaches this (the remote
-      // classifier names neither), and the Project is the Canvas's, never one
-      // the window names.
+      // The design systems a Canvas may switch to: its own Project's. The host
+      // window and a person-paired device reach this; a hub-introduced or
+      // restricted device does not, and the Project is the Canvas's, never one
+      // the caller names.
       if (route === "design-systems" && request.method === "GET") {
         if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
           return failureResponse("Canvas design systems request is invalid.", 400, origin);
@@ -511,8 +511,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         } catch {
           return failureResponse("Canvas ID is invalid.", 400, origin);
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           canvasId,
         );
@@ -598,8 +599,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             origin,
           );
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           canvasId,
         );
@@ -677,8 +679,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         } catch {
           return malformed();
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           canvasId,
         );
@@ -784,8 +787,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             origin,
           );
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           canvasId,
         );
@@ -840,8 +844,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             reason: "Canvas answers are unavailable on this host.",
           });
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           canvasId,
         );
@@ -889,11 +894,12 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         if (answers === undefined) {
           return denied("unavailable", "Canvas answers are unavailable on this host.");
         }
-        if (principal.kind === "remote-device") {
+        if (!principalActsAsHostPerson(principal)) {
           return denied("unauthorized", "Answers are saved from a window on the host.");
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           canvasId,
         );
@@ -944,8 +950,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         if (comments === undefined) {
           return denied("unavailable", "Canvas comments are unavailable on this host.");
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           canvasId,
         );
@@ -1001,8 +1008,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             origin,
           );
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           canvasId,
         );
@@ -1072,8 +1080,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             origin,
           );
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           canvasId,
         );
@@ -1273,8 +1282,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         } catch {
           return failureResponse("Canvas ID is invalid.", 400, origin);
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           canvasId,
         );
@@ -1341,8 +1351,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             origin,
           );
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           canvasId,
         );
@@ -1472,8 +1483,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         } catch {
           return failureResponse("Canvas ID is invalid.", 400, origin);
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           canvasId,
         );
@@ -1534,15 +1546,20 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           } catch {
             return jsonResponse(malformed, 200, origin);
           }
-          const context = await resolveAuthorizedContext(
+          const context = await resolvePersonCanvasContext(
             dependencies,
+            principal,
             authenticatedWindowId,
             requestBody.canvasId,
           );
           if (context.kind === "ok") await dependencies.refreshCanvasExportTargets?.();
           return jsonResponse(
             decodeCanvasExportPrepareResult(
-              await exportService.prepare(requestBody, context.kind === "ok", principal.kind),
+              await exportService.prepare(
+                requestBody,
+                context.kind === "ok",
+                principalActsAsHostPerson(principal) ? "local-window" : "remote-device",
+              ),
             ),
             200,
             origin,
@@ -1554,8 +1571,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         } catch {
           return jsonResponse(malformed, 200, origin);
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           requestBody.canvasId,
         );
@@ -1608,8 +1626,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         } catch {
           return jsonResponse(malformed, 200, origin);
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           requestBody.canvasId,
         );
@@ -1619,9 +1638,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               canvasId: requestBody.canvasId,
               exportId: requestBody.exportId,
               permitted: context.kind === "ok",
-              // A paired device's request is journaled as that device, which
-              // the service refuses: only a local window may dismiss.
               actor: canvasExportEventActor(principal, OCTANT_LOCAL_ACTOR_ID),
+              personPairedDevice:
+                principal.kind === "remote-device" && principalActsAsHostPerson(principal),
             }),
           ),
           200,
@@ -1726,8 +1745,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           } catch {
             return refusedRevoke("malformed", "Public link revoke request is malformed.");
           }
-          const context = await resolveAuthorizedContext(
+          const context = await resolvePersonCanvasContext(
             dependencies,
+            principal,
             authenticatedWindowId,
             revokeRequest.canvasId,
           );
@@ -1759,8 +1779,12 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           } catch {
             return failureResponse("Canvas ID is invalid.", 400, origin);
           }
-          const context = await resolveAuthorizedContext(
+          if (!principalActsAsHostPerson(principal)) {
+            return failureResponse("Canvas network is not available for this canvas.", 403, origin);
+          }
+          const context = await resolvePersonCanvasContext(
             dependencies,
+            principal,
             authenticatedWindowId,
             canvasId,
           );
@@ -1792,10 +1816,10 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             200,
             origin,
           );
-        // Letting a Canvas's pages send its content to the internet is a
-        // person's choice at this machine. A paired device and an agent grant
-        // are other principals, and no agent tool reaches this route.
-        if (principal.kind !== "local-window") {
+        // Letting a Canvas's pages reach the internet is the host's own
+        // person's choice, at a local window or on a device they paired. A
+        // hub-introduced device and an agent grant stay refused.
+        if (!principalActsAsHostPerson(principal)) {
           return refusedNetwork(
             "local-window-required",
             "Only a person at this machine can change a Canvas's network.",
@@ -1814,8 +1838,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         if (access === undefined) {
           return refusedNetwork("unavailable", "This host does not offer a Canvas network.");
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           command.canvasId,
         );
@@ -1849,12 +1874,10 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             { kind: "canvas-network-page-renewal-refused" }
           >["reason"],
         ) => answerRenewal({ kind: "canvas-network-page-renewal-refused", reason });
-        // A page's token is kept alive only by the window that ran the page,
-        // which proves itself as a window and names the page by the ticket it
-        // ran it with. Neither a paired device (whose pages hold no token)
-        // nor the token itself renews anything, so a token that leaked from a
-        // page dies with that page.
-        if (principal.kind !== "local-window") return refusedRenewal("local-window-required");
+        // A page's token is kept alive only by the host's own person (at a
+        // local window or on a device they paired), naming the page by its
+        // ticket; hub-introduced and restricted devices are refused.
+        if (!principalActsAsHostPerson(principal)) return refusedRenewal("local-window-required");
         const body = await readJson(request);
         let command;
         try {
@@ -1868,8 +1891,14 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           access === undefined ||
           pageCanvasId === undefined ||
           dependencies.canvasProjection.getById(pageCanvasId) === undefined ||
-          (await resolveAuthorizedContext(dependencies, authenticatedWindowId, pageCanvasId))
-            .kind !== "ok" ||
+          (
+            await resolvePersonCanvasContext(
+              dependencies,
+              principal,
+              authenticatedWindowId,
+              pageCanvasId,
+            )
+          ).kind !== "ok" ||
           access.renewPage(command.ticket) === undefined
         ) {
           return refusedRenewal("not-live");
@@ -1906,8 +1935,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           } catch {
             return failureResponse("Canvas ID is invalid.", 400, origin);
           }
-          const context = await resolveAuthorizedContext(
+          const context = await resolvePersonCanvasContext(
             dependencies,
+            principal,
             authenticatedWindowId,
             canvasId,
           );
@@ -1965,8 +1995,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         } catch {
           return refusedFolder("malformed", "Canvas export folder request is malformed.");
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolvePersonCanvasContext(
           dependencies,
+          principal,
           authenticatedWindowId,
           command.canvasId,
         );
@@ -2298,6 +2329,27 @@ async function resolveAuthorizedContext(
       lifecycle: project.lifecycle,
     },
   };
+}
+
+/**
+ * Authorize a Canvas action for the host's own person: a local window uses its
+ * workspace context; a device the host's own person paired has no workspace on
+ * the host, so when `resolveAuthorizedContext` has no workspace it falls back
+ * to the Canvas's thread read authority. Hub-introduced and restricted devices
+ * do not fall back and stay refused.
+ */
+async function resolvePersonCanvasContext(
+  dependencies: CanvasRouteDependencies,
+  principal: ClientPrincipal,
+  windowId: WindowId,
+  canvasId: ReturnType<typeof decodeCanvasId>,
+): Promise<AuthorizedCanvasContext> {
+  const local = await resolveAuthorizedContext(dependencies, windowId, canvasId);
+  if (local.kind === "ok") return local;
+  if (principal.kind === "remote-device" && principalActsAsHostPerson(principal)) {
+    return resolvePairedReadContext(dependencies, windowId, canvasId);
+  }
+  return local;
 }
 
 /**

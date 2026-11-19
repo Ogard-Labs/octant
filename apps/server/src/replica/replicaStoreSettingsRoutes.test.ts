@@ -124,15 +124,43 @@ describe("replica store settings routes", () => {
     expect(calls).toEqual([]);
   });
 
-  it("refuses a paired remote device even though the transport accepted it", async () => {
+  it("admits a person-paired device for replica store settings while refusing hub-introduced and restricted devices", async () => {
     const { route, calls } = handler();
-    const request = command({
+    for (const admittedBy of [undefined, "hub-roster"] as const) {
+      const request = command({
+        schemaVersion: 1,
+        kind: "set-sync",
+        syncOn: true,
+        expectedVersion: 0,
+      });
+      bindPrincipalRouteContext(request, {
+        principal: {
+          kind: "remote-device",
+          deviceId: Schema.decodeUnknownSync(DeviceId)("00000000-0000-4000-8000-00000000c001"),
+          hostId: Schema.decodeUnknownSync(StableHostId)("00000000-0000-4000-8000-00000000c002"),
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
+            "00000000-0000-4000-8000-00000000c003",
+          ),
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        },
+        scopeId: decodeWindowId("00000000-0000-4000-8000-00000000c001"),
+      });
+      const response = await route(request);
+      expect(response?.status).toBe(403);
+    }
+    expect(calls).toEqual([]);
+
+    const paired = command({
       schemaVersion: 1,
       kind: "set-sync",
       syncOn: true,
       expectedVersion: 0,
     });
-    bindPrincipalRouteContext(request, {
+    bindPrincipalRouteContext(paired, {
       principal: {
         kind: "remote-device",
         deviceId: Schema.decodeUnknownSync(DeviceId)("00000000-0000-4000-8000-00000000c001"),
@@ -144,12 +172,13 @@ describe("replica store settings routes", () => {
         sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
           "00000000-0000-4000-8000-00000000c003",
         ),
+        admittedBy: "host-person",
       },
       scopeId: decodeWindowId("00000000-0000-4000-8000-00000000c001"),
     });
-    const response = await route(request);
-    expect(response?.status).toBe(403);
-    expect(calls).toEqual([]);
+    const response = await route(paired);
+    expect(response?.status).toBe(200);
+    expect(calls).toEqual([{ method: "setSync", input: { syncOn: true, expectedVersion: 0 } }]);
   });
 
   it("refuses a read without a window capability", async () => {

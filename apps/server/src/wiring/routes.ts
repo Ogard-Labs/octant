@@ -159,7 +159,13 @@ export type RoutesDependencies = {
     | "threadSearchRoutes"
     | "workThreadRoutes"
   > &
-  Pick<ReplicaWiring, "replicaSyncStatusRoutes" | "syncedArtifactRoutes"> &
+  Pick<
+    ReplicaWiring,
+    | "replicaMembershipRoutes"
+    | "replicaStoreSettingsRoutes"
+    | "replicaSyncStatusRoutes"
+    | "syncedArtifactRoutes"
+  > &
   Pick<
     AuthorityWiring,
     | "personMemoryRoutes"
@@ -248,6 +254,8 @@ export function wireRoutes(deps: RoutesDependencies) {
     providerRoutes,
     providerUsageLimitsRoutes,
     remoteServerGrantLocalRoutes,
+    replicaMembershipRoutes,
+    replicaStoreSettingsRoutes,
     replicaSyncStatusRoutes,
     scaffoldRoutes,
     replyDetailRoutes,
@@ -305,6 +313,8 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await nativeBrowserPresentationRoutes(request)) ??
     (await hostResourceRoutes(request)) ??
     (await conversationInputRoutes(request)) ??
+    (await replicaStoreSettingsRoutes(request)) ??
+    (await replicaMembershipRoutes(request)) ??
     (await replicaSyncStatusRoutes(request)) ??
     (await projectBindingRoutes(request)) ??
     (await launchSessionRoutes(request)) ??

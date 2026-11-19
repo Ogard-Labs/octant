@@ -105,19 +105,25 @@ export const ShieldServer = Schema.Struct({
 }).annotations(strict);
 export type ShieldServer = typeof ShieldServer.Type;
 
-/** Only a person at a local window changes the registry. */
-const localWindow = Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict);
+/**
+ * Only the host's own person changes the registry: at a local window, or on a
+ * device that person paired, whose id the event's actor names.
+ */
+const ShieldServerPerson = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("person-paired-device") }).annotations(strict),
+);
 
 /** One server registered or changed, as a whole record that replaces the one before. */
 export const ShieldServerSetPayload = Schema.Struct({
   server: ShieldServer,
-  principal: localWindow,
+  principal: ShieldServerPerson,
 }).annotations(strict);
 export type ShieldServerSetPayload = typeof ShieldServerSetPayload.Type;
 
 export const ShieldServerRemovedPayload = Schema.Struct({
   serverId: AggregateId,
-  principal: localWindow,
+  principal: ShieldServerPerson,
 }).annotations(strict);
 export type ShieldServerRemovedPayload = typeof ShieldServerRemovedPayload.Type;
 
@@ -128,14 +134,14 @@ export type ShieldServerRemovedPayload = typeof ShieldServerRemovedPayload.Type;
 export const ShieldProjectServersSetPayload = Schema.Struct({
   projectId: AggregateId,
   servers: Schema.Array(ShieldServer).pipe(Schema.maxItems(MAX_SHIELD_SERVERS)),
-  principal: localWindow,
+  principal: ShieldServerPerson,
 }).annotations(strict);
 export type ShieldProjectServersSetPayload = typeof ShieldProjectServersSetPayload.Type;
 
 /** A Project goes back to the account list. */
 export const ShieldProjectServersClearedPayload = Schema.Struct({
   projectId: AggregateId,
-  principal: localWindow,
+  principal: ShieldServerPerson,
 }).annotations(strict);
 export type ShieldProjectServersClearedPayload = typeof ShieldProjectServersClearedPayload.Type;
 

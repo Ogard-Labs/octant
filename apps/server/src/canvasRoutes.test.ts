@@ -3982,4 +3982,84 @@ describe("canvas network routes", () => {
     );
     expect(page.headers.get("content-security-policy")).toBe(BASE_POLICY);
   });
+
+  it("lets a person-paired device without a local workspace read and toggle Canvas network access while refusing hub-introduced devices", async () => {
+    const threadReadAuthority = createThreadReadAuthority({
+      chat: (id) => {
+        if (String(id) !== threadId) throw new Error("Chat thread was not found.");
+        return { projectId };
+      },
+      work: async () => undefined,
+      code: async () => undefined,
+    });
+    const { route } = networkRoute({
+      threadReadAuthority,
+      activeContextResolver: async (readerId) =>
+        String(readerId) === String(windowId) ? { mode: "chat", projectId } : undefined,
+    });
+    const bindAs = (request: Request, admittedBy: "host-person" | "hub-roster") => {
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "17171717-1717-4171-8171-171717171717" as never,
+          admittedBy,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return request;
+    };
+
+    const blockedRead = bindAs(
+      new Request(`http://127.0.0.1/api/canvas/network-access?canvasId=${String(canvasId)}`),
+      "hub-roster",
+    );
+    expect((await answer(route, blockedRead)).status).toBe(403);
+
+    const blockedPost = bindAs(
+      new Request("http://127.0.0.1/api/canvas/network-access", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          kind: "set-canvas-network-access",
+          canvasId: String(canvasId),
+          allowed: true,
+        }),
+      }),
+      "hub-roster",
+    );
+    expect(await (await answer(route, blockedPost)).json()).toMatchObject({
+      kind: "canvas-network-access-refused",
+      reason: "local-window-required",
+    });
+
+    const pairedRead = bindAs(
+      new Request(`http://127.0.0.1/api/canvas/network-access?canvasId=${String(canvasId)}`),
+      "host-person",
+    );
+    expect((await answer(route, pairedRead)).status).toBe(200);
+
+    const pairedAllow = bindAs(
+      new Request("http://127.0.0.1/api/canvas/network-access", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          kind: "set-canvas-network-access",
+          canvasId: String(canvasId),
+          allowed: true,
+        }),
+      }),
+      "host-person",
+    );
+    expect(await (await answer(route, pairedAllow)).json()).toMatchObject({
+      kind: "canvas-network-access",
+      allowed: true,
+    });
+  });
 });

@@ -577,9 +577,14 @@ describe("browser automation routes", () => {
       expect((await handler(pairedRequest(kind, "host-person")))?.status).toBe(200);
     }
     expect(service.act).toHaveBeenCalledTimes(3);
-    // A paired device's navigation is never marked as the person's own
-    // browsing: it could not act on a page that followed a redirect.
-    expect(service.act).not.toHaveBeenCalledWith(expect.objectContaining({ startedBy: "person" }));
+    // A person-paired device's navigation is the person's own browsing, as a
+    // local window's is; a hub-introduced or restricted device is refused above.
+    expect(service.act).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ kind: "navigate" }),
+        startedBy: "person",
+      }),
+    );
   });
 
   it("marks a navigation from a window of this computer as the person's, and no other action", async () => {
@@ -1125,7 +1130,7 @@ describe("browser automation routes", () => {
     });
     await withProjects(person);
     expect(projectBrowsers.execute).toHaveBeenLastCalledWith(windowId, "local-window", command);
-    // A profile page, with the person's sign-ins, stays at a window.
+    // A device the host's own person paired opens a profile page as a window does.
     const profiled = post({ ...command, profile: "personal" });
     bindPrincipalRouteContext(profiled, {
       principal: createRemoteDevicePrincipal({
@@ -1140,9 +1145,33 @@ describe("browser automation routes", () => {
       }),
       scopeId: windowId,
     });
-    const refusedProfile = await withProjects(profiled);
-    expect(await refusedProfile?.json()).toMatchObject({ reason: "profile-unavailable" });
-    expect(projectBrowsers.execute).toHaveBeenCalledTimes(3);
+    await withProjects(profiled);
+    expect(projectBrowsers.execute).toHaveBeenLastCalledWith(windowId, "local-window", {
+      ...command,
+      profile: "personal",
+    });
+    expect(projectBrowsers.execute).toHaveBeenCalledTimes(4);
+
+    // A hub-introduced device stays held to the remote-device caller.
+    const hubProfiled = post({ ...command, profile: "personal" });
+    bindPrincipalRouteContext(hubProfiled, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: "90000000-0000-4000-8000-000000000002" as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "a1000000-0000-4000-8000-000000000004" as never,
+        admittedBy: "hub-roster",
+      }),
+      scopeId: windowId,
+    });
+    await withProjects(hubProfiled);
+    expect(projectBrowsers.execute).toHaveBeenLastCalledWith(windowId, "remote-device", {
+      ...command,
+      profile: "personal",
+    });
 
     const without = await handler(post(command));
     expect(without?.status).toBe(503);
@@ -1244,6 +1273,61 @@ describe("browser automation routes", () => {
         actorId: pairedDeviceId,
         deviceId: pairedDeviceId,
       });
+
+      const personPaired = new Request("http://127.0.0.1/api/browser/profiles", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(clear),
+      });
+      bindPrincipalRouteContext(personPaired, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: pairedDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000009" as never,
+          admittedBy: "host-person",
+        }),
+        scopeId: windowId,
+      });
+      expect((await withProfiles(personPaired))?.status).toBe(200);
+      expect(profiles.execute).toHaveBeenLastCalledWith("person-paired-device", clear, {
+        kind: "remote-device",
+        actorId: pairedDeviceId,
+        deviceId: pairedDeviceId,
+      });
+
+      // Credential-use remains local-window-only even for a person-paired device.
+      const credUse = new Request("http://127.0.0.1/api/browser/credential-use", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "list" }),
+      });
+      bindPrincipalRouteContext(credUse, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: pairedDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000010" as never,
+          admittedBy: "host-person",
+        }),
+        scopeId: windowId,
+      });
+      const withCredentials = createBrowserAutomationRouteHandler({
+        service: service as any,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        credentialUse: { execute: vi.fn() } as never,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      const credResponse = await withCredentials(credUse);
+      expect(credResponse?.status).toBe(403);
+      expect(await credResponse?.json()).toMatchObject({ category: "unauthorized" });
       // A profile cannot be named by a caller that decides its own scope or store path.
       expect(
         (await withProfiles(post("profiles", { ...clear, partition: "persist:other" })))?.status,

@@ -5,6 +5,7 @@ import {
   type AutomationNotificationDeliveryStatus,
   type AutomationNotificationPreferences,
 } from "@octant/contracts";
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -56,7 +57,7 @@ function authorizeRequest(
   const bound = readPrincipalRouteContext(request);
   if (bound !== undefined) {
     return {
-      kind: bound.principal.kind === "remote-device" ? "remote-device" : "local-window",
+      kind: principalActsAsHostPerson(bound.principal) ? "local-window" : "remote-device",
     };
   }
   try {

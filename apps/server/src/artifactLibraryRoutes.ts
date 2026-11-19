@@ -17,7 +17,7 @@ import {
 } from "@octant/contracts";
 import type { ArtifactLibraryService } from "./canvas/artifactLibraryService";
 import type { CanvasTagService } from "./canvas/canvasTagService";
-import type { ClientPrincipal } from "./clientPrincipal";
+import { principalActsAsHostPerson, type ClientPrincipal } from "./clientPrincipal";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -94,17 +94,19 @@ export function createArtifactLibraryRouteHandler(deps: ArtifactLibraryRouteDepe
     // that arrived at the loopback listener on its own is the local window,
     // proved by its capability. Neither identity can come from the body.
     let principal: ClientPrincipal;
+    let scopeId: WindowId;
     try {
       const bound = readPrincipalRouteContext(request);
       if (bound === undefined) {
-        const windowId = authenticateRouteWindowId({
+        scopeId = authenticateRouteWindowId({
           request,
           store: deps.windowAuthorityStore,
           now: now(),
         });
-        principal = { kind: "local-window", windowId, capabilityGeneration: 0 };
+        principal = { kind: "local-window", windowId: scopeId, capabilityGeneration: 0 };
       } else {
         principal = bound.principal;
+        scopeId = bound.scopeId;
       }
     } catch (error) {
       return error instanceof WindowAuthorityError
@@ -146,11 +148,11 @@ export function createArtifactLibraryRouteHandler(deps: ArtifactLibraryRouteDepe
       } catch {
         return failure("Claude page snapshot request is invalid.", 400, origin);
       }
-      if (principal.kind !== "local-window" || deps.findPublishedSnapshot === undefined) {
+      if (!principalActsAsHostPerson(principal) || deps.findPublishedSnapshot === undefined) {
         return json(decodeArtifactLibraryClaudeSnapshotResult({ kind: "unavailable" }), origin);
       }
       const snapshot = await deps
-        .findPublishedSnapshot(principal.windowId as WindowId, snapshotRequest)
+        .findPublishedSnapshot(scopeId, snapshotRequest)
         .catch(() => undefined);
       return json(
         decodeArtifactLibraryClaudeSnapshotResult(
@@ -160,16 +162,13 @@ export function createArtifactLibraryRouteHandler(deps: ArtifactLibraryRouteDepe
       );
     }
     if (url.pathname === "/api/artifacts/claude-copy") {
-      // The copy reads the same kept snapshot, so it has the snapshot's reach:
-      // a window on this host only. A paired device never reads the snapshot,
-      // so it cannot copy it either.
       let copyRequest: ArtifactLibraryClaudeCopyRequest;
       try {
         copyRequest = decodeArtifactLibraryClaudeCopyRequest(body);
       } catch {
         return failure("Copy into Canvas request is invalid.", 400, origin);
       }
-      if (principal.kind !== "local-window" || deps.copyClaudePage === undefined) {
+      if (!principalActsAsHostPerson(principal) || deps.copyClaudePage === undefined) {
         return json(
           decodeCanvasHtmlImportResult({
             kind: "denied",
@@ -179,7 +178,7 @@ export function createArtifactLibraryRouteHandler(deps: ArtifactLibraryRouteDepe
           origin,
         );
       }
-      const result = await deps.copyClaudePage(principal.windowId as WindowId, copyRequest).catch(
+      const result = await deps.copyClaudePage(scopeId, copyRequest).catch(
         (): CanvasHtmlImportResult => ({
           kind: "denied",
           denialCode: "unavailable",
@@ -202,7 +201,10 @@ export function createArtifactLibraryRouteHandler(deps: ArtifactLibraryRouteDepe
       }
       return json(
         decodeCanvasTagCommandResult(
-          tags.change(body, principal.kind === "local-window" ? "local-window" : "remote-device"),
+          tags.change(
+            body,
+            principalActsAsHostPerson(principal) ? "local-window" : "remote-device",
+          ),
         ),
         origin,
       );

@@ -148,6 +148,25 @@ describe("changing an artifact's tags over the wire", () => {
     });
   });
 
+  it("hands a person-paired device's tag command as a host person while keeping hub-introduced devices remote", async () => {
+    const { handler, change } = route();
+    const paired = post({ kind: "canvas-tag-add", canvasId, tag: "Launch" }, {}, tagUrl);
+    bindPrincipalRouteContext(paired, {
+      principal: { kind: "remote-device", admittedBy: "host-person" } as never,
+      scopeId: windowId,
+    });
+    expect((await handler(paired))?.status).toBe(200);
+
+    const hub = post({ kind: "canvas-tag-add", canvasId, tag: "Launch" }, {}, tagUrl);
+    bindPrincipalRouteContext(hub, {
+      principal: { kind: "remote-device", admittedBy: "hub-roster" } as never,
+      scopeId: windowId,
+    });
+    expect((await handler(hub))?.status).toBe(200);
+
+    expect(change.mock.calls.map((call) => call[1])).toEqual(["local-window", "remote-device"]);
+  });
+
   it("answers a refused command as a result, not an error", async () => {
     const store = new WindowAuthorityStore();
     store.register({ windowId, capability, now: 0 });

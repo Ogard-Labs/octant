@@ -19,7 +19,7 @@ import {
   encodeSubscriptionOAuthCredential,
   readSubscriptionOAuthCredential,
 } from "@octant/provider-sdk/subscription-oauth";
-import type { PrincipalKind } from "@octant/domain/remote-access-policy";
+import { actsAsHostPerson, type PrincipalKind } from "@octant/domain/remote-access-policy";
 import { authenticateProjectRequest } from "../../projectBindingRoutes";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../../windowAuthorityStore";
@@ -204,7 +204,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
       for (const [key, attempt] of pending) {
         if (attempt.expiresAt <= now()) pending.delete(key);
       }
-      const prior = principal === "local-window" ? pending.get(key) : undefined;
+      const prior = actsAsHostPerson(principal) ? pending.get(key) : undefined;
       const execute = async (): Promise<ProviderOAuthView> => {
         let resumed = command;
         if (
@@ -240,7 +240,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
       };
       const viewPromise = execute();
       const tracking =
-        principal === "local-window" && (command.kind === "begin" || prior !== undefined);
+        actsAsHostPerson(principal) && (command.kind === "begin" || prior !== undefined);
       if (tracking)
         pending.set(key, { view: viewPromise, expiresAt: prior?.expiresAt ?? now() + 15 * 60_000 });
       const view = await viewPromise.catch((error: unknown) => {

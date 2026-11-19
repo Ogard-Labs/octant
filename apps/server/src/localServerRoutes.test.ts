@@ -276,7 +276,7 @@ function createBoundRoute() {
   return { handler, stop };
 }
 
-function remotePost(body: unknown) {
+function remotePost(body: unknown, admittedBy?: "host-person" | "hub-roster") {
   const request = new Request(commandsUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -292,6 +292,7 @@ function remotePost(body: unknown) {
       protocolVersion: 1,
       capabilityDigest: "a".repeat(64),
       sessionId: "00000000-0000-4000-8000-000000000907",
+      ...(admittedBy === undefined ? {} : { admittedBy }),
     } as never,
     scopeId: decodeWindowId(deviceId),
   });
@@ -559,6 +560,34 @@ describe("Running services authority", () => {
           listenerId: leftover.listenerId,
           confirmation: leftoverConfirmation,
         }),
+      )
+    )?.json();
+    expect(stopped.kind).toBe("running-service-stopped");
+    expect(stop).toHaveBeenCalledWith({ pid: 9001 });
+  });
+
+  it("offers a person-paired device the leftover confirmation and honours it while refusing a hub-introduced device", async () => {
+    const { handler, stop } = createRunningRoute({ projectsActive: true });
+    const hubListed = await (await handler(remotePost(listRunningCommand, "hub-roster")))?.json();
+    expect(hubListed.snapshot.services[1].stop.status).toBe("unavailable");
+
+    const pairedListed = await (
+      await handler(remotePost(listRunningCommand, "host-person"))
+    )?.json();
+    const leftover = pairedListed.snapshot.services[1];
+    expect(leftover.stop).toEqual({ status: "available", confirmationRequired: true });
+
+    const stopped = await (
+      await handler(
+        remotePost(
+          {
+            kind: "stop-running-service",
+            requestId,
+            listenerId: leftover.listenerId,
+            confirmation: leftoverConfirmation,
+          },
+          "host-person",
+        ),
       )
     )?.json();
     expect(stopped.kind).toBe("running-service-stopped");

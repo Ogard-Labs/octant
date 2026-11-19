@@ -1,5 +1,5 @@
 import type { EventActor } from "@octant/contracts";
-import { principalActsAsHostPerson } from "./clientPrincipal";
+import { principalActsAsHostPerson, principalAuthorityKind } from "./clientPrincipal";
 import { eventActorForPrincipal } from "./principalEventActor";
 import { boundPrincipalIsRestricted } from "./principalRouteContext";
 import {
@@ -242,6 +242,7 @@ export function createBrowserAutomationRouteHandler(
 
     let windowId;
     let callerKind: "local-window" | "remote-device";
+    let authorityKind: "local-window" | "person-paired-device" | "remote-device";
     // A device the host's own person paired, judged as the person where a
     // route says so; it stays the principal and the actor.
     let actsAsHostPerson: boolean;
@@ -256,6 +257,7 @@ export function createBrowserAutomationRouteHandler(
       });
       windowId = principal.scopeId;
       callerKind = principal.principal.kind;
+      authorityKind = principalAuthorityKind(principal.principal);
       actsAsHostPerson = principalActsAsHostPerson(principal.principal);
       actor = eventActorForPrincipal(principal.principal);
     } catch {
@@ -280,9 +282,14 @@ export function createBrowserAutomationRouteHandler(
       );
     }
 
-    // A paired device sees that a signed-in page exists and nothing it shows.
+    // A hub-introduced or restricted device sees that a signed-in page exists
+    // and nothing it shows; the host's own person (at a local window or on a
+    // device they paired) sees the page.
     const shown = (snapshot: BrowserAutomationSnapshot): BrowserAutomationSnapshot =>
-      callerKind === "remote-device" ? withheldFromRemote(snapshot) : snapshot;
+      !actsAsHostPerson ? withheldFromRemote(snapshot) : snapshot;
+    const personCaller: "local-window" | "remote-device" = actsAsHostPerson
+      ? "local-window"
+      : "remote-device";
     try {
       if (
         url.pathname === "/api/browser/task-profile/current" ||
@@ -293,7 +300,7 @@ export function createBrowserAutomationRouteHandler(
           ? decodeBrowserTaskProfileSelectCommand(decoded.value)
           : decodeBrowserTaskProfileReadCommand(decoded.value);
         if (
-          callerKind !== "local-window" ||
+          !actsAsHostPerson ||
           !dependencies.authority.canAccessWindow(windowId, command.threadId, command.mode)
         )
           return notThisWindowsThread(origin);
@@ -416,34 +423,9 @@ export function createBrowserAutomationRouteHandler(
           );
         }
         const command = decodeProjectBrowserCommand(decoded.value);
-        // A device the host's own person paired opens the person's own
-        // Project page as a window does; its page belongs to its scope. A
-        // profile page opens in the desktop's native Browser with the
-        // person's sign-ins, so from a device it waits for profile pages over
-        // the remote channel, and only a Private page opens.
-        if (
-          callerKind === "remote-device" &&
-          actsAsHostPerson &&
-          command.kind === "open" &&
-          command.profile !== undefined &&
-          command.profile !== "private"
-        ) {
-          return success(
-            decodeProjectBrowserResult({
-              kind: "project-browser-refused",
-              reason: "profile-unavailable",
-              message: "A profile page opens at a window on this computer.",
-            }),
-            origin,
-          );
-        }
         return success(
           decodeProjectBrowserResult(
-            await dependencies.projectBrowsers.execute(
-              windowId,
-              actsAsHostPerson ? "local-window" : callerKind,
-              command,
-            ),
+            await dependencies.projectBrowsers.execute(windowId, personCaller, command),
           ),
           origin,
         );
@@ -476,7 +458,7 @@ export function createBrowserAutomationRouteHandler(
                 dependencies.authority.canAccessWindow(windowId, threadId, input.mode)
                   ? pages.threadTitle(threadId, input.mode)
                   : undefined,
-              remote: callerKind === "remote-device",
+              remote: !actsAsHostPerson,
             }),
           }),
           origin,
@@ -493,12 +475,7 @@ export function createBrowserAutomationRouteHandler(
         const command = decodeBrowserExtensionsCommand(decoded.value);
         return success(
           decodeBrowserExtensionsResult(
-            await dependencies.extensions.execute(
-              windowId,
-              callerKind === "local-window" ? "local-window" : "remote-device",
-              command,
-              actor,
-            ),
+            await dependencies.extensions.execute(windowId, personCaller, command, actor),
           ),
           origin,
         );
@@ -514,11 +491,7 @@ export function createBrowserAutomationRouteHandler(
         const command = decodeBrowserProfilesCommand(decoded.value);
         return success(
           decodeBrowserProfilesResult(
-            await dependencies.profiles.execute(
-              callerKind === "local-window" ? "local-window" : "remote-device",
-              command,
-              actor,
-            ),
+            await dependencies.profiles.execute(authorityKind, command, actor),
           ),
           origin,
         );
@@ -533,8 +506,9 @@ export function createBrowserAutomationRouteHandler(
         }
         const command = decodeBrowserFlowsCommand(decoded.value);
         // Flows are a Project's data that a replay would navigate and type
-        // from; a paired device may not run, save or delete them.
-        if (callerKind !== "local-window") {
+        // from; only the host's own person (at a local window or on a device
+        // they paired) may list, run, save, or delete them.
+        if (!actsAsHostPerson) {
           return success(
             decodeBrowserFlowsResult({
               kind: "browser-flows-refused",
@@ -740,11 +714,10 @@ export function createBrowserAutomationRouteHandler(
             await dependencies.service.create({
               windowId,
               ...input,
-              // A signed-in page opens only for the person at this Mac; the
-              // service refuses a paired device before any runtime is asked.
-              ...(callerKind === "remote-device"
-                ? { profileCaller: "remote-device" as const }
-                : {}),
+              // A signed-in page opens only for the host's own person; a
+              // hub-introduced or restricted device is refused before any
+              // runtime is asked.
+              ...(!actsAsHostPerson ? { profileCaller: "remote-device" as const } : {}),
             }),
           ),
           origin,
@@ -801,7 +774,7 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/captures") {
         const input = decodeBrowserCapturesCommand(decoded.value);
-        const refusal = await captureReadRefusal(windowId, callerKind, input.threadId, origin);
+        const refusal = await captureReadRefusal(windowId, personCaller, input.threadId, origin);
         if (refusal !== undefined) return refusal;
         return success(
           decodeBrowserCapturesResponse({
@@ -811,10 +784,8 @@ export function createBrowserAutomationRouteHandler(
         );
       }
       if (url.pathname === "/api/browser/steps") {
-        // The step list is the Browser's history beside the captures, so it
-        // answers the same callers: a local window that can open the thread.
         const input = decodeBrowserStepsCommand(decoded.value);
-        const refusal = await captureReadRefusal(windowId, callerKind, input.threadId, origin);
+        const refusal = await captureReadRefusal(windowId, personCaller, input.threadId, origin);
         if (refusal !== undefined) return refusal;
         return success(
           decodeBrowserStepsResponse({
@@ -827,7 +798,7 @@ export function createBrowserAutomationRouteHandler(
         // The person's Screenshot control. The ordinary action route keeps
         // nothing, and a model cannot reach this path through tool input.
         const input = decodeBrowserCaptureTakeCommand(decoded.value);
-        const refusal = captureTakeRefusal(windowId, callerKind, input.threadId, origin);
+        const refusal = captureTakeRefusal(windowId, personCaller, input.threadId, origin);
         if (refusal !== undefined) return refusal;
         if (input.request.kind !== "screenshot") {
           return failure(
@@ -859,7 +830,7 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/captures/image") {
         const input = decodeBrowserCaptureImageCommand(decoded.value);
-        const refusal = await captureReadRefusal(windowId, callerKind, input.threadId, origin);
+        const refusal = await captureReadRefusal(windowId, personCaller, input.threadId, origin);
         if (refusal !== undefined) return refusal;
         const found = await dependencies.captures?.read(input.threadId, input.captureId);
         if (found === undefined) {
@@ -890,13 +861,8 @@ export function createBrowserAutomationRouteHandler(
         url.pathname === "/api/browser/contexts/take-over" ||
         url.pathname === "/api/browser/contexts/hand-back"
       ) {
-        // The person's, and only from a window of this computer that can see
-        // the thread: this route decides it, never the pane. A paired device
-        // may not, even on a page it can tap: it cannot type, and the gateway
-        // does not admit this path for it either. The service adds the rest (a
-        // routine's window, the agent's own sign-in ask).
         const input = decodeBrowserThreadContextCommand(decoded.value);
-        if (callerKind === "remote-device") {
+        if (!actsAsHostPerson) {
           return failure(
             {
               category: "unauthorized",
@@ -979,7 +945,7 @@ export function createBrowserAutomationRouteHandler(
                 // device is left out: it reaches the page only through this
                 // route, which acts on approved origins alone, so a page that
                 // followed a redirect off them would leave it unable to act.
-                ...(callerKind === "local-window" && pictured.kind === "navigate"
+                ...(actsAsHostPerson && pictured.kind === "navigate"
                   ? { startedBy: "person" as const }
                   : {}),
               }),

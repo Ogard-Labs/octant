@@ -11,6 +11,7 @@ import {
   type ThreadToolCallRecordsResult,
 } from "@octant/contracts";
 import type { ThreadExportActorKind } from "@octant/domain";
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -139,7 +140,7 @@ function createThreadCommandRouteHandler<Outcome>(options: {
         });
       } else {
         windowId = bound.scopeId;
-        actorKind = bound.principal.kind === "remote-device" ? "remote-device" : "local-window";
+        actorKind = principalActsAsHostPerson(bound.principal) ? "local-window" : "remote-device";
       }
     } catch (error) {
       if (error instanceof WindowAuthorityError) {

@@ -9,6 +9,8 @@ import {
   decodeWindowId,
 } from "@octant/contracts";
 import { decodePreviewHostId, decodePreviewTargetId } from "@octant/contracts/previews";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { createPreviewRouteHandler, resolvePreviewActiveContext } from "./previewRoutes";
 import { PreviewService } from "./preview/previewService";
@@ -541,6 +543,68 @@ describe("Preview routes", () => {
     const body = await response?.json();
     expect(body).toEqual({ kind: "failed", reason: "cancelled" });
     expect(JSON.stringify(body)).not.toContain(root);
+  });
+
+  it("admits a person-paired device to text editing while refusing hub-introduced devices and keeping Finder handoff local-only", async () => {
+    const bindAs = (req: Request, admittedBy: "host-person" | "hub-roster") => {
+      bindPrincipalRouteContext(req, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: "90000000-0000-4000-8000-000000000801" as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000801" as never,
+          admittedBy,
+        }),
+        scopeId: windowId,
+      });
+      return req;
+    };
+
+    const pairedText = bindAs(
+      new Request("http://127.0.0.1/api/preview/text", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify({ target: makeTarget() }),
+      }),
+      "host-person",
+    );
+    expect(await (await route(pairedText))?.json()).toMatchObject({
+      kind: "ready",
+      text: "# Title\nbody line\n",
+    });
+
+    const hubText = bindAs(
+      new Request("http://127.0.0.1/api/preview/text", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify({ target: makeTarget() }),
+      }),
+      "hub-roster",
+    );
+    expect(await (await route(hubText))?.json()).toEqual({ kind: "unauthorized" });
+
+    // Finder / external-editor handoff stays native to the local host even for a person-paired device.
+    const pairedHandoff = bindAs(
+      new Request("http://127.0.0.1/api/preview/handoff", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify({ target: makeTarget(), kind: "reveal-in-finder" }),
+      }),
+      "host-person",
+    );
+    expect(await (await route(pairedHandoff))?.json()).toMatchObject({ kind: "unauthorized" });
   });
 });
 

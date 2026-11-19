@@ -339,6 +339,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "personMemoryAccess"
     | "octantInstructions"
     | "isPairedDeviceScope"
+    | "isRestrictedDeviceScope"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -2555,10 +2556,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     const codeSessionRoutes = createCodeSessionRouteHandler({
       windowAuthorityStore: deps.windowAuthorityStore,
       canOpenThread: (windowId, threadId) => {
-        if (deps.isPairedDeviceScope(windowId)) return false;
+        const device = deps.isPairedDeviceScope(windowId);
+        if (device && deps.isRestrictedDeviceScope(windowId)) return false;
         try {
           const thread = persistence.readCodeThread(threadId);
-          return thread !== undefined && canAccessCodeProject(windowId, thread.projectId);
+          if (thread === undefined) return false;
+          return device
+            ? codeProjectAccess.hasActiveCodeProject(thread.projectId)
+            : canAccessCodeProject(windowId, thread.projectId);
         } catch {
           return false;
         }
@@ -2566,8 +2571,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       liveTasks: (threadId) => outlivingCodeSessions.liveTasks(codeSessionKey(threadId)),
       stopLiveTasks: (threadId) => outlivingCodeSessions.stopThread(codeSessionKey(threadId)),
       // A window here or the host's own paired device is the person; the
-      // host acting for a routine is not.
-      isPerson: (windowId) => !isRoutineHostScope(windowId),
+      // host acting for a routine or a hub-introduced device is not.
+      isPerson: (windowId) =>
+        !isRoutineHostScope(windowId) && !deps.isRestrictedDeviceScope(windowId),
       nativeSessions: () => codeOperationRuntime?.nativeSessions,
     });
     return {

@@ -13,7 +13,7 @@ import {
 import type { LocalServerActor } from "@octant/domain";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
 import type { PersistenceService } from "./persistence/persistenceService";
-import { readPrincipalRouteContext } from "./principalRouteContext";
+import { boundPrincipalIsRestricted } from "./principalRouteContext";
 import type { ProjectService } from "./projectService";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -164,16 +164,13 @@ function isRunningServiceBody(body: unknown): boolean {
 }
 
 /**
- * The transport principal is authoritative. A local window is the host user; a
- * request the remote gateway authenticated carries a bound remote-device
- * principal and stays `remote-client`, so the domain policy keeps a leftover
- * Stop on the host. Anything without a bound context reached this handler on
- * the loopback listener under a proven window capability.
+ * The transport principal is authoritative. A local window or a device the
+ * host's own person paired is `local-user`; a hub-introduced or restricted
+ * device stays `remote-client`, so the domain policy keeps a leftover Stop on
+ * the host for those sessions.
  */
 function requestActor(request: Request): LocalServerActor {
-  return readPrincipalRouteContext(request)?.principal.kind === "remote-device"
-    ? "remote-client"
-    : "local-user";
+  return boundPrincipalIsRestricted(request) ? "remote-client" : "local-user";
 }
 
 async function assertAccessibleCodeProject(

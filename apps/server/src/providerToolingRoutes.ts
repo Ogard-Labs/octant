@@ -4,6 +4,7 @@ import {
   decodeProviderToolingListRequest,
   decodeProviderToolingPlanRequest,
 } from "@octant/contracts";
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -66,10 +67,9 @@ export function createProviderToolingRouteHandler(deps: ProviderToolingRouteDepe
         now: now(),
         body,
       });
-      caller =
-        context.principal.kind === "local-window"
-          ? ({ kind: "local-window", windowId: context.principal.windowId } as const)
-          : ({ kind: "remote-device", windowId: String(context.scopeId) } as const);
+      caller = principalActsAsHostPerson(context.principal)
+        ? ({ kind: "local-window", windowId: String(context.scopeId) } as const)
+        : ({ kind: "remote-device", windowId: String(context.scopeId) } as const);
     } catch (error) {
       return error instanceof WindowAuthorityError
         ? failure("This step requires the Octant window on this host.", 401, origin)

@@ -118,30 +118,50 @@ describe("disk cleanup routes", () => {
     });
   });
 
-  it("refuses a caller without the window's capability, and a paired device everything", async () => {
+  it("admits a person-paired device for worktree and Xcode cleanup while refusing hub-introduced and restricted devices", async () => {
     const { handler, scan, remove, derivedData } = route();
     expect(
       (await handler(request(HOST_WORKTREES_SCAN_PATH, "POST", undefined, false)))?.status,
     ).toBe(401);
-    for (const remote of [
-      request(HOST_WORKTREES_PATH, "GET"),
-      request(HOST_WORKTREES_SCAN_PATH, "POST"),
-      request(XCODE_BUILD_DATA_PATH, "GET"),
-      request(HOST_WORKTREE_REMOVE_PATH, "POST", {
-        repositoryPath: "/r",
-        worktreePath: "/w",
-        confirmed: true,
-      }),
-    ]) {
-      bindPrincipalRouteContext(remote, {
-        principal: { kind: "remote-device" } as never,
-        scopeId: windowId,
-      });
-      expect((await handler(remote))?.status).toBe(403);
+    for (const admittedBy of [undefined, "hub-roster"] as const) {
+      for (const remote of [
+        request(HOST_WORKTREES_PATH, "GET"),
+        request(HOST_WORKTREES_SCAN_PATH, "POST"),
+        request(XCODE_BUILD_DATA_PATH, "GET"),
+        request(HOST_WORKTREE_REMOVE_PATH, "POST", {
+          repositoryPath: "/r",
+          worktreePath: "/w",
+          confirmed: true,
+        }),
+      ]) {
+        bindPrincipalRouteContext(remote, {
+          principal: {
+            kind: "remote-device",
+            ...(admittedBy === undefined ? {} : { admittedBy }),
+          } as never,
+          scopeId: windowId,
+        });
+        expect((await handler(remote))?.status).toBe(403);
+      }
     }
     expect(scan).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
     expect(derivedData.list).not.toHaveBeenCalled();
+
+    const pairedScan = request(HOST_WORKTREES_SCAN_PATH, "POST");
+    bindPrincipalRouteContext(pairedScan, {
+      principal: { kind: "remote-device", admittedBy: "host-person" } as never,
+      scopeId: windowId,
+    });
+    expect((await handler(pairedScan))?.status).toBe(200);
+    const pairedXcode = request(XCODE_BUILD_DATA_PATH, "GET");
+    bindPrincipalRouteContext(pairedXcode, {
+      principal: { kind: "remote-device", admittedBy: "host-person" } as never,
+      scopeId: windowId,
+    });
+    expect((await handler(pairedXcode))?.status).toBe(200);
+    expect(scan).toHaveBeenCalledOnce();
+    expect(derivedData.list).toHaveBeenCalledOnce();
   });
 
   it("refuses a removal that was not confirmed", async () => {

@@ -86,7 +86,10 @@ const ALIAS = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,252}$/;
 const CREDENTIAL_FOLDER =
   /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|\.kube|\.docker|\.config\/gh|Library\/Keychains)(?:\/|$)|\/\.(?:netrc|git-credentials|npmrc|pypirc)$|\.(?:pem|key|p12|pfx)$/i;
 
-export type ShieldServerPrincipal = "local-window" | "remote-device";
+export type ShieldServerPrincipal =
+  | "local-window"
+  | "remote-device"
+  | { readonly kind: "person-paired-device"; readonly actor: EventActorValue };
 
 export type ShieldServersChange =
   | { readonly kind: "changed"; readonly server?: ShieldServer }
@@ -193,7 +196,8 @@ export class ShieldServerStore {
     readonly servers: ReadonlyArray<ShieldServerFields>;
     readonly principal: ShieldServerPrincipal;
   }): ShieldServersChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const person = this.#person(input.principal);
+    if (person === undefined) return refused("needs-local-window");
     if (input.servers.length > MAX_SHIELD_SERVERS) return refused("too-many-servers");
     // A server keeps its id across a save: the one this list already gave
     // its alias, else the account server's it was copied from. The key
@@ -221,14 +225,14 @@ export class ShieldServerStore {
     } catch {
       return refused("project-not-found");
     }
-    const payload = { projectId, servers, principal: { kind: "local-window" as const } };
+    const payload = { projectId, servers, principal: person.principal };
     if (
       !this.#append(
         SHIELD_SERVERS_AGGREGATE,
         String(projectId),
         SHIELD_SERVERS_EVENT_NAMES.projectServersSet,
         payload,
-        this.#personActor,
+        person.actor,
       )
     ) {
       return refused("unavailable");
@@ -242,11 +246,12 @@ export class ShieldServerStore {
     readonly projectId: string;
     readonly principal: ShieldServerPrincipal;
   }): ShieldServersChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const person = this.#person(input.principal);
+    if (person === undefined) return refused("needs-local-window");
     if (!this.#projectServers.has(input.projectId)) return { kind: "changed" };
     const payload = {
       projectId: decodeAggregateId(input.projectId),
-      principal: { kind: "local-window" as const },
+      principal: person.principal,
     };
     if (
       !this.#append(
@@ -254,7 +259,7 @@ export class ShieldServerStore {
         input.projectId,
         SHIELD_SERVERS_EVENT_NAMES.projectOverrideCleared,
         payload,
-        this.#personActor,
+        person.actor,
       )
     ) {
       return refused("unavailable");
@@ -267,9 +272,13 @@ export class ShieldServerStore {
     readonly server: ShieldServerFields;
     readonly principal: ShieldServerPrincipal;
   }): ShieldServersChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const person = this.#person(input.principal);
+    if (person === undefined) return refused("needs-local-window");
     if (this.#servers.size >= MAX_SHIELD_SERVERS) return refused("too-many-servers");
-    return this.#set({ serverId: decodeAggregateId(this.#options.uuid()), ...input.server });
+    return this.#set(
+      { serverId: decodeAggregateId(this.#options.uuid()), ...input.server },
+      person,
+    );
   }
 
   change(input: {
@@ -277,7 +286,8 @@ export class ShieldServerStore {
     readonly server: ShieldServerFields;
     readonly principal: ShieldServerPrincipal;
   }): ShieldServersChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const person = this.#person(input.principal);
+    if (person === undefined) return refused("needs-local-window");
     const existing = this.#servers.get(input.serverId);
     if (existing === undefined) return refused("server-not-found");
     // A Project's folder was checked on the host this names. Editing the name
@@ -293,18 +303,19 @@ export class ShieldServerStore {
         };
       }
     }
-    return this.#set({ ...input.server, serverId: existing.serverId });
+    return this.#set({ ...input.server, serverId: existing.serverId }, person);
   }
 
   remove(input: {
     readonly serverId: string;
     readonly principal: ShieldServerPrincipal;
   }): ShieldServersChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const person = this.#person(input.principal);
+    if (person === undefined) return refused("needs-local-window");
     const existing = this.#servers.get(input.serverId);
     if (existing === undefined) return refused("server-not-found");
-    const payload = { serverId: existing.serverId, principal: { kind: "local-window" as const } };
-    if (!this.#appendRegistry(SHIELD_SERVERS_EVENT_NAMES.serverRemoved, payload)) {
+    const payload = { serverId: existing.serverId, principal: person.principal };
+    if (!this.#appendRegistry(SHIELD_SERVERS_EVENT_NAMES.serverRemoved, payload, person.actor)) {
       return refused("unavailable");
     }
     this.#apply(SHIELD_SERVERS_EVENT_NAMES.serverRemoved, payload);
@@ -525,12 +536,33 @@ export class ShieldServerStore {
     );
   }
 
-  #set(server: ShieldServer): ShieldServersChange {
+  #person(principal: ShieldServerPrincipal):
+    | {
+        readonly principal: { readonly kind: "local-window" | "person-paired-device" };
+        readonly actor: EventActorValue;
+      }
+    | undefined {
+    if (principal === "local-window") {
+      return { principal: { kind: "local-window" }, actor: this.#personActor };
+    }
+    if (typeof principal === "object" && principal.kind === "person-paired-device") {
+      return { principal: { kind: "person-paired-device" }, actor: principal.actor };
+    }
+    return undefined;
+  }
+
+  #set(
+    server: ShieldServer,
+    person: {
+      readonly principal: { readonly kind: "local-window" | "person-paired-device" };
+      readonly actor: EventActorValue;
+    },
+  ): ShieldServersChange {
     const checked = canonicalServer(server, [...this.#servers.values()]);
     if (checked.kind === "refused") return checked;
     const canonical = checked.server;
-    const payload = { server: canonical, principal: { kind: "local-window" as const } };
-    if (!this.#appendRegistry(SHIELD_SERVERS_EVENT_NAMES.serverSet, payload)) {
+    const payload = { server: canonical, principal: person.principal };
+    if (!this.#appendRegistry(SHIELD_SERVERS_EVENT_NAMES.serverSet, payload, person.actor)) {
       return refused("unavailable");
     }
     this.#apply(SHIELD_SERVERS_EVENT_NAMES.serverSet, payload);
@@ -559,13 +591,13 @@ export class ShieldServerStore {
     }
   }
 
-  #appendRegistry(eventName: string, payload: unknown): boolean {
+  #appendRegistry(eventName: string, payload: unknown, actor: EventActorValue): boolean {
     return this.#append(
       SHIELD_SERVERS_AGGREGATE,
       SHIELD_SERVERS_AGGREGATE_ID,
       eventName,
       payload,
-      this.#personActor,
+      actor,
     );
   }
 

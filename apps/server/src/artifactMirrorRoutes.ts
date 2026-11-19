@@ -1,6 +1,6 @@
 import { decodeArtifactMirrorCommand } from "@octant/contracts/artifact-mirror";
 import type { ArtifactMirrorService } from "./canvas/artifactMirrorService";
-import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
+import { authenticateRouteWindowId, boundPrincipalIsRestricted } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -43,7 +43,7 @@ export function createArtifactMirrorRouteHandler(deps: ArtifactMirrorRouteDepend
     // A forwarded remote request carries a bound principal. Naming a folder on
     // this machine is host work, so a paired device is turned away before the
     // command is even decoded.
-    if (readPrincipalRouteContext(request)?.principal.kind === "remote-device") {
+    if (boundPrincipalIsRestricted(request)) {
       return failure("Artifact mirroring is settled on the host.", 403, origin);
     }
     try {

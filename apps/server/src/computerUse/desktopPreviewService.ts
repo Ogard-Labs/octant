@@ -20,7 +20,10 @@ import type { RemoteServerGrantTarget } from "../localServers/localServerService
 import type { DesktopLeaseCaller, DesktopLeaseService } from "./desktopLeaseService";
 
 type Target = Extract<RemoteServerGrantTarget, { readonly status: "listed" }>;
-type Caller = DesktopLeaseCaller & { readonly leaseId: ReturnType<typeof decodeDesktopLeaseId> };
+type Caller = DesktopLeaseCaller & {
+  readonly leaseId: ReturnType<typeof decodeDesktopLeaseId>;
+  readonly personPairedDevice?: boolean;
+};
 type Lease = NonNullable<ReturnType<DesktopLeaseService["previewTarget"]>>;
 interface Review {
   readonly id: string;
@@ -242,7 +245,7 @@ export function createDesktopPreviewService(options: {
   ): Promise<DesktopPreviewAnswer> => {
     if (
       stopped ||
-      caller.actor.kind !== "local-user" ||
+      (caller.actor.kind !== "local-user" && caller.personPairedDevice !== true) ||
       caller.scopeId === undefined ||
       caller.owner.mode !== "code" ||
       caller.owner.threadId !== input.threadId ||

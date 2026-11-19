@@ -139,4 +139,38 @@ describe("settling where artifacts are mirrored", () => {
     ).toBe(400);
     expect(execute).not.toHaveBeenCalled();
   });
+
+  it("admits a person-paired device for artifact mirror settings while refusing hub-introduced and restricted devices", async () => {
+    const { handler, execute } = route();
+    for (const admittedBy of [undefined, "hub-roster"] as const) {
+      const remote = request("GET");
+      bindPrincipalRouteContext(remote, {
+        principal: {
+          kind: "remote-device",
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        } as never,
+        scopeId: windowId,
+      });
+      expect((await handler(remote))?.status).toBe(403);
+    }
+
+    const pairedRead = request("GET");
+    bindPrincipalRouteContext(pairedRead, {
+      principal: { kind: "remote-device", admittedBy: "host-person" } as never,
+      scopeId: windowId,
+    });
+    expect((await handler(pairedRead))?.status).toBe(200);
+
+    const pairedWrite = request("POST", {
+      kind: "set-artifact-mirror-fallback",
+      expectedVersion: 0,
+      destination: { kind: "global-folder", canonicalRoot: "/Users/me/Artifacts" },
+    });
+    bindPrincipalRouteContext(pairedWrite, {
+      principal: { kind: "remote-device", admittedBy: "host-person" } as never,
+      scopeId: windowId,
+    });
+    expect((await handler(pairedWrite))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+  });
 });

@@ -1492,9 +1492,9 @@ artifact sync all leave it here. The pure `admitCanvasTagCommand` policy
 validates shape and budgets, and the refusals are named values
 (`malformed-request`, `oversized-payload`, `duplicate-tag`, `unknown-tag`,
 `tag-budget-exceeded`, `stale-version`). Only the person changes tags, at a
-window on this host or a paired device (maintainer decision, 2026-11-12; not
-built yet: today the command route is host-window only, and a paired device
-reads a listing's tags and changes none), and the host stamps the event's
+window on this host or a paired device (maintainer decision, 2026-11-12; server
+policy admits a person-paired device and refuses hub-introduced devices; paired
+UI follow-up remains), and the host stamps the event's
 timestamp
 and its own person, never a field the request carries. The listing carries
 each entry's tags and a roster of every tag with how many artifacts carry

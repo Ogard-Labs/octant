@@ -24,6 +24,7 @@ import type {
   WorkspaceLayoutNode,
 } from "@octant/contracts";
 import type { PreviewPosture } from "@octant/domain";
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -151,7 +152,7 @@ export function createPreviewRouteHandler(dependencies: PreviewRouteDependencies
     try {
       if (route === "text") {
         const body = decodePreviewTextRequest(decoded.value);
-        const principal = readPrincipalRouteContext(request)?.principal.kind ?? "local-window";
+        const boundPrincipal = readPrincipalRouteContext(request)?.principal;
         const current = async () => {
           try {
             const id = authenticateRouteWindowId({
@@ -162,7 +163,7 @@ export function createPreviewRouteHandler(dependencies: PreviewRouteDependencies
             if (
               id !== authenticatedWindowId ||
               request.signal.aborted ||
-              principal !== "local-window"
+              (boundPrincipal !== undefined && !principalActsAsHostPerson(boundPrincipal))
             )
               return undefined;
             const authority = await resolvePreviewAuthority(dependencies, id, body.target);

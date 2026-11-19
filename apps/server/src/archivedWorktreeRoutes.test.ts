@@ -58,22 +58,45 @@ describe("archived worktree routes", () => {
     expect(list).not.toHaveBeenCalled();
   });
 
-  it("shows a paired device neither the folders nor a way to delete them", async () => {
+  it("lists and removes worktrees for a person-paired device while refusing hub-introduced and restricted devices", async () => {
     const { handler, list, remove } = route();
-    for (const remote of [
-      request(ARCHIVED_WORKTREES_PATH, "GET"),
-      request(ARCHIVED_WORKTREE_REMOVE_PATH, "POST", { threadId, confirmed: true }),
-    ]) {
-      bindPrincipalRouteContext(remote, {
-        principal: { kind: "remote-device" } as never,
-        scopeId: windowId,
-      });
-      const response = await handler(remote);
-      expect(response?.status).toBe(403);
-      expect(await response?.json()).toMatchObject({ reason: "unauthorized" });
+    for (const admittedBy of [undefined, "hub-roster"] as const) {
+      for (const remote of [
+        request(ARCHIVED_WORKTREES_PATH, "GET"),
+        request(ARCHIVED_WORKTREE_REMOVE_PATH, "POST", { threadId, confirmed: true }),
+      ]) {
+        bindPrincipalRouteContext(remote, {
+          principal: {
+            kind: "remote-device",
+            ...(admittedBy === undefined ? {} : { admittedBy }),
+          } as never,
+          scopeId: windowId,
+        });
+        const response = await handler(remote);
+        expect(response?.status).toBe(403);
+        expect(await response?.json()).toMatchObject({ reason: "unauthorized" });
+      }
     }
     expect(list).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
+
+    const listReq = request(ARCHIVED_WORKTREES_PATH, "GET");
+    bindPrincipalRouteContext(listReq, {
+      principal: { kind: "remote-device", admittedBy: "host-person" } as never,
+      scopeId: windowId,
+    });
+    expect((await handler(listReq))?.status).toBe(200);
+    const removeReq = request(ARCHIVED_WORKTREE_REMOVE_PATH, "POST", {
+      threadId,
+      confirmed: true,
+    });
+    bindPrincipalRouteContext(removeReq, {
+      principal: { kind: "remote-device", admittedBy: "host-person" } as never,
+      scopeId: windowId,
+    });
+    expect((await handler(removeReq))?.status).toBe(200);
+    expect(list).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledWith(threadId);
   });
 
   it("refuses a removal that was not confirmed", async () => {

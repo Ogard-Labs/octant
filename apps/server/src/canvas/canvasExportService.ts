@@ -233,16 +233,20 @@ export class CanvasExportService {
 
   /**
    * The person checked the destination and wants the notice gone without
-   * exporting again. Only a window on this computer may dismiss it: a paired
-   * device cannot quietly clear the host's record of an uncertain publish.
+   * exporting again. The host's own person may dismiss it, at a local window
+   * or on a device they paired; a hub-introduced or restricted device cannot.
    */
   dismissUnconfirmed(input: {
     readonly canvasId: CanvasId;
     readonly exportId: CanvasExportRecordId;
     readonly permitted: boolean;
     readonly actor: EventActor;
+    readonly personPairedDevice?: boolean;
   }): CanvasExportNoticeDismissResult {
-    if (!input.permitted || input.actor.kind !== "local-user") {
+    const allowedActor =
+      input.actor.kind === "local-user" ||
+      (input.actor.kind === "remote-device" && input.personPairedDevice === true);
+    if (!input.permitted || !allowedActor) {
       return refused(
         "unauthorized",
         "An unconfirmed export can be dismissed only from a window on this computer.",

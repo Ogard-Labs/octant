@@ -317,12 +317,16 @@ export function decideDesktopBilledSpend(input: {
 }
 
 /**
- * Only a person at a local window sets or clears the cap. An agent never
- * does, in any posture, so no turn can raise what it may spend; a paired
- * device does not either, as with every host-wide money setting.
+ * Only the host's own person sets or clears the monthly cap: at a local
+ * window, or on a device that person paired. An agent never does, in any
+ * posture, so no turn can raise what it may spend; a device the hub
+ * introduced or a restricted session does not either.
  */
-export function desktopSpendCapChangeAllowed(actor: EventActor["kind"]): boolean {
-  return actor === "local-user";
+export function desktopSpendCapChangeAllowed(
+  actor: EventActor["kind"],
+  personPairedDevice = false,
+): boolean {
+  return actor === "local-user" || (actor === "remote-device" && personPairedDevice);
 }
 
 export type DesktopArtifactPathDecision =

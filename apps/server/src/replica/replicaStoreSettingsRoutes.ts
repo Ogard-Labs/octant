@@ -20,6 +20,7 @@ import {
   type ReplicaStoreSettingsCommand,
   type ReplicaStoreSettingsResult,
 } from "@octant/contracts/replica-store-settings";
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -97,8 +98,7 @@ export function createReplicaStoreSettingsRouteHandler(
         store: dependencies.windowAuthorityStore,
         now: now(),
       });
-      // Host-only: a paired phone is refused even if transport policy regressed.
-      if (context.principal.kind !== "local-window") {
+      if (!principalActsAsHostPerson(context.principal)) {
         return failure("Sync settings are host-only.", 403, origin);
       }
       windowId = context.scopeId;
