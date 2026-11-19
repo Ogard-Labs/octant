@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, realpath, rm } from "node:fs/promises";
+import { chmod, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -699,6 +699,40 @@ describe("waitForStorageReady", () => {
       }),
     ).resolves.toEqual(attached);
     expect(resolveAttachedHost).toHaveBeenCalledTimes(2);
+  });
+
+  it("rechecks storage when the host publishes its receipt between health probes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "octant-receipt-wake-"));
+    const hostInfoPath = join(dir, "octant-host.json");
+    let attempts = 0;
+    try {
+      const fetch = vi.fn(async () => {
+        if (++attempts === 1) {
+          await writeFile(join(dir, "publishing"), "not proof of readiness");
+          await rename(join(dir, "publishing"), hostInfoPath);
+          return new Response(null, { status: 503 });
+        }
+        return Response.json({
+          product: "Octant",
+          status: "ok",
+          instanceId: "desktop-child",
+          storage: "ready",
+        });
+      });
+      await expect(
+        waitForStorageReady({
+          serverUrl: "http://127.0.0.1:43123/",
+          instanceId: "desktop-child",
+          hostInfoPath,
+          fetch,
+          timeoutMs: 2000,
+          pollIntervalMs: 10000,
+        }),
+      ).resolves.toBeUndefined();
+      expect(attempts).toBe(2);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("keeps the total wait within the overall deadline when polling is slower", async () => {

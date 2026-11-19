@@ -2233,6 +2233,9 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       serverUrl,
       instanceId,
       timeoutMs: DESKTOP_HOST_READY_TIMEOUT_MS,
+      ...(desktopWindowsHost === undefined
+        ? { hostInfoPath: desktopPosixHostPaths().hostInfoPath }
+        : {}),
       ...(server === undefined
         ? {}
         : {
