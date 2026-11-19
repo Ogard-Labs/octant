@@ -68,6 +68,15 @@ func kernelIdentity(_ pid: pid_t) -> KernelIdentity? {
         birthSeconds: before.pbi_start_tvsec, birthMicroseconds: before.pbi_start_tvusec,
         executable: URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath().standardizedFileURL.path)
 }
+// An exited child can remain in the PID list until its parent reaps it.
+// It has no executable or open resources; an unreadable live process is still ambiguous.
+func confirmedZombie(_ pid: pid_t) -> Bool {
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+    var info = kinfo_proc()
+    var length = MemoryLayout<kinfo_proc>.size
+    return sysctl(&mib, 4, &info, &length, nil, 0) == 0 && length == MemoryLayout<kinfo_proc>.size &&
+        info.kp_proc.p_pid == pid && info.kp_eproc.e_ucred.cr_uid == geteuid() && info.kp_proc.p_stat == SZOMB
+}
 func bundleCensus(_ deadline: Date) -> (complete: Bool, owned: [KernelIdentity]) {
     var pids = [pid_t](repeating: 0, count: 4096)
     // proc_listpids returns bytes, unlike proc_listpgrppids' PID count.
@@ -79,7 +88,7 @@ func bundleCensus(_ deadline: Date) -> (complete: Bool, owned: [KernelIdentity])
         if Date() >= deadline { complete = false; break }
         if let identity = kernelIdentity(pid) {
             if identity.executable.hasPrefix(expectedBundle + "/") { owned.append(identity) }
-        } else if kill(pid, 0) == 0 || errno != ESRCH { complete = false }
+        } else if (kill(pid, 0) == 0 || errno != ESRCH) && !confirmedZombie(pid) { complete = false }
     }
     return (complete, owned)
 }
