@@ -12,10 +12,11 @@ export interface TodoThreadState {
 }
 
 export function todoThreadKey(link: {
+  readonly hostId: string;
   readonly mode: OctantMode;
   readonly threadId: TodoThreadLink["threadId"] | string;
 }): string {
-  return `${link.mode}:${String(link.threadId)}`;
+  return `${link.hostId}:${link.mode}:${String(link.threadId)}`;
 }
 
 /**
@@ -46,15 +47,20 @@ export function todoThreadState(row: ChatThreadNavigationItem): TodoThreadState 
 
 /** The thread rows of every mode, by mode and thread id. */
 export function todoThreadStates(
+  hostId: string | undefined,
   rows: ReadonlyArray<{
     readonly mode: OctantMode;
     readonly rows: ReadonlyArray<ChatThreadNavigationItem>;
   }>,
 ): ReadonlyMap<string, TodoThreadState> {
   const states = new Map<string, TodoThreadState>();
+  if (hostId === undefined) return states;
   for (const group of rows) {
     for (const row of group.rows) {
-      states.set(todoThreadKey({ mode: group.mode, threadId: row.threadId }), todoThreadState(row));
+      states.set(
+        todoThreadKey({ hostId, mode: group.mode, threadId: row.threadId }),
+        todoThreadState(row),
+      );
     }
   }
   return states;
@@ -67,4 +73,9 @@ export function newestTodoThread(todo: Todo): TodoThreadLink | undefined {
 /** Where Start can take a to-do: Chat, or one of this host's active Projects. */
 export type TodoStartTarget =
   | { readonly kind: "chat" }
-  | { readonly kind: "project"; readonly projectId: string; readonly name: string };
+  | {
+      readonly kind: "project";
+      readonly projectId: string;
+      readonly name: string;
+      readonly hostId?: string;
+    };

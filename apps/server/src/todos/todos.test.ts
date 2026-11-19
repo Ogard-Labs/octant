@@ -20,6 +20,8 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { createRemoteRoutePolicy } from "../remoteRoutePolicy";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { MachineChangeFeed } from "../machineChangeFeed";
+import { createTodoClient, createTodoChangeClient } from "@octant/client-runtime/todo-client";
 import { createTodoRouteHandler } from "./todoRoutes";
 import { registerTodoEvents, TodoStore } from "./todoStore";
 
@@ -41,7 +43,15 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
 });
 
-function host() {
+function host(
+  defaultListHost?: () =>
+    | {
+        readonly kind: "other-host";
+        readonly hostId: ReturnType<typeof decodeStableHostId>;
+        readonly name: string;
+      }
+    | undefined,
+) {
   const directory = mkdtempSync(join(tmpdir(), "octant-todos-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -70,11 +80,20 @@ function host() {
       uuid: () => crypto.randomUUID(),
       clock: () => decodeUtcTimestamp(START),
       hostId: () => decodeStableHostId(HOST_ID),
+      defaultActor: actor,
+      ...(defaultListHost === undefined ? {} : { defaultListHost }),
     });
   const store = start();
   const windows = new WindowAuthorityStore();
   windows.register({ windowId, capability, now: 0 });
-  const routes = createTodoRouteHandler({ store, windowAuthorityStore: windows, now: () => 0 });
+  const feed = new MachineChangeFeed();
+  journal.subscribeCommitted((append) => feed.publishCommitted(append));
+  const routes = createTodoRouteHandler({
+    store,
+    feed,
+    windowAuthorityStore: windows,
+    now: () => 0,
+  });
 
   const fromWindow = (path: string, body?: unknown) =>
     routes(
@@ -244,6 +263,7 @@ describe("the person's to-do list", () => {
     const h = host();
     const response = await createTodoRouteHandler({
       store: h.store,
+      feed: new MachineChangeFeed(),
       windowAuthorityStore: new WindowAuthorityStore(),
       now: () => 0,
     })(new Request("http://127.0.0.1/api/todos"));
@@ -359,6 +379,126 @@ describe("the person's to-do list", () => {
     expect(refused?.status).toBe(409);
     expect(await refused?.json()).toMatchObject({ reason: "list-not-empty" });
     expect(h.store.listHost().choice).toEqual({ kind: "this-host" });
+  });
+
+  it("notifies a paired device when the list changes and refuses other devices", async () => {
+    const h = host();
+    const first = await h.fromDevice("host-person", "/api/todos/changes");
+    const cursor = await first?.json();
+    expect(cursor).toMatchObject({ changed: true });
+    const waiting = h.fromDevice(
+      "host-person",
+      `/api/todos/changes?afterSequence=${cursor.sequence}&epoch=${cursor.epoch}`,
+    );
+    await h.fromWindow("/api/todos/commands", { kind: "add-todo", todoId: TODO_1, title: "Live" });
+    const updated = await (await waiting)?.json();
+    expect(updated).toMatchObject({ changed: true });
+    const replay = await h.fromDevice(
+      "host-person",
+      `/api/todos/changes?afterSequence=${cursor.sequence}&epoch=${cursor.epoch}`,
+    );
+    expect(await replay?.json()).toMatchObject({ changed: true, sequence: updated.sequence });
+    const restarted = await h.fromDevice(
+      "host-person",
+      "/api/todos/changes?afterSequence=0&epoch=old-process",
+    );
+    expect(await restarted?.json()).toMatchObject({ changed: true });
+    expect((await h.fromDevice("hub-roster", "/api/todos/changes"))?.status).toBe(403);
+  });
+
+  it("shares adds, edits and ticks through the remote client's change cursor", async () => {
+    const h = host();
+    const fetch = Object.assign(
+      async (
+        input: Parameters<typeof globalThis.fetch>[0],
+        init?: Parameters<typeof globalThis.fetch>[1],
+      ) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        const body =
+          typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
+        return (
+          (await h.fromDevice("host-person", `${url.pathname}${url.search}`, body)) ??
+          new Response(null, { status: 404 })
+        );
+      },
+      { preconnect: globalThis.fetch.preconnect },
+    );
+    const options = { baseUrl: "http://127.0.0.1", fetch, windowCapability: "" };
+    const remote = createTodoClient(options);
+    const waitForChange = createTodoChangeClient(options);
+    const signal = new AbortController().signal;
+    let cursor = await waitForChange(undefined, signal);
+    let waiting = waitForChange(cursor, signal);
+    await h.fromWindow("/api/todos/commands", {
+      kind: "add-todo",
+      todoId: TODO_1,
+      title: "Across computers",
+    });
+    cursor = await waiting;
+    expect(cursor.changed).toBe(true);
+    const added = (await remote.read()).todos[0];
+    expect(added?.title).toBe("Across computers");
+    waiting = waitForChange(cursor, signal);
+    await remote.change(
+      decodeTodoCommand({
+        kind: "edit-todo",
+        todoId: TODO_1,
+        expectedVersion: added?.version,
+        title: "Edited elsewhere",
+        notes: "",
+      }),
+    );
+    cursor = await waiting;
+    expect(cursor.changed).toBe(true);
+    expect(h.store.view().todos[0]?.title).toBe("Edited elsewhere");
+    waiting = waitForChange(cursor, signal);
+    await h.fromWindow("/api/todos/commands", {
+      kind: "set-todo-state",
+      todoId: TODO_1,
+      state: "done",
+    });
+    expect((await waiting).changed).toBe(true);
+    expect((await remote.read()).todos[0]?.state).toBe("done");
+  });
+
+  it("uses the hub by default without hiding an existing list or overriding an explicit choice", async () => {
+    let joined = false;
+    const hub = {
+      kind: "other-host" as const,
+      hostId: decodeStableHostId("22222222-2222-4222-8222-222222222222"),
+      name: "Hub",
+    };
+    const h = host(() => (joined ? hub : undefined));
+    expect(h.store.listHost().choice).toEqual({ kind: "this-host" });
+    joined = true;
+    expect(h.store.listHost().choice).toEqual(hub);
+    joined = false;
+    expect(h.start().listHost().choice).toEqual(hub);
+    expect(
+      (
+        await h.fromWindow("/api/todos/commands", {
+          kind: "add-todo",
+          todoId: TODO_1,
+          title: "Hidden",
+        })
+      )?.status,
+    ).toBe(409);
+    await h.fromWindow("/api/todos/list-host", {
+      kind: "choose-todo-list-host",
+      choice: { kind: "this-host" },
+    });
+    await h.fromWindow("/api/todos/commands", { kind: "add-todo", todoId: TODO_1, title: "Mine" });
+    expect(h.start().listHost().choice).toEqual({ kind: "this-host" });
+
+    let otherJoined = false;
+    const existing = host(() => (otherJoined ? hub : undefined));
+    await existing.fromWindow("/api/todos/commands", {
+      kind: "add-todo",
+      todoId: TODO_2,
+      title: "Existing",
+    });
+    otherJoined = true;
+    expect(existing.store.listHost().choice).toEqual({ kind: "this-host" });
   });
 
   it("refuses to name this computer as another, and a device or an agent grant that would move the list", async () => {

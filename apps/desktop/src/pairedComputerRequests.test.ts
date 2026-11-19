@@ -138,6 +138,59 @@ describe("a window's request to a paired computer", () => {
     expect(raced.answer.status).toBe("refused");
   });
 
+  it("carries attachment metadata only on an attachment route", async () => {
+    const headers = {
+      "content-type": "image/png",
+      "x-octant-code-thread-id": "11111111-1111-4111-8111-111111111111",
+      "x-octant-code-attachment-id": "22222222-2222-4222-8222-222222222222",
+      "x-octant-code-display-name": "image.png",
+    };
+    const upload = await ask({
+      ...hello,
+      method: "PUT",
+      path: "/api/code/attachments",
+      headers,
+      body: new Uint8Array([1, 2, 3]),
+    });
+    expect(upload.answer.status).toBe("answered");
+    expect(upload.sent).toHaveBeenCalledWith(
+      expect.stringContaining("/api/code/attachments"),
+      expect.objectContaining({ method: "PUT", headers: expect.objectContaining(headers) }),
+    );
+    const other = await ask({ ...hello, path: "/api/projects/bootstrap", headers });
+    expect(other.answer.status).toBe("refused");
+    expect(other.sent).not.toHaveBeenCalled();
+  });
+
+  it("returns complete thread event frames and cancels the buffered batch", async () => {
+    const cancelled = vi.fn();
+    const path = "/api/chat/threads/11111111-1111-4111-8111-111111111111/events?afterSequence=0";
+    const { answer } = await ask(
+      { ...hello, path },
+      {
+        answer: () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"sequence":1}\n{"sequence":'));
+              },
+              cancel: cancelled,
+            }),
+            { headers: { "content-type": "application/x-ndjson" } },
+          ),
+      },
+    );
+    expect(answer.status).toBe("answered");
+    if (answer.status !== "answered") return;
+    expect(new TextDecoder().decode(answer.body)).toBe('{"sequence":1}\n');
+    expect(cancelled).toHaveBeenCalled();
+    expect(
+      (await ask({ ...hello, path: path.replace("11111111-1111-4111-8111-111111111111", "bad") }))
+        .answer.status,
+    ).toBe("refused");
+    expect((await ask({ ...hello, path, method: "POST" })).answer.status).toBe("refused");
+  });
+
   it("names no arbitrary URL: only the listed paths and methods get through", async () => {
     const refused = [
       { path: "//example.com/api/remote/hello" },
@@ -178,7 +231,7 @@ describe("a window's request to a paired computer", () => {
         ...hello,
         method,
         path: path === "/api/remote/hello" ? `${path}?clientNonce=abc` : path,
-        ...(method === "POST" ? { body: "{}" } : {}),
+        ...(method === "GET" ? {} : { body: "{}" }),
       });
       expect(answer.status, `${method} ${path}`).toBe("answered");
     }
@@ -198,7 +251,37 @@ describe("a window's request to a paired computer", () => {
         "POST /api/server-proxy/grants",
         "GET /api/host/resources",
         "POST /api/code/local-servers/commands",
+        "GET /api/projects/bootstrap",
+        "GET /api/providers/bootstrap",
+        "GET /api/chat/bootstrap",
+        "GET /api/chat/navigation",
+        "GET /api/code/bootstrap",
+        "GET /api/code/navigation",
+        "GET /api/work/threads/bootstrap",
+        "GET /api/work/navigation",
+        "GET /api/reply-detail",
+        "GET /api/extensions/snapshot",
+        "GET /api/conversation-inputs",
+        "GET /api/work/requests",
+        "GET /api/code/attachments",
+        "GET /api/work/attachments",
+        "POST /api/chat/commands",
+        "POST /api/code/commands",
+        "POST /api/work/threads/commands",
+        "POST /api/work/turns",
+        "POST /api/extensions/tool-approvals",
+        "POST /api/work/turns/cancel",
+        "POST /api/work/turns/rewind",
+        "POST /api/work/mutations",
+        "POST /api/work/requests/commands",
+        "POST /api/code/evidence/batch",
+        "POST /api/chat/attachments",
+        "PUT /api/code/attachments",
+        "PUT /api/work/attachments",
+        "DELETE /api/code/attachments",
+        "DELETE /api/work/attachments",
         "GET /api/todos",
+        "GET /api/todos/changes",
         "POST /api/todos/commands",
       ],
     );

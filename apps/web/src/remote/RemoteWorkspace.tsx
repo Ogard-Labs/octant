@@ -40,6 +40,7 @@ import {
 } from "../transcript/replyDetail";
 
 export interface RemoteWorkspaceProps {
+  readonly initialThread?: { readonly mode: OctantMode; readonly threadId: string };
   readonly clients: RemoteProductClients;
   readonly mode: OctantMode;
   /** False while the session is stale: reads stay visible, sends are refused. */
@@ -162,6 +163,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
       surface = (
         <RemoteChatSurface
           clients={props.clients}
+          initialThread={props.initialThread}
           connected={props.connected}
           actsAsHostPerson={props.actsAsHostPerson === true}
           extensionClient={props.extensionClient}
@@ -178,6 +180,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
       surface = (
         <RemoteWorkSurface
           clients={props.clients}
+          initialThread={props.initialThread}
           connected={props.connected}
           actsAsHostPerson={props.actsAsHostPerson === true}
           extensionClient={props.extensionClient}
@@ -191,6 +194,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
       surface = (
         <RemoteCodeSurface
           clients={props.clients}
+          initialThread={props.initialThread}
           connected={props.connected}
           actsAsHostPerson={props.actsAsHostPerson === true}
           extensionClient={props.extensionClient}
@@ -248,6 +252,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
 }
 
 interface RemoteSurfaceProps {
+  readonly initialThread: RemoteWorkspaceProps["initialThread"];
   readonly clients: RemoteProductClients;
   /** A browser the host's own person paired starts threads as a window does. */
   readonly actsAsHostPerson: boolean;
@@ -262,6 +267,8 @@ function RemoteChatSurface(
   props: RemoteSurfaceProps & { readonly providerSnapshot?: ProviderRegistrySnapshot },
 ) {
   const [activeThreadId, setActiveThreadId] = useState<ChatThreadId | undefined>(() => {
+    if (props.initialThread?.mode === "chat")
+      return decodeChatThreadId(props.initialThread.threadId);
     const link = readContinuationLink(globalThis.location?.href ?? "");
     return link?.mode === "chat" ? decodeChatThreadId(link.threadId) : undefined;
   });
@@ -359,6 +366,8 @@ function RemoteChatSurface(
 
 function RemoteWorkSurface(props: RemoteSurfaceProps) {
   const [activeThreadId, setActiveThreadId] = useState<WorkThread["id"] | undefined>(() => {
+    if (props.initialThread?.mode === "work")
+      return decodeWorkThreadId(props.initialThread.threadId);
     const link = readContinuationLink(globalThis.location?.href ?? "");
     return link?.mode === "work" ? decodeWorkThreadId(link.threadId) : undefined;
   });
@@ -436,6 +445,8 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
 
 function RemoteCodeSurface(props: RemoteSurfaceProps) {
   const [activeThreadId, setActiveThreadId] = useState<CodeThreadId | undefined>(() => {
+    if (props.initialThread?.mode === "code")
+      return decodeCodeThreadId(props.initialThread.threadId);
     const link = readContinuationLink(globalThis.location?.href ?? "");
     return link?.mode === "code" ? decodeCodeThreadId(link.threadId) : undefined;
   });

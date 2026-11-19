@@ -13,12 +13,16 @@ import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { TodoStore } from "./todoStore";
+import type { MachineChangeFeed } from "../machineChangeFeed";
+import { MachineChangeEpoch } from "@octant/contracts/machine-changes";
+import { Schema } from "effect";
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 /** A full to-do: notes at their bound, every Project and tag, with room for the JSON around them. */
 const BODY_LIMIT = 32_768;
 export const TODOS_PATH = "/api/todos";
+export const TODO_CHANGES_PATH = "/api/todos/changes";
 export const TODO_COMMAND_PATH = "/api/todos/commands";
 /**
  * Which host keeps the list. Served to this host's own windows: the private
@@ -52,6 +56,7 @@ function statusFor(result: TodoResult): number {
 }
 
 export interface TodoRouteDependencies {
+  readonly feed: Pick<MachineChangeFeed, "head" | "epoch" | "subscribe">;
   readonly store: Pick<TodoStore, "view" | "change" | "listHost" | "chooseListHost">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
@@ -71,6 +76,7 @@ export function createTodoRouteHandler(dependencies: TodoRouteDependencies) {
     if (
       url.pathname !== TODOS_PATH &&
       url.pathname !== TODO_COMMAND_PATH &&
+      url.pathname !== TODO_CHANGES_PATH &&
       url.pathname !== TODO_LIST_HOST_PATH
     ) {
       return undefined;
@@ -102,6 +108,49 @@ export function createTodoRouteHandler(dependencies: TodoRouteDependencies) {
           "The to-do list can be seen and changed only by you, from a window on this computer or a device you paired.",
         ),
         403,
+        origin,
+      );
+    }
+    if (url.pathname === TODO_CHANGES_PATH && request.method === "GET") {
+      const after = url.searchParams.get("afterSequence");
+      const epoch = url.searchParams.get("epoch");
+      if (after === null && epoch === null && url.searchParams.size === 0) {
+        return json(
+          { changed: true, sequence: dependencies.feed.head(), epoch: dependencies.feed.epoch() },
+          200,
+          origin,
+        );
+      }
+      const sequence = Number(after);
+      if (
+        after === null ||
+        epoch === null ||
+        url.searchParams.size !== 2 ||
+        !Number.isSafeInteger(sequence) ||
+        sequence < 0 ||
+        !Schema.is(MachineChangeEpoch)(epoch)
+      ) {
+        return json({ error: "To-do change cursor is invalid." }, 400, origin);
+      }
+      const signal = AbortSignal.any([request.signal, AbortSignal.timeout(20_000)]);
+      let cursor = sequence;
+      for await (const frame of dependencies.feed.subscribe({
+        afterSequence: sequence,
+        epoch,
+        signal,
+      })) {
+        cursor = frame.sequence;
+        if (frame.kind === "snapshot-required" || frame.topics.includes("todos")) {
+          return json(
+            { changed: true, sequence: frame.sequence, epoch: dependencies.feed.epoch() },
+            200,
+            origin,
+          );
+        }
+      }
+      return json(
+        { changed: false, sequence: cursor, epoch: dependencies.feed.epoch() },
+        200,
         origin,
       );
     }

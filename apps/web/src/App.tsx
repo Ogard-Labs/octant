@@ -376,6 +376,7 @@ import { useProjectController } from "./projects/useProjectController";
 import { countTodos, todoListIsReadOnly } from "./todos/todoListModel";
 import {
   createTodoClient,
+  createTodoChangeClient,
   type TodoClient,
   type TodoListHostClient,
 } from "@octant/client-runtime/todo-client";
@@ -399,6 +400,9 @@ interface TodoStartInProgress {
   readonly draft?: string;
 }
 import { useTodoList } from "./todos/useTodoList";
+import { useRemoteTodoProjects, type RemoteTodoProject } from "./todos/useRemoteTodoProjects";
+import { RemoteTodoDraft } from "./todos/RemoteTodoDraft";
+import { OctantDialog } from "./ui/base/OctantDialog";
 import { useTodoListHost } from "./todos/useTodoListHost";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
@@ -2834,10 +2838,20 @@ function LaunchedShell(
         : `other-host:${String(todoListChoice.hostId)}`;
   const todoListOtherHostName =
     todoListChoice?.kind === "other-host" ? todoListChoice.name : undefined;
+  const todoRemoteSlot =
+    todoListChoice?.kind === "other-host"
+      ? hostFederationTransports?.get(String(todoListChoice.hostId))
+      : undefined;
+  const todoRemoteKnown = todoRemoteSlot !== undefined;
+  const todoRemoteBridge =
+    todoRemoteSlot?.kind === "remote" && todoRemoteSlot.state.kind === "ready"
+      ? todoRemoteSlot.bridge
+      : undefined;
   const todoListSource = useMemo((): {
     readonly client: TodoClient | undefined;
     readonly remote: boolean;
     readonly unreachable?: string;
+    readonly waitForChange?: ReturnType<typeof createTodoChangeClient>;
   } => {
     if (todoListChoiceKey === "this-host") {
       return { client: launchedClients.todoClient, remote: false };
@@ -2853,49 +2867,44 @@ function LaunchedShell(
       };
     }
     if (!todoListChoiceKey.startsWith("other-host:")) return { client: undefined, remote: false };
-    const hostId = todoListChoiceKey.slice("other-host:".length);
     const name = todoListOtherHostName ?? "The computer that keeps the list";
-    const slot = hostFederationTransports?.get(hostId);
-    if (
-      slot === undefined ||
-      slot.kind !== "remote" ||
-      slot.bridge === undefined ||
-      slot.state.kind !== "ready"
-    ) {
+    if (todoRemoteBridge === undefined) {
       return {
         client: undefined,
         remote: true,
-        unreachable:
-          slot === undefined
-            ? `${name} keeps the list, and this window is not paired with it.`
-            : `${name} cannot be reached, so nothing can be changed.`,
+        unreachable: !todoRemoteKnown
+          ? `${name} keeps the list, and this window is not paired with it.`
+          : `${name} cannot be reached, so nothing can be changed.`,
       };
     }
+    // The session owns the destination and strips the local window capability.
+    const options = {
+      baseUrl: "http://127.0.0.1",
+      fetch: createRemoteProductFetch({ bridge: todoRemoteBridge }),
+      windowCapability: "",
+    };
     return {
-      client: createTodoClient({
-        // The remote session owns the destination; the base URL only shapes
-        // the path, and no window capability leaves this computer.
-        baseUrl: "http://127.0.0.1",
-        fetch: createRemoteProductFetch({ bridge: slot.bridge }),
-        windowCapability: "",
-      }),
+      client: createTodoClient(options),
+      waitForChange: createTodoChangeClient(options),
       remote: true,
     };
-    // The transport slot changes in place; the revision says when to look again.
+    // Health snapshots mutate the slot in place. Keep a live wait on the same
+    // bridge while it remains ready, instead of replacing it on each snapshot.
   }, [
     todoListChoiceKey,
     todoListOtherHostName,
     launchedClients.todoClient,
-    hostFederationTransports,
-    federationRevision,
+    todoRemoteKnown,
+    todoRemoteBridge,
   ]);
   const todoList = useTodoList(
     todoListSource.client,
-    // Another computer's changes do not reach this host's feed; its list is
-    // read again on the slow timer and after each change sent from here.
     todoListSource.remote ? undefined : machineChanges.todos,
     {
       key: todoListChoiceKey,
+      ...(todoListSource.waitForChange === undefined
+        ? {}
+        : { waitForChange: todoListSource.waitForChange }),
       ...(todoListSource.unreachable === undefined
         ? {}
         : { unreachable: todoListSource.unreachable }),
@@ -2934,6 +2943,15 @@ function LaunchedShell(
     todoList.read.status === "loading" || todoList.read.view === undefined
       ? 0
       : countTodos(todoList.read.view.todos).waiting;
+  const remoteTodoProjects = useRemoteTodoProjects(hostFederationTransports, federationRevision);
+  const [remoteTodo, setRemoteTodo] = useState<{
+    readonly hostId: string;
+    readonly destination?: RemoteTodoProject;
+    readonly todo?: Todo;
+    readonly thread?: TodoThreadLink;
+  }>();
+  const remoteTodoSlot =
+    remoteTodo === undefined ? undefined : hostFederationTransports?.get(remoteTodo.hostId);
   const todoProjects = useMemo(
     () =>
       projectController.allProjects
@@ -2946,12 +2964,17 @@ function LaunchedShell(
   useNewTodoShortcut(openTodoQuickAdd);
   const todoThreadRows = useMemo(
     () =>
-      todoThreadStates([
+      todoThreadStates(todoThisHostId, [
         { mode: "chat", rows: chatController.navigation },
         { mode: "work", rows: workNavigation.navigation },
         { mode: "code", rows: codeController.navigation },
       ]),
-    [chatController.navigation, workNavigation.navigation, codeController.navigation],
+    [
+      todoThisHostId,
+      chatController.navigation,
+      workNavigation.navigation,
+      codeController.navigation,
+    ],
   );
   const todosPage: TodosPageProps = {
     list: todoList,
@@ -2961,6 +2984,12 @@ function LaunchedShell(
     projects: todoProjects,
     onClose: () => setTodosOpen(false),
     start: {
+      otherProjects: remoteTodoProjects.map((destination) => ({
+        hostId: destination.hostId,
+        hostName: destination.hostName,
+        projectId: String(destination.project.id),
+        name: destination.project.name,
+      })),
       threadStates: todoThreadRows,
       onStart: (todo, target) => void startTodo(todo, target),
       onOpenThread: (link, title) => void openTodoThread(link, title),
@@ -7033,6 +7062,15 @@ function LaunchedShell(
    * starts until the person sends; the host that owns the Project decides.
    */
   async function startTodo(todo: Todo, target: TodoStartTarget): Promise<void> {
+    if (target.kind === "project" && target.hostId !== undefined) {
+      const destination = remoteTodoProjects.find(
+        (candidate) =>
+          candidate.hostId === target.hostId && String(candidate.project.id) === target.projectId,
+      );
+      if (destination === undefined) return;
+      setRemoteTodo({ hostId: destination.hostId, destination, todo });
+      return;
+    }
     const project =
       target.kind === "chat"
         ? undefined
@@ -7070,20 +7108,20 @@ function LaunchedShell(
   }
 
   /** Called by each create path once the host answered with its thread. */
-  function linkStartedTodo(
+  async function linkStartedTodo(
     start: TodoStartInProgress | undefined,
     mode: OctantMode,
     threadId: string,
-  ): void {
+  ): Promise<void> {
     if (start === undefined || start.mode !== mode) return;
     if (todoStartRef.current === start) setTodoStart(undefined);
-    void recordTodoLink(start.todoId, { threadId, mode });
+    await recordTodoLink(start.todoId, { threadId, mode });
   }
 
   async function recordTodoLink(todoId: string, started: TodoUnlinkedStart): Promise<void> {
     // The list as it is now, not as it was when the create started.
     // A thread is linked by the host that owns it: this one.
-    const hostId = todoThisHostIdRef.current;
+    const hostId = started.hostId ?? todoThisHostIdRef.current;
     let saved = false;
     if (hostId !== undefined) {
       try {
@@ -7108,6 +7146,10 @@ function LaunchedShell(
   }
 
   async function openTodoThread(link: TodoThreadLink, title: string): Promise<void> {
+    if (String(link.hostId) !== String(todoThisHostIdRef.current)) {
+      setRemoteTodo({ hostId: String(link.hostId), thread: link });
+      return;
+    }
     closeWorkspaceReaders();
     const threadId = String(link.threadId);
     if (link.mode === "chat") await controller.openChatThread(decodeChatThreadId(threadId), title);
@@ -7478,7 +7520,7 @@ function LaunchedShell(
         );
         return false;
       }
-      linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
+      await linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
       // The branch Start a fix handed in now belongs to this thread; the next
       // draft must not open on it.
       setPendingDraftBranch(undefined);
@@ -7664,7 +7706,7 @@ function LaunchedShell(
           setDraftError(chatController.errorMessage ?? "The chat thread could not be created.");
           return;
         }
-        linkStartedTodo(sentFromTodo, "chat", String(result.thread.id));
+        await linkStartedTodo(sentFromTodo, "chat", String(result.thread.id));
         // Clear the pane that submitted this create. Welcome panes cannot
         // become active, and another Chat pane can be current by the time
         // create finishes, so the caller passes the submitting pane.
@@ -7872,7 +7914,7 @@ function LaunchedShell(
           setDraftError("The Code thread could not be created.");
           return;
         }
-        linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
+        await linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
         firstPromptAnnouncedFor = created.thread.id;
         codeThreadControllers.announceFirstPrompt(created.thread.id, prompt);
         await controller.openCodeThread(
@@ -7964,7 +8006,7 @@ function LaunchedShell(
           setDraftError("The task could not be created.");
           return false;
         }
-        linkStartedTodo(sentFromTodo, "work", String(created.thread.id));
+        await linkStartedTodo(sentFromTodo, "work", String(created.thread.id));
         await controller.openWorkThread(
           created.thread.id,
           created.thread.title,
@@ -9194,6 +9236,41 @@ function LaunchedShell(
                     <TodoListHostSettingsContext.Provider value={todoListHostSettings}>
                       <OctantCommandProvider commands={octantCommands}>
                         <OctantDialogPresence>
+                          {remoteTodo === undefined ? null : (
+                            <OctantDialog
+                              label={
+                                remoteTodo.destination?.project.name ?? "Thread on paired computer"
+                              }
+                              open
+                              onClose={() => setRemoteTodo(undefined)}
+                            >
+                              {remoteTodoSlot?.bridge === undefined ? (
+                                <p>Pair with this computer to open its thread.</p>
+                              ) : (
+                                <RemoteTodoDraft
+                                  key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}
+                                  bridge={remoteTodoSlot.bridge}
+                                  hostId={remoteTodo.hostId}
+                                  hostName={remoteTodoSlot.displayName}
+                                  connected={remoteTodoSlot.state.kind === "ready"}
+                                  {...(remoteTodo.destination === undefined
+                                    ? {}
+                                    : { project: remoteTodo.destination.project })}
+                                  {...(remoteTodo.todo === undefined
+                                    ? {}
+                                    : { todo: remoteTodo.todo })}
+                                  {...(remoteTodo.thread === undefined
+                                    ? {}
+                                    : { thread: remoteTodo.thread })}
+                                  onCreated={async (link) => {
+                                    if (remoteTodo.todo !== undefined)
+                                      await recordTodoLink(String(remoteTodo.todo.id), link);
+                                  }}
+                                  onClose={() => setRemoteTodo(undefined)}
+                                />
+                              )}
+                            </OctantDialog>
+                          )}
                           {todoQuickAddOpen ? (
                             <TodoQuickAddDialog
                               list={todoList}

@@ -136,3 +136,49 @@ async function send(
   }
   return body;
 }
+
+export interface TodoChangeCursor {
+  readonly sequence: number;
+  readonly epoch: string;
+}
+
+/** A bounded wait for a remote list invalidation, with a cursor for reconnects. */
+export function createTodoChangeClient(options: TodoClientOptions) {
+  const fetch = bindFetchPort(options.fetch);
+  return async (
+    cursor: TodoChangeCursor | undefined,
+    signal: AbortSignal,
+  ): Promise<TodoChangeCursor & { readonly changed: boolean }> => {
+    const url = new URL("/api/todos/changes", options.baseUrl);
+    if (cursor !== undefined) {
+      url.searchParams.set("afterSequence", String(cursor.sequence));
+      url.searchParams.set("epoch", cursor.epoch);
+    }
+    const body = await send(
+      fetch,
+      url.toString(),
+      {
+        method: "GET",
+        headers: { "x-octant-window-capability": options.windowCapability },
+        signal,
+      },
+      "To-do updates are unavailable.",
+    );
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !("changed" in body) ||
+      typeof body.changed !== "boolean" ||
+      !("sequence" in body) ||
+      typeof body.sequence !== "number" ||
+      !Number.isSafeInteger(body.sequence) ||
+      body.sequence < 0 ||
+      !("epoch" in body) ||
+      typeof body.epoch !== "string" ||
+      !/^[A-Za-z0-9-]{1,64}$/.test(body.epoch)
+    ) {
+      throw new TodoClientFailure("To-do updates are invalid.", 0);
+    }
+    return { changed: body.changed, sequence: body.sequence, epoch: body.epoch };
+  };
+}
