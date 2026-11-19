@@ -4152,6 +4152,18 @@ form > .work-composer-adapter__attachments {
   color: var(--oct-link);
 }
 
+/* A description's checklist reads as one: the box is a mark of what is done and
+   cannot be changed here. */
+.pr-detail__prose input[type="checkbox"] {
+  margin: 0 var(--oct-space-2) 0 0;
+  vertical-align: -2px;
+  accent-color: var(--oct-accent);
+}
+
+.pr-detail__prose li:has(> input[type="checkbox"]) {
+  list-style: none;
+}
+
 /* The age holds a slot of one width, right-aligned, so a title never gives or
    takes room as "now" becomes "3d" and every row's age ends at the same edge.
    Three characters at the 12px meta size, which is the longest it reads

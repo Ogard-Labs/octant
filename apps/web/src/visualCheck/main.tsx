@@ -9,6 +9,7 @@ import { IconDefaults } from "../ui/IconDefaults";
 import { SCENES, sceneById } from "./scenes";
 import "../styles.css";
 import "../styles/work-list.css";
+import "../styles/github.css";
 import "../styles/preview.css";
 import "../styles/inbox.css";
 import "../styles/review.css";

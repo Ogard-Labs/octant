@@ -130,20 +130,3 @@
   gap: var(--oct-space-2);
   margin: 0;
 }
-
-/* A description's checklist reads as one: the box is a mark of what is done and
-   cannot be changed here. */
-.pr-detail__prose input[type="checkbox"] {
-  margin: 0 var(--oct-space-2) 0 0;
-  vertical-align: -2px;
-  accent-color: var(--oct-accent);
-}
-
-.pr-detail__prose li:has(> input[type="checkbox"]) {
-  list-style: none;
-}
-
-html[data-octant-increased-contrast="true"] .work-list__row[aria-current="true"] {
-  background: var(--octant-control-hover);
-  text-decoration: underline;
-}

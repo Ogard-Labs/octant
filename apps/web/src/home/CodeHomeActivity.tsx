@@ -44,6 +44,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { ActivityRangeField, activityRangeLabel } from "./ActivityRangeField";
 import "./home.css";
+import "./code-home-activity.css";
 import {
   arrangeHomeCards,
   moveHomeCard,

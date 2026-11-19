@@ -193,6 +193,11 @@ time.work-list__meta-text {
   background: var(--oct-selection);
 }
 
+html[data-octant-increased-contrast="true"] .work-list__row[aria-current="true"] {
+  background: var(--octant-control-hover);
+  text-decoration: underline;
+}
+
 /* ── Repository control ─────────────────────────────────────────────── */
 
 /* One fixed width, words cut with an ellipsis: choosing a repository never
