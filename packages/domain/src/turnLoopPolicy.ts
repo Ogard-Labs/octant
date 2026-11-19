@@ -43,6 +43,8 @@ export interface TurnLoopPendingStart {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly resolved: boolean;
+  /** True once this unresolved start has already reset an earlier streak. */
+  readonly streakBroken: boolean;
 }
 
 export interface TurnLoopState {
@@ -212,13 +214,18 @@ export function observeTurnToolCall(
   };
 }
 
+function matchesStartedToolName(startedName: string, requestedName: string): boolean {
+  return startedName === requestedName || startedName.endsWith(requestedName);
+}
+
 function appendPendingStart(
   pending: ReadonlyArray<TurnLoopPendingStart>,
   toolCallId: string,
   toolName: string,
+  streakBroken: boolean,
 ): ReadonlyArray<TurnLoopPendingStart> {
   if (pending.some((entry) => entry.toolCallId === toolCallId)) return pending;
-  const next = [...pending, { toolCallId, toolName, resolved: false }];
+  const next = [...pending, { toolCallId, toolName, resolved: false, streakBroken }];
   return next.length > MAX_PENDING_TOOL_STARTS
     ? next.slice(next.length - MAX_PENDING_TOOL_STARTS)
     : next;
@@ -236,6 +243,27 @@ function markPendingStartResolved(
 }
 
 /**
+ * If any earlier unresolved `tool-start` (before `beforeIndex`) has not yet
+ * broken the prior streak, reset the streak now and mark those starts as
+ * accounted for so overlapping tools never allow a later call to extend an
+ * earlier streak.
+ */
+function accountForInterveningStarts(state: TurnLoopState, beforeIndex: number): TurnLoopState {
+  const hasIntervening = state.pendingStarts.some(
+    (entry, index) => index < beforeIndex && !entry.resolved && !entry.streakBroken,
+  );
+  if (!hasIntervening) return state;
+  return {
+    ...resetTurnLoopStreak(state),
+    pendingStarts: state.pendingStarts.map((entry, index) =>
+      index < beforeIndex && !entry.resolved && !entry.streakBroken
+        ? { ...entry, streakBroken: true }
+        : entry,
+    ),
+  };
+}
+
+/**
  * Observes a normalized provider runtime event for loop detection.
  *
  * - `tool-request` carries Octant's own app-managed tool calls with full JSON
@@ -244,9 +272,9 @@ function markPendingStartResolved(
  * - `tool-start` paired with an un-truncated, non-partial `tool-call-content`
  *   (`part: "input"`) checks provider-native tools that report their JSON
  *   inputs (Claude Code).
- * - Any tool call whose input is missing, truncated, or partial resets the
- *   consecutive streak so another tool running in between never bridges two
- *   separate runs into a false loop.
+ * - Any intervening tool call — even one still in flight or whose input is
+ *   missing, truncated, or partial — resets the consecutive streak so another
+ *   tool running in between never bridges two separate runs into a false loop.
  */
 export function observeTurnRuntimeEvent(
   state: TurnLoopState,
@@ -256,12 +284,21 @@ export function observeTurnRuntimeEvent(
   switch (event.kind) {
     case "tool-start": {
       const start = event as Extract<TurnLoopRuntimeEvent, { readonly kind: "tool-start" }>;
+      const breaksPriorStreak =
+        state.lastToolName !== undefined &&
+        !matchesStartedToolName(start.toolName, state.lastToolName);
+      const base = breaksPriorStreak ? resetTurnLoopStreak(state) : state;
       return {
         next: {
-          ...state,
-          pendingStarts: appendPendingStart(state.pendingStarts, start.toolCallId, start.toolName),
+          ...base,
+          pendingStarts: appendPendingStart(
+            base.pendingStarts,
+            start.toolCallId,
+            start.toolName,
+            breaksPriorStreak,
+          ),
         },
-        count: state.consecutiveCount,
+        count: base.consecutiveCount,
         earlyWarning: false,
         loop: undefined,
       };
@@ -299,9 +336,10 @@ export function observeTurnRuntimeEvent(
           loop: undefined,
         };
       }
+      const ordered = accountForInterveningStarts(state, index);
       const withResolved: TurnLoopState = {
-        ...state,
-        pendingStarts: markPendingStartResolved(state.pendingStarts, index),
+        ...ordered,
+        pendingStarts: markPendingStartResolved(ordered.pendingStarts, index),
       };
       if (content.truncated === true || content.partial === true) {
         return {
@@ -322,18 +360,21 @@ export function observeTurnRuntimeEvent(
       const request = event as Extract<TurnLoopRuntimeEvent, { readonly kind: "tool-request" }>;
       // When a provider runtime (Claude, Codex, OpenCode, Pi, ACP) announces an
       // app-managed tool via `tool-start` before the bridge emits `tool-request`,
-      // pair them so the start's completion does not reset the streak.
+      // pair them so the start's completion does not reset the streak. Any
+      // earlier unresolved start ahead of this call still breaks the prior streak.
       const matchIndex = state.pendingStarts.findIndex(
-        (entry) =>
-          !entry.resolved &&
-          (entry.toolName === request.toolName || entry.toolName.endsWith(request.toolName)),
+        (entry) => !entry.resolved && matchesStartedToolName(entry.toolName, request.toolName),
+      );
+      const ordered = accountForInterveningStarts(
+        state,
+        matchIndex === -1 ? state.pendingStarts.length : matchIndex,
       );
       const correlated: TurnLoopState =
         matchIndex === -1
-          ? state
+          ? ordered
           : {
-              ...state,
-              pendingStarts: markPendingStartResolved(state.pendingStarts, matchIndex),
+              ...ordered,
+              pendingStarts: markPendingStartResolved(ordered.pendingStarts, matchIndex),
             };
       return observeTurnToolCall(correlated, {
         toolName: request.toolName,
@@ -362,7 +403,7 @@ export function observeTurnRuntimeEvent(
       const entry = state.pendingStarts[index];
       const nextPending = state.pendingStarts.filter((_, current) => current !== index);
       const base: TurnLoopState = { ...state, pendingStarts: nextPending };
-      if (entry !== undefined && !entry.resolved) {
+      if (entry !== undefined && !entry.resolved && !entry.streakBroken) {
         return {
           next: resetTurnLoopStreak(base),
           count: 0,

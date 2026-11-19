@@ -222,6 +222,113 @@ describe("turn loop and stall policy", () => {
     }
   });
 
+  it("breaks an active streak as soon as an intervening tool starts, even before it finishes", () => {
+    // 5 identical octant_read requests, then an overlapping native Bash tool-start,
+    // then a 6th identical octant_read before Bash completes.
+    let state = INITIAL_TURN_LOOP_STATE;
+    for (let i = 1; i <= 5; i += 1) {
+      const req = observeTurnRuntimeEvent(
+        state,
+        {
+          kind: "tool-request",
+          requestId: `r-${i}`,
+          toolName: "octant_read",
+          inputJson: '{"path":"a.ts"}',
+        },
+        { strict: true },
+      );
+      expect(req.loop).toBeUndefined();
+      state = req.next;
+    }
+
+    // Native Bash starts without input and stays running.
+    state = observeTurnRuntimeEvent(
+      state,
+      { kind: "tool-start", toolCallId: "bash-1", toolName: "Bash" },
+      { strict: true },
+    ).next;
+
+    // A 6th octant_read while Bash is still in flight must start a fresh streak at 1, never triggering a Strict stop.
+    const sixth = observeTurnRuntimeEvent(
+      state,
+      {
+        kind: "tool-request",
+        requestId: "r-6",
+        toolName: "octant_read",
+        inputJson: '{"path":"a.ts"}',
+      },
+      { strict: true },
+    );
+    expect(sixth.count).toBe(1);
+    expect(sixth.loop).toBeUndefined();
+    state = sixth.next;
+
+    // Five more identical octant_read calls after Bash started DO form a fresh 6-call loop.
+    let latest = sixth;
+    for (let i = 7; i <= 11; i += 1) {
+      latest = observeTurnRuntimeEvent(
+        state,
+        {
+          kind: "tool-request",
+          requestId: `r-${i}`,
+          toolName: "octant_read",
+          inputJson: '{"path":"a.ts"}',
+        },
+        { strict: true },
+      );
+      state = latest.next;
+    }
+    expect(latest.count).toBe(6);
+    expect(latest.loop).toEqual({ kind: "stop", toolName: "octant_read", count: 6 });
+
+    // Same invariant when an overlapping Bash start precedes a 6th Claude Read tool-start + tool-call-content.
+    let claudeState = INITIAL_TURN_LOOP_STATE;
+    for (let i = 1; i <= 5; i += 1) {
+      claudeState = observeTurnRuntimeEvent(
+        claudeState,
+        { kind: "tool-start", toolCallId: `read-${i}`, toolName: "Read" },
+        { strict: true },
+      ).next;
+      claudeState = observeTurnRuntimeEvent(
+        claudeState,
+        {
+          kind: "tool-call-content",
+          toolCallId: `read-${i}`,
+          part: "input",
+          text: '{"file_path":"a.ts"}',
+        },
+        { strict: true },
+      ).next;
+      claudeState = observeTurnRuntimeEvent(
+        claudeState,
+        { kind: "tool-success", toolCallId: `read-${i}` },
+        { strict: true },
+      ).next;
+    }
+    claudeState = observeTurnRuntimeEvent(
+      claudeState,
+      { kind: "tool-start", toolCallId: "bash-overlap", toolName: "Bash" },
+      { strict: true },
+    ).next;
+    claudeState = observeTurnRuntimeEvent(
+      claudeState,
+      { kind: "tool-start", toolCallId: "read-6", toolName: "Read" },
+      { strict: true },
+    ).next;
+    const sixthRead = observeTurnRuntimeEvent(
+      claudeState,
+      {
+        kind: "tool-call-content",
+        toolCallId: "read-6",
+        part: "input",
+        text: '{"file_path":"a.ts"}',
+      },
+      { strict: true },
+    );
+    expect(sixthRead.count).toBe(1);
+    expect(sixthRead.loop).toBeUndefined();
+  });
+
   it("appends one informational sentence to an Octant tool result without discarding the result", () => {
     expect(appendRepeatToolWarning({ ok: true, value: 42 })).toEqual({
       ok: true,
