@@ -1186,4 +1186,22 @@ describe("GhPullRequestPort issue closure", () => {
 
     expect(closure).toEqual({ closedAt: "2026-08-22T09:00:00Z", title: "The real bug" });
   });
+
+  it("sends owner and name as string variables when they look like literals", async () => {
+    const { port, command } = fixture([]);
+
+    await port.observeIssueClosure(
+      { owner: "true", name: "2048", issueNumber: 34, closerNumber: 12 },
+      new AbortController().signal,
+    );
+
+    expect(vi.mocked(command.run).mock.calls[0]?.[0].slice(-6)).toEqual([
+      "-f",
+      "owner=true",
+      "-f",
+      "name=2048",
+      "-F",
+      "number=34",
+    ]);
+  });
 });

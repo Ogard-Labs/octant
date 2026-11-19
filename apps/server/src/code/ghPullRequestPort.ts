@@ -882,9 +882,11 @@ export class GhPullRequestPort {
           "graphql",
           "-f",
           `query=${ISSUE_CLOSURE_QUERY}`,
-          "-F",
+          // -f keeps owner and name strings: -F would turn a repository named
+          // `true` or `2048` into a boolean or integer GraphQL rejects.
+          "-f",
           `owner=${owner}`,
-          "-F",
+          "-f",
           `name=${name}`,
           "-F",
           `number=${request.issueNumber}`,
