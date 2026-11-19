@@ -63,12 +63,12 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 4       | 4            | 0                   |
-| [Hubs and Nightly](#hubs-and-nightly)                                                 | 6         | 1       | 4            | 1                   |
+| [Hubs and Nightly](#hubs-and-nightly)                                                 | 6         | 1       | 5            | 0                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **287**   | **169** | **110**      | **8**               |
+| **All areas**                                                                         | **287**   | **169** | **111**      | **7**               |
 
 ## Principles and hard lines
 
@@ -3821,12 +3821,12 @@ Status: Partly built. Since: 2026-11-07. Detail: [Hub and spokes: moving a threa
 A person starts and manages a coding session on whichever of their computers they choose, from any window, phone or browser connected through Octant; the hub coordinates, and each computer runs and authorizes its own work (maintainer request, 2026-11-19).
 
 - The hub is the front door (a device paired with the hub reaches every member), the directory, and the owner of the shared services a specification places on it; it carries no session traffic, and two computers can pair directly with no hub. _Designed, not built._
-- A start-screen composer's computer picker makes the thread on the computer it names, in that computer's Project with its providers, models and defaults; until the window can route a create, a create aimed at another computer is refused with a sentence and never runs on this one. _Designed, not built._
+- A start-screen composer's computer picker makes the thread on the computer it names, in that computer's Project with its providers, models and defaults; until the window can route a create, a create aimed at another computer is refused with a sentence and never runs on this one. Built for a computer the window paired directly: the Code start screen shows that computer's own Code surface over its session, the desktop's paired-computer channel carries the Code routes (`:id` segments matching only a lowercase UUID), and an open thread's events are read without waiting (`wait=0`) at the phone's pace. Not built yet: a computer the hub introduced, choosing a folder there, merged lists across computers, and image attachments there.
 - A device only the hub introduced acts on a member within that member's Act hub-grant item; a device the member's own person paired acts as that person there. _Designed, not built._
 - A computer can be added as a member over SSH without visiting it: the signed headless installer runs after the person confirms, it joins with a join code passed in the same session, and updates drain, swap and roll back. _Designed, not built._
 - Each member reports a load level beside the roster, and a member can stop accepting delegated work with one switch. _Designed, not built._
 
-Status: Designed, not built. Since: 2026-11-19. Detail: [Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work) and [decisions](hub-and-spokes.md#decisions).
+Status: Partly built. Since: 2026-11-19. Detail: [Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work) and [decisions](hub-and-spokes.md#decisions).
 
 ### Octant Nightly
 
