@@ -10,6 +10,7 @@
     "./agent-run-conversation-policy": "./src/agentRunConversationPolicy.ts",
     "./agent-run-workspace-policy": "./src/agentRunWorkspacePolicy.ts",
     "./agent-run-forest": "./src/agentRunForest.ts",
+    "./activity-range-policy": "./src/activityRangePolicy.ts",
     "./automatic-model-policy": "./src/automaticModelPolicy.ts",
     "./automation-policy": "./src/automationPolicy.ts",
     "./outside-driver-publisher-policy": "./src/outsideDriverPublisherPolicy.ts",

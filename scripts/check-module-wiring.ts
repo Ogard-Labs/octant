@@ -88,6 +88,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   // ── Remaining ──
   [
+    "packages/domain/src/activityRangePolicy.ts",
+    "Timeframe resolution for the planned Code home activity panel; the panel is not built yet, so only its test reaches the policy through the ./activity-range-policy subpath. Remove once a product module imports it.",
+  ],
+  [
     "apps/server/src/remote/remoteExitEvidenceADriver.ts",
     "Browser-realm bundle entry built by remoteExitEvidenceA.smoke.test.ts via `bun build`; excluded from the server tsconfig on purpose. Remove once that evidence is served by a product caller or the smoke is retired.",
   ],
