@@ -13,6 +13,7 @@ import { PatternSections } from "./patterns";
 import "../styles.css";
 import "../styles/work-list.css";
 import "../styles/github.css";
+import "../styles/linear-issues.css";
 import "../styles/preview.css";
 import "../styles/inbox.css";
 import "../styles/review.css";
@@ -40,7 +41,10 @@ import "../styles/settings.css";
 import "../styles/zen.css";
 import "../styles/browser-workspace.css";
 import "../styles/folder-picker.css";
+import "../context/context.css";
+import "../context/context-health-warning.css";
 import "../styles/components.css";
+import "../styles/thread-search.css";
 import "./gallery.css";
 
 const SIZES = [12, 13, 14, 15, 16] as const;

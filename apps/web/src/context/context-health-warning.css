@@ -1,0 +1,14 @@
+.context-health-warning {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-health-warning {
+    transition: none;
+  }
+}

@@ -554,7 +554,10 @@ describe("GitHubIssueBrowser", () => {
   });
 
   it("marks the current issue with fill and text emphasis in increased contrast", () => {
-    const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles/work-list.css"), "utf8");
+    const stylesheet = readFileSync(
+      resolve(import.meta.dirname, "../styles/work-list.css"),
+      "utf8",
+    );
     expect(stylesheet).toMatch(
       /\[data-octant-increased-contrast="true"\] \.work-list__row[^{]*\{[^}]*?background:\s*var\(--octant-control-hover\);[\s\S]*?text-decoration:\s*underline/,
     );

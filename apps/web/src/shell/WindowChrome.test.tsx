@@ -98,6 +98,10 @@ const projectStyles = readFileSync(
   resolve(process.cwd(), "src/styles/project-threads.css"),
   "utf8",
 );
+const projectMemoryStyles = readFileSync(
+  resolve(process.cwd(), "src/styles/project-memory.css"),
+  "utf8",
+);
 /*
  * Comments are stripped before matching. `cssRule` reads a rule's prelude as
  * "everything since the last brace", so a comment written above a rule became
@@ -112,6 +116,7 @@ const styles = [
   environmentStyles,
   surfaceStyles,
   projectStyles,
+  projectMemoryStyles,
 ]
   .join("\n")
   .replace(/\/\*[\s\S]*?\*\//g, "");

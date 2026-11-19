@@ -1,3 +1,4 @@
+import "../styles/linear-issues.css";
 import type {
   LinearIssueDetail,
   LinearIssueFilterOption,

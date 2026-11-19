@@ -1,7 +1,7 @@
 import type { ContextHealth } from "@octant/contracts/context";
 import { contextHealthLabel } from "./contextInspectorModel";
 import { OctantButton } from "../ui/base/OctantButton";
-import "./context.css";
+import "./context-health-warning.css";
 
 export interface ContextHealthWarningProps {
   readonly health: Exclude<ContextHealth, "healthy">;
