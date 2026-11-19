@@ -1,3 +1,4 @@
+import "../styles/thread-plan.css";
 import { ListChecks } from "../ui/icons";
 import { useId, useState } from "react";
 import { useRegisterComposerMenuAction } from "../composer/ComposerMenuActions";

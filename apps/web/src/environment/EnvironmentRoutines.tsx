@@ -1,3 +1,4 @@
+import "../styles/environment-details.css";
 import "../styles/automation.css";
 import type { AutomationClient } from "@octant/client-runtime";
 import type {

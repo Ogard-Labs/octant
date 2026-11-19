@@ -1,3 +1,4 @@
+import "../styles/thread-plan.css";
 import type { ThreadPlan, ThreadPlanStepId, ThreadPlanStepStatus } from "@octant/contracts";
 import { CheckCircle2, Circle, CircleDot, CircleSlash } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";

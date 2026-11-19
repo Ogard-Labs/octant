@@ -1,0 +1,443 @@
+.thread-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.thread-plan-proposal.project-dialog {
+  --octant-dialog-width: 460px;
+
+  width: min(100%, 460px);
+  max-width: 460px;
+}
+
+.thread-plan-proposal h1 {
+  margin-bottom: var(--oct-space-3);
+}
+
+.thread-plan__compose {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--oct-space-3);
+}
+
+.thread-plan__field {
+  display: grid;
+  gap: var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+}
+
+/* Actions end the sheet at its trailing edge, Cancel before the default action,
+   like any Mac sheet. A full-width button under the fields read as a web form. */
+.thread-plan__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+}
+
+.thread-plan__status,
+.thread-plan__empty,
+.thread-plan__command-error,
+.thread-plan__history {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.plan-card__header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plan-card__status,
+.plan-card__progress,
+.plan-card__step-state,
+.plan-card__step-rationale {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.plan-card__steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-card__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.plan-card__step-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* A dropped step stays readable and stays legible as dropped in words; the
+   line-through is the second signal, never the only one. */
+.plan-card__step[data-step-status="dropped"] .plan-card__step-title {
+  text-decoration: line-through;
+}
+
+.plan-card__step-actions,
+.plan-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  flex-wrap: wrap;
+}
+
+.thread-task-viewer__placement {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 0 12px 8px;
+}
+
+.thread-task-viewer {
+  display: flex;
+  justify-content: center;
+}
+
+.thread-task-viewer__trigger {
+  min-height: 30px;
+  color: var(--octant-text-secondary);
+  background: var(--octant-floating);
+  box-shadow: var(--octant-shadow-hairline);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-task-viewer__trigger:hover,
+.thread-task-viewer__trigger:focus-visible,
+.thread-task-viewer__trigger[aria-expanded="true"] {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+.thread-task-viewer__trigger:active {
+  background: var(--octant-control-pressed);
+}
+
+.thread-task-viewer__evidence {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-task-viewer__popover {
+  width: min(400px, calc(100vw - 32px));
+  padding: var(--oct-space-3);
+  color: var(--octant-text-primary);
+}
+
+.thread-task-viewer__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid var(--octant-border);
+}
+
+.thread-task-viewer__header strong {
+  overflow: hidden;
+  font-size: var(--oct-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-task-viewer__header span {
+  flex: 0 0 auto;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-task-viewer__steps {
+  display: grid;
+  gap: 0;
+  margin: var(--oct-space-1) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.thread-task-viewer__steps > li {
+  position: relative;
+  display: grid;
+  min-height: 34px;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-2) var(--oct-space-2) 4px;
+  border-radius: var(--oct-radius-sm);
+}
+
+/* The run of marks reads as one track rather than four loose dots, so the
+   connector is drawn between them and stopped short of the last. The rows sit
+   flush against each other, so reaching the next mark means clearing that row's
+   6px top padding and the mark's own 3px offset; anything shorter leaves a gap
+   that reads as a break in the sequence. */
+.thread-task-viewer__steps > li:not(:last-child)::before {
+  position: absolute;
+  top: 26px;
+  bottom: -9px;
+  left: 11.25px;
+  width: 1.5px;
+  background: var(--octant-border);
+  content: "";
+}
+
+.thread-task-viewer__steps > li[data-step-status="in-progress"] {
+  background: var(--oct-selection);
+}
+
+.thread-task-viewer__steps > li[data-step-status="dropped"] .thread-task-viewer__title {
+  text-decoration: line-through;
+}
+
+/* Drawn, not glyphed: a step's state is one mark that changes fill, so the
+   states line up on the same circle instead of on four icon silhouettes. */
+.thread-task-viewer__mark {
+  position: relative;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--octant-border-strong);
+  border-radius: 50%;
+  margin-top: var(--oct-space-1);
+  color: var(--octant-accent-foreground);
+  background: transparent;
+}
+
+.thread-task-viewer__steps > li[data-step-status="in-progress"] .thread-task-viewer__mark {
+  border-color: var(--octant-accent-text);
+}
+
+.thread-task-viewer__steps > li[data-step-status="in-progress"] .thread-task-viewer__mark::after {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--octant-accent-text);
+  content: "";
+}
+
+/* A done mark draws the accent ink, so it sits on the accent fill that ink is
+   paired with: on accent text, a swatch with white ink (Slate, Graphite) left
+   white checks on the preset blue at 2.8:1 in dark mode. */
+.thread-task-viewer__steps > li[data-step-status="done"] .thread-task-viewer__mark {
+  border-color: var(--octant-accent);
+  background: var(--octant-accent);
+}
+
+.thread-task-viewer__steps > li[data-step-status="dropped"] .thread-task-viewer__mark::after {
+  width: 7px;
+  height: 1.5px;
+  background: var(--octant-text-muted);
+  content: "";
+}
+
+.thread-task-viewer__body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.thread-task-viewer__title {
+  overflow: hidden;
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-task-viewer__rationale,
+.thread-task-viewer__state {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+/* The chip's own reading, restated where the steps it counts are on screen. */
+.thread-task-viewer__footer {
+  display: flex;
+  align-items: baseline;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 8px 2px 0;
+  border-top: 1px solid var(--octant-border);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-task-viewer__footer-progress {
+  color: var(--octant-text-primary);
+  font-weight: var(--oct-weight-medium);
+}
+
+.thread-task-viewer__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.thread-task-viewer__actions button {
+  min-height: 24px;
+  padding-inline: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+}
+
+@media (max-width: 560px) {
+  .thread-task-viewer__popover {
+    width: calc(100vw - 16px);
+  }
+
+  .thread-task-viewer__steps > li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .thread-task-viewer__actions {
+    grid-column: 2;
+  }
+}
+
+/* Task progress stays separate from child execution; it is open while the turn runs. */
+.thread-tasks {
+  width: min(560px, calc(100% - 2 * var(--oct-space-3)));
+  margin: 0 var(--oct-space-3) var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-floating);
+  box-shadow: var(--octant-shadow-hairline);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-tasks__header {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 24px;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding-inline: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+  font-weight: normal;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.thread-tasks__status {
+  color: var(--octant-text-secondary);
+}
+
+.thread-tasks__chevron {
+  margin-inline-start: auto;
+}
+
+.thread-tasks__chevron[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+.thread-tasks[data-state="running"] .thread-tasks__header-icon {
+  animation: turn-header-spin var(--oct-motion-spin) linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-tasks[data-state="running"] .thread-tasks__header-icon {
+    animation: none;
+  }
+}
+
+.thread-tasks__list {
+  display: grid;
+  max-height: 12rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.thread-tasks__list > li {
+  display: grid;
+  grid-template-columns: auto 16px minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1) 2px;
+}
+
+.thread-tasks__index {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.thread-tasks__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--octant-text-secondary);
+}
+
+.thread-tasks__list > li[data-task-state="completed"] .thread-tasks__mark {
+  color: var(--octant-success-text);
+}
+
+.thread-tasks__list > li[data-task-state="failed"] .thread-tasks__mark {
+  color: var(--octant-danger-text);
+}
+
+.thread-tasks__list > li[data-task-state="running"] .thread-tasks__mark,
+.thread-tasks__list > li[data-task-state="running"] .thread-tasks__mark > svg {
+  color: var(--octant-accent-text);
+}
+
+.thread-tasks__list > li[data-task-state="running"] .thread-tasks__mark > svg {
+  animation: turn-header-spin var(--oct-motion-spin) linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-tasks__list > li[data-task-state="running"] .thread-tasks__mark > svg {
+    animation: none;
+  }
+}
+
+.thread-tasks__summary {
+  overflow-wrap: anywhere;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
+}
+
+.thread-tasks__list > li[data-task-state="completed"] .thread-tasks__summary,
+.thread-tasks__list > li[data-task-state="failed"] .thread-tasks__summary {
+  color: var(--octant-text-secondary);
+}
+
+/* A finished step is struck through; the step in hand reads a weight up. */
+.thread-tasks__list > li[data-task-state="completed"] .thread-tasks__summary {
+  text-decoration: line-through;
+  text-decoration-color: var(--octant-text-muted);
+}
+
+.thread-tasks__list > li[data-task-state="running"] .thread-tasks__summary {
+  font-weight: var(--oct-weight-medium);
+}

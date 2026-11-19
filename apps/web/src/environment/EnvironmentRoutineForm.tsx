@@ -1,3 +1,4 @@
+import "../styles/environment-details.css";
 import {
   decodeAutomationThreadRoutineRequest,
   type AutomationMissedRunPolicy,

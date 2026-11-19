@@ -1,3 +1,4 @@
+import "../styles/thread-goal.css";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { useEffect, useState } from "react";
 import type { GoalClient } from "@octant/client-runtime/goal-client";

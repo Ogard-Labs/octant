@@ -1,0 +1,456 @@
+/* Context: the head line, one thin meter, and a row per reported part, on the
+   rows' own insets so every figure ends on the edge the other values do. */
+.environment-context {
+  --context-window-track: color-mix(in oklab, var(--oct-fg) 10%, transparent);
+}
+
+.environment-context__head,
+.environment-context__none {
+  display: flex;
+  min-height: var(--environment-row-h);
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0 calc(var(--environment-row-inset) + var(--oct-icon-sm) + var(--oct-space-2)) 0
+    var(--environment-row-inset);
+  font-size: var(--oct-text-detail);
+}
+
+.environment-context__none {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.environment-context__percent {
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-regular);
+}
+
+.environment-context__figure {
+  margin-inline-start: auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.environment-context__meter,
+.environment-context__mini {
+  display: flex;
+  height: 4px;
+  gap: 1px;
+  overflow: hidden;
+  background: var(--context-window-track);
+  border-radius: var(--oct-radius-pill);
+}
+
+.environment-context__meter {
+  margin: 0 calc(var(--environment-row-inset) + var(--oct-icon-sm) + var(--oct-space-2))
+    var(--oct-space-1) var(--environment-row-inset);
+}
+
+.environment-context__mini {
+  width: 24px;
+  flex: none;
+}
+
+.environment-context__meter > span {
+  min-width: 2px;
+  height: 100%;
+  flex: 0 0 auto;
+  background: var(--context-window-tone);
+}
+
+.environment-context__mini > span {
+  height: 100%;
+  background: var(--context-window-tone);
+}
+
+.environment-context__parts {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.environment-context__part {
+  display: grid;
+  min-height: var(--environment-row-h);
+  grid-template-columns: 8px minmax(0, 1fr) 6ch 5ch;
+  align-items: center;
+  column-gap: var(--oct-space-2);
+  padding: 0 calc(var(--environment-row-inset) + var(--oct-icon-sm) + var(--oct-space-2)) 0
+    var(--environment-row-inset);
+  font-size: var(--oct-text-detail);
+  font-variant-numeric: tabular-nums;
+}
+
+.environment-context__part-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-context__part-tokens,
+.environment-context__part-share {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-align: right;
+}
+
+.environment-context__actions {
+  display: flex;
+  padding: var(--oct-space-1) var(--environment-row-inset);
+}
+
+/* Subagents: the running runs, at most five, then one line for the rest. */
+.environment-subagents__list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  max-height: 224px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.environment-subagent {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 28px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  padding: 0;
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  text-align: left;
+  text-decoration: none;
+}
+
+.environment-subagent:hover {
+  text-decoration: none;
+}
+
+.environment-subagents__mark {
+  flex: none;
+}
+
+/* "N finished" and "+N more" start where the titles do: an empty slot as wide
+   as the row's 14px mark stands in the icon column. */
+.environment-subagents__slot {
+  flex: none;
+  width: 14px;
+}
+
+/* The title takes the room, so the time or state word ends on the row's right
+   edge whatever the title's length, and a ticking time never rides beside it. */
+.environment-subagents__task {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-subagents__state {
+  flex: none;
+  color: var(--oct-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.environment-subagent:hover .environment-subagents__task,
+.environment-subagent:focus-visible .environment-subagents__task {
+  color: var(--oct-fg);
+}
+
+/* Routines: one row per routine, its name with the schedule as one quiet line
+   under it, and a "…" menu in a slot of its own at the end. The slot is drawn
+   at rest, so nothing moves when a row is pointed at. */
+.environment-routines__list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.environment-routine {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.environment-routine__text {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 2px;
+}
+
+.environment-routine__name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-routine__schedule {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+}
+
+.environment-routine__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}
+
+/* Follow-up: the empty line and the picker sit in the row's body, in the same
+   small type as a routine's schedule. */
+.environment-follow-ups__empty,
+.environment-follow-up-picker__note {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+}
+
+.environment-follow-up-picker {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+}
+
+.environment-follow-up-picker__picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}
+
+.environment-follow-up-picker__field {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+}
+
+/* The New routine form borrows the Automation Center editor's fields at the
+   row's smaller size. */
+.environment-routine-form {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+}
+
+.environment-routine-form .automation-editor__field .input,
+.environment-routine-form .automation-editor__field .select,
+.environment-routine-form .automation-editor__field .textarea {
+  font-size: var(--oct-text-xs);
+}
+
+.environment-routine-form__issues {
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  color: var(--oct-warn-fg);
+  font-size: var(--oct-text-xs);
+}
+
+/* The thread's own pull requests in the Changes card: two lines per row at one
+   fixed height, so a state, a check or a stale note arriving changes no row's
+   size. The row and its "…" are siblings; the row takes the room the "…"
+   leaves. */
+.environment-thread-prs {
+  --environment-thread-pr-h: 44px;
+
+  display: grid;
+  min-width: 0;
+}
+
+.environment-thread-prs__list {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.environment-thread-pr {
+  display: flex;
+  height: var(--environment-thread-pr-h);
+  min-width: 0;
+  align-items: center;
+}
+
+.environment-thread-pr > .environment-thread-pr__open {
+  display: flex;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-1) 0 var(--environment-row-inset);
+  text-align: left;
+}
+
+/* The state's colour is its token; the words carry it too, so colour is never
+   the only signal. */
+.environment-thread-pr__state[data-pr-state="open"] {
+  color: var(--oct-pr-open);
+}
+
+.environment-thread-pr__state[data-pr-state="merged"] {
+  color: var(--oct-pr-merged);
+}
+
+.environment-thread-pr__state[data-pr-state="closed"] {
+  color: var(--oct-pr-closed);
+}
+
+/* Queued: on its way in, so the pending tone the checks dot uses. */
+.environment-thread-pr__state[data-pr-state="queued"] {
+  color: var(--octant-warning-text);
+}
+
+.environment-thread-pr__state[data-pr-state="draft"],
+.environment-thread-pr__state[data-pr-state="unknown"] {
+  color: var(--oct-pr-draft);
+}
+
+.environment-thread-pr__text {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.environment-thread-pr__title,
+.environment-thread-pr__meta,
+.environment-thread-pr__repository,
+.environment-thread-pr__words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Line two is a row of three: the repository gives way first (it shrinks far
+   faster than the words), and the line counts never shrink. */
+.environment-thread-pr__meta {
+  display: flex;
+  gap: var(--oct-space-1);
+}
+
+.environment-thread-pr__repository {
+  flex: 0 100 auto;
+}
+
+.environment-thread-pr__words {
+  flex: 0 1 auto;
+}
+
+.environment-thread-pr__diffstat {
+  flex: none;
+}
+
+.environment-thread-pr__title {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+}
+
+.environment-thread-pr__meta {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* The trailing cluster has one width on every row, whether it holds a count and
+   a dot, a dot, or nothing, so a count arriving moves nothing. Right-aligned so
+   the dots share one column. */
+.environment-thread-pr__checks-end {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--oct-space-1);
+}
+
+/* Room for "123/456" and the dot: 56px. */
+.environment-thread-pr__checks-end[data-reserved="true"] {
+  min-width: calc(var(--oct-space-12) + var(--oct-space-2));
+}
+
+.environment-thread-pr__check-count {
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A small dot for the checks of a pull request that can still merge. It never
+   stands alone: the row's name says the same in words. */
+.environment-thread-pr__checks {
+  width: var(--oct-space-2);
+  height: var(--oct-space-2);
+  flex: none;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-meta);
+}
+
+.environment-thread-pr__checks[data-checks="passing"] {
+  background: var(--octant-success-text);
+}
+
+.environment-thread-pr__checks[data-checks="failing"] {
+  background: var(--octant-danger-text);
+}
+
+.environment-thread-pr__checks[data-checks="pending"] {
+  background: var(--octant-warning-text);
+}
+
+/* The "…" keeps its room always and shows on row hover or focus, and while its
+   menu is open (focus is in the menu then). Opacity only: nothing moves. */
+.environment-thread-pr__more {
+  display: inline-flex;
+  width: var(--oct-space-6);
+  flex: none;
+  align-items: center;
+  margin-inline-end: var(--oct-space-2);
+  opacity: 0;
+}
+
+.environment-thread-pr:hover .environment-thread-pr__more,
+.environment-thread-pr:focus-within .environment-thread-pr__more,
+.environment-thread-pr__more:has([aria-expanded="true"]) {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .environment-thread-pr__more {
+    opacity: 1;
+  }
+}
+
+.environment-thread-prs__more {
+  margin: 0;
+  padding: var(--oct-space-1) var(--environment-row-inset);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}

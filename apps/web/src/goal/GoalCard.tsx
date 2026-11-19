@@ -1,3 +1,4 @@
+import "../styles/thread-goal.css";
 import type { ThreadGoal } from "@octant/contracts";
 import { OctantButton } from "../ui/base/OctantButton";
 import { GoalCriteria } from "./GoalCriteria";

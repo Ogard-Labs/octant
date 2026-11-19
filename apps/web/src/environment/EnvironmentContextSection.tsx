@@ -1,3 +1,4 @@
+import "../styles/environment-details.css";
 import "../context/context.css";
 import type { ContextCompactionExecutor } from "@octant/contracts/context";
 import { useState } from "react";
