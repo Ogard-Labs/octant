@@ -4,7 +4,7 @@ import {
   MAX_CODE_DEBUG_BREAKPOINT_FILES,
   MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE,
 } from "@octant/contracts/code-debug";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import userEvent from "@testing-library/user-event";
@@ -870,6 +870,73 @@ describe("MonacoEditorPane", () => {
     // too rather than asking the same question again.
     await expect(confirmFilesClose(scopeB)).resolves.toBe(true);
     expect(filesClosePromptSnapshot()).toBeUndefined();
+  });
+
+  it("adopts a peer's saved revision instead of an older load still in flight", async () => {
+    const scopeA = filesCloseScope(undefined, ids.thread);
+    const scopeB = filesCloseScope("host-b", ids.thread);
+    const code = client();
+    // The peer's first-revision read stays pending: the save that lands
+    // meanwhile supersedes it, so a late resolve cannot restore stale bytes.
+    let resolvePending!: (bytes: Uint8Array) => void;
+    const pending = new Promise<Uint8Array>((resolve) => {
+      resolvePending = resolve;
+    });
+    vi.mocked(code.content)
+      .mockResolvedValueOnce(new TextEncoder().encode("revision one"))
+      .mockReturnValueOnce(pending);
+    const fixtureA = runtime();
+    const fixtureB = runtime();
+    render(
+      <MonacoEditorPane
+        client={code}
+        file={textFile()}
+        filesCloseScope={scopeA}
+        loadRuntime={fixtureA.loadRuntime}
+      />,
+    );
+    render(
+      <MonacoEditorPane
+        client={code}
+        file={textFile()}
+        filesCloseScope={scopeB}
+        loadRuntime={fixtureB.loadRuntime}
+      />,
+    );
+    await waitFor(() => expect(fixtureA.options).toBeDefined());
+
+    act(() => fixtureA.options?.onChange("saved revision two"));
+    const panes = await screen.findAllByRole("region", { name: "Code editor for src/index.ts" });
+    await userEvent
+      .setup()
+      .click(within(panes[0] as HTMLElement).getByRole("button", { name: "Save src/index.ts" }));
+    await waitFor(() => expect(code.save).toHaveBeenCalledOnce());
+
+    // The saved revision is the peer's baseline even though its older read
+    // never finished: it became ready on the saved text, and the late resolve
+    // lands nothing.
+    await waitFor(() => expect(fixtureB.options?.value).toBe("saved revision two"));
+    await act(async () => {
+      resolvePending(new TextEncoder().encode("revision one"));
+      await pending;
+    });
+    expect(fixtureB.options?.value).toBe("saved revision two");
+
+    // An edit on the peer saves against the saved revision's identity and
+    // digest — never a baseline the late read would have installed.
+    act(() => fixtureB.options?.onChange("edit on the saved revision"));
+    await userEvent
+      .setup()
+      .click(within(panes[1] as HTMLElement).getByRole("button", { name: "Save src/index.ts" }));
+    await waitFor(() =>
+      expect(code.save).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          text: "edit on the saved revision",
+          expectedIdentity: metadata.identity,
+          expectedDigest: "c".repeat(64),
+        }),
+      ),
+    );
   });
 
   it.each([

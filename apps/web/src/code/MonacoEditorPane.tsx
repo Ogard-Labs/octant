@@ -435,21 +435,35 @@ function AvailableEditor(
       // A buffer already in conflict keeps it: a peer's save does not resolve
       // the version this view is being asked to reconcile.
       if (conflict !== undefined) return;
-      // The draft now stands against the saved revision either way; only a
-      // buffer holding the saved text itself goes clean.
+      // The saved revision is the document's baseline even where an older
+      // load is still pending: superseding the generation drops its late
+      // resolve or reject, so stale bytes never land under the new metadata.
+      requestGeneration.current += 1;
       metadataRef.current = notice.metadata;
       if (currentDebugFileKey.current === debugFileKey)
         debugLoadedFile.current = { key: debugFileKey, metadata: notice.metadata };
-      setLoadState((state) =>
-        state.kind === "ready" ? { kind: "ready", text: notice.text } : state,
-      );
-      const nextDirty = draftRef.current !== notice.text;
+      setLoadState({ kind: "ready", text: notice.text });
+      // Unsaved work — held in this buffer or retained for the document —
+      // still stands against the saved revision; a buffer holding only the
+      // old baseline adopts the saved text as its draft.
+      const retained = props.draftStore?.read(draftKey);
+      const nextDraft = dirtyRef.current ? draftRef.current : (retained ?? notice.text);
+      setDraft(nextDraft);
+      draftRef.current = nextDraft;
+      const nextDirty = nextDraft !== notice.text;
       setDirty(nextDirty);
       dirtyRef.current = nextDirty;
+      if (nextDirty) {
+        props.draftStore?.write(draftKey, nextDraft);
+        props.draftStore?.write(`${draftKey}:base`, editorFileRevision(notice.metadata));
+      } else {
+        props.draftStore?.clear(draftKey);
+        props.draftStore?.clear(`${draftKey}:base`);
+      }
     };
     baselineListenerRef.current = listener;
     return subscribeEditorBaselineNotice(draftKey, listener);
-  }, [draftKey, discardDraftAndReload, debugFileKey, conflict]);
+  }, [draftKey, discardDraftAndReload, debugFileKey, conflict, props.draftStore]);
 
   const saveAndReport = useRef<() => Promise<boolean>>(async () => true);
   saveAndReport.current = async () => {
