@@ -12,7 +12,7 @@ import {
 import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/chat";
 import { decodeCodeBoardView } from "@octant/contracts";
 import { decodeActivityView } from "@octant/contracts/code-home-activity";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createNewTaskDrafts, NewTaskDraftsContext } from "../composer/useNewTaskPrompt";
@@ -159,6 +159,7 @@ describe("WorkspaceView welcome", () => {
         }}
       />,
     );
+    await act(() => vi.dynamicImportSettled());
     await userEvent.click(await screen.findByRole("button", { name: "Open created task" }));
     expect(onOpenCodeThread).toHaveBeenCalledWith(createdThreadId, "Code task", project.id);
   });

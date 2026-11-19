@@ -399,6 +399,11 @@ describe("App", () => {
   });
 
   it("batches streamed Chat reply deltas so the Chat pane commits once per 50 ms beat", async () => {
+    // The fake clock measures reply commits, not the nested workspace imports.
+    await Promise.all([
+      import("./environment/ChatThreadEnvironment"),
+      import("./chat/ChatWorkspace"),
+    ]);
     vi.useFakeTimers();
     let view: ReturnType<typeof render> | undefined;
     paneBoundary.observing = true;
@@ -549,8 +554,11 @@ describe("App", () => {
         expect(paneBoundary.latest?.chatController.status).toBe("ready");
         expect(paneBoundary.latest?.codeController.status).toBe("ready");
         expect(paneBoundary.latest?.codeController.followUps.has(String(codeThreadId))).toBe(true);
-        expect(chatBoundary.latest?.controller.activeView?.lastSequence).toBe(1);
       });
+      await act(() => vi.dynamicImportSettled());
+      await vi.waitFor(() =>
+        expect(chatBoundary.latest?.controller.activeView?.lastSequence).toBe(1),
+      );
       await streamReady.promise;
 
       // Drain startup's deferred read-cursor notification before measuring
@@ -644,6 +652,11 @@ describe("App", () => {
   });
 
   it("restores the first prompt after evidence storage throws in an opened Code task", async () => {
+    await Promise.all([
+      import("./environment/CodeThreadEnvironment"),
+      import("./code/CodeWorkspaceTab"),
+      import("./code/CodeWorkspace"),
+    ]);
     const user = userEvent.setup();
     const base = codes();
     const initial = await base.bootstrap();
@@ -702,6 +715,7 @@ describe("App", () => {
       await screen.findByRole("region", { name: "Workspace pane: Open immediately" }),
     ).toBeVisible();
     await waitFor(() => expect(codeApi.putEvidence).toHaveBeenCalled());
+    await act(() => vi.dynamicImportSettled());
     await waitFor(() =>
       expect(screen.getByRole("textbox", { name: "Follow-up message" })).toHaveValue(
         "Open immediately",
@@ -1603,6 +1617,8 @@ describe("App", () => {
         />,
       );
 
+      await screen.findByRole("region", { name: "Workspace pane: Launch planning" });
+      await act(() => vi.dynamicImportSettled());
       const quickStart = await screen.findByRole("region", { name: "Chat quick start" });
       await user.click(within(quickStart).getByRole("button", { name: "Provider and model" }));
       const levels = screen.getByRole("group", { name: "Effort level" });
