@@ -2249,7 +2249,7 @@ describe("WorkspaceView tab isolation", () => {
 });
 
 describe("WorkspaceView Work overview", () => {
-  it("keeps quick-start disabled until the exact Project is explicitly available", () => {
+  it("keeps quick-start disabled until the exact Project is explicitly available", async () => {
     const projectId = "00000000-0000-4000-8000-000000000901" as never;
     render(
       <WorkspaceView
@@ -2283,7 +2283,7 @@ describe("WorkspaceView Work overview", () => {
       />,
     );
 
-    const composer = screen.getByRole("region", { name: "Work quick start" });
+    const composer = await screen.findByRole("region", { name: "Work quick start" });
     expect(within(composer).getByRole("textbox", { name: "Start a new task" })).toBeDisabled();
   });
 
@@ -2321,7 +2321,7 @@ describe("WorkspaceView Work overview", () => {
       />,
     );
 
-    const composer = screen.getByRole("region", { name: "Work quick start" });
+    const composer = await screen.findByRole("region", { name: "Work quick start" });
     await user.type(
       within(composer).getByRole("textbox", { name: "Start a new task" }),
       "Prepare the brief",
