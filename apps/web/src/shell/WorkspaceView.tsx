@@ -1688,6 +1688,8 @@ function renderCodeTab(
         {...(harnessAutoReviewSupported === undefined ? {} : { harnessAutoReviewSupported })}
         strictDefault={strictDefault}
         {...(autoReview === undefined ? {} : { autoReview })}
+        {...(project === undefined ? {} : { project })}
+        {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
         {...(project?.type === "code" && (project.extraFolders ?? []).length > 0
           ? { projectExtraFolders: project.extraFolders?.map((folder) => folder.canonicalRoot) }
           : {})}

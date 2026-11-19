@@ -112,6 +112,8 @@ export interface MonacoEditorPaneProps {
   readonly draftStore?: CodeEditorDraftStore;
   readonly file: CodeEditorFileProjection;
   readonly loadRuntime?: () => Promise<MonacoAdapterRuntime>;
+  /** A refused or failed re-open, while the mounted buffer stays. */
+  readonly openError?: string;
   readonly onRequestRefresh?: () => void;
   readonly onOpenExternalEditor?: () => Promise<void>;
   /**
@@ -1075,6 +1077,11 @@ function AvailableEditor(
           </OctantButton>
         </OctantAlert>
       ) : null}
+
+      {props.openError === undefined ? null : (
+        /* ui-boundary-exception: compact-status */
+        <p role="alert">{props.openError}</p>
+      )}
 
       {message !== undefined ? (
         /* ui-boundary-exception: compact-status */

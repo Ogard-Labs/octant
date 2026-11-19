@@ -167,6 +167,25 @@ export interface BrowserSurfaceState {
   readonly activeTabId: string;
 }
 
+/** The revision of an icon the person's window already holds. */
+export interface BrowserSurfaceTabIconRef {
+  readonly tabId: string;
+  readonly revision: number;
+}
+
+/**
+ * One tab's icon as the person's own window reads it. The image crosses only
+ * the window's own IPC to its owning window's renderer: it is never part of an
+ * observation, a tool result, or anything the server or an agent can see.
+ */
+export interface BrowserSurfaceTabIcon {
+  readonly tabId: string;
+  readonly revision: number;
+  readonly active: boolean;
+  /** The changed image; absent while the page has declared none or unchanged. */
+  readonly dataUrl?: string;
+}
+
 /** What the person asked of the tab rail. */
 export type BrowserSurfaceTabCommand =
   | { readonly kind: "open" }
@@ -421,11 +440,24 @@ export interface BrowserSurfaceHostOptions {
 const HIBERNATE_IDLE_MS = 5 * 60_000;
 const HIBERNATE_HOT_LIMIT = 4;
 
+/**
+ * How many remembered revisions one icon read may carry. A context's tab count
+ * is bounded by policy, so this bounds only a window that is asking about tabs
+ * it does not have — extra entries are ignored, not an error.
+ */
+const TAB_ICONS_KNOWN_LIMIT = 128;
+
 /** What a hibernated tab keeps so the page can be opened again where it was. */
 interface HibernatedTab {
   readonly tabId: string;
   readonly url: string;
   readonly title: string;
+  /**
+   * The last icon the page declared, so a sleeping tab's tile and rail still
+   * show it without reopening the page. Reading icons never wakes a context.
+   */
+  readonly favicon?: OwnedTab["favicon"];
+  readonly iconRevision: number;
 }
 
 /** One page of a context. Tabs share the context's session and its guards. */
@@ -448,6 +480,11 @@ interface OwnedTab {
   faviconFetch?: { readonly controller: AbortController; readonly startedAt: number } | undefined;
   readonly view: BrowserSurfaceViewPort;
   documentRevision: number;
+  /**
+   * Bumped from the context's own counter each time the tab's icon state
+   * changes, so the person's icon read can return only what changed.
+   */
+  iconRevision: number;
   /** Electron may remove the view getter before the WebContents destroyed callback. */
   readonly contents: BrowserSurfaceViewPort["webContents"];
   readonly contentsId: number | undefined;
@@ -504,6 +541,11 @@ interface OwnedSurface {
   /** Every open tab, in the order the person opened them. */
   tabs: OwnedTab[];
   activeTabId: string;
+  /**
+   * Counter for tab icon revisions, shared across the context's tabs so one
+   * tab's change can never collide with another's.
+   */
+  nextIconRevision: number;
   /**
    * Ordinal for the next tab this context opens.
    *
@@ -1456,6 +1498,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       tabId: tab.tabId,
       url: tab.contents.isDestroyed() ? "" : tab.contents.getURL(),
       title: tab.contents.isDestroyed() ? "" : tab.contents.getTitle(),
+      iconRevision: tab.iconRevision,
+      ...(tab.favicon === undefined ? {} : { favicon: tab.favicon }),
     }));
     clearPointSelection(owned);
     closeEditingMenu(owned);
@@ -1465,6 +1509,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     const closing = owned.tabs;
     owned.tabs = [];
     for (const tab of closing) {
+      tab.faviconFetch?.controller.abort();
+      tab.faviconFetch = undefined;
       tab.view.setVisible(false);
       tab.releasePopups();
       forgetWebContents(tab);
@@ -1497,10 +1543,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     if (sleeping === undefined) return;
     owned.hibernated = undefined;
     owned.waking = (async () => {
-      const reopened = sleeping.map((row) => ({
-        row,
-        tab: openTabView(contextId, owned, row.tabId),
-      }));
+      const reopened = sleeping.map((row) => {
+        const tab = openTabView(contextId, owned, row.tabId);
+        // The icon the tab went to sleep with stands until the live page
+        // declares its own, so a reopened tile never blinks to the globe.
+        tab.favicon = row.favicon;
+        tab.iconRevision = row.iconRevision;
+        return { row, tab };
+      });
       // The address passes the same navigation guard as any other load; one
       // the policy no longer admits leaves that tab blank.
       await Promise.all(
@@ -1571,6 +1621,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     const popups = new BrowserPagePopups();
     const tab: OwnedTab = {
       documentRevision: 0,
+      iconRevision: 0,
       tabId,
       view,
       contents: view.webContents,
@@ -1635,6 +1686,17 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           tab.documentRevision += 1;
           if (owned.pointSelection?.tabId === tabId) clearPointSelection(owned);
         }
+        // A new document gets no icon until it declares one, even when it is on
+        // the same site: keeping the previous page's image would show one
+        // site's icon for a page that never chose it.
+        if (event === "did-navigate") {
+          tab.faviconFetch?.controller.abort();
+          tab.faviconFetch = undefined;
+          if (tab.favicon !== undefined) {
+            tab.favicon = undefined;
+            tab.iconRevision = owned.nextIconRevision++;
+          }
+        }
         // A displayed frame belongs to this document, not its navigation successor.
         if (event === "did-start-loading") {
           void owned.textComposition.close();
@@ -1655,6 +1717,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         tab.faviconFetch = undefined;
         if (tab.favicon !== undefined) {
           tab.favicon = undefined;
+          tab.iconRevision = owned.nextIconRevision++;
           publish(contextId, owned);
         }
         return;
@@ -1669,7 +1732,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       if (session.fetch === undefined || !originAllowed(iconUrl, owned.policy.allowedOrigins)) {
         tab.faviconFetch?.controller.abort();
         tab.faviconFetch = undefined;
-        tab.favicon = undefined;
+        if (tab.favicon !== undefined) {
+          tab.favicon = undefined;
+          tab.iconRevision = owned.nextIconRevision++;
+        }
         return;
       }
       const now = Date.now();
@@ -1682,7 +1748,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       tab.faviconFetch?.controller.abort();
       const controller = new AbortController();
       tab.faviconFetch = { controller, startedAt: now };
+      // The icon that belonged to the previous declaration is not shown while
+      // this one loads: its revision moves, and the tile falls to the globe.
       tab.favicon = { url: iconUrl, pageOrigin, dataUrl: undefined };
+      tab.iconRevision = owned.nextIconRevision++;
       void fetchFaviconDataUrl({ fetch: session.fetch.bind(session) }, iconUrl, {
         signal: controller.signal,
       }).then((dataUrl) => {
@@ -1695,6 +1764,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           return;
         }
         tab.favicon = { url: iconUrl, pageOrigin, dataUrl };
+        tab.iconRevision = owned.nextIconRevision++;
         publish(contextId, owned);
       });
     });
@@ -3609,6 +3679,61 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         owned.previewPending = false;
       }
     },
+    /**
+     * Every tab's icon for the owning window's own tab strip, as a delta
+     * against the revisions the window already holds.
+     *
+     * Person-only like the preview picture: the read checks the window and
+     * thread own the context, and it only reads what the host already holds —
+     * it never wakes a hibernated context, never fetches an icon for the read,
+     * and its rows never join an observation or a tool result.
+     */
+    tabIcons: (
+      contextId: BrowserContextId | string,
+      owner: BrowserSurfaceOwner,
+      known: ReadonlyArray<BrowserSurfaceTabIconRef>,
+    ): ReadonlyArray<BrowserSurfaceTabIcon> => {
+      const owned = surface(contextId);
+      // Person-only in both directions: an agent's own context answers nobody,
+      // and no owner of agent kind ever reads any context's images.
+      if (
+        owned.owner.kind === "execution" ||
+        owner.kind === "execution" ||
+        owned.owner.windowId !== owner.windowId ||
+        owned.owner.threadId !== owner.threadId
+      ) {
+        throw new Error("Octant Browser tab icons do not own this context.");
+      }
+      const remembered = new Map<string, number>();
+      for (const entry of known.slice(0, TAB_ICONS_KNOWN_LIMIT)) {
+        remembered.set(entry.tabId, entry.revision);
+      }
+      const rows: BrowserSurfaceTabIcon[] = [];
+      const add = (
+        tabId: string,
+        revision: number,
+        dataUrl: string | undefined,
+        sleeping: boolean,
+      ): void => {
+        const changed = remembered.get(tabId) !== revision;
+        rows.push({
+          tabId,
+          revision,
+          active: tabId === owned.activeTabId,
+          ...(changed && dataUrl !== undefined ? { dataUrl } : {}),
+          ...(sleeping ? { sleeping } : {}),
+        });
+      };
+      // A sleeping context still names its tabs and their last icons; the
+      // read leaves it asleep rather than reopening pages to answer.
+      if (owned.hibernated !== undefined) {
+        for (const tab of owned.hibernated)
+          add(tab.tabId, tab.iconRevision, tab.favicon?.dataUrl, true);
+      } else {
+        for (const tab of owned.tabs) add(tab.tabId, tab.iconRevision, tab.favicon?.dataUrl, false);
+      }
+      return rows;
+    },
     command: async (
       contextId: BrowserContextId | string,
       owner: BrowserSurfaceOwner,
@@ -3955,6 +4080,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       policy: input.policy,
       tabs: [],
       activeTabId: firstTabId,
+      nextIconRevision: 1,
       nextTabOrdinal: 2,
       lastBounds: undefined,
       userGrantedOrigins: [],

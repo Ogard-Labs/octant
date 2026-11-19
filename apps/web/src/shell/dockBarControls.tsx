@@ -25,8 +25,8 @@ export interface DockBarButton {
   readonly pressed?: boolean;
   /**
    * A state that must read at a glance (View only) stays in words: the button
-   * shows its label, never folds into the More menu while it is there and, as a
-   * cue, moves to the secondary row rather than being cut.
+   * shows its label rather than an icon. It is still a named control: at the
+   * menu step it folds into the More menu before any state cue does.
    */
   readonly words?: boolean;
 }
@@ -80,7 +80,12 @@ export interface DockBarChoice {
   readonly compact?: boolean;
 }
 
-/** A quiet word or two the tool says about itself: a count, a state. */
+/**
+ * A quiet word or two the tool says about itself: a count, a state. State
+ * outranks every named control: the bar folds it only after the actions and
+ * view switches are in the More menu, and then into that menu's first rows,
+ * with a badge on the More button that reads it.
+ */
 export interface DockBarText {
   readonly kind: "text";
   readonly id: string;
@@ -90,18 +95,24 @@ export interface DockBarText {
   /** A status mark before the words (running, busy, lost, idle). */
   readonly dot?: "running" | "busy" | "lost" | "idle";
   /**
-   * A cue a person must be able to read (a billed Desktop's provider and place).
-   * It is never cut to an ellipsis: when the bar cannot hold it beside the
-   * tool's name it moves to the one secondary row.
+   * A cue a person must be able to read (a billed Desktop's provider and
+   * place): it is never cut to an ellipsis, and when it folds the More button
+   * carries its badge.
    */
   readonly cue?: boolean;
+  /**
+   * How urgently the folded badge reads. Absent, it follows the dot: lost
+   * reads as danger, busy as warning, anything else neutral.
+   */
+  readonly tone?: "warning" | "danger";
 }
 
 /**
  * A control the tool draws itself (a popover trigger with its own panel). It
- * never folds and is measured as drawn; `width` is only the room kept for it
- * before it has been. Where the bar cannot hold it, it moves to the one
- * secondary row without being remounted.
+ * never folds into the More menu and is measured as drawn; `width` is only the
+ * room kept for it before it has been. Where the bar cannot hold it even with
+ * the tool's name shortened, it moves — without being remounted — to the one
+ * secondary row, which nothing else may share.
  */
 export interface DockBarNode {
   readonly kind: "node";
@@ -131,6 +142,57 @@ export interface DockBarHost {
 
 /** Provided by a tile (and the bottom panel) around its tool. */
 export const DockBarContext = createContext<DockBarHost | undefined>(undefined);
+
+/**
+ * What the focused pane's bar offers right now, so the command palette can
+ * list the same named commands the bar draws — the palette command and the
+ * bar's own control close over the one registered callback.
+ */
+export interface FocusedDockToolSource {
+  readonly toolLabel: string;
+  readonly items: ReadonlyArray<DockBarItem>;
+}
+
+/**
+ * One publication per owner, last asserted wins: the focused tile or the
+ * bottom panel writes its merged items, a reader (the command palette's
+ * source list) watches them. An owner clears only its own publication — a
+ * publisher that unmounts while on top falls back to whatever published
+ * before it instead of leaving the palette empty.
+ */
+export interface FocusedDockTool {
+  readonly get: () => FocusedDockToolSource | undefined;
+  readonly set: (owner: string, source: FocusedDockToolSource | undefined) => void;
+  readonly subscribe: (listener: () => void) => () => void;
+}
+
+export function createFocusedDockTool(): FocusedDockTool {
+  const sources = new Map<string, FocusedDockToolSource>();
+  const listeners = new Set<() => void>();
+  const emit = () => {
+    for (const listener of listeners) listener();
+  };
+  return {
+    get: () => [...sources.values()].at(-1),
+    set: (owner, source) => {
+      if (source === undefined) {
+        if (!sources.delete(owner)) return;
+      } else {
+        // Delete first so a re-assert moves this owner to the top.
+        sources.delete(owner);
+        sources.set(owner, source);
+      }
+      emit();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+/** Mounted once above the shell's dock so focused tiles can publish to the palette. */
+export const FocusedDockToolContext = createContext<FocusedDockTool | undefined>(undefined);
 
 /**
  * The element a tool portals its own tabs into, so they stand in the pane's
@@ -177,7 +239,7 @@ export function useDockBarControls(
         case "choice":
           return [item.id, item.label, item.value, item.options, item.compact === true];
         case "text":
-          return [item.id, item.text, item.live === true, item.dot, item.cue === true];
+          return [item.id, item.text, item.live === true, item.dot, item.cue === true, item.tone];
         case "node":
           return [item.id, item.width];
       }

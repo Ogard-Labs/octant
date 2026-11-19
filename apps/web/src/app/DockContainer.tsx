@@ -5,6 +5,7 @@ import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { ChatThreadId } from "@octant/contracts/chat";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
 import { useBrowserThreadSnapshot } from "../threadActivity/useBrowserThreadSnapshot";
+import { useBrowserSurfaceTabIcons } from "../browser/tabIcons";
 import {
   decodeCodeThreadId,
   type CodeCheckoutId,
@@ -37,7 +38,7 @@ import {
   forgetClosedBrowserTabs,
   useBrowserTabPages,
 } from "../browser/browserTabPages";
-import { PageFavicon } from "../shell/PageFavicon";
+import { PageFavicon, type PageIconState } from "../shell/PageFavicon";
 import { dockShelfEntries, type DockShelfEntry } from "../shell/DockShelf";
 import type { DockCardControls } from "../shell/RightUtilityDockSurface";
 import { DockTerminalCard } from "../shell/DockTerminalCard";
@@ -632,7 +633,51 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
       ? pageIconSnapshot.observation
       : undefined;
   };
-  const pageIcon = (tabId: string): string | undefined => pageObservation(tabId)?.faviconDataUrl;
+  // The pages' icons also come straight from the window's own desktop bridge:
+  // a page the server never peeked still shows its icon, and the read carries
+  // no image for a page that declared none.
+  const browserContextIds = [
+    ...new Set(
+      displayedDockState.tabs.flatMap((tab) => {
+        if (tab.surface !== "browser") return [];
+        // A dock tab with no context id is the thread's default Browser tab:
+        // its context is whichever the server now calls the thread's current
+        // one — the same lookup pageIcon makes below.
+        const contextId = tab.browserContextId ?? pageIconSnapshot?.context?.contextId;
+        return contextId === undefined ? [] : [String(contextId)];
+      }),
+    ),
+  ];
+  const browserTabIcons = useBrowserSurfaceTabIcons({
+    contextIds: browserContextIds,
+    hostBridge,
+    refreshKey: pageIconSnapshot,
+    threadId: dockThread?.threadId,
+  });
+  const hostReadsIcons = hostBridge?.readBrowserSurfaceTabIcons !== undefined;
+  const pageIcon = (tabId: string): PageIconState | undefined => {
+    // A dock tab with no context id is the thread's default Browser tab:
+    // its context is whichever the server now calls the thread's current one.
+    const contextId =
+      displayedDockState.tabs.find((tab) => tab.id === tabId)?.browserContextId ??
+      pageIconSnapshot?.context?.contextId;
+    if (contextId !== undefined && hostReadsIcons) {
+      const icons = browserTabIcons.get(contextId);
+      if (icons !== undefined) {
+        // The window's own read is authoritative: when it answers, an absent
+        // image means the page declared no icon — no stale peeked icon is
+        // allowed to dress it instead.
+        return {
+          ...(icons.activeTabId === undefined ? {} : { src: icons.icons.get(icons.activeTabId) }),
+          ...(icons.sleeping === true ? { muted: true } : {}),
+        };
+      }
+    }
+    // Older hosts without the tab-icon route, and contexts this window does
+    // not own (an agent's pages), only know the server's peeked icon.
+    const observed = pageObservation(tabId)?.faviconDataUrl;
+    return observed === undefined ? undefined : { src: observed };
+  };
   // The tab's name is what the page shows: the pane's live title, else its
   // host; the server's last read only for a tab whose pane has not reported.
   const livePages = useBrowserTabPages();
@@ -820,7 +865,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
                           .map((tab) => ({
                             id: tab.id,
                             label: pageTitle(tab.id),
-                            icon: <PageFavicon src={pageIcon(tab.id)} />,
+                            icon: <PageFavicon {...(pageIcon(tab.id) ?? {})} />,
                             current: tab.id === entry.tabId,
                           })),
                         onChoose: actions.previewDockCardPage,

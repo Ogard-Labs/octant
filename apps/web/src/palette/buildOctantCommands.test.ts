@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { RefreshCw } from "../ui/icons";
 import { buildOctantCommands, type OctantCommandSources } from "./buildOctantCommands";
 import { keybindingActionForCommand } from "./commandKeybinding";
 import type { OctantCommand } from "./commandModel";
@@ -220,5 +221,91 @@ describe("the destination, sidebar and dock commands", () => {
   it("offers no dock tool when the host cannot open one", () => {
     const commands = buildOctantCommands(sources({ dockTools: [{ id: "files", label: "Files" }] }));
     expect(commands.some((command) => command.id.startsWith("dock-tool:"))).toBe(false);
+  });
+});
+
+describe("the focused pane's bar commands", () => {
+  it("lists the bar's named commands and runs the exact callbacks its controls close over", () => {
+    const onRefresh = vi.fn();
+    const onMenuPick = vi.fn();
+    const onView = vi.fn();
+    const commands = buildOctantCommands(
+      sources({
+        focusedToolCommands: {
+          toolLabel: "Simulator",
+          items: [
+            {
+              kind: "button",
+              id: "refresh",
+              label: "Refresh device",
+              icon: RefreshCw,
+              onSelect: onRefresh,
+            },
+            {
+              kind: "menu",
+              id: "more",
+              label: "Device actions",
+              icon: RefreshCw,
+              items: [
+                { id: "type", label: "Type text" },
+                { id: "url", label: "Open URL", disabled: true },
+              ],
+              onSelect: onMenuPick,
+            },
+            {
+              kind: "choice",
+              id: "view",
+              label: "Things view",
+              options: [
+                { id: "a", label: "View A" },
+                { id: "b", label: "View B" },
+              ],
+              value: "a",
+              onChange: onView,
+            },
+            // A state line and a drawn node are not commands.
+            { kind: "text", id: "state", text: "Booting" },
+            { kind: "node", id: "own", width: 40, node: null },
+            {
+              kind: "button",
+              id: "locked",
+              label: "Lock",
+              icon: RefreshCw,
+              disabled: true,
+              onSelect: vi.fn(),
+            },
+          ],
+        },
+      }),
+    );
+
+    const refresh = commands.find((command) => command.id === "tool-command:refresh");
+    if (refresh?.action.kind !== "run") throw new Error("expected a run command");
+    refresh.action.run();
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+
+    const type = commands.find((command) => command.id === "tool-command:more:type");
+    if (type?.action.kind !== "run") throw new Error("expected a run command");
+    type.action.run();
+    expect(onMenuPick).toHaveBeenCalledWith("type");
+    // A disabled menu row reaches nobody.
+    expect(commands.some((command) => command.id === "tool-command:more:url")).toBe(false);
+
+    const view = commands.find((command) => command.id === "tool-command:view:b");
+    if (view?.action.kind !== "run") throw new Error("expected a run command");
+    view.action.run();
+    expect(onView).toHaveBeenCalledWith("b");
+
+    // State text, drawn nodes and disabled controls publish nothing.
+    expect(commands.some((command) => command.id === "tool-command:state")).toBe(false);
+    expect(commands.some((command) => command.id === "tool-command:own")).toBe(false);
+    expect(commands.some((command) => command.id === "tool-command:locked")).toBe(false);
+    expect(refresh.detail).toBe("Simulator");
+    expect(type.detail).toBe("Simulator — Device actions");
+  });
+
+  it("offers nothing when the pane in front publishes no bar controls", () => {
+    const commands = buildOctantCommands(sources());
+    expect(commands.some((command) => command.id.startsWith("tool-command:"))).toBe(false);
   });
 });

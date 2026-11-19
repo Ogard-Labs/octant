@@ -403,7 +403,7 @@ describe("CodeWorkspaceTab code files", () => {
     expect(await screen.findByText("This file changed outside this editor.")).toBeVisible();
   });
 
-  it("keeps the file honestly unavailable when the reload cannot re-open it", async () => {
+  it("keeps the mounted file and reports the failure when the reload cannot re-open it", async () => {
     const client = codeClient();
     vi.mocked(client.openFile)
       .mockResolvedValueOnce(openedFile(ids.content, "d".repeat(64)))
@@ -418,8 +418,8 @@ describe("CodeWorkspaceTab code files", () => {
     await screen.findByRole("button", { name: "Discard draft and reload" });
     await user.click(screen.getByRole("button", { name: "Discard draft and reload" }));
 
-    expect(await screen.findByText("src/index.ts is unavailable")).toBeVisible();
-    expect(screen.queryByText("staged before the edit")).not.toBeInTheDocument();
+    expect(await screen.findByText("Code file is unavailable. Reconnect and retry.")).toBeVisible();
+    expect(screen.queryByText("src/index.ts is unavailable")).not.toBeInTheDocument();
   });
 });
 

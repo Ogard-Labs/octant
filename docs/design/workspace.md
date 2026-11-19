@@ -200,7 +200,12 @@ beside the band's compose button; both run the same action. The command palette
 tooltip) lists, besides threads, the pages the rail and sidebar open (Home,
 Inbox, Agents, Artifacts, Projects, and in Work and Code Board and Automations),
 every Settings page that needs no native capability, New thread, Show or hide
-the sidebar, and the dock tools the thread can open. In the Activity feed the
+the sidebar, and the dock tools the thread can open. The palette also lists
+the focused pane's named bar controls — every button, menu row and view
+option the bar offers, folded or not — and each palette command runs the
+exact callback the bar's own control invokes; state lines and tool-drawn
+controls are not commands, and a disabled control is absent there as it is
+on the bar. In the Activity feed the
 newest group is open, so a feed whose only group is Earlier is never a blank
 column. Group headings in the sidebar are 12px in the meta ink with a 14px
 chevron and the count as a right-aligned number.
@@ -1209,8 +1214,14 @@ Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
 has one. Each tile has one bar, 32px: the tool's name (the Browser's and the Terminal's bar is their row of pages or sessions, one tab each even for a single page, then "+"; a tool alone has no bar, so the same row stands at the top of its body, and the row is never dropped in any layout),
 then the tool's own controls (navigation as words, actions as icons, status as
-text; they fold into a named view menu and then a More menu before the name is
-cut), with an Arrange menu on the bar's context menu (right click, the menu key, Shift+F10 on a control of the bar, or Enter or Space on the bar itself, which is a Tab stop; never a button on the bar: Move left, right, up and down where the caps allow, Move
+text; when they do not fit, each view switch folds into one control naming the
+current view, then every named control — word buttons, view switches, icon
+actions and menu buttons — folds into the one More menu before any state the
+tool reports about itself does; state is the last thing to leave the bar and
+then it is the menu's first rows, whole, with a badge on the More button in
+the worst tone any folded state reports, before the tool's name is cut; a
+control the tool draws itself never folds and only then may take the one
+secondary row under the bar, which nothing else may share), with an Arrange menu on the bar's context menu (right click, the menu key, Shift+F10 on a control of the bar, or Enter or Space on the bar itself, which is a Tab stop; never a button on the bar: Move left, right, up and down where the caps allow, Move
 left of, right of, above or below each other tile where the caps allow it and it changes
 something, Show alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
 trailing edge; a tool that is open but not shown is marked on its button in the thread header's

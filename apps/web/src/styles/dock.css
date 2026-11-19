@@ -1387,11 +1387,11 @@
   gap: var(--oct-space-1);
 }
 
-/* What must stay readable or whole (a billed desktop's provider and place, a
-   control the tool draws itself) stands after the tool's words. When the bar
-   cannot hold it beside the name it moves, without being drawn again, to the
-   one secondary row under the bar: 32px on the bar's insets and hairline, in
-   the same toolbar. In the bottom panel it scrolls within its own box. */
+/* A control the tool draws itself stands after the tool's words and never
+   folds. When the bar cannot hold it even after the tool's name shortened, it
+   moves — without being drawn again — to the one secondary row under the bar:
+   32px on the bar's insets and hairline, in the same toolbar, shared by
+   nothing else. In the bottom panel it scrolls within its own box. */
 .dock-tile__tool-cues {
   display: flex;
   min-width: 0;
@@ -1434,6 +1434,29 @@
 
 .bottom-utility-panel__controls .dock-tile__tool-cues > * {
   flex: none;
+}
+
+/* A folded state cue reads on the More button itself: the corner badge
+   grows and takes the worst tone any folded state reports. */
+.dock-tile__control[data-cue]::after {
+  width: 6px;
+  height: 6px;
+  background: var(--oct-meta);
+}
+
+.dock-tile__control[data-cue="warning"]::after {
+  background: var(--oct-warn);
+}
+
+.dock-tile__control[data-cue="danger"]::after {
+  background: var(--oct-danger);
+}
+
+/* A folded cue is the More menu's first row: state read, never an action. */
+.dock-bar-cue-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
 }
 
 /* The words laid out unseen, so the bar knows how much room they need. */
@@ -2113,6 +2136,12 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   flex: none;
   border-radius: var(--oct-radius-sm);
   object-fit: contain;
+}
+
+/* A sleeping page keeps the icon it went to sleep with, dimmed. */
+.dock-page-favicon--muted {
+  opacity: 0.55;
+  filter: grayscale(60%);
 }
 
 /* The shelf: minimised tools as small live cards at the foot of the dock body,

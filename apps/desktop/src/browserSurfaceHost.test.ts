@@ -465,6 +465,203 @@ describe("BrowserSurfaceHost", () => {
     });
   });
 
+  describe("a window's own tab icons", () => {
+    const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    const ICON = `data:image/png;base64,${Buffer.from(PNG).toString("base64")}`;
+    const owner = { windowId: "window-a", threadId };
+
+    function fire(created: BrowserSurfaceViewPort, event: string, icons: string[] = []): void {
+      for (const [name, listener] of vi.mocked(created.webContents.on).mock.calls)
+        if (name === event) listener({}, icons);
+    }
+
+    async function withTabs(count: number) {
+      const created: BrowserSurfaceViewPort[] = [];
+      const fetch = vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => "image/png" },
+        body: {
+          getReader: () => {
+            let sent = false;
+            return {
+              read: async () =>
+                sent ? { done: true } : ((sent = true), { done: false, value: PNG }),
+              cancel: async () => undefined,
+            };
+          },
+        },
+      }));
+      const host = createBrowserSurfaceHost({
+        createView: () => {
+          const native = view();
+          (native.webContents.session as { fetch?: unknown }).fetch = fetch;
+          created.push(native);
+          return native;
+        },
+      });
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: Math.max(count, 1),
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      for (let index = 1; index < count; index += 1) {
+        await host.tabCommand(contextId, owner, { kind: "open" });
+      }
+      return { created, fetch, host };
+    }
+
+    it("reads every tab's icon, including a tab the person has never selected", async () => {
+      const { created, host } = await withTabs(2);
+      try {
+        const first = host.tabIcons(contextId, owner, [])[0]?.tabId;
+        fire(created[0]!, "page-favicon-updated", ["https://example.com/one.png"]);
+        fire(created[1]!, "page-favicon-updated", ["https://example.com/two.png"]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const rows = host.tabIcons(contextId, owner, []);
+        expect(rows).toHaveLength(2);
+        expect(rows.every((row) => row.dataUrl === ICON)).toBe(true);
+        expect(rows.filter((row) => row.active)).toHaveLength(1);
+        // The icon of the tab that is not in front still answers, without the
+        // person selecting it or any peek naming it.
+        expect(rows.some((row) => !row.active && row.dataUrl === ICON && row.tabId === first)).toBe(
+          true,
+        );
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("returns no image for an icon the window already holds and the new image after it changes", async () => {
+      const { created, host } = await withTabs(1);
+      try {
+        fire(created[0]!, "page-favicon-updated", ["https://example.com/first.png"]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const [row] = host.tabIcons(contextId, owner, []);
+        expect(row?.dataUrl).toBe(ICON);
+        const [same] = host.tabIcons(contextId, owner, [
+          { tabId: row!.tabId, revision: row!.revision },
+        ]);
+        expect(same?.revision).toBe(row!.revision);
+        expect(same?.dataUrl).toBeUndefined();
+        // A declaration inside the minimum fetch interval is refused, so the
+        // page's new address is declared a beat later than the first fetch.
+        await new Promise((resolve) => setTimeout(resolve, 1_100));
+        fire(created[0]!, "page-favicon-updated", ["https://example.com/second.png"]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const [changed] = host.tabIcons(contextId, owner, [
+          { tabId: row!.tabId, revision: row!.revision },
+        ]);
+        expect(changed?.revision).not.toBe(row!.revision);
+        expect(changed?.dataUrl).toBe(ICON);
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("clears a tab's icon on top-level navigation instead of lending it to the next page", async () => {
+      const { created, host } = await withTabs(1);
+      try {
+        fire(created[0]!, "page-favicon-updated", ["https://example.com/favicon.png"]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const [row] = host.tabIcons(contextId, owner, []);
+        fire(created[0]!, "did-navigate");
+        const [moved] = host.tabIcons(contextId, owner, [
+          { tabId: row!.tabId, revision: row!.revision },
+        ]);
+        expect(moved?.revision).not.toBe(row!.revision);
+        expect(moved?.dataUrl).toBeUndefined();
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("refuses a window or thread that does not own the context", async () => {
+      const { host } = await withTabs(1);
+      try {
+        expect(() => host.tabIcons(contextId, { windowId: "window-b", threadId }, [])).toThrow();
+        expect(() =>
+          host.tabIcons(contextId, { windowId: "window-a", threadId: "other-thread" }, []),
+        ).toThrow();
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("refuses a hibernated context a window does not own without reopening its pages", async () => {
+      const views: BrowserSurfaceViewPort[] = [];
+      const host = createBrowserSurfaceHost({
+        hibernation: { idleMs: 0 },
+        createView: () => {
+          const native = view();
+          views.push(native);
+          return native;
+        },
+      });
+      const policy = decodeBrowserContextPolicy({
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 60_000,
+      });
+      const ready = await host.persistentOwner.configure(true);
+      if (ready.status !== "ready") throw new Error("owner missing");
+      const executionId = decodeBrowserContextId("60000000-0000-4000-8000-000000000004");
+      const binding = decodePersistentBrowserLeaseBinding({
+        ownerId: ready.ownerId,
+        grantId: contextId,
+        executionId,
+        threadId,
+        mode: "work",
+        projectId: contextId,
+        providerId: "provider",
+        modelId: "model",
+        authorityRevision: "revision",
+        profile: { kind: "personal" },
+        origins: policy.allowedOrigins,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      const created = await host.persistentOwner.createContext(
+        executionId,
+        policy,
+        new AbortController().signal,
+        binding,
+      );
+      if (created.status !== "created") throw new Error("context not created");
+      try {
+        await host.persistentOwner.sweep();
+        expect(views).toHaveLength(1);
+        // A context nobody's window owns answers nobody's icon read, and the
+        // refusal is a lookup, not a wake: no page was reopened to refuse.
+        expect(() => host.tabIcons(executionId, { windowId: "window-a", threadId }, [])).toThrow();
+        // The execution owner itself cannot read the images either: an icon is
+        // a person-facing detail, never a hint the agent may hold.
+        expect(() =>
+          host.tabIcons(
+            executionId,
+            {
+              kind: "execution",
+              leaseId: created.leaseId,
+              ownerId: created.ownerId,
+              threadId,
+            },
+            [],
+          ),
+        ).toThrow();
+        expect(views).toHaveLength(1);
+      } finally {
+        await host.closeAll();
+      }
+    });
+  });
+
   it("opens inside the native selection-start rectangle without moving a selected range", async () => {
     const f = await keyboardMenuSurface(0, 20);
     try {
