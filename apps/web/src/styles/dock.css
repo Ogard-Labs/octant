@@ -423,6 +423,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A run time keeps one width while it ticks and when the run finishes. */
+.dock-card__time {
+  justify-content: flex-end;
+  min-width: 48px;
+}
+
 .dock-card__meta + .dock-card__meta {
   margin-inline-start: var(--oct-space-2);
 }
@@ -2398,13 +2404,6 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
 .dock-artifacts__body:has(> .surface-empty) {
   display: grid;
   align-content: center;
-}
-
-/* A row is read by its title, so it starts at the leading edge; the shared
-   button recipe centres its content, which set each row's facts adrift. */
-.dock-artifacts .artifact-row__open {
-  justify-content: flex-start;
-  text-align: start;
 }
 
 .dock-artifacts__note {

@@ -151,6 +151,7 @@ export class WorkTurnProjection {
       ...(updated.toolStepsTruncated === undefined
         ? {}
         : { toolStepsTruncated: updated.toolStepsTruncated }),
+      ...(updated.strictKept === undefined ? {} : { strictKept: updated.strictKept }),
       ...(updated.childObservations === undefined
         ? {}
         : { childObservations: updated.childObservations }),

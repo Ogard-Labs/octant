@@ -22,6 +22,19 @@ word carries colour. `TurnHeader` in `apps/web/src/transcript/` is the one
 recipe; a mode maps its own lifecycle onto its vocabulary and adds nothing of
 its own.
 
+## Strict notice
+
+When a provider launch was Strict, the host journals what Strict kept for it,
+and the turn shows one quiet note above its reply in Code and Work: "Strict
+kept: Octant's sandbox, protected files, a fixed environment, …". The words
+come from the protections the host applied to that launch (its runtime
+family, and whether it ran in Octant's sandbox), never from the level alone.
+The note shows on the first Strict launch in a thread and again only when what
+Strict kept differs from the turn before, so a thread says it once per change
+rather than on every turn; a launch outside Strict shows nothing. It is the
+same meta-ink note as a provider handoff's (`role="note"`), not a page banner
+or a card. `strictKeptSentence` in `@octant/domain` is the one wording.
+
 ## Reply actions
 
 A finished reply (completed, failed, interrupted or cancelled) ends with one
@@ -337,10 +350,20 @@ reached the card dims and withholds Stop; the thread's connection notice says wh
 Task-plan completion is never counted as child completion. View all opens the
 full Agents list even when every child has finished. Expansion previews at most
 three active or unresolved children; longer history stays in Environment and
-Agents. Compact rows show task, semantic status, recorded model and available
-activity. Age is explicitly time since the last update or first observation,
-never inferred execution duration. Raw identifiers and workspace paths belong
-in details. Rows open the child in Agents. Only managed active children offer
+Agents. While the card is folded, no child needs attention (nothing failed,
+waiting, stopped, of unknown status or to review) and at least one child is
+working, its head reads one line in place of the counts, "Waiting on <A>, <B>
+and N others" ("and 1 other" for one more; "Waiting on <A>" or "Waiting on <A>
+and <B>" for one or two). The names are the longest-working children's task
+first lines, oldest first, cut with an ellipsis to fit, each a link-styled
+button that opens that child as the rows do. The head keeps its height and one
+line, so swapping it for the counts moves nothing; expanded, or with anything
+needing attention, the head shows the counts. Compact rows show task, semantic status, recorded model and available
+activity. Each row also shows how long the child has run, measured from its request (or
+first sight of a provider's own) to its last update and ticking while it works,
+the same rule as the transcript's row, at the trailing edge in a slot of fixed
+width: a finished child's time stops where it stopped. Raw identifiers and
+workspace paths belong in details. Rows open the child in Agents. Only managed active children offer
 Stop; Stop all asks first and names its managed scope. Headers and rows wrap at
 narrow widths, disclosures work with the keyboard and retain visible focus,
 and expanded lists have bounded height.
@@ -352,7 +375,10 @@ managed run's result once it has one, else its state), the model and effort as
 the picker names them ("Sonnet 5.5 High"; nothing when the run reported no
 model), how long it has run (from its request or first sight to its last
 update, ticking while it works), and its state mark at the trailing edge, in a
-slot that keeps its width so nothing moves when a run finishes. A subagent
+slot that keeps its width so nothing moves when a run finishes. The row is one
+button that opens the child in Agents, as the card's rows do: Enter or Space on
+it opens too, its name is the task and its state, and it keeps its look on
+hover and press. A subagent
 belongs to the turn that was running when it started, because the host links
 a subagent to its thread and not to a turn: a turn owns the span from its start
 to the next turn's. The rows and the composer's card read one shared summary
@@ -363,9 +389,14 @@ not write, so it never renders as their right-aligned bubble. It is a
 left-aligned child-result card in the thread's measure: a status mark and
 "<Role> subagent finished" (or the state it stopped in), the provider and
 model, the task in meta ink, then the reply as Markdown, folded after about
-eight lines behind Show full result. A subagent that stopped gives the host's
-recorded reason in place of a reply. Run ID, generation and provider ID sit
-behind a Details disclosure. The card is one component in Chat, Work and
+eight lines behind Show full result. A child that finished is not drawn as that
+card at rest: its delivered result reads as one quiet centred line, "<Role>
+subagent finished · worked 48s" (the run time by the rows' rule, left out when
+no times are known), with the reply behind Show result, a disclosure that opens
+the card in place and works from the keyboard. A subagent that stopped or
+failed keeps the full card and gives the host's recorded reason in place of a
+reply. Run ID, generation and provider ID sit behind a Details disclosure in
+the opened card. The card is one component in Chat, Work and
 Code; a delivery the card cannot read is shown as its text under a plain
 "Subagent result" head.
 
@@ -382,7 +413,7 @@ usage where the runtime reports them, "Usage not reported" otherwise. Every
 row, managed or not, names its provider.
 
 A result steered into the parent's running turn shows as the same child-result
-card after that turn's reply, headed "Delivered into the running turn".
+line or card after that turn's reply, headed "Delivered into the running turn".
 
 Managed result previews identify their execution generation and recorded model.
 The result detail leads with the reported summary, files, checks and blockers;
@@ -420,14 +451,13 @@ where it is. Side-task offers stack above them as hairline cards: a target icon
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
 
-## Turn figures and plan meters
+## Turn figures and plan usage
 
 A thread's turn figures sit at the top of its Thread info panel, not under the
 composer: with the row of controls and the line of figures under the box, plus a
-card, the composer read as four stacked layers. Above the box, one strip holds
-where the thread runs (Project and branch) on the left and the plan meters
-described below on the right, so the box holds only the message and its
-controls. The figures are one compact block of the 12px meta step in the meta
+card, the composer read as four stacked layers. A thread's composer
+carries no plan usage and no strip of figures, so the box holds only the message
+and its controls. The figures are one compact block of the 12px meta step in the meta
 ink, separated by middle dots, with no hue on any number and no fill: the
 thread's turns, input and output tokens, thinking tokens when the provider
 reported them (part of the output), the cache hit, speed, first token, and cost.
@@ -440,31 +470,17 @@ cost with Previous and Next turn controls. There is no hide control and no
 setting: the panel is closed until asked for, so the figures cost the page
 nothing.
 
-**Plan meters.** Remaining plan usage stands beside the composer, right-aligned on
-the same row as where the work runs: the row under a thread's box, and on a
-start screen the end of the context-chip row above the card (it drops to its
-own right-aligned line when the chips leave no room). A meter is a bar and the
-share **left**: `▬▬▬ 28%`. The bar is a 56px groove 6px tall with a raised
-fill (the pressed-control inset on the track, the bevel's highlight on the
-fill); the figure is in the primary ink at medium weight, in tabular numerals,
-at the 12px meta step, with no fill behind the row. One meter carries no name:
-the bar and its figure say what it is, and its tooltip and accessible name say
-which window ("7-day limit, 28% left"). When a provider reports two windows
-the shortest and the longest stand side by side, and only then does each lead
-with a quiet name in words, `5h ▬▬▬ 85%  week ▬▬ 43%`, because two bare
-figures cannot be told apart. (The single meter read `wk ▬ 28%`: a code to
-look up beside a hairline.) They describe the
-provider the composer will send to (a start screen follows the model menu's
-choice) and read the same host observation as the rail's rings, picked by window
-length (`windowSpan`). A provider that reports no window gets no meters, never
-an empty bar. The fill is the theme's accent role (`--oct-accent`, the ink under
-Mono); a window with a fifth or less left takes the warning ink and
-a spent one the danger ink. The Appearance setting **Usage bars** (`usageBars`,
-Settings › Appearance › Reading) chooses the bar: **Smooth** (default) is a
-three-pixel rounded line; **Pixelated** is a 17 × 3 grid of 2px square cells with
-1px gaps, lit in the same accent, whose last four columns thin out in steps (two
-thirds, a checker, a third, a stipple) so the fill dissolves at its leading edge.
-Neither animates, so reduced motion needs no variant. The row under the box
+**Plan meters.** Remaining plan usage shows in the account menu and the rail's
+ring, on a start screen as the [plan usage line](start-screen.md#plan-usage-line)
+at the end of the context-chip row above the card, and in Settings › Usage. It
+does not stand beside a thread's composer, and the Environment panel's Usage row
+shows the thread's own tokens and cost, not the plan. Its form is the start
+screen's line: each window's share left and its reset, no bar (the bar meters
+went with the Inbox card and the Usage bars setting, maintainer request,
+2026-11-18). The line describes the provider the composer will send to (a start
+screen follows the model menu's choice) and reads the same host observation as
+the rail's ring, picked by window length (`windowSpan`). A provider that reports
+no window shows none. The row under the box
 ([The row under the box](../../DESIGN.md#composer-row)) keeps its controls: the
 approval mode is its shield icon alone, the model button names the model with a
 chosen effort in muted ink and no chevron, the microphone sits just before send,
@@ -741,8 +757,23 @@ change and journals it as the device. Approving a plan, which widens what
 the next turn may do, asks for the phone's own confirmation (Face ID, Touch
 ID or passcode) first; switching to Plan and keeping the level do not. A
 Code thread's level-change ask stays with the desktop, like the phone's
-other Code approvals, and the phone shows no other Work approval or
-question yet.
+other Code approvals.
+
+Every other request a Work agent waits on draws on the same screen, oldest
+first, with the desktop's words: a tool call as **Provider approval** (the
+action and what it does, **Approve** and **Deny**), a question as its prompt,
+each offered answer and **Type your own answer** with **Submit**, and a
+questionnaire as each question with its limits (**Choose one**, **Select
+1–n options**, a **(Recommended)** option, **Write another answer**), the
+optional **Anything to add?**, **Send answers** and **Dismiss**, which ends
+the question unanswered as the desktop's does. Each sends the answer and the
+version it read through the same request route a window uses, and the host
+journals it as the device. Approving a tool call lets the agent act, so it
+asks for the phone's own confirmation first; denying, answering a question
+and dismissing do not. A refusal (answered elsewhere, its version moved, the
+thread's permissions changed since it asked) shows the host's sentence under
+the card, which stays; an answer holding a path or link, which Work request
+text never carries, is refused on the phone before it is sent.
 
 ## Sessions started outside Octant
 
@@ -817,25 +848,30 @@ ordinary notice content cannot issue an approval receipt.
 
 ### Project trust prompt
 
-When a Work or Code thread opens and its Project holds untrusted Project code
-for the thread's key provider, the composer shows one quiet notice card above
-the box (maintainer decision, 2026-11-14: one trust prompt per Project). It is
-the neutral card, announced as a status rather than an alert, and names the
-provider and what would load: "This Project has its own Claude Code settings
-and MCP servers. They load once you trust this Project for Claude Code." Its
-actions are **Trust for <provider>** (secondary) and **Not now** (ghost) at the
-trailing edge. Trust sends the Project's trust command, the same one Project
-settings' Trusted providers sends, and the card goes once the Project lists
-the provider. Not now hides it for that Project and provider in this viewer's
-browser only; Trusted providers in Project settings still offers the trust. A
-window with no Project controller shows the words and Not now without Trust,
-and the host refuses the command from anyone but its own person. The card never
-shows for a trusted Project, a Project folder without that provider's Project
-code, or a provider whose trust loads none (any provider that is not a key
-provider, and Codex). Every ACP agent is a key provider, so the card names
-Gemini CLI, Goose, Kimi Code, and the others for the Project files their
-launches hold until trust (maintainer decision, 2026-11-14). The host's answer and the entries it reads are
-in [Architecture: Key providers run as themselves](../architecture.md#providers).
+Adding a Project, or an extra folder, is the person's trust decision for every
+agent on its threads, so outside Strict no thread asks to trust its Project
+(maintainer decision, 2026-11-18, replacing the one trust prompt per Project of
+2026-11-14). When a Strict Work or Code thread opens and its Project holds Project
+code for the thread's key provider that the person has not allowed, the composer
+shows one quiet notice card above the box. It is the neutral card, announced as a
+status rather than an alert, and names the provider and what Strict holds:
+"Strict holds this Project's own Claude Code settings and MCP servers until you
+allow this Project's code. Its instruction files, such as AGENTS.md, already
+load." Its actions are **Allow Project code** (secondary) and **Not now** (ghost)
+at the trailing edge. Allow sends the Project's trust command, the same one
+Project settings' Trusted providers sends, listing every key provider, so one
+confirmation covers the Project; the card goes once the Project lists the
+provider. Not now hides it for that Project in this viewer's browser only;
+Trusted providers in Project settings still offers the list. A window with no
+Project controller shows the words and Not now without Allow, and the host
+refuses the command from anyone but its own person. The card never shows outside
+Strict, for a Project that lists the provider, a Project folder without that
+provider's Project code, or a provider that is not a key provider. Every ACP
+agent is a key provider, so the card names Gemini CLI, Goose, Kimi Code, and the
+others for the Project files their launches hold until then, and Codex for
+`.codex/config.toml`, which refuses its Strict thread until allowed. The host's
+answer and the entries it reads are in
+[Architecture: Key providers run as themselves](../architecture.md#providers).
 
 ## Turn menu panels
 

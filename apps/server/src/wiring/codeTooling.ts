@@ -683,6 +683,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       },
       processes: languageServerProcesses,
       platform: languageServerHostPlatform(process.platform),
+      threadStrict: (threadId) => deps.resolveThreadStrict(String(threadId)),
       cacheRoot: join(persistence.dataDirectory, "code", "language-server-cache"),
       watcher: codeFileWatch,
     });
@@ -776,6 +777,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       },
       records: debugSessionRecords,
       platform: languageServerHostPlatform(process.platform),
+      threadStrict: (threadId) => deps.resolveThreadStrict(String(threadId)),
       stateRoot: debugStateRoot,
       uuid: randomUUID,
     });

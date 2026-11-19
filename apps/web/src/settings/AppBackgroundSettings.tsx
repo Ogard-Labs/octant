@@ -7,6 +7,7 @@ import type {
   SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
+import type { ContributedGround } from "@octant/plugin-host/grounds";
 import { ASCII_DEFAULT_CELL, ASCII_MIN_CELL, asciiCell } from "@octant/domain/ascii-print";
 import {
   DEFAULT_CHARACTER_LEVEL,
@@ -22,6 +23,7 @@ import { SettingRow, SettingsDisclosure } from "./primitives";
 import { SliderField } from "./SliderField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { usePluginGrounds } from "../theme/pluginGrounds";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 
@@ -197,6 +199,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const library = props.library;
   const background = props.background;
+  const pluginGrounds = usePluginGrounds();
   const savedCharacters =
     background.kind === "characters"
       ? (background.characterSet ?? DEFAULT_CHARACTER_SET)
@@ -226,6 +229,32 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     const pending = next ?? unsaved.current;
     unsaved.current = undefined;
     if (pending !== undefined) props.onChange(pending);
+  };
+  // A plugin's ground is copied into the person's own (never saved as a
+  // reference), so it keeps working when the plugin is switched off.
+  const pickPluginGround = (picked: ContributedGround) => {
+    const {
+      characterSet: _set,
+      characterDensity: _density,
+      characterSpeed: _speed,
+      characterPattern: _pattern,
+      ...rest
+    } = background;
+    setTyped(picked.ground.characterSet);
+    setTypedRefused(false);
+    saveCharacters({
+      ...rest,
+      characterSet: picked.ground.characterSet,
+      ...(picked.ground.characterDensity === undefined
+        ? {}
+        : { characterDensity: picked.ground.characterDensity }),
+      ...(picked.ground.characterSpeed === undefined
+        ? {}
+        : { characterSpeed: picked.ground.characterSpeed }),
+      ...(picked.ground.characterPattern === undefined
+        ? {}
+        : { characterPattern: picked.ground.characterPattern }),
+    });
   };
   const field = background.kind === "pixels";
   const scene: AppBackgroundScene = (field ? background.scene : undefined) ?? "drift";
@@ -753,6 +782,11 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                     aria-label="Starter character set"
                     className="settings-view__select"
                     onValueChange={(next) => {
+                      const plugin = pluginGrounds.find((option) => option.id === next);
+                      if (plugin !== undefined) {
+                        pickPluginGround(plugin);
+                        return;
+                      }
                       const starter = STARTER_SETS.find((option) => option.id === next);
                       if (starter !== undefined) {
                         setTyped(starter.characters);
@@ -763,6 +797,11 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                     options={[
                       ...STARTER_SETS.map((option) => ({ id: option.id, label: option.label })),
                       { id: "custom", label: "Custom", disabled: true },
+                      ...pluginGrounds.map((option) => ({
+                        id: option.id,
+                        label: `${option.displayName} (${option.pluginName})`,
+                        group: "From plugins",
+                      })),
                     ]}
                     value={
                       STARTER_SETS.find((option) => option.characters === savedCharacters)?.id ??

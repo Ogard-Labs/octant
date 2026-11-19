@@ -1181,9 +1181,10 @@ Code journals the ask as an `approval-requested` with action `level-change`,
 the level it would move to, and the plan as evidence. On approval the host
 changes the level through the thread's ordinary access command, for the
 window that approved and journaled as the person's like any level change,
-then ends the turn that asked: Plan's read-only rule rests on the tool set
-and sandbox profile a session launches with, so the new level applies from
-the next turn's session and never inside the one that asked. A kept session
+then ends the turn that asked, unless it entered Plan in place (see
+**Changing the level inside the running turn** below): Plan's read-only
+rule otherwise rests on the tool set and sandbox profile a session launches
+with, so the new level applies from the next turn's session. A kept session
 started at the old level is stopped before that turn too. The level an
 approval applies is worked out when the person answers, from the thread as
 it is then, so a level lowered while the ask was open is the one a plan
@@ -1207,32 +1208,56 @@ host moves the thread through the same rule as the Code access command,
 journaled as the person or paired device that answered, before the
 provider hears the answer; a change the host cannot make leaves the request
 pending. The turn that asked then ends, and the next one launches at the
-new level. Entering Plan records the level the thread left as its
+new level, unless it entered Plan in place, as below. Entering Plan records the level the thread left as its
 `planReturnAccess` (Full access is recorded as Ask first), whether the
 agent asked or the person chose Plan from the mode picker, and an approved
 plan returns the thread there, never to Full access.
 
 **Changing the level inside the running turn** (maintainer decision,
-2026-11-14; resolved 2026-11-18; designed, not built). An approved change
-is applied without ending the turn only when two things hold: the provider
-can change the level inside its session, and Octant can hold that session
-to the new level's rules without launching it again. Otherwise the turn
-ends, as it does today.
+2026-11-14; resolved 2026-11-18; built). An approved change is applied
+without ending the turn only when two things hold: the provider can change
+the level inside its session, and Octant can hold that session to the new
+level's rules without launching it again. A driver says it can through the
+driver port's optional `changeLevelInPlace`, which answers `applied`,
+`refused` or `failed`; anything but `applied`, or no such call, and the turn
+ends as before.
 
 - _Entering Plan in place_ (Claude Code, in Work and Code). The host first
-  moves the thread's level. It then calls the runtime's
-  `setPermissionMode("plan")`, and only after that does the agent hear the
-  answer. From then on the session's gate applies Plan's refusals itself:
+  moves the thread's level. It then asks the driver to change in place: the
+  Claude driver turns its gate to Plan for the session and calls the
+  runtime's `setPermissionMode("plan")`, and only after that does the agent
+  hear the answer, which tells it the thread is in Plan for the rest of the
+  turn. From then on the gate judges every call at Plan rather than the
+  session's launch level (a read runs unasked, a marked server asks, a path
+  outside the Project is refused, the person's own rules decide nothing),
+  and refuses what a Plan session would not hold:
   - every file write and edit tool;
-  - every `Bash` call, because the session's sandbox is the old level's and
-    can write, so a command cannot be judged by it;
+  - every `Bash` call and every tool that manages commands, because the
+    session's sandbox is the old level's and can write, so a command cannot
+    be judged by it;
   - every command that would leave the sandbox;
   - every MCP server the person did not mark read-only;
-  - every subagent or `Workflow` start.
+  - every subagent or `Workflow` start;
+  - every other tool outside Plan's list (reads, the session's task tools,
+    a question, a skill's text, web reads, artifact reads and Octant's own
+    tools, which the host judges at the thread's current level), so a tool
+    the gate does not know fails closed.
 
-  Each refusal carries Plan's sentence. If `setPermissionMode` fails, the
-  turn ends as today, so the level never moves without its rules. The next
-  turn launches with Plan's read-only profile and tool set as usual.
+  Each refusal carries Plan's sentence, and an approval the person answers
+  afterwards for a call asked about before the change is refused too. If
+  `setPermissionMode` fails, the gate stays at Plan and the turn ends as
+  before, so the level never moves without its rules. A session whose
+  account directory overlaps the checkout, which a Plan launch refuses
+  because the task tools write there, is refused the change and its turn
+  ends. The running turn's own ceiling, a Code turn's and a Work turn's,
+  reads Plan from then on, before the agent hears the answer, so a level
+  the person raises again meanwhile applies only from the next turn and
+  Octant's own tools judge the rest of the turn at Plan. The next turn launches with Plan's
+  read-only profile and tool set as usual.
+
+- _A journaled record._ The approval's answer records which way the change
+  applied: Code's `approval-answered` and Work's resolved request carry
+  `levelChangeApplied`, `in-place` or `next-turn`.
 
 - _Leaving Plan always ends the turn._ A Plan session holds Plan's tool set
   and a read-only sandbox. No runtime control adds a tool or widens a
@@ -1251,16 +1276,6 @@ directions. Octant matches it in the narrowing direction. There, the gate
 can refuse what the old launch profile would still allow. In the widening
 direction the session has neither the tools nor the sandbox, and handing
 the agent a level its session cannot honour would be a silent mismatch.
-
-Building it needs four changes:
-
-- an in-place level change on the driver port;
-- the Claude gate reading the session's current level, not its launch
-  level, at each check (paths, `Bash`, sandbox escape, MCP servers,
-  subagents);
-- the Work and Code request runtimes choosing between applying in place
-  and ending the turn;
-- a journaled record of which of the two happened.
 
 #### Sessions started outside Octant
 
@@ -1416,10 +1431,28 @@ and escalation in place of Octant's profile:
   host's less Octant's variables and other providers' keys. A Plan or Chat
   lease outside Strict keeps Octant's read-only profile, with only other
   providers' sign-ins refused among the protected files.
-- The workspace-write policy takes no deny rules, so Octant's protected paths
-  are not Codex deny rules (not built yet: a named Codex permissions profile
-  could carry them). The runtime's own `ssh` uses the person's own setup, so
-  such a launch gets no server folder.
+- Octant's protected paths become Codex deny rules. Codex's built-in
+  workspace-write policy has no deny field (`SandboxWorkspaceWrite` in codex-rs
+  `config/src/types.rs` holds writable roots, network and temp exclusions
+  only), so from 0.169.0, outside Windows, the sandbox runs as a named
+  permissions profile instead (`codexNativePermissionProfile`): the thread's
+  `config` defines `permissions.octant-workspace` as `:workspace` with the
+  Project's folders `write`, other providers' sign-ins `deny` (the Provider
+  sign-ins group the person has not removed, as the host resolves it at its
+  composition boundary and hands the driver as a plain list, less the
+  account's own Codex home, which stays `write` inside Octant's provider
+  folder), and the network
+  `enabled` only without Octant's egress proxy. `thread/start` and
+  `thread/resume` select it with `permissions` in place of `sandbox`, and each
+  turn restates it by name in place of `sandboxPolicy`, which would replace
+  it. Measured on codex-cli 0.169.0 (Linux): a thread started this way reports
+  the profile as active, a denied file fails with `Permission denied` inside
+  Codex's own sandbox while the Project stays writable, a denied folder with
+  one account home re-allowed reads that home and refuses its sibling, and a
+  denied path that does not exist is accepted without being created. An
+  earlier release keeps the built-in workspace-write policy without deny rules.
+  The runtime's own `ssh` uses the person's own setup, so such a launch gets
+  no server folder.
 
 Under Strict, in Plan and in Chat, every Codex app-server below Full access
 runs under Octant's profile, and the
@@ -1560,14 +1593,116 @@ the turn reports completed, so a follow-up such as "fix those findings" sees
 them; where they cannot be appended the turn still completes, after a note
 that a follow-up turn will not see them.
 
-**Codex's own Project configuration** (maintainer decision, 2026-11-16;
-designed, not built). In a Project the person trusted for Codex, outside Plan
-and Strict, Codex loads its own Project configuration as it does on its own
-(the project-local configuration codex-rs's loader reads for a project Codex
-trusts, less the keys codex-rs refuses from a Project, `PROJECT_LOCAL_CONFIG_DENYLIST`
-in `config/src/loader/mod.rs`, rust-v0.162.1), and the trust prompt lists its
-entries. Today Octant reports `projectCode` unsupported for Codex and its trust
-loads none of Codex's Project configuration; Plan and Strict keep that.
+**Codex's own Project configuration** (maintainer decisions, 2026-11-16 and
+2026-11-18; built). Adding a Project, or an extra folder, in Octant is the
+person's trust decision for every agent on its threads, so outside Plan
+every Codex Work and Code thread's `thread/start` and `thread/resume` config
+records the Project folder and each extra folder as
+`projects.<folder>.trust_level = "trusted"` (`codexProjectTrustConfig`),
+which Codex reads before it loads Project layers (`project_trust_context`).
+Codex then reads the Project's `AGENTS.md` and loads its own Project
+configuration as it does on its own (the project-local configuration
+codex-rs's loader reads for a project Codex trusts, less the keys codex-rs
+refuses from a Project, `PROJECT_LOCAL_CONFIG_DENYLIST` in
+`config/src/loader/mod.rs`, rust-v0.162.1), and Octant reports `projectCode`
+supported. Measured on codex-cli 0.169.0: a `read-only` thread loaded the
+Project's `model` with the override and not without it, and nothing was
+written to the account's `config.toml`.
+
+This resolves the earlier gap: without a decision, Codex's app-server trusts
+a Project folder by itself, and records it in the account's Codex
+`config.toml`, when a thread starts with a sandbox that can write the folder
+(`workspace-write` or `danger-full-access`; measured on 0.169.0,
+`thread_processor.rs` `thread_start`). With the trust stated per thread it
+never needs to, and Octant never marks a folder `untrusted`, because Codex
+then also skips the Project's `AGENTS.md` (`load_project_instructions`).
+Plan records no trust: its thread starts `read-only`, so Codex trusts no
+folder by itself, still reads `AGENTS.md` of a folder with no decision, and
+loads no Project configuration, as Plan loads no Project code. Under Strict
+the trust is recorded the same way, so a Strict thread whose Project root
+holds `.codex/config.toml` is refused before its thread starts until the
+person allows the Project's code (`codexStrictProjectConfigRefusal`, category
+`incompatible`, naming **Allow Project code**); the trust cannot leave the
+file out without marking the folder untrusted. A folder the person trusted
+in their own Codex CLI keeps that record, so in Plan such a folder's
+configuration loads, inside Plan's read-only profile.
+
+**Codex sessions started outside Octant** (maintainer request, 2026-11-18;
+built). An empty Work or Code thread can continue one of the person's own
+Codex sessions in its folder, under the same rules as a Claude Code session
+([Sessions started outside Octant](#sessions-started-outside-octant)): only
+the person adopts, the host journals it and marks the thread as carrying
+outside content, and a claim the thread cannot record is given back.
+Octant's Codex runs on the account's own Codex home, so the person's sessions
+and Octant's share Codex's thread store. The driver's `nativeSessions`
+(`codexNativeSessions.ts`) lists them with `thread/list` on a catalog
+app-server, filtered to the thread's folder (`cwd`), newest first by
+`updated_at`, at most 50, from the `cli`, `vscode`, `exec` and `appServer`
+sources; a listing loads no thread. It leaves out a subagent's or ephemeral
+thread, every thread an Octant thread holds, and every thread whose
+`originator` is `Octant`, the client name Octant's connections send at
+`initialize`, which Codex records on each thread it creates (from codex-cli
+0.154.0; such a thread was started by another Octant host on the same Codex
+home). Each carries its name, else the first line of its first
+request, and its branch, for the picker only. Adopting reads the thread with
+`thread/read`, which does not load it either (measured with codex-cli
+0.170.0), refuses one whose folder is not the thread's, and resumes the
+person's own thread: nothing is copied, so the history is the one their
+Codex shows, and the thread's next turn resumes it with `thread/resume`
+through the ordinary checks, which refuse a thread whose folder is not the
+Project's. Which threads an Octant thread holds is the host's own journal,
+read through the provider SDK's `ProviderSessionOwnership` port for every
+Codex account (accounts may share one Codex home): every thread an Octant
+thread starts, takes up or forks is journaled with its resume cursor. A held
+thread is neither offered again nor adopted by a second Octant thread.
+Between the driver's claim and the host's record the claim is held in the
+driver, the check and the claim are one step, so two adoptions of one session
+take turns, and `release` gives the claim back only while it names the
+adoption's own session. Codex fixes a thread's app tools when it
+starts it and a resume cannot add any, so an adopted thread runs with Codex's
+own tools and none of Octant's: its cursor is marked `adopted`, a turn that
+offers Octant's tools resumes it rather than asking for a text handoff, and
+no rule about an Octant tool reaches its model. A session still open in the
+person's own Codex keeps its writer there, and the resume reports that
+another Codex process is using the thread until it closes.
+
+**Codex fork and rewind** (maintainer request, 2026-11-18; built for fork).
+A Code fork continues a copy of Codex's own thread rather than a text
+handoff where it can, as Claude Code's does ([Fork and rewind](#fork-and-rewind)).
+Each completed turn journals its Codex turn id as its native anchor, and the
+driver's `forkSession` calls `thread/fork` with `lastTurnId` set to it,
+`cwd` set to the Project's folder and `excludeTurns`. The copy keeps the
+source's app tools (measured with codex-cli 0.170.0), so its cursor carries
+the source's tool record and `adopted` mark. Codex leaves the copy loaded in
+the app-server that made it, and another app-server's resume refuses a
+loaded thread, so the copy is made on a short-lived catalog process of its
+own that closes as soon as the copy exists; the fork's first turn then
+resumes it on its own lease, and the journal holds the copy from then on.
+Each copy has a process of its own, so two forks at once never leave one
+copy loaded while the other is made. A copy is made only into the source's own folder and
+mode, and only by a release whose fork cuts at a turn (`lastTurnId`, from
+codex-cli 0.143.0); a fork onto its own worktree, a turn with no anchor, an
+older Codex and a failed copy go back with the text handoff. Codex still
+reports `sessionRollback` unsupported, so a rewind keeps the text handoff.
+
+**Codex skills and plugins in `@`** (maintainer request, 2026-11-18; built).
+The composer's `@` menu lists Codex's own skills and plugins after Octant's,
+labelled as Codex's. The probe reads the account's skills with `skills/list`
+(no folder: the `user`, `system` and `admin` scopes; a Project's skills are
+not the account's) and its installed, enabled plugins with
+`plugin/installed` (codex-cli 0.135.0 and later), into the observation's
+`mentions`; a release that lists neither offers none, and a failed read never
+fails the probe. Choosing one writes Codex's own reference into the draft:
+`$name` for a skill, `@name` for a plugin. At send the driver reads the
+prompt's `$name` and `@name` references and resolves each against Codex's
+own listing for the thread's folder, never a path the client sent: a skill
+becomes a `skill` input item with the `SKILL.md` path `skills/list`
+reported, a plugin a `mention` item naming `plugin://<name>@<marketplace>`,
+beside the text, which keeps the reference. A Project skill Octant switched
+off for the thread, a disabled skill or plugin, plugins on a thread whose
+plugins are off (Chat), and a name two skills or two plugins share are never
+sent as items; a listing that fails sends none, and Codex still reads a
+`$name` in the text by itself. At most 16 items go with one turn.
 
 The installed OpenCode binary's
 version selects its routes: 1.x keeps the legacy session API and its
@@ -1915,8 +2050,23 @@ the source again afterwards, and a message after the anchor then removes the
 copy and sends the text handoff instead. Only a session this instance
 opened for the fork's own folder and mode is forked; another folder or mode,
 an anchor OpenCode no longer holds, or a runtime without the routes goes
-back with the text handoff. A rewind still sends the text handoff: OpenCode
-reports `sessionRollback` unsupported, and changing that is its own step.
+back with the text handoff.
+
+A Code rewind continues the same kind of copy: OpenCode reports
+`sessionRollback` supported, and the rewound thread's next turn resumes
+OpenCode's fork of the kept turn's session cut at that turn's anchor, under
+the same folder and mode checks, so the removed turns never reach the model
+and the source session stays as it was. A kept turn with no anchor, or a
+copy that fails, goes back with the text handoff. Rationale: OpenCode's own
+undo (1.x and 2.x `POST /session/{id}/revert` with a `messageID`, and
+`unrevert`) is not used. It rolls the session back in place and also puts
+files back from OpenCode's own snapshots (the session's `revert.snapshot`
+and `diff`), while a rewind's files come back only through Octant's
+checkpoints, and only when the person chose files; a second restore beside
+the checkpoint's would disagree with the journal, and a conversation-only
+rewind would change files. Rolling the source back in place would also
+change a session that earlier turns' anchors and a fork made from it still
+name.
 
 ## Pi
 
@@ -2021,8 +2171,17 @@ source is never written. Only a session this instance opened for the fork's
 own folder, mode and model is copied (Pi keeps the model a session was opened
 with and refuses a resume onto another); any other fork, an anchor the file
 no longer holds, a file over 64 MB, or a fork session that already has a
-history goes back with the text handoff. A rewind still sends the text
-handoff, since Pi reports `sessionRollback` unsupported.
+history goes back with the text handoff.
+
+A Code rewind continues the same kind of copy: Pi reports `sessionRollback`
+supported, and the rewound thread's next turn resumes a new session file
+copied through the kept turn's anchor entry, under the same folder, mode and
+model checks. Pi's own way back in a session (moving the leaf to an earlier
+entry of its tree) changes the source session, which earlier turns' anchors
+and any fork made from it still name, so it is not used; the source file is
+never written. A kept turn with no anchor, a thread now on another model, or
+a copy that fails goes back with the text handoff. Files come back only
+through Octant's checkpoints, as for every provider.
 
 ## ACP agents
 
@@ -2069,8 +2228,9 @@ keeps each message as sent. Pi passes an agent's text on as sent.
 
 Every ACP agent is a key provider (maintainer decision, 2026-11-14): its
 account and thread switches work as the other key providers' do, and a
-Project trusted for it loads that Project's own files in Work and Code
-outside Plan. Each profile's `nativeSetup` releases what its launch
+trusted Project loads that Project's own files in Work and Code outside
+Plan. Every Project the person added is trusted outside Strict; under Strict
+only one whose code the person allowed (maintainer decision, 2026-11-18). Each profile's `nativeSetup` releases what its launch
 otherwise holds back, and its `nativeSetupSupport` reports only those
 features:
 
@@ -2079,16 +2239,23 @@ features:
   hooks, plugins, and agent files as it does on its own, under its own folder
   trust where it keeps one. Each agent's entries are listed in
   `PROJECT_CODE_ENTRIES` (`packages/domain/src/projectCodeTrustPolicy.ts`),
-  so the one trust prompt names them; a test holds the two lists together.
+  so the Strict prompt names them; a test holds the two lists together, and
+  another that no profile holds back a Project instruction file.
   Gemini CLI and Qwen Code start in a trusted Project instead of refusing it.
   Grok Build's `trusted_folders.toml` becomes readable, so its own trust list
-  decides. In Plan, in Chat, and in an untrusted Project every entry stays
-  held, and the two refusals stay.
+  decides; Grok reads a Project's instructions only in a folder that list
+  trusts, so a folder the person never trusted in Grok gets none (not
+  built: telling Grok the folder is trusted at launch). In Plan, in Chat,
+  and in a Strict thread whose Project's code is not allowed every entry
+  stays held, and the two refusals stay.
 - **The person's own home.** Kimi Code reads its home `AGENTS.md` with any of
   the setup, `skills` with skills, `mcp.json` and `plugins` with tool servers,
   and `hooks` with hooks (never in Chat or Plan). Kilo unsets
-  `KILO_DISABLE_EXTERNAL_SKILLS` with skills. fx reads the Project's
-  `AGENTS.md`, instruction text, with any of the setup.
+  `KILO_DISABLE_EXTERNAL_SKILLS` with skills.
+- **Instruction files.** A Project's instruction text is never held back:
+  fx reads the Project's `AGENTS.md`, and Mistral Vibe its Project context
+  (no `VIBE_INCLUDE_PROJECT_CONTEXT` guard), in every mode, with or without
+  the person's setup, Strict and Plan included.
 - **Not lifted.** Kilo's and Devin's managed configuration stays, because it
   carries the level's permission and the agent or mode Octant selects, which
   the person's own configuration would replace; so their home configuration
@@ -2328,7 +2495,12 @@ Junie (`junie --acp=true` inside `junie.app`, 4020.10.0), Amp (`amp-acp`
 person adds it as a local command. Cursor's block was that its
 compatibility probe through this stack never ran (registry 2026.11.13,
 `cursor-agent acp`); that still holds for a profile, so Cursor too is listed
-for adding as any ACP agent rather than kept out.
+for adding as any ACP agent rather than kept out. Each listing carries the
+registry's `darwin-aarch64` distribution at that commit: the archive address
+and, where the entry has one, its `sha256` (Google Antigravity, Amp, Kiro
+CLI, Muse Code), or the npm package at its exact release (Factory Droid,
+Auggie), with the entry's environment. Junie and Cursor list no checksum,
+so they install as unverified downloads.
 
 fx ships as an ACP profile (`fx`) but is not in the registry.
 
@@ -2351,7 +2523,8 @@ threads stay.
 
 ### Any ACP agent
 
-Decided (maintainer decision, 2026-11-16; partly built; this replaces
+Decided (maintainer decision, 2026-11-16; built, except the profile
+promotions below; this replaces
 the rule that only a reviewed profile runs): a person may add an agent from
 the public ACP registry, or their own local command, through the plugin
 model ([Architecture: extensions and skills](../architecture.md#extensions-and-skills)).
@@ -2370,29 +2543,130 @@ Built: the launch policy, `decideAcpAgentLaunch` in
 `packages/plugin-host/src/acpAgents.ts`, pure like the rest of the
 activation policy there:
 
-| Steps the person took                  | Strict or level                 | Starts                                |
-| -------------------------------------- | ------------------------------- | ------------------------------------- |
-| None (found in the registry, or typed) | Any                             | Nothing (`not-installed`)             |
-| Installed, not enabled                 | Any                             | Nothing (`disabled`)                  |
-| Installed and enabled, not trusted     | Any, Full access included       | In Octant's sandbox, remembering none |
-| Trusted                                | Full access                     | With no sandbox                       |
-| Trusted                                | Plan, or Strict (or unresolved) | In Octant's sandbox                   |
-| Trusted                                | Outside Strict, below Full      | Without Octant's sandbox              |
+| Steps the person took                  | Strict or level                 | Starts                                      |
+| -------------------------------------- | ------------------------------- | ------------------------------------------- |
+| None (found in the registry, or typed) | Any                             | Nothing (`not-installed`)                   |
+| Installed, not enabled                 | Any                             | Nothing (`disabled`)                        |
+| Installed and enabled, not trusted     | Any, Full access included       | In Octant's sandbox, remembering none       |
+| Trusted                                | Full access                     | With no sandbox                             |
+| Trusted                                | Plan, or Strict (or unresolved) | In Octant's sandbox                         |
+| Trusted                                | Outside Strict, below Full      | As a shipped profile outside Strict (`own`) |
 
 An untrusted agent at Full access gets the wall Accept edits has, since it
-is not yet trusted to run open. A command is an absolute executable path
-with literal arguments, never run through a shell; a relative path or a
-control character is refused before the agent is added
-(`acpAgentCommandRefusal`). An agent from the registry is added from the
-executable the person's install put on disk (`addRegistryAcpAgent`), and
-starts installed, untrusted and disabled. Under Octant's sandbox the home
-folder is unreadable, so an untrusted agent that keeps its sign-in there
-reaches its provider only through a key in its environment.
+is not yet trusted to run open. `own` is the launch every shipped ACP
+profile gets outside Strict below Full access: the agent's own settings
+decide what Strict would fix (its channels, the fixed environment, Octant's
+protected files inside its folders). An added agent has no checked sandbox
+of its own, so on macOS that launch still keeps Octant's Seatbelt wall, as
+it does for every shipped profile that has none
+([Own sandboxes checked and not switched](#own-sandboxes-checked-and-not-switched)); on Windows it starts unconfined with the
+agent's own approvals. A command is an absolute executable path with
+literal arguments, never run through a shell; a relative path, a control
+character, more than 32 arguments, or an argument that names a key, token,
+secret or password is refused before the agent is added
+(`acpAgentCommandRefusal`), because the arguments are journaled with the
+agent. Under Octant's sandbox the home folder is unreadable, so an agent
+that keeps its sign-in there reaches its provider only through a key in its
+environment or at Full access.
 
-Not built yet: the host side, that is Settings' add, trust and enable flow,
-installing a registry distribution, and a provider instance for an added
-agent on the shared stack, which needs a driver kind of its own beside the
-reviewed rows of `ACP_AGENT_PROFILES`.
+Built, the host side: one driver kind, `acp-agent`, for every added agent,
+outside the closed rows of `ACP_AGENT_PROFILES` and admitted by one bundled
+plugin ("Added ACP agents"). Its instance configuration
+(`AddedAcpAgentConfiguration` in `@octant/contracts/providers`) holds the
+source (a registry id, the exact release the host's listing pinned and its
+distribution kind, or a local absolute command), the arguments and, for a
+registry agent, the registry entry's environment, the install record (the
+executable and how it was checked), and the trust; the instance's own
+`enabled` is the third step. Settings' Providers page has an **Any ACP
+agent** section: **Add ACP agent** picks a registry entry or a local
+command, then each agent shows **Install**, **Trust** and **Turn on** in
+that order, with **Stop trusting**, **Turn off**, **Reinstall** and
+**Remove**. The commands are `add-acp-agent`, `install-acp-agent` and
+`set-acp-agent-trust`, beside the existing `set-provider-enabled` and
+`remove-provider`, and each step is journaled as its own instance event.
+The host decides every step:
+
+- **Add.** A registry agent is named by its registry id alone; its name,
+  release, distribution, arguments and environment come from the host's own
+  listing (`ACP_REGISTRY_AGENTS`), so no client can point an install at
+  another package, address or checksum, and a request carrying any of them
+  fails to decode. A local agent carries no environment, so no key travels
+  in it. An added agent starts not installed, untrusted and off.
+- **Install** (`acpAgentInstall.ts`). Nothing the install puts on disk is
+  run. See the rationale below for how each distribution is checked.
+- **Trust.** Shows what trusting grants and how the install vouched for the
+  bytes; an unverified download is said plainly. Trust is refused before an
+  install, and a reinstall drops it.
+- **Enable.** Refused until the agent is installed and trusted
+  (`acpAgentEnableRefusal`). Stopping trust later leaves the agent on; its
+  next launch is held as an untrusted one.
+- **Authority.** Adding, installing and trusting are steps of admitting a
+  program Octant did not review, so the route refuses them from any client
+  that does not act as the host's own person, as for an outside driver.
+- **Remove** deletes what the install put in Octant's managed folder; a
+  local command is the person's and stays.
+
+The launch (`withAddedAcpAgentLaunch` in `addedAcpAgent.ts`) holds the
+driver to `decideAcpAgentLaunch`: an agent that is not installed or not on
+starts nothing, and an untrusted one is started under Strict, with the
+sandbox kept at Full access, with none of the person's own setup, with
+Octant's tools taken out (its probe reports app tools unsupported) and with
+every approval answered for one call. An added agent is not a key provider:
+Octant holds no switch for its own setup, so no Project trust is recorded
+for it. Its network below Full access reaches the common model providers,
+the endpoints its environment names and the Project's own rules, since its
+vendor's hosts are not known.
+
+The generic profile (`addedAcpAgentProfile`) claims nothing a probe would
+have to show. Its identity is the configured command, so any
+`agentInfo.name` is accepted while ACP's protocol version must still be 1.
+Its version is read from `--version` where the agent answers and is
+otherwise taken from the `initialize` reply's `agentInfo.version`
+(`versionProbe: "best-effort"`). Every capability is what `initialize`
+advertises. The model is set in the spelling the session reported
+(`modelSelection: "follow-session"`): its `model` config option, or else
+`session/set_model` when it reports `models`, and not at all when the
+session already opened on that model. No mode is selected (`selectsNoMode`), since no mapping of
+Chat, Work, Code and Plan onto the agent's own modes was read; Plan's
+read-only wall and the level's approvals are Octant's sandbox and approval
+bridge. It pins no exact-release feature (usage, compaction, file review,
+forms, warm reuse, unadvertised HTTP tools), so none is offered at any
+level, and the Full access "unverified" rule has nothing to offer it. An
+agent whose session lists no model has nothing to select and cannot start a
+thread.
+
+Rationale (lead decision, 2026-11-18), install integrity: an `npx` or
+`uvx` distribution installs the exact pinned release with the package
+manager into Octant's managed folder for that agent
+(`<data>/acp-agent-installs/<instance>`), relying on the package manager's
+own lockfile and integrity checks; npm runs with `--ignore-scripts` and uv
+with `--no-build`, so no package code runs at install time. A package that
+needs its install script to fetch its real binary then fails its
+Connection Check instead. A binary distribution downloads only over HTTPS
+(a redirect included) from the URL the listing names, capped at 1 GiB. The
+registry schema's `sha256` is optional: an archive that carries one is
+checked and refused on a mismatch, leaving nothing on disk; one without is
+installed as an unverified download, which the Trust step says plainly.
+A download that cannot be written (a full or unwritable disk) is refused and
+its partial file removed. Archives are unpacked with the system's `tar` or `unzip` after every entry
+is listed and the archive refused when one is absolute or climbs out with
+`..`; the executable must resolve inside the install folder. Downloads
+follow the Marketplace fetches switch. Each install goes into a fresh
+folder and the earlier ones are removed only once it is on disk, so a
+failed reinstall leaves the agent as it was. Rejected: verifying only what
+HTTPS gives for every binary (it would hide the registry's checksum where
+one exists), and refusing every binary without a checksum (it would leave
+out Cursor and Junie, whose entries carry none).
+
+Rationale, driver kind: one generic `acp-agent` kind, whose instance
+configuration holds the source, the trust and (in `enabled`) the switch,
+keeps `ProviderDriverKind` closed, as `outside-harness-endpoint` does for
+outside driver packages. Rejected: a driver kind per added agent, which
+would turn the vocabulary into `string`.
+
+Not built: the probe next agents' first-class profiles and the recheck of
+Cursor's block (below). Each needs a live probe against a signed-in install,
+which this change could not run; until then each is added as any ACP agent.
 
 ### Probe before a profile ships
 
@@ -2402,11 +2676,29 @@ pinned is offered as "unverified" instead of refused, under
 Full access the pin holds. Built for Kimi Code's reviewed command inventory:
 a release that lists another inventory passes the probe, the runtime card
 says it is unverified and names the commands it added, a session below Full
-access is refused, and at Full access its listed commands run with it. Not
-built yet for the exact-release claims a profile pins (usage, compaction,
-file review, forms, warm reuse, unadvertised HTTP tools): the probe reports
-each one for every level, so offering it at Full access alone needs a Full
-access value of its own, as `appManagedToolsAtFullAccess` is.
+access is refused, and at Full access its listed commands run with it.
+
+Built for the exact-release claims a profile pins (`acpExactReleaseClaim` in
+`apps/server/src/providers/acpProfiles.ts`): a release newer than every
+release a claim was reviewed on keeps that claim at Full access, offered as
+unverified, and below Full access the pin holds; an older or unparseable
+release never inherits newer evidence. The probe gives Full access its own
+value, `capabilities.atFullAccess` (`release: "unverified"` with usage,
+forms as `userQuestions`, and Octant's tools as `appManagedTools`), present
+only where it differs from the other levels, and the runtime card says which
+features the release keeps at Full access. A Full access session then
+counts usage, asks the agent's session forms, takes Octant's tools over the
+unadvertised HTTP transport (the tool gate reads `atFullAccess` through
+`threadAppToolSupport`), and is retained warm on the newer release.
+Compaction and file review keep the pin at Full access too: the host runs
+both on a session it resumes for them tool-free or under Plan, not on the
+thread's Full access session, so the release is judged below Full access
+there. A spend ceiling still counts a provider whose usage reads
+unsupported below Full access as not measured. Rationale: the probe used to
+report one value for every level, so an unreviewed release lost these
+features at Full access as well, where the person already runs the agent
+open; Mistral Vibe 3.0.3, newer than the 2.25.0 its HTTP tool evidence
+pinned, is now offered Octant's tools at Full access as unverified.
 
 A profile ships only after a live probe against a signed-in install on Apple
 Silicon shows each of the following, recorded as a smoke test beside
@@ -2616,8 +2908,12 @@ its status are in
   Claude with no file or shell tool in its session's tool list
   (`claudeExecutionOptions` leaves out `Read`, `Grep`, `Glob`, `LS`, `Edit`,
   `Write`, `NotebookEdit`, `Bash` and the task tools on Windows). OpenCode
-  and the ACP agents keep their own file and shell tools whatever they are
-  told, so their Chat launch is refused by name.
+  and the ACP agents stay refused by name in Chat: OpenCode's permission
+  rules can deny its file and shell tools, but its command templates run
+  shell substitutions and its plugins run code in its own process outside
+  those rules, and an ACP agent's client capabilities decide only whether it
+  uses Octant's file and terminal methods, never its own built-in tools,
+  which no reviewed profile can be told to drop.
 - **Refused by name:** Strict at every level ("Strict needs a sandbox
   Windows doesn't have yet"), Full access with the sandbox kept, and a Chat
   launch on OpenCode or an ACP agent. A launch that does not carry its Strict

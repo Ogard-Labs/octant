@@ -76,9 +76,23 @@ const ACP_AGENT_DRIVERS: ReadonlyArray<BundledDriverSpec> = ACP_AGENT_KINDS.map(
   };
 });
 
+/**
+ * The one driver every agent a person adds from the ACP registry or as a
+ * local command runs on. Its plugin admits the shared ACP stack; each added
+ * agent still takes its own install, trust and enable steps. The seed follows
+ * Amazon Bedrock's, so no earlier plugin identity moves.
+ */
+const ADDED_ACP_AGENT_DRIVER = {
+  driverKind: "acp-agent",
+  displayName: "Added ACP agents",
+  digestNibble: "1a",
+  uuidNibble: "1b",
+} as const satisfies BundledDriverSpec;
+
 const BUNDLED_PROVIDER_DRIVERS: ReadonlyArray<BundledDriverSpec> = [
   ...NATIVE_PROVIDER_DRIVERS,
   ...ACP_AGENT_DRIVERS,
+  ADDED_ACP_AGENT_DRIVER,
 ];
 
 /**

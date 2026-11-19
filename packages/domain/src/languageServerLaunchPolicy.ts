@@ -33,6 +33,12 @@ export interface LanguageServerLaunchRequest {
    * category.
    */
   readonly shellCommandApproval: "granted" | "absent";
+  /**
+   * The resolved Strict value of the thread whose read starts or uses the
+   * server. Read on Windows only, where a server runs unconfined outside
+   * Strict; a request that does not say counts as Strict.
+   */
+  readonly strict?: boolean | undefined;
 }
 
 export type LanguageServerLaunchShape =
@@ -60,7 +66,31 @@ export type LanguageServerLaunchShape =
        * the checkout, not the thread that happened to start it.
        */
       readonly network: "proxied-under-project-rules";
+    }
+  | {
+      /**
+       * Windows outside Strict: Windows has no sandbox Octant can use yet, so
+       * the server runs with the person's own reach, as an editor there
+       * starts it, and nothing here claims a wall. A `repo-tooling` server
+       * still needs the person's start and approval first.
+       */
+      readonly launchClass: ExtensionLanguageServerClass;
+      readonly confinement: "none";
     };
+
+/**
+ * Whether a host's language servers can run at all for a thread: macOS and
+ * Linux confine them at every setting, and Windows runs them unconfined
+ * outside Strict. Strict on Windows needs Octant's sandbox, which it lacks.
+ */
+function languageServersRunHere(
+  platform: LanguageServerHostPlatform,
+  strict: boolean | undefined,
+): boolean {
+  return (
+    platform === "macos" || platform === "linux" || (platform === "windows" && strict === false)
+  );
+}
 
 /** A launch refusal reaches the editor unchanged as a language read refusal. */
 export type LanguageServerLaunchRefusal = Extract<
@@ -75,10 +105,19 @@ export type LanguageServerLaunchDecision =
 export function decideLanguageServerLaunch(
   request: LanguageServerLaunchRequest,
 ): LanguageServerLaunchDecision {
-  if (request.platform !== "macos" && request.platform !== "linux") {
+  if (!languageServersRunHere(request.platform, request.strict)) {
     return { status: "refused", reason: "unsupported-platform" };
   }
   const confinement = request.platform === "macos" ? "seatbelt" : "bubblewrap";
+  if (request.platform === "windows") {
+    // A static server starts without asking, as it does where it is confined;
+    // repository tooling keeps every step it needs elsewhere.
+    const refusal =
+      request.launchClass === "static" ? undefined : repositoryToolingRefusal(request);
+    return refusal === undefined
+      ? { status: "launch", shape: { launchClass: request.launchClass, confinement: "none" } }
+      : { status: "refused", reason: refusal };
+  }
   if (request.launchClass === "static") {
     return {
       status: "launch",
@@ -94,16 +133,8 @@ export function decideLanguageServerLaunch(
       },
     };
   }
-  if (request.posture === "plan") return { status: "refused", reason: "plan-read-only" };
-  // Running the repository's tooling on the host is the person's to start, at
-  // the machine or on a device they paired, as terminal input is. An approval
-  // on record does not let any other device session start one.
-  if (!actsAsHostPerson(request.startedBy)) {
-    return { status: "refused", reason: "local-host-required" };
-  }
-  if (request.shellCommandApproval !== "granted") {
-    return { status: "refused", reason: "approval-required" };
-  }
+  const refusal = repositoryToolingRefusal(request);
+  if (refusal !== undefined) return { status: "refused", reason: refusal };
   return {
     status: "launch",
     shape: {
@@ -119,6 +150,19 @@ export function decideLanguageServerLaunch(
   };
 }
 
+/** Why a `repo-tooling` start refuses, on every platform it runs on, or undefined. */
+function repositoryToolingRefusal(
+  request: LanguageServerLaunchRequest,
+): LanguageServerLaunchRefusal | undefined {
+  if (request.posture === "plan") return "plan-read-only";
+  // Running the repository's tooling on the host is the person's to start, at
+  // the machine or on a device they paired, as terminal input is. An approval
+  // on record does not let any other device session start one.
+  if (!actsAsHostPerson(request.startedBy)) return "local-host-required";
+  if (request.shellCommandApproval !== "granted") return "approval-required";
+  return undefined;
+}
+
 /** The facts of one agent read of a file a `repo-tooling` server covers. */
 export interface AgentRepositoryToolingReadRequest {
   /** The posture the agent's turn runs at when the read is made. */
@@ -128,6 +172,8 @@ export interface AgentRepositoryToolingReadRequest {
   readonly server: "running" | "not-running";
   /** The shell-command approval for this checkout and the server's package state as it is now. */
   readonly shellCommandApproval: "granted" | "absent";
+  /** The agent's thread's resolved Strict value, read on Windows only. */
+  readonly strict?: boolean | undefined;
 }
 
 export type AgentRepositoryToolingReadDecision =
@@ -147,7 +193,7 @@ export type AgentRepositoryToolingReadDecision =
 export function decideAgentReadThroughRepositoryTooling(
   request: AgentRepositoryToolingReadRequest,
 ): AgentRepositoryToolingReadDecision {
-  if (request.platform !== "macos" && request.platform !== "linux") {
+  if (!languageServersRunHere(request.platform, request.strict)) {
     return { status: "refused", reason: "unsupported-platform" };
   }
   if (request.posture === "plan") return { status: "refused", reason: "plan-read-only" };

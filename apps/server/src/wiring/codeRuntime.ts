@@ -133,7 +133,6 @@ import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
-import { hostProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 import {
   backgroundSessionIdleLimitMs,
   providerToolCallPauseLimitMs,
@@ -552,8 +551,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     personMemoryAccess,
     octantInstructions,
   } = deps;
-  // The trust a person already gave a Project's folder in Claude Code or Codex.
-  const providerCliProjectTrust = hostProviderCliProjectTrust();
   return Effect.gen(function* () {
     // The coordinator service is wired after the Code runtime that reports
     // stopped turns to it; a stop before then has no worker to move.
@@ -1753,7 +1750,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           sessionNativeSetup(
             {
               ...persistence,
-              readProviderCliTrust: providerCliProjectTrust,
               readStrict: (threadId) => resolveThreadStrict(threadId),
             },
             {

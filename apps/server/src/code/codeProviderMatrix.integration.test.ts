@@ -44,11 +44,14 @@ const CODE_OUTCOMES = {
   "ideogram-image": "unavailable",
   // Nothing admits an outside driver package yet, so no outside instance runs a turn.
   "outside-harness-endpoint": "unavailable",
+  // An added agent claims nothing a conformance run would show: what it can do
+  // is what its own `initialize` reports when the person runs it.
+  "acp-agent": "unavailable",
 } as const satisfies Readonly<Record<ProviderDriverKind, CodeOutcome>>;
 
 describe("Code provider matrix", () => {
   it("classifies every declared provider kind with conformance or explicit unavailability", () => {
-    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(27);
+    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(28);
     for (const [providerKind, outcome] of Object.entries(CODE_OUTCOMES) as Array<
       [ProviderDriverKind, CodeOutcome]
     >) {
@@ -60,6 +63,7 @@ describe("Code provider matrix", () => {
           "bfl-image",
           "ideogram-image",
           "outside-harness-endpoint",
+          "acp-agent",
         ]).toContain(providerKind);
         continue;
       }

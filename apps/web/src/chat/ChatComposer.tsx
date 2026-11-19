@@ -1,5 +1,9 @@
 import { useComposerCompacting } from "../context/composerContextMeterScope";
-import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
+import {
+  ComposerAtTypeahead,
+  composerProviderMentions,
+  useComposerAtMenu,
+} from "../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   useId,
@@ -273,6 +277,7 @@ export function ChatComposer(props: ChatComposerProps) {
     ),
   ];
   const atMenu = useComposerAtMenu({
+    provider: composerProviderMentions(props.providerGroups, props.selectedProviderInstanceId),
     draft: props.draft,
     onDraftChange: props.onDraftChange,
     textarea: () => messageRef.current,

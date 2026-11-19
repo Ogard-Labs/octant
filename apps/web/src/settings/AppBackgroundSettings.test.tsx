@@ -3,11 +3,14 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import {
   decodeAppBackground,
+  type AppBackground,
   DEFAULT_APP_BACKGROUND,
   type SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
 import { DEFAULT_CHARACTER_SET } from "@octant/domain/theme-policy";
+import type { ContributedGround } from "@octant/plugin-host/grounds";
+import { PluginGroundsContext } from "../theme/pluginGrounds";
 import { AppBackgroundSettings, type BackgroundImageLibrary } from "./AppBackgroundSettings";
 
 afterEach(cleanup);
@@ -777,6 +780,79 @@ describe("AppBackgroundSettings", () => {
       expect(onChange).toHaveBeenLastCalledWith(
         expect.objectContaining({ kind: "characters", characterPattern: "rings" }),
       );
+    });
+
+    describe("grounds from plugins", () => {
+      const nightDots: ContributedGround = {
+        id: "plugin:pkg:dots",
+        displayName: "Night dots",
+        pluginName: "Night pack",
+        ground: { characterSet: "AB", characterDensity: 60, characterPattern: "rings" },
+      };
+      const renderWith = (
+        grounds: ReadonlyArray<ContributedGround>,
+        background: AppBackground = characters,
+        onChange = vi.fn(),
+      ) =>
+        render(
+          <PluginGroundsContext.Provider value={grounds}>
+            <AppBackgroundSettings background={background} onChange={onChange} />
+          </PluginGroundsContext.Provider>,
+        );
+
+      it("lists a plugin's grounds under From plugins, and no group when there are none", async () => {
+        const user = userEvent.setup();
+        const first = renderWith([]);
+        await openCustomize(user);
+        await user.click(screen.getByRole("combobox", { name: "Starter character set" }));
+        expect(await screen.findByRole("option", { name: "Binary" })).toBeInTheDocument();
+        expect(screen.queryByText("From plugins")).toBeNull();
+        first.unmount();
+
+        renderWith([nightDots]);
+        await openCustomize(user);
+        await user.click(screen.getByRole("combobox", { name: "Starter character set" }));
+        expect(await screen.findByText("From plugins")).toBeInTheDocument();
+        expect(
+          await screen.findByRole("option", { name: "Night dots (Night pack)" }),
+        ).toBeInTheDocument();
+      });
+
+      it("copies a picked ground's values into the person's ground and saves once", async () => {
+        const user = userEvent.setup();
+        const onChange = vi.fn();
+        renderWith([nightDots], { ...characters, characterSpeed: 10 }, onChange);
+        await openCustomize(user);
+        await user.click(screen.getByRole("combobox", { name: "Starter character set" }));
+        await user.click(await screen.findByRole("option", { name: "Night dots (Night pack)" }));
+        expect(onChange).toHaveBeenCalledTimes(1);
+        const saved = onChange.mock.calls[0]?.[0];
+        expect(saved).toMatchObject({
+          kind: "characters",
+          characterSet: "AB",
+          characterDensity: 60,
+          characterPattern: "rings",
+        });
+        expect(saved).not.toHaveProperty("characterSpeed");
+        expect(JSON.stringify(saved)).not.toContain("plugin:");
+        expect(screen.getByRole("textbox", { name: "Characters" })).toHaveValue("AB");
+      });
+
+      it("drops a disabled plugin's ground from the menu while the person's copy stays", async () => {
+        const user = userEvent.setup();
+        const copy = { ...characters, characterSet: "AB", characterDensity: 60 };
+        const { rerender } = renderWith([nightDots], copy);
+        await openCustomize(user);
+        rerender(
+          <PluginGroundsContext.Provider value={[]}>
+            <AppBackgroundSettings background={copy} onChange={vi.fn()} />
+          </PluginGroundsContext.Provider>,
+        );
+        await user.click(screen.getByRole("combobox", { name: "Starter character set" }));
+        await screen.findByRole("option", { name: "Binary" });
+        expect(screen.queryByRole("option", { name: /Night dots/ })).toBeNull();
+        expect(screen.getByRole("textbox", { name: "Characters" })).toHaveValue("AB");
+      });
     });
 
     it("previews slider and typing changes and saves once when the person lets go", async () => {

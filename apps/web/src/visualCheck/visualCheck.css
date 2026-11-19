@@ -30,3 +30,18 @@ body,
 .visual-check__pane--padded {
   padding-inline: 24px;
 }
+
+/* The dock's two widths: flexible (480px at least) and tiled (one column). */
+.visual-check__dock {
+  height: 100%;
+  overflow: auto;
+  padding: var(--oct-space-2);
+}
+
+.visual-check__dock--flexible {
+  width: 480px;
+}
+
+.visual-check__dock--tiled {
+  width: 280px;
+}

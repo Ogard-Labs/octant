@@ -83,6 +83,7 @@ import type {
   ProviderSessionHandle,
   ProviderSessionForkRequest,
   ProviderSessionStart,
+  ProviderInPlaceLevelChange,
 } from "@octant/provider-sdk/driver";
 import { BROWSER_TOOL_HOST_LINE, browserUseSelection } from "@octant/plugin-host/browser-use";
 import { COMPUTER_TOOL_HOST_LINE, computerUseSelection } from "@octant/plugin-host/computer-use";
@@ -4558,6 +4559,53 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("records what Strict kept with a Strict launch's session, and nothing for a launch outside Strict", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    let strict = true;
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      resolveStrict: () => strict,
+    });
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "linux" } }));
+    try {
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(18),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() =>
+        expect(fixture.conversation().turns[0]?.strictKept).toEqual(
+          expect.arrayContaining(["octant-sandbox", "protected-files"]),
+        ),
+      );
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(fixture.conversation().turns[0]?.status).toBe("completed"));
+      strict = false;
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(19),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(fixture.conversation().turns).toHaveLength(2));
+      expect(fixture.conversation().turns[1]).not.toHaveProperty("strictKept");
+    } finally {
+      vi.unstubAllGlobals();
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("runs a Windows Code turn below Full access outside Strict with the provider's own approvals", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -6413,6 +6461,12 @@ describe("CodeOperationRuntime", () => {
         expect.objectContaining({ requestId: "plan-ask", approved: true, scope: "once" }),
       );
       expect(connection.interrupt).toHaveBeenCalled();
+      // A provider with no in-place change ends the turn, and the journal says so.
+      expect(
+        (await operationEvents(fixture.runtime, firstTurn)).find(
+          (event) => event.kind === "approval-answered",
+        ),
+      ).toMatchObject({ decision: "approved", levelChangeApplied: "next-turn" });
       // The session that asked kept the level it launched with to the end.
       expect(starts.map((start) => start.executionPolicy)).toEqual([thread().executionPolicy]);
       await Effect.runPromise(
@@ -6441,6 +6495,130 @@ describe("CodeOperationRuntime", () => {
             .at(-1),
         ).toBe("plan"),
       );
+    } finally {
+      fixture.close();
+    }
+  });
+
+  async function answeredLevelChangeWithInPlaceDriver(input: {
+    readonly kind: "enter-plan" | "exit-plan";
+    readonly inPlace: ProviderInPlaceLevelChange;
+    readonly operation: number;
+  }) {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const order: string[] = [];
+    const base = providerConnection(queue);
+    const changeLevelInPlace = vi.fn(() =>
+      Effect.sync(() => {
+        order.push("in-place");
+        return input.inPlace;
+      }),
+    );
+    const connection: ProviderConnection = {
+      ...base,
+      changeLevelInPlace,
+      answerApproval: (answer) =>
+        Effect.sync(() => order.push("answer")).pipe(Effect.zipRight(base.answerApproval(answer))),
+    };
+    const changeThreadLevel = vi.fn(async () => true);
+    const fixture = runtimeFixture({ provider: providerDriver(connection), changeThreadLevel });
+    if (input.kind === "exit-plan")
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+    const turn = operationId(input.operation);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: turn,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(base.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "approval-request",
+          requestId: "level-ask",
+          action: input.kind === "enter-plan" ? "EnterPlanMode" : "ExitPlanMode",
+          description: "Claude asks to change the level.",
+          levelChange:
+            input.kind === "enter-plan"
+              ? { kind: "enter-plan" }
+              : { kind: "exit-plan", plan: "1. Fix it." },
+        }),
+      ),
+    );
+    let approvalId: CodeApprovalId | undefined;
+    await vi.waitFor(async () => {
+      const asked = (await operationEvents(fixture.runtime, turn)).find(
+        (event) => event.kind === "approval-requested",
+      );
+      expect(asked?.kind).toBe("approval-requested");
+      if (asked?.kind === "approval-requested") approvalId = asked.approvalId;
+    });
+    const answered = await fixture.runtime.execute(windowId, {
+      kind: "answer-provider-approval",
+      operationId: operationId(input.operation + 1),
+      threadId,
+      checkoutId,
+      approvalId: approvalId!,
+      decision: "approved",
+    });
+    const answeredEvent = (await operationEvents(fixture.runtime, turn)).find(
+      (event) => event.kind === "approval-answered",
+    );
+    return { fixture, base, answered, answeredEvent, order, changeLevelInPlace };
+  }
+
+  it("enters Plan inside the running turn when the provider can hold its session to Plan", async () => {
+    const { fixture, base, answered, answeredEvent, order } =
+      await answeredLevelChangeWithInPlaceDriver({
+        kind: "enter-plan",
+        inPlace: { status: "applied" },
+        operation: 1393,
+      });
+    try {
+      expect(answered).toMatchObject({ state: "running" });
+      // The session is held to Plan before the agent hears it was approved.
+      expect(order).toEqual(["in-place", "answer"]);
+      expect(base.interrupt).not.toHaveBeenCalled();
+      expect(answeredEvent).toMatchObject({
+        decision: "approved",
+        levelChangeApplied: "in-place",
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("ends the turn when the provider fails to enter Plan in place", async () => {
+    const { fixture, base, answered, answeredEvent } = await answeredLevelChangeWithInPlaceDriver({
+      kind: "enter-plan",
+      inPlace: { status: "failed", reason: "Claude did not switch to plan mode." },
+      operation: 1395,
+    });
+    try {
+      expect(answered).toMatchObject({ state: "interrupted" });
+      expect(base.interrupt).toHaveBeenCalled();
+      expect(answeredEvent).toMatchObject({ levelChangeApplied: "next-turn" });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("ends the turn when the person approves leaving Plan, even where the provider can enter Plan in place", async () => {
+    const { fixture, base, answered, answeredEvent, changeLevelInPlace } =
+      await answeredLevelChangeWithInPlaceDriver({
+        kind: "exit-plan",
+        inPlace: { status: "applied" },
+        operation: 1397,
+      });
+    try {
+      expect(answered).toMatchObject({ state: "interrupted" });
+      expect(changeLevelInPlace).not.toHaveBeenCalled();
+      expect(base.interrupt).toHaveBeenCalled();
+      expect(answeredEvent).toMatchObject({ levelChangeApplied: "next-turn" });
     } finally {
       fixture.close();
     }
@@ -15016,12 +15194,123 @@ it("requests a preview through the actual app-managed terminal write composition
         }),
       ),
     );
-    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledTimes(2));
+    // The write runs a real terminal command; a loaded CI runner took longer
+    // than the default second to answer it.
+    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledTimes(2), {
+      timeout: 5_000,
+    });
     await vi.waitFor(
       () => expect(f.conversation().turns[0]?.reviewPreview?.capture?.version).toBe(1),
       { timeout: 3_000 },
     );
     expect(readTreeDiff).toHaveBeenCalledOnce();
+  } finally {
+    await f.runtime.close();
+    f.close();
+  }
+});
+
+it("keeps a turn that entered Plan in place at Plan when the person raises the level again before it ends", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const base = providerConnection(queue);
+  const provider: ProviderConnection = {
+    ...base,
+    changeLevelInPlace: () => Effect.succeed({ status: "applied" as const }),
+  };
+  let setThread: (next: CodeThread) => void = () => undefined;
+  const f = runtimeFixture({
+    terminalExit: { exitCode: 0 },
+    provider: providerDriver(provider),
+    supportsAppManagedTools: true,
+    changeThreadLevel: async (input: { readonly executionPolicy: ProviderExecutionPolicy }) => {
+      setThread(
+        decodeCodeThread({
+          ...thread(),
+          executionPolicy: input.executionPolicy,
+          planReturnPolicy: "approval-gated",
+        }),
+      );
+      return true;
+    },
+  });
+  setThread = (next) => f.setThread(next);
+  f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+  const turn = operationId(1810);
+  try {
+    expect(
+      await f.runtime.execute(windowId, {
+        kind: "start-terminal",
+        operationId: operationId(1809),
+        terminalId: decodeCodeTerminalId(threadId),
+        threadId,
+        checkoutId,
+        columns: 80,
+        rows: 24,
+        credentialRefs: [],
+      }),
+    ).toMatchObject({ kind: "terminal-state", state: "running" });
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: turn,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(base.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "approval-request",
+          requestId: "plan-ask",
+          action: "EnterPlanMode",
+          description: "Claude asks to plan first.",
+          levelChange: { kind: "enter-plan" },
+        }),
+      ),
+    );
+    let approvalId: CodeApprovalId | undefined;
+    await vi.waitFor(async () => {
+      const asked = (await operationEvents(f.runtime, turn)).find(
+        (event) => event.kind === "approval-requested",
+      );
+      expect(asked?.kind).toBe("approval-requested");
+      if (asked?.kind === "approval-requested") approvalId = asked.approvalId;
+    });
+    expect(
+      await f.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1811),
+        threadId,
+        checkoutId,
+        approvalId: approvalId!,
+        decision: "approved",
+      }),
+    ).toMatchObject({ state: "running" });
+    // The person puts the thread back at Full access while the turn runs.
+    f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access", version: 3 }));
+    expect(
+      f.runtime.threadWithActiveTurnPosture?.(
+        decodeCodeThread({ ...thread(), executionPolicy: "full-access", version: 3 }),
+      )?.executionPolicy,
+    ).toBe("plan");
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-request",
+          requestId: "terminal-write",
+          toolName: "octant_terminal",
+          inputJson: JSON.stringify({ operation: "write", command: "echo changed\n" }),
+        }),
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(base.answerTool).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: "terminal-write", isError: true }),
+      ),
+    );
   } finally {
     await f.runtime.close();
     f.close();

@@ -1,5 +1,10 @@
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
-import { planReadOnlyToolServers, providerCommandOf, providerRunsAsItself } from "@octant/domain";
+import {
+  mcpServerTool,
+  planReadOnlyToolServers,
+  providerCommandOf,
+  providerRunsAsItself,
+} from "@octant/domain";
 import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readBoundedResponseBody } from "../extensions/boundedResponseBody";
 import { advertisedSlashCommands } from "./providerSlashCommands";
@@ -351,9 +356,32 @@ export interface OwnPermissions {
    * session whose setup has web tools off cannot reach them through a rule.
    */
   readonly webTools: boolean;
+  /**
+   * The person's blocked tools, as OpenCode names them (`server_tool` for an
+   * MCP server's). Denied last, after every allow, at every level.
+   */
+  readonly blockedTools?: ReadonlyArray<string>;
 }
 
 const NO_OWN_PERMISSIONS: OwnPermissions = { rules: [], toolServers: false, webTools: false };
+
+/**
+ * The person's blocked tools as OpenCode names them: a built-in by its own
+ * name, and an MCP server's tool given as `server__tool` under OpenCode's
+ * `server_tool`.
+ */
+export function openCodeBlockedToolNames(
+  blocked: ReadonlyArray<string> | undefined,
+): ReadonlyArray<string> {
+  return (blocked ?? []).map((tool) => {
+    const named = mcpServerTool(tool);
+    return named === undefined ? tool : `${named.server}_${named.tool}`;
+  });
+}
+
+function blockedToolDenials(own: OwnPermissions): ReadonlyArray<PermissionV2Rule> {
+  return (own.blockedTools ?? []).map((action) => ({ action, resource: "*", effect: "deny" }));
+}
 
 /** What a session with the setup on carries of the person's configuration. */
 interface ResolvedOwnSetup extends OpenCodeOwnSetup {
@@ -365,15 +393,21 @@ interface ResolvedOwnSetup extends OpenCodeOwnSetup {
   readonly projectConfig: boolean;
 }
 
-function ownPermissions(setup: ResolvedOwnSetup | undefined): OwnPermissions {
-  return setup === undefined
-    ? NO_OWN_PERMISSIONS
-    : {
-        rules: setup.rules,
-        toolServers: setup.toolServers,
-        planServers: setup.planServers,
-        webTools: setup.webTools,
-      };
+function ownPermissions(
+  setup: ResolvedOwnSetup | undefined,
+  blockedTools: ReadonlyArray<string> | undefined,
+): OwnPermissions {
+  const blocked = openCodeBlockedToolNames(blockedTools);
+  const base =
+    setup === undefined
+      ? NO_OWN_PERMISSIONS
+      : {
+          rules: setup.rules,
+          toolServers: setup.toolServers,
+          planServers: setup.planServers,
+          webTools: setup.webTools,
+        };
+  return blocked.length === 0 ? base : { ...base, blockedTools: blocked };
 }
 
 /**
@@ -487,6 +521,12 @@ const capabilities = {
   // current model first (then the cursor's binding, then the session record),
   // and every prompt names it, so the session never silently runs the old one.
   modelSwitch: "supported",
+  // A rewound Code thread continues OpenCode's own fork of its session cut
+  // at the last kept turn's anchor (`forkOpenCodeSession`), which leaves the
+  // source and the files alone. OpenCode's revert route is not used: it also
+  // puts files back from OpenCode's own snapshots, which Octant's checkpoints
+  // already do when the person asks for files, and it changes the source.
+  sessionRollback: "supported",
   // One server process serves every thread, so killing it ends them all.
   forceStop: "unsupported",
   ...unsupportedChatCapabilities,
@@ -2124,6 +2164,7 @@ function makeConnection(
     let runtimeStrict = true;
     let runtimeOwnSkills = false;
     let runtimeOwnSetupKey = ownSetupKey(undefined);
+    let runtimeBlockedToolsKey = "[]";
     let runtimeKind: "legacy" | "beta" | undefined;
     let runtimeVersion: string | undefined;
     let runtimeIsolated = false;
@@ -2371,6 +2412,7 @@ function makeConnection(
       runtimeFullAccessSandbox = false;
       runtimeStrict = true;
       runtimeOwnSetupKey = ownSetupKey(undefined);
+      runtimeBlockedToolsKey = "[]";
       runtimeVersion = undefined;
       runtimeIsolated = false;
       runtimeProjectConfig = false;
@@ -2385,6 +2427,7 @@ function makeConnection(
       managedToolServerName: string | undefined,
       ownSkills: boolean,
       ownSetup: ResolvedOwnSetup | undefined,
+      blockedTools: ReadonlyArray<string> | undefined,
     ): Effect.Effect<OpenCodeClientPort, ProviderFailure> =>
       Effect.tryPromise({
         try: async () => {
@@ -2398,7 +2441,10 @@ function makeConnection(
               // permission rules both refuse the protected files under it.
               runtimeStrict !== strict ||
               runtimeOwnSkills !== ownSkills ||
-              runtimeOwnSetupKey !== ownSetupKey(ownSetup)
+              runtimeOwnSetupKey !== ownSetupKey(ownSetup) ||
+              // The person's blocked tools are in the process's private
+              // configuration, which a running process never rereads.
+              runtimeBlockedToolsKey !== JSON.stringify(blockedTools ?? [])
             ) {
               throw fail(
                 "unauthorized",
@@ -2441,7 +2487,7 @@ function makeConnection(
                     managedToolServerName,
                     extraFolders,
                     ownSkills,
-                    ownPermissions(ownSetup),
+                    ownPermissions(ownSetup, blockedTools),
                     openCodeProtectedPathsFor(
                       options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
                       strict,
@@ -2471,6 +2517,7 @@ function makeConnection(
             runtimeStrict = strict;
             runtimeOwnSkills = ownSkills;
             runtimeOwnSetupKey = ownSetupKey(ownSetup);
+            runtimeBlockedToolsKey = JSON.stringify(blockedTools ?? []);
             runtimeKind = started.runtime ?? "legacy";
             runtimeVersion = started.version;
             runtimeIsolated = started.isolatedConfiguration === true;
@@ -2827,7 +2874,7 @@ function makeConnection(
             input.tools ?? [],
             input.nativeSetup,
             rememberedEdits,
-            ownPermissions(ownSetup),
+            ownPermissions(ownSetup, input.blockedTools),
             openCodeProtectedPathsFor(
               options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
               input.strict !== false,
@@ -2843,6 +2890,7 @@ function makeConnection(
                 state.managedTools?.serverName,
                 state.nativeSetup?.skills === true,
                 ownSetup,
+                input.blockedTools,
               ),
             ),
             Effect.flatMap((runtimeClient) => {
@@ -3003,7 +3051,7 @@ function makeConnection(
                 tools,
                 input.nativeSetup,
                 rememberedEdits,
-                ownPermissions(ownSetup),
+                ownPermissions(ownSetup, input.blockedTools),
                 openCodeProtectedPathsFor(
                   options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
                   input.strict !== false,
@@ -3029,6 +3077,7 @@ function makeConnection(
                     state.managedTools?.serverName,
                     state.nativeSetup?.skills === true,
                     ownSetup,
+                    input.blockedTools,
                   ),
                 ),
                 Effect.flatMap((runtimeClient) => {
@@ -3817,6 +3866,9 @@ function mapAndOffer(
                   ? {}
                   : { planServers: state.own.planServers }),
                 webTools: state.own.webTools,
+                ...(state.own.blockedTools === undefined
+                  ? {}
+                  : { blockedTools: state.own.blockedTools }),
               },
               state.protectedPaths,
               beta.readOnlyFolders,
@@ -4210,10 +4262,15 @@ export function permissionRules(
   for (const rule of openCodeProtectedReadRefusals(policy, protectedPaths)) {
     rules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
   }
-  if (managedToolServerName === undefined) return rules;
   // OpenCode prefixes MCP tools as `<server>_<tool>`. Deny every other
   // namespaced tool in this session; only this session's bridge is allowed.
-  return [...rules, { permission: `${managedToolServerName}_*`, pattern: "*", action: "allow" }];
+  if (managedToolServerName !== undefined)
+    rules.push({ permission: `${managedToolServerName}_*`, pattern: "*", action: "allow" });
+  // The person's blocked tools come last, so no allow above reopens one.
+  for (const rule of blockedToolDenials(own)) {
+    rules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
+  }
+  return rules;
 }
 
 function splitModelId(value: string): { providerId: string; modelId: string } {
@@ -4404,6 +4461,7 @@ export function betaSessionPermissionRules(
   if (managedToolServerName !== undefined) {
     rules.push({ action: `${managedToolServerName}_*`, resource: "*", effect: "allow" });
   }
+  rules.push(...blockedToolDenials(own));
   return rules;
 }
 

@@ -161,7 +161,7 @@ export function languageStatusText(state: CodeLanguageEditorState): string | und
     case "off":
       return "Language services are off. Turn them on in Settings › Code.";
     case "unsupported-platform":
-      return "Language services are not available on this host's platform.";
+      return "Language services are not available here: they run on macOS and Linux, and on Windows outside Strict.";
     case "refused":
       return `Language services are unavailable: ${REFUSAL_TEXT[state.reason]}.`;
     case "crashed":

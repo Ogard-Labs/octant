@@ -2,8 +2,12 @@ import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from "@octant/contracts/th
 import type { ProjectId } from "@octant/contracts/projects";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { ReactNode } from "react";
+import { ChildResultCards } from "../agents/ChildResultCards";
+import { SubagentsTray } from "../agents/ComposerSubagentsTray";
+import { TurnSubagentRows, ThreadSubagentsContext } from "../agents/threadSubagents";
 import { AgentsCenter } from "../agents/AgentsCenter";
 import { ArtifactLibraryView } from "../artifacts/ArtifactLibraryView";
+import { ArtifactDockList } from "../dockModules/ArtifactsModule";
 import { INITIAL_ARTIFACT_FILTERS } from "../artifacts/useArtifactLibrary";
 import { AutomationCenter } from "../automation/AutomationCenter";
 import { CodeWhereControl } from "../code/composer/CodeWhereControl";
@@ -29,9 +33,16 @@ import {
   CODE_PROJECT,
   CODE_TAB,
   codeProjectClient,
+  localUsageHistoryFixture,
   planUsageClient,
   threadRoutinesClient,
   threadUsageClient,
+  SUBAGENT_RESULT_DELIVERY,
+  SUBAGENT_RESULT_ENTRY,
+  SUBAGENT_ROW_ENTRIES,
+  SUBAGENT_TRAY_ENTRIES,
+  SUBAGENT_TURN_STARTED_AT,
+  subagentsRead,
   USAGE_LEDGER,
   VISUAL_NOW,
 } from "./fixtures";
@@ -160,7 +171,7 @@ function HomeScene() {
 function RailScene() {
   const profile = { ...defaultShellSettings().userProfile, displayName: "Ada Lovelace" };
   return (
-    <PlanUsageProvider barStyle="smooth" client={planUsageClient()} instances={[CLAUDE_ACCOUNT]}>
+    <PlanUsageProvider client={planUsageClient()} instances={[CLAUDE_ACCOUNT]}>
       <div style={{ height: "100%", width: 48, display: "flex" }}>
         <SidebarRail
           account={<RailAccount onOpenNavigator={noop} onOpenSettings={noop} profile={profile} />}
@@ -291,6 +302,31 @@ const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => Rea
     ),
   },
   {
+    id: "settings-usage-history",
+    render: () => (
+      <SettingsView
+        initialDeepLink={{ section: "usage" }}
+        localUsageHistoryClient={{ load: async () => localUsageHistoryFixture() }}
+        nativeBoundsAvailable
+        onResetLayout={noop}
+        onResetNativeBounds={noop}
+        onSearchChange={noop}
+        onSettingsChange={noop}
+        search=""
+        settings={defaultShellSettings()}
+        sidebarVibrancySupported
+        usageClient={
+          {
+            query: async () => USAGE_LEDGER,
+            export: noop,
+            reset: noop,
+            retain: noop,
+          } as never
+        }
+      />
+    ),
+  },
+  {
     id: "agents-table",
     render: () => (
       <Pane>
@@ -313,6 +349,30 @@ const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => Rea
           view="list"
         />
       </Pane>
+    ),
+  },
+  {
+    id: "dock-artifacts",
+    render: () => (
+      <div className="visual-check__dock visual-check__dock--flexible">
+        <ArtifactDockList
+          entries={ARTIFACT_LISTING.entries}
+          observedAt={VISUAL_NOW}
+          onOpen={noop}
+        />
+      </div>
+    ),
+  },
+  {
+    id: "dock-artifacts-tiled",
+    render: () => (
+      <div className="visual-check__dock visual-check__dock--tiled">
+        <ArtifactDockList
+          entries={ARTIFACT_LISTING.entries}
+          observedAt={VISUAL_NOW}
+          onOpen={noop}
+        />
+      </div>
     ),
   },
   {
@@ -366,7 +426,36 @@ const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => Rea
     ),
   },
   { id: "rail", render: () => <RailScene /> },
+  { id: "subagent-progress", render: () => <SubagentProgressScene /> },
 ];
+
+const FOLDED_TRAY_STORAGE = { getItem: () => "false", setItem: noop };
+
+/**
+ * How a thread shows its subagents: the rows under a turn, a finished child's
+ * quiet result line, and the composer's folded card naming what it waits on.
+ * Run times are measured against the fixed clock the page runs on, so a
+ * working child's time does not change between frames.
+ */
+function SubagentProgressScene() {
+  return (
+    <Pane padded>
+      <ThreadSubagentsContext value={subagentsRead(SUBAGENT_ROW_ENTRIES)}>
+        <TurnSubagentRows window={{ from: SUBAGENT_TURN_STARTED_AT }} />
+      </ThreadSubagentsContext>
+      <ThreadSubagentsContext value={subagentsRead([SUBAGENT_RESULT_ENTRY])}>
+        <ChildResultCards text={SUBAGENT_RESULT_DELIVERY} />
+      </ThreadSubagentsContext>
+      <SubagentsTray
+        entries={SUBAGENT_TRAY_ENTRIES}
+        onOpenSubagent={noop}
+        onStop={noop}
+        onStopAll={noop}
+        storage={FOLDED_TRAY_STORAGE}
+      />
+    </Pane>
+  );
+}
 
 export const SCENES: ReadonlyArray<VisualScene> = SCENE_LIST.map((meta) => {
   const renderer = RENDERERS.find((candidate) => candidate.id === meta.id);

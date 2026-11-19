@@ -1,4 +1,5 @@
 import {
+  decodeProviderInstance,
   decodeProviderInstanceId,
   decodeProviderSessionId,
   type ProviderFailure,
@@ -18,6 +19,7 @@ import { makeAcpDriver, type AcpClientPort, type AcpDriverOptions } from "./acpD
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
 import { sanitizeAcpEnvironment } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpProviderProfile } from "./acpProfiles";
+import { addedAcpAgentProfile } from "./addedAcpAgent";
 import { AcpFailure, type AcpNewSessionResult, type AcpConfigOptionsResult } from "./acpProtocol";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
@@ -848,11 +850,96 @@ describe("verified ACP usage", () => {
   });
 
   it.each(["3.0.2", "3.0.4"])(
-    "leaves usage unsupported on the unverified release %s",
+    "leaves usage unsupported below Full access on the unreviewed release %s",
     async (runtimeVersion) => {
       const { driver } = fixture(vibe, { runtimeVersion });
       const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
       expect(probe.capabilities.usage).toBe("unsupported");
+    },
+  );
+
+  it("offers a newer release's usage at Full access as unverified", async () => {
+    const { driver } = fixture(vibe, { runtimeVersion: "3.0.4" });
+    const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    // Every pin Vibe carries was reviewed on an older release: usage and
+    // forms on 3.0.3, its unadvertised HTTP tools on 2.25.0.
+    expect(probe.capabilities).toMatchObject({
+      usage: "unsupported",
+      userQuestions: "unavailable",
+      appManagedTools: "unsupported",
+      atFullAccess: {
+        release: "unverified",
+        usage: "supported",
+        userQuestions: "supported",
+        appManagedTools: "supported",
+      },
+    });
+    expect(probe.message).toBe(
+      "Mistral Vibe 3.0.4 is newer than the release Octant reviewed. At Full access it keeps usage, forms, Octant's tools, unverified; below Full access those stay off until Octant reviews this release.",
+    );
+  });
+
+  it.each(["3.0.2", "3.0.3"])(
+    "gives the reviewed or older release %s no Full access value of its own",
+    async (runtimeVersion) => {
+      const { unadvertisedHttpMcpVersions: _tools, ...usageAndForms } = vibe;
+      const { driver } = fixture(usageAndForms, { runtimeVersion });
+      const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+      expect(probe.capabilities).not.toHaveProperty("atFullAccess");
+    },
+  );
+
+  it.each([
+    ["full-access", 1],
+    ["approval-gated", 0],
+  ] as const)(
+    "reports a newer release's usage in a %s session only at Full access",
+    async (executionPolicy, reported) => {
+      const { driver, client } = fixture(vibe, { runtimeVersion: "3.0.4" });
+      const usage = (input: number, output: number) =>
+        client.emit({
+          kind: "notification",
+          method: "session/update",
+          params: {
+            sessionId: "agent-session-1",
+            update: {
+              sessionUpdate: "usage_update",
+              used: 600,
+              size: 200_000,
+              _meta: { promptTokens: input, completionTokens: output, cachedTokens: 0 },
+            },
+          },
+        });
+      client.newSession.mockImplementationOnce(async () => {
+        usage(10_000, 2_000);
+        return { sessionId: "agent-session-1", configOptions: client.configOptions };
+      });
+      client.prompt.mockImplementationOnce(async () => {
+        usage(10_400, 2_100);
+        return {
+          stopReason: "end_turn",
+          usage: {
+            inputTokens: 10_400,
+            outputTokens: 2_100,
+            totalTokens: 12_500,
+            cachedReadTokens: 0,
+          },
+        };
+      });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy });
+            const stream = yield* connection.subscribe;
+            const collected = yield* Effect.fork(Effect.promise(() => collectTerminal(stream)));
+            yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+            const events = yield* Fiber.join(collected);
+            expect(events.filter((event) => event.kind === "usage")).toHaveLength(reported);
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
     },
   );
 });
@@ -2584,10 +2671,10 @@ describe("ACP provider driver profile quirks", () => {
     // cannot raise, and the pin keeps a session that fails to select its mode
     // on `ask` rather than fx's default `auto`.
     expect(fx.process.guards.FX_PERMISSION_MODE).toBe("ask");
+    // The workspace AGENTS.md is instruction text and stays readable.
     expect(fx.process.forbiddenRootEntries).toEqual([
       ".fx.json",
       ".mcp.json",
-      "AGENTS.md",
       ".agents",
       ".claude/skills",
     ]);
@@ -3142,6 +3229,60 @@ describe("ACP provider driver profile quirks", () => {
       });
       const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
       expect(result.capabilities.userQuestions).toBe(expected);
+    },
+  );
+
+  it.each([
+    ["full-access", true],
+    ["approval-gated", false],
+  ] as const)(
+    "asks a newer release's session form in a %s session only at Full access",
+    async (executionPolicy, asked) => {
+      const { driver, client } = fixture(vibe, {
+        runtimeVersion: "3.0.4",
+        authentication: "subscription",
+      });
+      client.prompt.mockImplementation(() => new Promise(() => {}));
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy });
+            const events: ProviderRuntimeEvent[] = [];
+            yield* Effect.forkScoped(
+              Stream.runForEach(yield* connection.subscribe, (event) =>
+                Effect.sync(() => {
+                  events.push(event);
+                }),
+              ),
+            );
+            yield* connection.send({ sessionId, prompt: "Choose", attachments: [], tools: [] });
+            client.request({
+              kind: "request",
+              id: "native-form",
+              method: "elicitation/create",
+              params: {
+                sessionId: "agent-session-1",
+                mode: "form",
+                message: "Choose formats",
+                requestedSchema: {
+                  type: "object",
+                  required: ["q0"],
+                  properties: {
+                    q0: {
+                      type: "array",
+                      description: "Formats?",
+                      items: { anyOf: [{ const: "PDF" }, { const: "Text" }] },
+                    },
+                  },
+                },
+              },
+            });
+            yield* Effect.sleep("5 millis");
+            expect(events.some((event) => event.kind === "user-input-request")).toBe(asked);
+          }),
+        ),
+      );
     },
   );
 
@@ -4223,5 +4364,94 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
       .filter((profile) => profile.refusesProject !== undefined)
       .map((profile) => profile.kind);
     expect(refusing.sort()).toEqual(["gemini", "qwen"]);
+  });
+});
+
+describe("an added ACP agent's model selection", () => {
+  const added = decodeProviderInstance({
+    id: instanceId,
+    displayName: "My agent",
+    driverKind: "acp-agent",
+    configuration: {
+      kind: "acp-agent",
+      source: { kind: "local", command: binaryPath },
+      args: ["acp"],
+      install: { executable: binaryPath, integrity: "local-command" },
+      trusted: true,
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 3,
+    createdAt: "2026-11-18T10:00:00.000Z",
+    updatedAt: "2026-11-18T10:00:00.000Z",
+  });
+  if (added.driverKind !== "acp-agent") throw new Error("not an added agent");
+  const profile = addedAcpAgentProfile(added);
+
+  async function start(session: AcpNewSessionResult) {
+    const { driver, client } = fixture(profile);
+    client.newSession.mockImplementationOnce(async () => session);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+    return client;
+  }
+
+  it("sets the model with session/set_model when the session reports models and no model option, and selects no mode", async () => {
+    const client = await start({
+      sessionId: "agent-session-models",
+      models: {
+        currentModelId: "agent-other",
+        availableModels: [
+          { modelId: "agent-other", name: "Other" },
+          { modelId, name: "Agent K2" },
+        ],
+      },
+    });
+    expect(client.call).toHaveBeenCalledWith("session/set_model", {
+      sessionId: "agent-session-models",
+      modelId,
+    });
+    expect(client.setConfigOption).not.toHaveBeenCalled();
+  });
+
+  it("sets the model through the config option when the session reports one", async () => {
+    const client = await start({
+      sessionId: "agent-session-options",
+      configOptions: [
+        {
+          type: "select",
+          id: "model",
+          name: "Model",
+          currentValue: "agent-other",
+          options: [
+            { value: "agent-other", name: "Other" },
+            { value: modelId, name: "Agent K2" },
+          ],
+        },
+      ],
+    });
+    expect(client.setConfigOption).toHaveBeenCalledWith("agent-session-options", "model", modelId);
+    expect(client.setConfigOption).not.toHaveBeenCalledWith(
+      "agent-session-options",
+      "mode",
+      expect.anything(),
+    );
+    expect(client.call).not.toHaveBeenCalledWith("session/set_model", expect.anything());
+  });
+
+  it("leaves a session that already opened on the model alone", async () => {
+    const client = await start({
+      sessionId: "agent-session-current",
+      models: { currentModelId: modelId, availableModels: [{ modelId, name: "Agent K2" }] },
+    });
+    expect(client.call).not.toHaveBeenCalledWith("session/set_model", expect.anything());
+    expect(client.setConfigOption).not.toHaveBeenCalled();
   });
 });
