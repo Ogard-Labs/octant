@@ -188,11 +188,10 @@ function readAgentRunLeadPersonMemoryScope(
   persistence: PersistenceService,
   workThreadProjection: WorkThreadProjection,
   run: AgentRun,
-  agentRunRequestOwner: (run: AgentRun) => string | undefined,
+  ownerWindowId: string | undefined,
 ): PersonMemoryTurnScope | undefined {
   try {
-    const owner = agentRunRequestOwner(run);
-    const windowId = owner === undefined ? undefined : decodeWindowId(owner);
+    const windowId = ownerWindowId === undefined ? undefined : decodeWindowId(ownerWindowId);
     const threadId = String(run.parentThreadId);
     switch (run.routingReceipt.mode) {
       case "chat": {
@@ -831,7 +830,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   ): void => {
     childToolContributors.push(contributor);
   };
-  contributeChildTools(({ run, authority }) => {
+  contributeChildTools(({ run, authority, ownerWindowId }) => {
     if (!authority.tools) return undefined;
     const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
     const observed = providerRuntimeRegistry.observedState(target.providerInstanceId);
@@ -846,12 +845,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       persistence,
       workThreadProjection,
       run,
-      agentRunRequestOwner,
+      ownerWindowId ?? agentRunRequestOwner(run),
     );
     return lead === undefined
       ? undefined
       : personMemoryAccess.childToolsFor(lead, authority, () => {
-          const owner = agentRunRequestOwner(run);
+          const owner = agentRunRequestOwner(run) ?? ownerWindowId;
           if (owner === undefined) return undefined;
           try {
             return decodeWindowId(owner);
@@ -1026,12 +1025,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         readAdmittedInputs: (input) => readAgentRunAdmittedInputs(persistence.connection, input),
         readResultText: (dependencyId) => agentRunPersistence.resultText(dependencyId),
       }),
-      personMemoryBlock: (run) => {
+      personMemoryBlock: (run, ownerWindowId) => {
         const lead = readAgentRunLeadPersonMemoryScope(
           persistence,
           workThreadProjection,
           run,
-          agentRunRequestOwner,
+          ownerWindowId ?? agentRunRequestOwner(run),
         );
         return lead === undefined ? undefined : personMemoryAccess.childBlockFor(lead);
       },

@@ -13,14 +13,42 @@ import { AgentRunSessionStore } from "./agentRunSessionStore";
 import { AgentRunLiveConversationStore } from "./agentRunLiveConversationStore";
 import { Effect, Queue, Stream } from "effect";
 import {
+  AgentRunRequested,
+  AgentRunResultAcknowledged,
+  AgentRunResultDeliverySettled,
+  AgentRunStatusChanged,
+  EventActor,
   decodeContextSubjectRef,
   decodeProviderServiceLimits,
+  decodeUtcTimestamp,
+  decodeWindowId,
   type AgentRun,
   type AgentRunAuthority,
   type ProviderContextBlock,
   type ProviderExecutionPolicy,
   type ProviderTurnInput,
+  type WindowId,
 } from "@octant/contracts";
+import { Schema } from "effect";
+import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
+import { EventRegistry } from "../persistence/eventRegistry";
+import { Journal } from "../persistence/journal";
+import { ProjectionRegistry } from "../persistence/projection";
+import {
+  AGENT_RUN_REQUESTED,
+  AGENT_RUN_RESULT_ACKNOWLEDGED,
+  AGENT_RUN_RESULT_DELIVERY_SETTLED,
+  AGENT_RUN_STATUS_CHANGED,
+  AgentRunEventStore,
+} from "./agentRunEventStore";
+import {
+  AgentRunOrchestrationService,
+  createInMemoryCapacityPort,
+} from "./agentRunOrchestrationService";
+import { AgentRunPersistenceService } from "./agentRunPersistenceService";
+import { AgentRunProjection } from "./agentRunProjection";
+import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
+import { PersonMemoryStore, registerPersonMemoryEvents } from "../personMemory/personMemoryStore";
 import type {
   ProviderAcquireInput,
   ProviderDriver,
@@ -3087,4 +3115,282 @@ it("offers octant_past_threads to a child only when its clamped authority allows
   );
   await settled(withoutToolsRuntime.start(agentRun({ authority: { ...authority, tools: false } })));
   expect(withoutToolsProvider.turns[0]?.tools).toEqual([]);
+});
+
+it("restores person memory on retry and resume after restart for a trusted window, and withholds both for a restricted device", async () => {
+  const LOCAL = decodeWindowId("cccccccc-0000-4000-8000-000000000001");
+  const HUB_DEVICE = decodeWindowId("cccccccc-0000-4000-8000-000000000004");
+  const actor = Schema.decodeUnknownSync(EventActor)({
+    kind: "local-user",
+    actorId: "77777777-7777-4777-8777-777777777777",
+  });
+  const path = databasePath();
+  const connection = openSqlite(path);
+  applyMigrations(connection, MIGRATIONS, () => now);
+  const registry = registerPersonMemoryEvents(
+    new EventRegistry()
+      .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
+      .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
+      .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
+      .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged),
+  );
+  const journal = new Journal({
+    connection,
+    registry,
+    projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+    clock: () => now,
+  });
+  const memoryStore = new PersonMemoryStore({
+    connection,
+    journal,
+    uuid: () => crypto.randomUUID(),
+    clock: () => decodeUtcTimestamp("2026-08-01T12:00:00.000Z"),
+    actor,
+  });
+  memoryStore.remember({
+    source: {
+      mode: "chat",
+      threadId: "aaaaaaaa-0000-4000-8000-000000000001" as never,
+      title: "Invoices",
+      providerInstanceId: providerInstanceId as never,
+      endedAt: decodeUtcTimestamp("2026-08-01T12:00:00.000Z"),
+    },
+    summary: "Built an invoice export.",
+    entries: [{ kind: "preference", content: "Prefers CSV over spreadsheets." }],
+  });
+  const personMemoryAccess = createPersonMemoryAccess({
+    store: memoryStore,
+    isRestrictedDeviceScope: (scope) => String(scope) === String(HUB_DEVICE),
+    projectLabel: () => "Shop",
+  });
+
+  const eventStore = new AgentRunEventStore({
+    journal,
+    uuid: () => crypto.randomUUID(),
+    actor,
+  });
+  const persistence = new AgentRunPersistenceService({
+    store: eventStore,
+    projection: new AgentRunProjection(),
+    uuid: () => crypto.randomUUID(),
+    clock: () => now,
+    connection,
+  });
+  const sessionStore = new AgentRunSessionStore({
+    connection,
+    getById: (id) => persistence.getById(id),
+  });
+  // Simulates the in-memory agentRunExecutionWindows map cleared on host restart.
+  const executionOwners = new Map<string, WindowId>();
+  const resolveOwner = (run: AgentRun, ownerWindowId?: string): WindowId | undefined =>
+    ownerWindowId === undefined
+      ? executionOwners.get(String(run.requestId))
+      : decodeWindowId(ownerWindowId);
+  const leadOf = (run: AgentRun, ownerWindowId?: string) => ({
+    mode: run.routingReceipt.mode,
+    threadId: String(run.parentThreadId),
+    createdAt: "2026-08-01T13:00:00.000Z",
+    windowId: resolveOwner(run, ownerWindowId),
+  });
+
+  const provider = fakeProvider({ resumable: true });
+  let runtimeUuidCall = 0;
+  const runtime = createAgentRunSessionRuntime(
+    runtimeOptions(provider, {
+      sessionStore: sessionStore.sessions,
+      supportsResume: () => true,
+      appManagedToolTransport: () => "supported",
+      // `fakeProvider.start` always answers with `sessionId`, so each fresh
+      // start gets a unique reservation id followed by `sessionId`.
+      uuid: () => {
+        runtimeUuidCall += 1;
+        return runtimeUuidCall % 2 === 1 ? crypto.randomUUID() : sessionId;
+      },
+      personMemoryBlock: (run, ownerWindowId) =>
+        personMemoryAccess.childBlockFor(leadOf(run, ownerWindowId)),
+      appManagedTools: ({ run, authority: childAuthority, ownerWindowId }) =>
+        personMemoryAccess.childToolsFor(leadOf(run, ownerWindowId), childAuthority, () =>
+          resolveOwner(run, ownerWindowId),
+        ),
+    }),
+  );
+  let settledByRun:
+    | ((settled: {
+        readonly runId: AgentRun["id"];
+        readonly outcome: AgentRunSessionOutcome;
+      }) => void)
+    | undefined;
+  const supervisor = new AgentRunSessionSupervisor({
+    port: runtime,
+    onSessionSettled: (event) => settledByRun?.(event),
+  });
+  const orchestration = new AgentRunOrchestrationService({
+    persistence,
+    capacity: createInMemoryCapacityPort(),
+    approvals: { isCurrent: () => true },
+    worktree: { isVerifiedIsolation: () => true, isParentCheckout: () => false },
+    processes: supervisor,
+  });
+  settledByRun = (event) => orchestration.onSessionSettled(event);
+
+  const seedRun = agentRun();
+  const admitted = orchestration.admit({
+    command: {
+      kind: "request-agent-run",
+      requestId: seedRun.requestId,
+      parentThreadId: seedRun.parentThreadId,
+      role: "research",
+      task: seedRun.task,
+      creationPosture: "automatic",
+      requestedAuthority: authority,
+      routingReceipt: seedRun.routingReceipt,
+      workspaceReceipt: seedRun.workspaceReceipt,
+    },
+    parentAuthority: authority,
+    liveAuthority: authority,
+    confirmed: true,
+  });
+  if (admitted.kind !== "run-accepted") throw new Error("Expected admitted child run");
+  const interrupted = persistence.applyCommand({
+    kind: "interrupt-agent-run",
+    runId: admitted.run.id,
+    expectedVersion: admitted.run.version,
+    recoveryReason: "Host restarted while child was active.",
+  });
+  if (interrupted.kind !== "run-updated") throw new Error("Expected interrupted run");
+
+  // 1. Simulate restart (empty executionOwners) and retry from a trusted window.
+  executionOwners.clear();
+  const retried = orchestration.retry(interrupted.run.id, interrupted.run.version, authority, {
+    ownerWindowId: String(LOCAL),
+  });
+  expect(retried).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "starting" } });
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+  expect(provider.turns[0]?.context?.filter((block) => block.kind === "person-memory")).toEqual([
+    expect.objectContaining({
+      kind: "person-memory",
+      text: expect.stringContaining("Prefers CSV over spreadsheets."),
+    }),
+  ]);
+  expect(provider.turns[0]?.tools?.map((tool) => tool.name)).toContain("octant_past_threads");
+  await provider.emit({ kind: "text-delta", sessionId, text: "First reply", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  await vi.waitFor(() =>
+    expect(persistence.getById(admitted.run.id)?.lifecycleStatus).toBe("completed"),
+  );
+
+  // 2. Simulate restart again (empty executionOwners) and resume from a trusted window.
+  executionOwners.clear();
+  const completed = persistence.getById(admitted.run.id);
+  if (completed === undefined) throw new Error("Expected completed run");
+  const delivered = persistence.applyCommand({
+    kind: "settle-agent-run-result-delivery",
+    runId: completed.id,
+    expectedVersion: completed.version,
+    generation: completed.generation ?? 1,
+    outcome: "delivered",
+  });
+  if (delivered.kind !== "run-updated") throw new Error("Expected delivered run");
+  const resumed = await orchestration.resume(delivered.run.id, delivered.run.version, authority, {
+    message: "Check the invoice format",
+    ownerWindowId: String(LOCAL),
+    onExecutionAccepted: (accepted) => {
+      executionOwners.set(String(accepted.requestId), LOCAL);
+    },
+  });
+  expect(resumed).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "starting" } });
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(2));
+  expect(provider.turns[1]?.context).toEqual([]);
+  expect(provider.turns[1]?.tools?.map((tool) => tool.name)).toContain("octant_past_threads");
+  await provider.emit({ kind: "text-delta", sessionId, text: "Second reply", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  await vi.waitFor(() =>
+    expect(persistence.getById(admitted.run.id)?.lifecycleStatus).toBe("completed"),
+  );
+
+  // 3. Simulate restart again and resume from a restricted hub-introduced device: gets no tools.
+  executionOwners.clear();
+  const completedAgain = persistence.getById(admitted.run.id);
+  if (completedAgain === undefined) throw new Error("Expected completed run");
+  const deliveredAgain = persistence.applyCommand({
+    kind: "settle-agent-run-result-delivery",
+    runId: completedAgain.id,
+    expectedVersion: completedAgain.version,
+    generation: completedAgain.generation ?? 1,
+    outcome: "delivered",
+  });
+  if (deliveredAgain.kind !== "run-updated") throw new Error("Expected delivered run");
+  const restrictedResume = await orchestration.resume(
+    deliveredAgain.run.id,
+    deliveredAgain.run.version,
+    authority,
+    {
+      message: "Follow up from hub device",
+      ownerWindowId: String(HUB_DEVICE),
+      onExecutionAccepted: (accepted) => {
+        executionOwners.set(String(accepted.requestId), HUB_DEVICE);
+      },
+    },
+  );
+  expect(restrictedResume).toMatchObject({
+    kind: "run-updated",
+    run: { lifecycleStatus: "starting" },
+  });
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(3));
+  expect(provider.turns[2]?.context).toEqual([]);
+  expect(provider.turns[2]?.tools).toEqual([]);
+  await provider.emit({ kind: "text-delta", sessionId, text: "Third reply", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  await vi.waitFor(() =>
+    expect(persistence.getById(admitted.run.id)?.lifecycleStatus).toBe("completed"),
+  );
+
+  // 4. Simulate restart and retry an interrupted run from a restricted hub-introduced device: gets neither block nor tool.
+  const secondRun = agentRun();
+  const secondAdmitted = orchestration.admit({
+    command: {
+      kind: "request-agent-run",
+      requestId: "22222222-2222-4222-8222-222222222299" as never,
+      parentThreadId: secondRun.parentThreadId,
+      role: "research",
+      task: secondRun.task,
+      creationPosture: "automatic",
+      requestedAuthority: authority,
+      routingReceipt: secondRun.routingReceipt,
+      workspaceReceipt: secondRun.workspaceReceipt,
+    },
+    parentAuthority: authority,
+    liveAuthority: authority,
+    confirmed: true,
+  });
+  if (secondAdmitted.kind !== "run-accepted") throw new Error("Expected second admitted run");
+  const secondInterrupted = persistence.applyCommand({
+    kind: "interrupt-agent-run",
+    runId: secondAdmitted.run.id,
+    expectedVersion: secondAdmitted.run.version,
+    recoveryReason: "Host restarted while child was active.",
+  });
+  if (secondInterrupted.kind !== "run-updated") throw new Error("Expected second interrupted run");
+  executionOwners.clear();
+  const restrictedRetry = orchestration.retry(
+    secondInterrupted.run.id,
+    secondInterrupted.run.version,
+    authority,
+    { ownerWindowId: String(HUB_DEVICE) },
+  );
+  expect(restrictedRetry).toMatchObject({
+    kind: "run-updated",
+    run: { lifecycleStatus: "starting" },
+  });
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(4));
+  expect(provider.turns[3]?.context?.filter((block) => block.kind === "person-memory")).toEqual([]);
+  expect(provider.turns[3]?.tools).toEqual([]);
+  await provider.emit({ kind: "text-delta", sessionId, text: "Fourth reply", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  await vi.waitFor(() =>
+    expect(persistence.getById(secondAdmitted.run.id)?.lifecycleStatus).toBe("completed"),
+  );
+
+  memoryStore.close();
+  connection.close();
 });

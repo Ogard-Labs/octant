@@ -313,9 +313,11 @@ export interface AgentRunSessionRuntimeOptions {
   /**
    * The lead thread's person-memory block, or `undefined` when the lead does
    * not take part or has nothing to say. Sent once on a fresh start and never
-   * duplicated on a continuation that already holds it.
+   * duplicated on a continuation that already holds it. `ownerWindowId` carries
+   * the caller's verified scope during retry/resume before the execution map is
+   * rebound.
    */
-  readonly personMemoryBlock?: (run: AgentRun) => string | undefined;
+  readonly personMemoryBlock?: (run: AgentRun, ownerWindowId?: string) => string | undefined;
   readonly inputsCurrent?: (manifest: ConversationInputManifest) => boolean;
   readonly prepareInputs?: (input: {
     readonly run: AgentRun;
@@ -389,6 +391,7 @@ export interface AgentRunSessionRuntimeOptions {
     readonly run: AgentRun;
     readonly authority: AgentRunAuthority;
     readonly projectRoot: string;
+    readonly ownerWindowId?: string;
   }) => AppManagedToolSet | undefined;
   /**
    * The run's record of tool calls about to take effect
@@ -553,7 +556,11 @@ export function createAgentRunSessionRuntime(
     return previous;
   };
 
-  const prepareSession = (run: AgentRun, continuation?: { readonly message?: string }) => {
+  const prepareSession = (
+    run: AgentRun,
+    continuation?: { readonly message?: string },
+    ownerWindowId?: string,
+  ) => {
     if (sessions.has(run.id))
       throw new AgentRunSessionError(
         "provider-unavailable",
@@ -587,7 +594,7 @@ export function createAgentRunSessionRuntime(
     const personMemoryText =
       continuation !== undefined || resolvedContext.some((block) => block.kind === "person-memory")
         ? undefined
-        : options.personMemoryBlock?.(run);
+        : options.personMemoryBlock?.(run, ownerWindowId);
     const source =
       run.workspaceReceipt.kind === "code-worktree" ? run.workspaceReceipt.source : undefined;
     const context: ReadonlyArray<ProviderContextBlock> = [
@@ -605,7 +612,12 @@ export function createAgentRunSessionRuntime(
           ]),
     ];
 
-    const appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
+    const appManagedTools = options.appManagedTools?.({
+      run,
+      authority,
+      projectRoot,
+      ...(ownerWindowId === undefined ? {} : { ownerWindowId }),
+    });
     if (appManagedTools !== undefined && appManagedTools.definitions.length > 0) {
       const transport = options.appManagedToolTransport?.({
         providerInstanceId: target.providerInstanceId,
@@ -771,6 +783,7 @@ export function createAgentRunSessionRuntime(
       spendReservationId,
       providerSessionId,
       record,
+      ownerWindowId,
       claim: () => {
         if (owned)
           throw new AgentRunSessionError(
@@ -806,6 +819,7 @@ export function createAgentRunSessionRuntime(
       reservationId,
       spendReservationId,
       providerSessionId,
+      ownerWindowId,
     } = prepared;
     let record = prepared.record;
     let reviewCapture: AgentRunReviewCaptureLease | undefined;
@@ -817,7 +831,12 @@ export function createAgentRunSessionRuntime(
           "provider-unavailable",
           "This child already owns a live session.",
         );
-      appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
+      appManagedTools = options.appManagedTools?.({
+        run,
+        authority,
+        projectRoot,
+        ...(ownerWindowId === undefined ? {} : { ownerWindowId }),
+      });
       toolEffects = options.toolEffects?.(run);
       options.capacityScheduler.markRunning(reservationId);
       prepared.claim();
@@ -1281,22 +1300,24 @@ export function createAgentRunSessionRuntime(
         };
       }
     },
-    prepareStart: (run) => {
-      const prepared = prepareSession(run);
+    prepareStart: (run, input) => {
+      const prepared = prepareSession(run, undefined, input?.ownerWindowId);
       return {
         start: (started) => startSession(started, undefined, prepared),
         release: prepared.release,
       };
     },
     prepareResume: (run, input) => {
-      const prepared = prepareSession(run, input ?? {});
+      const prepared = prepareSession(run, input ?? {}, input?.ownerWindowId);
       return {
         start: (started) => startSession(started, input ?? {}, prepared),
         release: prepared.release,
       };
     },
-    start: (run) => startSession(run),
-    resume: (run, input) => startSession(run, input ?? {}),
+    start: (run, input) =>
+      startSession(run, undefined, prepareSession(run, undefined, input?.ownerWindowId)),
+    resume: (run, input) =>
+      startSession(run, input ?? {}, prepareSession(run, input ?? {}, input?.ownerWindowId)),
     steer: async ({ runId, message }) => {
       const live = sessions.get(runId);
       if (
