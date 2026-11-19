@@ -9359,9 +9359,6 @@ function LaunchedShell(
                                                       value={federation}
                                                     >
                                                       <PlanUsageProvider
-                                                        barStyle={
-                                                          controller.settings?.usageBars ?? "smooth"
-                                                        }
                                                         client={
                                                           launchedClients.providerUsageLimitsClient
                                                         }

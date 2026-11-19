@@ -507,7 +507,7 @@ export const TranscriptTextSize = Schema.Literal("small", "medium", "large");
 export type TranscriptTextSize = typeof TranscriptTextSize.Type;
 export const TranscriptWidth = Schema.Literal("narrow", "medium", "wide");
 export type TranscriptWidth = typeof TranscriptWidth.Type;
-/** How the composer's plan-usage meters draw their bar: a smooth fill or square cells. */
+/** Retired: how the plan-usage meters drew their bar; stays so old rows decode. */
 export const UsageBarStyle = Schema.Literal("smooth", "pixelated");
 export type UsageBarStyle = typeof UsageBarStyle.Type;
 /**
@@ -1036,10 +1036,7 @@ export const ShellSettings = Schema.Struct({
   transcriptWidth: Schema.optionalWith(TranscriptWidth, {
     default: () => "medium" as const,
   }),
-  /**
-   * How the plan-usage bars above the composer are drawn. A store persisted
-   * before the setting shipped decodes to the smooth bar.
-   */
+  /** Retired: the plan-usage bar style, with the Inbox card (2026-11-18); stays optional so old rows decode. */
   usageBars: Schema.optionalWith(UsageBarStyle, { default: () => "smooth" as const }),
   /**
    * How much of a turn's thinking and tool calls the transcript shows open.

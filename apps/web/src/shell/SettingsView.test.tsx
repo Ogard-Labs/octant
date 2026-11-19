@@ -331,17 +331,6 @@ describe("SettingsView", () => {
     expect(content.scrollTop).toBe(0);
   });
 
-  it("draws the usage bars smooth until Pixelated is chosen in Appearance", async () => {
-    const user = userEvent.setup();
-    const { props } = renderSettings();
-    navigateTo("Appearance");
-
-    expect(screen.getByRole("button", { name: "Smooth" })).toHaveAttribute("aria-pressed", "true");
-    await user.click(screen.getByRole("button", { name: "Pixelated" }));
-
-    expect(props.onSettingsChange).toHaveBeenCalledWith({ usageBars: "pixelated" });
-  });
-
   it("shows replies at low detail until another level is chosen in Appearance", async () => {
     const user = userEvent.setup();
     const { props } = renderSettings();

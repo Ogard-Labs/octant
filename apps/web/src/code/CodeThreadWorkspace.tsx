@@ -764,6 +764,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     threadId: String(props.threadId),
     projectId: view?.thread.projectId,
     providerInstanceId: view?.thread.providerInstanceId,
+    strict:
+      view?.thread.strict ??
+      (view?.thread.fullAccessSandbox === true && view.thread.executionPolicy === "full-access"
+        ? true
+        : props.strictDefault === true),
   });
   const threadCanvases = useThreadCanvasCards({
     client: view === undefined ? undefined : props.canvasClient,

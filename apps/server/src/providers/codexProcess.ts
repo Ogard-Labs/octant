@@ -14,6 +14,7 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
+import { rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 
@@ -1120,13 +1121,27 @@ function prepareWindowsCodexLaunch(input: {
       cwd: scratch,
       environment: input.environment,
       // Windows refuses to remove a folder that is still a process's working
-      // directory (EBUSY), and a tree just stopped can hold it for a moment
-      // after its exit is seen: a CI catalog read failed its cleanup that
-      // way. Node retries those errors on Windows for the delays given.
-      release: () =>
-        rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
+      // directory (EBUSY), and a tree just stopped can hold it for longer than
+      // a short retry covers: CI catalog reads failed their cleanup that way
+      // even with Node's retries. The folder is an empty scratch directory, so
+      // a late removal is retried in the background instead of failing a read
+      // whose process has already stopped.
+      release: () => releaseScratch(scratch),
     },
   };
+}
+
+function releaseScratch(scratch: string): void {
+  try {
+    rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {
+    const retry = setTimeout(() => {
+      void rm(scratch, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }).catch(
+        () => undefined,
+      );
+    }, 1_000);
+    retry.unref();
+  }
 }
 
 /**

@@ -1712,6 +1712,21 @@ export const ProviderCapabilities = Schema.Struct({
    */
   appManagedToolsAtFullAccess: Schema.optional(Schema.Literal("mixed")),
   /**
+   * What a Full access thread is offered on an install whose release is newer
+   * than the one Octant reviewed a version-pinned feature against: the
+   * features that pin gates, offered as unverified instead of lost. Every
+   * other level keeps the values above, since below Full access the pin
+   * holds. Absent means Full access reads the values above.
+   */
+  atFullAccess: Schema.optional(
+    Schema.Struct({
+      release: Schema.Literal("unverified"),
+      usage: ProviderCapabilitySupport,
+      userQuestions: ProviderCapabilitySupport,
+      appManagedTools: ProviderCapabilitySupport,
+    }).annotations(strict),
+  ),
+  /**
    * The driver natively serves ACP client filesystem and terminal methods
    * (`fs/read_text_file`, `fs/write_text_file`, `terminal/*`) over its own
    * connection, independently of the app-managed tool bridge.

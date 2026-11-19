@@ -1,11 +1,13 @@
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { createHash } from "node:crypto";
+import { lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   CODEX_BLOCKABLE_TOOLS,
   mcpServerTool,
   planReadOnlyToolServers,
+  projectCodeEntries,
   providerOwnMemoryLaunches,
 } from "@octant/domain";
 import {
@@ -854,8 +856,9 @@ const capabilities = {
     // The account home's hooks load as Codex loads them; Octant never
     // switched them off.
     hooks: "supported",
-    // A Project the person trusted for Codex loads its `.codex/config.toml`
-    // outside Plan and Strict (`codexProjectTrustConfig`).
+    // Every Project folder is trusted outside Plan (`codexProjectTrustConfig`),
+    // so Codex loads its `.codex/config.toml`; Strict refuses one the person
+    // has not allowed (`codexStrictProjectConfigRefusal`).
     projectCode: "supported",
   },
 } as const;
@@ -1567,28 +1570,73 @@ export function codexProtectedSignIns(
 }
 
 /**
- * A thread's override that makes Codex load its own Project configuration
- * (`.codex/config.toml` at the Project): the folder recorded as trusted in
- * the thread's own config, which Codex reads before it loads Project layers
- * (`project_trust_context` in codex-rs `config/src/loader/mod.rs`). Measured on
- * 0.169.0: a `read-only` thread loaded the Project's `model` with this
- * override and not without it, and nothing was written to `config.toml`.
- * Only for a Work or Code thread whose Project the person trusted for Codex,
- * outside Plan and Strict.
+ * Codex's own trust record for a thread's Project folders, as the thread's
+ * override: adding a Project, or an extra folder, in Octant is the person's
+ * trust decision for every agent on its threads (maintainer decision,
+ * 2026-11-18), so each folder is recorded as trusted in the thread's own
+ * config. Codex reads it before it loads Project layers
+ * (`project_trust_context` in codex-rs `config/src/loader/mod.rs`), so it
+ * reads the Project's `AGENTS.md` and `.codex/config.toml` and never trusts
+ * the folder by itself. Measured on 0.169.0: a `read-only` thread loaded the
+ * Project's `model` with this override and not without it, nothing was
+ * written to the account's `config.toml`, and without it a thread started
+ * with a sandbox that can write the folder (`workspace-write` or
+ * `danger-full-access`) recorded the folder as trusted there itself
+ * (`thread_processor.rs` `thread_start`). No folder is ever recorded
+ * `untrusted`: Codex then skips the Project's `AGENTS.md`
+ * (`load_project_instructions`).
+ *
+ * Plan records nothing: its thread starts `read-only`, so Codex trusts no
+ * folder by itself and reads `AGENTS.md` of a folder with no decision, and
+ * Plan loads no Project code. Chat has no Project folder.
  */
 export function codexProjectTrustConfig(input: {
+  readonly projectFolders: ReadonlyArray<string>;
+  readonly mode: "chat" | "work" | "code";
+  readonly executionPolicy: ProviderExecutionPolicy;
+}): Pick<CodexThreadConfig, "projects"> {
+  if (input.mode === "chat" || input.executionPolicy === "plan") return {};
+  return {
+    projects: Object.fromEntries(
+      input.projectFolders.map((folder) => [folder, { trust_level: "trusted" as const }]),
+    ),
+  };
+}
+
+/**
+ * Why a Strict Codex thread may not start: its Project holds Codex's own
+ * Project configuration, which Codex loads in every folder it trusts, and the
+ * person has not confirmed the Project's code (`projectCode`). Strict keeps
+ * Project configuration that can run code (MCP servers, hooks) out until
+ * then, and the trust Octant records cannot leave the file out without
+ * marking the folder untrusted, which would also hide `AGENTS.md`. Plan
+ * records no trust and loads no Project code, so it is not refused.
+ */
+export function codexStrictProjectConfigRefusal(input: {
   readonly projectRoot: string;
   readonly mode: "chat" | "work" | "code";
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly strict: boolean | undefined;
   readonly nativeSetup: ProviderNativeSetup | undefined;
-}): Pick<CodexThreadConfig, "projects"> {
-  return input.mode !== "chat" &&
-    input.executionPolicy !== "plan" &&
-    input.strict === false &&
-    input.nativeSetup?.projectCode === true
-    ? { projects: { [input.projectRoot]: { trust_level: "trusted" } } }
-    : {};
+  readonly exists?: (path: string) => boolean;
+}): string | undefined {
+  if (input.mode === "chat" || input.executionPolicy === "plan") return undefined;
+  if (input.strict === false || input.nativeSetup?.projectCode === true) return undefined;
+  const exists = input.exists ?? entryExists;
+  const found = projectCodeEntries("codex").filter((entry) =>
+    exists(join(input.projectRoot, ...entry.path.split("/"))),
+  );
+  if (found.length === 0) return undefined;
+  return `Strict holds this Project's own Codex configuration (${found.map((entry) => entry.path).join(", ")}) until you allow this Project's code, because Codex loads it in every Project folder. Choose Allow Project code above the composer, or turn Strict off for this thread.`;
+}
+
+function entryExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -2689,14 +2737,27 @@ function makeConnection(
       const profile = nativeProfile(input);
       return {
         ...codexProjectTrustConfig({
-          projectRoot,
+          projectFolders: [projectRoot, ...extraFolders],
           mode: mode ?? "code",
           executionPolicy: input.executionPolicy,
-          strict: input.strict,
-          nativeSetup: input.nativeSetup,
         }),
         ...(profile === undefined ? {} : { permissions: { [CODEX_OCTANT_PROFILE]: profile } }),
       };
+    };
+    /** Fails a Strict session whose Project holds Codex configuration the person has not allowed. */
+    const refuseStrictProjectConfig = (input: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly strict?: boolean;
+      readonly nativeSetup?: ProviderNativeSetup;
+    }) => {
+      const refusal = codexStrictProjectConfigRefusal({
+        projectRoot,
+        mode: mode ?? "code",
+        executionPolicy: input.executionPolicy,
+        strict: input.strict,
+        nativeSetup: input.nativeSetup,
+      });
+      return refusal === undefined ? Effect.void : Effect.fail(failure("incompatible", refusal));
     };
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
     /** Forgets the thread a review ran on once its run ends, so nothing more is read from it. */
@@ -3505,6 +3566,7 @@ function makeConnection(
               optionSettings = codexModelOptionSettings(observedModel, requestedOptions);
             }
             const dynamicTools = codexDynamicTools(input.tools);
+            yield* refuseStrictProjectConfig(input);
             const modeConfig = yield* modeThreadConfig(
               input.nativeSetup,
               input.executionPolicy,
@@ -3605,6 +3667,7 @@ function makeConnection(
           Effect.gen(function* () {
             yield* ensureRuntime(codexLeasePosture(input));
             ensureSubscribed();
+            yield* refuseStrictProjectConfig(input);
             const modeConfig = yield* modeThreadConfig(
               input.nativeSetup,
               input.executionPolicy,

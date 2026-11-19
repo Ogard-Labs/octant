@@ -451,14 +451,13 @@ where it is. Side-task offers stack above them as hairline cards: a target icon
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
 
-## Turn figures and plan meters
+## Turn figures and plan usage
 
 A thread's turn figures sit at the top of its Thread info panel, not under the
 composer: with the row of controls and the line of figures under the box, plus a
-card, the composer read as four stacked layers. Above the box, one strip holds
-where the thread runs (Project and branch) on the left and the plan meters
-described below on the right, so the box holds only the message and its
-controls. The figures are one compact block of the 12px meta step in the meta
+card, the composer read as four stacked layers. A thread's composer
+carries no plan usage and no strip of figures, so the box holds only the message
+and its controls. The figures are one compact block of the 12px meta step in the meta
 ink, separated by middle dots, with no hue on any number and no fill: the
 thread's turns, input and output tokens, thinking tokens when the provider
 reported them (part of the output), the cache hit, speed, first token, and cost.
@@ -471,31 +470,17 @@ cost with Previous and Next turn controls. There is no hide control and no
 setting: the panel is closed until asked for, so the figures cost the page
 nothing.
 
-**Plan meters.** Remaining plan usage stands beside the composer, right-aligned on
-the same row as where the work runs: the row under a thread's box, and on a
-start screen the end of the context-chip row above the card (it drops to its
-own right-aligned line when the chips leave no room). A meter is a bar and the
-share **left**: `▬▬▬ 28%`. The bar is a 56px groove 6px tall with a raised
-fill (the pressed-control inset on the track, the bevel's highlight on the
-fill); the figure is in the primary ink at medium weight, in tabular numerals,
-at the 12px meta step, with no fill behind the row. One meter carries no name:
-the bar and its figure say what it is, and its tooltip and accessible name say
-which window ("7-day limit, 28% left"). When a provider reports two windows
-the shortest and the longest stand side by side, and only then does each lead
-with a quiet name in words, `5h ▬▬▬ 85%  week ▬▬ 43%`, because two bare
-figures cannot be told apart. (The single meter read `wk ▬ 28%`: a code to
-look up beside a hairline.) They describe the
-provider the composer will send to (a start screen follows the model menu's
-choice) and read the same host observation as the rail's rings, picked by window
-length (`windowSpan`). A provider that reports no window gets no meters, never
-an empty bar. The fill is the theme's accent role (`--oct-accent`, the ink under
-Mono); a window with a fifth or less left takes the warning ink and
-a spent one the danger ink. The Appearance setting **Usage bars** (`usageBars`,
-Settings › Appearance › Reading) chooses the bar: **Smooth** (default) is a
-three-pixel rounded line; **Pixelated** is a 17 × 3 grid of 2px square cells with
-1px gaps, lit in the same accent, whose last four columns thin out in steps (two
-thirds, a checker, a third, a stipple) so the fill dissolves at its leading edge.
-Neither animates, so reduced motion needs no variant. The row under the box
+**Plan meters.** Remaining plan usage shows in the account menu and the rail's
+ring, on a start screen as the [plan usage line](start-screen.md#plan-usage-line)
+at the end of the context-chip row above the card, and in Settings › Usage. It
+does not stand beside a thread's composer, and the Environment panel's Usage row
+shows the thread's own tokens and cost, not the plan. Its form is the start
+screen's line: each window's share left and its reset, no bar (the bar meters
+went with the Inbox card and the Usage bars setting, maintainer request,
+2026-11-18). The line describes the provider the composer will send to (a start
+screen follows the model menu's choice) and reads the same host observation as
+the rail's ring, picked by window length (`windowSpan`). A provider that reports
+no window shows none. The row under the box
 ([The row under the box](../../DESIGN.md#composer-row)) keeps its controls: the
 approval mode is its shield icon alone, the model button names the model with a
 chosen effort in muted ink and no chevron, the microphone sits just before send,
@@ -774,8 +759,23 @@ change and journals it as the device. Approving a plan, which widens what
 the next turn may do, asks for the phone's own confirmation (Face ID, Touch
 ID or passcode) first; switching to Plan and keeping the level do not. A
 Code thread's level-change ask stays with the desktop, like the phone's
-other Code approvals, and the phone shows no other Work approval or
-question yet.
+other Code approvals.
+
+Every other request a Work agent waits on draws on the same screen, oldest
+first, with the desktop's words: a tool call as **Provider approval** (the
+action and what it does, **Approve** and **Deny**), a question as its prompt,
+each offered answer and **Type your own answer** with **Submit**, and a
+questionnaire as each question with its limits (**Choose one**, **Select
+1–n options**, a **(Recommended)** option, **Write another answer**), the
+optional **Anything to add?**, **Send answers** and **Dismiss**, which ends
+the question unanswered as the desktop's does. Each sends the answer and the
+version it read through the same request route a window uses, and the host
+journals it as the device. Approving a tool call lets the agent act, so it
+asks for the phone's own confirmation first; denying, answering a question
+and dismissing do not. A refusal (answered elsewhere, its version moved, the
+thread's permissions changed since it asked) shows the host's sentence under
+the card, which stays; an answer holding a path or link, which Work request
+text never carries, is refused on the phone before it is sent.
 
 ## Sessions started outside Octant
 
@@ -850,25 +850,30 @@ ordinary notice content cannot issue an approval receipt.
 
 ### Project trust prompt
 
-When a Work or Code thread opens and its Project holds untrusted Project code
-for the thread's key provider, the composer shows one quiet notice card above
-the box (maintainer decision, 2026-11-14: one trust prompt per Project). It is
-the neutral card, announced as a status rather than an alert, and names the
-provider and what would load: "This Project has its own Claude Code settings
-and MCP servers. They load once you trust this Project for Claude Code." Its
-actions are **Trust for <provider>** (secondary) and **Not now** (ghost) at the
-trailing edge. Trust sends the Project's trust command, the same one Project
-settings' Trusted providers sends, and the card goes once the Project lists
-the provider. Not now hides it for that Project and provider in this viewer's
-browser only; Trusted providers in Project settings still offers the trust. A
-window with no Project controller shows the words and Not now without Trust,
-and the host refuses the command from anyone but its own person. The card never
-shows for a trusted Project, a Project folder without that provider's Project
-code, or a provider whose trust loads none (any provider that is not a key
-provider, and Codex). Every ACP agent is a key provider, so the card names
-Gemini CLI, Goose, Kimi Code, and the others for the Project files their
-launches hold until trust (maintainer decision, 2026-11-14). The host's answer and the entries it reads are
-in [Architecture: Key providers run as themselves](../architecture.md#providers).
+Adding a Project, or an extra folder, is the person's trust decision for every
+agent on its threads, so outside Strict no thread asks to trust its Project
+(maintainer decision, 2026-11-18, replacing the one trust prompt per Project of
+2026-11-14). When a Strict Work or Code thread opens and its Project holds Project
+code for the thread's key provider that the person has not allowed, the composer
+shows one quiet notice card above the box. It is the neutral card, announced as a
+status rather than an alert, and names the provider and what Strict holds:
+"Strict holds this Project's own Claude Code settings and MCP servers until you
+allow this Project's code. Its instruction files, such as AGENTS.md, already
+load." Its actions are **Allow Project code** (secondary) and **Not now** (ghost)
+at the trailing edge. Allow sends the Project's trust command, the same one
+Project settings' Trusted providers sends, listing every key provider, so one
+confirmation covers the Project; the card goes once the Project lists the
+provider. Not now hides it for that Project in this viewer's browser only;
+Trusted providers in Project settings still offers the list. A window with no
+Project controller shows the words and Not now without Allow, and the host
+refuses the command from anyone but its own person. The card never shows outside
+Strict, for a Project that lists the provider, a Project folder without that
+provider's Project code, or a provider that is not a key provider. Every ACP
+agent is a key provider, so the card names Gemini CLI, Goose, Kimi Code, and the
+others for the Project files their launches hold until then, and Codex for
+`.codex/config.toml`, which refuses its Strict thread until allowed. The host's
+answer and the entries it reads are in
+[Architecture: Key providers run as themselves](../architecture.md#providers).
 
 ## Turn menu panels
 
