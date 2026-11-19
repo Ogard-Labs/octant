@@ -42,6 +42,8 @@ export interface NewMemberAlertRow {
   readonly name: string;
   readonly role: string;
   readonly identityKeyFingerprint: string;
+  /** Its address on the private network, once the spoke knows one. */
+  readonly privateAddress?: string;
 }
 
 const fingerprint = (value: string) => <code className="oct-meta--mono">{value}</code>;
@@ -311,6 +313,7 @@ export function NewMemberChecks(props: {
             <li className="setrow" key={alert.alertId}>
               <span className="setrow-label">{alert.name} joined the hub</span>
               <p className="setrow-hint">
+                {alert.privateAddress === undefined ? null : `${alert.privateAddress} · `}
                 {alert.role} · device key {fingerprint(alert.identityKeyFingerprint)}. If you did
                 not add it, choose Remove, then check the hub.
               </p>

@@ -1,4 +1,5 @@
 import {
+  NEW_DEVICE_ALERTS_PATH,
   decodeNewDeviceAlertList,
   type NewDeviceAlertList,
   type NewMemberAlert,
@@ -9,7 +10,7 @@ import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 
-export const NEW_DEVICE_ALERTS_PATH = "/api/new-device-alerts";
+export { NEW_DEVICE_ALERTS_PATH };
 
 export interface NewDeviceAlertRouteDependencies {
   /** The alerts this host raised as a spoke for members a newer roster added. */

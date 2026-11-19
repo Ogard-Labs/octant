@@ -182,6 +182,9 @@ export const HubMemberAlertView = Schema.Struct({
 export const NewDeviceAlertView = Schema.Union(HubMemberAlertView, PairedDeviceAlertView);
 export type NewDeviceAlertView = typeof NewDeviceAlertView.Type;
 
+/** Every device connected to a host reads its new-device alerts here. */
+export const NEW_DEVICE_ALERTS_PATH = "/api/new-device-alerts";
+
 /**
  * Every new-device alert a host holds, for any device connected to it
  * (maintainer decision, 2026-11-19). `removesHere` says whether this caller may
