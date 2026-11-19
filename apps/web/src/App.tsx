@@ -99,7 +99,7 @@ import { useHomeStart } from "./app/homeStart";
 import { ReaderPagesContainer } from "./app/ReaderPagesContainer";
 import { SettingsContainer } from "./app/SettingsContainer";
 import { OctantSheet } from "./ui/base/OctantSheet";
-import type { ShellActions } from "./app/shellActions";
+import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
@@ -159,6 +159,7 @@ import type {
   ProviderInstance,
   VoiceSettings,
 } from "@octant/contracts";
+
 import type {
   CodeBoardQuery,
   CodeProjectPullRequestDetailObserved,
@@ -406,6 +407,7 @@ import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
 import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
+import { MoveThreadToProjectDialog } from "./projects/MoveThreadToProjectDialog";
 import {
   ProjectActionRunDialog,
   type ProjectActionTarget,
@@ -1203,6 +1205,12 @@ function LaunchedShell(
   // in, and the person sends it like any new thread.
   const [pendingDraftPrompt, setPendingDraftPrompt] = useState<string>();
   const [pendingDraftBranch, setPendingDraftBranch] = useState<string>();
+  const [draftStartFrom, setDraftStartFrom] = useState<{ readonly projectId: string } | undefined>(
+    undefined,
+  );
+  // The Move to Project request the sidebar's dialog answers; the Code
+  // Environment asks through the same action rather than a second surface.
+  const [moveRequest, setMoveRequest] = useState<ThreadMoveRequest | undefined>(undefined);
   // New coordinator opens an ordinary Code draft in its Project; the thread it
   // creates becomes a coordinator before its first message is sent. It holds
   // only for that Project, so choosing another one in the draft drops it.
@@ -5723,7 +5731,17 @@ function LaunchedShell(
       markCodeFollowUp: codeController.markFollowUp,
       markCodeThreadRead: codeController.markThreadRead,
       mergeProjectPullRequest,
-      moveCodeThread: codeController.moveThread,
+      moveCodeThread: (threadId, projectId, options) => {
+        // A follow-up started through the thread's own slot is scoped in
+        // that slot's controller — only it names the exact running operation
+        // a Stop and move may end. The window controller stays the route for
+        // a first turn it owns; its own scoped-turn check refuses a stop it
+        // cannot name, so a successor or an unscoped turn is never cancelled
+        // by accident.
+        const slot = codeThreadControllers.get(threadId);
+        return (slot ?? codeController).moveThread(threadId, projectId, options);
+      },
+      requestMoveToProject: setMoveRequest,
       moveProject: projectController.move,
       noteCanvasReferences,
       noteHandedOffDocument,
@@ -6829,29 +6847,51 @@ function LaunchedShell(
     setPendingDraftCoordinatorChoices({});
   }
 
-  async function openDraftInProject(projectId: ProjectId) {
+  async function openDraftInProject(
+    projectId: ProjectId,
+    options?: { readonly startFrom?: boolean | undefined },
+  ) {
     const serverProject = serverCodeProjectFor(serverCodeProjects.projects, projectId);
     if (serverProject !== undefined) {
-      await openDraftInKnownProject(serverProject.projectId, "code", serverProject.name);
+      await openDraftInKnownProject(
+        serverProject.projectId,
+        "code",
+        serverProject.name,
+        options?.startFrom,
+      );
       return;
     }
     const serverWorkProject = serverCodeProjectFor(serverCodeProjects.workProjects, projectId);
     if (serverWorkProject !== undefined) {
-      await openDraftInKnownProject(serverWorkProject.projectId, "work", serverWorkProject.name);
+      await openDraftInKnownProject(
+        serverWorkProject.projectId,
+        "work",
+        serverWorkProject.name,
+        options?.startFrom,
+      );
       return;
     }
     const project = projectController.allProjects.find((candidate) => candidate.id === projectId);
     if (project === undefined || project.lifecycle !== "active") return;
-    await openDraftInKnownProject(project.id, project.type, project.name);
+    await openDraftInKnownProject(project.id, project.type, project.name, options?.startFrom);
   }
 
   // Used right after creation, when the Project is not yet in this render's
   // snapshot; the dialog already knows the mode and name.
-  async function openDraftInKnownProject(projectId: ProjectId, mode: OctantMode, _name: string) {
+  async function openDraftInKnownProject(
+    projectId: ProjectId,
+    mode: OctantMode,
+    _name: string,
+    startFrom?: boolean,
+  ) {
     // The draft carries its Project itself. Opening the Project first put its
     // overview on screen for a frame before the draft replaced it, which read
     // as an old page flashing past every time a task was started from a row.
     closeWorkspaceReaders();
+    // The branch-start intent belongs to exactly this draft: keyed to the
+    // Project it was opened for and cleared for every other way a draft
+    // opens, so a later same-Project draft does not inherit it.
+    setDraftStartFrom(startFrom === true ? { projectId: String(projectId) } : undefined);
     // A new draft starts clean: a prompt seeded by an earlier PR-review
     // handoff must not reappear as this draft's text.
     setDraftError(undefined);
@@ -6865,6 +6905,7 @@ function LaunchedShell(
   // sticky default for every later draft opened from the sidebar.
   function openDraftInActiveProject(mode: "work" | "code") {
     closeWorkspaceReaders();
+    setDraftStartFrom(undefined);
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
     resetNewTaskDraft(mode);
@@ -8791,6 +8832,7 @@ function LaunchedShell(
                   machineChanges={machineChanges}
                   navigation={navigationModel}
                   {...(pendingDraftBranch === undefined ? {} : { pendingDraftBranch })}
+                  {...(draftStartFrom === undefined ? {} : { draftStartFrom })}
                   {...(pendingDraftCoordinator === undefined ? {} : { pendingDraftCoordinator })}
                   pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
                   {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
@@ -9117,13 +9159,74 @@ function LaunchedShell(
           projectAnnouncementSequence={projectController.announcementSequence}
         />
       </ShellFrame>
-      <OctantDialogPresence>
-        <FilesClosePrompt />
-      </OctantDialogPresence>
       <PrepareToShutDownHost
         hostBridge={props.hostBridge}
         onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
       />
+      <OctantDialogPresence>
+        <FilesClosePrompt />
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {moveRequest === undefined ? null : (
+          // The one Move to Project dialog lives above the shell frame so it
+          // stays mounted and reachable wherever the asking surface is —
+          // including when the sidebar that used to host it is hidden.
+          <MoveThreadToProjectDialog
+            {...(moveRequest.busy === true ||
+            (moveRequest.mode === "code" &&
+              navigationModel.codeSidebarThreads.some(
+                (thread) =>
+                  String(thread.threadId) === moveRequest.threadId &&
+                  (thread.activity === "working" || thread.activity === "attention"),
+              ))
+              ? { busy: true }
+              : {})}
+            currentProjectId={moveRequest.projectId}
+            mode={moveRequest.mode}
+            onClose={() => setMoveRequest(undefined)}
+            {...(() => {
+              const moveProvider = providerController.instances.find(
+                (instance) => String(instance.id) === moveRequest.providerInstanceId,
+              );
+              const moveModel =
+                moveProvider === undefined || moveRequest.modelId === undefined
+                  ? undefined
+                  : providerController.observedByInstance
+                      .get(moveProvider.id)
+                      ?.models.find((listed) => String(listed.id) === moveRequest.modelId);
+              return {
+                ...(moveProvider === undefined ? {} : { threadProvider: moveProvider }),
+                ...(moveModel === undefined ? {} : { threadModel: moveModel }),
+                ...(moveRequest.workingFolderId === undefined
+                  ? {}
+                  : { threadWorkingFolderId: moveRequest.workingFolderId }),
+                ...(moveRequest.checkoutKind === undefined
+                  ? {}
+                  : { threadCheckoutKind: moveRequest.checkoutKind }),
+                ...(moveRequest.checkoutAvailability === undefined
+                  ? {}
+                  : { threadCheckoutAvailability: moveRequest.checkoutAvailability }),
+              };
+            })()}
+            onMove={async (projectId: string, when?: "after-turn" | "stop-now") =>
+              moveRequest.mode === "code"
+                ? actions.moveCodeThread(
+                    decodeCodeThreadId(moveRequest.threadId),
+                    decodeProjectId(projectId),
+                    { when },
+                  )
+                : actions.tryWorkRestCommand(moveRequest.threadId, (expectedVersion) => ({
+                    kind: "move-work-thread",
+                    threadId: decodeWorkThreadId(moveRequest.threadId),
+                    expectedVersion,
+                    projectId: decodeProjectId(projectId),
+                  }))
+            }
+            projects={projectController.allProjects}
+            threadTitle={moveRequest.title}
+          />
+        )}
+      </OctantDialogPresence>
       {(() => {
         const coordinator = codeController.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(coordinatorBoundsThreadId),

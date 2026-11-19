@@ -353,6 +353,7 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 
 export interface CodeOperationRuntimeOptions {
   readonly prepareWorktree?: CodeOperationServiceOptions["prepareWorktree"];
+  readonly checkoutObserved?: CodeOperationServiceOptions["checkoutObserved"];
   /** How long a Stop waits for the runtime to confirm it; defaults to {@link STOP_CONFIRMATION_MS}. */
   readonly stopConfirmationMs?: number;
   /**
@@ -1590,6 +1591,9 @@ export function createCodeOperationRuntime(
     },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
     ...(options.prepareWorktree === undefined ? {} : { prepareWorktree: options.prepareWorktree }),
+    ...(options.checkoutObserved === undefined
+      ? {}
+      : { checkoutObserved: options.checkoutObserved }),
     terminals: terminal,
     ...(options.terminalBrowserGrants === undefined
       ? {}
@@ -3005,6 +3009,15 @@ function approvalPrompt(
       case "commit-git":
         message = "Allow Code commit operation?";
         effectDetail = `${command.message}\n\n${command.stagedSummary.map(({ path }) => path).join("\n")}`;
+        break;
+      case "switch-git-branch":
+        message = "Switch this checkout's branch?";
+        effectDetail = [
+          `Target branch: ${command.branch}`,
+          command.dirty === "stash"
+            ? "Uncommitted changes are stashed first."
+            : "Refused if the checkout has uncommitted changes.",
+        ].join("\n");
         break;
       case "push-git":
         message = "Allow Code push operation?";
@@ -8097,12 +8110,17 @@ const decodeCodeGitOperationId = Schema.decodeUnknownSync(CodeGitOperationId);
 function codeOperationGitPort(git: GitService): CodeOperationGitPort {
   return {
     remoteHead: (input, signal) => git.remoteHead(input, signal),
-    observe: async ({ checkoutRoot, maxDiffBytes, ignoreWhitespace }) =>
+    observe: async ({ checkoutRoot, maxDiffBytes, ignoreWhitespace, untrackedFiles }) =>
       mapGitObservation(
         await git.observe(
           checkoutRoot,
           undefined,
-          ignoreWhitespace === true ? { ignoreWhitespace: true } : undefined,
+          ignoreWhitespace === true || untrackedFiles === "all"
+            ? {
+                ...(ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
+                ...(untrackedFiles === "all" ? { untrackedFiles: "all" as const } : {}),
+              }
+            : undefined,
         ),
         maxDiffBytes,
       ),
@@ -8135,6 +8153,7 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
         })),
       }),
     push: (input) => git.push(input),
+    switchBranch: (input) => git.switchBranch(input),
     unstage: (input) => git.unstage(input),
     checkpoint: (input) => git.checkpoint(input),
     restoreCheckpoint: (input) => git.restoreCheckpoint(input),

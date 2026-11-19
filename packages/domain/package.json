@@ -105,6 +105,7 @@
     "./remote-protocol-policy": "./src/remoteProtocolPolicy.ts",
     "./preview-policy": "./src/previewPolicy.ts",
     "./project-policy": "./src/projectPolicy.ts",
+    "./project-provider-policy": "./src/projectProviderPolicy.ts",
     "./project-view-policy": "./src/projectViewPolicy.ts",
     "./provider-capacity-policy": "./src/providerCapacityPolicy.ts",
     "./provider-catalog-policy": "./src/providerCatalogPolicy.ts",

@@ -920,6 +920,7 @@ export function startOctantServer(
       windowAuthorityStore,
       threadWakeups,
       hostResourceBudget,
+      managedWorktreeReceipts,
       providerAvailabilityMarks,
       providerUsageLimitsService,
       nativeHarnessRoutingStore,

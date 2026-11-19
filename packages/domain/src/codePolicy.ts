@@ -218,7 +218,7 @@ const RESTORE_REFUSAL_TITLE_LIMIT = 100;
 /** `title` is given only when the writing thread is in the requester's Project. */
 export function inPlaceRestoreRefusalText(
   title?: string,
-  action: "restore" | "discard" = "restore",
+  action: "restore" | "discard" | "switch" = "restore",
 ): string {
   if (title === undefined) {
     return `A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then ${action}.`;

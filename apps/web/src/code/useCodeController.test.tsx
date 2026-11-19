@@ -4504,3 +4504,223 @@ function memoryDraftStorage(): Storage {
     },
   };
 }
+
+describe("useCodeController moveThread choices", () => {
+  const busyRuntime = (turnStartedAt = "2026-07-21T12:00:00.000Z") =>
+    [{ threadId: ids.thread, executing: true, turnStartedAt }] as never;
+  const idleRuntime = () => [{ threadId: ids.thread, executing: false }] as never;
+  const sentCommands = (client: CodeClient) =>
+    vi.mocked(client.execute).mock.calls.map(([command]) => (command as { kind: string }).kind);
+  const sentOperations = (client: CodeClient) =>
+    vi
+      .mocked(client.executeOperation)
+      .mock.calls.map(([operation]) => (operation as { kind: string }).kind);
+
+  it("queues the move for after the running turn and dispatches it once the turn settles", async () => {
+    const nav = { value: { ...bootstrap(), runtime: busyRuntime() } };
+    const client = fakeClient({ bootstrap: vi.fn(async () => nav.value) });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.bootstrap).toBeDefined());
+
+    const outcome = await result.current.moveThread(ids.thread, ids.project, {
+      when: "after-turn",
+    });
+    expect(outcome.status).toBe("deferred");
+    expect(sentCommands(client)).not.toContain("move-code-thread");
+
+    let settled: unknown;
+    void (outcome as { settled: Promise<unknown> }).settled.then((answer) => {
+      settled = answer;
+    });
+    nav.value = { ...bootstrap(), runtime: idleRuntime() };
+    await act(async () => {
+      await result.current.refreshNavigation();
+    });
+
+    await waitFor(() => expect(settled).toEqual({ status: "ok" }));
+    expect(sentCommands(client).filter((kind) => kind === "move-code-thread")).toHaveLength(1);
+  });
+
+  it("drops the queued move on Cancel and refuses it when a different turn took over", async () => {
+    const nav = { value: { ...bootstrap(), runtime: busyRuntime() } };
+    const client = fakeClient({ bootstrap: vi.fn(async () => nav.value) });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.bootstrap).toBeDefined());
+
+    const cancelledMove = await result.current.moveThread(ids.thread, ids.project, {
+      when: "after-turn",
+    });
+    expect(cancelledMove.status).toBe("deferred");
+    (cancelledMove as { cancel: () => void }).cancel();
+    await expect((cancelledMove as { settled: Promise<unknown> }).settled).resolves.toEqual({
+      status: "cancelled",
+    });
+
+    nav.value = { ...bootstrap(), runtime: idleRuntime() };
+    await act(async () => {
+      await result.current.refreshNavigation();
+    });
+    expect(sentCommands(client)).not.toContain("move-code-thread");
+
+    nav.value = { ...bootstrap(), runtime: busyRuntime() };
+    await act(async () => {
+      await result.current.refreshNavigation();
+    });
+    const moved = await result.current.moveThread(ids.thread, ids.project, {
+      when: "after-turn",
+    });
+    expect(moved.status).toBe("deferred");
+    nav.value = {
+      ...bootstrap(),
+      runtime: busyRuntime("2026-07-21T13:00:00.000Z"),
+    };
+    await act(async () => {
+      await result.current.refreshNavigation();
+    });
+    await expect((moved as { settled: Promise<unknown> }).settled).resolves.toEqual({
+      status: "refused",
+      message: "The thread started another turn; move it when it is idle.",
+    });
+    expect(sentCommands(client)).not.toContain("move-code-thread");
+  });
+
+  it("refuses to stop a turn this window did not start, and sends nothing", async () => {
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => ({ ...bootstrap(), runtime: busyRuntime() })),
+      executeOperation: vi.fn(async () => undefined as never),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.bootstrap).toBeDefined());
+
+    const outcome = await result.current.moveThread(ids.thread, ids.project, {
+      when: "stop-now",
+    });
+    expect(outcome).toEqual({
+      status: "refused",
+      message:
+        "The running turn cannot be identified from this window; move the thread after it finishes instead.",
+    });
+    expect(sentOperations(client)).not.toContain("cancel-provider-turn");
+    expect(sentCommands(client)).not.toContain("move-code-thread");
+  });
+
+  it("stops only the turn it started, then moves once that turn settles", async () => {
+    const nav = { value: { ...bootstrap(), runtime: busyRuntime() } };
+    const interrupted = deferred<void>();
+    async function* frames() {
+      yield {
+        threadId: ids.thread,
+        operationId: "70000000-0000-4000-8000-000000000043",
+        cursor: 1,
+        occurredAt: now,
+        event: {
+          kind: "operation-result",
+          result: {
+            kind: "provider-turn-state",
+            operationId: "70000000-0000-4000-8000-000000000043",
+            state: "running",
+          },
+        },
+      };
+      await interrupted.promise;
+      yield {
+        threadId: ids.thread,
+        operationId: "70000000-0000-4000-8000-000000000043",
+        cursor: 2,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "interrupted" },
+      };
+    }
+    const executeOperation = vi.fn(async (command: CodeOperationCommand) => ({
+      kind: "provider-turn-state" as const,
+      operationId: command.operationId,
+      state:
+        command.kind === "cancel-provider-turn" ? ("interrupted" as const) : ("running" as const),
+    }));
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => nav.value),
+      executeOperation: executeOperation as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    let running: Promise<boolean> | undefined;
+    await act(async () => {
+      running = result.current.sendFollowUp("stop this turn");
+    });
+    await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+    const startedTurn = () =>
+      executeOperation.mock.calls.find(([command]) => command.kind === "start-provider-turn")?.[0]
+        .operationId;
+
+    const outcome = await result.current.moveThread(ids.thread, ids.project, {
+      when: "stop-now",
+    });
+    // The stop names the exact turn this window started, and the move waits
+    // for that turn to settle instead of racing its drain.
+    expect(outcome.status).toBe("deferred");
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "cancel-provider-turn",
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        turnOperationId: startedTurn(),
+      }),
+    );
+    expect(sentCommands(client)).not.toContain("move-code-thread");
+
+    interrupted.resolve();
+    await act(async () => {
+      await running;
+    });
+    nav.value = { ...bootstrap(), runtime: idleRuntime() };
+    await act(async () => {
+      await result.current.refreshNavigation();
+    });
+    await expect((outcome as { settled: Promise<unknown> }).settled).resolves.toEqual({
+      status: "ok",
+    });
+    expect(sentCommands(client).filter((kind) => kind === "move-code-thread")).toHaveLength(1);
+  });
+
+  it("answers a queued move as cancelled when a newer queued move replaces it", async () => {
+    const nav = { value: { ...bootstrap(), runtime: busyRuntime() } };
+    const client = fakeClient({ bootstrap: vi.fn(async () => nav.value) });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.bootstrap).toBeDefined());
+
+    const first = await result.current.moveThread(ids.thread, ids.project, {
+      when: "after-turn",
+    });
+    const second = await result.current.moveThread(ids.thread, ids.project, {
+      when: "after-turn",
+    });
+    expect(first.status).toBe("deferred");
+    expect(second.status).toBe("deferred");
+    await expect((first as { settled: Promise<unknown> }).settled).resolves.toEqual({
+      status: "cancelled",
+    });
+
+    nav.value = { ...bootstrap(), runtime: idleRuntime() };
+    await act(async () => {
+      await result.current.refreshNavigation();
+    });
+    await expect((second as { settled: Promise<unknown> }).settled).resolves.toEqual({
+      status: "ok",
+    });
+    expect(sentCommands(client).filter((kind) => kind === "move-code-thread")).toHaveLength(1);
+  });
+
+  it("moves an idle thread immediately", async () => {
+    const client = fakeClient();
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.bootstrap).toBeDefined());
+
+    const outcome = await result.current.moveThread(ids.thread, ids.project);
+    expect(outcome.status).toBe("ok");
+    expect(sentCommands(client)).toContain("move-code-thread");
+  });
+});

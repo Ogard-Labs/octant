@@ -2,6 +2,7 @@ import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { OwnerUnlockNotGiven } from "@octant/client-runtime";
 import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
 import type {
+  CodeCheckoutIdentity,
   CodeProjectPullRequestDetailObserved,
   CodeTerminalId,
   CodeProjectPullRequestDetailQuery,
@@ -65,6 +66,27 @@ type ThreadUtilityPresentation = ReturnType<typeof useThreadUtilityPresentation>
  * thread's rest, a Project's colour), not for the controller that carries
  * them, because the surfaces do not know the controllers.
  */
+/**
+ * The thread whose Move to Project choice is open: `undefined` closes the
+ * dialog. `busy` marks a thread whose turn is still running, so the dialog can
+ * offer deferred and stop-then-move choices.
+ */
+export interface ThreadMoveRequest {
+  readonly mode: "work" | "code";
+  readonly threadId: string;
+  readonly title: string;
+  readonly projectId: string;
+  readonly busy?: boolean;
+  /** The thread's provider and model, when the surface that asked knows them. */
+  readonly providerInstanceId?: string;
+  readonly modelId?: string;
+  /** The thread's approved working folder, when it has one. */
+  readonly workingFolderId?: string;
+  /** The thread's checkout kind and availability, when its view knows them. */
+  readonly checkoutKind?: CodeCheckoutIdentity["kind"];
+  readonly checkoutAvailability?: CodeCheckoutIdentity["availability"];
+}
+
 export type ShellActions = {
   readonly activateContentTab: ShellController["activateContentTab"];
   readonly activatePane: ShellController["activatePane"];
@@ -123,6 +145,12 @@ export type ShellActions = {
   ) => Promise<CodeProjectPullRequestMergeOutcome | OwnerUnlockNotGiven>;
   readonly moveCodeThread: CodeController["moveThread"];
   readonly moveProject: ProjectController["move"];
+  /**
+   * The Move to Project dialog's target: sidebar rows and the Code Environment
+   * both ask through this one entry, and the dialog renders next to the
+   * sidebar that owns the request.
+   */
+  readonly requestMoveToProject: (request: ThreadMoveRequest | undefined) => void;
   readonly noteCanvasReferences: NonNullable<WorkspaceViewProps["onCanvasReferencesObserved"]>;
   readonly noteHandedOffDocument: (mode: OctantMode, threadId: string, canvasId: string) => void;
   readonly onComputerUseSessionChange: NonNullable<
@@ -149,7 +177,10 @@ export type ShellActions = {
   readonly openCrossContextInNewWindow: ShellController["openCrossContextInNewWindow"];
   readonly openDockTab: (surface: RightUtilityDockSurfaceId, opener?: HTMLElement) => void;
   readonly openDraftInActiveProject: (mode: "work" | "code") => void;
-  readonly openDraftInProject: (projectId: ProjectId) => Promise<void>;
+  readonly openDraftInProject: (
+    projectId: ProjectId,
+    options?: { readonly startFrom?: boolean | undefined },
+  ) => Promise<void>;
   /** New coordinator in a Code Project's sidebar menu. */
   readonly openCoordinatorDraftInProject: (projectId: ProjectId) => Promise<void>;
   /** Turns a New coordinator draft back into an ordinary one. */
