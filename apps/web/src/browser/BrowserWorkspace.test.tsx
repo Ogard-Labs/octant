@@ -19,7 +19,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { threadImageOffers } from "../composer/threadImageOffers";
-import { BrowserWorkspace, RENDERER_OVERLAY_SELECTOR } from "./BrowserWorkspace";
+import { BrowserWorkspace } from "./BrowserWorkspace";
+import { RENDERER_OVERLAY_SELECTOR } from "./rendererOverlaySelector";
 import { boundsInsideViewport } from "./useNativeBrowserSurface";
 import {
   browserTabPageOf,

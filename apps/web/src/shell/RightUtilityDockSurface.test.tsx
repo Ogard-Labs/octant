@@ -12,7 +12,7 @@ import {
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { decodeProjectId } from "@octant/contracts/projects";
 import { ServerCodeProjectsContext } from "../projects/serverProjectEntries";
-import { RENDERER_OVERLAY_SELECTOR } from "../browser/BrowserWorkspace";
+import { RENDERER_OVERLAY_SELECTOR } from "../browser/rendererOverlaySelector";
 import { RightUtilityDockSurface, type DockTileControls } from "./RightUtilityDockSurface";
 import { DockToolButtons } from "./DockToolButtons";
 import { buildDockToolButtons } from "./dockToolButtonsModel";

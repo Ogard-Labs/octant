@@ -10,7 +10,8 @@ import type {
 import type { ZenProjectResearchDock as ZenProjectResearchDockBinding } from "@octant/contracts/zen";
 import { ArrowLeft, ArrowRight, ChevronRight, RotateCw, ShieldCheck, X } from "../ui/icons";
 import { useCallback, useEffect, useState } from "react";
-import { normalizeBrowserUrl, RENDERER_OVERLAY_SELECTOR } from "../browser/BrowserWorkspace";
+import { normalizeBrowserUrl } from "../browser/browserNavigation";
+import { RENDERER_OVERLAY_SELECTOR } from "../browser/rendererOverlaySelector";
 import { useNativeBrowserSurface } from "../browser/useNativeBrowserSurface";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";

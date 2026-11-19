@@ -21,12 +21,9 @@ import {
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import {
-  BrowserWorkspace,
-  makeBrowserToolAction,
-  normalizeBrowserUrl,
-  RENDERER_OVERLAY_SELECTOR,
-} from "../browser/BrowserWorkspace";
+import { BrowserWorkspace } from "../browser/BrowserWorkspace";
+import { makeBrowserToolAction, normalizeBrowserUrl } from "../browser/browserNavigation";
+import { RENDERER_OVERLAY_SELECTOR } from "../browser/rendererOverlaySelector";
 import { useNativeBrowserSurface } from "../browser/useNativeBrowserSurface";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantAlert } from "../ui/base/OctantAlert";

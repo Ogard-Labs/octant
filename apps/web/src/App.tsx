@@ -368,7 +368,7 @@ import {
   useFirstRunOnboardingController,
   type FirstRunOnboardingOutcome,
 } from "./onboarding/useFirstRunOnboardingController";
-import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
+import { projectPullRequestKey } from "./code/projectPullRequestKey";
 import { OctantToast } from "./ui/base/OctantToast";
 import { OctantDialogPresence } from "./ui/base/OctantDialogPresence";
 import { useProjectController } from "./projects/useProjectController";
