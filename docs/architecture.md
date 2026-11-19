@@ -542,10 +542,18 @@ services that append to the journal. Providers, tools, Git, terminals,
 subagents, extensions, and recovery live here. A headless host runs the same
 server through `@octant/cli` (`octant server run`, `octant web`). The
 installable headless artifact (`scripts/package-headless.ts`) is self-contained:
-it carries the bundled CLI (`bin/octant`), the bundled server (`lib/server`), the
-web assets, and a top-level `node_modules` holding the third-party and native
+it carries the bundled CLI (`bin/octant.mjs`), the bundled server (`lib/server`),
+the web assets, a top-level `node_modules` holding the third-party and native
 dependencies both bundles leave external, built on the target platform itself,
-and the target's bundled TypeScript language server with its license notice.
+the target's bundled TypeScript language server with its license notice, and
+the Bun runtime the repository pins (`lib/runtime/bun`, with Bun's license in
+`share/NOTICES.txt`), so the computer needs no Bun of its own. The build
+carries the Bun that runs the packaging script and refuses any other version;
+its digest is in the manifest like every file's. `bin/octant` is a `sh`
+launcher that runs the CLI bundle under that runtime. It follows a link to
+itself but not the directory it sits in, and the service an installed CLI
+writes runs that launcher through the install's `current` link, so the next
+start after an upgrade runs the new version's Bun.
 A published build also carries `octant-artifact.sig` beside its manifest: the
 release key of its ring (the feed keys, stable or preview) over the manifest's
 canonical bytes, which name every file's digest. Each target is built on its
@@ -559,7 +567,7 @@ names, before anything is staged, and check the staged copy again;
 `--self-built` installs a build the person made themselves without one,
 because an unsigned build proves nothing about who produced it. The server's
 own start-up check and the build's self-inspection need no signature.
-An installed CLI starts that server under its own Bun runtime with
+An installed CLI starts that server under the same runtime with
 `OCTANT_ARTIFACT_ROOT` and `OCTANT_ARTIFACT_VERSION` set. The server verifies
 every listed file before it opens the store, and reports that version on
 `/health`, in a diagnostics export, and on the owner receipt. When the stamped

@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,10 +19,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildHeadlessArtifact,
   HEADLESS_ARTIFACT_TARGETS,
+  HEADLESS_CLI_LAUNCHER,
   HEADLESS_CLI_RUNTIME_PACKAGES,
   headlessMigrationsMetadata,
   headlessRuntimeFileRole,
   isHeadlessRuntimeFile,
+  pinnedBunVersion,
   renderHeadlessServiceTemplate,
   type HeadlessComponentSource,
 } from "./package-headless";
@@ -49,6 +52,7 @@ function fixtureSources(root: string): ReadonlyArray<HeadlessComponentSource> {
     ["migrations", "share/migrations.json", '{"storeVersion":1}\n'],
     ["notices", "share/NOTICES.txt", "third-party notices\n"],
     ["service-template", "share/service/octant.service.template", "[Unit]\n"],
+    ["runtime", "lib/runtime/bun", "runtime-bytes"],
   ];
   return sources.map(([role, path, body]) => {
     const source = join(root, "sources", path.replaceAll("/", "_"));
@@ -172,6 +176,33 @@ describe("buildHeadlessArtifact", () => {
       runtime: { platform: "linux", arch: "x64", wireVersion: "1", storeVersion: 1 },
     });
     expect(inspection).toMatchObject({ ok: true });
+  });
+
+  it("starts the octant command under the runtime the build carries, also through a link", async () => {
+    const root = temporaryRoot("octant-headless-launcher-");
+    const install = join(root, "install");
+    mkdirSync(join(install, "bin"), { recursive: true });
+    mkdirSync(join(install, "lib", "runtime"), { recursive: true });
+    writeFileSync(join(install, "bin", "octant"), HEADLESS_CLI_LAUNCHER, { mode: 0o755 });
+    // A stand-in runtime that prints what it was asked to run.
+    writeFileSync(join(install, "lib", "runtime", "bun"), '#!/bin/sh\necho "$@"\n', {
+      mode: 0o755,
+    });
+    const environment = { PATH: "/usr/bin:/bin" };
+    const direct = await execFileAsync(join(install, "bin", "octant"), ["server", "status"], {
+      env: environment,
+    });
+    expect(direct.stdout.trim()).toBe(`${join(install, "bin")}/octant.mjs server status`);
+    mkdirSync(join(root, "path"));
+    symlinkSync(join(install, "bin", "octant"), join(root, "path", "octant"));
+    const linked = await execFileAsync(join(root, "path", "octant"), ["web"], { env: environment });
+    expect(linked.stdout.trim()).toBe(`${join(install, "bin")}/octant.mjs web`);
+  });
+
+  it("carries the Bun the repository pins and nothing else", () => {
+    expect(pinnedBunVersion('{"packageManager":"bun@1.4.4"}')).toBe("1.4.4");
+    expect(() => pinnedBunVersion('{"packageManager":"npm@10.0.0"}')).toThrow(/bun@/);
+    expect(() => pinnedBunVersion("{}")).toThrow(/bun@/);
   });
 
   it("fails closed when a required component role is missing", async () => {

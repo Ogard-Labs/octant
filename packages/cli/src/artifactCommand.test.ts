@@ -59,6 +59,7 @@ function writeArtifact(options: {
     ["migrations", "share/migrations.json", `{"storeVersion":${options.storeVersion}}`],
     ["notices", "share/NOTICES.txt", "notices"],
     ["service-template", "share/service/octant.service.template", "[Unit]"],
+    ["runtime", "lib/runtime/bun", "runtime-bytes"],
   ];
   const manifest: HeadlessArtifactManifest = {
     schemaVersion: 1,

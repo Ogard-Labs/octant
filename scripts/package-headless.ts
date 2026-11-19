@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
@@ -41,10 +41,50 @@ const REQUIRED_ROLES: ReadonlyArray<HeadlessArtifactComponentRole> = [
   "migrations",
   "notices",
   "service-template",
+  "runtime",
 ];
 
 const VERSIONED_ROLES = new Set<HeadlessArtifactComponentRole>(["server", "cli", "web-assets"]);
-const EXECUTABLE_ROLES = new Set<HeadlessArtifactComponentRole>(["cli", "native-module"]);
+const EXECUTABLE_ROLES = new Set<HeadlessArtifactComponentRole>([
+  "cli",
+  "native-module",
+  "runtime",
+]);
+
+/**
+ * `bin/octant`: runs the CLI bundle under the Bun the build carries, so the
+ * computer needs no Bun of its own. A link to it (one on `PATH`) is followed to
+ * the launcher itself, but the directory it names is not resolved further, so
+ * a launcher reached through an install's `current` link keeps that path and
+ * the service it writes follows the next upgrade.
+ */
+export const HEADLESS_CLI_LAUNCHER = `#!/bin/sh
+self=$0
+while [ -L "$self" ]; do
+  target=$(readlink -- "$self")
+  case $target in
+    /*) self=$target ;;
+    *) self=$(dirname -- "$self")/$target ;;
+  esac
+done
+dir=$(dirname -- "$self")
+exec "$dir/../lib/runtime/bun" "$dir/octant.mjs" "$@"
+`;
+
+/** The Bun version the repository's `packageManager` pins, which the build carries. */
+export function pinnedBunVersion(rootPackageJson: string): string {
+  const parsed: unknown = JSON.parse(rootPackageJson);
+  const packageManager =
+    typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as { readonly packageManager?: unknown }).packageManager
+      : undefined;
+  const match =
+    typeof packageManager === "string" ? /^bun@(\d+\.\d+\.\d+)$/.exec(packageManager) : null;
+  if (match?.[1] === undefined) {
+    throw new Error("The root package.json must pin Bun as packageManager bun@<version>.");
+  }
+  return match[1];
+}
 
 export interface HeadlessComponentSource {
   readonly role: HeadlessArtifactComponentRole;
@@ -397,7 +437,23 @@ async function assembleRepositoryArtifact(
     );
   }
   await requireBuiltFile(repositoryRoot, "packages/cli/dist/bin.mjs");
-  push("cli", "bin/octant", resolve(repositoryRoot, "packages/cli/dist/bin.mjs"));
+  push("cli", "bin/octant.mjs", resolve(repositoryRoot, "packages/cli/dist/bin.mjs"));
+  const launcherPath = join(scratch, "octant");
+  await writeFile(launcherPath, HEADLESS_CLI_LAUNCHER);
+  push("cli", "bin/octant", launcherPath);
+
+  // The build carries the Bun that runs this script, which must be the one the
+  // repository pins: on a release runner that is the official build setup-bun
+  // installed, and its digest goes into the signed manifest like any file.
+  const bunVersion = pinnedBunVersion(
+    await readFile(resolve(repositoryRoot, "package.json"), "utf8"),
+  );
+  if (Bun.version !== bunVersion) {
+    throw new Error(
+      `The headless build carries the Bun that builds it; this is Bun ${Bun.version} and the repository pins ${bunVersion}. Build it with Bun ${bunVersion}.`,
+    );
+  }
+  push("runtime", "lib/runtime/bun", process.execPath);
 
   const webDist = resolve(repositoryRoot, "apps/web/dist");
   for (const file of await collectFiles(webDist)) {
@@ -443,7 +499,14 @@ async function assembleRepositoryArtifact(
   push("migrations", "share/migrations.json", migrationsPath);
 
   const noticesPath = join(scratch, "NOTICES.txt");
-  await cp(resolve(repositoryRoot, "LICENSE"), noticesPath);
+  await writeFile(
+    noticesPath,
+    [
+      await readFile(resolve(repositoryRoot, "LICENSE"), "utf8"),
+      `---\n\nBun ${bunVersion} (lib/runtime/bun), https://bun.sh\n`,
+      await readFile(resolve(repositoryRoot, "scripts/licenses/bun-LICENSE.txt"), "utf8"),
+    ].join("\n"),
+  );
   push("notices", "share/NOTICES.txt", noticesPath);
 
   const templatePath = join(scratch, `service.${target.platform}.template`);

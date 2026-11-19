@@ -20,11 +20,19 @@ const CONTENTS: Record<string, string> = {
   "share/migrations.json": '{"versions":[1,2]}',
   "share/NOTICES.txt": "notices",
   "share/service/octant.service.template": "[Unit]",
+  "lib/runtime/bun": "runtime-bytes",
 };
 
 const ROLES: Record<
   string,
-  "server" | "cli" | "web-assets" | "native-module" | "migrations" | "notices" | "service-template"
+  | "server"
+  | "cli"
+  | "web-assets"
+  | "native-module"
+  | "migrations"
+  | "notices"
+  | "service-template"
+  | "runtime"
 > = {
   "lib/server/main.mjs": "server",
   "bin/octant": "cli",
@@ -33,6 +41,7 @@ const ROLES: Record<
   "share/migrations.json": "migrations",
   "share/NOTICES.txt": "notices",
   "share/service/octant.service.template": "service-template",
+  "lib/runtime/bun": "runtime",
 };
 
 const roots: string[] = [];

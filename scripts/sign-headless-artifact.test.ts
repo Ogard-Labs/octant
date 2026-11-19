@@ -49,6 +49,7 @@ async function builtArtifact() {
     ["migrations", "share/migrations.json", '{"storeVersion":1}\n'],
     ["notices", "share/NOTICES.txt", "third-party notices\n"],
     ["service-template", "share/service/octant.service.template", "[Unit]\n"],
+    ["runtime", "lib/runtime/bun", "runtime-bytes"],
   ];
   const components = files.map(([role, path, body]) => {
     const source = join(base, "sources", path.replaceAll("/", "_"));

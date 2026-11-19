@@ -24,7 +24,7 @@ describe("headless install smoke isolation", () => {
     );
   });
 
-  it("gives the installed CLI no module search path from the caller's shell", () => {
+  it("gives the installed CLI no module search path and no Bun from the caller's shell", () => {
     const environment = installedCliEnvironment({
       source: {
         HOME: "/home/person",
@@ -32,13 +32,12 @@ describe("headless install smoke isolation", () => {
         OCTANT_SERVER_ROOT: "/home/person/checkout/apps/server",
         XDG_RUNTIME_DIR: "/run/user/1000",
       },
-      bunDirectory: "/home/person/.bun/bin",
       dataDirectory: "/tmp/prefix/data",
       port: 14_001,
     });
     expect(environment).toEqual({
       HOME: "/home/person",
-      PATH: "/home/person/.bun/bin:/usr/bin:/bin",
+      PATH: "/usr/bin:/bin",
       OCTANT_DATA_DIR: "/tmp/prefix/data",
       OCTANT_SERVER_PORT: "14001",
       XDG_RUNTIME_DIR: "/run/user/1000",
