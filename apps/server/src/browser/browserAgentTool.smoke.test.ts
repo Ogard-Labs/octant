@@ -346,6 +346,57 @@ beforeAll(async () => {
         <script>setTimeout(() => { location.href = "http://127.0.0.1:${String(port)}/local-frame"; }, 300);</script>`);
       return;
     }
+    // The same committed cross-site frame, moving itself to a public name that
+    // redirects onto this computer: the hop's first leg leaves its process, so
+    // only the browser-wide session can pause the redirect onto a local name.
+    if (path === "/pub-oopif-hop") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Public framed</title><p>Public framed page</p>
+        <iframe title="Mover" src="http://x.elsewhere.test:${String(port)}/inner-mover-hop"></iframe>`);
+      return;
+    }
+    if (path === "/inner-mover-hop") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Inner mover</title><p>Elsewhere frame</p>
+        <script>setTimeout(() => { location.href = "http://b.octant.test:${String(port)}/r-oopif"; }, 300);</script>`);
+      return;
+    }
+    if (path === "/r-oopif") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(302, {
+        location: `http://127.0.0.1:${String(port)}/local-oopif-hop`,
+      });
+      response.end();
+      return;
+    }
+    if (path === "/local-oopif-hop") {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end("<!doctype html><title>Local oopif</title><p>Local intranet landing</p>");
+      return;
+    }
+    // A popup opened onto a public name that redirects onto this computer.
+    if (path === "/pub-popup-hop") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Public popup</title><p>Public popup page</p>
+        <button id="pop" onclick="window.open('http://x.elsewhere.test:${String(port)}/r-popup')">Open</button>`);
+      return;
+    }
+    if (path === "/r-popup") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(302, {
+        location: `http://127.0.0.1:${String(port)}/local-popup-hop`,
+      });
+      response.end();
+      return;
+    }
+    if (path === "/local-popup-hop") {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end("<!doctype html><title>Local popup</title><p>Local intranet panel</p>");
+      return;
+    }
     if (path === "/pub-popup") {
       const port = (server.address() as AddressInfo).port;
       response.writeHead(200, { "content-type": "text/html" });
@@ -2585,6 +2636,15 @@ describe.skipIf(!available)("the headless Browser's page-started local-navigatio
     await tool.stop();
   });
 
+  it("refuses a cross-site frame's redirect hop onto this computer", async () => {
+    const tool = localTool();
+    await tool.call({ operation: "navigate", url: named("a.octant.test", "/pub-oopif-hop") });
+    const before = hitCount("/local-oopif-hop");
+    await settle();
+    expect(hitCount("/local-oopif-hop")).toBe(before);
+    await tool.stop();
+  });
+
   it("lets the agent's named local page continue on its exact origin and nowhere else", async () => {
     const tool = localTool();
     await tool.call({ operation: "navigate", url: named("127.0.0.1", "/local") });
@@ -2645,6 +2705,17 @@ describe.skipIf(!available)("the headless Browser's page-started local-navigatio
     await tool.call({ operation: "click", ref: refFor(outline, /button "Open"/) });
     await settle();
     expect(hitCount("/local-popup")).toBe(before);
+    await tool.stop();
+  });
+
+  it("refuses a popup's redirect hop onto this computer", async () => {
+    const tool = localTool();
+    await tool.call({ operation: "navigate", url: named("a.octant.test", "/pub-popup-hop") });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot ?? "";
+    const before = hitCount("/local-popup-hop");
+    await tool.call({ operation: "click", ref: refFor(outline, /button "Open"/) });
+    await settle();
+    expect(hitCount("/local-popup-hop")).toBe(before);
     await tool.stop();
   });
 });

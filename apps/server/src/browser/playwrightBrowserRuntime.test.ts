@@ -28,7 +28,12 @@ const policy = {
  * test's runtime code opens. Listeners are kept per event and sends recorded;
  * `paused` emits a Fetch.requestPaused for the guard.
  */
-function fakeProtocolSession() {
+function fakeProtocolSession(
+  options: {
+    readonly browserContextId?: string;
+    readonly targets?: ReadonlyMap<string, { readonly browserContextId?: string }>;
+  } = {},
+) {
   const listeners = new Map<string, (parameters: unknown) => void>();
   const sent: Array<{ method: string; parameters?: Record<string, unknown> | undefined }> = [];
   const session = {
@@ -36,6 +41,15 @@ function fakeProtocolSession() {
       sent.push({ method, parameters });
       if (method === "Page.getFrameTree") {
         return { frameTree: { frame: { id: "frame-main", url: "about:blank" } } };
+      }
+      if (method === "Target.getTargetInfo") {
+        const targetId = parameters?.targetId;
+        if (targetId === undefined) {
+          return { targetInfo: { browserContextId: options.browserContextId ?? "bc" } };
+        }
+        const found = options.targets?.get(String(targetId));
+        if (found === undefined) throw new Error(`No target ${String(targetId)}`);
+        return { targetInfo: { browserContextId: found.browserContextId } };
       }
       return undefined;
     }),
@@ -51,7 +65,7 @@ function fakeProtocolSession() {
   return session;
 }
 
-function fakePage(name: string): PlaywrightPagePort {
+function fakePage(name: string, browserContextId = "bc"): PlaywrightPagePort {
   let url = "about:blank";
   let title = name;
   let viewport = { width: 1280, height: 720 };
@@ -105,7 +119,7 @@ function fakePage(name: string): PlaywrightPagePort {
     on: vi.fn(),
     context: () => ({
       newCDPSession: vi.fn(async () => {
-        const session = fakeProtocolSession();
+        const session = fakeProtocolSession({ browserContextId });
         sessions.push(session);
         return session;
       }),
@@ -167,9 +181,14 @@ function harness() {
   }));
   const created = [...contexts];
   let disconnected: (() => void) | undefined;
+  // What the browser-wide session's Target.getTargetInfo answers per frame id;
+  // a test fills it with the out-of-process frames and popups it pauses.
+  const browserTargets = new Map<string, { readonly browserContextId?: string }>();
+  const browserSession = fakeProtocolSession({ targets: browserTargets });
   const browser: PlaywrightBrowserPort = {
     pid: 4321,
     newContext: vi.fn(async () => contexts.shift()!),
+    newBrowserCDPSession: vi.fn(async () => browserSession),
     close: vi.fn(async () => undefined),
     on: (_event, listener) => {
       disconnected = listener;
@@ -183,6 +202,8 @@ function harness() {
   });
   return {
     browser,
+    browserSession,
+    browserTargets,
     contexts: created,
     disconnected: () => disconnected?.(),
     launch,
@@ -287,6 +308,7 @@ describe("PlaywrightBrowserRuntime", () => {
           newPage: vi.fn(async () => pages[0]!),
           close: vi.fn(async () => undefined),
         })),
+        newBrowserCDPSession: vi.fn(async () => fakeProtocolSession()),
         close: vi.fn(async () => undefined),
         on: vi.fn(),
       };
@@ -323,6 +345,7 @@ describe("PlaywrightBrowserRuntime", () => {
           newPage: vi.fn(async () => pages[0]!),
           close: vi.fn(async () => undefined),
         })),
+        newBrowserCDPSession: vi.fn(async () => fakeProtocolSession()),
         close: vi.fn(async () => undefined),
         on: vi.fn(),
       };
@@ -884,6 +907,7 @@ function harnessWithReceipt(options: {
   const browser: PlaywrightBrowserPort = {
     pid: 4321,
     newContext: vi.fn(async () => contexts.shift()!),
+    newBrowserCDPSession: vi.fn(async () => fakeProtocolSession()),
     close: vi.fn(async () => undefined),
     on: (_event, listener) => {
       disconnected = listener;
@@ -938,6 +962,9 @@ async function recordingHarness(options: { readonly startFrame?: boolean } = {})
       // The navigation guard opens first; it needs the frame tree to attach.
       if (method === "Page.getFrameTree") {
         return { frameTree: { frame: { id: "frame-main", url: "about:blank" } } };
+      }
+      if (method === "Target.getTargetInfo") {
+        return { targetInfo: { browserContextId: "bc" } };
       }
       // A page that does not repaint sends one frame as the screencast starts,
       // and starting a recording waits for it to be looked at.
@@ -1044,6 +1071,8 @@ describe("bounded headless element feedback", () => {
       switch (method) {
         case "Page.getFrameTree":
           return { frameTree: { frame: { id: "top", loaderId: "document-1", url: page.url() } } };
+        case "Target.getTargetInfo":
+          return { targetInfo: { browserContextId: "bc" } };
         case "Page.getLayoutMetrics":
           return {
             cssVisualViewport: {
@@ -1403,5 +1432,153 @@ describe("the headless page-started navigation guard", () => {
       f.runtime.act(firstId, action("navigate", local), new AbortController().signal),
     ).rejects.toThrow();
     expect(vi.mocked(page.close)).toHaveBeenCalled();
+  });
+});
+
+describe("the browser-wide document guard", () => {
+  const local = "http://127.0.0.1:4101/";
+
+  async function guardedTab() {
+    const f = harness();
+    const signal = new AbortController().signal;
+    await f.runtime.createContext(firstId, { ...policy, allowedOrigins: ["*"] }, signal);
+    // The browser-wide handler resolves targets asynchronously, so an emitted
+    // pause lands in `sent` one tick later.
+    const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const pause = (paused: {
+      requestId: string;
+      url: string;
+      frameId?: string;
+      redirectedRequestId?: string;
+    }) => pausedDocument(f.browserSession, paused);
+    const continued = () =>
+      sentCalls(f.browserSession, "Fetch.continueRequest").map(
+        (parameters) => parameters?.requestId,
+      );
+    const refused = () =>
+      sentCalls(f.browserSession, "Fetch.fulfillRequest").map(
+        (parameters) => parameters?.requestId,
+      );
+    return { ...f, signal, flush, pause, continued, refused };
+  }
+
+  it("arms its session before the first context opens", async () => {
+    const f = await guardedTab();
+    expect(sentCalls(f.browserSession, "Fetch.enable")).toEqual([
+      { patterns: [{ urlPattern: "*", resourceType: "Document", requestStage: "Request" }] },
+    ]);
+    expect(vi.mocked(f.browser.newBrowserCDPSession)).toHaveBeenCalledOnce();
+    await f.runtime.closeAll();
+  });
+
+  it("defers a guarded tab's own main frame to the tab's guard", async () => {
+    const f = await guardedTab();
+    f.pause({ requestId: "r1", url: local, frameId: "frame-main" });
+    await f.flush();
+    expect(f.continued()).toContain("r1");
+    // It never resolves the frame: the tab's own session is judging this hop.
+    expect(sentCalls(f.browserSession, "Target.getTargetInfo")).toEqual([]);
+    await f.runtime.closeAll();
+  });
+
+  it("refuses an out-of-process frame's redirect hop onto this computer", async () => {
+    const f = await guardedTab();
+    f.browserTargets.set("frame-oopif", { browserContextId: "bc" });
+    f.pause({
+      requestId: "r1",
+      url: "https://away.example.net/",
+      frameId: "frame-oopif",
+    });
+    f.pause({
+      requestId: "r2",
+      url: local,
+      frameId: "frame-oopif",
+      redirectedRequestId: "r1",
+    });
+    await f.flush();
+    expect(f.continued()).toContain("r1");
+    expect(f.refused()).toContain("r2");
+    await f.runtime.closeAll();
+  });
+
+  it("admits an out-of-process frame's hop to the context's only origin", async () => {
+    const f = harness();
+    await f.runtime.createContext(
+      firstId,
+      { ...policy, allowedOrigins: ["http://127.0.0.1:4101"] },
+      new AbortController().signal,
+    );
+    f.browserTargets.set("frame-oopif", { browserContextId: "bc" });
+    pausedDocument(f.browserSession, { requestId: "r1", url: local, frameId: "frame-oopif" });
+    pausedDocument(f.browserSession, {
+      requestId: "r2",
+      url: "http://192.168.1.5:4101/",
+      frameId: "frame-oopif",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(
+      sentCalls(f.browserSession, "Fetch.continueRequest").map(
+        (parameters) => parameters?.requestId,
+      ),
+    ).toContain("r1");
+    expect(
+      sentCalls(f.browserSession, "Fetch.fulfillRequest").map(
+        (parameters) => parameters?.requestId,
+      ),
+    ).toContain("r2");
+    await f.runtime.closeAll();
+  });
+
+  it("continues a frame that is not a target of its own", async () => {
+    const f = await guardedTab();
+    // An in-process subframe's id resolves to no target; the tab's page
+    // session already judges it.
+    f.pause({ requestId: "r1", url: local, frameId: "frame-sub" });
+    await f.flush();
+    expect(f.continued()).toContain("r1");
+    await f.runtime.closeAll();
+  });
+
+  it("refuses a hop onto this computer from a context it does not own", async () => {
+    const f = await guardedTab();
+    f.browserTargets.set("frame-popup", { browserContextId: "bc-elsewhere" });
+    f.pause({ requestId: "r1", url: local, frameId: "frame-popup" });
+    f.pause({ requestId: "r2", url: "https://away.example.net/", frameId: "frame-popup" });
+    await f.flush();
+    expect(f.refused()).toContain("r1");
+    expect(f.continued()).toContain("r2");
+    await f.runtime.closeAll();
+  });
+
+  it("refuses a document request the guard could not judge", async () => {
+    const f = await guardedTab();
+    f.browserSession.emit("Fetch.requestPaused", {
+      requestId: "unjudgeable",
+      frameId: "frame-oopif",
+      get request() {
+        throw new Error("unreadable event");
+      },
+    });
+    await f.flush();
+    expect(f.refused()).toContain("unjudgeable");
+    await f.runtime.closeAll();
+  });
+
+  it("fails the launch rather than run a browser it cannot guard", async () => {
+    const f = harness();
+    const openBrowserSession = vi.mocked(f.browser.newBrowserCDPSession);
+    if (openBrowserSession === undefined) throw new Error("No browser session fixture");
+    openBrowserSession.mockImplementationOnce(async () => {
+      throw new Error("protocol unavailable");
+    });
+    await expect(
+      f.runtime.createContext(
+        firstId,
+        { ...policy, allowedOrigins: ["*"] },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("protocol unavailable");
+    expect(vi.mocked(f.browser.close)).toHaveBeenCalled();
+    expect(vi.mocked(f.browser.newContext)).not.toHaveBeenCalled();
   });
 });

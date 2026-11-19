@@ -255,6 +255,12 @@ export interface PlaywrightContextPort {
 
 export interface PlaywrightBrowserPort {
   newContext(options?: { readonly ignoreHTTPSErrors: true }): Promise<PlaywrightContextPort>;
+  /**
+   * A browser-scoped protocol session: the only channel that sees an
+   * out-of-process frame's or a popup's redirect hops, which neither a page
+   * session nor `context.route` reports.
+   */
+  newBrowserCDPSession?(): Promise<PlaywrightProtocolSessionPort>;
   close(): Promise<void>;
   on(event: "disconnected", listener: () => void): void;
   readonly pid?: number;
@@ -323,6 +329,13 @@ interface OwnedRuntimeContext {
   openingTab: boolean;
   /** Last top-level navigation the allowlist refused during the current action. */
   blockedNavigationUrl: string | undefined;
+  /**
+   * The Chromium browser context every guarded tab of this context lives in,
+   * read off the first tab's own target. The browser-wide guard judges hops
+   * by it: a frame resolving to another context, or to none it knows, gets no
+   * allowance this context earned.
+   */
+  browserContextId?: string;
   /**
    * What the page reported since the last diagnostics read. Bounded on write,
    * not on read: a page that logs in a loop must not grow this without limit
@@ -491,11 +504,10 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
           return;
         }
         // An adopted tab's own protocol guard judges its main-frame document
-        // hops before they are sent. A subframe hop is judged here instead: the
-        // guard never pauses a committed out-of-process frame's own moves, and
-        // subframes never earn the named or exact-origin continuation anyway,
-        // so the refusal verdict is the same. A page with no guard — a popup
-        // not yet closed — gets the same treatment.
+        // hops before they are sent, and the browser-wide session judges the
+        // hops no tab's guard reaches. A hop still refused here carries the
+        // same verdict: subframes and popups never earn the named or
+        // exact-origin continuation.
         if (
           request.isNavigationRequest() &&
           refusesPageNavigation(request.url(), policy.allowedOrigins)
@@ -1373,6 +1385,14 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     this.#launching = this.#options
       .launch(executablePath, (process) => this.#persistBrowserProcess(process))
       .then(async (browser) => {
+        try {
+          await this.#armBrowserNavigationGuard(browser);
+        } catch (error) {
+          // A browser whose out-of-process hops cannot be judged is unowned:
+          // close it so no context ever runs under a missing guard.
+          await browser.close().catch(() => undefined);
+          throw error;
+        }
         this.#browser = browser;
         browser.on("disconnected", () => {
           if (this.#browser !== browser) return;
@@ -1673,9 +1693,119 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       throw new Error("Browser navigation guard is unavailable.");
     }
     nav.mainFrameId = mainFrameId;
+    // The browser-wide guard maps a paused frame to a Chromium browser context,
+    // so this tab's context must carry the id and every tab in it must agree.
+    const self = (await session.send("Target.getTargetInfo")) as
+      | { targetInfo?: { browserContextId?: unknown } }
+      | undefined;
+    const browserContextId = self?.targetInfo?.browserContextId;
+    if (
+      typeof browserContextId !== "string" ||
+      (owned.browserContextId !== undefined && owned.browserContextId !== browserContextId)
+    ) {
+      await session.detach?.().catch(() => undefined);
+      throw new Error("Browser navigation guard is unavailable.");
+    }
+    owned.browserContextId = browserContextId;
     await session.send("Fetch.enable", {
       patterns: [{ urlPattern: "*", resourceType: "Document", requestStage: "Request" }],
     });
+  }
+
+  /**
+   * The browser-wide session that judges the document hops a tab's own page
+   * session never sees: an out-of-process frame's hops — including its
+   * redirect hops, which neither a page session nor `context.route` reports —
+   * and a popup's. Installed before any context opens; an unavailable or
+   * refused session leaves the browser unlaunched rather than unguarded.
+   */
+  async #armBrowserNavigationGuard(browser: PlaywrightBrowserPort): Promise<void> {
+    const opening = browser.newBrowserCDPSession?.();
+    if (opening === undefined) throw new Error("Browser navigation guard is unavailable.");
+    const session = await opening;
+    if (session.on === undefined) {
+      await session.detach?.().catch(() => undefined);
+      throw new Error("Browser navigation guard is unavailable.");
+    }
+    session.on("Fetch.requestPaused", (parameters) => {
+      void this.#answerBrowserPausedDocument(session, parameters);
+    });
+    await session.send("Fetch.enable", {
+      patterns: [{ urlPattern: "*", resourceType: "Document", requestStage: "Request" }],
+    });
+  }
+
+  /** Every browser-wide pause is answered; a failure while judging refuses. */
+  async #answerBrowserPausedDocument(
+    session: PlaywrightProtocolSessionPort,
+    parameters: unknown,
+  ): Promise<void> {
+    const paused = (parameters ?? {}) as PausedDocumentRequest;
+    const requestId = paused.requestId;
+    if (requestId === undefined) return;
+    let admitted = true;
+    try {
+      admitted = await this.#admitBrowserDocumentHop(session, paused);
+    } catch {
+      admitted = false;
+    }
+    await session
+      .send(
+        admitted ? "Fetch.continueRequest" : "Fetch.fulfillRequest",
+        admitted ? { requestId } : { requestId, responseCode: 204 },
+      )
+      .catch(() =>
+        session
+          .send("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" })
+          .catch(() => undefined),
+      );
+  }
+
+  /**
+   * Judges a document hop the browser-wide session paused. A guarded tab's own
+   * main frame defers to the tab's guard; an in-process subframe is already
+   * judged there. Everything else — an out-of-process frame, a popup, a page
+   * in a context this runtime does not own — is judged by the plain address
+   * rule, with no named-load exception and no same-origin continuation: it
+   * never inherited them. `blockedNavigationUrl` stays unset: these hops are
+   * not the front tab's main frame.
+   */
+  async #admitBrowserDocumentHop(
+    session: PlaywrightProtocolSessionPort,
+    paused: PausedDocumentRequest,
+  ): Promise<boolean> {
+    const target = paused.request?.url;
+    if (typeof target !== "string" || !/^https?:/i.test(target)) return true;
+    const frameId = paused.frameId;
+    if (frameId !== undefined && this.#guardedMainFrame(frameId)) return true;
+    let browserContextId: string | undefined;
+    try {
+      const info = (await session.send("Target.getTargetInfo", { targetId: frameId })) as
+        | { targetInfo?: { browserContextId?: unknown } }
+        | undefined;
+      const resolved = info?.targetInfo?.browserContextId;
+      browserContextId = typeof resolved === "string" ? resolved : undefined;
+    } catch {
+      // A frame id that is not a target of its own is an in-process subframe,
+      // which the tab's page session already judges. Let it through.
+      return true;
+    }
+    const owned =
+      browserContextId === undefined
+        ? undefined
+        : [...this.#contexts.values()].find(
+            (candidate) =>
+              candidate.browserContextId === browserContextId && candidate.tabs.length > 0,
+          );
+    if (owned === undefined) return !onThisComputerOrNetwork(target);
+    return !refusesPageNavigation(target, owned.allowedOrigins);
+  }
+
+  /** Whether `frameId` is the main frame of a tab whose own guard is armed. */
+  #guardedMainFrame(frameId: string): boolean {
+    for (const owned of this.#contexts.values())
+      for (const tab of owned.tabs) if (tab.navigation.mainFrameId === frameId) return true;
+    return false;
   }
 
   /** The tabs as they now stand, after a tab action, with the one in front. */
