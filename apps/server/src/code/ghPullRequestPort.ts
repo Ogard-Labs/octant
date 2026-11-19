@@ -1509,7 +1509,8 @@ function decodeIssueClosure(
       isRecord(closerRepository.owner) &&
       typeof closerRepository.owner.login === "string" &&
       closerRepository.owner.login.toLowerCase() === owner.toLowerCase() &&
-      closerRepository.name === name &&
+      typeof closerRepository.name === "string" &&
+      closerRepository.name.toLowerCase() === name.toLowerCase() &&
       typeof node.createdAt === "string" &&
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(node.createdAt)
     ) {

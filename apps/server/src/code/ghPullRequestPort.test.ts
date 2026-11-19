@@ -1146,3 +1146,44 @@ describe("GhPullRequestPort active list", () => {
     ).resolves.toEqual({ status: "disconnected" });
   });
 });
+
+describe("GhPullRequestPort issue closure", () => {
+  it("confirms the closer when the Project's casing differs from GitHub's canonical casing", async () => {
+    const { port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              issue: {
+                title: "The real bug",
+                timelineItems: {
+                  pageInfo: { hasPreviousPage: false },
+                  nodes: [
+                    {
+                      createdAt: "2026-08-22T09:00:00Z",
+                      closer: {
+                        number: 12,
+                        repository: {
+                          owner: { login: "octant" },
+                          name: "octant",
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+      },
+    ]);
+
+    const closure = await port.observeIssueClosure(
+      { owner: "Octant", name: "OCTANT", issueNumber: 34, closerNumber: 12 },
+      new AbortController().signal,
+    );
+
+    expect(closure).toEqual({ closedAt: "2026-08-22T09:00:00Z", title: "The real bug" });
+  });
+});
