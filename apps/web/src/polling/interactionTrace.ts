@@ -1,9 +1,14 @@
 /**
- * Local, opt-in interaction marks. They never leave the process and do not
+ * Local, opt-in interaction marks. They never leave the machine and do not
  * run unless `OCTANT_PERF_TRACE=1` is set on the process or
  * `globalThis.__OCTANT_PERF_TRACE` is true. Layers distinguish host/server
  * work from renderer work from native-window work from provider/network time
  * without shipping product telemetry.
+ *
+ * Each mark is also written as one `octant-perf <layer>:<name> <epoch-ms>`
+ * console line so the desktop host — which keeps its own marks on stderr for
+ * the packaged launch benchmark — can relay renderer marks the same way. In a
+ * browser the line only reaches the page's own console.
  */
 export type InteractionLayer = "host" | "server" | "renderer" | "native-window" | "provider";
 
@@ -42,6 +47,7 @@ export function markInteraction(layer: InteractionLayer, name: string): void {
   if (typeof performance.mark === "function") {
     performance.mark(`octant:${layer}:${name}`);
   }
+  console.debug(`octant-perf ${layer}:${name} ${Math.round(performance.timeOrigin + at)}`);
 }
 
 export function markInteractionAfterPaint(name: string): void {

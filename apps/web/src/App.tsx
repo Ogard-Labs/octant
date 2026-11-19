@@ -931,6 +931,9 @@ function LaunchedShell(
       delete root.dataset.octantHostVibrancy;
     };
   }, [hostSidebarVibrancyActive]);
+  // First committed paint of the launched shell; the opt-in launch benchmark
+  // reads `shell-committed-painted` off the host's mark stream.
+  useEffect(() => markInteractionAfterPaint("shell-committed"), []);
   const viewportIsNarrow = useNarrowViewport();
   const isNarrow = props.isNarrow ?? viewportIsNarrow;
   // Whether the workspace holds the Environment section beside a tool column.
@@ -1979,6 +1982,16 @@ function LaunchedShell(
       ),
     [chatController.navigation, chatController.status],
   );
+  // The launch benchmark's "usable" moment: the composer the launch shows —
+  // the draft workspace's, enabled unless a thread creation is in flight — is
+  // mounted, and the Chat bootstrap has answered, which is what the controller
+  // reporting ready means. Painted, not committed, so the mark lands after the
+  // frame a person could act on.
+  useEffect(() => {
+    if (chatController.status === "ready" && !draftCreating) {
+      markInteractionAfterPaint("usable");
+    }
+  }, [chatController.status, draftCreating]);
   const createCodeOperationId = useCallback(
     () => globalThis.crypto.randomUUID() as CodeOperationId,
     [],
