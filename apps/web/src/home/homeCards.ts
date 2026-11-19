@@ -154,7 +154,7 @@ export function setHomeCardVisible(
   if (definition === undefined) return customization;
   const others = customization.visibility.filter((entry) => entry.id !== id);
   return {
-    order: customization.order,
+    ...customization,
     visibility: visible === definition.defaultOn ? others : [...others, { id, visible }],
   };
 }
@@ -180,5 +180,5 @@ export function moveHomeCard(
   const next = arranged.filter((candidate) => candidate !== id);
   next.splice(to, 0, id);
   const unseen = customization.order.filter((candidate) => !next.includes(candidate));
-  return { order: [...next, ...unseen], visibility: customization.visibility };
+  return { ...customization, order: [...next, ...unseen] };
 }

@@ -248,6 +248,65 @@ export const ActivityView = Schema.Struct({
 }).annotations(strict);
 export type ActivityView = typeof ActivityView.Type;
 
+/**
+ * A calendar date as `YYYY-MM-DD` — the shape only. Whether the day exists
+ * and which of two dates comes first is the domain's call, checked before a
+ * range is ever resolved.
+ */
+export const ActivityCalendarDate = Schema.String.pipe(Schema.pattern(/^\d{4}-\d{2}-\d{2}$/));
+
+/** A named timeframe or an explicit pair of local calendar dates. */
+export const ActivityRangeChoice = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal(
+      "today",
+      "last-24-hours",
+      "yesterday",
+      "this-week",
+      "this-month",
+      "last-month",
+      "this-year",
+      "total",
+    ),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("custom"),
+    startDate: ActivityCalendarDate,
+    endDate: ActivityCalendarDate,
+  }),
+).annotations(strict);
+export type ActivityRangeChoice = typeof ActivityRangeChoice.Type;
+
+/** One card pinned to its own timeframe instead of the shared one. */
+export const HomeActivityPin = Schema.Struct({
+  card: ActivityKind,
+  range: ActivityRangeChoice,
+}).annotations(strict);
+export type HomeActivityPin = typeof HomeActivityPin.Type;
+
+export const HOME_ACTIVITY_MAX_PINS = 4;
+
+/**
+ * The person's Code Home activity choices, kept per device inside the
+ * home-card customization: a shared timeframe, which history feeds the
+ * cards, and up to four cards pinned to their own timeframe. A pin may name
+ * each card only once.
+ */
+export const HomeActivityCustomization = Schema.Struct({
+  sharedRange: ActivityRangeChoice,
+  source: ActivityCardSource,
+  pins: Schema.Array(HomeActivityPin).pipe(Schema.maxItems(HOME_ACTIVITY_MAX_PINS)),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (customization) =>
+        new Set(customization.pins.map((pin) => pin.card)).size === customization.pins.length,
+      { message: () => "A pin may name a card only once." },
+    ),
+  );
+export type HomeActivityCustomization = typeof HomeActivityCustomization.Type;
+
 export const decodeActivityQuery = Schema.decodeUnknownSync(ActivityQuery);
 export const encodeActivityQuery = Schema.encodeSync(ActivityQuery);
 export const decodeActivityView = Schema.decodeUnknownSync(ActivityView);

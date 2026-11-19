@@ -408,6 +408,56 @@ describe("shell bootstrap contracts", () => {
     expect(decodeShellSettings(predatesTheCards).homeCards).toEqual({ order: [], visibility: [] });
   });
 
+  it("round-trips the activity cards' shared range, source and pinned ranges", () => {
+    const activity = {
+      sharedRange: { kind: "last-month" },
+      source: "octant",
+      pins: [
+        { card: "runs", range: { kind: "last-24-hours" } },
+        {
+          card: "prs-merged",
+          range: { kind: "custom", startDate: "2026-08-01", endDate: "2026-08-14" },
+        },
+      ],
+    };
+    const customized = {
+      ...settings,
+      homeCards: {
+        order: ["activity-runs", "activity-prs-merged"],
+        visibility: [{ id: "activity-prs-merged", visible: false }],
+        activity,
+      },
+    };
+    const decoded = decodeShellSettings(customized);
+    expect(decoded.homeCards.order).toEqual(["activity-runs", "activity-prs-merged"]);
+    expect(decoded.homeCards.visibility).toEqual([{ id: "activity-prs-merged", visible: false }]);
+    expect(decoded.homeCards.activity).toEqual(activity);
+  });
+
+  it("decodes a legacy store that never recorded activity choices without inventing them", () => {
+    expect(decodeShellSettings(settings).homeCards.activity).toBeUndefined();
+  });
+
+  it("refuses a second pin on the same activity card", () => {
+    expect(() =>
+      decodeShellSettings({
+        ...settings,
+        homeCards: {
+          order: [],
+          visibility: [],
+          activity: {
+            sharedRange: { kind: "this-week" },
+            source: "github",
+            pins: [
+              { card: "runs", range: { kind: "today" } },
+              { card: "runs", range: { kind: "total" } },
+            ],
+          },
+        },
+      }),
+    ).toThrow();
+  });
+
   it("decodes a store that never recorded the update-check preference to checks off", () => {
     const { automaticUpdateChecks: _omitted, ...withoutUpdateChecks } = settings;
     expect(decodeShellSettings(withoutUpdateChecks).automaticUpdateChecks).toBe(false);

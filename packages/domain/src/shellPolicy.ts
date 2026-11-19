@@ -767,6 +767,15 @@ export function replaceShellSettings(
 ): ShellSettings {
   return {
     ...replacement,
+    // An older client replacing the whole document writes order and
+    // visibility but no activity section; dropping the stored choices would
+    // silently reset pins the person made on a newer client.
+    homeCards: {
+      ...replacement.homeCards,
+      ...(replacement.homeCards.activity !== undefined || current.homeCards.activity === undefined
+        ? {}
+        : { activity: current.homeCards.activity }),
+    },
     firstRunOnboarding: resolveFirstRunOnboarding(
       current.firstRunOnboarding,
       replacement.firstRunOnboarding,

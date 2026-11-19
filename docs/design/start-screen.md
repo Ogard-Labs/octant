@@ -575,6 +575,12 @@ only to a comparison. An older read still in flight cannot restore those
 records, and the initial view is refused the same way when the admitted
 Project or repository set itself changes while the read is gathered.
 
+The choices are per device and travel inside the existing card
+order/visibility store: every card follows one shared timeframe, **This
+week** by default, reads the signed-in GitHub account by default, and up
+to four cards may be pinned to their own timeframe. No UI exposes these
+choices yet.
+
 A timeframe resolves to a half-open
 `[start, end)` instant window plus an optional comparison window in the
 person's own time zone and week start (Sunday = 0 through Saturday = 6).

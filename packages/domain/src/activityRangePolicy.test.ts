@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { HomeActivityCustomization } from "@octant/contracts/code-home-activity";
 import {
+  activityRangeForCard,
+  DEFAULT_HOME_ACTIVITY,
   isActivityCalendarDate,
   resolveActivityRange,
   type ActivityRange,
@@ -424,5 +427,49 @@ describe("resolveActivityRange", () => {
       endMs: ms("2018-11-04T03:00:00.000Z"),
     });
     expect(result.comparison).toBeNull();
+  });
+});
+
+describe("activityRangeForCard", () => {
+  it("reads a store with no recorded choices as this week from GitHub", () => {
+    expect(DEFAULT_HOME_ACTIVITY).toEqual({
+      sharedRange: { kind: "this-week" },
+      source: "github",
+      pins: [],
+    });
+    expect(activityRangeForCard(DEFAULT_HOME_ACTIVITY, "runs")).toEqual({
+      kind: "this-week",
+    });
+  });
+
+  it("returns the shared range for every card the person did not pin", () => {
+    const settings: HomeActivityCustomization = {
+      sharedRange: { kind: "last-month" },
+      source: "octant",
+      pins: [{ card: "runs", range: { kind: "today" } }],
+    };
+    expect(activityRangeForCard(settings, "prs-merged")).toEqual({ kind: "last-month" });
+    expect(activityRangeForCard(settings, "issues-closed")).toEqual({ kind: "last-month" });
+    expect(activityRangeForCard(settings, "releases-published")).toEqual({
+      kind: "last-month",
+    });
+  });
+
+  it("returns a card's own pinned range", () => {
+    const settings: HomeActivityCustomization = {
+      sharedRange: { kind: "this-week" },
+      source: "github",
+      pins: [
+        {
+          card: "issues-closed",
+          range: { kind: "custom", startDate: "2026-08-01", endDate: "2026-08-14" },
+        },
+      ],
+    };
+    expect(activityRangeForCard(settings, "issues-closed")).toEqual({
+      kind: "custom",
+      startDate: "2026-08-01",
+      endDate: "2026-08-14",
+    });
   });
 });
