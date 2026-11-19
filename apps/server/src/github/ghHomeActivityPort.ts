@@ -1,9 +1,9 @@
 import {
   type GhCommandPort,
   type GhCommandResult,
-  sanitizeGhEnvironment,
   validRepository,
 } from "../code/ghPullRequestPort";
+import { sanitizedEnvironment } from "./ghAuthenticationPort";
 
 /**
  * Bounded read-only GitHub history for the Code Home forge seam. Every row
@@ -123,7 +123,7 @@ export class GhHomeActivityPort {
     readonly isEffective?: () => boolean;
   }) {
     this.#command = options.command;
-    this.#environment = sanitizeGhEnvironment(options.inheritedEnvironment ?? process.env);
+    this.#environment = sanitizedEnvironment(options.inheritedEnvironment ?? process.env);
     this.#isEffective = options.isEffective ?? (() => true);
   }
 
@@ -297,10 +297,13 @@ export class GhHomeActivityPort {
     arguments_: readonly string[],
     signal: AbortSignal,
   ): Promise<GhCommandResult | undefined> {
-    if (!this.#isEffective()) return undefined;
+    if (signal.aborted || !this.#isEffective()) return undefined;
     try {
+      // The allowlisted environment carries no GH_HOST, so the hostname is
+      // pinned on the command line: an ambient enterprise host could
+      // otherwise redirect this read at the wrong GitHub.
       return await this.#command.run(
-        arguments_,
+        [...arguments_, "--hostname", "github.com"],
         {
           environment: this.#environment,
           stdin: undefined,

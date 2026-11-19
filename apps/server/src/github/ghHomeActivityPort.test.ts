@@ -5,12 +5,21 @@ import { GhHomeActivityPort } from "./ghHomeActivityPort";
 
 const signal = new AbortController().signal;
 
-function fixture(results: ReadonlyArray<GhCommandResult>) {
+function fixture(
+  results: ReadonlyArray<GhCommandResult>,
+  inheritedEnvironment?: NodeJS.ProcessEnv,
+) {
   const queue = [...results];
   const command: GhCommandPort = {
     run: vi.fn(async () => queue.shift() ?? { exitCode: 1, stdout: "" }),
   };
-  return { command, port: new GhHomeActivityPort({ command }) };
+  return {
+    command,
+    port: new GhHomeActivityPort({
+      command,
+      ...(inheritedEnvironment === undefined ? {} : { inheritedEnvironment }),
+    }),
+  };
 }
 
 const searchPage = (
@@ -78,7 +87,13 @@ const observe = (
 
 describe("GhHomeActivityPort", () => {
   it("asks the search for merged pull requests inside the window", async () => {
-    const { command, port } = fixture([searchPage([mergedNode()])]);
+    const { command, port } = fixture([searchPage([mergedNode()])], {
+      GH_HOST: "enterprise.example",
+      GH_TOKEN: "discard",
+      GITHUB_ENTERPRISE_TOKEN: "discard",
+      GH_CONFIG_DIR: "/config",
+      PATH: "/bin",
+    });
     const result = await observe(port, "prs-merged", "2026-08-18T00:00:00Z");
     expect(result.status).toBe("ready");
     expect(command.run).toHaveBeenCalledWith(
@@ -96,6 +111,17 @@ describe("GhHomeActivityPort", () => {
       expect.anything(),
       signal,
     );
+    // An ambient enterprise host or token never reaches the child: the
+    // allowlisted environment drops them and the call pins github.com itself.
+    const argv = vi.mocked(command.run).mock.calls[0]?.[0] ?? [];
+    const hostnameAt = argv.indexOf("--hostname");
+    expect(argv.slice(hostnameAt, hostnameAt + 2)).toEqual(["--hostname", "github.com"]);
+    const environment = vi.mocked(command.run).mock.calls[0]?.[1].environment ?? {};
+    expect(environment.GH_HOST).toBeUndefined();
+    expect(environment.GH_TOKEN).toBeUndefined();
+    expect(environment.GITHUB_ENTERPRISE_TOKEN).toBeUndefined();
+    expect(environment.GH_CONFIG_DIR).toBe("/config");
+    expect(environment.PATH).toBe("/bin");
   });
 
   it("closes the search with an upper bound when the window has one", async () => {
