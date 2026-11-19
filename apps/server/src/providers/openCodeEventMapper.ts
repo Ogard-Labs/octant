@@ -481,6 +481,10 @@ export function mapOpenCodeEvent(
     case "permission.asked": {
       const requestId = normalizeText(event.properties.id);
       const action = normalizeText(event.properties.permission);
+      const toolCallId =
+        event.properties.tool === undefined
+          ? undefined
+          : normalizeText(event.properties.tool.callID);
       return requestId === undefined || action === undefined
         ? []
         : [
@@ -489,6 +493,7 @@ export function mapOpenCodeEvent(
               requestId,
               action,
               description: "Approval is required for this action.",
+              ...(toolCallId === undefined ? {} : { toolCallId }),
             }),
           ];
     }

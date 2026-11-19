@@ -259,6 +259,79 @@ describe("CodeTurnRunner", () => {
     ]);
   });
 
+  it("stamps a host-run tool's end at the host's finish, not the request's stamp", async () => {
+    const finish = "2026-07-21T00:00:09.000Z";
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "host-call",
+            toolName: "octant_browser",
+            inputJson: "{}",
+            occurredAt: now,
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            clock: () => finish,
+            appManagedTools: {
+              definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              execute: async () => ({ result: { ok: true } }),
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    const request = observed.find(
+      (next) => next.category === "tool" && next.status === "app-managed-request",
+    );
+    const completed = observed.find(
+      (next) => next.category === "tool" && next.status === "completed",
+    );
+    expect(request?.occurredAt).toBe(now);
+    expect(completed?.occurredAt).toBe(finish);
+  });
+
+  it("forwards the provider's call identity on an approval request", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "approval-request",
+            requestId: "approval-1",
+            toolCallId: "call-9",
+            action: "Bash",
+            description: "Run tests",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    expect(observed).toContainEqual(
+      expect.objectContaining({ category: "approval", toolCallId: "call-9" }),
+    );
+  });
+
   it("cancels a pending app tool when its transport request expires without answering a stale call", async () => {
     const request = new AbortController();
     const connection = fakeConnection({
@@ -364,6 +437,114 @@ describe("CodeTurnRunner", () => {
       expect(observed.some((next) => next.category === "approval")).toBe(false);
     },
   );
+
+  it("bounds a recorded host-run call by its measured execute interval, closing before the answer's delivery and after subtracting the person wait", async () => {
+    const at = (ms: number) => new Date(Date.parse(now) + ms).toISOString();
+    // A clock the test moves: the execute interval is measured at 242
+    // seconds — 240 of them the recorded call spent waiting on the person —
+    // and the answer's own delivery takes another ten that must never join
+    // the measured interval.
+    let nowMs = 0;
+    let answerSent = false;
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "waited-call",
+            toolName: "octant_browser",
+            inputJson: "{}",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+      answerTool: vi.fn(() =>
+        Effect.promise(async () => {
+          nowMs += 10_000;
+          answerSent = true;
+        }),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            clock: () => at(nowMs),
+            appManagedTools: {
+              definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              execute: async () => ({ result: { ok: true } }),
+            },
+            toolEffects: {
+              tools: (set) => ({
+                ...set,
+                execute: (call) => {
+                  // The recorded call measured the wait inside its own run.
+                  nowMs += 242_000;
+                  call.onApprovalWait?.(240_000);
+                  return set.execute(call);
+                },
+              }),
+              observe: () => undefined,
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    expect(answerSent).toBe(true);
+    expect(observed).toContainEqual(
+      expect.objectContaining({
+        category: "tool",
+        status: "completed",
+        requestId: "waited-call",
+        callTiming: {
+          startedAt: at(0),
+          endedAt: at(242_000),
+          approvalWaitMs: 240_000,
+        },
+      }),
+    );
+  });
+
+  it("offers no call bounds for a host-run call nobody recorded", async () => {
+    const at = (ms: number) => new Date(Date.parse(now) + ms).toISOString();
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "unrecorded-call",
+            toolName: "octant_browser",
+            inputJson: "{}",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            clock: () => at(0),
+            appManagedTools: {
+              definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              execute: async () => ({ result: { ok: true } }),
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    const completed = observed.find(
+      (next) => next.category === "tool" && next.status === "completed",
+    );
+    expect(completed).toBeDefined();
+    expect(completed?.callTiming).toBeUndefined();
+  });
 
   it("records the routine an app-managed call created on that call's tool event", async () => {
     const connection = fakeConnection({

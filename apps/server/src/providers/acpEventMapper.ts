@@ -670,6 +670,9 @@ export function mapAcpPermissionRequest(
       requestId,
       action: toolKind,
       description: title,
+      // The row's own normalized id, not the agent's provider id — the wait is
+      // billed to that call alone; an unattributed ask gets none.
+      ...(tool === undefined ? {} : { toolCallId: tool.toolCallId }),
     }),
     ...withCall(
       providerApprovalCall({

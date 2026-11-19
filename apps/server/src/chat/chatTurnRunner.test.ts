@@ -26,6 +26,7 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { ChatTurnRunner } from "./chatTurnRunner";
+import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { createWebSearchTools } from "./research/webSearchTools";
 
 const now = "2026-07-19T22:00:00.000Z";
@@ -3825,6 +3826,8 @@ describe("ChatTurnRunner", () => {
         readonly result: unknown;
         readonly isError?: boolean;
       }>;
+      readonly clock?: () => string;
+      readonly toolEffects?: TurnToolEffects;
     } = {},
   ) {
     const attempts: Array<ChatAttempt> = [];
@@ -3881,6 +3884,8 @@ describe("ChatTurnRunner", () => {
           estimatedTokens: 100,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
+          ...(extra.clock === undefined ? {} : { clock: extra.clock }),
+          ...(extra.toolEffects === undefined ? {} : { toolEffects: extra.toolEffects }),
           ...(extra.toolStepLimit === undefined ? {} : { toolStepLimit: extra.toolStepLimit }),
           ...(extra.execute === undefined
             ? {}
@@ -3936,6 +3941,97 @@ describe("ChatTurnRunner", () => {
     expect(attempts.at(-1)?.toolSteps).toHaveLength(2);
   });
 
+  it("journals each call's measured bounds and the reasoning total, once each, from the provider's own stamps", async () => {
+    const { attempts, steps } = await runToolTurn([
+      {
+        kind: "reasoning-delta",
+        text: "Thinking",
+        occurredAt: "2026-08-11T12:00:00.000Z",
+      },
+      {
+        kind: "tool-start",
+        toolCallId: "call-1",
+        toolName: "Web search",
+        occurredAt: "2026-08-11T12:00:02.000Z",
+      },
+      {
+        kind: "tool-start",
+        toolCallId: "call-2",
+        toolName: "Fetch page",
+        occurredAt: "2026-08-11T12:00:03.000Z",
+      },
+      {
+        kind: "tool-success",
+        toolCallId: "call-1",
+        summary: "3 results",
+        occurredAt: "2026-08-11T12:00:05.000Z",
+      },
+      {
+        kind: "tool-failure",
+        toolCallId: "call-2",
+        message: "Timed out",
+        occurredAt: "2026-08-11T12:00:07.000Z",
+      },
+    ]);
+    // The reasoning span closed at the first non-reasoning event: its total
+    // is journaled on the small step frame and on every later whole attempt.
+    expect(attempts.at(-1)?.reasoningMs).toBe(2_000);
+    expect(steps.some(({ step }) => step === undefined)).toBe(true);
+    expect(attempts.at(-1)?.toolSteps).toEqual([
+      {
+        toolCallId: "call-1",
+        toolName: "Web search",
+        state: "completed",
+        summary: "3 results",
+        timing: {
+          startedAt: "2026-08-11T12:00:02.000Z",
+          endedAt: "2026-08-11T12:00:05.000Z",
+        },
+      },
+      {
+        toolCallId: "call-2",
+        toolName: "Fetch page",
+        state: "failed",
+        summary: "Timed out",
+        timing: {
+          startedAt: "2026-08-11T12:00:03.000Z",
+          endedAt: "2026-08-11T12:00:07.000Z",
+        },
+      },
+    ]);
+  });
+
+  it("bills no approval wait: an attempt declines its native asks itself, and unstamped events time nothing", async () => {
+    const { attempts, steps } = await runToolTurn([
+      { kind: "tool-start", toolCallId: "call-1", toolName: "Web search" },
+      {
+        kind: "approval-request",
+        requestId: "ask-1",
+        action: "run",
+        description: "Search the web",
+        toolCallId: "call-1",
+      },
+      { kind: "tool-success", toolCallId: "call-1", summary: "3 results" },
+    ]);
+    // No stamps, no invented bounds: the step ends untimed, and the
+    // auto-denied ask left no person wait to subtract anyway.
+    expect(attempts.at(-1)?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Web search", state: "completed", summary: "3 results" },
+    ]);
+    expect(attempts.at(-1)?.reasoningMs).toBeUndefined();
+    expect(steps.every(({ step }) => step === undefined || !("timing" in (step as object)))).toBe(
+      true,
+    );
+  });
+
+  it("keeps the reasoning total off attempts whose events carry no trustworthy stamps", async () => {
+    const { attempts } = await runToolTurn([
+      { kind: "reasoning-delta", text: "Thinking" },
+      { kind: "text-delta", text: "Working" },
+    ]);
+    expect(attempts.at(-1)?.reasoningMs).toBeUndefined();
+  });
+
   it("keeps as many tool calls as the person's limit and says once that the attempt called more", async () => {
     const { attempts, steps } = await runToolTurn(
       Array.from({ length: 5 }, (_unused, index) => ({
@@ -3960,6 +4056,9 @@ describe("ChatTurnRunner", () => {
       ],
       {
         driverKind: "openai-compatible",
+        // The recorded call is what makes the execute bounds trustworthy: a
+        // person's wait inside them is measured and subtracted, not guessed.
+        toolEffects: { tools: (set) => set, observe: () => undefined },
         execute: async ({ name }) =>
           name === "read-file"
             ? { result: { text: "hello" } }
@@ -3968,13 +4067,88 @@ describe("ChatTurnRunner", () => {
     );
     expect(steps.map(({ step }) => step)).toEqual([
       { toolCallId: "call-1", toolName: "read-file", state: "started" },
-      { toolCallId: "call-1", toolName: "read-file", state: "completed" },
+      {
+        toolCallId: "call-1",
+        toolName: "read-file",
+        state: "completed",
+        // A call Octant ran itself is timed from its own execute bounds.
+        timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+      },
       { toolCallId: "call-2", toolName: "run-command", state: "started" },
-      { toolCallId: "call-2", toolName: "run-command", state: "failed" },
+      {
+        toolCallId: "call-2",
+        toolName: "run-command",
+        state: "failed",
+        timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+      },
     ]);
     expect(attempts.at(-1)?.toolSteps).toEqual([
+      {
+        toolCallId: "call-1",
+        toolName: "read-file",
+        state: "completed",
+        timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+      },
+      {
+        toolCallId: "call-2",
+        toolName: "run-command",
+        state: "failed",
+        timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+      },
+    ]);
+  });
+
+  it("times an app tool's own bounds apart from the person's wait inside it, or not at all", async () => {
+    let nowMs = Date.parse("2026-08-11T12:00:00.000Z");
+    // The recorded-call wrapper reports the wait the host measured, exactly
+    // as the tool-effects ledger does when a call asks a person inside it.
+    const toolEffects = {
+      tools: (set: { execute: (call: never) => Promise<unknown> }) => ({
+        ...set,
+        execute: async (call: { onApprovalWait?: (waitMs: number) => void }) => {
+          const result = await set.execute(call as never);
+          call.onApprovalWait?.(240_000);
+          return result;
+        },
+      }),
+      observe: () => undefined,
+    } as const;
+    const { attempts } = await runToolTurn(
+      [{ kind: "tool-request", requestId: "call-1", toolName: "read-file", inputJson: "{}" }],
+      {
+        driverKind: "openai-compatible",
+        clock: () => new Date(nowMs).toISOString(),
+        toolEffects: toolEffects as never,
+        execute: async () => {
+          // Four minutes asking, two seconds doing: the row shows both apart.
+          nowMs += 242_000;
+          return { result: { text: "hello" } };
+        },
+      },
+    );
+    expect(attempts.at(-1)?.toolSteps).toEqual([
+      {
+        toolCallId: "call-1",
+        toolName: "read-file",
+        state: "completed",
+        timing: {
+          startedAt: "2026-08-11T12:00:00.000Z",
+          endedAt: "2026-08-11T12:04:02.000Z",
+          approvalWaitMs: 240_000,
+        },
+      },
+    ]);
+    // With no recorded call the same bounds would hide a wait inside them,
+    // so the step ends untimed.
+    const unrecorded = await runToolTurn(
+      [{ kind: "tool-request", requestId: "call-1", toolName: "read-file", inputJson: "{}" }],
+      {
+        driverKind: "openai-compatible",
+        execute: async () => ({ result: { text: "hello" } }),
+      },
+    );
+    expect(unrecorded.attempts.at(-1)?.toolSteps).toEqual([
       { toolCallId: "call-1", toolName: "read-file", state: "completed" },
-      { toolCallId: "call-2", toolName: "run-command", state: "failed" },
     ]);
   });
 

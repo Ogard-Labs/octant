@@ -1432,6 +1432,7 @@ describe("ChatProjection", () => {
             turnId: ids.turn,
             attemptId: ids.attempt,
             toolStep: { toolCallId: "call-1", toolName: "Web search", state },
+            ...(state === "completed" ? { reasoningMs: 4_000 } : {}),
             updatedAt: at,
           }),
         ],
@@ -1453,6 +1454,33 @@ describe("ChatProjection", () => {
         }),
       ],
     });
+    // The turn's final whole-attempt snapshot restates the same totals.
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 7,
+      events: [
+        pending("chat.attempt-updated@1", {
+          kind: "attempt-updated",
+          attempt: {
+            id: ids.attempt,
+            turnId: ids.turn,
+            threadId: ids.thread,
+            providerInstanceId: ids.provider,
+            providerSessionId: ids.session,
+            modelId: "model-a",
+            contextManifestId: ids.manifest,
+            outcome: "completed",
+            responseRefs: [refA, refB],
+            citationIds: [],
+            toolSteps: [{ toolCallId: "call-1", toolName: "Web search", state: "completed" }],
+            toolStepsTruncated: true,
+            reasoningMs: 4_000,
+            createdAt: now,
+            updatedAt: "2026-07-19T12:00:06.000Z",
+          },
+        }),
+      ],
+    });
     const envelopes = store
       .replay({ afterSequence: 0, limit: 100 } as never)
       .filter(
@@ -1462,14 +1490,27 @@ describe("ChatProjection", () => {
       );
     // Applied twice, as a replay over a projection that is already ahead does.
     for (const envelope of [...envelopes, ...envelopes]) projection.apply(connection, envelope);
+    // The incremental reasoning total reaches the projection before the whole
+    // attempt does — and the replayed step rows must not drop it.
+    const midAttempt = readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]
+      ?.attempts[0];
+    expect(midAttempt?.reasoningMs).toBe(4_000);
+
+    const snapshot = store
+      .replay({ afterSequence: 0, limit: 100 } as never)
+      .filter((entry) => entry.eventName === "chat.attempt-updated@1")
+      .at(-1);
+    if (snapshot === undefined) throw new Error("expected the attempt snapshot event");
+    projection.apply(connection, snapshot);
 
     const attempt = readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]
       ?.attempts[0];
+    expect(attempt?.reasoningMs).toBe(4_000);
     expect(attempt?.toolSteps).toEqual([
       { toolCallId: "call-1", toolName: "Web search", state: "completed" },
     ]);
     expect(attempt?.toolStepsTruncated).toBe(true);
-    expect(attempt?.updatedAt).toBe("2026-07-19T12:00:05.000Z");
+    expect(attempt?.updatedAt).toBe("2026-07-19T12:00:06.000Z");
     expect(attempt?.responseRefs.map((reference) => reference.contentId)).toEqual([
       ids.content,
       "82000000-0000-4000-8000-000000000071",

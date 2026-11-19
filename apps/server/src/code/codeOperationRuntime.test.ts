@@ -5642,6 +5642,622 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("times a tool call around the person's approval wait and journals the reasoning total", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    let clockNow = "2026-07-21T13:00:00.000Z";
+    const move = (seconds: number) => {
+      clockNow = new Date(Date.parse("2026-07-21T13:00:00.000Z") + seconds * 1_000).toISOString();
+    };
+    const at = (seconds: number) =>
+      new Date(Date.parse("2026-07-21T13:00:00.000Z") + seconds * 1_000).toISOString();
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      clock: () => clockNow,
+    });
+    const startOperation = operationId(23);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      // reason0, tool12, ask13, answer253, success254 — provider stamps for the
+      // call, journal stamps for the person-facing ask and answer.
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({ kind: "reasoning-delta", text: "thinking", occurredAt: at(0) }),
+        ),
+      );
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-start",
+            toolCallId: "call-1",
+            toolName: "Read",
+            occurredAt: at(12),
+          }),
+        ),
+      );
+      move(13);
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "approval-1",
+            toolCallId: "call-1",
+            action: "Read",
+            description: "Read /tmp/file",
+          }),
+        ),
+      );
+      let approvalId: string | undefined;
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        approvalId = events
+          .find((event) => event.kind === "approval-requested")
+          ?.approvalId.toString();
+        expect(approvalId).toBeDefined();
+      });
+      move(253);
+      await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(91),
+        threadId,
+        checkoutId,
+        approvalId: approvalId as never,
+        decision: "approved",
+      });
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-success",
+            toolCallId: "call-1",
+            summary: "Tool completed.",
+            occurredAt: at(254),
+          }),
+        ),
+      );
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        const reasoning = events.find((event) => event.kind === "reasoning-time");
+        const completed = events.find(
+          (event) => event.kind === "tool-activity" && event.state === "completed",
+        );
+        expect(reasoning).toMatchObject({ kind: "reasoning-time", reasoningMs: 12_000 });
+        expect(completed).toMatchObject({
+          kind: "tool-activity",
+          timing: {
+            startedAt: at(12),
+            endedAt: at(254),
+            approvalWaitMs: 240_000,
+          },
+        });
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("charges a host ask inside a recorded call's execution to the call's wait, not its run", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    let clockNow = "2026-07-21T13:00:00.000Z";
+    const move = (seconds: number) => {
+      clockNow = new Date(Date.parse("2026-07-21T13:00:00.000Z") + seconds * 1_000).toISOString();
+    };
+    const at = (seconds: number) =>
+      new Date(Date.parse("2026-07-21T13:00:00.000Z") + seconds * 1_000).toISOString();
+    // The call's own record, on its own store: the turn's journal cannot
+    // carry tool-effect events, and the wait must be real either way.
+    const effectsDirectory = mkdtempSync(join(tmpdir(), "octant-tool-effects-"));
+    directories.push(effectsDirectory);
+    const effectsConnection = openSqlite(join(effectsDirectory, "effects.sqlite3"));
+    applyMigrations(effectsConnection, MIGRATIONS, () => now);
+    const ledger = new ToolEffectLedger({
+      journal: new Journal({
+        connection: effectsConnection,
+        registry: registerToolEffectEvents(new EventRegistry()),
+        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+        clock: () => clockNow,
+      }),
+      uuid: randomUUID,
+      actor: { kind: "system", actorId: operationId(999) as never },
+      clock: () => clockNow,
+    });
+    const bindings: Array<
+      Parameters<
+        NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"]>
+      >[0]
+    > = [];
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      supportsAppManagedTools: true,
+      clock: () => clockNow,
+      nativeHarness: {
+        contextFor: () => [],
+        turnStarted: () => undefined,
+        turnCompleted: async () => undefined,
+        toolEffects: (turn) => ledger.forTurn(turn),
+      },
+      computerUseTools: (input) => {
+        bindings.push(input);
+        return {
+          definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+          // The tool asks the person before it acts, then works two more
+          // seconds: a 240-second wait on a 2-second call.
+          execute: async () => {
+            const answer = await input.ask("Send dist/notes-app into the desktop?");
+            move(242);
+            return { result: { kind: "answer", answer } };
+          },
+        };
+      },
+    });
+    const startOperation = operationId(1490);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "computer-1",
+            toolName: "octant_computer",
+            inputJson: "{}",
+          }),
+        ),
+      );
+      let approvalId: string | undefined;
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        const requested = events.find((event) => event.kind === "approval-requested");
+        if (requested?.kind === "approval-requested") {
+          // The ask names the call that raised it.
+          expect(requested.toolCallId).toBe("computer-1");
+          approvalId = String(requested.approvalId);
+        }
+        expect(approvalId).toBeDefined();
+      });
+      move(240);
+      await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1491),
+        threadId,
+        checkoutId,
+        approvalId: approvalId as never,
+        decision: "approved",
+      });
+      await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalledOnce());
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        const completed = events.find(
+          (event) => event.kind === "tool-activity" && event.state === "completed",
+        );
+        // The measured interval carries the person's wait separately: the
+        // call reads as two seconds of run after a four-minute ask, never
+        // as a 242-second execution.
+        expect(completed).toMatchObject({
+          kind: "tool-activity",
+          state: "completed",
+          timing: {
+            startedAt: at(0),
+            endedAt: at(242),
+            approvalWaitMs: 240_000,
+          },
+        });
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+      effectsConnection.close();
+    }
+  });
+
+  it("does not charge a concurrent call for another call's approval wait", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    let clockNow = "2026-07-21T13:00:00.000Z";
+    const at = (seconds: number) =>
+      new Date(Date.parse("2026-07-21T13:00:00.000Z") + seconds * 1_000).toISOString();
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      clock: () => clockNow,
+    });
+    const startOperation = operationId(24);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      const offer = (value: Parameters<typeof providerEvent>[0]) =>
+        Effect.runPromise(Queue.offer(queue, providerEvent(value)));
+      await offer({
+        kind: "tool-start",
+        toolCallId: "waited",
+        toolName: "Read",
+        occurredAt: at(10),
+      });
+      await offer({
+        kind: "tool-start",
+        toolCallId: "other",
+        toolName: "Edit",
+        occurredAt: at(11),
+      });
+      clockNow = at(12);
+      await offer({
+        kind: "approval-request",
+        requestId: "approval-2",
+        toolCallId: "waited",
+        action: "Read",
+        description: "Read /tmp/file",
+      });
+      await offer({
+        kind: "tool-success",
+        toolCallId: "other",
+        summary: "done",
+        occurredAt: at(20),
+      });
+      clockNow = at(30);
+      let approvalId: string | undefined;
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        approvalId = events
+          .find((event) => event.kind === "approval-requested")
+          ?.approvalId.toString();
+        expect(approvalId).toBeDefined();
+      });
+      await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(91),
+        threadId,
+        checkoutId,
+        approvalId: approvalId as never,
+        decision: "approved",
+      });
+      await offer({
+        kind: "tool-success",
+        toolCallId: "waited",
+        summary: "done",
+        occurredAt: at(35),
+      });
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        const other = events.find(
+          (event) =>
+            event.kind === "tool-activity" &&
+            event.toolCallId === "other" &&
+            event.state === "completed",
+        );
+        const waited = events.find(
+          (event) =>
+            event.kind === "tool-activity" &&
+            event.toolCallId === "waited" &&
+            event.state === "completed",
+        );
+        // The unrelated call keeps its own nine seconds; the waited call's
+        // row carries the wait clipped to its own span.
+        expect(other).toMatchObject({ timing: { startedAt: at(11), endedAt: at(20) } });
+        expect(waited).toMatchObject({
+          timing: { startedAt: at(10), endedAt: at(35), approvalWaitMs: 18_000 },
+        });
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("bills a refused-in-Plan allow nothing and the later deny the wait since the ask", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    let clockNow = "2026-07-21T13:00:00.000Z";
+    const at = (seconds: number) =>
+      new Date(Date.parse("2026-07-21T13:00:00.000Z") + seconds * 1_000).toISOString();
+    const connection = {
+      ...providerConnection(queue),
+      answerApproval: vi.fn(() => {
+        // Delivery is slower than the person's answer: the journaled receipt
+        // lands five seconds later, but the wait ended at the accepted answer.
+        clockNow = at(25);
+        return Effect.void;
+      }),
+    };
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      clock: () => clockNow,
+    });
+    const startOperation = operationId(31);
+    try {
+      // The turn runs in Plan, where an allow is refused before delivery.
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      const offer = (value: Parameters<typeof providerEvent>[0]) =>
+        Effect.runPromise(Queue.offer(queue, providerEvent(value)));
+      await offer({
+        kind: "tool-start",
+        toolCallId: "call-1",
+        toolName: "Write",
+        occurredAt: at(0),
+      });
+      clockNow = at(2);
+      await offer({
+        kind: "approval-request",
+        requestId: "ask-1",
+        toolCallId: "call-1",
+        action: "Write",
+        description: "Write the file",
+      });
+      let approvalId: string | undefined;
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        approvalId = events
+          .find((event) => event.kind === "approval-requested")
+          ?.approvalId.toString();
+        expect(approvalId).toBeDefined();
+      });
+      // An owner's allow is refused under Plan before delivery; because it
+      // settled nothing, the ask — and the person's wait — stays open.
+      await vi.waitFor(() => expect(fixture.runtime.ownerApprovals?.()).toHaveLength(1));
+      clockNow = at(5);
+      const pending = fixture.runtime.ownerApprovals?.()[0];
+      if (pending === undefined) throw new Error("expected an owner approval");
+      expect(
+        await pending.answer(true, pending.current, {
+          kind: "owner-unlock",
+          memberId: HubMemberId.make(String(windowId)),
+        }),
+      ).toBe(false);
+      expect(connection.answerApproval).not.toHaveBeenCalled();
+      clockNow = at(20);
+      await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(92),
+        threadId,
+        checkoutId,
+        approvalId: approvalId as never,
+        decision: "denied",
+      });
+      await offer({
+        kind: "tool-success",
+        toolCallId: "call-1",
+        summary: "done",
+        occurredAt: at(40),
+      });
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        // Only the deny reached the provider; the refused allow journaled none.
+        expect(events.filter((event) => event.kind === "approval-answered")).toHaveLength(1);
+        const completed = events.find(
+          (event) =>
+            event.kind === "tool-activity" &&
+            event.toolCallId === "call-1" &&
+            event.state === "completed",
+        );
+        // Ask at :02, denied at :20. The refused :05 allow settled nothing,
+        // and the provider's five-second receipt did not stretch the wait.
+        expect(completed).toMatchObject({
+          timing: { startedAt: at(0), endedAt: at(40), approvalWaitMs: 18_000 },
+        });
+      });
+      // The answered row is the delivery receipt: it stamps :25, when the
+      // provider took the deny, while the person's wait above ended at :20.
+      const answeredFrame = (
+        await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 50)
+      ).find((frame) => frame.event.kind === "approval-answered");
+      expect(answeredFrame?.occurredAt).toBe(at(25));
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("journals no answered row when the provider cannot take the person's answer", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = {
+      ...providerConnection(queue),
+      answerApproval: vi.fn(() => Effect.die(new Error("provider gone"))),
+    };
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(33);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "ask-dead",
+            action: "Bash",
+            description: "Run a command",
+          }),
+        ),
+      );
+      let approvalId: string | undefined;
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        approvalId = events
+          .find((event) => event.kind === "approval-requested")
+          ?.approvalId.toString();
+        expect(approvalId).toBeDefined();
+      });
+      const refused = await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(93),
+        threadId,
+        checkoutId,
+        approvalId: approvalId as never,
+        decision: "approved",
+      });
+      expect(refused.kind).toBe("operation-failed");
+      const events = await operationEvents(fixture.runtime, startOperation);
+      // An answered row claims the provider received the answer; it did not.
+      expect(events.some((event) => event.kind === "approval-answered")).toBe(false);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("journals no timing for a call whose bounds a batch stamped", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(25);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-start",
+            toolCallId: "batched",
+            toolName: "Read",
+            synthesized: true,
+          }),
+        ),
+      );
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-success",
+            toolCallId: "batched",
+            summary: "done",
+            synthesized: true,
+          }),
+        ),
+      );
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        const completed = events.find(
+          (event) => event.kind === "tool-activity" && event.state === "completed",
+        );
+        expect(completed).toMatchObject({ kind: "tool-activity", state: "completed" });
+        if (completed?.kind !== "tool-activity") return;
+        expect(completed.timing).toBeUndefined();
+        expect(events.some((event) => event.kind === "reasoning-time")).toBe(false);
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("journals no stamp-derived duration for an unmeasured app-managed call, even when the provider echoes its completion", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const execute = vi.fn(async () => ({ result: { lines: ["on the server"] } }));
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      holdsServerThread: () => true,
+      serverCodeTurn: () => ({
+        status: "bound",
+        tools: {
+          definitions: [
+            { name: "read", description: "Read a file.", inputSchema: { type: "object" } },
+          ],
+          execute,
+        },
+      }),
+    });
+    const startOperation = operationId(1485);
+    try {
+      fixture.bindCheckoutToRemoteFolder();
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "server-read-2",
+            toolName: "read",
+            inputJson: JSON.stringify({ path: "index.html" }),
+          }),
+        ),
+      );
+      await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalledOnce());
+      // The provider echoes the call's end as its own completion. The call
+      // was already released when its own completion journaled, so this
+      // restatement cannot measure it either — the execute interval was
+      // unrecorded and there is no honest bound to invent.
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({ kind: "tool-success", toolCallId: "server-read-2", summary: "done" }),
+        ),
+      );
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        const completed = events.filter(
+          (event) => event.kind === "tool-activity" && event.state === "completed",
+        );
+        expect(completed.length).toBeGreaterThanOrEqual(1);
+        for (const row of completed) {
+          if (row.kind !== "tool-activity") continue;
+          expect(row.timing).toBeUndefined();
+        }
+      });
+      expect(execute).toHaveBeenCalledOnce();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("clears the harness retry notice when the retried response only calls a tool", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -11842,6 +12458,8 @@ function runtimeFixture(options: {
   >[0]["verifyModelToolsOnFirstUse"];
   feedbackScope?: Parameters<typeof createProductFeedbackTurnPort>[0]["resolveScope"];
   onFeedbackDelivered?: () => void;
+  /** Journal clock; the fixed `now` unless a test needs to move it forward. */
+  clock?: () => string;
   inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
@@ -12049,7 +12667,7 @@ function runtimeFixture(options: {
       .register(new AggregateHeadsProjection())
       .register(new CodeProjection())
       .register(new ProductFeedbackProjection()),
-    clock: () => now,
+    clock: options.clock ?? (() => now),
   });
   if (options.failRuntimeWorkJournal === true) {
     const append = journal.append.bind(journal);
@@ -12435,7 +13053,7 @@ function runtimeFixture(options: {
           },
         }),
     actor,
-    clock: () => now,
+    clock: options.clock ?? (() => now),
     uuid: () => `90000000-0000-4000-8000-${(++uuidCounter).toString().padStart(12, "0")}`,
     ...(options.onProviderTurnRequested === undefined
       ? {}

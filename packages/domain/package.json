@@ -75,6 +75,7 @@
     "./context-policy": "./src/contextPolicy.ts",
     "./conversation-input-policy": "./src/conversationInputPolicy.ts",
     "./trim-trailing": "./src/trimTrailing.ts",
+    "./turn-activity-timing": "./src/turnActivityTiming.ts",
     "./keyring-advice": "./src/keyringAdvice.ts",
     "./model-context-window": "./src/modelContextWindow.ts",
     "./diagnostics-policy": "./src/diagnosticsPolicy.ts",

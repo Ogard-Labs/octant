@@ -24,6 +24,7 @@ import { foldCodeTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentResultSteered } from "@octant/contracts";
+import { decodeUtcTimestamp } from "@octant/contracts";
 import {
   AGENT_RESULT_STEERED,
   AGENT_RESULT_STEERING_AGGREGATE_TYPE,
@@ -790,6 +791,124 @@ describe("CodeOperationEventStore", () => {
       },
     ]);
     expect(turn?.stepsTruncated).toBeUndefined();
+    fixture.connection.close();
+  });
+
+  it("replays a turn's reasoning total and completed-call timing, and omits them on older journals", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000036",
+      digest: "c".repeat(64),
+      byteLength: 9,
+    });
+    const toolCallId = "89000000-0000-4000-8000-000000000061";
+    let cursor = 0;
+    const append = (event: Parameters<typeof store.append>[0]["event"]) =>
+      store.append({ threadId, operationId, expectedCursor: cursor++, event });
+
+    append(
+      decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt,
+      }),
+    );
+    append({ kind: "reasoning-time", reasoningMs: 12_000 });
+    append({ kind: "tool-activity", toolCallId, toolName: "Read", state: "started" });
+    append({
+      kind: "tool-activity",
+      toolCallId,
+      toolName: "Read",
+      state: "completed",
+      timing: {
+        startedAt: decodeUtcTimestamp("2026-07-21T13:00:12.000Z"),
+        endedAt: decodeUtcTimestamp("2026-07-21T13:04:14.000Z"),
+        approvalWaitMs: 240_000,
+      },
+    });
+    append(stateEvent("completed"));
+
+    const [turn] = store.conversation({ threadId, afterCursor: 0, limit: 10 }).turns;
+    expect(turn?.reasoningMs).toBe(12_000);
+    expect(turn?.steps).toEqual([
+      {
+        kind: "tool",
+        toolCallId,
+        toolName: "Read",
+        state: "completed",
+        timing: {
+          startedAt: "2026-07-21T13:00:12.000Z",
+          endedAt: "2026-07-21T13:04:14.000Z",
+          approvalWaitMs: 240_000,
+        },
+      },
+    ]);
+    fixture.connection.close();
+  });
+
+  it("keeps a call's first bounded timing on replay when a restated completion carries none", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000035",
+      digest: "d".repeat(64),
+      byteLength: 9,
+    });
+    const toolCallId = "89000000-0000-4000-8000-000000000062";
+    let cursor = 0;
+    const append = (event: Parameters<typeof store.append>[0]["event"]) =>
+      store.append({ threadId, operationId, expectedCursor: cursor++, event });
+
+    append(
+      decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt,
+      }),
+    );
+    append({ kind: "tool-activity", toolCallId, toolName: "Read", state: "started" });
+    append({
+      kind: "tool-activity",
+      toolCallId,
+      toolName: "Read",
+      state: "completed",
+      timing: {
+        startedAt: decodeUtcTimestamp("2026-07-21T13:00:12.000Z"),
+        endedAt: decodeUtcTimestamp("2026-07-21T13:04:14.000Z"),
+        approvalWaitMs: 240_000,
+      },
+    });
+    // A provider restatement of the same call's end measures nothing: the
+    // bounded interval already recorded stands.
+    append({
+      kind: "tool-activity",
+      toolCallId,
+      toolName: "Read",
+      state: "completed",
+      summary: "Provider restated the completion.",
+    });
+    append(stateEvent("completed"));
+
+    const [turn] = store.conversation({ threadId, afterCursor: 0, limit: 10 }).turns;
+    expect(turn?.steps).toEqual([
+      {
+        kind: "tool",
+        toolCallId,
+        toolName: "Read",
+        state: "completed",
+        summary: "Provider restated the completion.",
+        timing: {
+          startedAt: "2026-07-21T13:00:12.000Z",
+          endedAt: "2026-07-21T13:04:14.000Z",
+          approvalWaitMs: 240_000,
+        },
+      },
+    ]);
     fixture.connection.close();
   });
 

@@ -954,7 +954,16 @@ describe("WorkTurnRuntime", () => {
       {
         truncated: false,
         steps: [
-          { toolCallId: "call-1", toolName: "Read", state: "completed", summary: "Read the brief" },
+          {
+            toolCallId: "call-1",
+            toolName: "Read",
+            state: "completed",
+            summary: "Read the brief",
+            timing: {
+              startedAt: "2026-08-11T12:00:00.000Z",
+              endedAt: "2026-08-11T12:00:01.000Z",
+            },
+          },
         ],
       },
     ]);
@@ -1336,7 +1345,13 @@ describe("WorkTurnRuntime", () => {
     // runtime that announces its own calls gets no second row for the request.
     expect(stepUpdates.at(-1)).toEqual({
       steps: [
-        { toolCallId: "call-1", toolName: "Bash", state: "completed", summary: "Tool completed." },
+        {
+          toolCallId: "call-1",
+          toolName: "Bash",
+          state: "completed",
+          summary: "Tool completed.",
+          timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+        },
       ],
       truncated: false,
     });
@@ -1422,6 +1437,10 @@ describe("WorkTurnRuntime", () => {
       },
       onToolSteps: (steps) => stepUpdates.push(steps),
       toolCallRecords: { observe: () => undefined, appTool },
+      toolEffects: {
+        tools: (set) => set,
+        observe: () => undefined,
+      },
     });
 
     expect(outcome).toEqual({ kind: "completed", response: "" });
@@ -1432,12 +1451,121 @@ describe("WorkTurnRuntime", () => {
     });
     expect(stepUpdates.at(-1)).toEqual({
       steps: [
-        { toolCallId: "call-1", toolName: "read-file", state: "completed" },
-        { toolCallId: "call-2", toolName: "run-command", state: "failed" },
+        {
+          toolCallId: "call-1",
+          toolName: "read-file",
+          state: "completed",
+          // A call Octant ran itself is timed from its own execute bounds.
+          timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+        },
+        {
+          toolCallId: "call-2",
+          toolName: "run-command",
+          state: "failed",
+          timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+        },
       ],
       truncated: false,
     });
     expect(appTool.mock.calls.map(([call]) => call.toolCallId)).toEqual(["call-1", "call-2"]);
+  });
+
+  it("times an Octant Harness tool call apart from a person's wait inside it, or not at all", async () => {
+    const runOnce = async (scoped: boolean) => {
+      const stepUpdates: Array<{ readonly steps: ReadonlyArray<unknown> }> = [];
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const base = {
+        instanceId: ids.provider,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+        sessionId: ids.session as never,
+      };
+      const connection: ProviderConnection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+        resume: () => Effect.die("unused"),
+        send: () => Effect.void,
+        stop: () => Effect.void,
+        interrupt: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      await Effect.runPromise(
+        Queue.offerAll(queue, [
+          {
+            ...base,
+            sequence: 1,
+            kind: "tool-request",
+            requestId: "call-1",
+            toolName: "read-file",
+            inputJson: '{"path":"notes.md"}',
+          },
+          { ...base, sequence: 2, kind: "completed" },
+        ]),
+      );
+      const driver: ProviderDriver = {
+        kind: "openai-compatible",
+        probe: () => Effect.die("unused"),
+        acquire: () => Effect.succeed(connection),
+      };
+      await new WorkTurnRuntime({ timeoutMs: 1_000 }).run({
+        command: decodeStartWorkThreadTurnCommand({
+          kind: "start-work-thread-turn",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          prompt: "Use the tool",
+          authority: decodeWorkTurnAuthority({
+            hostId: "local",
+            projectId: ids.project,
+            bindingRevisionId: ids.binding,
+            workingDirectory: ".",
+            confinementPosture: "project-root-confined",
+            providerInstanceId: ids.provider,
+            modelId: "gpt-5",
+          }),
+        }),
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        driver,
+        signal: new AbortController().signal,
+        appManagedTools: {
+          definitions: [{ name: "read-file", inputSchema: { type: "object" } }],
+          execute: async () => ({ result: { text: "hello" }, isError: false }) as const,
+        },
+        onToolSteps: (steps) => stepUpdates.push(steps),
+        ...(scoped
+          ? {
+              toolEffects: {
+                // As the ledger's recorded call does, the set reports the
+                // person wait it measured inside this call's execution.
+                tools: (set) => ({
+                  ...set,
+                  execute: async (input) => {
+                    input.onApprovalWait?.(90_000);
+                    return set.execute(input);
+                  },
+                }),
+                observe: () => undefined,
+              },
+            }
+          : {}),
+      });
+      return stepUpdates.at(-1)?.steps[0];
+    };
+
+    const timed = (await runOnce(true)) as { timing?: unknown };
+    expect(timed).toMatchObject({
+      toolCallId: "call-1",
+      state: "completed",
+      timing: { approvalWaitMs: 90_000 },
+    });
+    // Without the recorded-call boundary no person wait could be measured, so
+    // the whole interval is not offered as run time.
+    const unscoped = (await runOnce(false)) as { timing?: unknown };
+    expect(unscoped).toMatchObject({ toolCallId: "call-1", state: "completed" });
+    expect(unscoped.timing).toBeUndefined();
   });
 
   it("keeps as many tool calls as the turn's limit, and every call when the limit is off", async () => {
@@ -2675,4 +2803,266 @@ describe("WorkTurnRuntime", () => {
       } else expect(result.kind).toBe("failed");
     },
   );
+
+  describe("turn timing", () => {
+    const at = (seconds: number) => `2026-11-19T13:00:${String(seconds).padStart(2, "0")}.000Z`;
+
+    let sequence = 0;
+    const event = (fields: Record<string, unknown>, occurredAt: string) =>
+      ({
+        instanceId: ids.provider,
+        sessionId: ids.session,
+        sequence: ++sequence,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp(occurredAt),
+        ...fields,
+      }) as unknown as ProviderRuntimeEvent;
+
+    const command = () =>
+      decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Do the work",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      });
+
+    const driverFor = (events: ReadonlyArray<ProviderRuntimeEvent>): ProviderDriver =>
+      ({
+        kind: "openai-compatible",
+        probe: () => Effect.die("unused"),
+        acquire: () =>
+          Effect.succeed({
+            subscribe: Effect.succeed(Stream.fromIterable(events)),
+            start: () => Effect.void,
+            send: () => Effect.void,
+            resume: () => Effect.void,
+            interrupt: () => Effect.void,
+            stop: () => Effect.void,
+            answerApproval: () => Effect.void,
+            answerUserInput: () => Effect.void,
+            answerTool: () => Effect.void,
+          } as never),
+      }) as ProviderDriver;
+
+    async function runTimed(
+      events: ReadonlyArray<ProviderRuntimeEvent>,
+      extra: {
+        readonly clock?: () => string;
+        readonly onRequestSettled?: (
+          input: { readonly providerCallbackId: string },
+          release: (settled?: {
+            readonly person: boolean;
+            readonly requestedAt?: UtcTimestamp;
+            readonly settledAt?: UtcTimestamp;
+          }) => void,
+        ) => () => void;
+      } = {},
+    ) {
+      const stepUpdates: Array<{ readonly steps: ReadonlyArray<unknown> }> = [];
+      const reasoning: number[] = [];
+      const outcome = await new WorkTurnRuntime().run({
+        command: command(),
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        driver: driverFor([...events, event({ kind: "completed" }, at(59))]),
+        signal: new AbortController().signal,
+        onToolSteps: (steps) => stepUpdates.push(steps),
+        onReasoningMs: (total) => reasoning.push(total),
+        ...(extra.clock === undefined ? {} : { clock: extra.clock }),
+        ...(extra.onRequestSettled === undefined
+          ? {}
+          : {
+              onRequestSettled: (input, release) =>
+                extra.onRequestSettled?.(input, release) ?? (() => undefined),
+            }),
+      });
+      const last = stepUpdates.at(-1)?.steps ?? [];
+      return { outcome, steps: last, reasoning };
+    }
+
+    it("times each call from its own provider stamps, even when calls overlap", async () => {
+      const { steps } = await runTimed([
+        event({ kind: "tool-start", toolCallId: "call-1", toolName: "Read" }, at(0)),
+        event({ kind: "tool-start", toolCallId: "call-2", toolName: "Fetch" }, at(1)),
+        event({ kind: "tool-success", toolCallId: "call-1", summary: "done" }, at(3)),
+        event({ kind: "tool-failure", toolCallId: "call-2", message: "no" }, at(5)),
+      ]);
+      expect(steps).toEqual([
+        {
+          toolCallId: "call-1",
+          toolName: "Read",
+          state: "completed",
+          summary: "done",
+          timing: { startedAt: at(0), endedAt: at(3) },
+        },
+        {
+          toolCallId: "call-2",
+          toolName: "Fetch",
+          state: "failed",
+          summary: "no",
+          timing: { startedAt: at(1), endedAt: at(5) },
+        },
+      ]);
+    });
+
+    it("restates the turn's reasoning total at each span boundary", async () => {
+      const { reasoning } = await runTimed([
+        event({ kind: "reasoning-delta", text: "first" }, at(0)),
+        event({ kind: "tool-start", toolCallId: "call-1", toolName: "Read" }, at(2)),
+        event({ kind: "reasoning-delta", text: "second" }, at(3)),
+        event({ kind: "text-delta", text: "Done" }, at(5)),
+      ]);
+      expect(reasoning).toEqual([2_000, 4_000]);
+    });
+
+    it("bills the person's approval wait from the request journal's own bounds, not the provider's ask stamp", async () => {
+      const { steps } = await runTimed(
+        [
+          // The provider stamped its ask at :00, but screening held it until
+          // the request journal recorded it at :05; the person answered at
+          // :07. The wait the person spent is the journal's interval — two
+          // seconds — never the seven a provider stamp would bill.
+          event(
+            {
+              kind: "approval-request",
+              requestId: "ask-1",
+              action: "run",
+              description: "Write the file",
+              toolCallId: "call-1",
+            },
+            at(0),
+          ),
+          event({ kind: "tool-start", toolCallId: "call-1", toolName: "Write" }, at(1)),
+          event({ kind: "tool-start", toolCallId: "call-2", toolName: "Read" }, at(2)),
+          event({ kind: "tool-success", toolCallId: "call-2", summary: "ok" }, at(4)),
+          event({ kind: "tool-success", toolCallId: "call-1", summary: "ok" }, at(8)),
+        ],
+        {
+          onRequestSettled: (_input, release) => {
+            release({
+              person: true,
+              requestedAt: decodeTimestamp(at(5)),
+              settledAt: decodeTimestamp(at(7)),
+            });
+            return () => undefined;
+          },
+        },
+      );
+      expect(steps).toEqual([
+        {
+          toolCallId: "call-1",
+          toolName: "Write",
+          state: "completed",
+          summary: "ok",
+          timing: { startedAt: at(1), endedAt: at(8), approvalWaitMs: 2_000 },
+        },
+        {
+          toolCallId: "call-2",
+          toolName: "Read",
+          state: "completed",
+          summary: "ok",
+          timing: { startedAt: at(2), endedAt: at(4) },
+        },
+      ]);
+    });
+
+    it("does not bill an automated reviewer's settle as person-facing wait", async () => {
+      const { steps } = await runTimed(
+        [
+          event({ kind: "tool-start", toolCallId: "call-1", toolName: "Write" }, at(0)),
+          event(
+            {
+              kind: "approval-request",
+              requestId: "ask-1",
+              action: "run",
+              description: "Write the file",
+              toolCallId: "call-1",
+            },
+            at(2),
+          ),
+          event({ kind: "tool-success", toolCallId: "call-1", summary: "ok" }, at(8)),
+        ],
+        {
+          onRequestSettled: (_input, release) => {
+            release({ person: false });
+            return () => undefined;
+          },
+        },
+      );
+      expect(steps).toEqual([
+        {
+          toolCallId: "call-1",
+          toolName: "Write",
+          state: "completed",
+          summary: "ok",
+          timing: { startedAt: at(0), endedAt: at(8) },
+        },
+      ]);
+    });
+
+    it("keeps a call's own bounds while its approval wait was never settled and bills none", async () => {
+      const { steps } = await runTimed(
+        [
+          event({ kind: "tool-start", toolCallId: "call-1", toolName: "Write" }, at(0)),
+          event(
+            {
+              kind: "approval-request",
+              requestId: "ask-1",
+              action: "run",
+              description: "Write the file",
+              toolCallId: "call-1",
+            },
+            at(2),
+          ),
+          event({ kind: "tool-success", toolCallId: "call-1", summary: "ok" }, at(8)),
+        ],
+        {
+          // Never settled: no journal ask and settle bounds exist, so no
+          // wait is billed — the call's own measured interval still stands.
+          onRequestSettled: () => () => undefined,
+        },
+      );
+      expect(steps).toEqual([
+        {
+          toolCallId: "call-1",
+          toolName: "Write",
+          state: "completed",
+          summary: "ok",
+          timing: { startedAt: at(0), endedAt: at(8) },
+        },
+      ]);
+    });
+
+    it("shows no duration for a call that never ended, and omits bounds the provider never stamped", async () => {
+      const { steps } = await runTimed([
+        event({ kind: "tool-start", toolCallId: "call-1", toolName: "Read" }, at(0)),
+        // The un-stamped events a replay or a batched adapter produces.
+        {
+          kind: "tool-success",
+          toolCallId: "call-1",
+          summary: "done",
+          instanceId: ids.provider,
+          sessionId: ids.session,
+          sequence: ++sequence,
+          correlationId: decodeCorrelationId(String(ids.project)),
+          occurredAt: undefined,
+        } as unknown as ProviderRuntimeEvent,
+        event({ kind: "tool-start", toolCallId: "call-2", toolName: "Fetch" }, at(9)),
+      ]);
+      expect(steps).toEqual([
+        { toolCallId: "call-1", toolName: "Read", state: "completed", summary: "done" },
+        { toolCallId: "call-2", toolName: "Fetch", state: "started" },
+      ]);
+    });
+  });
 });

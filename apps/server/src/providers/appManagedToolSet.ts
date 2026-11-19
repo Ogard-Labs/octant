@@ -31,6 +31,13 @@ export interface AppManagedToolSet {
      * call's journaled intent with its settlement and reaches no tool's input.
      */
     readonly toolCallId?: string;
+    /**
+     * Receives the person-facing approval wait the call's record measured
+     * while it executed, when one ran inside the recorded-call boundary. A
+     * caller that times the whole execution subtracts it; sets that do not
+     * record calls simply never invoke it.
+     */
+    readonly onApprovalWait?: (waitMs: number) => void;
   }) => Promise<{
     readonly result: unknown;
     readonly isError?: boolean;
