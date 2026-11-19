@@ -250,9 +250,20 @@ function reasonLabel(view: ActivityView): string {
   }
 }
 
+/**
+ * A view plus the input it was read under, kept together: a refresh may
+ * retain it while the new query's dates have already resolved, and the
+ * records it opens are labelled and paged by the window they came from,
+ * never by a newer resolution.
+ */
+interface ActivityAnswer {
+  readonly view: ActivityView;
+  readonly input: ActivityCardInput;
+}
+
 interface CardRead {
   readonly phase: "loading" | "refreshing" | "settled";
-  readonly view?: ActivityView;
+  readonly answer?: ActivityAnswer;
   /** A refresh failed but a previous view is still shown. */
   readonly stale?: boolean;
 }
@@ -423,8 +434,8 @@ function useEffectiveCardInput(candidate: ActivityCardInput, epoch: number): Act
 /** What `ActivityCard` needs from one card's read: the answer plus the drill-down it opened. */
 interface ActivityCardView {
   readonly read: CardRead;
-  readonly drill: { readonly view: ActivityView } | undefined;
-  readonly openRecords: (view: ActivityView) => void;
+  readonly drill: ActivityAnswer | undefined;
+  readonly openRecords: () => void;
   readonly closeRecords: () => void;
   /** A records page found the snapshot stale: re-read so reopening retries. */
   readonly renewAfterStale: () => void;
@@ -438,7 +449,7 @@ interface ActivityCardView {
  */
 function useActivityCardContent(input: ActivityCardInput, epoch: number): ActivityCardView {
   const [read, setRead] = useState<CardRead>({ phase: "loading" });
-  const [drill, setDrill] = useState<{ view: ActivityView } | undefined>(undefined);
+  const [drill, setDrill] = useState<ActivityAnswer | undefined>(undefined);
   const [renewed, setRenewed] = useState(0);
   const consumedEpoch = useRef(0);
   const consumedRenew = useRef(0);
@@ -469,8 +480,8 @@ function useActivityCardContent(input: ActivityCardInput, epoch: number): Activi
       return undefined;
     }
     setRead((previous) =>
-      (refresh || renew) && !scopeChanged && previous.view !== undefined
-        ? { phase: "refreshing", view: previous.view }
+      (refresh || renew) && !scopeChanged && previous.answer !== undefined
+        ? { phase: "refreshing", answer: previous.answer }
         : { phase: "loading" },
     );
     const query = refresh ? { ...input.query, refresh: true } : input.query;
@@ -481,13 +492,13 @@ function useActivityCardContent(input: ActivityCardInput, epoch: number): Activi
         // A fresh answer with no navigable basis — unavailable or a labeled
         // fallback — retires the last snapshot's open records dialog too.
         if (view.status === "unavailable" || view.fallback !== undefined) setDrill(undefined);
-        setRead({ phase: "settled", view });
+        setRead({ phase: "settled", answer: { view, input } });
       },
       () => {
         if (!active) return;
         setRead((previous) =>
-          previous.view !== undefined
-            ? { phase: "settled", view: previous.view, stale: true }
+          previous.answer !== undefined
+            ? { phase: "settled", answer: previous.answer, stale: true }
             : { phase: "settled" },
         );
       },
@@ -499,7 +510,7 @@ function useActivityCardContent(input: ActivityCardInput, epoch: number): Activi
   return {
     read,
     drill,
-    openRecords: (view) => setDrill({ view }),
+    openRecords: () => setDrill(read.answer),
     closeRecords: () => setDrill(undefined),
     renewAfterStale: () => setRenewed((count) => count + 1),
   };
@@ -527,7 +538,7 @@ function ActivityCard(props: {
   );
   const titleId = useId();
   const Icon = definition.icon;
-  const view = read.view;
+  const view = read.answer?.view;
   const loading = view === undefined && read.phase === "loading";
   const failed = view === undefined && !loading;
   const unavailable = view !== undefined && view.status === "unavailable";
@@ -552,7 +563,7 @@ function ActivityCard(props: {
       <OctantButton
         aria-label={`${definition.title}: ${count}. Show records`}
         className="code-home-activity-card__figure"
-        onClick={() => openRecords(view)}
+        onClick={openRecords}
         type="button"
         variant="bare"
       >
@@ -655,7 +666,7 @@ function ActivityCard(props: {
       <OctantDialogPresence>
         {drill === undefined ? null : (
           <ActivityRecordsDialog
-            input={input}
+            input={drill.input}
             onClose={closeRecords}
             onStale={renewAfterStale}
             onOpenExternal={props.onOpenExternal}

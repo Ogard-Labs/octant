@@ -877,4 +877,78 @@ describe("a changed scope", () => {
     );
     expect(source.calls()).toHaveLength(8);
   });
+
+  it("keeps a refresh's retained records labelled by the window they were read under", async () => {
+    const user = userEvent.setup();
+    let clock = Date.parse("2026-08-10T12:00:00.000Z");
+    const clockSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const pending: Array<(value: ActivityView) => void> = [];
+    let calls = 0;
+    const read: CodeHomeActivityProps["read"] = () => {
+      calls += 1;
+      if (calls <= 4) return Promise.resolve(view());
+      return new Promise((resolve) => pending.push(resolve));
+    };
+    try {
+      render(<Harness read={read} />);
+      const card = await screen.findByRole("region", { name: "Pull requests merged" });
+      await waitFor(() => expect(calls).toBe(4));
+      await user.click(
+        within(card).getByRole("button", { name: "Pull requests merged: 2. Show records" }),
+      );
+      const header = () =>
+        document.querySelector(".code-home-activity-records__scope")?.textContent;
+      const firstHeader = header();
+      expect(firstHeader).toBeTruthy();
+      expect(await screen.findByText("Ship the panel")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Close records" }));
+
+      clock += 7 * 24 * 60 * 60 * 1000;
+      await user.click(screen.getByRole("button", { name: "Refresh activity" }));
+      await waitFor(() => expect(pending).toHaveLength(4));
+
+      // While the refresh is in flight the retained answer still opens —
+      // under the window it was actually read for, not the newly resolved one.
+      await user.click(
+        within(card).getByRole("button", { name: "Pull requests merged: 2. Show records" }),
+      );
+      expect(header()).toBe(firstHeader);
+      expect(screen.getByText("Ship the panel")).toBeInTheDocument();
+
+      act(() =>
+        pending.forEach((resolve) =>
+          resolve(
+            view({
+              count: 5,
+              records: [
+                {
+                  kind: "prs-merged",
+                  occurredAt: "2026-11-04T08:00:00.000Z",
+                  id: "octant/octant#77",
+                  label: "Land the refresh",
+                  repositoryOwner: "octant",
+                  repositoryName: "octant",
+                  number: 77,
+                  mergedBy: "henrik",
+                },
+              ],
+            }),
+          ),
+        ),
+      );
+      // The already-open dialog keeps the answer it opened.
+      expect(header()).toBe(firstHeader);
+      expect(screen.getByText("Ship the panel")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Close records" }));
+      await user.click(
+        within(card).getByRole("button", { name: "Pull requests merged: 5. Show records" }),
+      );
+      expect(header()).not.toBe(firstHeader);
+      expect(await screen.findByText("Land the refresh")).toBeInTheDocument();
+      expect(screen.queryByText("Ship the panel")).not.toBeInTheDocument();
+    } finally {
+      clockSpy.mockRestore();
+    }
+  });
 });
