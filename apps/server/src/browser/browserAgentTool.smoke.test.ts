@@ -2605,6 +2605,12 @@ describe.skipIf(!available)("the headless Browser's page-started local-navigatio
     await tool.call({ operation: "click", ref: refFor(page?.snapshot, /link "Elsewhere"/) });
     await settle();
     expect(hitCount("/local-else")).toBe(elsewhereBefore);
+    // The refused hop kept the local document it started from, and that
+    // document's own moves still continue on its exact origin.
+    page = (await tool.call({ operation: "snapshot" })).result.page;
+    await tool.call({ operation: "click", ref: refFor(page?.snapshot, /link "Next"/) });
+    page = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(page?.snapshot).toContain("Local next page");
     // A hop out that redirects back is refused on the return hop.
     await tool.call({ operation: "navigate", url: named("127.0.0.1", "/local") });
     const finalBefore = hitCount("/local-final");

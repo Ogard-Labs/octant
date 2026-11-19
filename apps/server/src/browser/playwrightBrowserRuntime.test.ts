@@ -1247,7 +1247,7 @@ describe("the headless page-started navigation guard", () => {
     const continued = () =>
       sentCalls(session, "Fetch.continueRequest").map((parameters) => parameters?.requestId);
     const failed = () =>
-      sentCalls(session, "Fetch.failRequest").map((parameters) => parameters?.requestId);
+      sentCalls(session, "Fetch.fulfillRequest").map((parameters) => parameters?.requestId);
     return { ...f, signal, page, session, start, hop, commit, continued, failed };
   }
 

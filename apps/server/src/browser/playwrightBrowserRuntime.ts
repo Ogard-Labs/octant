@@ -1626,10 +1626,14 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         admitted = false;
       }
       if (requestId === undefined) return;
+      // A refused hop answered No Content cancels the navigation and keeps the
+      // document it started from — the page a refused move leaves on desktop —
+      // where a failed request would trade it for a Chromium error page. A
+      // paused hop that cannot be answered still fails closed.
       void session
         .send(
-          admitted ? "Fetch.continueRequest" : "Fetch.failRequest",
-          admitted ? { requestId } : { requestId, errorReason: "BlockedByClient" },
+          admitted ? "Fetch.continueRequest" : "Fetch.fulfillRequest",
+          admitted ? { requestId } : { requestId, responseCode: 204 },
         )
         .catch(() =>
           session
@@ -2330,12 +2334,6 @@ async function leaveUnapprovedLanding(
   if (/^https?:/i.test(landed) && !originAllowed(landed, allowedOrigins)) {
     await page.goto("about:blank").catch(() => undefined);
     throw new BrowserNavigationBlockedError(landed);
-  }
-  // A refused navigation leaves Chromium's own error page behind, and its
-  // title can still name the refused address; the tab is left blank like any
-  // landing it was not approved for.
-  if (landed.startsWith("chrome-error:")) {
-    await page.goto("about:blank").catch(() => undefined);
   }
 }
 
