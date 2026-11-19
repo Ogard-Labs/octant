@@ -552,7 +552,13 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                 Back
               </OctantButton>
             ) : null}
-            <OctantButton disabled={busy || blocked} onClick={skip} type="button" variant="ghost">
+            <OctantButton
+              data-launch-control="setup"
+              disabled={busy || blocked}
+              onClick={skip}
+              type="button"
+              variant="ghost"
+            >
               {controller.submitting === "skipped" ? "Skipping…" : "Skip setup"}
             </OctantButton>
             {handoffOpen ? (

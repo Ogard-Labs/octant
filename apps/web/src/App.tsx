@@ -148,7 +148,11 @@ import {
   type WorkThreadCommand,
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
-import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
+import {
+  markInteraction,
+  markInteractionAfterPaint,
+  traceLaunchControl,
+} from "./polling/interactionTrace";
 import { useSnoozeClock } from "./polling/useSnoozeClock";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import { ThreadActivityRevisionsContext } from "./polling/ThreadActivityRevisions";
@@ -1987,16 +1991,6 @@ function LaunchedShell(
       ),
     [chatController.navigation, chatController.status],
   );
-  // The launch benchmark's "usable" moment: the composer the launch shows —
-  // the draft workspace's, enabled unless a thread creation is in flight — is
-  // mounted, and the Chat bootstrap has answered, which is what the controller
-  // reporting ready means. Painted, not committed, so the mark lands after the
-  // frame a person could act on.
-  useEffect(() => {
-    if (chatController.status === "ready" && !draftCreating) {
-      markInteractionAfterPaint("usable");
-    }
-  }, [chatController.status, draftCreating]);
   const createCodeOperationId = useCallback(
     () => globalThis.crypto.randomUUID() as CodeOperationId,
     [],
@@ -3986,6 +3980,10 @@ function LaunchedShell(
     resolve: recordFirstRunOutcome,
     concealed: controller.settingsOpen || createOpen,
   });
+  useEffect(() => {
+    if (controller.status !== "ready" || chatController.status !== "ready" || draftCreating) return;
+    return traceLaunchControl(firstRunController.visible ? "setup" : "composer");
+  }, [controller.status, chatController.status, draftCreating, firstRunController.visible]);
   const whatsNew = useWhatsNewAfterUpdate({
     hostBridge: props.hostBridge,
     firstRunVisible: firstRunController.visible,

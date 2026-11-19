@@ -64,6 +64,36 @@ export function readInteractionMarks(): ReadonlyArray<InteractionMark> {
   return holder().__OCTANT_PERF_MARKS ?? [];
 }
 
+/** The fresh profile opens setup over the composer. Only count a frame
+ * where the control the person actually sees can receive a pointer event. */
+export function traceLaunchControl(kind: "setup" | "composer"): (() => void) | undefined {
+  if (!isEnabled() || readInteractionMarks().some((mark) => mark.name === "usable-painted")) return;
+  const selector =
+    kind === "setup"
+      ? "[data-launch-control='setup']:enabled"
+      : ".workspace-layer textarea.composer-input:enabled:not([readonly])";
+  const deadline = performance.now() + 45_000;
+  let last: Element | undefined;
+  let frame = requestAnimationFrame(check);
+  function check() {
+    if (performance.now() >= deadline) return;
+    const target = Array.from(document.querySelectorAll(selector)).find((control) => {
+      if (control.closest("[inert], [aria-hidden='true']")) return false;
+      const rect = control.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return hit !== null && control.contains(hit);
+    });
+    if (target !== undefined && target === last) {
+      markInteraction("renderer", "usable-painted");
+      return;
+    }
+    last = target;
+    frame = requestAnimationFrame(check);
+  }
+  return () => cancelAnimationFrame(frame);
+}
+
 export function clearInteractionMarks(): void {
   holder().__OCTANT_PERF_MARKS = [];
 }
