@@ -1,0 +1,979 @@
+/* Zen surface styles: loaded with the Zen surface chunk. These rules moved out of
+   zen.css; the ones the shell's Zen wrapper and live-thread cards need stayed. */
+
+.zen-surface__canvas {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+  z-index: 2;
+}
+
+.zen-surface__empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  display: grid;
+  max-width: 360px;
+  gap: var(--oct-space-2);
+  color: var(--oct-muted);
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.zen-surface__empty strong {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-medium);
+}
+
+.zen-el-actions {
+  display: flex;
+  gap: var(--oct-space-1);
+}
+
+/* The system timer speaks state through the clock colour; this line says
+   the same state in words because the widget announces it aria-live. */
+.zen-timer-status {
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.zen-timer[data-status="completed"] .zen-timer-status {
+  color: var(--oct-success-fg);
+}
+
+.zen-notes,
+.zen-checklist {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
+/* The system textarea sizes itself for the styleguide card; here it takes
+   whatever height the card's geometry gives the body. */
+.zen-notes textarea {
+  flex: 1;
+}
+
+.zen-widget-status {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.zen-widget-status--error {
+  color: var(--oct-danger-fg);
+}
+
+.zen-checklist__label {
+  min-width: 0;
+  flex: 1;
+}
+
+.zen-checklist__actions {
+  display: flex;
+  gap: var(--oct-space-1);
+  margin-left: auto;
+}
+
+.zen-checklist__add {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-top: auto;
+}
+
+.zen-checklist__add label {
+  min-width: 0;
+  flex: 1;
+}
+
+.zen-widget-picker > * {
+  min-width: 0;
+}
+
+.zen-add-picker {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+}
+
+.zen-add-picker__hint {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.zen-add-target.zen-add-target {
+  display: grid;
+  height: auto;
+  min-height: 0;
+  justify-items: start;
+  gap: 2px;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  text-align: start;
+  white-space: normal;
+}
+
+.zen-add-target__title {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}
+
+.zen-add-target__detail {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.zen-surface__message {
+  position: absolute;
+  top: 52px;
+  left: 16px;
+  max-width: min(420px, calc(100% - 32px));
+  z-index: 4;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+/* Clear of the bar at the bottom and the chrome band at the top: a panel that
+   ran under the bar hid its own last row and the controls beneath it. */
+.zen-surface__panel-anchor,
+.zen-surface__manual-panel {
+  position: absolute;
+  top: 76px;
+  left: 50%;
+  z-index: 6;
+  box-sizing: border-box;
+  min-width: 0;
+  width: min(620px, calc(100% - 32px));
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 180px);
+  transform: translateX(-50%);
+  /* The card inside is what actually holds the rows, so it has to take the
+     anchor's height rather than growing past it; the thread picker ran under
+     the bar and hid its own last row. */
+  display: flex;
+}
+
+.zen-surface__panel-anchor > *,
+.zen-surface__manual-panel > * {
+  min-height: 0;
+  max-height: 100%;
+}
+
+.zen-panel__timer-create {
+  display: grid;
+  gap: var(--oct-space-3);
+  margin: var(--oct-space-4) 0;
+  padding: var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.zen-thread-picker > input {
+  width: 100%;
+  margin-bottom: var(--oct-space-3);
+}
+
+.zen-thread-picker__results {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+}
+
+.zen-thread-picker__entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-6);
+  padding: var(--oct-space-3);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-fg-soft);
+}
+
+.zen-assistant__capability {
+  padding: var(--oct-space-3);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-fg-soft);
+}
+
+.zen-assistant form {
+  display: flex;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-4);
+}
+
+.zen-assistant form input {
+  min-width: 0;
+  flex: 1;
+}
+
+.zen-surface__manual-panel {
+  left: auto;
+  right: 16px;
+  width: min(360px, calc(100% - 32px));
+  transform: none;
+}
+
+.zen-surface__manual-panel label {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+}
+
+/* A pinned shell fills its card; the notices that stand in for it do not. */
+.zen-terminal-card__notice {
+  margin: 0;
+  padding: var(--oct-space-3);
+  font-size: var(--oct-text-sm);
+  color: var(--oct-muted);
+}
+
+.zen-terminal-card__ended {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.zen-terminal-card__ended > p {
+  margin: 0;
+}
+
+.zen-el-body .code-terminal-pane {
+  height: 100%;
+  min-height: 0;
+}
+
+/* ─── spaces ───────────────────────────────────────────────────────────
+   The switcher rides above the panning surface: it is how you leave a
+   space. It wears the system bar chrome and only scrolls sideways when
+   the window cannot hold every space. */
+.zen-surface__spaces-anchor {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 5;
+  max-width: calc(100% - 32px);
+}
+
+.zen-pill.zen-spaces {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.zen-spaces__space {
+  display: flex;
+  align-items: center;
+}
+
+.zen-spaces__tab {
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
+.zen-spaces__tab--showing {
+  opacity: 1;
+}
+
+.zen-spaces__remove,
+.zen-spaces__add {
+  opacity: 0.6;
+}
+
+.zen-spaces__remove:hover,
+.zen-spaces__add:hover {
+  opacity: 1;
+}
+
+.zen-spaces__rename {
+  width: 120px;
+}
+
+/* ─── orbit bar ──────────────────────────────────────────────────────── */
+.zen-surface__bar-anchor {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 5;
+  max-width: calc(100% - 32px);
+}
+
+.zen-bar__button--deferred {
+  opacity: var(--oct-disabled-opacity);
+  cursor: default;
+}
+/* .visually-hidden is defined once, in octant.css. */
+
+.zen-surface__bar-anchor .zen-bar {
+  flex-wrap: wrap;
+  border-radius: var(--oct-radius-md);
+  max-width: 100%;
+}
+
+.zen-surface__bar-anchor {
+  left: 12px;
+  right: 12px;
+  transform: none;
+  bottom: 12px;
+}
+
+.zen-surface__spaces-anchor {
+  left: 12px;
+  right: 12px;
+  transform: none;
+}
+
+.zen-surface__panel-anchor,
+.zen-surface__manual-panel {
+  top: 52px;
+  right: 12px;
+  left: 12px;
+  width: auto;
+  max-height: calc(100% - 180px);
+  transform: none;
+}
+
+.zen-surface__canvas,
+.zen-el {
+  transition: none;
+}
+
+.zen-appearance__section {
+  display: grid;
+  gap: var(--oct-space-3);
+  min-width: 0;
+}
+
+.zen-appearance__heading {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.zen-appearance__slider > :last-child {
+  grid-column: 1 / -1;
+}
+
+.zen-appearance__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.zen-appearance__label {
+  font-size: var(--oct-text-sm);
+}
+
+.zen-appearance__readout {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.zen-appearance__segments {
+  background: color-mix(in srgb, var(--oct-fg) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--oct-glass-stroke) 60%, transparent);
+}
+
+.zen-appearance__segments--wide {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.zen-appearance__segments[data-disabled] {
+  opacity: var(--oct-disabled-opacity);
+}
+
+.zen-appearance__note {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.zen-appearance__group,
+.zen-appearance__preset-grid {
+  min-width: 0;
+}
+
+.zen-appearance__group {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.zen-appearance__group h4 {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  text-transform: capitalize;
+}
+
+.zen-appearance__preset-grid > .zen-appearance__preset {
+  display: grid;
+  align-content: start;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1);
+  justify-items: stretch;
+  text-align: left;
+}
+
+.zen-appearance__thumb {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--oct-radius-sm);
+  object-fit: cover;
+  box-shadow: inset 0 0 0 1px var(--oct-glass-stroke);
+}
+
+.zen-appearance__preset:hover .zen-appearance__thumb {
+  outline-color: var(--oct-glass-stroke-strong);
+  box-shadow: inset 0 0 0 1px var(--oct-glass-stroke-strong);
+}
+
+.zen-appearance__thumb--app {
+  color: var(--oct-muted);
+  background:
+    radial-gradient(color-mix(in srgb, var(--oct-fg) 18%, transparent) 1px, transparent 1.5px) 0 0 /
+      6px 6px,
+    var(--oct-bg);
+}
+
+.zen-appearance__thumb--upload {
+  color: var(--oct-muted);
+  background: color-mix(in srgb, var(--oct-fg) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--oct-glass-stroke-strong);
+}
+
+.zen-appearance__upload {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1);
+  cursor: default;
+}
+
+/* The native control is still the one that opens the file picker and names
+   the choice; the tile is what shows. */
+.zen-appearance__file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.zen-appearance__preset[aria-pressed="true"] .zen-appearance__preset-name,
+.zen-appearance__upload[data-selected="true"] .zen-appearance__preset-name {
+  color: var(--oct-fg);
+}
+
+.zen-appearance__preset-motion {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.zen-appearance__custom > summary {
+  cursor: default;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+}
+
+.zen-appearance__custom[open] {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.zen-research__resize--w {
+  top: 12px;
+  bottom: 12px;
+  left: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.zen-research__resize--s {
+  right: 12px;
+  bottom: 0;
+  left: 12px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.zen-research__resize--sw {
+  bottom: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+}
+
+.zen-research[data-interacting] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.zen-research--collapsed {
+  width: auto;
+  height: auto;
+  padding: var(--oct-space-2);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.zen-research__header {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-border-soft);
+  cursor: grab;
+  touch-action: none;
+}
+
+.zen-research__header:active {
+  cursor: grabbing;
+}
+
+.zen-research__title {
+  flex: 1;
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  color: var(--oct-muted);
+}
+
+.zen-research__rail {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1) var(--oct-space-2);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.zen-research__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 160px;
+  padding: 2px var(--oct-space-1);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fg-soft);
+}
+
+.zen-research__tab button[role="tab"] {
+  max-width: 132px;
+  overflow: hidden;
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-research__tab button[aria-selected="true"] {
+  font-weight: var(--oct-weight-medium);
+  color: var(--oct-fg);
+}
+
+.project-agent-pages__tab {
+  height: auto;
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  padding: var(--oct-space-1) var(--oct-space-2);
+}
+
+.project-agent-pages__page,
+.project-agent-pages__thread,
+.project-agent-page__owner {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-agent-pages__page {
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.project-agent-pages__owner {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+.project-agent-page {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.project-agent-page__head {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.project-agent-page__owner {
+  flex: 1;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.project-agent-page__picture {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.project-agent-page__note {
+  margin: 0;
+  padding: var(--oct-space-3);
+  font-size: var(--oct-text-sm);
+  color: var(--oct-muted);
+}
+
+.zen-research__chrome {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.zen-research__chrome .browser-profile-control span {
+  display: none;
+}
+
+.zen-research__address {
+  flex: 1;
+  overflow: hidden;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-research__page,
+.zen-research__web-browser {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.zen-research__web-browser > .browser-workspace {
+  height: 100%;
+}
+
+.zen-research__address-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.zen-research__picture {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.zen-research__empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-4);
+  font-size: var(--oct-text-sm);
+}
+
+.zen-research__notice {
+  margin: 0;
+  padding: var(--oct-space-3);
+  font-size: var(--oct-text-sm);
+  color: var(--oct-muted);
+}
+
+.zen-canvas-card__chrome {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.zen-canvas-card__stale {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+.zen-canvas-card__document {
+  flex: 1;
+  min-height: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  overflow: auto;
+}
+
+.zen-canvas-card__notice {
+  margin: 0;
+  padding: var(--oct-space-3);
+  font-size: var(--oct-text-sm);
+  color: var(--oct-muted);
+}
+
+.zen-surface .zen-el,
+.zen-surface .zen-research:not(.zen-research--collapsed) {
+  background-color: color-mix(in srgb, var(--oct-glass-floor) 78%, transparent);
+  background-image: linear-gradient(var(--oct-glass-regular), var(--oct-glass-regular));
+  backdrop-filter: blur(var(--oct-glass-blur-regular)) saturate(170%);
+  -webkit-backdrop-filter: blur(var(--oct-glass-blur-regular)) saturate(170%);
+}
+
+.zen-surface .zen-research__header {
+  border-bottom-color: color-mix(in srgb, var(--oct-glass-stroke) 50%, transparent);
+}
+/* Reduced transparency, increased contrast, or no backdrop blur: an opaque
+   window with a plain edge, as every other Zen surface falls back. */
+
+.zen-surface .zen-el,
+.zen-surface .zen-research:not(.zen-research--collapsed) {
+  background-color: var(--oct-surface);
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html[data-octant-increased-contrast="true"] .zen-surface .zen-el,
+html[data-octant-increased-contrast="true"]
+  .zen-surface
+  .zen-research:not(.zen-research--collapsed) {
+  background-color: var(--oct-surface);
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* The keys keep the ghost recipe's own paint; the dock only sizes them and
+   quiets the glyphs until one is pointed at. */
+.zen-surface .zen-bar__button {
+  width: 36px;
+  height: 36px;
+}
+
+.zen-surface .zen-bar__button svg {
+  color: var(--oct-muted);
+}
+
+.zen-surface .zen-bar__button:hover:not([aria-disabled="true"]) svg {
+  color: var(--oct-fg);
+}
+
+.zen-surface .zen-bar-sep {
+  margin-block: 8px;
+  background: color-mix(in srgb, var(--oct-glass-stroke) 70%, transparent);
+}
+
+.zen-ground-effect[data-painted="true"] {
+  opacity: 1;
+}
+
+.zen-surface__manual-panel .zen-appearance__upload {
+  margin-top: 0;
+}
+
+.zen-el .zen-el-head {
+  min-height: 34px;
+  padding-inline: var(--oct-space-3) var(--oct-space-1);
+}
+
+.zen-el-icon {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.zen-el .zen-el-actions {
+  gap: 0;
+  opacity: 0.55;
+}
+
+.zen-el:hover .zen-el-actions,
+.zen-el:focus-within .zen-el-actions,
+.zen-el.zen-element--focused .zen-el-actions {
+  opacity: 1;
+}
+
+.zen-el .zen-el-actions button {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+}
+
+.zen-el-resize--n,
+.zen-el-resize--s {
+  right: 12px;
+  left: 12px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.zen-el-resize--n {
+  top: 0;
+}
+
+.zen-el-resize--s {
+  bottom: 0;
+}
+
+.zen-el-resize--e,
+.zen-el-resize--w {
+  top: 12px;
+  bottom: 12px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.zen-el-resize--e {
+  right: 0;
+}
+
+.zen-el-resize--w {
+  left: 0;
+}
+
+.zen-el-resize--ne,
+.zen-el-resize--nw,
+.zen-el-resize--se,
+.zen-el-resize--sw {
+  width: 14px;
+  height: 14px;
+}
+
+.zen-el-resize--ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.zen-el-resize--nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.zen-el-resize--se {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+.zen-el-resize--sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.zen-el:hover .zen-el-resize--se::after {
+  opacity: 1;
+}
+
+.zen-el[data-minimized="true"] .zen-el-resize {
+  display: none;
+}
+
+.zen-bar.zen-surface__controls button {
+  gap: var(--oct-space-1);
+}
+
+.zen-add__section {
+  display: grid;
+  gap: var(--oct-space-3);
+  min-width: 0;
+}
+
+.zen-add__tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--oct-space-2);
+}
+
+.zen-add__tile svg {
+  color: var(--oct-muted);
+}
+
+.zen-add__tile:hover svg,
+.zen-add__tile[aria-expanded="true"] svg {
+  color: var(--oct-fg);
+}
+
+.zen-add__row {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.zen-add__row > * {
+  min-width: 0;
+}
+
+.zen-add__row--link > input {
+  flex: 3 1 0;
+}
+
+.zen-add__row--link > input + input {
+  flex: 2 1 0;
+}
+
+.zen-add__row-icon {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.zen-surface .zen-add__minutes {
+  width: 72px;
+  flex: none;
+}
+
+.zen-add__unit {
+  flex: 1;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.zen-add__row-action {
+  flex: none;
+}
+
+.zen-add .zen-add-targets {
+  margin-top: 0;
+}

@@ -1,3 +1,4 @@
+import "../styles/automation.css";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type {

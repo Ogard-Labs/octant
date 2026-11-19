@@ -2,13 +2,6 @@
    surface language; this sheet keeps the list/detail split, the run rows,
    and the detail pane. */
 
-.agents-center-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  overflow: auto;
-  background: var(--oct-bg);
-}
 
 .agents-center__notice {
   display: flex;

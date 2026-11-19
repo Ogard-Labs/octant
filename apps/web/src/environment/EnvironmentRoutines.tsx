@@ -1,3 +1,4 @@
+import "../styles/automation.css";
 import type { AutomationClient } from "@octant/client-runtime";
 import type {
   AutomationCommandResult,

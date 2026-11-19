@@ -8,13 +8,6 @@
    (the suite asserts it). Motion is limited to color transitions and
    respects prefers-reduced-motion. */
 
-.automation-center-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  overflow: auto;
-  background: var(--oct-bg);
-}
 
 .automation-center__notice {
   display: flex;
