@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   ChatDeleted,
   EventActor,
+  HUB_DELEGATION_RECORDED,
+  HubDelegationRecordedPayload,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadRetentionThreadPurged,
   decodeUtcTimestamp,
@@ -14,6 +16,7 @@ import {
 import { decodePersonMemoryCommand } from "@octant/contracts/person-memory";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import { readReceivedDelegationThreadIds } from "../hub/delegationJournal";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
@@ -66,7 +69,8 @@ function harness(threads: FakeThread[]) {
     connection,
     registry: registerPersonMemoryEvents(new EventRegistry())
       .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
-      .register("chat.deleted@1", 1, ChatDeleted),
+      .register("chat.deleted@1", 1, ChatDeleted)
+      .register(HUB_DELEGATION_RECORDED, 1, HubDelegationRecordedPayload),
     projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
     clock: () => START,
   });
@@ -530,10 +534,11 @@ describe("who person memory reaches", () => {
       threadId: THREAD_3,
       projectId: PROJECT_B,
       createdAt: leadCreatedAt,
+      windowId: LOCAL,
     };
 
     const childBlock = access.childBlockFor(lead);
-    expect(childBlock).toBe(access.blockFor({ ...lead, windowId: LOCAL }));
+    expect(childBlock).toBe(access.blockFor(lead));
     expect(childBlock).toContain("Prefers CSV");
     // Learned after the lead thread was created: absent from the lead's block and the child's.
     expect(childBlock).not.toContain("Prefers YAML");
@@ -552,6 +557,24 @@ describe("who person memory reaches", () => {
     // A child with tools disabled gets no search tool.
     expect(access.childToolsFor(lead, { tools: false })).toBeUndefined();
 
+    // A child delegated from a hub-introduced device or unknown scope gets neither block nor tool.
+    for (const restrictedWindow of [HUB_DEVICE, undefined]) {
+      expect(access.childBlockFor({ ...lead, windowId: restrictedWindow })).toBeUndefined();
+      expect(
+        access.childToolsFor({ ...lead, windowId: restrictedWindow }, { tools: true }),
+      ).toBeUndefined();
+    }
+
+    // If a child's live scope later narrows to a restricted device or disappears, search refuses.
+    let currentOwner: WindowId | undefined = LOCAL;
+    const liveChildTools = access.childToolsFor(lead, { tools: true }, () => currentOwner);
+    currentOwner = HUB_DEVICE;
+    const refusedSearch = await liveChildTools?.execute({
+      name: "octant_past_threads",
+      inputJson: JSON.stringify({ query: "invoice" }),
+    });
+    expect(refusedSearch?.isError).toBe(true);
+
     // A child whose lead is in a Project kept out of memory gets neither.
     h.store.change(
       decodePersonMemoryCommand({
@@ -569,6 +592,7 @@ describe("who person memory reaches", () => {
       threadId: THREAD_3,
       projectId: PROJECT_A,
       createdAt: leadCreatedAt,
+      windowId: LOCAL,
     };
     expect(access.childBlockFor(ordinaryLead)).toContain("Prefers CSV");
     h.store.change(
@@ -595,9 +619,82 @@ describe("who person memory reaches", () => {
       threadId: "aaaaaaaa-0000-4000-8000-000000000004",
       projectId: PROJECT_A,
       createdAt: leadCreatedAt,
+      windowId: LOCAL,
     };
     expect(access.childBlockFor(otherLead)).toBeUndefined();
     expect(access.childToolsFor(otherLead, { tools: true })).toBeUndefined();
+  });
+
+  it("withholds person memory from a peer-delegated Work thread and its subagents, including after journal replay", async () => {
+    const h = harness([
+      {
+        id: THREAD_1,
+        completedAt: later,
+        projectId: PROJECT_A,
+        title: "Private payroll",
+        personMessages: ["CSV"],
+      },
+    ]);
+    h.advance(later);
+    await h.sweep.pass();
+
+    const peerThreadId = "aaaaaaaa-0000-4000-8000-000000000099";
+    h.journal.append({
+      aggregate: {
+        aggregateType: "hub-delegation",
+        aggregateId: "77777777-7777-4777-8777-777777777777",
+      },
+      expectedVersion: 0,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName: HUB_DELEGATION_RECORDED,
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor,
+          occurredAt: later,
+          payload: {
+            change: "received",
+            actingPrincipal: {
+              kind: "peer",
+              memberId: "66666666-6666-4666-8666-666666666666",
+            },
+            requestId: "55555555-5555-4555-8555-555555555555",
+            memberId: "66666666-6666-4666-8666-666666666666",
+            projectId: PROJECT_B,
+            threadId: peerThreadId,
+          },
+        },
+      ],
+    });
+    const withheld = readReceivedDelegationThreadIds(h.journal);
+    expect(withheld.has(peerThreadId)).toBe(true);
+
+    const access = createPersonMemoryAccess({
+      store: h.store,
+      isRestrictedDeviceScope: (scope) => scope === HUB_DEVICE,
+      isThreadWithheld: (threadId) => withheld.has(threadId),
+      projectLabel: () => "Shop",
+    });
+
+    const peerScope = {
+      mode: "work" as const,
+      threadId: peerThreadId,
+      projectId: PROJECT_B,
+      createdAt: "2026-11-02T00:00:00.000Z",
+      windowId: HOST,
+    };
+    expect(access.blockFor(peerScope)).toBeUndefined();
+    expect(access.toolsFor(peerScope)).toBeUndefined();
+    expect(access.childBlockFor(peerScope)).toBeUndefined();
+    expect(access.childToolsFor(peerScope, { tools: true })).toBeUndefined();
+
+    // An ordinary routine thread under the same host scope still reads person memory.
+    const routineScope = { ...peerScope, threadId: THREAD_3 };
+    expect(access.blockFor(routineScope)).toContain("Prefers CSV");
+    expect(access.toolsFor(routineScope)?.definitions.map((d) => d.name)).toEqual([
+      "octant_past_threads",
+    ]);
   });
 });
 

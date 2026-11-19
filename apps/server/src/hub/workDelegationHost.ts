@@ -77,6 +77,12 @@ export interface WorkDelegationServices {
   };
   /** The host's own scope, which no window or device can claim. */
   readonly scope: WindowId;
+  /**
+   * Called once a peer-delegated Work thread is created and before its first
+   * turn starts, so host-wide person memory is withheld from the turn and any
+   * child run it spawns.
+   */
+  readonly onDelegatedThreadCreated?: (threadId: string) => void;
   readonly uuid?: () => string;
 }
 
@@ -142,6 +148,9 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
         if (!wasCreated(created)) return { status: "refused", kind: "start-failed" };
         // Work may have been turned off while the thread was being created.
         if (!services.isWorkEnabled()) return { status: "refused", kind: "mode-unavailable" };
+        // Mark the thread before starting the turn so person memory is
+        // withheld before the provider sees any context or tools.
+        services.onDelegatedThreadCreated?.(threadId);
         const turnId = uuid();
         const started = await services.turns.startFirstTurn(
           services.scope,

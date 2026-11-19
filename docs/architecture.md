@@ -2072,19 +2072,22 @@ except where a bullet says otherwise.
     change everything in Settings › Memory, and a turn either sends gets the
     block and `octant_past_threads` under the thread's own participation rules
     (memory on, Project not kept out, thread not Leave no trace). A device known
-    only through a hub's roster and a turn with no scope (such as a benchmark
-    runner's Chat turn) get neither.
+    only through a hub's roster (and any subagent it spawns), a peer-delegated
+    Work turn (and any subagent it spawns), and a turn with no scope (such as a
+    benchmark runner's Chat turn) get neither.
   - A routine's run or another turn the host starts as itself (a delivered child
     result, a turn resumed after a usage limit, a goal round): gets the block
     and `octant_past_threads` under the thread's own participation rules, so a
     provider session keeps a stable standing-context prefix across person and
     host-started turns.
-  - A subagent (child run): gets its lead thread's person-memory block once on
-    start (never duplicated on a continuation that already holds it) and
+  - A subagent (child run): inherits its originating turn's scope restriction
+    and gets its lead thread's person-memory block once on start (never
+    duplicated on a continuation that already holds it) and
     `octant_past_threads` scoped to its lead thread when its clamped authority
     allows tools and its provider carries Octant's tools, so a child sees what
-    its lead sees and never more. A child whose lead is in a kept-out Project or
-    a Leave no trace thread gets neither.
+    its lead sees and never more. A child whose originating scope is absent or
+    restricted, or whose lead is peer-delegated, in a kept-out Project, or in a
+    Leave no trace thread, gets neither.
   - Only turns with the person's own message can write person memory (through
     distillation of ended threads); routines, host-started turns, and subagents
     read it without writing to it, and all caps stay unchanged.

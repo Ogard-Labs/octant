@@ -21,6 +21,7 @@ import {
   decodeMultiModelRoutingVendorId,
   decodeProjectId,
   decodeProviderInstanceId,
+  decodeWindowId,
   decodeWorkThreadId,
   decodeUtcTimestamp,
   effectiveAgentRunConcurrency,
@@ -122,7 +123,7 @@ import {
   isNativeHarnessDriverKind,
 } from "@octant/domain";
 import { type AppManagedToolSet, combineAppManagedToolSets } from "../providers/appManagedToolSet";
-import type { PersonMemoryLeadScope } from "../personMemory/personMemoryAccess";
+import type { PersonMemoryTurnScope } from "../personMemory/personMemoryAccess";
 import { type ConfiguredProviderDriverOptions, makeConfiguredProviderDriver } from "./providers";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -178,13 +179,20 @@ function readAgentRunParentThread(
   }
 }
 
-/** The lead thread's person-memory scope for one child run, or `undefined` when gone. */
+/**
+ * The lead thread's person-memory scope for one child run, carrying the
+ * originating turn's principal scope so a child spawned from a restricted
+ * device or an unknown scope never widens memory reach.
+ */
 function readAgentRunLeadPersonMemoryScope(
   persistence: PersistenceService,
   workThreadProjection: WorkThreadProjection,
   run: AgentRun,
-): PersonMemoryLeadScope | undefined {
+  agentRunRequestOwner: (run: AgentRun) => string | undefined,
+): PersonMemoryTurnScope | undefined {
   try {
+    const owner = agentRunRequestOwner(run);
+    const windowId = owner === undefined ? undefined : decodeWindowId(owner);
     const threadId = String(run.parentThreadId);
     switch (run.routingReceipt.mode) {
       case "chat": {
@@ -195,6 +203,7 @@ function readAgentRunLeadPersonMemoryScope(
           threadId: String(thread.id),
           projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
           createdAt: thread.createdAt,
+          windowId,
         };
       }
       case "work": {
@@ -205,6 +214,7 @@ function readAgentRunLeadPersonMemoryScope(
           threadId: String(thread.id),
           projectId: String(thread.projectId),
           createdAt: thread.createdAt,
+          windowId,
         };
       }
       case "code": {
@@ -215,6 +225,7 @@ function readAgentRunLeadPersonMemoryScope(
           threadId: String(thread.id),
           projectId: String(thread.projectId),
           createdAt: thread.createdAt,
+          windowId,
         };
       }
     }
@@ -628,6 +639,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     AuthorityWiring,
     | "agentRunParentAuthority"
     | "agentRunPersistence"
+    | "agentRunRequestOwner"
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
     | "liveTurns"
@@ -664,6 +676,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     agentRunInteractions,
     agentRunPersistence,
     agentRunParentAuthority,
+    agentRunRequestOwner,
     codeBoardEventStore,
     codeParentActiveTurn,
     codeSessionAuthority,
@@ -829,8 +842,23 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     ) {
       return undefined;
     }
-    const lead = readAgentRunLeadPersonMemoryScope(persistence, workThreadProjection, run);
-    return lead === undefined ? undefined : personMemoryAccess.childToolsFor(lead, authority);
+    const lead = readAgentRunLeadPersonMemoryScope(
+      persistence,
+      workThreadProjection,
+      run,
+      agentRunRequestOwner,
+    );
+    return lead === undefined
+      ? undefined
+      : personMemoryAccess.childToolsFor(lead, authority, () => {
+          const owner = agentRunRequestOwner(run);
+          if (owner === undefined) return undefined;
+          try {
+            return decodeWindowId(owner);
+          } catch {
+            return undefined;
+          }
+        });
   });
   // Managed subagent execution. A managed child runs as an in-process
   // provider session, not a spawned process, so authority is re-derived from
@@ -999,7 +1027,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         readResultText: (dependencyId) => agentRunPersistence.resultText(dependencyId),
       }),
       personMemoryBlock: (run) => {
-        const lead = readAgentRunLeadPersonMemoryScope(persistence, workThreadProjection, run);
+        const lead = readAgentRunLeadPersonMemoryScope(
+          persistence,
+          workThreadProjection,
+          run,
+          agentRunRequestOwner,
+        );
         return lead === undefined ? undefined : personMemoryAccess.childBlockFor(lead);
       },
       prepareInputs: async ({ run, manifest, signal }) => {
