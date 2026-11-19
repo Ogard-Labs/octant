@@ -405,6 +405,7 @@ import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
 import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
+import { MoveThreadToProjectDialog } from "./projects/MoveThreadToProjectDialog";
 import {
   ProjectActionRunDialog,
   type ProjectActionTarget,
@@ -8574,7 +8575,6 @@ function LaunchedShell(
         sidebar={
           <FollowUpLineageProvider client={launchedClients.followUpSuggestionClient}>
             <SidebarContainer
-              moveRequest={moveRequest}
               zenEnabled={zen.enabled}
               windowHistory={windowHistory}
               actions={actions}
@@ -9127,6 +9127,43 @@ function LaunchedShell(
       </ShellFrame>
       <OctantDialogPresence>
         <FilesClosePrompt />
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {moveRequest === undefined ? null : (
+          // The one Move to Project dialog lives above the shell frame so it
+          // stays mounted and reachable wherever the asking surface is —
+          // including when the sidebar that used to host it is hidden.
+          <MoveThreadToProjectDialog
+            {...(moveRequest.busy === true ||
+            (moveRequest.mode === "code" &&
+              navigationModel.codeSidebarThreads.some(
+                (thread) =>
+                  String(thread.threadId) === moveRequest.threadId &&
+                  (thread.activity === "working" || thread.activity === "attention"),
+              ))
+              ? { busy: true }
+              : {})}
+            currentProjectId={moveRequest.projectId}
+            mode={moveRequest.mode}
+            onClose={() => setMoveRequest(undefined)}
+            onMove={async (projectId: string, when?: "after-turn" | "stop-now") =>
+              moveRequest.mode === "code"
+                ? actions.moveCodeThread(
+                    decodeCodeThreadId(moveRequest.threadId),
+                    decodeProjectId(projectId),
+                    { when },
+                  )
+                : actions.tryWorkRestCommand(moveRequest.threadId, (expectedVersion) => ({
+                    kind: "move-work-thread",
+                    threadId: decodeWorkThreadId(moveRequest.threadId),
+                    expectedVersion,
+                    projectId: decodeProjectId(projectId),
+                  }))
+            }
+            projects={projectController.allProjects}
+            threadTitle={moveRequest.title}
+          />
+        )}
       </OctantDialogPresence>
       <PrepareToShutDownHost
         hostBridge={props.hostBridge}

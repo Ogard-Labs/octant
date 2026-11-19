@@ -3010,6 +3010,15 @@ function approvalPrompt(
         message = "Allow Code commit operation?";
         effectDetail = `${command.message}\n\n${command.stagedSummary.map(({ path }) => path).join("\n")}`;
         break;
+      case "switch-git-branch":
+        message = "Switch this checkout's branch?";
+        effectDetail = [
+          `Target branch: ${command.branch}`,
+          command.dirty === "stash"
+            ? "Uncommitted changes are stashed first."
+            : "Refused if the checkout has uncommitted changes.",
+        ].join("\n");
+        break;
       case "push-git":
         message = "Allow Code push operation?";
         effectDetail = [

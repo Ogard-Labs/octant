@@ -1,5 +1,7 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts";
+import type { CodeApprovalId, CodeCheckoutId, CodeThreadId } from "@octant/contracts";
+import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import { decidesCodeEffectsByApproval } from "@octant/domain";
 
 export interface SwitchCodeBranchRequest {
   readonly branch: string;
@@ -93,17 +95,41 @@ export async function switchCodeBranch(
   nextUuid: () => string,
   scope: { readonly threadId: CodeThreadId; readonly checkoutId: CodeCheckoutId },
   request: SwitchCodeBranchRequest,
+  authority?: {
+    readonly executionPolicy: ProviderExecutionPolicy;
+    /**
+     * The shared approval path the Git pane's mutations take. A grant is
+     * recorded against the exact command below — its operation ids and the
+     * state token the person consented to — so approval can never stand in
+     * for a switch that was not the one it named.
+     */
+    readonly requestApproval?: (
+      command: Parameters<CodeClient["executeOperation"]>[0],
+    ) => Promise<CodeApprovalId | undefined>;
+  },
 ): Promise<SwitchCodeBranchOutcome> {
+  const command: Parameters<CodeClient["executeOperation"]>[0] = {
+    kind: "switch-git-branch",
+    operationId: nextUuid() as never,
+    gitOperationId: nextUuid() as never,
+    ...scope,
+    branch: request.branch,
+    expectedStateToken: request.expectedStateToken,
+    dirty: request.dirty,
+  };
+  if (authority !== undefined) {
+    if (authority.executionPolicy === "plan") {
+      return { status: "refused", message: "Plan mode is read-only; switching is unavailable." };
+    }
+    if (decidesCodeEffectsByApproval(authority.executionPolicy)) {
+      const approvalId = await authority.requestApproval?.(command);
+      if (approvalId === undefined) {
+        return { status: "refused", message: "The branch switch was not approved." };
+      }
+    }
+  }
   try {
-    const result = await client.executeOperation({
-      kind: "switch-git-branch",
-      operationId: nextUuid() as never,
-      gitOperationId: nextUuid() as never,
-      ...scope,
-      branch: request.branch,
-      expectedStateToken: request.expectedStateToken,
-      dirty: request.dirty,
-    });
+    const result = await client.executeOperation(command);
     if (result === undefined) {
       return { status: "refused", message: "The host did not answer the switch request." };
     }

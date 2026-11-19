@@ -362,6 +362,14 @@ describe("Code operation contracts", () => {
         expectedStateToken: "a".repeat(64),
       },
       {
+        kind: "switch-git-branch",
+        ...scope,
+        gitOperationId: ids.git,
+        branch: "feature/another-branch",
+        expectedStateToken: "a".repeat(64),
+        dirty: "refuse",
+      },
+      {
         kind: "push-git",
         ...scope,
         gitOperationId: ids.git,

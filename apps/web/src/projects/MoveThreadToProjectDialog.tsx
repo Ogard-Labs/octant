@@ -183,7 +183,7 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
                   type="button"
                   variant="bare"
                 >
-                  <span aria-hidden="true" className="move-thread__when-dot" />
+                  <span aria-hidden="true" className="code-where__dot" />
                   {choice.label}
                 </OctantButton>
               ))}

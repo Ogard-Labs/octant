@@ -49,6 +49,7 @@ import {
   decodeCodeEvidenceReference,
   decodeCodeOperationEvent,
   decodeCodeOperationId,
+  decodeCodeOperationApprovalRequest,
   decodeCodeOperationCommand,
   decodeCodeThread,
   type CodeApprovalId,
@@ -164,6 +165,7 @@ import { GhPullRequestPort, type GhCommandPort } from "./ghPullRequestPort";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { createCodeLanguageAgentTools } from "./codeLanguageAgentTools";
 import type { CodeLanguageAgentReadResult } from "./codeLanguageService";
+import { CodeOperationApprovalStore } from "./codeOperationApprovalStore";
 import {
   CODE_OPERATION_EVENT_RECORDED,
   CodeOperationEventStore,
@@ -667,6 +669,101 @@ describe("CodeOperationRuntime", () => {
     expect(restore?.detail).toContain(
       "Uncommitted work not saved in this checkpoint is overwritten.",
     );
+    fixture.close();
+  });
+
+  it("prepares and confirms approval for a branch switch, held to its exact branch and observed state", async () => {
+    let storeUuid = 0;
+    const approvalStore = new CodeOperationApprovalStore({
+      uuid: () => `10000000-0000-4000-8000-${(++storeUuid).toString().padStart(12, "0")}` as never,
+      now: () => Date.parse(now),
+    });
+    const fixture = runtimeFixture({ approvalValidator: false, approvalStore });
+    const command = {
+      kind: "switch-git-branch" as const,
+      threadId,
+      checkoutId,
+      operationId: operationId(20),
+      gitOperationId: operationId(21) as never,
+      branch: "release/2025",
+      expectedStateToken: "e".repeat(64),
+      dirty: "refuse" as const,
+    };
+    // The real decoder admits the command: a gated switch that cannot decode
+    // never reaches prepare at all.
+    const request = decodeCodeOperationApprovalRequest({
+      effect: { kind: "operation", command },
+    });
+    const challenge = await fixture.runtime.prepareApproval(windowId, request);
+    expect(challenge).toMatchObject({
+      threadId,
+      checkoutId,
+      contextDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(challenge?.message).toBe("Switch this checkout's branch?");
+    expect(challenge?.detail).toContain("Target branch: release/2025");
+    expect(challenge?.detail).toContain("Refused if the checkout has uncommitted changes.");
+    expect(challenge?.detail).not.toContain("stash");
+    // Only a command that asks for it names the stash the person consents to.
+    const stashed = await fixture.runtime.prepareApproval(
+      windowId,
+      decodeCodeOperationApprovalRequest({
+        effect: {
+          kind: "operation",
+          command: { ...command, operationId: operationId(22), dirty: "stash" as const },
+        },
+      }),
+    );
+    expect(stashed?.detail).toContain("Uncommitted changes are stashed first.");
+
+    const receipt = await fixture.runtime.confirmApproval(windowId, {
+      challengeId: challenge!.challengeId,
+    });
+    expect(receipt?.approvalId).toEqual(expect.any(String));
+    const effect = { kind: "operation" as const, command };
+    // The grant answers the exact command it was shown for: a switch to
+    // another branch, or one under a different observed checkout state, is
+    // not the act the person approved. These refusals run before the true
+    // validate because a matching validate consumes the one-shot grant.
+    await expect(
+      approvalStore.validate({
+        windowId,
+        effect: {
+          kind: "operation",
+          command: { ...command, branch: "main" },
+        } as never,
+        contextDigest: challenge!.contextDigest,
+        approvalId: receipt!.approvalId,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      approvalStore.validate({
+        windowId,
+        effect: {
+          kind: "operation",
+          command: { ...command, expectedStateToken: "f".repeat(64) },
+        } as never,
+        contextDigest: challenge!.contextDigest,
+        approvalId: receipt!.approvalId,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      approvalStore.validate({
+        windowId,
+        effect: effect as never,
+        contextDigest: challenge!.contextDigest,
+        approvalId: receipt!.approvalId,
+      }),
+    ).resolves.toBe(true);
+    // The grant is spent: the same command cannot be answered twice.
+    await expect(
+      approvalStore.validate({
+        windowId,
+        effect: effect as never,
+        contextDigest: challenge!.contextDigest,
+        approvalId: receipt!.approvalId,
+      }),
+    ).resolves.toBe(false);
     fixture.close();
   });
 
@@ -12568,6 +12665,8 @@ function runtimeFixture(options: {
     binary: boolean;
   }>;
   approvalValidator?: boolean | (() => boolean);
+  /** The runtime's own approval store, kept by a test to validate issued grants. */
+  approvalStore?: CodeOperationApprovalStore;
   /** Where the runtime keeps its running turns, as the host passes it. */
   activeTurns?: CodeActiveTurns;
   /** Whether a window may access a Project; a function answers per Project. */
@@ -13052,6 +13151,7 @@ function runtimeFixture(options: {
               typeof options.approvalValidator === "function" ? options.approvalValidator() : true,
           },
         }),
+    ...(options.approvalStore === undefined ? {} : { approvalStore: options.approvalStore }),
     actor,
     clock: options.clock ?? (() => now),
     uuid: () => `90000000-0000-4000-8000-${(++uuidCounter).toString().padStart(12, "0")}`,

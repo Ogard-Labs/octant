@@ -103,6 +103,7 @@ import { TabActivationProvider, type TabActivationRegistry } from "./TabActivati
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
 import { observeCodeBranchState, switchCodeBranch } from "../code/switchCodeBranch";
+import { nativeCodeWorkspaceApprovals } from "../code/codeWorkspaceApprovals";
 import type { ThreadMoveRequest } from "../app/shellActions";
 import {
   Component,
@@ -1585,6 +1586,12 @@ function renderCodeTab(
             (checkout) => String(checkout.id) === String(activeThread.checkoutId),
           );
   const checkoutAvailability = activeCheckout?.availability;
+  // The one shared approval route the workspace's own panes record through;
+  // the grant names the exact command the person confirmed.
+  const workspaceGitApproval = nativeCodeWorkspaceApprovals(
+    props.hostBridge,
+    codeController.activeView,
+  )?.git;
   const providerInstanceId = activeThread?.providerInstanceId;
   const autoReview = autoReviewFor({
     providerInstanceId,
@@ -1803,6 +1810,12 @@ function renderCodeTab(
                       () => globalThis.crypto.randomUUID(),
                       { threadId: tab.threadId, checkoutId: activeThread.checkoutId },
                       request,
+                      {
+                        executionPolicy: activeThread.executionPolicy,
+                        ...(workspaceGitApproval === undefined
+                          ? {}
+                          : { requestApproval: workspaceGitApproval }),
+                      },
                     ),
                 })}
             {...(project === undefined || props.onRequestMoveToProject === undefined
@@ -1822,6 +1835,7 @@ function renderCodeTab(
             props.waitingThreadIds?.has(String(tab.threadId)) === true
               ? { threadBusy: true }
               : {})}
+            {...(activeThread === undefined ? {} : { threadPolicy: activeThread.executionPolicy })}
             {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
             {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
             {...(props.projectWindowCapability === undefined

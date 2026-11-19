@@ -4941,6 +4941,49 @@ describe("App", () => {
     );
   });
 
+  it("opens the shared Move to Project dialog from the Environment's Project row with the sidebar hidden", async () => {
+    const user = userEvent.setup();
+    const base = projectBootstrap();
+    const second = {
+      ...base.active[0]!,
+      id: otherProjectId,
+      name: "Octant mirror",
+    };
+    const projectApi = projects({
+      ...base,
+      active: [base.active[0]!, second],
+      availability: base.availability.map((entry) => ({
+        ...entry,
+        status: "available" as const,
+      })),
+    });
+    vi.mocked(projectApi.environmentForThread).mockResolvedValue(readyEnvironment);
+    vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
+
+    render(
+      <App
+        codeClient={codes()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await showRightUtilityDock(user);
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    await openQuickDockTool(user, dock, "Environment");
+    await within(dock).findByRole("region", { name: "Environment details" });
+    // The dialog used to live inside the sidebar's own tree, so hiding the
+    // sidebar took the move choice with it.
+    await user.click(screen.getByRole("button", { name: "Hide sidebar" }));
+    expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).not.toBeInTheDocument();
+    await user.click(within(dock).getByRole("button", { name: /Octant/ }));
+    expect(await screen.findByRole("dialog", { name: "Move to Project" })).toBeVisible();
+  });
+
   it("treats the native minimum width as compact desktop chrome", async () => {
     const originalMatchMedia = window.matchMedia;
     const addEventListener = vi.fn();

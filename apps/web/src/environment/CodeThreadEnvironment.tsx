@@ -24,6 +24,7 @@ import type {
   WorkspaceTab,
 } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
+import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
 import { decideThreadMove, folderContains } from "@octant/domain/thread-project-move-policy";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
@@ -152,6 +153,11 @@ export interface CodeThreadEnvironmentProps {
    * (the host also refuses mid-turn) and the busy move choice is offered.
    */
   readonly threadBusy?: boolean;
+  /**
+   * The posture the thread runs at. Plan is read-only, so Switch branch stays
+   * greyed rather than asking for a mutation the host would refuse.
+   */
+  readonly threadPolicy?: ProviderExecutionPolicy;
   readonly onExecute?: (
     command: CodeCommand,
     signal?: AbortSignal,
@@ -328,8 +334,15 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             icon: <GitFork aria-hidden="true" size={16} />,
             // A switch while a turn runs would move the ground under the
             // provider; the host refuses too, and the greyed row says why.
-            ...(props.threadBusy === true
-              ? { disabled: true, description: "Available when the current turn finishes." }
+            // Under Plan the checkout is read-only, so the row stays off.
+            ...(props.threadBusy === true || props.threadPolicy === "plan"
+              ? {
+                  disabled: true,
+                  description:
+                    props.threadPolicy === "plan"
+                      ? "Plan mode is read-only."
+                      : "Available when the current turn finishes.",
+                }
               : {}),
             run: () => setSwitchBranchOpen(true),
           },

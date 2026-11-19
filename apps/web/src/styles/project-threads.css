@@ -838,8 +838,7 @@
 }
 
 /* The busy-move choices read like the rows around them: one plain button per
-   choice with a dot at the leading edge, the same grammar as the Where
-   menu's radio rows. */
+   choice carrying the shared radio dot the Where menu's rows draw. */
 .move-thread__when {
   margin: var(--oct-space-3) 0 0;
   padding: 0;
@@ -861,15 +860,7 @@
   text-align: left;
 }
 
-.move-thread__when-dot {
-  width: 14px;
-  height: 14px;
-  flex: none;
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 50%;
-}
-
-.move-thread__when-choice[aria-checked="true"] .move-thread__when-dot {
+.move-thread__when-choice[aria-checked="true"] .code-where__dot {
   border: 4px solid var(--octant-text-primary);
 }
 

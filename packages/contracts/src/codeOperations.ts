@@ -3212,6 +3212,7 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   // A rewind that puts files back is approved as the restore it performs.
   "rewind-code-thread",
   "commit-git",
+  "switch-git-branch",
   "push-git",
   "create-pull-request",
   "update-pull-request",

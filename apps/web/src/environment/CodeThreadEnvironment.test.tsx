@@ -1142,6 +1142,16 @@ describe("CodeThreadEnvironment branch and move actions", () => {
     await user.keyboard("{Escape}");
   });
 
+  it("greys Switch branch under Plan mode, which is read-only", async () => {
+    const { user } = await openBranchMenuClicked({ threadPolicy: "plan" });
+    expect(await screen.findByRole("menuitem", { name: "Switch branch…" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("menuitem", { name: "New task on another branch…" })).toBeEnabled();
+    await user.keyboard("{Escape}");
+  });
+
   it("offers no current-thread switch on a remote root or a plain folder, but still opens a new task from either", async () => {
     for (const checkoutKind of ["remote-root", "plain-folder"] as const) {
       const { unmount, user } = await openBranchMenuClicked({ checkoutKind });
