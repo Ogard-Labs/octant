@@ -15,6 +15,12 @@ const shared = {
 export default defineConfig([
   {
     ...shared,
+    // The primary Electron process needs Schema before it can start the host.
+    // Bundle that import here rather than walking Effect's module tree on disk.
+    deps: {
+      ...shared.deps,
+      alwaysBundle: [...shared.deps.alwaysBundle, /^effect(?:\/|$)/],
+    },
     entry: ["src/main.ts"],
     format: ["esm"],
   },
