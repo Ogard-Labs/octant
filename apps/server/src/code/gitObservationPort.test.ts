@@ -1,9 +1,18 @@
 import { execFile as nodeExecFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import { GitObservationPort, type GitObservation } from "./gitObservationPort";
@@ -656,6 +665,54 @@ describe("GitObservationPort", () => {
     expect(second.stateToken).toBe(first.stateToken);
   });
 
+  it("hashes a link's own name: retargeting moves the token while the target's bytes never do", async () => {
+    const repository = createRepository();
+    const first = join(temporaryDirectory(), "first-target.txt");
+    const second = join(temporaryDirectory(), "second-target.txt");
+    // Identical bytes behind two names, so only the name the link carries can
+    // move the token.
+    writeFileSync(first, "same outside bytes\n");
+    writeFileSync(second, "same outside bytes\n");
+    symlinkSync(first, join(repository, "link.txt"));
+    git(repository, "add", "--", "link.txt");
+    git(repository, "commit", "-m", "add link");
+    const port = new GitObservationPort(confinedOptions());
+
+    const before = await port.observe(repository);
+    expect(before.status).toBe("ready");
+    if (before.status !== "ready") return;
+
+    rmSync(join(repository, "link.txt"));
+    symlinkSync(second, join(repository, "link.txt"));
+    const retargeted = await port.observe(repository);
+    expect(retargeted.status).toBe("ready");
+    if (retargeted.status !== "ready") return;
+    // The link itself changed: a consent taken on the old token is stale.
+    expect(retargeted.stateToken).not.toBe(before.stateToken);
+    expect(retargeted.stateToken).toBe(oracleStateToken(retargeted));
+
+    // The bytes the link names sit outside the checkout and are never read:
+    // mutating them leaves the token — and the consent it carries — untouched.
+    writeFileSync(second, "changed outside bytes\n");
+    const after = await port.observe(repository);
+    expect(after.status).toBe("ready");
+    if (after.status !== "ready") return;
+    expect(after.stateToken).toBe(retargeted.stateToken);
+  });
+
+  it("hashes a dangling link's own name without resolving the target it lacks", async () => {
+    const repository = createRepository();
+    symlinkSync(join(repository, "does-not-exist.txt"), join(repository, "loose.txt"));
+    const port = new GitObservationPort(confinedOptions());
+
+    const result = await port.observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.changedPaths).toContain("loose.txt");
+    expect(result.stateToken).toBe(oracleStateToken(result));
+  });
+
   it("changes the state token when a file appears inside an untracked directory", async () => {
     const repository = createRepository();
     mkdirSync(join(repository, "untracked-directory"));
@@ -823,12 +880,25 @@ function recordingPort(
  */
 function oracleStateToken(observation: GitObservation): string {
   const objectId = (args: string[]): string | null => {
-    // `hash-object` reads the bytes a link names: the port refuses to hash a
-    // path resolving outside the checkout, so the oracle expects null there.
     const hashed = args[0] === "hash-object" ? args[args.length - 1] : undefined;
     if (hashed !== undefined) {
       try {
-        const resolved = realpathSync(join(observation.checkoutRoot, hashed));
+        const full = join(observation.checkoutRoot, hashed);
+        if (lstatSync(full).isSymbolicLink()) {
+          const parent = realpathSync(dirname(full));
+          if (
+            parent !== observation.checkoutRoot &&
+            !parent.startsWith(`${observation.checkoutRoot}${sep}`)
+          )
+            return null;
+          // The port hashes the link's own bytes — the target's name — never
+          // the target, so the oracle does too.
+          return createHash("sha256")
+            .update("octant symlink\0")
+            .update(readlinkSync(full, { encoding: "buffer" }))
+            .digest("hex");
+        }
+        const resolved = realpathSync(full);
         if (
           resolved !== observation.checkoutRoot &&
           !resolved.startsWith(`${observation.checkoutRoot}${sep}`)

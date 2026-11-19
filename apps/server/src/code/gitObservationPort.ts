@@ -2,8 +2,8 @@ import { trackSandboxChild, sandboxToolPolicy } from "../process/sandboxRuntimeP
 import { isUtf8 } from "node:buffer";
 import { execFile as nodeExecFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, mkdir, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { isAbsolute, join, sep } from "node:path";
+import { lstat, mkdir, mkdtemp, realpath, readlink, rm, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, sep } from "node:path";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
   createGitSeatbeltConfinement,
@@ -774,22 +774,35 @@ async function readWorktreeObjectIds(
 ): Promise<Array<string | null>> {
   // A deleted path, a rename source and a collapsed untracked directory make
   // `hash-object` fail for the whole batch, and those are common. Locally, only
-  // paths that resolve to a regular file go to Git (it follows symlinks, so a
-  // dangling link or one to a directory would fail the chunk); the rest get
-  // null, as the per-path call gave. The real path must also stay inside the
-  // checkout: `hash-object` reads the bytes, so a link — or a linked directory
-  // on the way — pointing outside would bind content the checkout does not own.
-  // On a server the checkout is not on this machine's disk, so nothing is read
-  // here: every path goes to the batch and the per-path fallback sorts out the
-  // failures.
+  // regular files whose real path stays inside the checkout go to Git, which
+  // reads the bytes it hashes. A symlink is hashed itself — the link text is
+  // what Git versions — with a digest domain-separated from Git's own object
+  // ids; the target is never opened, so a dangling or outside-pointing link
+  // cannot bind bytes the checkout does not own. An ancestor that leads out
+  // refuses too. On a server the checkout is not on this machine's disk, so
+  // nothing is read here: every path goes to the batch and the per-path
+  // fallback sorts out the failures.
   let hashable: string[] = [];
+  const byPath = new Map<string, string>();
   if (checkoutRoot === undefined) hashable = [...paths];
   else {
     for (const path of paths) {
       try {
         const full = join(checkoutRoot, path);
         const stats = await lstat(full);
-        if (stats.isFile() || (stats.isSymbolicLink() && (await stat(full)).isFile())) {
+        if (stats.isSymbolicLink()) {
+          const parent = await realpath(dirname(full));
+          if (parent !== checkoutRoot && !parent.startsWith(`${checkoutRoot}${sep}`)) continue;
+          // Raw bytes, never a decoded string: two targets that differ only
+          // in non-UTF8 bytes must not hash to the same name.
+          const linkText = await readlink(full, { encoding: "buffer" });
+          byPath.set(
+            path,
+            createHash("sha256").update("octant symlink\0").update(linkText).digest("hex"),
+          );
+          continue;
+        }
+        if (stats.isFile()) {
           const resolved = await realpath(full);
           if (resolved === checkoutRoot || resolved.startsWith(`${checkoutRoot}${sep}`))
             hashable.push(path);
@@ -799,7 +812,6 @@ async function readWorktreeObjectIds(
       }
     }
   }
-  const byPath = new Map<string, string>();
   if (hashable.length > 0) {
     const batch = await run(["hash-object", "--no-filters", "--", ...hashable]);
     const batchIds = batch.stdout.split("\n").filter((line) => line !== "");
