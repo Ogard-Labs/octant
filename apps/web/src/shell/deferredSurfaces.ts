@@ -31,7 +31,14 @@ const ZenProjectTerminalCard = lazy(() =>
   })),
 );
 
+const ProjectCreateDialog = lazy(() =>
+  import("../projects/ProjectCreateDialog").then((module) => ({
+    default: module.ProjectCreateDialog,
+  })),
+);
+
 export {
+  ProjectCreateDialog,
   RemotePairingView,
   UsageWorkspace,
   ZenCanvasCard,

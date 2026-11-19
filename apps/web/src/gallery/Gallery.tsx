@@ -38,6 +38,7 @@ import "../styles/settings.css";
 // The shared component/material layer loads last, as it does in the app.
 import "../styles/zen.css";
 import "../styles/browser-workspace.css";
+import "../styles/folder-picker.css";
 import "../styles/components.css";
 import "./gallery.css";
 

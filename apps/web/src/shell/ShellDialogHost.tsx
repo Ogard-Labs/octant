@@ -17,10 +17,8 @@ const FirstRunOnboarding = lazy(() =>
   })),
 );
 import { CommandPalette } from "../palette/CommandPalette";
-import {
-  ProjectCreateDialog,
-  type ProjectCreateGithubSource,
-} from "../projects/ProjectCreateDialog";
+import type { ProjectCreateGithubSource } from "../projects/ProjectCreateDialog";
+import { ProjectCreateDialog } from "./deferredSurfaces";
 import { WhatsNewAfterUpdate } from "../settings/WhatsNewAfterUpdate";
 import type { WhatsNewController } from "../settings/useWhatsNewAfterUpdate";
 import type { OctantHostBridge } from "./hostBridge";
@@ -110,16 +108,18 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
     <>
       <OctantDialogPresence>
         {props.createOpen ? (
-          <ProjectCreateDialog
-            folderBrowseClient={props.folderBrowseClient}
-            {...(props.github === undefined ? {} : { github: props.github })}
-            hostId={props.hostId}
-            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-            mode={props.mode}
-            onClose={props.onCloseCreate}
-            onCreate={props.onCreateProject}
-            onCreated={props.onCreatedProject}
-          />
+          <Suspense fallback={null}>
+            <ProjectCreateDialog
+              folderBrowseClient={props.folderBrowseClient}
+              {...(props.github === undefined ? {} : { github: props.github })}
+              hostId={props.hostId}
+              {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+              mode={props.mode}
+              onClose={props.onCloseCreate}
+              onCreate={props.onCreateProject}
+              onCreated={props.onCreatedProject}
+            />
+          </Suspense>
         ) : null}
       </OctantDialogPresence>
       <OctantDialogPresence>

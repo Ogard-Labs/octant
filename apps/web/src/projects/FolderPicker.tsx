@@ -1,3 +1,4 @@
+import "../styles/folder-picker.css";
 import type {
   FolderBrowseMode,
   FolderBrowseResult,
