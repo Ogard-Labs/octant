@@ -214,6 +214,8 @@ export interface WorkTurnRuntimePort {
       input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
       release: (settled?: {
         readonly person: boolean;
+        /** The request journal's own ask stamp; a person-facing wait starts there. */
+        readonly requestedAt?: UtcTimestamp;
         /** The request journal's own settle stamp; the wait ends there, not at the callback. */
         readonly settledAt?: UtcTimestamp;
       }) => void,
@@ -959,15 +961,12 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (event.kind === "approval-request" || event.kind === "user-input-request") {
                   const providerCallbackId = normalizedProviderCallbackId(event.requestId);
                   if (providerCallbackId === undefined) return;
-                  // A question is the person's time but never an approval
-                  // wait: only approval asks may be billed to a call.
-                  if (event.kind === "approval-request") {
-                    turnTiming.approvalAsked({
-                      approvalId: providerCallbackId,
-                      occurredAt: event.occurredAt,
-                      ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }),
-                    });
-                  }
+                  // A provider stamp cannot bound a person-facing wait: an
+                  // ask may sit in a provider's queue or a screening before
+                  // the request journal can see it. The wait the person
+                  // spent is learned at settlement, from the journal's own
+                  // ask and settle stamps — the provider event's stamp keeps
+                  // ordering reasoning only.
                   const requestKey = `${String(event.sessionId)}:${providerCallbackId}`;
                   const hold = yield* Deferred.make<void>();
                   pendingRequestHolds.set(requestKey, hold);
@@ -977,13 +976,21 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       providerCallbackId,
                     },
                     (settled) => {
-                      // The wait ends where the request journal settled the
-                      // ask — a person's answer, or a person-facing wait that
-                      // ran out (expired, interrupted, withdrawn). Only an
-                      // automated reviewer's settle is unbilled, and it still
-                      // closes the ask.
+                      // The wait is the request journal's own interval — its
+                      // ask stamp through its settle, prorated to any open
+                      // call by the tracker. Without the journal's ask stamp
+                      // there is no honest start, so nothing is billed; an
+                      // automated reviewer's settle is unbilled either way
+                      // and still closes the ask.
                       if (event.kind === "approval-request") {
-                        if (settled?.person === true) {
+                        if (settled?.person === true && settled.requestedAt !== undefined) {
+                          turnTiming.approvalAsked({
+                            approvalId: providerCallbackId,
+                            occurredAt: settled.requestedAt,
+                            ...(event.toolCallId === undefined
+                              ? {}
+                              : { toolCallId: event.toolCallId }),
+                          });
                           turnTiming.approvalAnswered({
                             approvalId: providerCallbackId,
                             occurredAt: settled.settledAt ?? clock(),

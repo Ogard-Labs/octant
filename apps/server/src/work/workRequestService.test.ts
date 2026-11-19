@@ -158,6 +158,44 @@ describe("WorkRequestService.record", () => {
     expect(result.request.version).toBe(1);
   });
 
+  it("settles with the journal's own ask and settle stamps for the wait a caller bills", async () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "provider-req-1",
+      detail: approvalDetail,
+    });
+    expect(recorded.status).toBe("ok");
+    if (recorded.status !== "ok") return;
+    const heard: Array<{
+      readonly person: boolean;
+      readonly requestedAt?: string;
+      readonly settledAt?: string;
+    }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "provider-req-1" },
+      (settled) => heard.push(settled ?? { person: false }),
+    );
+    await service.resolve({
+      kind: "resolve-work-request",
+      requestId: recorded.request.requestId,
+      expectedVersion: recorded.request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+    // A listener arriving after the settle reads the same recorded pair.
+    const late: typeof heard = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "provider-req-1" },
+      (settled) => late.push(settled ?? { person: false }),
+    );
+    expect(late).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
   it("settles listeners by provider session and callback identity", async () => {
     const { service } = createService();
     let settled = false;
@@ -225,7 +263,7 @@ describe("WorkRequestService.record", () => {
         heard.push(settled ?? {});
       },
     );
-    expect(heard).toEqual([{ person: true, settledAt: clockLater }]);
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
   });
 
   it("tells a listener that an expired ask ended person-facing wait at its recorded expiry", () => {
@@ -253,7 +291,7 @@ describe("WorkRequestService.record", () => {
     );
     // The ask stood person-facing until it ran out: the wait is billed, and
     // it ends where the journal says it ended, not when the listener asked.
-    expect(heard).toEqual([{ person: true, settledAt: clockLater }]);
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
   });
 
   it("tells a listener already waiting that an expiry is still person-facing wait", () => {
@@ -277,7 +315,7 @@ describe("WorkRequestService.record", () => {
       },
     );
     service.expire(recorded.request.requestId);
-    expect(heard).toEqual([{ person: true, settledAt: clockLater }]);
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
   });
 
   it("does not bill an automated reviewer's answer as person-facing wait", async () => {
@@ -317,7 +355,7 @@ describe("WorkRequestService.record", () => {
       agent,
     );
 
-    expect(heard).toEqual([{ person: false, settledAt: clockLater }]);
+    expect(heard).toEqual([{ person: false, requestedAt: clockNow, settledAt: clockLater }]);
   });
 
   it("keeps a credential-bearing provider callback private while delivering it exactly", async () => {

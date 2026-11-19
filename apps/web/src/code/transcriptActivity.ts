@@ -93,6 +93,11 @@ function foldToolEvent(
   const outsideContent = event.outsideContent ?? previous?.outsideContent;
   const routine = event.routine ?? previous?.routine;
   const timing = completedCallDurationMs(event.timing);
+  // A duplicate terminal frame carries no timing of its own: the first
+  // bounded measurement the row took stands rather than being cleared by a
+  // restatement that cannot measure the call.
+  const durationMs = timing?.durationMs ?? previous?.durationMs;
+  const waitedMs = timing === undefined ? previous?.waitedMs : timing.waitedMs;
   return {
     kind: "tool",
     id: String(event.toolCallId),
@@ -102,11 +107,11 @@ function foldToolEvent(
     ...(published === undefined ? {} : { published }),
     ...(outsideContent === undefined ? {} : { outsideContent }),
     ...(routine === undefined ? {} : { routine }),
-    ...(timing === undefined
+    ...(durationMs === undefined
       ? {}
       : {
-          durationMs: timing.durationMs,
-          ...(timing.waitedMs > 0 ? { waitedMs: timing.waitedMs } : {}),
+          durationMs,
+          ...(waitedMs !== undefined && waitedMs > 0 ? { waitedMs } : {}),
         }),
   };
 }

@@ -1854,6 +1854,11 @@ function foldTurnFrame(
     const existing = builder.steps.findIndex(
       (step) => step.kind === "tool" && String(step.toolCallId) === toolCallId,
     );
+    const previous = existing === -1 ? undefined : builder.steps[existing];
+    // A duplicate terminal frame carries no timing of its own: the first
+    // bounded measurement the call recorded stands rather than being
+    // cleared by a restatement that cannot measure it.
+    const timing = frame.event.timing ?? (previous?.kind === "tool" ? previous.timing : undefined);
     const step = {
       kind: "tool" as const,
       toolCallId: frame.event.toolCallId,
@@ -1865,7 +1870,7 @@ function foldTurnFrame(
         ? {}
         : { outsideContent: frame.event.outsideContent }),
       ...(frame.event.routine === undefined ? {} : { routine: frame.event.routine }),
-      ...(frame.event.timing === undefined ? {} : { timing: frame.event.timing }),
+      ...(timing === undefined ? {} : { timing }),
     };
     if (existing === -1) appendStep(builder, step);
     else builder.steps[existing] = step;

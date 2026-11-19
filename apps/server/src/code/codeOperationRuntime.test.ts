@@ -6066,6 +6066,75 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("journals no stamp-derived duration for an unmeasured app-managed call, even when the provider echoes its completion", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const execute = vi.fn(async () => ({ result: { lines: ["on the server"] } }));
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      holdsServerThread: () => true,
+      serverCodeTurn: () => ({
+        status: "bound",
+        tools: {
+          definitions: [
+            { name: "read", description: "Read a file.", inputSchema: { type: "object" } },
+          ],
+          execute,
+        },
+      }),
+    });
+    const startOperation = operationId(1485);
+    try {
+      fixture.bindCheckoutToRemoteFolder();
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "server-read-2",
+            toolName: "read",
+            inputJson: JSON.stringify({ path: "index.html" }),
+          }),
+        ),
+      );
+      await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalledOnce());
+      // The provider echoes the call's end as its own completion. The call
+      // was already released when its own completion journaled, so this
+      // restatement cannot measure it either — the execute interval was
+      // unrecorded and there is no honest bound to invent.
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({ kind: "tool-success", toolCallId: "server-read-2", summary: "done" }),
+        ),
+      );
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        const completed = events.filter(
+          (event) => event.kind === "tool-activity" && event.state === "completed",
+        );
+        expect(completed.length).toBeGreaterThanOrEqual(1);
+        for (const row of completed) {
+          if (row.kind !== "tool-activity") continue;
+          expect(row.timing).toBeUndefined();
+        }
+      });
+      expect(execute).toHaveBeenCalledOnce();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("clears the harness retry notice when the retried response only calls a tool", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

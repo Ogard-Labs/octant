@@ -171,7 +171,13 @@ export class WorkRequestService {
   readonly #interruptedSessions = new Set<string>();
   readonly #settlementListeners = new Map<
     string,
-    Set<(settled?: { readonly person: boolean; readonly settledAt?: UtcTimestamp }) => void>
+    Set<
+      (settled?: {
+        readonly person: boolean;
+        readonly requestedAt?: UtcTimestamp;
+        readonly settledAt?: UtcTimestamp;
+      }) => void
+    >
   >();
   /**
    * The thread's posture when each pending approval in this process was
@@ -577,7 +583,11 @@ export class WorkRequestService {
       readonly providerSessionId: ProviderSessionId;
       readonly providerCallbackId: string;
     },
-    callback: (settled?: { readonly person: boolean; readonly settledAt?: UtcTimestamp }) => void,
+    callback: (settled?: {
+      readonly person: boolean;
+      readonly requestedAt?: UtcTimestamp;
+      readonly settledAt?: UtcTimestamp;
+    }) => void,
   ): () => void {
     const key = settlementListenerKey(input.providerSessionId, input.providerCallbackId);
     const entry = this.#findByProviderSessionCallbackId(
@@ -597,6 +607,7 @@ export class WorkRequestService {
           : entry.settledActorKind !== undefined && entry.settledActorKind !== "agent";
       callback({
         person,
+        requestedAt: entry.request.requestedAt,
         ...(entry.request.settledAt === undefined ? {} : { settledAt: entry.request.settledAt }),
       });
       return () => undefined;
@@ -604,7 +615,11 @@ export class WorkRequestService {
     const listeners =
       this.#settlementListeners.get(key) ??
       new Set<
-        (settled?: { readonly person: boolean; readonly settledAt?: UtcTimestamp }) => void
+        (settled?: {
+          readonly person: boolean;
+          readonly requestedAt?: UtcTimestamp;
+          readonly settledAt?: UtcTimestamp;
+        }) => void
       >();
     listeners.add(callback);
     this.#settlementListeners.set(key, listeners);
@@ -790,7 +805,8 @@ export class WorkRequestService {
     // withdraw — both end person time at this settle. Only an automated
     // reviewer's `agent` settle is not person wait.
     const person = actor.kind !== "agent";
-    for (const callback of listeners ?? []) callback({ person, settledAt });
+    for (const callback of listeners ?? [])
+      callback({ person, requestedAt: nextRequest.requestedAt, settledAt });
     return ok(nextRequest);
   }
 

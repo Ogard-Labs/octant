@@ -6880,6 +6880,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               occurredAt: event.occurredAt,
               provenance,
             });
+            // An app-managed call's honest interval is only the one the host
+            // measured around `execute`: its request stamp predates the run
+            // and the answer's delivery follows it, so a stamp-derived bound
+            // would bill provider round-trip as the call's work. `callEnded`
+            // still ran to release the call, so a duplicate provider
+            // completion cannot measure it either.
+            if (journaled.timing !== undefined || event.providerKind === "tool-request")
+              return journaled;
             return timing === undefined ? journaled : { ...journaled, timing };
           })()
         : journaled;
@@ -7798,6 +7806,10 @@ function normalizedOperationEvent(
       ...(event.status === "completed" && event.routine !== undefined
         ? { routine: event.routine }
         : {}),
+      // An app-managed call that ended carries the bounds the host measured
+      // around its execute call; a provider-ended call has none and keeps
+      // the stamp-derived interval.
+      ...(event.callTiming === undefined ? {} : { timing: event.callTiming }),
     };
   }
   if (

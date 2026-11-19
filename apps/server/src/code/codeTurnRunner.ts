@@ -15,6 +15,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   type ProviderUsageLimit,
+  type ThreadCallTiming,
   type ThreadPublishedPage,
   type ThreadRoutineReceipt,
   type ToolOutsideContentMark,
@@ -197,6 +198,13 @@ export interface CodeTurnEvent {
   readonly outsideContent?: ToolOutsideContentMark;
   /** The routine the finished call created. */
   readonly routine?: ThreadRoutineReceipt;
+  /**
+   * The host-measured execute interval for an app-managed call that ended.
+   * Bounds come from the recorded call itself — the interval immediately
+   * around `execute` — never from the provider request or answer stamps,
+   * which sit outside the measured call.
+   */
+  readonly callTiming?: ThreadCallTiming;
   readonly status?: string;
   readonly path?: string;
   readonly change?: string;
@@ -814,6 +822,13 @@ export class CodeTurnRunner {
                       });
                       return;
                     }
+                    let appToolApprovalWaitMs = 0;
+                    // The interval the host measured, bounded immediately
+                    // around the execute call: the provider's request stamp
+                    // and the answer's delivery both sit outside it, and a
+                    // person wait inside is subtracted only because the
+                    // recorded call measured it.
+                    const appToolStartedAt = clock();
                     const execution = yield* idle.during(
                       Effect.promise(async () => {
                         try {
@@ -822,6 +837,13 @@ export class CodeTurnRunner {
                             inputJson: boundedEvent.inputJson,
                             toolCallId: sanitizedEvent.requestId,
                             ...(executionSignal === undefined ? {} : { signal: executionSignal }),
+                            ...(input.toolEffects === undefined
+                              ? {}
+                              : {
+                                  onApprovalWait: (waitMs: number) => {
+                                    appToolApprovalWaitMs += waitMs;
+                                  },
+                                }),
                           });
                         } catch {
                           return {
@@ -832,12 +854,29 @@ export class CodeTurnRunner {
                         }
                       }),
                     );
+                    const appToolEndedAt = clock();
+                    // Bounds exist only for a recorded call: an unrecorded
+                    // execute offers no interval at all rather than one a
+                    // provider wait could be hiding inside.
+                    const appToolCallTiming: ThreadCallTiming | undefined =
+                      input.toolEffects === undefined
+                        ? undefined
+                        : {
+                            startedAt: appToolStartedAt as ProviderRuntimeEvent["occurredAt"],
+                            endedAt: appToolEndedAt as ProviderRuntimeEvent["occurredAt"],
+                            ...(appToolApprovalWaitMs > 0
+                              ? { approvalWaitMs: appToolApprovalWaitMs }
+                              : {}),
+                          };
                     if (executionSignal?.aborted) {
                       yield* input.persistEvent({
                         ...normalized,
                         occurredAt: clock() as ProviderRuntimeEvent["occurredAt"],
                         status: "interrupted",
                         text: "App-managed action was cancelled.",
+                        ...(appToolCallTiming === undefined
+                          ? {}
+                          : { callTiming: appToolCallTiming }),
                       });
                       return;
                     }
@@ -859,6 +898,7 @@ export class CodeTurnRunner {
                       ...(answer.isError || execution.routine === undefined
                         ? {}
                         : { routine: execution.routine }),
+                      ...(appToolCallTiming === undefined ? {} : { callTiming: appToolCallTiming }),
                       // A refused call carries a mark only when it reached
                       // for a protected secret, which its row then shows.
                       ...(execution.outsideContent === undefined

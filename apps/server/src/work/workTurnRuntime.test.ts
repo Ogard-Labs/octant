@@ -2860,7 +2860,11 @@ describe("WorkTurnRuntime", () => {
         readonly clock?: () => string;
         readonly onRequestSettled?: (
           input: { readonly providerCallbackId: string },
-          release: (settled?: { readonly person: boolean }) => void,
+          release: (settled?: {
+            readonly person: boolean;
+            readonly requestedAt?: UtcTimestamp;
+            readonly settledAt?: UtcTimestamp;
+          }) => void,
         ) => () => void;
       } = {},
     ) {
@@ -2921,12 +2925,13 @@ describe("WorkTurnRuntime", () => {
       expect(reasoning).toEqual([2_000, 4_000]);
     });
 
-    it("bills the person's approval wait to the call it gated, never a neighbor", async () => {
-      let now = at(6);
+    it("bills the person's approval wait from the request journal's own bounds, not the provider's ask stamp", async () => {
       const { steps } = await runTimed(
         [
-          event({ kind: "tool-start", toolCallId: "call-1", toolName: "Write" }, at(0)),
-          event({ kind: "tool-start", toolCallId: "call-2", toolName: "Read" }, at(1)),
+          // The provider stamped its ask at :00, but screening held it until
+          // the request journal recorded it at :05; the person answered at
+          // :07. The wait the person spent is the journal's interval — two
+          // seconds — never the seven a provider stamp would bill.
           event(
             {
               kind: "approval-request",
@@ -2935,18 +2940,20 @@ describe("WorkTurnRuntime", () => {
               description: "Write the file",
               toolCallId: "call-1",
             },
-            at(2),
+            at(0),
           ),
+          event({ kind: "tool-start", toolCallId: "call-1", toolName: "Write" }, at(1)),
+          event({ kind: "tool-start", toolCallId: "call-2", toolName: "Read" }, at(2)),
           event({ kind: "tool-success", toolCallId: "call-2", summary: "ok" }, at(4)),
           event({ kind: "tool-success", toolCallId: "call-1", summary: "ok" }, at(8)),
         ],
         {
-          clock: () => now,
-          // The request journal's settle is what ends the wait; here the
-          // person answered at :06 while both calls still ran.
           onRequestSettled: (_input, release) => {
-            now = at(6);
-            release({ person: true });
+            release({
+              person: true,
+              requestedAt: decodeTimestamp(at(5)),
+              settledAt: decodeTimestamp(at(7)),
+            });
             return () => undefined;
           },
         },
@@ -2957,14 +2964,14 @@ describe("WorkTurnRuntime", () => {
           toolName: "Write",
           state: "completed",
           summary: "ok",
-          timing: { startedAt: at(0), endedAt: at(8), approvalWaitMs: 4_000 },
+          timing: { startedAt: at(1), endedAt: at(8), approvalWaitMs: 2_000 },
         },
         {
           toolCallId: "call-2",
           toolName: "Read",
           state: "completed",
           summary: "ok",
-          timing: { startedAt: at(1), endedAt: at(4) },
+          timing: { startedAt: at(2), endedAt: at(4) },
         },
       ]);
     });
@@ -3003,7 +3010,7 @@ describe("WorkTurnRuntime", () => {
       ]);
     });
 
-    it("omits a call's duration while the approval it is gated on stays open", async () => {
+    it("keeps a call's own bounds while its approval wait was never settled and bills none", async () => {
       const { steps } = await runTimed(
         [
           event({ kind: "tool-start", toolCallId: "call-1", toolName: "Write" }, at(0)),
@@ -3020,12 +3027,19 @@ describe("WorkTurnRuntime", () => {
           event({ kind: "tool-success", toolCallId: "call-1", summary: "ok" }, at(8)),
         ],
         {
-          // Never settled: the wait's end is unknown, so no honest duration.
+          // Never settled: no journal ask and settle bounds exist, so no
+          // wait is billed — the call's own measured interval still stands.
           onRequestSettled: () => () => undefined,
         },
       );
       expect(steps).toEqual([
-        { toolCallId: "call-1", toolName: "Write", state: "completed", summary: "ok" },
+        {
+          toolCallId: "call-1",
+          toolName: "Write",
+          state: "completed",
+          summary: "ok",
+          timing: { startedAt: at(0), endedAt: at(8) },
+        },
       ]);
     });
 

@@ -361,6 +361,29 @@ describe("transcript activity", () => {
       expect(row).toMatchObject({ durationMs: 2_000, waitedMs: 240_000 });
     });
 
+    it("keeps the first bounded measurement when a restated completion carries none", () => {
+      const activity = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+        kind: "tool-activity",
+        toolCallId: "call-1",
+        toolName: "Read",
+        state: "completed",
+        timing: { startedAt: started, endedAt: ended, approvalWaitMs: 240_000 },
+      } as CodeOperationEvent);
+      const restated = applyActivityEvent(activity, {
+        kind: "tool-activity",
+        toolCallId: "call-1",
+        toolName: "Read",
+        state: "completed",
+        summary: "Provider restated the completion.",
+      } as CodeOperationEvent);
+      const row = restated.rows.find((r) => r.kind === "tool");
+      expect(row).toMatchObject({
+        summary: "Provider restated the completion.",
+        durationMs: 2_000,
+        waitedMs: 240_000,
+      });
+    });
+
     it("times a call with no wait as a plain duration", () => {
       const activity = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
         kind: "tool-activity",
