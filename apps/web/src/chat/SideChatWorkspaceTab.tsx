@@ -8,14 +8,18 @@ import {
 } from "@octant/contracts";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { buildModelPickerGroups } from "@octant/domain";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
 import type { ProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
-import { ChatWorkspace } from "./ChatWorkspace";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { SideChatPanel } from "./SideChatPanel";
 import { useChatController, type ChatReadCursorStore } from "./useChatController";
 import { OctantAlert } from "../ui/base/OctantAlert";
+
+const ChatWorkspace = lazy(() =>
+  import("./ChatWorkspace").then((module) => ({ default: module.ChatWorkspace })),
+);
 
 /**
  * The provider facts a sidecar's Chat surface reads. Narrowed on purpose: the
@@ -180,84 +184,89 @@ function SideChatSidecarSurface(props: {
         ? props.notice
         : null}
       {returnNotice === undefined ? null : <OctantAlert tone="neutral">{returnNotice}</OctantAlert>}
-      <ChatWorkspace
-        controller={controller}
-        sideChatReturnPending={returnPending}
-        {...(returnClient === undefined
-          ? {}
-          : {
-              onReturnSideChatReply: async (turnId, attemptId) => {
-                if (pending.current) return;
-                pending.current = true;
-                setReturnPending(true);
-                setReturnNotice(undefined);
-                const abort = new AbortController();
-                activeReturn.current = abort;
-                // Match the existing bounded folder-read budget. A transport may
-                // ignore abort, so race the entire prepare read, including decoding.
-                let removeAbort = () => {};
-                const stopped = new Promise<never>((_resolve, reject) => {
-                  const refuse = () => reject(new Error("Side Chat preparation was interrupted."));
-                  abort.signal.addEventListener("abort", refuse, { once: true });
-                  removeAbort = () => abort.signal.removeEventListener("abort", refuse);
-                });
-                const deadline = setTimeout(() => abort.abort(), 20_000);
-                try {
-                  const result = await Promise.race([
-                    returnClient.execute(
-                      {
-                        kind: "prepare-side-chat-return",
-                        requestId: decodeThreadMentionRequestId(globalThis.crypto.randomUUID()),
-                        sidecarThreadId: decodeMentionableThreadId(
-                          String(props.sidecar.sidecarThreadId),
-                        ),
-                        expectedSourceThreadId: props.sidecar.sourceThreadId,
-                        turnId,
-                        attemptId,
-                      },
-                      abort.signal,
-                    ),
-                    stopped,
-                  ]);
-                  if (!live.current || identityRef.current !== identity || abort.signal.aborted)
-                    return;
-                  if (
-                    result.kind !== "side-chat-draft-prepared" ||
-                    String(result.reference.sourceThreadId) !==
-                      String(props.sidecar.sourceThreadId) ||
-                    String(result.reference.sidecarThreadId) !== String(props.sidecarThreadId)
-                  )
-                    throw new Error("unavailable");
-                  const saved = composerThreadDrafts.appendSideChatReturn(result);
-                  setReturnNotice(
-                    saved.status === "refused"
-                      ? saved.message
-                      : saved.status === "unpersisted"
-                        ? "Added to the draft in this window, but not saved. Nothing was sent."
-                        : "Added to the saved draft. Your text is kept. Nothing was sent or queued.",
-                  );
-                } catch {
-                  if (live.current)
+      <Suspense
+        fallback={<OctantEmpty message="Loading chat." state="loading" title="Loading chat" />}
+      >
+        <ChatWorkspace
+          controller={controller}
+          sideChatReturnPending={returnPending}
+          {...(returnClient === undefined
+            ? {}
+            : {
+                onReturnSideChatReply: async (turnId, attemptId) => {
+                  if (pending.current) return;
+                  pending.current = true;
+                  setReturnPending(true);
+                  setReturnNotice(undefined);
+                  const abort = new AbortController();
+                  activeReturn.current = abort;
+                  // Match the existing bounded folder-read budget. A transport may
+                  // ignore abort, so race the entire prepare read, including decoding.
+                  let removeAbort = () => {};
+                  const stopped = new Promise<never>((_resolve, reject) => {
+                    const refuse = () =>
+                      reject(new Error("Side Chat preparation was interrupted."));
+                    abort.signal.addEventListener("abort", refuse, { once: true });
+                    removeAbort = () => abort.signal.removeEventListener("abort", refuse);
+                  });
+                  const deadline = setTimeout(() => abort.abort(), 20_000);
+                  try {
+                    const result = await Promise.race([
+                      returnClient.execute(
+                        {
+                          kind: "prepare-side-chat-return",
+                          requestId: decodeThreadMentionRequestId(globalThis.crypto.randomUUID()),
+                          sidecarThreadId: decodeMentionableThreadId(
+                            String(props.sidecar.sidecarThreadId),
+                          ),
+                          expectedSourceThreadId: props.sidecar.sourceThreadId,
+                          turnId,
+                          attemptId,
+                        },
+                        abort.signal,
+                      ),
+                      stopped,
+                    ]);
+                    if (!live.current || identityRef.current !== identity || abort.signal.aborted)
+                      return;
+                    if (
+                      result.kind !== "side-chat-draft-prepared" ||
+                      String(result.reference.sourceThreadId) !==
+                        String(props.sidecar.sourceThreadId) ||
+                      String(result.reference.sidecarThreadId) !== String(props.sidecarThreadId)
+                    )
+                      throw new Error("unavailable");
+                    const saved = composerThreadDrafts.appendSideChatReturn(result);
                     setReturnNotice(
-                      "Could not add this reply to the draft. Reopen the thread and Side Chat, then try again. Nothing was sent.",
+                      saved.status === "refused"
+                        ? saved.message
+                        : saved.status === "unpersisted"
+                          ? "Added to the draft in this window, but not saved. Nothing was sent."
+                          : "Added to the saved draft. Your text is kept. Nothing was sent or queued.",
                     );
-                } finally {
-                  clearTimeout(deadline);
-                  removeAbort();
-                  if (activeReturn.current === abort) activeReturn.current = undefined;
-                  pending.current = false;
-                  if (live.current) setReturnPending(false);
-                }
-              },
-            })}
-        providerGroups={providerGroups}
-        {...(providerController?.snapshot === undefined
-          ? {}
-          : { providerSnapshot: providerController.snapshot })}
-        {...(props.threadMentionClient === undefined
-          ? {}
-          : { threadMentionClient: props.threadMentionClient })}
-      />
+                  } catch {
+                    if (live.current)
+                      setReturnNotice(
+                        "Could not add this reply to the draft. Reopen the thread and Side Chat, then try again. Nothing was sent.",
+                      );
+                  } finally {
+                    clearTimeout(deadline);
+                    removeAbort();
+                    if (activeReturn.current === abort) activeReturn.current = undefined;
+                    pending.current = false;
+                    if (live.current) setReturnPending(false);
+                  }
+                },
+              })}
+          providerGroups={providerGroups}
+          {...(providerController?.snapshot === undefined
+            ? {}
+            : { providerSnapshot: providerController.snapshot })}
+          {...(props.threadMentionClient === undefined
+            ? {}
+            : { threadMentionClient: props.threadMentionClient })}
+        />
+      </Suspense>
     </>
   );
 }

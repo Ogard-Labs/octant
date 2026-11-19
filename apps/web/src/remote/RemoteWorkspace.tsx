@@ -11,8 +11,7 @@ import { decodeWorkspaceTabId } from "@octant/contracts/shell";
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { WorkThread } from "@octant/contracts/work-threads";
 import { buildModelPickerGroups, type PickerGroup } from "@octant/domain";
-import { useEffect, useMemo, useState } from "react";
-import { ChatWorkspace } from "../chat/ChatWorkspace";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { CanvasWorkspaceTab } from "../canvas/CanvasWorkspaceTab";
 import { useChatController } from "../chat/useChatController";
 import { CodeThreadWorkspace } from "../code/CodeThreadWorkspace";
@@ -25,7 +24,6 @@ import { useProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
-import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { RemoteProductClients } from "./remoteProductClients";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -78,6 +76,15 @@ export function RemoteWorkspace(props: RemoteWorkspaceProps) {
 }
 
 const QUIET_READING: ReplyDetailReading = { defaultLevel: "low", threads: [] };
+
+const ChatWorkspace = lazy(() =>
+  import("../chat/ChatWorkspace").then((module) => ({ default: module.ChatWorkspace })),
+);
+const WorkThreadWorkspace = lazy(() =>
+  import("../work/WorkThreadWorkspace").then((module) => ({
+    default: module.WorkThreadWorkspace,
+  })),
+);
 
 /**
  * The host's Reply detail, read over the session: when the workspace opens, on
@@ -339,19 +346,23 @@ function RemoteChatSurface(
       }
     >
       {activeThreadId === undefined ? null : (
-        <ChatWorkspace
-          canvasClient={canvasClient}
-          controller={controller}
-          {...(props.extensionClient === undefined
-            ? {}
-            : { extensionClient: props.extensionClient })}
-          narrow
-          onOpenCanvas={props.onOpenCanvas}
-          providerGroups={props.providerGroups}
-          {...(props.providerSnapshot === undefined
-            ? {}
-            : { providerSnapshot: props.providerSnapshot })}
-        />
+        <Suspense
+          fallback={<OctantEmpty message="Loading chat." state="loading" title="Loading chat" />}
+        >
+          <ChatWorkspace
+            canvasClient={canvasClient}
+            controller={controller}
+            {...(props.extensionClient === undefined
+              ? {}
+              : { extensionClient: props.extensionClient })}
+            narrow
+            onOpenCanvas={props.onOpenCanvas}
+            providerGroups={props.providerGroups}
+            {...(props.providerSnapshot === undefined
+              ? {}
+              : { providerSnapshot: props.providerSnapshot })}
+          />
+        </Suspense>
       )}
     </RemoteThreadPane>
   );
@@ -410,25 +421,29 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
       }
     >
       {activeThread === undefined ? null : (
-        <WorkThreadWorkspace
-          key={String(activeThread.id)}
-          title={activeThread.title}
-          threadId={activeThread.id}
-          initialThread={activeThread}
-          canvasClient={props.clients.canvas}
-          onOpenCanvas={props.onOpenCanvas}
-          onOpenCanvasInSidebar={props.onOpenCanvas}
-          canvasOpenLabel="Open Canvas"
-          threadClient={props.clients.workThread}
-          turnClient={props.clients.workTurn}
-          mutationClient={props.clients.workMutation}
-          requestClient={props.clients.workRequest}
-          providerGroups={props.providerGroups}
-          {...(props.extensionClient === undefined
-            ? {}
-            : { extensionClient: props.extensionClient })}
-          onThreadUpdated={workNavigation.applyThread}
-        />
+        <Suspense
+          fallback={<OctantEmpty message="Loading work." state="loading" title="Loading work" />}
+        >
+          <WorkThreadWorkspace
+            key={String(activeThread.id)}
+            title={activeThread.title}
+            threadId={activeThread.id}
+            initialThread={activeThread}
+            canvasClient={props.clients.canvas}
+            onOpenCanvas={props.onOpenCanvas}
+            onOpenCanvasInSidebar={props.onOpenCanvas}
+            canvasOpenLabel="Open Canvas"
+            threadClient={props.clients.workThread}
+            turnClient={props.clients.workTurn}
+            mutationClient={props.clients.workMutation}
+            requestClient={props.clients.workRequest}
+            providerGroups={props.providerGroups}
+            {...(props.extensionClient === undefined
+              ? {}
+              : { extensionClient: props.extensionClient })}
+            onThreadUpdated={workNavigation.applyThread}
+          />
+        </Suspense>
       )}
     </RemoteThreadPane>
   );

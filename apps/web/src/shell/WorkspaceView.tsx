@@ -121,7 +121,6 @@ import type { ChatThread, ChatThreadId, ChatTurnId } from "@octant/contracts/cha
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useChatController } from "../chat/useChatController";
 import type { ChatController, ChatReadCursorStore } from "../chat/useChatController";
-import { ChatWorkspace } from "../chat/ChatWorkspace";
 import { ChatWelcome } from "../chat/ChatWelcome";
 import { ChatProjectOverview } from "../chat/ChatProjectOverview";
 import type { CodeController } from "../code/useCodeController";
@@ -176,7 +175,6 @@ import type { ComputerUseClient } from "@octant/client-runtime/computer-use-clie
 import type { BrowserContextId, BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { LocalServerOpenTarget } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
-import { BrowserWorkspace } from "../browser/BrowserWorkspace";
 import {
   openDedicatedBrowserContext,
   releaseBrowserContext,
@@ -192,13 +190,23 @@ import { ProjectCanvasInventory } from "../projects/ProjectCanvasInventory";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
 import type { DraftRecentThread } from "./DraftThreadWorkspace";
 import type { OctantMode } from "@octant/contracts/modes";
-import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
 import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivityPictureInPicture";
 import { threadHasBrowserSurface } from "./browserActivityReveal";
 import type { ThreadProviderIdentity } from "./navigationModel";
 
+const ChatWorkspace = lazy(() =>
+  import("../chat/ChatWorkspace").then((module) => ({ default: module.ChatWorkspace })),
+);
+const WorkThreadWorkspace = lazy(() =>
+  import("../work/WorkThreadWorkspace").then((module) => ({
+    default: module.WorkThreadWorkspace,
+  })),
+);
+const BrowserWorkspace = lazy(() =>
+  import("../browser/BrowserWorkspace").then((module) => ({ default: module.BrowserWorkspace })),
+);
 const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
 const CanvasWorkspaceTab = lazy(() =>
   import("../canvas/CanvasWorkspaceTab").then((module) => ({
@@ -2285,90 +2293,98 @@ function renderNonCodeTab(
               {...threadBrowserPreview(props, paneId, String(tab.threadId))}
               threadId={tab.threadId as never}
             >
-              <WorkThreadWorkspace
-                projects={props.projects}
-                {...(props.workDefaultStrict === true ? { workDefaultStrict: true } : {})}
-                {...(props.revealTurn?.mode === "work" &&
-                String(props.revealTurn.threadId) === String(tab.threadId)
-                  ? {
-                      revealTurnId: props.revealTurn.turnId,
-                      ...(props.onTurnRevealed === undefined
-                        ? {}
-                        : { onTurnRevealed: props.onTurnRevealed }),
-                    }
-                  : {})}
-                {...(props.browserAutomationClient === undefined
-                  ? {}
-                  : { browserAutomationClient: props.browserAutomationClient })}
-                {...(props.workChangeRevision === undefined
-                  ? {}
-                  : { changeRevision: props.workChangeRevision })}
-                {...(initialThread === undefined ? {} : { initialThread })}
-                onDisplayReadyChange={onDisplayReadyChange}
-                {...(props.workMutationClient === undefined
-                  ? {}
-                  : { mutationClient: props.workMutationClient })}
-                {...(props.workTurnClient === undefined
-                  ? {}
-                  : { turnClient: props.workTurnClient })}
-                {...(props.workRequestClient === undefined
-                  ? {}
-                  : { requestClient: props.workRequestClient })}
-                threadClient={workThreadClient}
-                threadId={tab.threadId}
-                title={tab.title}
-                providerGroups={props.workProviderGroups ?? []}
-                {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
-                {...(props.onCanvasReferencesObserved === undefined
-                  ? {}
-                  : {
-                      onCanvasReferencesObserved: (threadId, cards) =>
-                        props.onCanvasReferencesObserved?.("work", threadId, cards),
-                    })}
-                {...(props.imageGenerationClient === undefined
-                  ? {}
-                  : { imageGenerationClient: props.imageGenerationClient })}
-                {...(props.imageGenerationProfiles === undefined
-                  ? {}
-                  : { imageGenerationProfiles: props.imageGenerationProfiles })}
-                {...(openProviderSettings === undefined
-                  ? {}
-                  : { onOpenSettings: openProviderSettings })}
-                {...(props.onOpenImageSettings === undefined
-                  ? {}
-                  : { onOpenImageSettings: props.onOpenImageSettings })}
-                {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
-                {...(props.projectServerUrl === undefined
-                  ? {}
-                  : { serverUrl: props.projectServerUrl })}
-                {...(props.projectWindowCapability === undefined
-                  ? {}
-                  : { windowCapability: props.projectWindowCapability })}
-                {...(props.extensionClient === undefined
-                  ? {}
-                  : { extensionClient: props.extensionClient })}
-                {...(props.automationClient === undefined
-                  ? {}
-                  : { automationClient: props.automationClient })}
-                {...(props.projectClient === undefined
-                  ? {}
-                  : { memoryProposalClient: props.projectClient })}
-                {...(props.onOpenCanvasReference === undefined
-                  ? {}
-                  : { onOpenCanvas: props.onOpenCanvasReference })}
-                {...(props.onOpenCanvasInSidebar === undefined
-                  ? {}
-                  : { onOpenCanvasInSidebar: props.onOpenCanvasInSidebar })}
-                {...(props.onWorkThreadUpdated === undefined
-                  ? {}
-                  : { onThreadUpdated: props.onWorkThreadUpdated })}
-                {...(props.onOpenWorkThread === undefined
-                  ? {}
-                  : {
-                      onOpenWorkThread: (opened) =>
-                        props.onOpenWorkThread?.(opened.id, opened.projectId, opened.title),
-                    })}
-              />
+              <Suspense
+                fallback={
+                  <OctantEmpty message="Loading work." state="loading" title="Loading work" />
+                }
+              >
+                <WorkThreadWorkspace
+                  projects={props.projects}
+                  {...(props.workDefaultStrict === true ? { workDefaultStrict: true } : {})}
+                  {...(props.revealTurn?.mode === "work" &&
+                  String(props.revealTurn.threadId) === String(tab.threadId)
+                    ? {
+                        revealTurnId: props.revealTurn.turnId,
+                        ...(props.onTurnRevealed === undefined
+                          ? {}
+                          : { onTurnRevealed: props.onTurnRevealed }),
+                      }
+                    : {})}
+                  {...(props.browserAutomationClient === undefined
+                    ? {}
+                    : { browserAutomationClient: props.browserAutomationClient })}
+                  {...(props.workChangeRevision === undefined
+                    ? {}
+                    : { changeRevision: props.workChangeRevision })}
+                  {...(initialThread === undefined ? {} : { initialThread })}
+                  onDisplayReadyChange={onDisplayReadyChange}
+                  {...(props.workMutationClient === undefined
+                    ? {}
+                    : { mutationClient: props.workMutationClient })}
+                  {...(props.workTurnClient === undefined
+                    ? {}
+                    : { turnClient: props.workTurnClient })}
+                  {...(props.workRequestClient === undefined
+                    ? {}
+                    : { requestClient: props.workRequestClient })}
+                  threadClient={workThreadClient}
+                  threadId={tab.threadId}
+                  title={tab.title}
+                  providerGroups={props.workProviderGroups ?? []}
+                  {...(props.canvasClient === undefined
+                    ? {}
+                    : { canvasClient: props.canvasClient })}
+                  {...(props.onCanvasReferencesObserved === undefined
+                    ? {}
+                    : {
+                        onCanvasReferencesObserved: (threadId, cards) =>
+                          props.onCanvasReferencesObserved?.("work", threadId, cards),
+                      })}
+                  {...(props.imageGenerationClient === undefined
+                    ? {}
+                    : { imageGenerationClient: props.imageGenerationClient })}
+                  {...(props.imageGenerationProfiles === undefined
+                    ? {}
+                    : { imageGenerationProfiles: props.imageGenerationProfiles })}
+                  {...(openProviderSettings === undefined
+                    ? {}
+                    : { onOpenSettings: openProviderSettings })}
+                  {...(props.onOpenImageSettings === undefined
+                    ? {}
+                    : { onOpenImageSettings: props.onOpenImageSettings })}
+                  {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
+                  {...(props.projectServerUrl === undefined
+                    ? {}
+                    : { serverUrl: props.projectServerUrl })}
+                  {...(props.projectWindowCapability === undefined
+                    ? {}
+                    : { windowCapability: props.projectWindowCapability })}
+                  {...(props.extensionClient === undefined
+                    ? {}
+                    : { extensionClient: props.extensionClient })}
+                  {...(props.automationClient === undefined
+                    ? {}
+                    : { automationClient: props.automationClient })}
+                  {...(props.projectClient === undefined
+                    ? {}
+                    : { memoryProposalClient: props.projectClient })}
+                  {...(props.onOpenCanvasReference === undefined
+                    ? {}
+                    : { onOpenCanvas: props.onOpenCanvasReference })}
+                  {...(props.onOpenCanvasInSidebar === undefined
+                    ? {}
+                    : { onOpenCanvasInSidebar: props.onOpenCanvasInSidebar })}
+                  {...(props.onWorkThreadUpdated === undefined
+                    ? {}
+                    : { onThreadUpdated: props.onWorkThreadUpdated })}
+                  {...(props.onOpenWorkThread === undefined
+                    ? {}
+                    : {
+                        onOpenWorkThread: (opened) =>
+                          props.onOpenWorkThread?.(opened.id, opened.projectId, opened.title),
+                      })}
+                />
+              </Suspense>
             </ThreadActivityPictureInPicture>
           </WorkThreadEnvironment>
         )}
@@ -2438,48 +2454,54 @@ function renderNonCodeTab(
         title="Browser is unavailable"
       />
     ) : (
-      <BrowserWorkspace
-        key={tab.id}
-        canDrawOnPage
-        client={props.browserAutomationClient}
-        onAgentBrowserRecovery={(reason) => {
-          if (tab.threadId === undefined) return;
-          if (reason === "host-lends-no-browser") {
-            props.onOpenSettings?.();
-            return;
-          }
-          requestThreadControl(
-            String(tab.threadId),
-            reason === "no-tool-transport" ? "provider" : "access",
-          );
-          if (tab.mode === "code") {
-            const thread = props.codeController.bootstrap?.threads.find(
-              (candidate) => String(candidate.id) === String(tab.threadId),
+      <Suspense
+        fallback={
+          <OctantEmpty message="Loading browser." state="loading" title="Loading browser" />
+        }
+      >
+        <BrowserWorkspace
+          key={tab.id}
+          canDrawOnPage
+          client={props.browserAutomationClient}
+          onAgentBrowserRecovery={(reason) => {
+            if (tab.threadId === undefined) return;
+            if (reason === "host-lends-no-browser") {
+              props.onOpenSettings?.();
+              return;
+            }
+            requestThreadControl(
+              String(tab.threadId),
+              reason === "no-tool-transport" ? "provider" : "access",
             );
-            props.onOpenCodeThread(
-              decodeCodeThreadId(String(tab.threadId)),
-              thread?.title ?? "Code task",
-              thread?.projectId,
-            );
-          } else if (tab.mode === "work") {
-            const thread = props.workThreads?.find(
-              (candidate) => String(candidate.id) === String(tab.threadId),
-            );
-            if (thread !== undefined)
-              props.onOpenWorkThread?.(thread.id, thread.projectId, thread.title);
-          }
-        }}
-        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-        {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-        {...(props.projectWindowCapability === undefined
-          ? {}
-          : { windowCapability: props.projectWindowCapability })}
-        {...(props.onDockResearch === undefined ? {} : { onDockResearch: props.onDockResearch })}
-        {...(props.onOpenSettings === undefined
-          ? {}
-          : { onManageExtensions: props.onOpenSettings })}
-        tab={tab}
-      />
+            if (tab.mode === "code") {
+              const thread = props.codeController.bootstrap?.threads.find(
+                (candidate) => String(candidate.id) === String(tab.threadId),
+              );
+              props.onOpenCodeThread(
+                decodeCodeThreadId(String(tab.threadId)),
+                thread?.title ?? "Code task",
+                thread?.projectId,
+              );
+            } else if (tab.mode === "work") {
+              const thread = props.workThreads?.find(
+                (candidate) => String(candidate.id) === String(tab.threadId),
+              );
+              if (thread !== undefined)
+                props.onOpenWorkThread?.(thread.id, thread.projectId, thread.title);
+            }
+          }}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+          {...(props.projectWindowCapability === undefined
+            ? {}
+            : { windowCapability: props.projectWindowCapability })}
+          {...(props.onDockResearch === undefined ? {} : { onDockResearch: props.onDockResearch })}
+          {...(props.onOpenSettings === undefined
+            ? {}
+            : { onManageExtensions: props.onOpenSettings })}
+          tab={tab}
+        />
+      </Suspense>
     );
   }
   if (tab.kind === "files") {
@@ -3270,67 +3292,73 @@ function ChatThreadWorkspace(props: {
       projects={props.projects}
       tab={props.tab}
     >
-      <ChatWorkspace
-        controller={controller}
-        providerGroups={providerGroups}
-        {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
-        {...(props.onTurnRevealed === undefined ? {} : { onTurnRevealed: props.onTurnRevealed })}
-        {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
-        onClearCanvasSelections={props.onClearCanvasSelections}
-        onRemoveCanvasSelection={props.onRemoveCanvasSelection}
-        pendingCanvasSelections={props.pendingCanvasSelections}
-        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        {...(props.memoryProposalClient === undefined
-          ? {}
-          : { memoryProposalClient: props.memoryProposalClient })}
-        {...(props.browserAutomationClient === undefined
-          ? {}
-          : { browserAutomationClient: props.browserAutomationClient })}
-        {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-        {...(props.projectWindowCapability === undefined
-          ? {}
-          : { windowCapability: props.projectWindowCapability })}
-        {...(props.providerController.snapshot === undefined
-          ? {}
-          : { providerSnapshot: props.providerController.snapshot })}
-        {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
-        {...(props.imageGenerationClient === undefined
-          ? {}
-          : { imageGenerationClient: props.imageGenerationClient })}
-        {...(props.imageGenerationProfiles === undefined
-          ? {}
-          : { imageGenerationProfiles: props.imageGenerationProfiles })}
-        {...(props.onOpenImageSettings === undefined
-          ? {}
-          : { onOpenImageSettings: props.onOpenImageSettings })}
-        {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
-        {...(props.onOpenCanvasReference === undefined
-          ? {}
-          : { onOpenCanvas: props.onOpenCanvasReference })}
-        {...(props.onCanvasReferencesObserved === undefined
-          ? {}
-          : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
-        {...(props.onThreadHandedOff === undefined
-          ? {}
-          : { onThreadHandedOff: props.onThreadHandedOff })}
-        {...(props.onOpenThread === undefined
-          ? {}
-          : {
-              onThreadBranched: (thread: ChatThread) =>
-                props.onOpenThread?.(thread.id, thread.title, thread.projectId),
-            })}
-        {...(props.onOpenSideChat === undefined ? {} : { onOpenSideChat: props.onOpenSideChat })}
-        moveToProject={{
-          projects: props.projects.flatMap((project) =>
-            project.type === "chat" && project.lifecycle === "active"
-              ? [{ id: project.id, name: project.name }]
-              : [],
-          ),
-          ...(createProject === undefined
+      <Suspense
+        fallback={<OctantEmpty message="Loading chat." state="loading" title="Loading chat" />}
+      >
+        <ChatWorkspace
+          controller={controller}
+          providerGroups={providerGroups}
+          {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
+          {...(props.onTurnRevealed === undefined ? {} : { onTurnRevealed: props.onTurnRevealed })}
+          {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+          onClearCanvasSelections={props.onClearCanvasSelections}
+          onRemoveCanvasSelection={props.onRemoveCanvasSelection}
+          pendingCanvasSelections={props.pendingCanvasSelections}
+          {...(props.extensionClient === undefined
             ? {}
-            : { onCreateProject: (name: string) => createProject("chat", name) }),
-        }}
-      />
+            : { extensionClient: props.extensionClient })}
+          {...(props.memoryProposalClient === undefined
+            ? {}
+            : { memoryProposalClient: props.memoryProposalClient })}
+          {...(props.browserAutomationClient === undefined
+            ? {}
+            : { browserAutomationClient: props.browserAutomationClient })}
+          {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+          {...(props.projectWindowCapability === undefined
+            ? {}
+            : { windowCapability: props.projectWindowCapability })}
+          {...(props.providerController.snapshot === undefined
+            ? {}
+            : { providerSnapshot: props.providerController.snapshot })}
+          {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+          {...(props.imageGenerationClient === undefined
+            ? {}
+            : { imageGenerationClient: props.imageGenerationClient })}
+          {...(props.imageGenerationProfiles === undefined
+            ? {}
+            : { imageGenerationProfiles: props.imageGenerationProfiles })}
+          {...(props.onOpenImageSettings === undefined
+            ? {}
+            : { onOpenImageSettings: props.onOpenImageSettings })}
+          {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
+          {...(props.onOpenCanvasReference === undefined
+            ? {}
+            : { onOpenCanvas: props.onOpenCanvasReference })}
+          {...(props.onCanvasReferencesObserved === undefined
+            ? {}
+            : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
+          {...(props.onThreadHandedOff === undefined
+            ? {}
+            : { onThreadHandedOff: props.onThreadHandedOff })}
+          {...(props.onOpenThread === undefined
+            ? {}
+            : {
+                onThreadBranched: (thread: ChatThread) =>
+                  props.onOpenThread?.(thread.id, thread.title, thread.projectId),
+              })}
+          {...(props.onOpenSideChat === undefined ? {} : { onOpenSideChat: props.onOpenSideChat })}
+          moveToProject={{
+            projects: props.projects.flatMap((project) =>
+              project.type === "chat" && project.lifecycle === "active"
+                ? [{ id: project.id, name: project.name }]
+                : [],
+            ),
+            ...(createProject === undefined
+              ? {}
+              : { onCreateProject: (name: string) => createProject("chat", name) }),
+          }}
+        />
+      </Suspense>
     </ChatThreadEnvironment>
   );
 }

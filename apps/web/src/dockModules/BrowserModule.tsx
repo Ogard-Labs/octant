@@ -1,6 +1,7 @@
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { unavailable } from "./moduleState";
-import { BrowserWorkspace } from "../browser/BrowserWorkspace";
+import { lazy, Suspense } from "react";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   decodeBrowserThreadId,
   decodeBrowserContextId,
@@ -21,6 +22,10 @@ type Props = Pick<
   | "windowCapability"
 >;
 
+const BrowserWorkspace = lazy(() =>
+  import("../browser/BrowserWorkspace").then((module) => ({ default: module.BrowserWorkspace })),
+);
+
 export default function BrowserModule(props: Props) {
   if (props.subject.mode === "chat" || props.browserAutomationClient === undefined) {
     return unavailable("Browser", "This thread has no Browser utility available.");
@@ -36,24 +41,28 @@ export default function BrowserModule(props: Props) {
       : { contextId: decodeBrowserContextId(props.browserContextId) }),
   };
   return (
-    <BrowserWorkspace
-      canDrawOnPage
-      dockTabId={props.utilityTabId ?? "browser"}
-      client={props.browserAutomationClient}
-      {...(props.onAgentBrowserRecovery === undefined
-        ? {}
-        : { onAgentBrowserRecovery: props.onAgentBrowserRecovery })}
-      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-      {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-      {...(props.subject.projectId === undefined ? {} : { projectId: props.subject.projectId })}
-      {...(props.onBrowserContextCreated === undefined
-        ? {}
-        : { onContextCreated: props.onBrowserContextCreated })}
-      startFresh={props.utilityTabId !== undefined && props.utilityTabId !== "browser"}
-      tab={tab}
-      {...(props.windowCapability === undefined
-        ? {}
-        : { windowCapability: props.windowCapability })}
-    />
+    <Suspense
+      fallback={<OctantEmpty message="Loading browser." state="loading" title="Loading browser" />}
+    >
+      <BrowserWorkspace
+        canDrawOnPage
+        dockTabId={props.utilityTabId ?? "browser"}
+        client={props.browserAutomationClient}
+        {...(props.onAgentBrowserRecovery === undefined
+          ? {}
+          : { onAgentBrowserRecovery: props.onAgentBrowserRecovery })}
+        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+        {...(props.subject.projectId === undefined ? {} : { projectId: props.subject.projectId })}
+        {...(props.onBrowserContextCreated === undefined
+          ? {}
+          : { onContextCreated: props.onBrowserContextCreated })}
+        startFresh={props.utilityTabId !== undefined && props.utilityTabId !== "browser"}
+        tab={tab}
+        {...(props.windowCapability === undefined
+          ? {}
+          : { windowCapability: props.windowCapability })}
+      />
+    </Suspense>
   );
 }
