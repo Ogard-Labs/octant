@@ -25,6 +25,8 @@ export interface UsageRecordProjectionRow {
   readonly observed_at: string;
   readonly last_sequence: number;
   readonly host_id: string;
+  /** Whether a Code turn ran at Full access; NULL where not recorded. */
+  readonly ran_at_full_access: number | null;
 }
 
 export function assertUsageProjectionSchema(schemaVersion: number): void {

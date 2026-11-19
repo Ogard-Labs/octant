@@ -56,6 +56,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
 import { DefaultFolderSettings } from "../settings/DefaultFolderSettings";
+import { NextMessageSuggestionsSettings } from "../settings/NextMessageSuggestionsSettings";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -2590,6 +2591,15 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           <BackgroundHostSettings
             bridge={props.hostBridge}
             focused={focusedSetting === settingId("background-host")}
+          />
+        </div>
+      </SettingsSection>
+      <SettingsSection title="Composer">
+        <div className="setgroup">
+          <NextMessageSuggestionsSettings
+            focusedSetting={focusedSetting}
+            onChange={(next) => props.onSettingsChange({ nextMessageSuggestions: next })}
+            value={props.settings.nextMessageSuggestions}
           />
         </div>
       </SettingsSection>

@@ -32,6 +32,7 @@ import {
   buildCompactIdentity,
   defaultEnvironmentPresentationState,
   defaultShellSettings,
+  nextMessageSuggestionsOn,
   defaultWindowWorkspace,
   deriveChatEnvironmentProjection,
   deriveCodeEnvironmentProjection,
@@ -2761,5 +2762,24 @@ describe("panes of several Projects in one window", () => {
       fastest = Math.min(fastest, ((performance.now() - started) * 1000) / rounds);
     }
     expect(fastest).toBeLessThan(50);
+  });
+});
+
+describe("next-message suggestions setting", () => {
+  it("suggests the next message in every mode until the person changes the setting", () => {
+    for (const mode of ["chat", "work", "code"] as const) {
+      expect(nextMessageSuggestionsOn(undefined, mode)).toBe(true);
+      expect(nextMessageSuggestionsOn(defaultShellSettings(), mode)).toBe(true);
+    }
+  });
+
+  it("suggests only in the chosen modes, and nowhere once switched off", () => {
+    const some = { nextMessageSuggestions: { enabled: true, modes: ["chat", "code"] as const } };
+    expect(nextMessageSuggestionsOn(some, "chat")).toBe(true);
+    expect(nextMessageSuggestionsOn(some, "work")).toBe(false);
+    const off = {
+      nextMessageSuggestions: { enabled: false, modes: ["chat", "work", "code"] as const },
+    };
+    expect(nextMessageSuggestionsOn(off, "chat")).toBe(false);
   });
 });

@@ -6727,7 +6727,8 @@ ls-remote` against the thread's remote and the GitHub reads they already
   said nothing to someone who did not. When the latest reply predicted the
   person's next message, or suggested a next message for this thread, the
   empty composer shows it instead and Tab takes it; the prediction leads,
-  and it is gone once the person sends anything. A start screen's composer asks "Ask anything…" in every mode, because a
+  and it is gone once the person sends anything. In a mode where Suggest my
+  next message is off, Tab offers neither. A start screen's composer asks "Ask anything…" in every mode, because a
   first-time person has not started a conversation to reply to. Neither
   changes while a response runs, and accessible input labels remain stable.
 
@@ -9821,12 +9822,29 @@ before this behaviour that left no ledger row at all, including every child
 run's, are not counted.
 
 A provider that never reports usage is not counted against a token or money
-ceiling. The host decides by provider, not by row: a ledger row's
+ceiling. The host decides by provider and level, not by row: a ledger row's
 `provider_instance_id` names the instance, and the instance's runtime
 capability as the host observes it now (`ProviderRuntimeRegistry`, the same
 observation that gates app-managed tools and model switches) decides whether
 its unreported rows count. Only `usage: "unsupported"` leaves them out: the ACP
-mappers and Oh My Pi declare it because they never emit usage. A provider that
+mappers and Oh My Pi declare it because they never emit usage. A Code turn's
+row records whether the turn ran at Full access (`ran_at_full_access`, from
+the `executionPolicy` its `conversation-turn-started` event journals), and a
+Full access row reads `capabilities.atFullAccess.usage` where the probe gives
+Full access its own value. An ACP release newer than the one Octant reviewed
+reads `unsupported` below Full access and `supported` at Full access, where
+its driver reports usage, so at Full access it counts as any measuring
+provider: its reported usage counts and a Full access turn that ended with no
+report refuses `unknown-spend`, while its guarded turns stay not measured and
+named (maintainer decision, 2026-11-19, "count it at full access"). A row
+with no recorded level reads the capability below Full access, as every row
+did before: Work turns and child runs (not built yet for them), a Code turn
+whose start journaled no level, and every Code turn journaled before the
+upgrade that added the record. A boundary the migration stores
+(`usage_turn_level_boundary`, the journal's last sequence when it ran) keeps
+those turns unrecorded on rebuild too, since their Full access turns ran
+before the driver measured usage there and reading them as measured would
+make a lifetime ceiling refuse for good. A provider that
 can report usage keeps the rule above, so its failed, cancelled, or
 interrupted turn that reported nothing still refuses `unknown-spend`; counting
 it as nothing would make an interrupted turn free. An instance that no longer
@@ -10868,13 +10886,20 @@ the model at another size.
 
 Follow-up suggestions are every provider's, not the harness's
 (`apps/server/src/followUps`). Every Chat, Work, and Code turn, on any
-provider, carries one fixed instructions block that lets the model end a reply
+provider, carries one fixed instructions block that has the model end a reply
 with an `octant-follow-ups` fenced block: up to three suggestions, and `next`,
 its prediction of the message the person will send next, in their words on
 one line (at most 280 characters; a longer or multi-line one is dropped
-whole). Every reply may carry a prediction, where most carry no suggestion, so
-the empty composer usually has something to offer at no extra request; an
-unreadable suggestion list leaves the prediction standing.
+whole). `next` is asked for as required, not offered: worded as optional,
+Haiku wrote no block on any of three ordinary prompts and Sonnet on one of
+three; worded as required, the two wrote one on seven of eight, the miss a
+conversation that had ended (measured 2026-11-18). So the empty composer
+usually has something to offer at no extra request; an unreadable suggestion
+list leaves the prediction standing. Settings › General › Composer's **Suggest
+my next message** (`nextMessageSuggestions` in shell settings: a switch and the
+modes it covers, absent meaning on in every mode) is read by the host on each
+turn: in a mode where it is off the turn carries a second fixed block that asks
+for suggestions only, and a prediction the reply still carries is not kept.
 `ThreadFollowUpSuggestionStore` journals the latest reply's set and prediction
 per thread (`thread-follow-up-suggestions`), retires them when a later reply
 suggests nothing, and replays sets a harness session journaled earlier. A turn

@@ -13,9 +13,11 @@ import type {
   NativeHarnessFollowUpCreation,
   NativeHarnessFollowUpPreview,
   NativeHarnessFollowUpSuggestion,
+  NextMessageSuggestionsSetting,
   OctantMode,
   ThreadFollowUpSuggestions,
 } from "@octant/contracts";
+import { nextMessageSuggestionsOn } from "@octant/domain/shell-policy";
 import {
   FollowUpSuggestionClientFailure,
   type FollowUpSuggestionClient,
@@ -66,6 +68,14 @@ export interface ComposerOffers extends FollowUpSuggestionChipsProps {
  * composer has no thread yet, or where the thread lives on another host.
  */
 export const FollowUpSuggestionContext = createContext<ComposerOffers | undefined>(undefined);
+
+/**
+ * Settings › Replies' next-message suggestions, for every composer in the
+ * window. Absent means on in every mode, as the host reads it.
+ */
+export const NextMessageSuggestionsContext = createContext<
+  NextMessageSuggestionsSetting | undefined
+>(undefined);
 
 /** The follow-up chips for the thread around this composer, if any. */
 export function ComposerFollowUpSuggestions() {
@@ -130,6 +140,7 @@ const noFollowUps = () => () => undefined;
  */
 export function useComposerSuggestion(): ComposerSuggestion | undefined {
   const context = useContext(FollowUpSuggestionContext);
+  const setting = useContext(NextMessageSuggestionsContext);
   const client = context?.client;
   const threadId = context?.threadId;
   const revision = useThreadActivityRevision("threadFollowUps");
@@ -146,7 +157,18 @@ export function useComposerSuggestion(): ComposerSuggestion | undefined {
   );
   useFollowUpRevision(client, threadId, revision);
   const dismissedTurnId = useDismissedTurn(threadId ?? "");
-  if (client === undefined || threadId === undefined || suggestions === null) return undefined;
+  if (
+    context === undefined ||
+    client === undefined ||
+    threadId === undefined ||
+    suggestions === null
+  ) {
+    return undefined;
+  }
+  // Off for this mode, the composer offers nothing on Tab: neither a stored
+  // prediction nor a next-step card's prompt. The cards themselves stay.
+  if (!nextMessageSuggestionsOn({ nextMessageSuggestions: setting }, context.mode))
+    return undefined;
   const turnId = suggestions.followUps.turnId;
   if (String(turnId) === dismissedTurnId) return undefined;
   if (suggestions.nextMessage !== undefined) {

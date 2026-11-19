@@ -2767,6 +2767,27 @@ CREATE INDEX validation_evidence_authority_idx
       END;
     `,
   },
+  {
+    version: 109,
+    name: "record_code_turn_full_access_on_usage",
+    // Whether a Code turn ran at Full access, so a spend ceiling reads an
+    // unreported turn by the usage capability of the level it ran at: an ACP
+    // release newer than the reviewed one measures usage at Full access only.
+    // NULL means not recorded and reads as before. The boundary keeps every
+    // turn already journaled when this build first ran on NULL, on rebuild
+    // too: those Full access turns ran before the driver measured them, so
+    // reading them as measured would make a lifetime ceiling refuse forever.
+    sql: `
+      ALTER TABLE usage_record_projection
+        ADD COLUMN ran_at_full_access INTEGER CHECK(ran_at_full_access IN (0, 1));
+      CREATE TABLE usage_turn_level_boundary (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        global_sequence INTEGER NOT NULL CHECK(global_sequence >= 0)
+      ) STRICT;
+      INSERT INTO usage_turn_level_boundary (singleton, global_sequence)
+        SELECT 1, COALESCE(MAX(global_sequence), 0) FROM event_journal;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

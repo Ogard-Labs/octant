@@ -2675,8 +2675,12 @@ unadvertised HTTP transport (the tool gate reads `atFullAccess` through
 Compaction and file review keep the pin at Full access too: the host runs
 both on a session it resumes for them tool-free or under Plan, not on the
 thread's Full access session, so the release is judged below Full access
-there. A spend ceiling still counts a provider whose usage reads
-unsupported below Full access as not measured. Rationale: the probe used to
+there. A spend ceiling reads each Code turn at the level it ran at: a Full access
+turn on such a release counts like any measuring provider's, its reported
+usage counted and a turn that ended with no report refusing as unknown spend,
+while a guarded turn's unreported row stays not measured
+([Architecture: stop reasons](../architecture.md#stop-reasons);
+maintainer decision, 2026-11-19). Rationale: the probe used to
 report one value for every level, so an unreviewed release lost these
 features at Full access as well, where the person already runs the agent
 open; Mistral Vibe 3.0.3, newer than the 2.25.0 its HTTP tool evidence

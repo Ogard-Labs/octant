@@ -504,7 +504,9 @@ bare Tab puts it in the draft (a "Next step here" suggestion is then marked
 used). The prediction leads when there are both, because it is written as the
 person would type it; it has no card, and it leaves the composer once the
 person sends anything. Once anything is typed, or with a modifier held, Tab
-keeps its ordinary meaning.
+keeps its ordinary meaning. Settings › General › Composer turns this off
+everywhere or per mode ([Settings](settings.md)); off, the composer says
+"Reply…" and Tab offers nothing, while the suggestion cards stay.
 
 Attachment and model controls sit on the left; access, context usage and send
 stay together at the right edge even when the controls wrap. Menus use compact

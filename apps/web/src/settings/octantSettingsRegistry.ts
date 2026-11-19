@@ -92,6 +92,31 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "enable work mode",
         },
         {
+          id: settingId("next-message-suggestions"),
+          label: "Suggest my next message",
+          scope: "app",
+          keywords:
+            "next message suggestion tab autocomplete complete predict composer placeholder",
+        },
+        {
+          id: settingId("next-message-suggestions-chat"),
+          label: "Suggest my next message in Chat",
+          scope: "app",
+          keywords: "next message suggestion tab autocomplete chat mode",
+        },
+        {
+          id: settingId("next-message-suggestions-work"),
+          label: "Suggest my next message in Work",
+          scope: "app",
+          keywords: "next message suggestion tab autocomplete work mode",
+        },
+        {
+          id: settingId("next-message-suggestions-code"),
+          label: "Suggest my next message in Code",
+          scope: "app",
+          keywords: "next message suggestion tab autocomplete code mode",
+        },
+        {
           id: settingId("background-host"),
           label: "Keep Octant running in the background",
           scope: "app",
