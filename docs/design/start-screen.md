@@ -569,6 +569,11 @@ published inside the range is not counted. A card reads partial only when a repo
 or a range holds more than 200 matches per repository, and a partial card
 shows no comparison.
 
+For Code Home, a confirmed repository access loss invalidates cached reads
+and frozen pages for that account and repository, even when it contributed
+only to a comparison. An older read still in flight cannot restore those
+records.
+
 A timeframe resolves to a half-open
 `[start, end)` instant window plus an optional comparison window in the
 person's own time zone and week start (Sunday = 0 through Saturday = 6).

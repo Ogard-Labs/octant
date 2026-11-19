@@ -60,6 +60,7 @@ function fixture(
     readonly forgeScope?: ReadonlyArray<string>;
     readonly forge?: () => Promise<CodeHomeActivityForgeResult>;
     readonly forgeAccount?: () => Promise<string | undefined>;
+    readonly forgeRepositoryEpoch?: (account: string, repositoryKey: string) => number;
     readonly clock?: () => UtcTimestamp;
   } = {},
 ) {
@@ -77,6 +78,9 @@ function fixture(
     listForgeScope: async () => options.forgeScope ?? [`${project}|octant-dev/octant`],
     ...(options.forge === undefined ? {} : { forgeRead: options.forge }),
     ...(options.forgeAccount === undefined ? {} : { forgeAccount: options.forgeAccount }),
+    ...(options.forgeRepositoryEpoch === undefined
+      ? {}
+      : { forgeRepositoryEpoch: options.forgeRepositoryEpoch }),
     uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
     now: () => Date.now(),
     clock: options.clock ?? (() => now),
@@ -452,9 +456,11 @@ describe("CodeHomeActivityService", () => {
     recordOverrides: Record<string, unknown> = {},
     projectOverride: string = project,
     repositoryKey = "octant-dev/octant",
+    repositoryEpoch = 0,
   ): CodeHomeActivityForgeRecord => ({
     projectId: projectOverride,
     repositoryKey,
+    repositoryEpoch,
     record: {
       kind: "prs-merged",
       occurredAt: now,
@@ -672,6 +678,169 @@ describe("CodeHomeActivityService", () => {
       () => true,
     );
     expect(next.status).toBe("unavailable");
+    expect(next.count).toBeUndefined();
+    expect(next.records).toHaveLength(0);
+  });
+
+  it("expires a github snapshot's pages when a repository's access epoch moves", async () => {
+    let epoch = 0;
+    const records = Array.from({ length: 26 }, (_, index) =>
+      forgeRecord({ id: `octant-dev/octant#${index + 1}`, number: index + 1 }),
+    );
+    const { read } = fixture([], {
+      forge: async () => ({
+        status: "ready",
+        account: "henrik",
+        checkedAt: now,
+        records,
+      }),
+      forgeAccount: async () => "henrik",
+      forgeRepositoryEpoch: () => epoch,
+    });
+    const first = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+    });
+    expect(first.status).toBe("ready");
+    expect(first.count).toBe(26);
+    epoch = 1;
+    const next = await read({
+      kind: "page",
+      snapshotId: first.snapshotId!,
+      offset: 25,
+    });
+    expect(next.status).toBe("unavailable");
+    expect(next.reason).toBe("authorization-changed");
+    expect(next.count).toBeUndefined();
+    expect(next.records).toHaveLength(0);
+  });
+
+  it("refuses a forge read whose repository epoch already moved before the snapshot was built", async () => {
+    let epoch = 0;
+    const { read } = fixture([], {
+      forge: async () => {
+        // A concurrent refresh confirmed the loss between the source's read
+        // and this view, so the row stamped with the older epoch is stale.
+        epoch = 1;
+        return {
+          status: "ready",
+          account: "henrik",
+          checkedAt: now,
+          records: [forgeRecord()],
+        };
+      },
+      forgeAccount: async () => "henrik",
+      forgeRepositoryEpoch: () => epoch,
+    });
+    const view = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+    });
+    expect(view.status).toBe("unavailable");
+    expect(view.reason).toBe("authorization-changed");
+    expect(view.count).toBeUndefined();
+    expect(view.records).toHaveLength(0);
+  });
+
+  it("refuses when two accepted records share a repository but carry different epochs", async () => {
+    const { read } = fixture([], {
+      forge: async () => ({
+        status: "ready",
+        account: "henrik",
+        checkedAt: now,
+        records: [
+          forgeRecord({ id: "octant-dev/octant#42", number: 42 }, project, "octant-dev/octant", 1),
+          forgeRecord({ id: "octant-dev/octant#7", number: 7 }, project, "octant-dev/octant", 0),
+        ],
+      }),
+      forgeAccount: async () => "henrik",
+      forgeRepositoryEpoch: () => 1,
+    });
+    const view = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+    });
+    expect(view.status).toBe("unavailable");
+    expect(view.reason).toBe("authorization-changed");
+    expect(view.count).toBeUndefined();
+    expect(view.records).toHaveLength(0);
+  });
+
+  it("refuses a forge view whose source binding ended while scope was listed", async () => {
+    const { read } = fixture([], {
+      forge: async () => ({
+        status: "ready",
+        account: "henrik",
+        checkedAt: now,
+        records: [forgeRecord()],
+        current: () => false,
+      }),
+      forgeAccount: async () => "henrik",
+    });
+    const view = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+    });
+    expect(view.status).toBe("unavailable");
+    expect(view.reason).toBe("authorization-changed");
+    expect(view.count).toBeUndefined();
+    expect(view.records).toHaveLength(0);
+  });
+
+  it("expires a github snapshot's pages when a comparison-only repository loses access", async () => {
+    const epochs = new Map<string, number>();
+    const { read } = fixture([], {
+      forgeScope: [`${project}|octant-dev/octant`, `${project}|octant-dev/past`],
+      forge: async () => ({
+        status: "ready",
+        account: "henrik",
+        checkedAt: now,
+        records: [
+          forgeRecord(),
+          forgeRecord(
+            {
+              id: "octant-dev/past#9",
+              repositoryOwner: "octant-dev",
+              repositoryName: "past",
+              number: 9,
+              occurredAt: "2026-07-15T00:00:00.000Z",
+            },
+            project,
+            "octant-dev/past",
+          ),
+        ],
+      }),
+      forgeAccount: async () => "henrik",
+      forgeRepositoryEpoch: (_account, repositoryKey) => epochs.get(repositoryKey) ?? 0,
+    });
+    const first = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: decodeUtcTimestamp("2026-08-01T00:00:00.000Z"), until },
+      comparison: {
+        from: decodeUtcTimestamp("2026-07-01T00:00:00.000Z"),
+        until: decodeUtcTimestamp("2026-08-01T00:00:00.000Z"),
+      },
+    });
+    expect(first.status).toBe("ready");
+    expect(first.comparisonCount).toBe(1);
+    epochs.set("octant-dev/past", 1);
+    const next = await read({
+      kind: "page",
+      snapshotId: first.snapshotId!,
+      offset: 0,
+    });
+    expect(next.status).toBe("unavailable");
+    expect(next.reason).toBe("authorization-changed");
     expect(next.count).toBeUndefined();
     expect(next.records).toHaveLength(0);
   });

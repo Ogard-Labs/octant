@@ -175,6 +175,27 @@ describe("GhHomeActivityPort", () => {
     );
   });
 
+  it("stops a paged walk at the first page boundary after the integration is disabled", async () => {
+    let effective = true;
+    const queue = [
+      searchPage([mergedNode({ number: 2 })], {
+        pageInfo: { hasNextPage: true, endCursor: "cursor-2" },
+      }),
+      searchPage([mergedNode({ number: 1 })]),
+    ];
+    const command: GhCommandPort = {
+      run: vi.fn(async () => {
+        const result = queue.shift() ?? { exitCode: 1, stdout: "" };
+        effective = false;
+        return result;
+      }),
+    };
+    const port = new GhHomeActivityPort({ command, isEffective: () => effective });
+    const result = await observe(port, "prs-merged");
+    expect(result).toMatchObject({ status: "unavailable", reason: "read-failed" });
+    expect(command.run).toHaveBeenCalledTimes(1);
+  });
+
   it("answers partial at the page bound instead of fabricating coverage", async () => {
     const { port } = fixture(
       Array.from({ length: 4 }, () =>

@@ -104,17 +104,28 @@ export interface CodeHomeActivityServicePorts {
    * secure account is connected; github snapshots recheck it on every page.
    */
   readonly forgeAccount?: (card: Exclude<ActivityKind, "runs">) => Promise<string | undefined>;
+  /**
+   * The access epoch an account's forge repository is read under; a view or
+   * page compares the epoch its rows were captured on against it, so a
+   * confirmed access loss retires the snapshot instead of serving stale rows.
+   */
+  readonly forgeRepositoryEpoch?: (account: string, repositoryKey: string) => number;
   readonly uuid: () => string;
   readonly now: () => number;
   readonly clock: () => UtcTimestamp;
 }
 
-/** One forge row plus the Project and repository that witnessed it. */
+/** One forge row plus the Project, repository, and access epoch that witnessed it. */
 export interface CodeHomeActivityForgeRecord {
   readonly record: ActivityRecord;
   readonly projectId: string;
   /** Normalized `owner/name`; authority is the projectId|repositoryKey pair. */
   readonly repositoryKey: string;
+  /**
+   * The account's access epoch the row was captured under. A repository-missing
+   * that lands after the read began still retires the row at view time.
+   */
+  readonly repositoryEpoch: number;
 }
 
 /**
@@ -136,6 +147,13 @@ export type CodeHomeActivityForgeResult =
       account: string;
       checkedAt: UtcTimestamp;
       records: ReadonlyArray<CodeHomeActivityForgeRecord>;
+      /**
+       * Whether the binding these records were read under still holds. The
+       * view rechecks it after its own awaits so rows gathered under a
+       * released source or a since-changed account are never served. Not
+       * retained on the snapshot: pages re-prove under their own lifetime.
+       */
+      readonly current?: () => boolean;
     }>;
 
 interface ThreadWitness {
@@ -153,6 +171,8 @@ interface ActivitySnapshot {
   readonly admittedKey: string;
   /** The forge account a github view was read as; octant snapshots carry none. */
   readonly forgeKey: string | undefined;
+  /** Access epochs of the repositories a github snapshot's records came from. */
+  readonly forgeEpochs: ReadonlyMap<string, number> | undefined;
   readonly all: ReadonlyArray<ActivityRecord>;
   readonly filtered: ReadonlyArray<ActivityRecord>;
   readonly authorityOf: ReadonlyMap<string, ThreadWitness>;
@@ -324,6 +344,7 @@ export class CodeHomeActivityService {
       card: query.card,
       checkedAt: this.#ports.clock(),
       forgeKey: undefined,
+      forgeEpochs: undefined,
       admittedKey: admitted.slice().sort().join("|"),
       all: records,
       filtered,
@@ -369,16 +390,33 @@ export class CodeHomeActivityService {
     admission: () => boolean,
   ): Promise<ActivityView> {
     const scope = (await this.#ports.listForgeScope?.(windowId)) ?? [];
-    if (!admission()) return this.#unavailable("github", "authorization-changed");
+    // The scope await gave a source release or account swap time to land:
+    // rows gathered under a binding that no longer holds are never served.
+    if (!admission() || forge.current?.() === false) {
+      return this.#unavailable("github", "authorization-changed");
+    }
     const admittedSet = new Set(scope);
     const scopeOf = (row: CodeHomeActivityForgeRecord) => `${row.projectId}|${row.repositoryKey}`;
     const inWindow = (record: CodeHomeActivityForgeRecord) =>
       (query.current.from === null || record.record.occurredAt >= query.current.from) &&
       record.record.occurredAt < query.current.until;
+    // Every repository the view's records rest on, current and comparison,
+    // with the access epoch its rows were captured under: an access loss on
+    // any one of them retires this view and the snapshot's later pages.
+    const witnessedRepositories = new Map<string, number>();
+    // A row accepted under one epoch must not outlive a revocation that
+    // landed before this view was built. Each accepted row is checked
+    // itself: two Projects sharing a remote can report different epochs for
+    // it, and only the freshest write in a summary map would hide that.
+    const staleEpoch = (row: CodeHomeActivityForgeRecord) =>
+      this.#ports.forgeRepositoryEpoch !== undefined &&
+      this.#ports.forgeRepositoryEpoch(forge.account, row.repositoryKey) !== row.repositoryEpoch;
     const byId = new Map<string, CodeHomeActivityForgeRecord>();
     for (const row of forge.records) {
       if (!inWindow(row) || byId.has(row.record.id)) continue;
       if (!admittedSet.has(scopeOf(row))) continue;
+      if (staleEpoch(row)) return this.#unavailable("github", "authorization-changed");
+      witnessedRepositories.set(row.repositoryKey, row.repositoryEpoch);
       byId.set(row.record.id, row);
     }
     const records = [...byId.values()]
@@ -404,6 +442,8 @@ export class CodeHomeActivityService {
       const comparisonIds = new Set<string>();
       for (const row of forge.records) {
         if (!inComparison(row) || !admittedSet.has(scopeOf(row))) continue;
+        if (staleEpoch(row)) return this.#unavailable("github", "authorization-changed");
+        witnessedRepositories.set(row.repositoryKey, row.repositoryEpoch);
         comparisonIds.add(row.record.id);
       }
       comparisonCount = comparisonIds.size;
@@ -417,6 +457,8 @@ export class CodeHomeActivityService {
         projectId: row.projectId,
       });
     }
+    const forgeEpochs =
+      this.#ports.forgeRepositoryEpoch === undefined ? undefined : witnessedRepositories;
     this.#evictSnapshots();
     const snapshotId = this.#ports.uuid();
     this.#snapshots.set(snapshotId, {
@@ -425,6 +467,7 @@ export class CodeHomeActivityService {
       card: query.card,
       checkedAt: forge.checkedAt,
       forgeKey: forge.account,
+      forgeEpochs,
       admittedKey: scope.slice().sort().join("|"),
       all: capped,
       filtered: capped,
@@ -483,6 +526,21 @@ export class CodeHomeActivityService {
       if (account !== snapshot.forgeKey) {
         this.#snapshots.delete(query.snapshotId);
         return this.#unavailable(snapshot.source, "authorization-changed");
+      }
+    }
+    // A repository whose access epoch moved since the read was confirmed
+    // lost underneath the snapshot — its rows are purged, so the frozen
+    // view must end rather than page them.
+    if (
+      snapshot.forgeEpochs !== undefined &&
+      snapshot.forgeKey !== undefined &&
+      this.#ports.forgeRepositoryEpoch !== undefined
+    ) {
+      for (const [repositoryKey, epoch] of snapshot.forgeEpochs) {
+        if (this.#ports.forgeRepositoryEpoch(snapshot.forgeKey, repositoryKey) !== epoch) {
+          this.#snapshots.delete(query.snapshotId);
+          return this.#unavailable(snapshot.source, "authorization-changed");
+        }
       }
     }
     const list = query.allFinished === true ? snapshot.all : snapshot.filtered;

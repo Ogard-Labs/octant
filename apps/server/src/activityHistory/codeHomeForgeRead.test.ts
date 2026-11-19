@@ -7,6 +7,11 @@ import {
 } from "@octant/contracts";
 import type { ActivityWindow } from "@octant/contracts/code-home-activity";
 import type { GhHomeActivityResult, GhHomeActivityRow } from "../github/ghHomeActivityPort";
+import { contributeGithubActivity } from "../plugins/github/githubActivityIntegration";
+import {
+  createIntegrationHostPort,
+  integrationActivitySourceSlot,
+} from "../integration/integrationHostPort";
 import { createCodeHomeForgeRead } from "./codeHomeForgeRead";
 
 const windowId = "83000000-0000-4000-8000-0000000000aa" as WindowId;
@@ -60,44 +65,81 @@ const repository = {
   repositoryName: "Octant",
 };
 
+type ObserveCall = (input: {
+  readonly owner: string;
+  readonly name: string;
+  readonly card: "prs-merged" | "issues-closed" | "releases-published";
+  readonly since: string | undefined;
+  readonly until: string | undefined;
+  readonly signal: AbortSignal;
+}) => Promise<GhHomeActivityResult>;
+
+const deferred = <T>() => {
+  const box: { resolve?: (value: T) => void } = {};
+  const promise = new Promise<T>((res) => {
+    box.resolve = res;
+  });
+  return { promise, resolve: (value: T) => box.resolve?.(value) };
+};
+
+/**
+ * Feeds raw `gh` responses through the real bundled registration in a real
+ * host slot, so the tests exercise the production bridge between the
+ * integration's activity source and the forge seam.
+ */
 function fixture(options: {
   readonly snapshot?: GithubAuthenticationSnapshot | (() => GithubAuthenticationSnapshot);
   readonly effective?: boolean;
   readonly repositories?: ReadonlyArray<typeof repository>;
   readonly denied?: ReadonlySet<string>;
   readonly results?: ReadonlyArray<GhHomeActivityResult>;
+  readonly observe?: ObserveCall;
 }) {
   const queue = [...(options.results ?? [{ status: "ready", rows: [mergedRow] }])];
-  const observe = vi.fn(
-    async (_input: {
-      readonly owner: string;
-      readonly name: string;
-      readonly card: "prs-merged" | "issues-closed" | "releases-published";
-      readonly since: string | undefined;
-      readonly until: string | undefined;
-      readonly signal: AbortSignal;
-    }): Promise<GhHomeActivityResult> =>
-      queue.length > 1 ? queue.shift()! : (queue[0] ?? { status: "ready", rows: [] }),
+  const observe = vi.fn<ObserveCall>(
+    options.observe ??
+      (async (): Promise<GhHomeActivityResult> =>
+        queue.length > 1 ? queue.shift()! : (queue[0] ?? { status: "ready", rows: [] })),
   );
   let nowMs = START_MS;
+  let effective = options.effective ?? true;
   const snapshotOf = options.snapshot;
-  const ports = {
-    capabilitySnapshot: vi.fn(async () =>
-      typeof snapshotOf === "function" ? snapshotOf() : (snapshotOf ?? readySnapshot()),
-    ),
-    integrationEffective: () => options.effective ?? true,
-    listRepositories: vi.fn(async () => options.repositories ?? [repository]),
-    mayReadProject: (_id: WindowId, project: ProjectId) =>
-      !(options.denied ?? new Set()).has(String(project)),
-    port: { observe },
+  const capabilitySnapshot = vi.fn(async () =>
+    typeof snapshotOf === "function" ? snapshotOf() : (snapshotOf ?? readySnapshot()),
+  );
+  const slot = integrationActivitySourceSlot(() => effective);
+  const host = createIntegrationHostPort({
+    registerActivitySource: slot.registerActivitySource,
+  });
+  const contribute = (observePort: ObserveCall) =>
+    contributeGithubActivity(host, {
+      capabilitySnapshot,
+      effective: () => effective,
+      observe: observePort,
+    });
+  const registration = contribute(observe);
+  const denied = options.denied ?? new Set<string>();
+  const listRepositories = vi.fn(async () =>
+    (options.repositories ?? [repository]).filter((entry) => !denied.has(String(entry.projectId))),
+  );
+  const { forgeRead, forgeAccount, forgeRepositoryEpoch } = createCodeHomeForgeRead({
+    source: slot.current,
+    listRepositories,
     now: () => nowMs,
-  };
-  const { forgeRead, forgeAccount } = createCodeHomeForgeRead(ports);
+  });
   return {
     forgeRead,
     forgeAccount,
+    forgeRepositoryEpoch,
     observe,
-    ports,
+    capabilitySnapshot,
+    listRepositories,
+    slot,
+    registration,
+    contribute,
+    setEffective: (value: boolean) => {
+      effective = value;
+    },
     advance: (ms: number) => {
       nowMs += ms;
     },
@@ -160,13 +202,13 @@ describe("createCodeHomeForgeRead", () => {
   });
 
   it("refuses when the bundled integration is not effective, without observing credentials", async () => {
-    const { forgeRead, observe, ports } = fixture({ effective: false });
+    const { forgeRead, observe, capabilitySnapshot } = fixture({ effective: false });
     expect(await read(forgeRead)).toEqual({
       status: "unavailable",
       reason: "not-connected",
     });
     expect(observe).not.toHaveBeenCalled();
-    expect(ports.capabilitySnapshot).not.toHaveBeenCalled();
+    expect(capabilitySnapshot).not.toHaveBeenCalled();
   });
 
   it("reports a rate-limited capability snapshot honestly", async () => {
@@ -372,16 +414,12 @@ describe("createCodeHomeForgeRead", () => {
 
   it("evicts cached history when the signed-in account changes", async () => {
     let snapshot = readySnapshot("henrik");
-    const { observe } = fixture({});
-    const ports = {
-      capabilitySnapshot: vi.fn(async () => snapshot),
-      integrationEffective: () => true,
-      listRepositories: vi.fn(async () => [repository]),
-      mayReadProject: () => true,
-      port: { observe },
+    const { observe, slot, listRepositories } = fixture({ snapshot: () => snapshot });
+    const read2 = createCodeHomeForgeRead({
+      source: slot.current,
+      listRepositories,
       now: () => START_MS,
-    };
-    const read2 = createCodeHomeForgeRead(ports).forgeRead;
+    }).forgeRead;
     await read2({ windowId, card: "prs-merged", current, refresh: false });
     snapshot = readySnapshot("other-login");
     await read2({ windowId, card: "prs-merged", current, refresh: false });
@@ -469,6 +507,148 @@ describe("createCodeHomeForgeRead", () => {
     expect(observe).toHaveBeenCalledTimes(2);
   });
 
+  it("bumps a repository's access epoch when a refresh confirms it is missing", async () => {
+    const { forgeRead, forgeRepositoryEpoch } = fixture({
+      results: [
+        { status: "ready", rows: [mergedRow] },
+        { status: "partial", rows: [], reason: "repository-missing" },
+      ],
+    });
+    await read(forgeRead);
+    expect(forgeRepositoryEpoch("henrik", "octant-dev/octant")).toBe(0);
+    await read(forgeRead, { refresh: true });
+    expect(forgeRepositoryEpoch("henrik", "octant-dev/octant")).toBe(1);
+  });
+
+  it("drops a late success that races a confirmed access loss instead of resurrecting it", async () => {
+    const gate = deferred<GhHomeActivityResult>();
+    const newerRow: GhHomeActivityRow = { ...mergedRow, number: 55 };
+    const { forgeRead, observe } = fixture({
+      observe: vi
+        .fn<ObserveCall>()
+        .mockImplementationOnce(async () => gate.promise)
+        .mockImplementationOnce(async () => ({
+          status: "partial",
+          rows: [],
+          reason: "repository-missing",
+        }))
+        .mockImplementation(async () => ({ status: "ready", rows: [newerRow] })),
+    });
+    const racing = forgeRead({ windowId, card: "prs-merged", current, refresh: true });
+    await vi.waitFor(() => {
+      expect(observe).toHaveBeenCalledTimes(1);
+    });
+    const lost = await forgeRead({ windowId, card: "prs-merged", current, refresh: true });
+    expect(lost).toMatchObject({ status: "unavailable" });
+    gate.resolve({ status: "ready", rows: [mergedRow] });
+    // The late answer arrived after the revocation it raced: it is dropped,
+    // so the read ends honest instead of serving the revoked rows.
+    expect(await racing).toMatchObject({ status: "unavailable" });
+    const again = await forgeRead({ windowId, card: "prs-merged", current, refresh: false });
+    // A repopulated cache would have skipped the fresh observation entirely.
+    expect(observe).toHaveBeenCalledTimes(3);
+    if (again.status !== "ready") throw new Error(`expected a ready read, got ${again.status}`);
+    expect(again.records.map((entry) => entry.record.id)).toEqual(["octant-dev/octant#55"]);
+  });
+
+  it("drops the cached fallback when a refused refresh races a confirmed access loss", async () => {
+    const gate = deferred<GhHomeActivityResult>();
+    const { forgeRead, observe } = fixture({
+      observe: vi
+        .fn<ObserveCall>()
+        .mockImplementationOnce(async () => ({ status: "ready", rows: [mergedRow] }))
+        .mockImplementationOnce(async () => gate.promise)
+        .mockImplementationOnce(async () => ({
+          status: "partial",
+          rows: [],
+          reason: "repository-missing",
+        })),
+    });
+    await read(forgeRead);
+    const racing = forgeRead({ windowId, card: "prs-merged", current, refresh: true });
+    await vi.waitFor(() => {
+      expect(observe).toHaveBeenCalledTimes(2);
+    });
+    const lost = await forgeRead({ windowId, card: "prs-merged", current, refresh: true });
+    expect(lost).toMatchObject({ status: "unavailable" });
+    gate.resolve({ status: "unavailable", reason: "read-failed" });
+    // The transient refusal would ordinarily serve the cached rows — but the
+    // purge that ran during the await revoked them, so nothing is served.
+    expect(await racing).toMatchObject({ status: "unavailable" });
+  });
+
+  it("never serves cached rows while the integration is disabled", async () => {
+    const { forgeRead, observe, setEffective } = fixture({});
+    await read(forgeRead);
+    setEffective(false);
+    expect(await read(forgeRead)).toEqual({ status: "unavailable", reason: "not-connected" });
+    expect(observe).toHaveBeenCalledTimes(1);
+  });
+
+  it("still purges a repository confirmed missing when the requesting window was abandoned", async () => {
+    let admitted = true;
+    const { forgeRead, forgeRepositoryEpoch } = fixture({
+      observe: async () => {
+        admitted = false;
+        return { status: "partial", rows: [], reason: "repository-missing" };
+      },
+    });
+    const refused = await read(forgeRead, { admission: () => admitted });
+    // The abandoned read refuses its own result, but the confirmed access
+    // loss still revoked the repository for every other window's read.
+    expect(refused).toMatchObject({ status: "unavailable" });
+    expect(forgeRepositoryEpoch("henrik", "octant-dev/octant")).toBe(1);
+  });
+
+  it("treats a rejecting source read as a transient refusal, not a thrown failure", async () => {
+    const { forgeRead } = fixture({
+      observe: vi
+        .fn<ObserveCall>()
+        .mockImplementationOnce(async () => ({ status: "ready", rows: [mergedRow] }))
+        .mockImplementationOnce(async () => {
+          throw new Error("gh exploded");
+        }),
+    });
+    await read(forgeRead);
+    const stale = await read(forgeRead, { refresh: true });
+    expect(stale.status).toBe("partial");
+    if (stale.status !== "partial") return;
+    expect(stale.records).toHaveLength(1);
+  });
+
+  it("serves no cached rows under a provider re-registered for the same account", async () => {
+    const { forgeRead, observe, registration, contribute } = fixture({});
+    await read(forgeRead);
+    if (registration?.kind !== "registered") throw new Error("registration refused");
+    registration.release();
+    const observeTwo = vi.fn<ObserveCall>(async () => ({
+      status: "ready",
+      rows: [{ ...mergedRow, number: 9 }],
+    }));
+    contribute(observeTwo);
+    const again = await read(forgeRead);
+    // Rows belong to the provider instance that gathered them: the new
+    // registration's read fetches instead of serving the first one's cache.
+    expect(observe).toHaveBeenCalledTimes(1);
+    expect(observeTwo).toHaveBeenCalledTimes(1);
+    if (again.status !== "ready") throw new Error(`expected a ready read, got ${again.status}`);
+    expect(again.records.map((entry) => entry.record.id)).toEqual(["octant-dev/octant#9"]);
+  });
+
+  it("drops a read the integration is disabled in the middle of", async () => {
+    const gate = deferred<GhHomeActivityResult>();
+    const { forgeRead, observe, setEffective } = fixture({
+      observe: async () => gate.promise,
+    });
+    const pending = read(forgeRead);
+    await vi.waitFor(() => {
+      expect(observe).toHaveBeenCalledTimes(1);
+    });
+    setEffective(false);
+    gate.resolve({ status: "ready", rows: [mergedRow] });
+    expect(await pending).toEqual({ status: "unavailable", reason: "not-connected" });
+  });
+
   it("purges a missing repository's rows under every timeframe, not just the refreshed one", async () => {
     const weekA: ActivityWindow = {
       from: decodeUtcTimestamp("2026-08-04T00:00:00.000Z"),
@@ -535,13 +715,10 @@ describe("createCodeHomeForgeRead", () => {
         { status: "ready", rows: [mergedRow] },
       ],
     });
-    let admitted = true;
     const result = await read(forgeRead, {
-      admission: () => {
-        const was = admitted;
-        admitted = false;
-        return was;
-      },
+      // Admission holds until the first repository has been observed, so the
+      // loss lands between repositories rather than before the first read.
+      admission: () => observe.mock.calls.length === 0,
     });
     expect(result).toMatchObject({ status: "unavailable" });
     expect(observe).toHaveBeenCalledTimes(1);
@@ -555,7 +732,7 @@ describe("createCodeHomeForgeRead", () => {
   it("answers no account when the integration or capability gate is not effective", async () => {
     const off = fixture({ effective: false });
     expect(await off.forgeAccount("prs-merged")).toBeUndefined();
-    expect(off.ports.capabilitySnapshot).not.toHaveBeenCalled();
+    expect(off.capabilitySnapshot).not.toHaveBeenCalled();
     const denied = fixture({
       snapshot: {
         state: "scope-limited",

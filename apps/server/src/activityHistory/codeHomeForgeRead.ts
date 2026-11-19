@@ -1,17 +1,14 @@
-import {
-  decodeActivityRecord,
-  type ActivityRecord,
-  type ActivityWindow,
-} from "@octant/contracts/code-home-activity";
+import { type ActivityWindow } from "@octant/contracts/code-home-activity";
 import {
   decodeUtcTimestamp,
   type ProjectId,
   type UtcTimestamp,
   type WindowId,
 } from "@octant/contracts";
-import type { GithubAuthenticationSnapshot, GithubCapabilityKind } from "@octant/contracts";
-import { decideGithubCatalogueRead } from "@octant/domain";
-import type { GhHomeActivityPort, GhHomeActivityRow } from "../github/ghHomeActivityPort";
+import type {
+  IntegrationActivityObservation,
+  IntegrationActivitySource,
+} from "@octant/plugin-api/integration";
 import type {
   CodeHomeActivityForgeRecord,
   CodeHomeActivityForgeResult,
@@ -25,30 +22,19 @@ interface CachedRepositoryRead {
   readonly storedAtMs: number;
   readonly checkedAt: string;
   readonly result: Extract<
-    Awaited<ReturnType<GhHomeActivityPort["observe"]>>,
+    IntegrationActivityObservation,
     { readonly status: "ready" | "partial" }
   >;
 }
 
-type GateOutcome =
-  | { readonly kind: "ready"; readonly account: string }
-  | { readonly kind: "result"; readonly result: CodeHomeActivityForgeResult };
-
-type ForgeCard = "prs-merged" | "issues-closed" | "releases-published";
-
-/** The catalogue capability each card's read actually needs. */
-const capabilityOf = (card: ForgeCard): GithubCapabilityKind =>
-  card === "prs-merged"
-    ? "pull-requests-read"
-    : card === "issues-closed"
-      ? "issues-read"
-      : "repository-catalogue";
-
 export interface CodeHomeForgeReadPorts {
-  /** The secure account and per-capability state `gh` would run under. */
-  readonly capabilitySnapshot: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>;
-  /** Whether the bundled GitHub integration is trusted and enabled. */
-  readonly integrationEffective: () => boolean;
+  /**
+   * The registered repository activity source, or undefined while the
+   * integration is ineffective. It is looked up ahead of every observation
+   * and rechecked after every await, so a source released mid-read — by a
+   * disable or a re-registration — cannot serve the rows it gathered.
+   */
+  readonly source: () => IntegrationActivitySource | undefined;
   /** Connected repositories named only by this window's admitted Projects. */
   readonly listRepositories: (windowId: WindowId) => Promise<
     ReadonlyArray<{
@@ -57,88 +43,67 @@ export interface CodeHomeForgeReadPorts {
       readonly repositoryName: string;
     }>
   >;
-  /** The window's current read admission for one Project. */
-  readonly mayReadProject: (windowId: WindowId, projectId: ProjectId) => boolean;
-  /** The bounded read-only history port; absent when no `gh` is configured. */
-  readonly port: Pick<GhHomeActivityPort, "observe"> | undefined;
   /** Milliseconds now, for the cache lifetime and observation times. */
   readonly now: () => number;
 }
 
 /**
- * The resolved GitHub history read behind the activity service's forge seam.
- * Only the signed-in account's own actions count — another actor's merge,
- * closure or release is not the person's activity. Results are cached per
- * normalized account + repository + card for one minute; an account change,
- * disconnect or insecure storage drops every entry so no view can borrow
- * another account's history, and a refused transient refresh serves the last
- * good rows as partial with their original checkedAt instead of a fabricated
- * fresh answer. A repository that answers 404/403 is not a temporary failure:
- * its cache is purged and its formerly read rows are never reused.
+ * The resolved history read behind the activity service's forge seam,
+ * answered through the contributed activity source the host admits. Results
+ * are cached per normalized account + repository + card for one minute; an
+ * account change, disconnect or insecure storage drops every entry so no
+ * view can borrow another account's history, and a refused transient refresh
+ * serves the last good rows as partial with their original checkedAt instead
+ * of a fabricated fresh answer. A repository the source reports missing is
+ * not a temporary failure: its cache is purged, its access epoch is bumped
+ * so snapshots and in-flight reads built on its rows end instead of serving
+ * them, and its formerly read rows are never reused.
  */
 export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
   readonly forgeRead: NonNullable<CodeHomeActivityServicePorts["forgeRead"]>;
   readonly forgeAccount: NonNullable<CodeHomeActivityServicePorts["forgeAccount"]>;
+  readonly forgeRepositoryEpoch: NonNullable<CodeHomeActivityServicePorts["forgeRepositoryEpoch"]>;
 } {
   const cache = new Map<string, CachedRepositoryRead>();
   let cacheAccount: string | undefined;
+  // Rows belong to the provider instance that gathered them, not merely its
+  // account: a re-registered source starts with an empty cache.
+  let cacheSource: IntegrationActivitySource | undefined;
+  // Confirmed access losses, per account|repository: a snapshot or an
+  // in-flight read built on since-purged rows must still notice even though
+  // the rows are gone.
+  const epochs = new Map<string, number>();
 
-  const gate = (snapshot: GithubAuthenticationSnapshot, card: ForgeCard): GateOutcome => {
-    // A disconnected or insecure account is a labeled fallback; a live
-    // account that cannot be observed is a read failure, never a connection
-    // claim.
-    if (snapshot.state === "insecure-storage" || snapshot.state === "external-token") {
-      cache.clear();
-      cacheAccount = undefined;
-      return {
-        kind: "result",
-        result: { status: "fallback", fallback: "insecure-github-storage" },
-      };
-    }
-    if (snapshot.state === "unauthorized") {
-      cache.clear();
-      cacheAccount = undefined;
-      return { kind: "result", result: { status: "fallback", fallback: "no-github-connection" } };
-    }
-    if (snapshot.state === "unavailable") {
-      return { kind: "result", result: { status: "unavailable", reason: "read-failed" } };
-    }
-    if (snapshot.state === "rate-limited") {
-      return { kind: "result", result: { status: "unavailable", reason: "rate-limited" } };
-    }
-    if (!ports.integrationEffective()) {
-      return { kind: "result", result: { status: "unavailable", reason: "not-connected" } };
-    }
-    const read = decideGithubCatalogueRead({
-      capability: capabilityOf(card),
-      snapshot: { state: snapshot.state, capabilities: snapshot.capabilities },
-    });
-    if (read.decision === "deny") {
-      return {
-        kind: "result",
-        result: {
-          status: "unavailable",
-          reason: read.reason === "rate-limited" ? "rate-limited" : "not-connected",
-        },
-      };
-    }
-    const account = snapshot.account?.login.toLowerCase();
-    if (account === undefined) {
-      return { kind: "result", result: { status: "unavailable", reason: "not-connected" } };
-    }
-    return { kind: "ready", account };
-  };
-
-  const forgeAccount = async (card: ForgeCard): Promise<string | undefined> => {
+  const forgeAccount = async (
+    card: "prs-merged" | "issues-closed" | "releases-published",
+  ): Promise<string | undefined> => {
     // A disabled or untrusted integration observes no credentials at all.
-    if (!ports.integrationEffective()) return undefined;
+    const source = ports.source();
+    if (source === undefined) return undefined;
     try {
-      const gated = gate(await ports.capabilitySnapshot(new AbortController().signal), card);
-      return gated.kind === "ready" ? gated.account : undefined;
+      const connection = await source.account(card, new AbortController().signal);
+      if (ports.source() !== source) return undefined;
+      if (connection.status === "connected") {
+        // A different account observed here ends every row the previous one
+        // read, even if a concurrent forge read still believes it is current.
+        if (connection.account !== cacheAccount) {
+          cache.clear();
+          cacheAccount = connection.account;
+        }
+        return connection.account;
+      }
+      if (connection.status === "disconnected" || connection.status === "insecure-storage") {
+        cache.clear();
+        cacheAccount = undefined;
+      }
+      return undefined;
     } catch {
       return undefined;
     }
   };
+
+  const forgeRepositoryEpoch = (account: string, repositoryKey: string): number =>
+    epochs.get(`${account}|${repositoryKey}`) ?? 0;
 
   const forgeRead = async (input: {
     readonly windowId: WindowId;
@@ -151,27 +116,51 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
   }): Promise<CodeHomeActivityForgeResult> => {
     const signal = input.signal ?? new AbortController().signal;
     const admitted = () => input.admission === undefined || input.admission();
-    // The integration switch comes before any credential observation, so a
-    // disabled integration never reaches GitHub for this read.
-    if (!ports.integrationEffective()) return { status: "unavailable", reason: "not-connected" };
-    let snapshot: GithubAuthenticationSnapshot;
+    // The slot lookup comes before any account observation, so a disabled
+    // integration never reaches its own credentials for this read.
+    const source = ports.source();
+    if (source === undefined) return { status: "unavailable", reason: "not-connected" };
+    const sourceLost = (): CodeHomeActivityForgeResult => ({
+      status: "unavailable",
+      reason: ports.source() === undefined ? "not-connected" : "read-failed",
+    });
+    let connection: Awaited<ReturnType<IntegrationActivitySource["account"]>>;
     try {
-      snapshot = await ports.capabilitySnapshot(signal);
+      connection = await source.account(input.card, signal);
     } catch {
       return { status: "unavailable", reason: "read-failed" };
     }
-    const gated = gate(snapshot, input.card);
-    if (gated.kind === "result") return gated.result;
-    const account = gated.account;
+    if (ports.source() !== source) return sourceLost();
+    if (!admitted()) return { status: "unavailable", reason: "read-failed" };
+    if (connection.status !== "connected") {
+      if (connection.status === "unavailable") {
+        return { status: "unavailable", reason: connection.reason };
+      }
+      cache.clear();
+      cacheAccount = undefined;
+      return {
+        status: "fallback",
+        fallback:
+          connection.status === "insecure-storage"
+            ? "insecure-github-storage"
+            : "no-github-connection",
+      };
+    }
+    const account = connection.account;
+    if (cacheSource !== source) {
+      cache.clear();
+      cacheSource = source;
+      cacheAccount = undefined;
+    }
     if (cacheAccount !== account) {
       cache.clear();
       cacheAccount = account;
     }
-    if (ports.port === undefined) return { status: "unavailable", reason: "not-checked" };
 
-    const repositories = (await ports.listRepositories(input.windowId)).filter((repository) =>
-      ports.mayReadProject(input.windowId, repository.projectId),
-    );
+    const repositories = await ports.listRepositories(input.windowId);
+    // An account swap another caller confirmed mid-read ends this one too:
+    // its rows were gathered under an account that is no longer current.
+    if (ports.source() !== source || cacheAccount !== account) return sourceLost();
     if (repositories.length === 0) return { status: "unavailable", reason: "not-connected" };
 
     // The read's lower bound is the earlier window start, floored to the
@@ -213,34 +202,75 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
     for (const repository of repositories) {
       if (!admitted()) return { status: "unavailable", reason: "read-failed" };
       const repositoryKey = `${repository.repositoryOwner.toLowerCase()}/${repository.repositoryName.toLowerCase()}`;
-      const cacheKey = `${account}|${repositoryKey}|${input.card}|${since ?? "all"}|${until ?? "open"}`;
+      const epochKey = `${account}|${repositoryKey}`;
+      const cacheKey = `${epochKey}|${input.card}|${since ?? "all"}|${until ?? "open"}`;
       const cached = cache.get(cacheKey);
       const fresh =
         cached !== undefined && !input.refresh && ports.now() - cached.storedAtMs < CACHE_TTL_MS
           ? cached
           : undefined;
       let observed: CachedRepositoryRead | undefined = fresh;
+      // The access epoch this repository's rows may be served under,
+      // captured before the read's only await and carried on every record
+      // so a later revocation still retires them.
+      const repositoryEpoch = epochs.get(epochKey) ?? 0;
       if (observed === undefined) {
-        const result = await ports.port.observe({
-          owner: repository.repositoryOwner,
-          name: repository.repositoryName,
-          card: input.card,
-          since,
-          until,
-          signal,
-        });
-        if (result.status === "ready" || result.status === "partial") {
-          if (result.status === "partial" && result.reason === "repository-missing") {
-            // A missing or forbidden repository is not temporary: every card
-            // and window it ever answered is purged, so no formerly read rows
-            // are served again under another timeframe.
-            const prefix = `${account}|${repositoryKey}|`;
-            for (const key of cache.keys()) {
-              if (key.startsWith(prefix)) cache.delete(key);
-            }
-            partial = true;
+        let result: IntegrationActivityObservation;
+        try {
+          result = await source.readRepository({
+            owner: repository.repositoryOwner,
+            name: repository.repositoryName,
+            card: input.card,
+            since,
+            until,
+            account,
+            signal,
+          });
+        } catch {
+          // A rejecting source read is a transient failure like any adapter
+          // refusal: it falls back to cached rows when they are still
+          // authorized rather than escaping to the caller.
+          result = { status: "unavailable", reason: "read-failed" };
+        }
+        if (ports.source() !== source || cacheAccount !== account) return sourceLost();
+        if (result.status === "repository-missing") {
+          // A confirmed access loss invalidates this repository's rows for
+          // every window, so the purge and epoch bump run even when this
+          // read's own admission was lost while it flew — though the
+          // abandoned read still refuses its result.
+          const prefix = `${epochKey}|`;
+          for (const key of cache.keys()) {
+            if (key.startsWith(prefix)) cache.delete(key);
+          }
+          epochs.set(epochKey, (epochs.get(epochKey) ?? 0) + 1);
+          partial = true;
+          if (!admitted()) return { status: "unavailable", reason: "read-failed" };
+          continue;
+        }
+        if (!admitted()) return { status: "unavailable", reason: "read-failed" };
+        // Any other answer that arrived across an epoch bump is as stale as
+        // the revocation it raced: never cached, never served. That holds
+        // for fresh rows and for the cached fallback a refused refresh
+        // would otherwise resurrect.
+        if ((epochs.get(epochKey) ?? 0) !== repositoryEpoch) {
+          partial = true;
+          continue;
+        }
+        if (result.status === "unavailable") {
+          // A session-level refusal ends the read; a per-read transient
+          // keeps the last good rows as partial coverage with their own
+          // original observation time.
+          if (result.reason === "not-connected" || result.reason === "not-checked") {
+            return { status: "unavailable", reason: result.reason };
+          }
+          if (result.reason === "rate-limited") rateLimited = true;
+          partial = true;
+          if (cached !== undefined) {
+            observed = cached;
+          } else {
             continue;
           }
+        } else {
           observed = {
             storedAtMs: ports.now(),
             checkedAt: new Date(ports.now()).toISOString(),
@@ -252,36 +282,19 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
             if (oldest === undefined) break;
             cache.delete(oldest);
           }
-        } else if (cached !== undefined) {
-          // A refused transient refresh keeps the last good rows as partial
-          // coverage with their own original observation time.
-          observed = cached;
-          partial = true;
-          if (result.reason === "rate-limited") rateLimited = true;
-        } else {
-          // A repository that could not be read leaves coverage incomplete.
-          partial = true;
-          if (result.reason === "rate-limited") rateLimited = true;
-          continue;
         }
       }
       if (observed.result.status === "partial") partial = true;
       if (checkedAt === undefined || observed.checkedAt < checkedAt) {
         checkedAt = observed.checkedAt;
       }
-      for (const row of observed.result.rows) {
-        // Only the signed-in person's own actions are their activity: an
-        // observation by or about any other actor is not counted.
-        const actor =
-          row.kind === "prs-merged"
-            ? row.mergedBy
-            : row.kind === "issues-closed"
-              ? row.closedBy
-              : row.publishedBy;
-        if (actor.toLowerCase() !== account) continue;
-        const record = forgeRecordOf(row, repositoryKey);
-        if (record === undefined) continue;
-        records.push({ record, projectId: String(repository.projectId), repositoryKey });
+      for (const record of observed.result.records) {
+        records.push({
+          record,
+          projectId: String(repository.projectId),
+          repositoryKey,
+          repositoryEpoch,
+        });
       }
     }
     if (!admitted() || checkedAt === undefined) {
@@ -305,83 +318,12 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
       account,
       checkedAt: decodeUtcTimestamp(checkedAt),
       records,
+      // The binding this read's rows stand on. A view built on them fails
+      // closed when the source was released or swapped, another caller
+      // confirmed a different account, or the read itself was abandoned.
+      current: () => ports.source() === source && cacheAccount === account && !signal.aborted,
     };
   };
 
-  return { forgeRead, forgeAccount };
-}
-
-/**
- * Normalizes one observed forge row into a validated activity record; the
- * identity matches the journal's own `owner/name#number` form so the same
- * delivery cannot count twice across sources. Releases key on their stable
- * numeric release id, not the mutable tag.
- */
-function forgeRecordOf(row: GhHomeActivityRow, repositoryKey: string): ActivityRecord | undefined {
-  const [repositoryOwner, repositoryName] = repositoryKey.split("/");
-  if (repositoryOwner === undefined || repositoryName === undefined) return undefined;
-  // GitHub omits fractional seconds; the contract's timestamp form needs them.
-  const instant = (value: string): string => new Date(value).toISOString();
-  try {
-    if (row.kind === "prs-merged") {
-      return decodeActivityRecord({
-        kind: "prs-merged",
-        occurredAt: instant(row.mergedAt),
-        id: `${repositoryKey}#${row.number}`,
-        label: row.title === "" ? `${repositoryKey}#${row.number}` : row.title,
-        repositoryOwner,
-        repositoryName,
-        number: row.number,
-        mergedBy: row.mergedBy,
-      });
-    }
-    if (row.kind === "issues-closed") {
-      return decodeActivityRecord({
-        kind: "issues-closed",
-        occurredAt: instant(row.closedAt),
-        id: `${repositoryKey}#${row.number}`,
-        label: row.title === "" ? `${repositoryKey}#${row.number}` : row.title,
-        repositoryOwner,
-        repositoryName,
-        number: row.number,
-      });
-    }
-    if (!isCanonicalReleaseHref(row.url, repositoryKey)) return undefined;
-    return decodeActivityRecord({
-      kind: "releases-published",
-      occurredAt: instant(row.publishedAt),
-      id: `${repositoryKey}/releases/${row.releaseId}`,
-      label: row.name === "" ? row.tag : row.name,
-      tag: row.tag,
-      url: row.url,
-    });
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * A release link is trusted only when it is a canonical github.com release
- * tag URL for the authorized repository: exact https host, no credentials,
- * and an `/{owner}/{repo}/releases/tag/…` path. Anything else — an
- * attacker-influenced or third-party URL — is dropped, never shown.
- */
-function isCanonicalReleaseHref(url: string, repositoryKey: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  if (
-    parsed.protocol !== "https:" ||
-    parsed.hostname !== "github.com" ||
-    parsed.username !== "" ||
-    parsed.password !== ""
-  ) {
-    return false;
-  }
-  const prefix = `/${repositoryKey}/releases/tag/`;
-  const path = parsed.pathname.toLowerCase();
-  return path.startsWith(prefix) && path.length > prefix.length;
+  return { forgeRead, forgeAccount, forgeRepositoryEpoch };
 }

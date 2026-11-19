@@ -110,13 +110,21 @@ interface DecodedPage {
 export class GhHomeActivityPort {
   readonly #command: GhCommandPort;
   readonly #environment: NodeJS.ProcessEnv;
+  readonly #isEffective: () => boolean;
 
   constructor(options: {
     readonly command: GhCommandPort;
     readonly inheritedEnvironment?: NodeJS.ProcessEnv;
+    /**
+     * Re-validated ahead of every transport call, so a paged walk stops at
+     * the first page boundary after the integration is switched off instead
+     * of spending a bounded page budget under a disabled source.
+     */
+    readonly isEffective?: () => boolean;
   }) {
     this.#command = options.command;
     this.#environment = sanitizeGhEnvironment(options.inheritedEnvironment ?? process.env);
+    this.#isEffective = options.isEffective ?? (() => true);
   }
 
   /**
@@ -289,6 +297,7 @@ export class GhHomeActivityPort {
     arguments_: readonly string[],
     signal: AbortSignal,
   ): Promise<GhCommandResult | undefined> {
+    if (!this.#isEffective()) return undefined;
     try {
       return await this.#command.run(
         arguments_,

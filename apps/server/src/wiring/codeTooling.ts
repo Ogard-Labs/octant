@@ -6,7 +6,6 @@ import {
 } from "../threadWorkingDirectoryAuthority";
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
 import { workThreadAccessOf } from "@octant/domain";
-import { isGithubIntegrationEffective } from "../github/githubIntegrationEffective";
 import { clampAgentRunSessionAuthority } from "../agentRun/agentRunSessionRuntime";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
@@ -47,8 +46,6 @@ import {
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
 import { CodeHomeActivityService } from "../activityHistory/codeHomeActivityService";
 import { createCodeHomeForgeRead } from "../activityHistory/codeHomeForgeRead";
-import { GhHomeActivityPort } from "../github/ghHomeActivityPort";
-import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { activityHistoryHeld, readActivityFacts } from "../persistence/activityHistoryProjection";
 import { createPairedMergeUnlockSlot } from "../hub/pairedMergeUnlock";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
@@ -136,7 +133,11 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
   Pick<
     CodeWiring,
-    "canAccessCodeProject" | "codeFileWatch" | "codeWorkingDirectoryProbePath" | "roots"
+    | "canAccessCodeProject"
+    | "codeFileWatch"
+    | "codeWorkingDirectoryProbePath"
+    | "listActivityRepositories"
+    | "roots"
   > &
   Pick<
     CodeRuntimeWiring,
@@ -149,9 +150,8 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
   Pick<
     IntegrationsWiring,
-    "toolEgressRules" | "providerRuntimeNetwork" | "githubCapabilityService"
+    "toolEgressRules" | "providerRuntimeNetwork" | "repositoryActivitySource"
   > &
-  Pick<CodeWiring, "projectPullRequestService"> &
   Pick<
     ProvidersWiring,
     | "extensionLifecycleService"
@@ -166,8 +166,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     browserAuthority,
     workThreadProjection,
     agentRunPersistence,
-    githubCapabilityService,
-    projectPullRequestService,
+    repositoryActivitySource,
+    listActivityRepositories,
     canAccessCodeProject,
     serverConnection,
     serverProjectStore,
@@ -857,22 +857,13 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // The hub side is wired after this; it binds the owner unlock a paired
     // client's merge may need into this slot.
     const pairedMergeUnlockSlot = createPairedMergeUnlockSlot();
-    // GitHub delivery/release history resolves through the same `gh` the
-    // pull-request reads use, gated on the secure account, the effective
-    // bundled integration, and the per-capability read decision inside the
-    // forge seam.
-    const { forgeRead, forgeAccount } = createCodeHomeForgeRead({
-      capabilitySnapshot: (signal) => githubCapabilityService.snapshot(signal),
-      integrationEffective: () =>
-        isGithubIntegrationEffective(extensionLifecycleService.snapshot()),
-      listRepositories: (windowId) => projectPullRequestService.listConnectedRepositories(windowId),
-      mayReadProject: (windowId, projectId) => canAccessCodeProject(windowId, projectId),
-      port:
-        options.ghExecutable === undefined
-          ? undefined
-          : new GhHomeActivityPort({
-              command: createGhCommandPort({ ghPath: options.ghExecutable }),
-            }),
+    // Repository activity history resolves through the source the bundled
+    // integration contributed; the host keeps the window's admitted
+    // repository scope and the source answers only account and per-repository
+    // record requests.
+    const { forgeRead, forgeAccount, forgeRepositoryEpoch } = createCodeHomeForgeRead({
+      source: repositoryActivitySource,
+      listRepositories: listActivityRepositories,
       now: Date.now,
     });
     // Code Home history reads authorized thread-by-thread against the same
@@ -931,14 +922,13 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       readFacts: (input) => readActivityFacts(persistence.connection, input),
       projectionHeld: () => activityHistoryHeld(persistence.connection),
       listForgeScope: async (windowId) =>
-        (await projectPullRequestService.listConnectedRepositories(windowId))
-          .filter((repository) => canAccessCodeProject(windowId, repository.projectId))
-          .map(
-            (repository) =>
-              `${String(repository.projectId)}|${repository.repositoryOwner.toLowerCase()}/${repository.repositoryName.toLowerCase()}`,
-          ),
+        (await listActivityRepositories(windowId)).map(
+          (repository) =>
+            `${String(repository.projectId)}|${repository.repositoryOwner.toLowerCase()}/${repository.repositoryName.toLowerCase()}`,
+        ),
       forgeRead,
       forgeAccount,
+      forgeRepositoryEpoch,
       uuid: randomUUID,
       now: Date.now,
       clock: () => new Date().toISOString() as UtcTimestamp,
