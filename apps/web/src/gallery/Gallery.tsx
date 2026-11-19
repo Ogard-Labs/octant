@@ -11,6 +11,9 @@ import { ColourRoles, IconScale, Radii, SpacingScale, TypeRoles } from "./founda
 import { OverlaySections } from "./overlays";
 import { PatternSections } from "./patterns";
 import "../styles.css";
+import "../styles/canvas-forms.css";
+import "../styles/canvas-design-player.css";
+import "../styles/canvas-inline.css";
 import "../styles/work-list.css";
 import "../styles/github.css";
 import "../styles/linear-issues.css";

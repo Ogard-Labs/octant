@@ -1,3 +1,4 @@
+import "../../styles/canvas-inline.css";
 import { ArrowDownRight, ArrowUpRight, Minus } from "../../ui/icons";
 import { useId, useLayoutEffect, useRef, useState, type SVGAttributes } from "react";
 import type {

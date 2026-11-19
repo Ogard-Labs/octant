@@ -1,3 +1,4 @@
+import "../../styles/canvas-design-player.css";
 import {
   useCallback,
   useEffect,

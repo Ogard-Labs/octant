@@ -1,3 +1,4 @@
+import "../styles/canvas-forms.css";
 import {
   CANVAS_HTML_IMPORT_MAX_BYTES,
   type CanvasHtmlImportDrop,

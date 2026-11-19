@@ -1,3 +1,4 @@
+import "../styles/canvas-inline.css";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type {
   CanvasCardStatus,

@@ -1,3 +1,4 @@
+import "../../styles/canvas-inline.css";
 import type {
   CanvasBlock,
   CanvasMetricDirection,
