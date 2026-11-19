@@ -1,3 +1,4 @@
+import "../styles/provider-settings.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   IMAGE_GENERATION_MAX_CUSTOM_SOURCES,

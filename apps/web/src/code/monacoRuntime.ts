@@ -1,3 +1,4 @@
+import "../styles/debug.css";
 import { installMonacoIntelligence } from "./monacoIntelligence";
 import * as monaco from "monaco-editor";
 import type {

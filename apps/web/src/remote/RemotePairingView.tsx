@@ -1,3 +1,4 @@
+import "../styles/remote-pairing.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useCallback, useId, useMemo, useRef, useState } from "react";
 import {

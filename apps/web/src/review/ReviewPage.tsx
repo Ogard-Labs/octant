@@ -1,3 +1,4 @@
+import "../styles/review.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   describeChord,

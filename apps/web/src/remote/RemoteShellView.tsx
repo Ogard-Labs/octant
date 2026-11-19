@@ -1,3 +1,4 @@
+import "../styles/remote-shell.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { ContinuityScreenContext } from "../continuity/ContinueElsewhere";
 import { readContinuationLink } from "../continuity/continuationLink";

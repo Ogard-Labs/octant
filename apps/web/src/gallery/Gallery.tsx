@@ -11,6 +11,15 @@ import { ColourRoles, IconScale, Radii, SpacingScale, TypeRoles } from "./founda
 import { OverlaySections } from "./overlays";
 import { PatternSections } from "./patterns";
 import "../styles.css";
+import "../styles/inbox.css";
+import "../styles/review.css";
+import "../styles/debug.css";
+import "../styles/canvas-dashboard.css";
+import "../styles/remote-pairing.css";
+import "../styles/remote-shell.css";
+import "../styles/project-overview.css";
+import "../styles/board.css";
+import "../styles/provider-settings.css";
 import "../styles/shell.css";
 import "../styles/dock.css";
 import "../styles/environment.css";

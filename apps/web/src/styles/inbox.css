@@ -3,14 +3,6 @@
    labels come from the surface language, and this sheet lays the cards out and
    turns a row's button or link into a full-width, multi-line target. */
 
-.inbox-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  overflow: auto;
-  background: var(--oct-bg);
-}
-
 /* One column of about 980px, left-aligned under the title's own inset, so a
    wide window leaves empty ground instead of stretching the cards. */
 .inbox-page {

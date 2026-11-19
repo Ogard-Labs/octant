@@ -1,3 +1,4 @@
+import "../styles/board.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ThreadBoardPullRequestIdentity } from "@octant/contracts";
 import { OctantButton } from "../ui/base/OctantButton";
