@@ -1,13 +1,10 @@
 import { claudeSandboxToolchainReads } from "./claudeSandboxToolchain";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
-import {
-  forkSession as forkClaudeSession,
-  listSessions as listClaudeSessions,
-  query as queryClaude,
-  type Options as ClaudeSdkOptions,
-  type McpSdkServerConfigWithInstance,
-  type McpSetServersResult,
-  type SpawnedProcess,
+import type {
+  Options as ClaudeSdkOptions,
+  McpSdkServerConfigWithInstance,
+  McpSetServersResult,
+  SpawnedProcess,
 } from "@anthropic-ai/claude-agent-sdk";
 import type {
   ProviderContextBreakdown,
@@ -22,6 +19,7 @@ import { withClaudeAccountDirectory } from "./claudeAccountDirectory";
 import { createManagedMcpTools, type ManagedToolAnswer } from "./managedMcpTools";
 import { Effect, Stream, type Scope } from "effect";
 import { isAbsolute } from "node:path";
+import { createRequire } from "node:module";
 
 import {
   claudeOffersTool,
@@ -1392,6 +1390,14 @@ function unavailableBackgroundWork(
   return undefined;
 }
 
+// The SDK's module graph is ~940 KB evaluated on first touch; a host that
+// never runs this provider should not pay for it at startup. `query` is a
+// synchronous iterator, so the load is a synchronous `require` — a failed
+// load still throws at the call that needed it.
+let claudeSdk: typeof import("@anthropic-ai/claude-agent-sdk") | undefined;
+const claudeSdkModule = (): typeof import("@anthropic-ai/claude-agent-sdk") =>
+  (claudeSdk ??= createRequire(import.meta.url)("@anthropic-ai/claude-agent-sdk"));
+
 function liveBridge(): ClaudeAgentSdkBridge {
   return {
     query: (invocation) => {
@@ -1451,14 +1457,17 @@ function liveBridge(): ClaudeAgentSdkBridge {
           UserPromptSubmit: [{ hooks: [...invocation.options.hooks.UserPromptSubmit[0].hooks] }],
         },
       };
-      return queryClaude({
+      return claudeSdkModule().query({
         prompt: invocation.prompt,
         options,
       });
     },
-    listSessions: (options) => listClaudeSessions(options),
+    listSessions: (options) => claudeSdkModule().listSessions(options),
     forkSession: (sessionId, options) =>
-      forkClaudeSession(sessionId, { dir: options.dir, upToMessageId: options.upToMessageId }),
+      claudeSdkModule().forkSession(sessionId, {
+        dir: options.dir,
+        upToMessageId: options.upToMessageId,
+      }),
   };
 }
 

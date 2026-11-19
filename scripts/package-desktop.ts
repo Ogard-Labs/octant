@@ -224,7 +224,6 @@ const STAGE_DIRECTORY = ".desktop-stage";
 const PACKAGER_DIRECTORY = ".packager";
 /** Server dependencies the server bundle leaves external; packaging copies them beside it. */
 export const EXTERNAL_RUNTIME_PACKAGES = [
-  "effect",
   "better-sqlite3",
   "node-pty",
   "@opencode-ai/sdk",
@@ -237,7 +236,6 @@ export const PACKAGED_RUNTIME_IMPORTS = [
   "@anthropic-ai/claude-agent-sdk",
   "@opencode-ai/sdk",
   "better-sqlite3",
-  "effect",
   "node-pty",
   "playwright-core",
   "yaml",
@@ -269,7 +267,6 @@ export const REQUIRED_STAGED_PACKAGED_FILES = [
   "apps/server/node_modules/@anthropic-ai/claude-agent-sdk/package.json",
   "apps/server/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs",
   "apps/server/node_modules/@opencode-ai/sdk/package.json",
-  "apps/server/node_modules/effect/package.json",
   "apps/server/node_modules/better-sqlite3/package.json",
   "apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
   "apps/server/node_modules/node-pty/package.json",
@@ -1061,7 +1058,6 @@ export function createServerRuntimeManifest() {
       "@anthropic-ai/claude-agent-sdk": "0.3.211",
       "@opencode-ai/sdk": "1.18.0",
       "better-sqlite3": "12.11.1",
-      effect: "3.21.4",
       "node-pty": "1.1.0",
       "playwright-core": "1.62.0",
       yaml: "2.8.3",

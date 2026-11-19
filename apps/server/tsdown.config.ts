@@ -24,6 +24,10 @@ export default defineConfig([
         // MCP input schemas are compiled on demand. Keep Ajv in a lazy bundled
         // chunk so packaged runtimes do not need a separately shipped module.
         /^ajv(?:\/|$)/,
+        // Effect's Schema graph resolves hundreds of external modules at
+        // startup (Arbitrary pulls in fast-check); bundling makes the cached
+        // start measurably faster and drops effect from the staged payload.
+        /^effect(?:\/|$)/,
       ],
       onlyBundle: false,
     },
