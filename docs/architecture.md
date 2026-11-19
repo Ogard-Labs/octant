@@ -2144,8 +2144,12 @@ A Code Project may be bound to a folder on one of the person's registered
 servers over SSH (maintainer decision, 2026-10-31, replacing the 2026-10-29
 removal; [Server Projects](design/server-projects.md) owns the detail).
 Inference, approvals, every authority check, and the journal stay on this
-host; a thread's files, shell, Git, and terminals are on the server. Server
-Projects are a catalog of their own, never the local Project catalog, so no
+host; a thread's files, shell, Git, and terminals are on the server. A person
+may instead run Claude Code or Codex itself on the server, signed in there, so
+its model requests leave from the server while approvals, authority checks and
+the journal stay on this host (maintainer decision, 2026-11-19; designed, not
+built; [Server Projects: Providers running on the server](design/server-projects.md#providers-running-on-the-server)).
+Server Projects are a catalog of their own, never the local Project catalog, so no
 service that reads a local Project's folder can be handed a server path.
 Octant connects with this host's own `ssh`, the person's SSH config, and their
 agent: keys stay with the host, nothing is forwarded, an unknown host key is
@@ -20146,7 +20150,12 @@ documents its authority, privacy, and release boundaries):
   runs their wake and push services, including a self-hosted wake service
   ([Hub and spokes](design/hub-and-spokes.md#wake-service)). A person can
   move a thread from one member to another before a planned shutdown
-  ([moving a thread](design/hub-and-spokes.md#moving-a-thread-to-another-member)). An
+  ([moving a thread](design/hub-and-spokes.md#moving-a-thread-to-another-member)),
+  and start and manage a coding session on whichever member they choose from
+  any window, phone or browser connected through the hub, while each member
+  keeps running and authorizing its own work and the hub carries no session
+  traffic (maintainer decision, 2026-11-19; designed, not built;
+  [The hub coordinates](design/hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)). An
   Octant-operated wake service is not in scope.
 - Connectors (MCP servers added by hand, imported from other tools on this Mac,
   signed in to, or chosen from the bundled catalog): user-added packages

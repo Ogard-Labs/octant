@@ -78,7 +78,12 @@ view of the provider's own app, never against a real provider sign-in. After thi
 [messaging between members](#messaging-between-members), was added on
 2026-11-07 and is designed, not built. Slice 12,
 [moving a thread to another member](#moving-a-thread-to-another-member), was
-added the same day and is designed, not built. What remains of slices 1 to 10 is
+added the same day and is designed, not built. Slices 13 to 19, starting a
+coding session on any member from one window, the hub as the front door, Code
+delegation, adding a computer over SSH and placement advice, were added on
+2026-11-19 and are designed, not built
+([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work)).
+What remains of slices 1 to 10 is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
 delivery to a real phone, a phone, passkey, and Touch ID run, a failover on a
 real network, a browser against a real hub, a real Claude or Codex sign-in on a
@@ -122,7 +127,12 @@ in a browser at its Tailscale name. After that:
    first owner exists; and
 8. before shutting down or restarting a computer, the person can move its
    threads to another member and carry on there, and a Code thread that cannot
-   move hands over through its branch.
+   move hands over through its branch; and
+9. from any member's window, a phone, or a browser that joined the hub, the
+   person starts a coding session on whichever member they choose, in a
+   Project on that member, and follows, steers and manages it from there, and
+   an agent on one member hands Code work to another as it hands Work today
+   ([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work)).
 
 **Not in scope:** members that are not the person's own devices (teams, shared
 machines, other people's computers), cloud machines Octant provisions, and
@@ -489,6 +499,65 @@ Rationale: making the hub an ordinary host with a role, rather than a separate
 product or service, keeps one server, one listener, one pairing protocol, and
 one update path. A phone as a guest rather than a plain paired device lets it
 follow failover and reach every spoke after joining once.
+
+### The hub coordinates; each member runs its own work
+
+Decided 2026-11-19 ([decision H24](#decisions)): a person starts and manages a
+coding session on whichever of their computers they choose, from any window,
+phone or browser connected through Octant. The hub coordinates the members;
+it does not own their work. Designed, not built, except where a line says
+otherwise.
+
+- **What stays on each member.** The member that runs a thread is its
+  authority, as [Settled by existing specifications](#settled-by-existing-specifications)
+  states: its journal, its files and checkouts, its provider sign-ins and
+  credentials, its sandbox and approval rules, and the final say on risky
+  actions. A hub that goes away loses no member its work, and two computers
+  can pair directly with no hub and get everything below except what only the
+  hub provides.
+- **The hub is the front door.** A device that joins the hub, or a member's
+  window, learns every member through the signed roster and its
+  introductions, so the person pairs once with the hub instead of with each
+  computer. The device then talks to each member directly over the private
+  network, as [decision H15](#decisions) settles for a browser; the hub never
+  carries a session's traffic, because a hub that relayed every turn would be
+  the one box whose compromise reaches every machine.
+- **The hub is the directory.** Members, their roles and addresses, which
+  member is online or asleep, and what each accepts (delegation, moves,
+  messages, and its load, [slice 19](#delivery-plan)) come from the roster and
+  the live data beside it.
+- **The hub owns the shared services.** A service a specification places on
+  the hub runs there for every member: the roster and failover, the update
+  mirror and other provisioning, the wake service, push, and the shared
+  stores other specifications give it (artifact replicas, the to-do list's
+  host). A service a specification keeps per host, such as person memory
+  today, stays per host until its own specification moves it.
+- **Starting a session on any member.** The new-task composer's computer
+  picker lists every member the window can reach. A thread is created on the
+  chosen member, under that member's rules, in one of its Projects, with its
+  providers, models, and defaults, and its live turn, Needs you, and
+  approvals reach the window from that member. Choosing or binding a folder
+  there uses that member's own folder check, for a device the member admits
+  as its person. Until the window can route a create, a create aimed at
+  another computer is refused with a reason and never runs on this one, as
+  [Hosts never trust each other](../architecture.md#security-and-authority)
+  requires.
+- **What a hub-introduced device may do.** A device the member's own person
+  paired acts as that person there. A device that only the hub introduced acts
+  within the member's **Act** hub-grant item: the Projects it names, the
+  threads it may start there (Code included), and never more than the
+  member's own level allows. Approvals stay on the member, answerable as
+  [What the hub may do on a spoke](#what-the-hub-may-do-on-a-spoke) says.
+- **A computer without Octant.** A server the person reaches only over SSH
+  is a [server Project](server-projects.md), not a member. Adding a computer
+  as a member over SSH, without visiting it, is [decision H26](#decisions).
+
+Rationale: Octant's authority, journal and credentials are per host, and a
+coding session needs the files on the machine that runs it, so putting the
+threads on the hub would rewrite replay, credentials and approvals and stop
+every member when the hub is down. A coordinator that is the front door,
+directory and owner of shared services gives one place to connect without
+that cost.
 
 ### Joining: a member adds only the hub
 
@@ -1045,6 +1114,21 @@ Rationale: delegation as a remote child run reuses the existing subagent rule
 (equal or narrower, clamped server-side) and the existing paired-principal
 path, so B never needs a new authority model. The result coming back as data
 keeps a compromised spoke from steering another spoke's agent.
+
+**Code delegation** ([decision H25](#decisions); designed, not built). Today
+only a Work Project takes delegated work, because a Code thread needs a
+managed worktree and a delivery target a person confirmed. B offers Code for a
+Code Project only after its person marks that Project as accepting delegated
+Code work, which records the delivery target they confirmed (the remote, base
+branch and outcome). A delegated Code thread is a managed thread on a branch
+named from the request id, the way a routine names its branch, approval-gated
+at most (Full access only under the owner rule above), and marked as having
+read outside content from its first turn, because its task is a peer's text.
+A's agent lists the members that take delegated work and the Projects each
+accepts through a read-only route B filters by its peer grant, with titles
+and no paths. Cancelling the parent cancels the remote Code child as it does a
+Work child, and a delegated Code thread cannot move, as a delegated Work
+thread cannot.
 
 ### Messaging between members
 
@@ -2467,6 +2551,9 @@ choice to the design, the design's recommendation was taken.
 | H12 | How long without the hub before members fail over?                          | A setting on the hub, carried in the roster, default five minutes                                                                                                                                                                                                                                                                                                                                                                                                                |
 | H13 | Does the hub keep running when the desktop app quits, and after a restart?  | Yes, on macOS, Linux, and Windows: the hub runs as a boot service under the person's account (a launch daemon, a lingering systemd user service, a Windows service) and starts unattended after a restart, power cut, or update. The desktop app connects to it                                                                                                                                                                                                                  |
 | H18 | Where does the hub keep its own keys so it can serve before anyone logs in? | The same way on every platform: a file in the Octant data folder readable only by the person's account, on an encrypted disk (FileVault, LUKS, or BitLocker); setup warns when the disk is not encrypted                                                                                                                                                                                                                                                                         |
+| H24 | What does the hub own, and where do sessions run?                           | The hub coordinates: it is the front door (pair once, reach every member), the directory, and the owner of the shared services a specification places on it. Every member keeps running and authorizing its own threads; the hub carries no session traffic. Two computers can pair directly with no hub (2026-11-19)                                                                                                                                                            |
+| H25 | May a member take delegated Code work?                                      | Yes, into a Code Project its person marked as accepting delegated Code work with a confirmed delivery target; approval-gated at most, on a branch named from the request, marked as outside content (2026-11-19)                                                                                                                                                                                                                                                                 |
+| H26 | May a computer be added as a member over SSH without visiting it?           | Yes, as an option: the person's window runs the signed headless installer over SSH after the person confirms, then the computer joins with a join code passed in the same session. The SSH login is the person on that machine, so only the spoke joins. Updates drain, swap and roll back after a failed handshake (2026-11-19)                                                                                                                                                 |
 | H14 | Does a host fetch its own Tailscale certificate for the web app?            | Yes, on the hub and on each spoke a browser reaches directly, through the local Tailscale daemon, off until the person turns it on after the certificate-transparency note                                                                                                                                                                                                                                                                                                       |
 | H15 | How does a browser guest reach a spoke?                                     | Directly: each spoke serves its own web app at its own Tailscale name, and the hub's web app links to it, so the hub never sees spoke traffic                                                                                                                                                                                                                                                                                                                                    |
 | H16 | Do spokes honor owner devices by default?                                   | Yes: ticked at join, clearly labeled, and untickable                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -2491,6 +2578,14 @@ moves only, every move owner-signed (the person is the same on every member),
 the source erased once the destination commits, no size limit, and a handover
 through the thread's branch instead of an offline file path; see
 [Moving a thread to another member](#moving-a-thread-to-another-member).
+
+On 2026-11-19 the maintainer asked that a person start coding sessions on
+whichever connected computer they choose and manage it fully from other
+devices, and settled H24 to H26: the hub coordinates and each member runs its
+own work, members take delegated Code work, and a computer can join over SSH.
+A server without Octant stays reachable over SSH as a
+[server Project](server-projects.md), which the same day gained running a
+provider on the server.
 
 Earlier on 2026-10-28 the maintainer settled that a standby hub exists (was
 H1), and that no member acts as a relay or introducer except the hub and a
@@ -3422,6 +3517,46 @@ a numbered slice. Built, with these narrower readings:
     progress stays current. Sizes are read per destination, the head's and
     each member a row names, and each destination's total and estimate show
     at the rate to that member, with one basis line each.
+
+13. **Start a coding session on a paired computer from one window.** A Code
+    client per host on the client runtime's routing to the owning host, the
+    desktop's paired-computer channel carrying the Code commands, reads and
+    stream, and the composer reading that host's Projects, providers, models
+    and defaults. Acceptance: a thread started with another computer chosen
+    is created there, never here; its turn streams, its approvals and Needs
+    you reach the window, and Stop reaches it; the window's own refusal is
+    lifted per action only as routing lands. Verification: client-runtime
+    and web tests and a two-host loopback smoke with fake providers.
+14. **Choose or bind a folder on another computer.** That host's folder
+    browse and one-use receipt for a device it admits as its person, and its
+    Project bind. Acceptance: a device the host's person paired binds a
+    folder there; a hub-introduced or restricted device is refused.
+    Verification: server route and permission tests.
+15. **One window shows every computer's work.** The merged reads carry
+    each reachable host's threads, Needs you and live turns, stale and
+    read-only when a host is unreachable. Verification: client-runtime tests
+    and rendered checks.
+16. **The hub as front door.** A device that joins the hub gets every
+    member through introductions and reaches each directly; the Act item is
+    enforced on each member. Acceptance: a hub-introduced device starts a
+    Code thread only in a Project the Act item names; removing the item
+    refuses the next create. Verification: server tests and a three-host
+    loopback smoke.
+17. **Code delegation.** The Project mark, the receiving Code host, the
+    member and Project list route, cancel and move as above. Acceptance: B
+    refuses Code into an unmarked Project; a delegated Code thread is
+    approval-gated, on its own branch, marked as outside content, and its
+    approvals cannot be answered from A or the hub. Verification: server
+    tests and a three-host loopback smoke with fake providers; a real run is
+    a maintainer gate.
+18. **Add a computer over SSH.** [Decision H26](#decisions): the signed
+    headless installer run over SSH after the person confirms, the join code
+    passed in the same session, and updates that drain, swap and roll back.
+    Verification: tests against a throwaway `sshd`; a real machine is a
+    maintainer gate.
+19. **Placement advice.** Each member reports a load level that changes
+    only after it holds, beside the roster, and a member can stop accepting
+    delegated work with one switch. Verification: server tests.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

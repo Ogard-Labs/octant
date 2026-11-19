@@ -63,12 +63,12 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 4       | 4            | 0                   |
-| [Hubs and Nightly](#hubs-and-nightly)                                                 | 5         | 1       | 4            | 0                   |
+| [Hubs and Nightly](#hubs-and-nightly)                                                 | 6         | 1       | 4            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **286**   | **169** | **110**      | **7**               |
+| **All areas**                                                                         | **287**   | **169** | **110**      | **8**               |
 
 ## Principles and hard lines
 
@@ -932,6 +932,7 @@ An agent reaches a remote machine with `ssh` through the thread's shell, in Work
 - A Code Project may be bound to a folder on a registered server, in a catalog of its own; the connection uses this host's `ssh` and the person's agent, forwards nothing, refuses an unknown host key, shares one connection per server through a private control socket, and fails closed with no local fallback. Built: the catalog, the connection, the folder check, Octant Harness Code threads with files, commands and Git on the server at every level (a remembered approval never covers a command there), thread terminals and the Project terminal as logins on the server, the Git tab and the dock's Review tool with Git on the server (Plan changes nothing there), the Files panel, file editor and Tests panel reading, saving and running on the server (saves checked by digest, no folder watch), and a thread's own worktree made with Git on the server and its pull request by repository and branch name (Plan makes no worktree there). A Work Project may be bound there too (`mode: "work"`; a Code Project's record is unchanged), whose Work threads run on the Octant Harness with file tools and commands on the server and no tool of this host (built, with its Work sidebar, composer, thread view and read-only Files listing of server names and sizes with Refresh; no previews, editing, watching or output attribution; [Server Projects](server-projects.md)). Its tests ran against a throwaway local `sshd` only, never a real server, and pull requests against a stand-in for `gh`, never GitHub.
 - A local person can open an owned loopback dev-server preview for a server Project. Dedicated SSH stdio streams carry HTTP and WebSockets without changing the ordinary command connection; stop, connection loss, revocation and explicit same-endpoint reconnect are visible. Stop/reopen and shutdown await retained resource receipts and pending starts, with bounded failure if cleanup is unconfirmed ([Server Projects](server-projects.md#person-operated-dev-server-previews)).
 - On a server, no login shell parses a call: the script and arguments travel encoded for `sh` alone, so any login shell (`fish` and the `csh` family included) reads them unchanged. Octant's file tools, Files panel, and search there refuse the secret guard's one list at every level, the person's changes included; a shell command there can still read what the login user can, gated only by the level. At Reviewed the server's action profile caps a Project's own calls and this host's safe places and protected paths judge nothing there; Shield treats a server thread as having read outside content, and the Watcher marks one it finds steering text in. A server with bound Projects cannot change its alias or user (built; [Server Projects](server-projects.md)).
+- A person may run Claude Code or Codex itself on a server Project's server, as the real CLI signed in there, over a long-lived pipe on the Project's SSH connection: the provider's own sandbox and plan mode apply, its model requests leave from the server, Strict refuses it, and OpenCode, Pi and the ACP agents stay refused there (maintainer decision, 2026-11-19; [Server Projects: Providers running on the server](server-projects.md#providers-running-on-the-server)). _Designed, not built._
 - The earlier SSH target binding was removed and old journals still replay; its `remote-root` threads keep refusing every operation.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -3788,6 +3789,7 @@ Credentials and work move between spokes only by explicit, narrowed, journaled a
 - An owner with a fresh unlock may copy an API key between hosts; both hosts journal the copy without the value.
 - Delegated work is clamped to the smaller of the peer grant and the receiving spoke's own Project authority, and journaled with the requesting peer.
 - Handing work to another spoke or peer host follows the rule for helpers on the same computer once the thread has read outside content: at Full access it is not refused, below Full access the thread needs its person's one answer for it, and Plan stays refused (maintainer decision, 2026-11-13). The answer is the same `delegation` standing answer a helper on this host asks for, so one answer covers both kinds of helper in the thread. Built in the delegating spoke's parent check. Not built yet: a Work thread, the one kind that names a member, cannot yet ask its person below Full access, so there it is still refused, as for a helper on its own host.
+- A member takes delegated Code work only into a Code Project its person marked as accepting it, with the delivery target they confirmed: approval-gated at most, on a branch named from the request, and marked as outside content from its first turn; the delegating agent lists members and their accepting Projects through a read-only route each member filters by its peer grant (maintainer decision, 2026-11-19). _Designed, not built._
 - Agent messages between members reach only Code threads a person tagged Reachable on both ends, under the receiver's Message item; they grant nothing there, and the only turn one can start is a bounded, `agent`-initiated wake turn on an idle recipient whose person left Wake when a message arrives on. _Designed, not built._
 - Hub provisioning offers are data that land as proposals; auto-apply is per kind and off by default, and a routine always asks.
 - The hub's wake service and push sender are each off until turned on; the hub forwards sealed notifications unchanged.
@@ -3813,6 +3815,18 @@ Before shutting down or restarting a computer, a person can move a Chat, Work or
 - A move that cannot finish always ends in an explicit This thread can't move error with one journaled reason; the thread unfreezes and stays on the source, and Prepare to shut down never says Safe to shut down while a chosen thread failed (maintainer request, 2026-11-08).
 
 Status: Partly built. Since: 2026-11-07. Detail: [Hub and spokes: moving a thread to another member](hub-and-spokes.md#moving-a-thread-to-another-member) and [Hub and spokes: moving a thread, screens](hub-and-spokes.md#moving-a-thread-screens).
+
+### Coding sessions on any connected computer
+
+A person starts and manages a coding session on whichever of their computers they choose, from any window, phone or browser connected through Octant; the hub coordinates, and each computer runs and authorizes its own work (maintainer request, 2026-11-19).
+
+- The hub is the front door (a device paired with the hub reaches every member), the directory, and the owner of the shared services a specification places on it; it carries no session traffic, and two computers can pair directly with no hub. _Designed, not built._
+- A start-screen composer's computer picker makes the thread on the computer it names, in that computer's Project with its providers, models and defaults; until the window can route a create, a create aimed at another computer is refused with a sentence and never runs on this one. _Designed, not built._
+- A device only the hub introduced acts on a member within that member's Act hub-grant item; a device the member's own person paired acts as that person there. _Designed, not built._
+- A computer can be added as a member over SSH without visiting it: the signed headless installer runs after the person confirms, it joins with a join code passed in the same session, and updates drain, swap and roll back. _Designed, not built._
+- Each member reports a load level beside the roster, and a member can stop accepting delegated work with one switch. _Designed, not built._
+
+Status: Designed, not built. Since: 2026-11-19. Detail: [Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work) and [decisions](hub-and-spokes.md#decisions).
 
 ### Octant Nightly
 
