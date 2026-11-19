@@ -2,6 +2,8 @@ import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-syn
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
+import type { ProjectBrowserClient } from "@octant/client-runtime/project-browser-client";
+import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
@@ -74,6 +76,11 @@ function workClients(
     workMutation: unused<WorkMutationClient>("workMutation"),
     workRequest: unused<WorkRequestClient>("workRequest"),
     replyDetail: { read: replyDetailRead, setThreadLevel: async () => undefined },
+    canvasImportHtml: async () => {
+      throw new Error("canvasImportHtml is unused");
+    },
+    projectTerminal: unused<ProjectTerminalClient>("projectTerminal"),
+    projectBrowser: unused<ProjectBrowserClient>("projectBrowser"),
   };
 }
 

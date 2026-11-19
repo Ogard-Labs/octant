@@ -14,6 +14,7 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
+import { rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 
@@ -241,6 +242,10 @@ function codexWindowsLaunch(authority: CodexLaunchAuthority): WindowsProviderLau
     executionPolicy: authority.executionPolicy,
     fullAccessSandbox: authority.fullAccessSandbox,
     strict: authority.strict,
+    // A Chat thread gives Codex no execution environment and turns its shell,
+    // image, plugin and app features off on every start and resume, so it
+    // has no folder or shell without Octant's sandbox.
+    chatWithoutFolderOrShell: true,
   });
 }
 
@@ -1115,9 +1120,28 @@ function prepareWindowsCodexLaunch(input: {
       args: program.args,
       cwd: scratch,
       environment: input.environment,
-      release: () => rmSync(scratch, { recursive: true, force: true }),
+      // Windows refuses to remove a folder that is still a process's working
+      // directory (EBUSY), and a tree just stopped can hold it for longer than
+      // a short retry covers: CI catalog reads failed their cleanup that way
+      // even with Node's retries. The folder is an empty scratch directory, so
+      // a late removal is retried in the background instead of failing a read
+      // whose process has already stopped.
+      release: () => releaseScratch(scratch),
     },
   };
+}
+
+function releaseScratch(scratch: string): void {
+  try {
+    rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {
+    const retry = setTimeout(() => {
+      void rm(scratch, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }).catch(
+        () => undefined,
+      );
+    }, 1_000);
+    retry.unref();
+  }
 }
 
 /**

@@ -113,7 +113,7 @@ checks never change registry/configuration or journal state.
 - Only a person, at a local window or a paired device, binds, renames, or
   removes a server Project; a routine and an agent are refused (maintainer decision, 2026-11-12).
   Not built yet: today a paired device is refused
-  `needs-local-window` too.
+  `needs-local-window` too; the design is [Paired devices](#paired-devices).
 - A binding names a registered server and an absolute folder path. Before it
   is journaled, the host connects and resolves the folder on the server to its
   real path (`cd` then `pwd -P`); a folder that does not exist, is not a
@@ -227,6 +227,19 @@ checks never change registry/configuration or journal state.
   host's files. Delegation, Browser, Computer, connectors, and forks are not
   offered there, since each acts on this host. The routine tools are offered,
   since they act only on this host's routine records ([Routines](#routines)).
+- **Attached files.** A file the turn names by path rather than sends (any
+  file but an image or a file the model takes natively) is copied before the
+  turn is accepted, over the Project's own SSH connection, into the thread's
+  attachments folder on the server,
+  `<home>/.octant/thread-attachments/<thread>/<attachment>/<name>`, outside
+  every Project folder. The copy is made read-only, its SHA-256 is checked
+  against the journaled digest, and the turn names its path there. The thread's
+  file tools read that folder and write nowhere in it; another thread's do not
+  read it, even through a Project folder that holds the login's home. The copy
+  is made before the turn's start is journaled, so a failed copy leaves no turn. A copy that fails refuses the turn with a sentence saying so. The
+  copies stay on the server when the thread is deleted (not built: removing
+  them). The same holds for a Work thread there
+  ([Plan and Chat tool parity](../architecture.md#security-and-authority)).
 - **The same levels.** The thread's guardrail level is resolved as it is for
   any Code thread (thread, then the account default), and decides each call as
   it does locally: Plan is read-only, Guarded asks for every command and edit,
@@ -319,7 +332,7 @@ checks never change registry/configuration or journal state.
   Full access. _Rationale:_ the posture says what holds the shell, and on a
   server nothing does: Octant has no sandbox there, and the person opening
   their own shell is the approval, as it is for a local Project terminal.
-  A Code Project opens it from the dock's quick tools. A Work Project opens
+  A Code Project opens it in Zen. A Work Project opens
   **Open terminal** in its Settings → Permissions → Servers row, only while this
   live local window holds that Work Project and its default-off **Developer
   tools** choice is on. Another Work Project offers its existing explicit
@@ -646,6 +659,92 @@ Project's connection, under the same levels, approvals, and journal.
   thread pushes to is the repository its branch is on; reading it at that
   moment needs no new record of a server's remotes on this host.
 
+## Paired devices
+
+Designed, not built (maintainer request, 2026-11-18). A device the host's own
+person paired already reads the catalog and a server's load. This design
+lets it do what a local window does with a server Project: bind, rename and
+remove one, edit and run its saved actions, switch a Work Project's Developer
+tools, run the read-only setup check, open the Project's own terminal, open a
+dev-server preview, and act on machines in the person's cloud account.
+
+- **Who.** A `person-paired-device` principal over its signed session. A
+  device the hub's roster introduced, an agent grant's session, a routine, an
+  agent and a caller with no session are refused `needs-person` before any
+  connection is made or event journaled; the refusal `needs-local-window` is
+  retired for a person-paired device.
+- **The actor in the records.** `server-projects.bound@2`, `renamed@2`,
+  `removed@2`, `actions-replaced@2` and `work-developer-tools-changed@2`, and
+  the `cloud-machines` events' version 2, widen `principal` from
+  `{ kind: "local-window" }` to that or
+  `{ kind: "person-paired-device", credentialGeneration }`; the device's id is
+  on the envelope actor (`remote-device`), resolved once from the
+  authenticated principal and never from the request, as Safe networks
+  records it. The device's id with its credential generation names the
+  pairing that acted, so a record survives the device re-pairing under a new
+  key without being confused with it.
+- **Journal compatibility.** Version 1 events keep decoding and are read as a
+  local window's. A local window's act keeps writing version 1; only a
+  device's act writes version 2, so a journal no device changed stays
+  readable by an older build, and an older build cannot decode a device's
+  record rather than reading it as a window's. The catalog rebuilds from both;
+  replay never connects to a server.
+- **An SSH session the device owns.** Every connection is this host's `ssh`
+  through the shared per-server control socket, as now; what changes is the
+  owner of each operation that holds one. A setup check, the Project terminal,
+  a saved-action run and a preview are owned by the device's session in place
+  of a window, and end when the device is revoked, its session ends, or it
+  sends nothing for a minute (the rule a device's local Project terminal
+  already follows). Closing a window never ends a device's operation, and a
+  device's loss never ends a window's.
+- **Prompts at the Mac.** The connection keeps `BatchMode=yes`. A server
+  whose key needs a confirmation or a touch at this computer (an agent added
+  with confirmation, a hardware key) cannot be answered from a phone; the
+  operation fails with "This server's key needs a confirmation at this
+  computer." instead of waiting, and nothing is journaled for a bind that did
+  not check its folder.
+- **Binding, renaming and removing.** The same folder check, refusals and
+  journal-first order as a window's. Removing a Project ends every operation
+  on it, a window's and a device's alike.
+- **Saved actions.** A device edits actions with the same optimistic revision,
+  and runs one after the same review on the device (server login, action
+  profile, canonical folder, branch, task policy and the absence of OS
+  confinement). The reviewed placement binds the device's id, session and
+  credential generation in place of the window; the Code task or Work binding
+  it names must be one the device reaches. Plan still refuses. Output follows
+  the existing bounded terminal transcript stream.
+- **Developer tools.** `set-server-work-developer-tools` from a device is
+  journaled as above. The terminal and saved-action buttons it reveals are the
+  device's to use while it holds that Work Project open in its own view; no
+  window binding is required of a device.
+- **Setup check.** `/api/remote-setup-check` admits a person-paired device
+  with the same strict input, the four-check limit, the twelve-second deadline
+  and the 2 KiB bound; it changes nothing and journals nothing, as for a
+  window.
+- **Previews.** A device cannot reach this host's loopback, so its preview is
+  not a local listener: the host serves it through the private listener's
+  existing relay route to the device, with a dedicated SSH stdio stream as the
+  upstream in place of a local port, under the relay's grant, budgets and
+  WebSocket rules. The preview's limits stay (eight streams, an hour, the
+  one-second sweep, `ClearAllForwardings=yes`), and its outcome is journaled
+  as `server-projects.preview-outcome@2`, naming the device as owner.
+- **Cloud machines.** Creating, binding, refreshing, suspending, resuming and
+  destroying from a device follow the same rules, the destroy confirmation
+  included: the host issues it to that device's session, and a confirmation
+  issued to one principal is refused from another.
+- Rationale: the records already say who acted, so naming the device is a
+  widening of one field; versioning it keeps an older build from crediting a
+  device's act to a window. The SSH connection is the host's, not the
+  window's, so only the ownership of what holds it needs a device form, and
+  the one-minute quiet rule is the one a device's shell already has. Serving a
+  device's preview through the relay reuses the one route the private listener
+  already upgrades, instead of exposing a loopback port.
+- Rejected: opening a second SSH connection per device (the control socket
+  shares one login per server on purpose, and the person's agent is on this
+  host either way); recording a device's act as the system's (the journal
+  must say which device bound a Project to a server); and an optional device
+  field on version 1 (an older build would read it as a window's act).
+
 ## Not built yet
 
 - Work file previews and editing, research sources, the status file and due
@@ -695,7 +794,8 @@ service stays out of scope
   (`/api/cloud-machines`). An agent and a routine are refused `needs-person`
   before any target or broker is asked. The design also lets a device the
   host's own person paired act; not built yet, it is refused
-  `needs-local-window`, as binding a server Project still is.
+  `needs-local-window`, as binding a server Project still is
+  ([Paired devices](#paired-devices)).
 - **Destroy asks once.** Destroying is irreversible and ends what the
   person's account pays for, so it needs a confirmation the host issues for
   exactly that machine (`request-cloud-machine-destroy`). The confirmation is

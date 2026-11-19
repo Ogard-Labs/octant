@@ -26,6 +26,7 @@ import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
 import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
+import { WorkRequestCards } from "../surfaces/WorkRequestCards";
 import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
 import {
   MOBILE_COPY,
@@ -45,7 +46,10 @@ import { AttachSourceSheet } from "../ui/AttachSourceSheet";
 import { FloatingComposer } from "../ui/FloatingComposer";
 import { IconButton } from "../ui/IconButton";
 import { NavBar } from "../ui/NativeChrome";
-import { ThreadPanesSheet } from "../panes/ThreadPanesSheet";
+import { ThreadPanesSheet, type ThreadTool } from "../panes/ThreadPanesSheet";
+import { listMobileThreadTools } from "../panes/threadPanesPresentation";
+import { CanvasHtmlImportSheet } from "../surfaces/CanvasHtmlImportSheet";
+import { ProjectPageSheet, ProjectTerminalSheet } from "../surfaces/ProjectToolSheets";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { RewindSheet } from "../ui/RewindSheet";
 import { modelOptionForThread } from "./thread/pendingAttachments";
@@ -187,10 +191,18 @@ export function ThreadScreen(props: ThreadScreenProps) {
     [identity, refreshSelected],
   );
 
+  const [openTool, setOpenTool] = useState<ThreadTool>();
+  const threadTools = listMobileThreadTools({
+    mode: mode ?? "chat",
+    actsAsHostPerson: standing.actsAsHostPerson,
+    projectId: routinesProjectId,
+  });
+
   useEffect(() => {
     setError(undefined);
     setBusy(false);
     setPanesOpen(false);
+    setOpenTool(undefined);
   }, [identity]);
 
   useEffect(() => {
@@ -584,6 +596,16 @@ export function ThreadScreen(props: ThreadScreenProps) {
               {offlineDemo || transport === undefined ? null : (
                 <NativeHarnessSessionPanel threadId={selected.threadId} transport={transport} />
               )}
+              {offlineDemo ||
+              transport === undefined ||
+              selected.mode !== "work" ||
+              work.thread === undefined ? null : (
+                <WorkRequestCards
+                  projectId={String(work.thread.projectId)}
+                  threadId={String(work.thread.id)}
+                  transport={transport}
+                />
+              )}
               {busy && chat.activeAttempt === undefined ? (
                 <ActivityIndicator color={colors.accent} />
               ) : null}
@@ -782,11 +804,44 @@ export function ThreadScreen(props: ThreadScreenProps) {
             openSurface(view);
             setPanesOpen(false);
           }}
+          onOpenTool={(tool) => {
+            setPanesOpen(false);
+            setOpenTool(tool);
+          }}
+          tools={threadTools}
           views={surfaces.filter((entry) => entry.id !== "chat")}
           threadId={selected.threadId}
           transport={transport}
           visible={panesOpen}
         />
+      )}
+      {offlineDemo || transport === undefined ? null : selected.mode === "chat" ? (
+        <CanvasHtmlImportSheet
+          onClose={() => setOpenTool(undefined)}
+          projectId={
+            chat.view?.thread.projectId === undefined
+              ? undefined
+              : String(chat.view.thread.projectId)
+          }
+          threadId={selected.threadId}
+          transport={transport}
+          visible={openTool === "import-html"}
+        />
+      ) : routinesProjectId === undefined ? null : (
+        <>
+          <ProjectTerminalSheet
+            onClose={() => setOpenTool(undefined)}
+            projectId={routinesProjectId}
+            transport={transport}
+            visible={openTool === "terminal"}
+          />
+          <ProjectPageSheet
+            onClose={() => setOpenTool(undefined)}
+            projectId={routinesProjectId}
+            transport={transport}
+            visible={openTool === "page"}
+          />
+        </>
       )}
       <RewindSheet {...turnActions.sheet} />
       <AttachSourceSheet

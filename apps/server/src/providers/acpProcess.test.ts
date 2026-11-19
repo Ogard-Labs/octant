@@ -85,6 +85,8 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
   cline: ["3.0.61", "3.0.60", "cline release 3.0.61 private-noise"],
   qwen: ["0.23.0", "0.22.9", "qwen-code release 0.23.0 private-noise"],
   fx: ["0.0.13", "0.0.12", "fx release 0.0.13 private-noise"],
+  // An added agent has no floor, so it has no too-old release.
+  "acp-agent": ["1.2.3", "1.2.3", "no version"],
 };
 const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   opencode: "0.0.0",
@@ -100,6 +102,7 @@ const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   cline: "3.0.61",
   qwen: "0.23.0",
   fx: "0.0.13",
+  "acp-agent": "1.2.3",
 };
 
 function fixture(profile: AcpProviderProfile, mode = "ready") {
@@ -2359,7 +2362,6 @@ describe("Mistral Vibe running as itself", () => {
 
     const own = sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x", nativeSetup: everything });
     for (const name of [
-      "VIBE_INCLUDE_PROJECT_CONTEXT",
       "VIBE_SKILL_PATHS",
       "VIBE_DISABLED_SKILLS",
       "VIBE_MCP_SERVERS",
@@ -2502,13 +2504,26 @@ describe("ACP agents running as themselves", () => {
       if (release === undefined) continue;
       const launch = { executionPolicy: "approval-gated" as const, mode: "code" as const };
       const named = new Set(projectCodeEntries(profile.kind).map((entry) => entry.path));
-      const beforeTrust = new Set(release(untrusted, launch).releasedRootEntries);
+      expect(release(untrusted, launch).releasedRootEntries, profile.kind).toEqual([]);
       for (const entry of held) {
         expect(release(everything, launch).releasedRootEntries, profile.kind).toContain(entry);
-        // An entry readable before trust is instruction text, never code.
-        if (beforeTrust.has(entry)) expect(entry, profile.kind).toBe("AGENTS.md");
-        else expect(named.has(entry), `${profile.kind} ${entry}`).toBe(true);
+        expect(named.has(entry), `${profile.kind} ${entry}`).toBe(true);
       }
+    }
+  });
+
+  it("leaves every agent a Project's instruction files to read with no setup at all, Strict and Plan included", () => {
+    const instructionFiles = ["AGENTS.md", "CLAUDE.md", "GEMINI.md", "QWEN.md", "AGENT.md"];
+    for (const profile of Object.values(acpProviderProfiles)) {
+      for (const entry of profile.process.forbiddenRootEntries ?? []) {
+        expect(instructionFiles, `${profile.kind} ${entry}`).not.toContain(entry);
+      }
+    }
+    // Mistral Vibe reads its Project context unless a guard turns it off; none does.
+    for (const executionPolicy of ["plan", "approval-gated"] as const) {
+      expect(
+        sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x", executionPolicy, mode: "code" }),
+      ).not.toHaveProperty("VIBE_INCLUDE_PROJECT_CONTEXT");
     }
   });
 

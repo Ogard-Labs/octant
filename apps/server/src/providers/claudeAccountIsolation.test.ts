@@ -116,6 +116,31 @@ describe("isolatedClaudeAccountEnvironment", () => {
     expect(environment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
+  it("gives a gateway account only its own address and token, in its own directory, with every ambient credential stripped", () => {
+    for (const strict of [true, false]) {
+      const environment = isolatedClaudeAccountEnvironment({
+        hostEnvironment: { ...hostileHostEnvironment, OPENAI_API_KEY: "other-provider-key" },
+        configDirectory: "/Users/provider-user/.claude-accounts/gateway",
+        authentication: "gateway",
+        gatewayBaseUrl: "https://gateway.example.com/anthropic",
+        apiKey: "broker-resolved-gateway-token-sentinel",
+        strict,
+      });
+
+      expect(environment.CLAUDE_CONFIG_DIR).toBe("/Users/provider-user/.claude-accounts/gateway");
+      expect(environment.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBe(
+        "/Users/provider-user/.claude-accounts/gateway",
+      );
+      expect(environment.ANTHROPIC_BASE_URL).toBe("https://gateway.example.com/anthropic");
+      expect(environment.ANTHROPIC_AUTH_TOKEN).toBe("broker-resolved-gateway-token-sentinel");
+      expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY");
+      expect(environment).not.toHaveProperty("CLAUDE_CODE_OAUTH_TOKEN");
+      expect(JSON.stringify(environment)).not.toMatch(
+        /ambient-|other-account|other-secure|routing\.invalid|other-provider-key/,
+      );
+    }
+  });
+
   it("does not rotate, fail over, or load-balance between account directories", () => {
     const personal = isolatedClaudeAccountEnvironment({
       hostEnvironment: hostileHostEnvironment,
@@ -131,6 +156,29 @@ describe("isolatedClaudeAccountEnvironment", () => {
     expect(personal.CLAUDE_CONFIG_DIR).toBe("/Users/provider-user/.claude-accounts/personal");
     expect(work.CLAUDE_CONFIG_DIR).toBe("/Users/provider-user/.claude-accounts/work");
     expect(personal.CLAUDE_CONFIG_DIR).not.toBe(work.CLAUDE_CONFIG_DIR);
+  });
+
+  it("does not let a gateway account's address or token reach a subscription account beside it", () => {
+    const gateway = isolatedClaudeAccountEnvironment({
+      hostEnvironment: hostileHostEnvironment,
+      configDirectory: "/Users/provider-user/.claude-accounts/gateway",
+      authentication: "gateway",
+      gatewayBaseUrl: "https://gateway.example.com",
+      apiKey: "gateway-token-sentinel",
+    });
+    for (const strict of [true, false]) {
+      const subscription = isolatedClaudeAccountEnvironment({
+        hostEnvironment: hostileHostEnvironment,
+        configDirectory: "/Users/provider-user/.claude-accounts/personal",
+        authentication: "subscription",
+        strict,
+      });
+
+      expect(gateway.CLAUDE_CONFIG_DIR).not.toBe(subscription.CLAUDE_CONFIG_DIR);
+      expect(subscription).not.toHaveProperty("ANTHROPIC_AUTH_TOKEN");
+      expect(subscription.ANTHROPIC_BASE_URL).not.toBe("https://gateway.example.com");
+      expect(JSON.stringify(subscription)).not.toMatch(/gateway-token|gateway\.example/);
+    }
   });
 
   it("creates the account directory without reading files Claude stores there", async () => {

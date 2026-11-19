@@ -260,7 +260,7 @@ describe("Pi process boundary", () => {
     );
   });
 
-  it("starts Pi on Windows at Full access and below it outside Strict with no sandbox, and refuses Strict and a kept sandbox by name", async () => {
+  it("starts Pi on Windows at Full access, below it and in Chat outside Strict with no sandbox, and refuses Strict and a kept sandbox by name", async () => {
     const f = fixture();
     const confinement = makePiConfinementLive({
       platform: "win32",
@@ -269,6 +269,7 @@ describe("Pi process boundary", () => {
       ownSetupPath: join(f.base, "own"),
     });
     const prepare = (level: {
+      readonly mode?: "chat" | "code";
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
@@ -291,9 +292,13 @@ describe("Pi process boundary", () => {
       { executionPolicy: "full-access" },
       { executionPolicy: "approval-gated", strict: false },
       { executionPolicy: "plan", strict: false },
+      // Chat starts Pi with no built-in tool, so it needs no Octant sandbox.
+      { mode: "chat", executionPolicy: "approval-gated", strict: false },
     ] as const) {
       const started = await prepare(level);
       expect(started).toMatchObject({ _tag: "Right", right: { command: f.binary, cwd: f.root } });
+      if (started._tag === "Right" && "mode" in level)
+        expect(started.right.args).toContain("--no-tools");
       // Pi's own approval bridge still asks Octant below Full access.
       if (started._tag === "Right")
         expect(started.right.environment.OCTANT_PI_APPROVALS).toBe(
@@ -301,6 +306,10 @@ describe("Pi process boundary", () => {
         );
     }
     expect(await prepare({ executionPolicy: "approval-gated" })).toMatchObject({
+      _tag: "Left",
+      left: { category: "incompatible", message: WINDOWS_STRICT_REFUSAL },
+    });
+    expect(await prepare({ mode: "chat", executionPolicy: "approval-gated" })).toMatchObject({
       _tag: "Left",
       left: { category: "incompatible", message: WINDOWS_STRICT_REFUSAL },
     });
@@ -732,6 +741,38 @@ describe("Pi process boundary", () => {
     expect(piExtensionSource([])).toContain(
       "if (knownReads.has(event.toolName)) return undefined;",
     );
+  });
+
+  it("leaves a blocked tool out of Pi's list and has the bridge refuse it first, at Full access too", () => {
+    expect(
+      piArguments(
+        "/bridge.ts",
+        "/sessions",
+        "full-1",
+        "code",
+        "full-access",
+        [],
+        undefined,
+        undefined,
+        undefined,
+        ["bash", "deploy"],
+      ),
+    ).toEqual(expect.arrayContaining(["--tools", "edit,write,read,grep,find,ls"]));
+    for (const bridge of [
+      piExtensionSource([], ["bash", "deploy"]),
+      piExtensionSource(
+        [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
+        ["bash", "deploy"],
+      ),
+    ]) {
+      expect(bridge).toContain('const blocked = new Set(["bash","deploy"]);');
+      // The refusal comes before the reads, Octant's own tools and the Full
+      // access pass, so no later rule lets a blocked tool through.
+      const refusal = bridge.indexOf("if (blocked.has(event.toolName))");
+      expect(refusal).toBeGreaterThan(-1);
+      expect(refusal).toBeLessThan(bridge.indexOf("knownReads.has(event.toolName)"));
+      expect(refusal).toBeLessThan(bridge.indexOf('OCTANT_PI_APPROVALS === "disabled"'));
+    }
   });
 
   it("maps modes to the minimum Pi tools and keeps full access genuine", async () => {

@@ -1,11 +1,13 @@
 import {
   ArtifactLibraryClaudeSnapshotResult,
+  type ArtifactLibraryClaudeCopyRequest,
   type ArtifactLibraryClaudeSnapshotRequest,
   ArtifactLibraryListing,
   type ArtifactLibraryQuery,
   type ArtifactSyncedCommand,
   ArtifactSyncedResult,
 } from "@octant/contracts/artifact-library";
+import { CanvasHtmlImportResult } from "@octant/contracts/canvas-cards";
 import { CanvasTagCommandResult, type CanvasTagCommand } from "@octant/contracts/canvas-tags";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -172,9 +174,44 @@ export async function loadClaudePageSnapshot(
   options: ArtifactLibraryClientOptions,
   request: ArtifactLibraryClaudeSnapshotRequest,
 ): Promise<ArtifactLibraryClaudeSnapshotResult> {
+  return decodeHostAnswer(ArtifactLibraryClaudeSnapshotResult)(
+    await postClaudePageRequest(
+      options,
+      "/api/artifacts/claude-snapshot",
+      request,
+      "The page's snapshot is unavailable.",
+    ),
+  );
+}
+
+/**
+ * Copies a Claude page's kept HTML snapshot into a new Canvas in the Project
+ * of the thread that published it. The host reads the snapshot itself and
+ * runs it through the HTML importer; a paired device is refused.
+ */
+export async function copyClaudePageToCanvas(
+  options: ArtifactLibraryClientOptions,
+  request: ArtifactLibraryClaudeCopyRequest,
+): Promise<CanvasHtmlImportResult> {
+  return decodeHostAnswer(CanvasHtmlImportResult)(
+    await postClaudePageRequest(
+      options,
+      "/api/artifacts/claude-copy",
+      request,
+      "The page could not be copied into a Canvas.",
+    ),
+  );
+}
+
+async function postClaudePageRequest(
+  options: ArtifactLibraryClientOptions,
+  path: string,
+  request: unknown,
+  unavailable: string,
+): Promise<unknown> {
   let url: URL;
   try {
-    url = new URL("/api/artifacts/claude-snapshot", options.baseUrl);
+    url = new URL(path, options.baseUrl);
   } catch {
     throw new ArtifactLibraryClientFailure("Artifact library base URL is invalid.", 0);
   }
@@ -193,14 +230,14 @@ export async function loadClaudePageSnapshot(
       body: JSON.stringify(request),
     });
   } catch {
-    throw new ArtifactLibraryClientFailure("The page's snapshot is unavailable.", 0);
+    throw new ArtifactLibraryClientFailure(unavailable, 0);
   }
   const body: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new ArtifactLibraryClientFailure(
-      readString(body, "error") ?? "The page's snapshot is unavailable.",
+      readString(body, "error") ?? unavailable,
       response.status,
     );
   }
-  return decodeHostAnswer(ArtifactLibraryClaudeSnapshotResult)(body);
+  return body;
 }

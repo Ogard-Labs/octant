@@ -133,7 +133,6 @@ import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
-import { hostProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 import {
   backgroundSessionIdleLimitMs,
   providerToolCallPauseLimitMs,
@@ -309,6 +308,7 @@ import {
 } from "../serverProjects/serverProjectThreads";
 import type { GitService } from "../code/gitService";
 import { createServerGitService } from "../serverProjects/serverGit";
+import { transferServerAttachments } from "../serverProjects/serverAttachments";
 import { serverTerminalLogin } from "../serverProjects/serverTerminal";
 import { ServerCodeFiles } from "../serverProjects/serverCodeFiles";
 import {
@@ -551,8 +551,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     personMemoryAccess,
     octantInstructions,
   } = deps;
-  // The trust a person already gave a Project's folder in Claude Code or Codex.
-  const providerCliProjectTrust = hostProviderCliProjectTrust();
   return Effect.gen(function* () {
     // The coordinator service is wired after the Code runtime that reports
     // stopped turns to it; a stop before then has no worker to move.
@@ -1076,6 +1074,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
         holdsServerThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
+        transferServerAttachments: (thread, files) => {
+          const place = serverThreadOf(serverProjectStore, thread);
+          const address =
+            place === undefined
+              ? undefined
+              : serverProjectStore.addressOf(String(place.project.id));
+          return transferServerAttachments({
+            connection: serverConnection,
+            server: address?.kind === "address" ? address.server : undefined,
+            threadId: String(thread.id),
+            files,
+          });
+        },
         serverTerminalLogin: (thread) => {
           const place = serverThreadOf(serverProjectStore, thread);
           if (place === undefined) return undefined;
@@ -1739,7 +1750,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           sessionNativeSetup(
             {
               ...persistence,
-              readProviderCliTrust: providerCliProjectTrust,
               readStrict: (threadId) => resolveThreadStrict(threadId),
             },
             {

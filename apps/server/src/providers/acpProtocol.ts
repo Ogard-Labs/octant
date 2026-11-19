@@ -49,14 +49,31 @@ const InitializeResult = Schema.Struct({
 export type AcpInitializeResult = typeof InitializeResult.Type;
 
 /**
- * An image the person attached, sent as an ACP `image` content block only to
- * an agent whose `initialize` advertised `promptCapabilities.image`.
+ * A file the person attached, as an ACP prompt content block. An image goes as
+ * an `image` block only to an agent whose `initialize` advertised
+ * `promptCapabilities.image`; any other file goes as an embedded `resource`
+ * block only to one that advertised `promptCapabilities.embeddedContext`, with
+ * its text when it is UTF-8 text and its bytes otherwise, as the protocol's
+ * `TextResourceContents` and `BlobResourceContents` carry them.
  */
-export interface AcpPromptImage {
-  readonly mimeType: string;
-  /** Base64 of the image bytes. */
-  readonly data: string;
-}
+export type AcpPromptAttachment =
+  | {
+      readonly type: "image";
+      readonly mimeType: string;
+      /** Base64 of the image bytes. */
+      readonly data: string;
+    }
+  | {
+      readonly type: "resource";
+      readonly resource:
+        | { readonly uri: string; readonly mimeType: string; readonly text: string }
+        | {
+            readonly uri: string;
+            readonly mimeType: string;
+            /** Base64 of the file's bytes. */
+            readonly blob: string;
+          };
+    };
 
 /** The only MCP transport Octant currently offers to an ACP agent. */
 export interface AcpMcpHttpServer {
@@ -435,7 +452,7 @@ export interface AcpClient {
   prompt(
     sessionId: string,
     prompt: string,
-    images?: ReadonlyArray<AcpPromptImage>,
+    attachments?: ReadonlyArray<AcpPromptAttachment>,
   ): Promise<AcpPromptResult>;
   setConfigOption(
     sessionId: string,
@@ -989,20 +1006,10 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         { sessionId, cwd, mcpServers, ...(meta === undefined ? {} : { _meta: meta }) },
         decode(ExistingSessionResult),
       ).then((result) => ({ ...result, sessionId })),
-    prompt: (sessionId, prompt, images = []) =>
+    prompt: (sessionId, prompt, attachments = []) =>
       request(
         "session/prompt",
-        {
-          sessionId,
-          prompt: [
-            { type: "text", text: prompt },
-            ...images.map((image) => ({
-              type: "image",
-              mimeType: image.mimeType,
-              data: image.data,
-            })),
-          ],
-        },
+        { sessionId, prompt: [{ type: "text", text: prompt }, ...attachments] },
         decode(PromptResult),
         limits.turnTimeoutMs,
       ),

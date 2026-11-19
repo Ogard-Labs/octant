@@ -202,7 +202,10 @@ describe("Google command-line sessions from an explicitly selected linked accoun
     expect(h.requests).toHaveLength(0);
   });
   it("bounds a non-answering linked store and token endpoint without a late grant", async () => {
-    const h = await harness(50);
+    // The deadline also bounds the unblocked steps between the gated ones; at
+    // 50ms a loaded CI runner missed it on the second point, which left no
+    // pointer and answered "none" where the endpoint's bound was under test.
+    const h = await harness(500);
     const blocked = Promise.withResolvers<void>();
     h.item.gate = blocked.promise;
     expect((await h.post("point", pointer)).body).toEqual({ status: "unavailable" });

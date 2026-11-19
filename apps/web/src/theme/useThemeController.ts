@@ -4,10 +4,19 @@ import {
   ThemeClientFailure,
   type ThemeClient,
 } from "@octant/client-runtime/theme-client";
-import { importThemeSettings, serializeOctantTheme } from "@octant/theme/import";
+import {
+  importThemeSettings,
+  serializeOctantTheme,
+  type MissingThemePhoto,
+} from "@octant/theme/import";
 import { exportThemeTokens, type ThemeExport, type ThemeExportFormat } from "@octant/theme/export";
 import type { ThemePreset } from "@octant/theme";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+/** What an import did: it applied the theme (naming any photo left out), or refused it. */
+export type ThemeImportOutcome =
+  | { readonly status: "imported"; readonly missing: ReadonlyArray<MissingThemePhoto> }
+  | { readonly status: "refused" };
 
 export type ThemeControllerStatus = "loading" | "ready" | "unavailable" | "conflict";
 
@@ -24,7 +33,15 @@ export interface ThemeController {
   readonly applyPatch: (patch: Partial<ThemeSettings>) => Promise<boolean>;
   readonly cancel: () => void;
   readonly reset: () => void;
-  readonly importJson: (value: string) => void;
+  /**
+   * Applies a theme file. `photoIds` are the ids in this host's photo library:
+   * a photo the file names that is not among them is left out instead of
+   * pointing at an image that cannot load.
+   */
+  readonly importJson: (
+    value: string,
+    options?: { readonly photoIds?: ReadonlySet<string> },
+  ) => ThemeImportOutcome;
   readonly exportJson: () => string | undefined;
   /**
    * The theme as design tokens for a project outside Octant, in the format the
@@ -214,19 +231,21 @@ export function useThemeController(options: {
   }, [applyExact]);
 
   const importJson = useCallback(
-    (value: string) => {
+    (value: string, options?: { readonly photoIds?: ReadonlySet<string> }): ThemeImportOutcome => {
       if (value.length > 256_000) {
         setError("Theme import is too large. Use a JSON file smaller than 256 KB.");
-        return;
+        return { status: "refused" };
       }
       try {
-        const imported = importThemeSettings(JSON.parse(value));
+        const { settings: imported, missing } = importThemeSettings(JSON.parse(value), options);
         draftRef.current = imported;
         setDraft(imported);
         setError(undefined);
         void applyExact(imported);
+        return { status: "imported", missing };
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Theme import is invalid.");
+        return { status: "refused" };
       }
     },
     [applyExact],

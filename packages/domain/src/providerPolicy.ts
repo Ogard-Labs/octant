@@ -34,6 +34,8 @@ import { Schema } from "effect";
 import type {
   AcpAgentConfiguration,
   AcpAgentProviderInstance,
+  AddedAcpAgentConfiguration,
+  AddedAcpAgentProviderInstance,
   ChangeAcpAgentConfigurationCommand,
   CreateAcpAgentProviderCommand,
   ProviderRegistryCommand,
@@ -698,8 +700,18 @@ export interface ClaudeConfigurationInput {
   readonly kind: ClaudeProviderConfiguration["kind"];
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
+  readonly gatewayBaseUrl?: string | undefined;
   readonly configDirectory?: string | undefined;
   readonly accent?: ClaudeAccountAccent | undefined;
+}
+
+/**
+ * Whether a Claude account signs in with a credential the host keeps for it:
+ * an API key or a gateway token. Both live in the host credential store and
+ * reach the runtime only through the account's own launch environment.
+ */
+export function claudeAccountUsesStoredKey(authentication: ClaudeAuthentication): boolean {
+  return authentication !== "subscription";
 }
 
 /** Closed accent set mirrored from the contract so Settings can list it. */
@@ -731,7 +743,7 @@ export function assignedCodexHome(homeDirectory: string, instanceId: ProviderIns
 
 /**
  * The directory a Claude account launches with, or `undefined` for the host
- * profile. An API-key account always has its assigned leaf, including one
+ * profile. An API-key or gateway account always has its assigned leaf, including one
  * stored before accounts carried a directory: the probe, the launch, resume
  * lookup and usage history must all name the same folder for it.
  */
@@ -742,7 +754,7 @@ export function effectiveClaudeAccountConfigDirectory(
   if (instance.configuration.configDirectory !== undefined) {
     return instance.configuration.configDirectory;
   }
-  return instance.configuration.authentication === "api-key"
+  return claudeAccountUsesStoredKey(instance.configuration.authentication)
     ? assignedClaudeAccountConfigDirectory(homeDirectory, instance.id)
     : undefined;
 }
@@ -883,6 +895,52 @@ export function ollamaAddressWarning(baseUrl: string): string | undefined {
     : undefined;
 }
 
+/**
+ * A Claude gateway address: HTTPS anywhere, or plain HTTP on this computer or
+ * a private network, judged by the rule Ollama addresses follow so a token
+ * never crosses the internet in the clear. A gateway may serve the Anthropic
+ * API under a path, so a path is kept (less a trailing slash); credentials,
+ * a query, or a fragment are refused, since the address is not a secret.
+ */
+export function normalizeClaudeGatewayBaseUrl(baseUrl: string): string {
+  const normalized = baseUrl.trim();
+  if (normalized.includes("?") || normalized.includes("#")) {
+    reject("invalid-base-url", "Gateway address cannot include a query or fragment.");
+  }
+  let url: URL;
+  try {
+    url = new URL(normalized);
+  } catch {
+    return reject("invalid-base-url", "Gateway address is not a valid URL.");
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.username !== "" ||
+    url.password !== ""
+  ) {
+    reject(
+      "invalid-base-url",
+      "Gateway address must be an HTTP or HTTPS URL with no credentials in it.",
+    );
+  }
+  if (url.protocol === "http:" && ollamaAddressReach(url.hostname) === "public") {
+    reject(
+      "invalid-base-url",
+      "A gateway on a public address must use HTTPS; plain HTTP is allowed on this computer or a private network.",
+    );
+  }
+  return `${url.origin}${stripTrailingSlashes(url.pathname)}`;
+}
+
+/**
+ * The warning a Claude gateway address carries, or undefined: the same
+ * plain-HTTP-off-this-computer warning an Ollama address carries, since the
+ * token travels with every request.
+ */
+export function claudeGatewayAddressWarning(baseUrl: string): string | undefined {
+  return ollamaAddressWarning(baseUrl);
+}
+
 function normalizeOllamaConfiguration(
   configuration: OllamaConfigurationInput,
 ): OllamaProviderConfiguration {
@@ -912,9 +970,22 @@ function normalizeClaudeConfiguration(
 ): ClaudeProviderConfiguration {
   if (
     configuration.authentication !== "subscription" &&
-    configuration.authentication !== "api-key"
+    configuration.authentication !== "api-key" &&
+    configuration.authentication !== "gateway"
   ) {
-    reject("invalid-authentication", "Claude authentication must be subscription or api-key.");
+    reject(
+      "invalid-authentication",
+      "Claude authentication must be subscription, api-key, or gateway.",
+    );
+  }
+  let gatewayBaseUrl: string | undefined;
+  if (configuration.authentication === "gateway") {
+    if (configuration.gatewayBaseUrl === undefined || configuration.gatewayBaseUrl.trim() === "") {
+      return reject("invalid-base-url", "A gateway account needs the gateway's address.");
+    }
+    gatewayBaseUrl = normalizeClaudeGatewayBaseUrl(configuration.gatewayBaseUrl);
+  } else if (configuration.gatewayBaseUrl !== undefined) {
+    reject("invalid-base-url", "Only a gateway account has a gateway address.");
   }
   if (
     configuration.accent !== undefined &&
@@ -927,6 +998,7 @@ function normalizeClaudeConfiguration(
     kind: "claude-agent-sdk",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
     authentication: configuration.authentication,
+    ...(gatewayBaseUrl === undefined ? {} : { gatewayBaseUrl }),
     ...(configDirectory === undefined ? {} : { configDirectory }),
     ...(configuration.accent === undefined ? {} : { accent: configuration.accent }),
   };
@@ -1026,6 +1098,93 @@ export function changeAcpAgentConfiguration(
   return {
     ...provider,
     configuration: normalizeAcpAgentConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+export function isAddedAcpAgentInstance(
+  instance: ProviderInstance,
+): instance is AddedAcpAgentProviderInstance {
+  return instance.driverKind === "acp-agent";
+}
+
+/** The person's three steps for an added agent, as its record holds them. */
+export function addedAcpAgentSteps(instance: AddedAcpAgentProviderInstance): {
+  readonly installed: boolean;
+  readonly trusted: boolean;
+  readonly enabled: boolean;
+} {
+  return {
+    installed: instance.configuration.install !== undefined,
+    trusted: instance.configuration.trusted,
+    enabled: instance.enabled,
+  };
+}
+
+/**
+ * Adds an agent from the registry or a local command: nothing installed,
+ * untrusted and off, whatever the configuration it is handed says.
+ */
+export function createAddedAcpAgentProvider(input: {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: AddedAcpAgentConfiguration;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+}): AddedAcpAgentProviderInstance {
+  const { install: _install, ...configuration } = input.configuration;
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "acp-agent",
+    configuration: { ...configuration, trusted: false },
+    enabled: false,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+/**
+ * Records where the install step put the agent's executable and how it was
+ * checked. A reinstall drops trust: the person trusts the bytes now on disk,
+ * not the ones before them, and an agent left on starts in Octant's sandbox.
+ */
+export function installAddedAcpAgent(
+  provider: AddedAcpAgentProviderInstance,
+  install: NonNullable<AddedAcpAgentConfiguration["install"]>,
+  updatedAt: UtcTimestamp,
+  activeSessionCount = 0,
+): AddedAcpAgentProviderInstance {
+  if (activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before reinstalling this agent.");
+  }
+  if (!install.executable.startsWith("/")) {
+    reject("invalid-binary-path", "The installed agent's executable must be absolute.");
+  }
+  return {
+    ...provider,
+    configuration: { ...provider.configuration, install, trusted: false },
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+/** Trusts an installed agent or takes that trust back; neither changes `enabled`. */
+export function setAddedAcpAgentTrust(
+  provider: AddedAcpAgentProviderInstance,
+  trusted: boolean,
+  updatedAt: UtcTimestamp,
+): AddedAcpAgentProviderInstance {
+  if (trusted && provider.configuration.install === undefined) {
+    reject("invalid-configuration", "Install this agent before trusting it.");
+  }
+  return {
+    ...provider,
+    configuration: { ...provider.configuration, trusted },
     version: nextVersion(provider.version),
     updatedAt,
   };
@@ -1915,12 +2074,12 @@ export function changeCodexConfiguration(
 
 type ClaudeRuntimeInputs = Pick<
   ClaudeConfigurationInput,
-  "binaryPath" | "authentication" | "configDirectory"
+  "binaryPath" | "authentication" | "gatewayBaseUrl" | "configDirectory"
 >;
 
 /**
  * Whether a change leaves alone everything a Claude process reads: its binary,
- * its authentication, and its account directory. Only the accent is left, and
+ * its authentication and gateway, and its account directory. Only the accent is left, and
  * that is how Octant draws the account, so a running session is unaffected.
  */
 export function claudeChangeKeepsRuntime(
@@ -1930,6 +2089,7 @@ export function claudeChangeKeepsRuntime(
   return (
     current.binaryPath === next.binaryPath &&
     current.authentication === next.authentication &&
+    current.gatewayBaseUrl === next.gatewayBaseUrl &&
     current.configDirectory === next.configDirectory
   );
 }
@@ -1979,7 +2139,7 @@ export function setClaudeArtifactDelivery(
   if (input.enabled && current.configuration.authentication !== "subscription") {
     reject(
       "invalid-authentication",
-      "Claude artifacts need a claude.ai sign-in; an API-key account cannot publish them.",
+      "Claude artifacts need a claude.ai sign-in; an API-key or gateway account cannot publish them.",
     );
   }
   const { artifactDelivery: _previous, ...rest } = current.configuration;

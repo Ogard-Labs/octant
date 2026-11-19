@@ -140,13 +140,16 @@ describe("StartQuickTools", () => {
     );
     const { rerender } = render(placement({ tool: "terminal", nonce: 1 }));
     expect(await screen.findByRole("complementary", { name: "Project terminal" })).toBeVisible();
-    expect(consume).toHaveBeenCalled();
-    expect(open).toHaveBeenLastCalledWith("terminal");
+    // The panel renders before the effect that reports it open, so wait for the report.
+    await waitFor(() => expect(consume).toHaveBeenCalled());
+    await waitFor(() => expect(open).toHaveBeenLastCalledWith("terminal"));
 
     rerender(placement({ tool: "browser", nonce: 2 }));
     expect(await screen.findByRole("complementary", { name: "Project browser" })).toBeVisible();
-    expect(open).toHaveBeenLastCalledWith("browser");
-    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "stop", projectId }));
+    await waitFor(() => expect(open).toHaveBeenLastCalledWith("browser"));
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "stop", projectId })),
+    );
   });
 
   it("starts one shell when the header button is pressed twice before the first has started", async () => {

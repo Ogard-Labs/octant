@@ -174,6 +174,83 @@ describe("ProviderRoutes", () => {
     },
   );
 
+  it("refuses a remote device adding, installing or trusting an ACP agent before the service runs", async () => {
+    const execute = vi.fn(() => ({ kind: "provider-updated", instance: provider() }));
+    const route = routeFixture({ execute });
+    const bodies = [
+      {
+        kind: "add-acp-agent",
+        instanceId,
+        expectedVersion: 0,
+        source: { kind: "registry", registryId: "cursor" },
+      },
+      { kind: "install-acp-agent", instanceId, expectedVersion: 1 },
+      { kind: "set-acp-agent-trust", instanceId, expectedVersion: 2, trusted: true },
+    ];
+    const deviceId = "80000000-0000-4000-8000-000000000044";
+    for (const body of bodies) {
+      const remote = new Request("http://127.0.0.1/api/providers/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: {
+          kind: "remote-device",
+          hostId: "local",
+          deviceId,
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "80000000-0000-4000-8000-000000000045",
+        } as never,
+        scopeId: deviceId as never,
+      });
+      expect((await route(remote))?.status).toBe(401);
+    }
+    expect(execute).not.toHaveBeenCalled();
+    for (const body of bodies) {
+      const local = await route(
+        new Request("http://127.0.0.1/api/providers/commands", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+          body: JSON.stringify(body),
+        }),
+      );
+      expect(local?.status).toBe(200);
+    }
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+
+  it("refuses an ACP agent whose request carries a download address, checksum, package or environment", async () => {
+    const execute = vi.fn(() => ({ kind: "provider-created", instance: provider() }));
+    const route = routeFixture({ execute });
+    const smuggled = [
+      { kind: "registry", registryId: "cursor", archive: "https://attacker.example/agent.tgz" },
+      { kind: "registry", registryId: "cursor", sha256: "0".repeat(64) },
+      { kind: "registry", registryId: "auggie", package: "evil-package" },
+      {
+        kind: "local",
+        displayName: "Mine",
+        command: "/opt/agent",
+        args: ["acp"],
+        environment: { OPENAI_API_KEY: "sk-secret" },
+      },
+    ];
+    for (const source of smuggled) {
+      const response = await route(
+        new Request("http://127.0.0.1/api/providers/commands", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+          body: JSON.stringify({ kind: "add-acp-agent", instanceId, expectedVersion: 0, source }),
+        }),
+      );
+      expect(response?.status).toBe(400);
+    }
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("lets a local window or a device the host's person paired set a thread's native setup, refuses any other device, and refuses a thread whose provider cannot", async () => {
     const threadId = "80000000-0000-4000-8000-000000000050";
     const choices = new Map<string, string>();

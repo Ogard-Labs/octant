@@ -1,8 +1,14 @@
 import {
+  decodeArtifactLibraryClaudeCopyRequest,
   decodeArtifactLibraryClaudeSnapshotRequest,
   decodeArtifactLibraryClaudeSnapshotResult,
   decodeArtifactLibraryQuery,
+  type ArtifactLibraryClaudeCopyRequest,
 } from "@octant/contracts/artifact-library";
+import {
+  decodeCanvasHtmlImportResult,
+  type CanvasHtmlImportResult,
+} from "@octant/contracts/canvas-cards";
 import {
   decodeCanvasTagCommandResult,
   type PublishedSnapshotRunRequest,
@@ -33,6 +39,16 @@ export interface ArtifactLibraryRouteDependencies {
     windowId: WindowId,
     request: PublishedSnapshotRunRequest,
   ) => Promise<ThreadPublishedSnapshot | undefined>;
+  /**
+   * Copies a Claude page's kept HTML snapshot into a new Canvas in the
+   * publishing thread's Project, under that thread's read check for the
+   * window and the HTML importer's create authority. Absent: the library
+   * offers no Copy into Canvas.
+   */
+  readonly copyClaudePage?: (
+    windowId: WindowId,
+    request: ArtifactLibraryClaudeCopyRequest,
+  ) => Promise<CanvasHtmlImportResult>;
   readonly now?: () => number;
 }
 
@@ -51,7 +67,8 @@ export function createArtifactLibraryRouteHandler(deps: ArtifactLibraryRouteDepe
     if (
       url.pathname !== "/api/artifacts/library" &&
       url.pathname !== "/api/artifacts/tag" &&
-      url.pathname !== "/api/artifacts/claude-snapshot"
+      url.pathname !== "/api/artifacts/claude-snapshot" &&
+      url.pathname !== "/api/artifacts/claude-copy"
     ) {
       return undefined;
     }
@@ -141,6 +158,35 @@ export function createArtifactLibraryRouteHandler(deps: ArtifactLibraryRouteDepe
         ),
         origin,
       );
+    }
+    if (url.pathname === "/api/artifacts/claude-copy") {
+      // The copy reads the same kept snapshot, so it has the snapshot's reach:
+      // a window on this host only. A paired device never reads the snapshot,
+      // so it cannot copy it either.
+      let copyRequest: ArtifactLibraryClaudeCopyRequest;
+      try {
+        copyRequest = decodeArtifactLibraryClaudeCopyRequest(body);
+      } catch {
+        return failure("Copy into Canvas request is invalid.", 400, origin);
+      }
+      if (principal.kind !== "local-window" || deps.copyClaudePage === undefined) {
+        return json(
+          decodeCanvasHtmlImportResult({
+            kind: "denied",
+            denialCode: "unavailable",
+            message: "Copy into Canvas is available only in Octant on this computer.",
+          }),
+          origin,
+        );
+      }
+      const result = await deps.copyClaudePage(principal.windowId as WindowId, copyRequest).catch(
+        (): CanvasHtmlImportResult => ({
+          kind: "denied",
+          denialCode: "unavailable",
+          message: "The page could not be copied into a Canvas.",
+        }),
+      );
+      return json(decodeCanvasHtmlImportResult(result), origin);
     }
     if (url.pathname === "/api/artifacts/tag") {
       const tags = deps.tags;

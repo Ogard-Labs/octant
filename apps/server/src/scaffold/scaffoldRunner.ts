@@ -36,6 +36,8 @@ export interface ScaffoldRunnerOptions {
       readonly argv: ReadonlyArray<string>;
       readonly cwd: string;
       readonly timeoutMs: number;
+      /** The thread's resolved Strict value, passed on a host without Octant's sandbox. */
+      readonly strict?: boolean;
     },
     signal?: AbortSignal,
   ) => Promise<ScaffoldProcessResult>;
@@ -50,6 +52,8 @@ export interface ScaffoldRunInput {
   readonly checkoutId: CodeCheckoutId;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly checkoutRoot: string;
+  /** The thread's resolved Strict value, passed on a host without Octant's sandbox. */
+  readonly strict?: boolean;
   readonly signal?: AbortSignal;
 }
 
@@ -106,6 +110,7 @@ export class ScaffoldRunner {
               ? input.checkoutRoot
               : `${input.checkoutRoot}/${plan.relativeCwd}`,
           timeoutMs: SCAFFOLD_TIMEOUT_MS,
+          ...(input.strict === undefined ? {} : { strict: input.strict }),
         },
         input.signal,
       );

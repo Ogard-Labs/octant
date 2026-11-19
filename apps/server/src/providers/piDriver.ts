@@ -11,6 +11,7 @@ import {
   type ProviderInputModality,
   type ProviderInstanceId,
   type ProviderOutputStopReason,
+  type ProviderResumeCursor,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
   type ProviderToolAnswer,
@@ -18,7 +19,11 @@ import {
   type ProviderApprovalCall,
 } from "@octant/contracts";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type {
+  ProviderConnection,
+  ProviderDriver,
+  ProviderSessionForkRequest,
+} from "@octant/provider-sdk/driver";
 import {
   rejectUnsupportedChatTurn,
   renderProviderTurnPrompt,
@@ -33,7 +38,7 @@ import {
   type PiRpcConnection,
   type PiSessionMode,
 } from "./piProcess";
-import { makePiNativeSessions } from "./piNativeSessions";
+import { forkPiSession, makePiNativeSessions, piSessionLastEntryId } from "./piNativeSessions";
 import { PiRpcFailure, type PiRpcEvent, type PiRpcResponse } from "./piRpcClient";
 import { outputStopReason } from "./outputStopReason";
 import { providerApprovalCall } from "./providerApprovalCall";
@@ -174,6 +179,10 @@ const capabilities = {
   // Pi's RPC `compact` compacts the session it holds in every mode, outside a
   // turn (Pi's RPC command reference).
   sessionCompaction: { chat: "supported", work: "supported", code: "supported" },
+  // A rewound Code thread continues a new session file copied through the
+  // last kept turn's entry, as Pi's own fork writes one (`forkPiSession`);
+  // the source file is never written.
+  sessionRollback: "supported",
 } as const;
 const MAX_REMEMBERED_TOOL_CALLS = 256;
 /** Pi's interface requests that expect no answer (`RpcExtensionUIRequest` in Pi's RPC types). */
@@ -332,6 +341,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
   return {
     kind: "pi",
     conversationOwnership: "provider",
+    forkSession: (input) => Effect.sync(() => forkPiDriverSession(options, input)),
     nativeSessions: makePiNativeSessions({
       instanceId: options.instanceId,
       octantSessionDirectory: join(options.piHome, "sessions"),
@@ -405,7 +415,14 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
         return result;
       });
     },
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], sandboxPolicy }) => {
+    acquire: ({
+      instanceId,
+      projectRoot,
+      mode,
+      extraFolders = [],
+      attachmentsFolder,
+      sandboxPolicy,
+    }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -416,8 +433,15 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           failure("invalid-configuration", "Pi requires an explicit product mode."),
         );
       }
+      // Pi's prompt carries images alone, so a Work or Code turn names any
+      // other attached file by its path in this folder, which Pi reads and
+      // never writes. Chat has no folder, so it is granted none.
+      const readOnlyFolders =
+        attachmentsFolder === undefined || mode === "chat" ? [] : [attachmentsFolder];
       if (
-        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+        [projectRoot, ...extraFolders, ...readOnlyFolders].some(
+          (root) => !isAbsolute(root) || resolve(root) !== root,
+        )
       ) {
         return Effect.fail(
           failure(
@@ -430,6 +454,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
         { ...options, ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }) },
         projectRoot,
         mode === "chat" ? [] : extraFolders,
+        readOnlyFolders,
         mode,
         resumeIdentities,
         {
@@ -450,10 +475,60 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
   };
 }
 
+/**
+ * A fork's or rewind's first session as a copy of the source's Pi session cut
+ * at the turn's anchor (`forkPiSession`). Only a session this instance opened
+ * for the same folder and mode is copied; anything else is undefined, so the
+ * host hands the conversation over as text.
+ */
+function forkPiDriverSession(
+  options: PiDriverOptions,
+  input: ProviderSessionForkRequest,
+): ProviderResumeCursor | undefined {
+  const binding = input.source.binding;
+  if (
+    String(input.instanceId) !== String(options.instanceId) ||
+    input.source.driverKind !== "pi" ||
+    binding === undefined ||
+    String(binding.instanceId) !== String(options.instanceId) ||
+    binding.projectRoot !== input.projectRoot ||
+    binding.mode !== input.mode ||
+    // Pi keeps the model a session was opened with and refuses a resume onto
+    // another, so a fork onto another model reads its source as text.
+    String(binding.modelId) !== String(input.modelId)
+  )
+    return undefined;
+  try {
+    const forked = forkPiSession({
+      octantSessionDirectory: join(options.piHome, "sessions"),
+      sourceSessionId: input.source.value,
+      sessionId: String(input.sessionId),
+      anchor: input.anchor,
+      projectRoot: input.projectRoot,
+    });
+    if (forked === undefined) return undefined;
+  } catch {
+    return undefined;
+  }
+  return {
+    driverKind: "pi",
+    value: String(input.sessionId),
+    binding: {
+      instanceId: options.instanceId,
+      sessionId: input.sessionId,
+      projectRoot: input.projectRoot,
+      mode: input.mode,
+      modelId: input.modelId,
+    },
+  };
+}
+
 function makeConnection(
   options: PiDriverOptions,
   projectRoot: string,
   extraFolders: ReadonlyArray<string>,
+  /** Folders Pi reads and never writes: the thread's attachments folder. */
+  readOnlyFolders: ReadonlyArray<string>,
   mode: PiSessionMode,
   resumeIdentities: Map<string, ResumeIdentity>,
   factories: {
@@ -824,6 +899,11 @@ function makeConnection(
         state.promptActive = false;
         state.terminal = true;
         state.completed = true;
+        // Where this turn ends in Pi's own session, for a later fork or rewind.
+        const nativeAnchor = piSessionLastEntryId(
+          join(options.piHome, "sessions"),
+          String(state.sessionId),
+        );
         emit(state, {
           kind: "completed",
           resumeCursor: {
@@ -838,6 +918,7 @@ function makeConnection(
             },
           },
           ...(state.outputStopReason === undefined ? {} : { stopReason: state.outputStopReason }),
+          ...(nativeAnchor === undefined ? {} : { nativeAnchor }),
         });
         return;
       }
@@ -866,6 +947,7 @@ function makeConnection(
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
       readonly tools: ReadonlyArray<ProviderToolDefinition>;
+      readonly blockedTools?: ReadonlyArray<string>;
     }) =>
       request(() => {
         const pending = (async () => {
@@ -893,6 +975,7 @@ function makeConnection(
             options.piHome,
             projectRoot,
             extraFolders,
+            readOnlyFolders,
             mode,
             input.modelId,
             input.executionPolicy,
@@ -903,6 +986,9 @@ function makeConnection(
             // files, so a warm runtime never crosses a change of it.
             input.strict,
             tools,
+            // The blocked tools are written into the bridge and the tool list
+            // when the process starts, so a warm runtime never crosses a change.
+            input.blockedTools ?? [],
           ]);
           let runtime =
             input.resume === true
@@ -971,6 +1057,7 @@ function makeConnection(
                     binaryPath: options.binaryPath,
                     root: mode === "chat" ? options.piHome : projectRoot,
                     ...(extraFolders.length === 0 ? {} : { extraFolders }),
+                    ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
                     piHome: options.piHome,
                     sessionDirectory: join(options.piHome, "sessions"),
                     sessionId: input.sessionId,
@@ -982,6 +1069,9 @@ function makeConnection(
                     modelProvider: selection.provider,
                     ...(tools.length === 0 ? {} : { tools }),
                     ...(managedTools === undefined ? {} : { toolBridge: managedTools.config }),
+                    ...(input.blockedTools === undefined || input.blockedTools.length === 0
+                      ? {}
+                      : { blockedTools: input.blockedTools }),
                     onProcessStarted: async (process) => {
                       receipt = await options.runtimeRegistry.trackProcess(
                         options.instanceId,
@@ -1198,6 +1288,7 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
           ...(input.strict === false ? { strict: false } : {}),
+          ...(input.blockedTools === undefined ? {} : { blockedTools: input.blockedTools }),
           // A Plan resume with no caller-supplied set fails closed to no tools,
           // not the full catalogue the session was first opened with.
           tools: input.tools ?? (input.executionPolicy === "plan" ? [] : identity.tools),

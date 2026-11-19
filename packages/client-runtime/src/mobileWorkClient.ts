@@ -12,6 +12,13 @@ import {
   WorkTurnLookupResult,
   ProjectBootstrap,
   decodeHostAnswer,
+  decodeWorkRequestCommand,
+  decodeWorkRequestFailure,
+  type QuestionnaireResponse,
+  type WorkRequest,
+  type WorkRequestCommand,
+  WorkRequestCommandResult,
+  WorkRequestList,
 } from "@octant/contracts";
 import {
   MobileInboxFailure,
@@ -323,4 +330,129 @@ export async function createMobileWorkFromPrompt(input: {
     );
   }
   return row;
+}
+
+/**
+ * The Work thread's requests waiting on a person, oldest first. The host scopes
+ * the list to what this device may answer; the phone filters nothing in.
+ */
+export async function listMobileWorkRequests(
+  transport: MobileRemoteTransport,
+  thread: { readonly threadId: string; readonly projectId: string },
+  signal?: AbortSignal,
+): Promise<ReadonlyArray<WorkRequest>> {
+  const query = new URLSearchParams({
+    projectId: thread.projectId,
+    threadId: thread.threadId,
+  }).toString();
+  const list = await decodeJson(
+    await transport.authenticatedFetch({
+      method: "GET",
+      path: "/api/work/requests",
+      query,
+      ...(signal === undefined ? {} : { signal }),
+    }),
+    decodeHostAnswer(WorkRequestList),
+    "Could not load the Work thread's requests from the host.",
+  );
+  return list.requests.filter(
+    (request) => request.status === "pending" && String(request.threadId) === thread.threadId,
+  );
+}
+
+/**
+ * What the host did with a phone's answer to a Work request. A refusal is the
+ * host's own sentence (answered elsewhere, its version moved, the thread's
+ * permissions changed since it asked), so a card says why instead of offering
+ * the same answer again as though it were lost on the way.
+ */
+export type MobileWorkRequestAnswer =
+  | { readonly status: "answered"; readonly result: WorkRequestCommandResult }
+  | { readonly status: "refused"; readonly message: string };
+
+/**
+ * Answers a pending Work approval. The host applies what approving means (a
+ * level change moves the thread through its ordinary access rule) and
+ * journals the answer as this device; the phone sends only yes or no and the
+ * version it read.
+ */
+export async function resolveMobileWorkApproval(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly request: Pick<WorkRequest, "requestId" | "version">;
+  readonly approved: boolean;
+}): Promise<MobileWorkRequestAnswer> {
+  return sendWorkRequestCommand(input.transport, {
+    kind: "resolve-work-request",
+    requestId: input.request.requestId,
+    expectedVersion: input.request.version,
+    resolution: { kind: "approval", approved: input.approved },
+  });
+}
+
+/**
+ * Answers a provider's question: the chosen option's words or the person's
+ * own, or a questionnaire's whole response. The host checks the answer
+ * against the question it recorded and hands the provider its own option
+ * value; the phone sends what the person chose and the version it read.
+ */
+export async function answerMobileWorkQuestion(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly request: Pick<WorkRequest, "requestId" | "version">;
+  readonly answer: string | QuestionnaireResponse;
+}): Promise<MobileWorkRequestAnswer> {
+  return sendWorkRequestCommand(input.transport, {
+    kind: "resolve-work-request",
+    requestId: input.request.requestId,
+    expectedVersion: input.request.version,
+    resolution: { kind: "user-input", answer: input.answer },
+  });
+}
+
+/** Ends the turn's questionnaire without an answer, as the desktop's Dismiss does. */
+export async function dismissMobileWorkQuestion(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly request: Pick<WorkRequest, "requestId" | "version">;
+}): Promise<MobileWorkRequestAnswer> {
+  return sendWorkRequestCommand(input.transport, {
+    kind: "cancel-work-request",
+    requestId: input.request.requestId,
+    expectedVersion: input.request.version,
+  });
+}
+
+async function sendWorkRequestCommand(
+  transport: MobileRemoteTransport,
+  candidate: unknown,
+): Promise<MobileWorkRequestAnswer> {
+  let command: WorkRequestCommand;
+  try {
+    command = decodeWorkRequestCommand(candidate);
+  } catch {
+    // Work request text refuses paths and links, so a typed answer holding
+    // one is refused before it is sent, in words the person can act on.
+    return { status: "refused", message: "The answer contains text that Work cannot deliver." };
+  }
+  const response = await transport.authenticatedFetch({
+    method: "POST",
+    path: "/api/work/requests/commands",
+    body: JSON.stringify(command),
+    contentType: "application/json",
+  });
+  if (!response.ok) {
+    const failure = await response
+      .json()
+      .then((body: unknown) => decodeWorkRequestFailure(body))
+      .catch(() => undefined);
+    if (failure !== undefined) return { status: "refused", message: failure.message };
+    throw new MobileInboxFailure(
+      response.status === 403 ? "rejected" : "unavailable",
+      "The host did not take that answer.",
+    );
+  }
+  const result = await decodeJson(
+    response,
+    decodeHostAnswer(WorkRequestCommandResult),
+    "The host did not take that answer.",
+  );
+  return { status: "answered", result };
 }

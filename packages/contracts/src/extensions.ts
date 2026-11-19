@@ -7,6 +7,11 @@ import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { ToolExtensionId } from "./toolActions";
 import {
+  AppBackgroundCharacterPattern,
+  AppBackgroundCharacterSet,
+  AppBackgroundPercent,
+} from "./theme";
+import {
   ExtensionComponentId,
   ExtensionContentDigest,
   ExtensionPackageId,
@@ -301,6 +306,7 @@ export const ExtensionComponentKind = Schema.Literal(
   "debug-adapter",
   "cloud-machine-target",
   "theme",
+  "ground",
 );
 export type ExtensionComponentKind = typeof ExtensionComponentKind.Type;
 export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(
@@ -571,6 +577,20 @@ export const ExtensionThemeDeclaration = Schema.Struct({
   );
 export type ExtensionThemeDeclaration = typeof ExtensionThemeDeclaration.Type;
 
+/**
+ * A character ground as data only: the four values a person can set on the
+ * character field, with the schemas the stored ground uses. It carries no
+ * colour, image, motion beyond the field's own speed, or code, and a field it
+ * does not name is refused rather than ignored.
+ */
+export const ExtensionGroundDeclaration = Schema.Struct({
+  characterSet: AppBackgroundCharacterSet,
+  characterDensity: Schema.optional(AppBackgroundPercent),
+  characterSpeed: Schema.optional(AppBackgroundPercent),
+  characterPattern: Schema.optional(AppBackgroundCharacterPattern),
+}).annotations(strict);
+export type ExtensionGroundDeclaration = typeof ExtensionGroundDeclaration.Type;
+
 export const ExtensionComponent = Schema.Struct({
   id: ExtensionComponentId,
   kind: ExtensionComponentKind,
@@ -592,6 +612,8 @@ export const ExtensionComponent = Schema.Struct({
   codeTool: Schema.optional(CodeToolContribution),
   /** Present exactly when `kind` is `theme`: colours as data, never code. */
   theme: Schema.optional(ExtensionThemeDeclaration),
+  /** Present exactly when `kind` is `ground`: character-field values as data, never code. */
+  ground: Schema.optional(ExtensionGroundDeclaration),
 }).annotations(strict);
 export type ExtensionComponent = typeof ExtensionComponent.Type;
 
@@ -796,6 +818,8 @@ export const ExtensionPackageManifest = Schema.Struct({
         if ((component.kind === "code-tool") !== (component.codeTool !== undefined)) return false;
         if ((component.kind === "theme") !== (component.theme !== undefined)) return false;
         if (component.kind === "theme" && component.declaredCapabilities.length > 0) return false;
+        if ((component.kind === "ground") !== (component.ground !== undefined)) return false;
+        if (component.kind === "ground" && component.declaredCapabilities.length > 0) return false;
         if (
           component.kind === "code-tool" &&
           (component.declaredCapabilities.length !== 1 ||

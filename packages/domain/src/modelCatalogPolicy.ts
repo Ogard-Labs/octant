@@ -101,6 +101,7 @@ const nativeToolRuntimeDrivers: ReadonlySet<ProviderDriverKind> = new Set([
   "opencode",
   "pi",
   ...ACP_AGENT_KINDS,
+  "acp-agent",
 ]);
 
 export function isNativeToolRuntimeDriver(driverKind: ProviderDriverKind): boolean {
@@ -266,6 +267,8 @@ function binaryOf(instance: ProviderInstance): string | undefined {
     case "pi-rpc":
     case "claude-agent-sdk":
       return instance.configuration.binaryPath;
+    case "acp-agent":
+      return instance.configuration.install?.executable;
     default:
       return isAcpAgentInstance(instance) ? instance.configuration.binaryPath : undefined;
   }

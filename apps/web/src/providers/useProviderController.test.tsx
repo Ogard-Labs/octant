@@ -2995,6 +2995,67 @@ describe("useProviderController", () => {
     expect(result.current.message).toMatch(/cannot save provider keys/i);
   });
 
+  it("refuses and clears a gateway token supplied without host credential authority", async () => {
+    const calls: string[] = [];
+    const api = client();
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await expect(
+        result.current.createClaude(
+          "Team gateway",
+          {
+            kind: "claude-agent-sdk",
+            binaryPath: "/usr/local/bin/claude",
+            authentication: "gateway",
+            gatewayBaseUrl: "https://gateway.example.com",
+          },
+          transientCredential("private-gateway-token", calls),
+        ),
+      ).resolves.toBe(false);
+    });
+    expect(api.execute).not.toHaveBeenCalled();
+    expect(calls).toEqual(["field.clear"]);
+    expect(result.current.message).toMatch(/cannot save provider keys/i);
+  });
+
+  it("stores a desktop gateway account's token through the host bridge after creating it", async () => {
+    const calls: string[] = [];
+    const api = client();
+    vi.mocked(api.execute).mockImplementation(async (command) => {
+      calls.push("provider.create");
+      return {
+        kind: "provider-created",
+        instance: claudeProvider({ id: "instanceId" in command ? command.instanceId : id }),
+      };
+    });
+    const host = credentialHost(calls);
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await expect(
+        result.current.createClaude(
+          "Team gateway",
+          {
+            kind: "claude-agent-sdk",
+            binaryPath: "/usr/local/bin/claude",
+            authentication: "gateway",
+            gatewayBaseUrl: "https://gateway.example.com",
+          },
+          transientCredential("desktop-gateway-token", calls),
+        ),
+      ).resolves.toBe(true);
+    });
+    expect(calls.filter((call) => call !== "field.clear")).toEqual([
+      "provider.create",
+      "credential.set",
+    ]);
+    expect(host.addProviderApiKey).toHaveBeenCalledWith(
+      expect.any(String),
+      "desktop-gateway-token",
+    );
+  });
+
   it("keeps Claude subscription creation available in a browser-only window", async () => {
     const api = client();
     vi.mocked(api.execute).mockImplementation(async (command) => ({
@@ -3020,6 +3081,31 @@ describe("useProviderController", () => {
         configuration: expect.objectContaining({ authentication: "subscription" }),
       }),
     );
+  });
+
+  it("deletes the stored token after removing a Claude gateway account", async () => {
+    const calls: string[] = [];
+    const gateway = claudeProvider({
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "gateway",
+        gatewayBaseUrl: "https://gateway.example.com",
+      },
+    });
+    const api = client(snapshot([gateway]));
+    vi.mocked(api.execute).mockImplementation(async () => {
+      calls.push("provider.remove");
+      return { kind: "provider-removed", instanceId: id, version: 2 as never };
+    });
+    const host = credentialHost(calls);
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.remove(id)).resolves.toBe(true);
+    });
+    expect(calls).toEqual(["provider.remove", "credential.clear"]);
   });
 
   it("deletes the credential after removing a bearer provider", async () => {
@@ -3598,6 +3684,7 @@ function observation(patch: Partial<ProviderObservedState> = {}): ProviderObserv
       | "nativeSetup"
       | "reviewVerdicts"
       | "appManagedToolsAtFullAccess"
+      | "atFullAccess"
       | "turnModes"
     >,
     observedAt: "2026-07-14T10:00:00.000Z" as never,
@@ -3621,6 +3708,7 @@ function failureObservation(
       | "nativeSetup"
       | "reviewVerdicts"
       | "appManagedToolsAtFullAccess"
+      | "atFullAccess"
       | "turnModes"
     >,
     message: "Provider probe failed.",

@@ -366,6 +366,12 @@ These rules govern Linear issues, not the product's Work/Code thread lifecycle.
   issue that owns the outcome; file a new issue only for a different outcome.
   (In November 2026 a backlog of 47 issues held about 12 outcomes; one feature
   alone had 13 slice issues.)
+- An issue another agent will implement is written as a self-contained brief
+  following `.agents/skills/writing-octant-issues/SKILL.md`: facts verified on
+  `main` at a named commit, maintainer decisions recorded with their dates,
+  stop conditions, tests to write first, and numbered acceptance criteria that
+  each say how they are verified. It is ready to start only when no decision
+  it depends on is open.
 
 Implementing a tracked issue includes keeping its evidence and status current.
 An instruction to validate or finish an issue includes closing it when the

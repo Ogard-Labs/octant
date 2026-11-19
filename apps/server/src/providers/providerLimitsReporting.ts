@@ -55,6 +55,8 @@ export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimit
     case "amazon-bedrock":
     // Octant reads no quota headers on an outside driver's brokered calls.
     case "outside-harness-endpoint":
+    // ACP has no limits channel, and an added agent has no account endpoint.
+    case "acp-agent":
       return "runtime-does-not-report";
   }
 }

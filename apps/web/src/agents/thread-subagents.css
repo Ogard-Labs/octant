@@ -25,6 +25,21 @@
   font-size: var(--oct-text-detail);
 }
 
+/* The row is one button when the pane can open a child. It lays out exactly as
+   the bare row did and paints nothing on hover or press, so nothing moves or
+   changes tint; the keyboard focus ring is the button recipe's own. */
+.turn-subagents__open {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  min-height: 28px;
+  font: inherit;
+  text-align: start;
+}
+
 .turn-subagents__mark {
   display: inline-flex;
   flex: none;

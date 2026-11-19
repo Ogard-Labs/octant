@@ -11,6 +11,8 @@ export interface ApprovalDecisionButtonsProps {
   readonly onAllowSession?: (() => void) | undefined;
   /** What Allow covers when it is more than this one request; "Allow" when absent. */
   readonly allowLabel?: string | undefined;
+  /** What declining keeps, such as "Keep planning"; "Deny" when absent. */
+  readonly denyLabel?: string | undefined;
   /** A narrower approval than Allow, shown last as the quiet choice. */
   readonly narrower?: { readonly label: string; readonly onPress: () => void } | undefined;
 }
@@ -38,7 +40,7 @@ export function ApprovalDecisionButtons(props: ApprovalDecisionButtonsProps) {
         </Text>
       </Pressable>
       <Pressable
-        accessibilityLabel={MOBILE_COPY.approvalDeny}
+        accessibilityLabel={props.denyLabel ?? MOBILE_COPY.approvalDeny}
         accessibilityRole="button"
         accessibilityState={state}
         disabled={props.busy}
@@ -50,7 +52,7 @@ export function ApprovalDecisionButtons(props: ApprovalDecisionButtonsProps) {
         ]}
       >
         <Text style={[mobileTypography.section, { color: colors.textPrimary }]}>
-          {MOBILE_COPY.approvalDeny}
+          {props.denyLabel ?? MOBILE_COPY.approvalDeny}
         </Text>
       </Pressable>
       {props.onAllowSession === undefined ? null : (

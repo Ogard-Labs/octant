@@ -554,6 +554,23 @@ export const decodeArtifactLibraryClaudeSnapshotRequest = Schema.decodeUnknownSy
   ArtifactLibraryClaudeSnapshotRequest,
 );
 
+/**
+ * Copies a Claude page's kept HTML snapshot into a new Canvas in the
+ * publishing thread's Project. The host reads the snapshot itself, under that
+ * thread's read check, so nothing the request carries becomes the page; the
+ * title is the one the person confirmed, never the page's own.
+ */
+export const ArtifactLibraryClaudeCopyRequest = Schema.Struct({
+  mode: Schema.Literal("work", "code"),
+  threadId: Schema.UUID,
+  toolCallId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+}).annotations(strict);
+export type ArtifactLibraryClaudeCopyRequest = typeof ArtifactLibraryClaudeCopyRequest.Type;
+export const decodeArtifactLibraryClaudeCopyRequest = Schema.decodeUnknownSync(
+  ArtifactLibraryClaudeCopyRequest,
+);
+
 /** The kept copy, or why there is none this caller may read. */
 export const ArtifactLibraryClaudeSnapshotResult = Schema.Union(
   Schema.Struct({

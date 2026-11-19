@@ -24,6 +24,7 @@ import type {
 import { Effect, type Scope } from "effect";
 import {
   HOST_PASSTHROUGH_VARIABLES,
+  acpExactReleaseClaim,
   acpSubagentsRun,
   type AcpProviderProfile,
   type AcpSessionMode,
@@ -84,6 +85,11 @@ export interface AcpConfinementInput {
   readonly root: string;
   /** The Project's extra folders, granted what `root` is granted. */
   readonly extraFolders?: ReadonlyArray<string>;
+  /**
+   * Folders the agent reads at every level and never writes: the thread's
+   * attachments folder, under the host's data directory.
+   */
+  readonly readOnlyFolders?: ReadonlyArray<string>;
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -139,6 +145,11 @@ export interface AcpProcessStartInput {
   readonly root: string;
   /** The Project's extra folders, granted what `root` is granted. */
   readonly extraFolders?: ReadonlyArray<string>;
+  /**
+   * Folders the agent reads at every level and never writes: the thread's
+   * attachments folder, under the host's data directory.
+   */
+  readonly readOnlyFolders?: ReadonlyArray<string>;
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -718,6 +729,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 configuredBinaryDirectory,
                 temporaryDirectory,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
+                ...(input.readOnlyFolders ?? []),
               ],
               privateHomeAllowPaths: [
                 root,
@@ -727,6 +739,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
+                ...(input.readOnlyFolders ?? []),
               ],
               ...(extraRules.length === 0 ? {} : { extraRules }),
             }),
@@ -839,6 +852,9 @@ function cleanupEffect(displayName: string, cleanup: () => Promise<void>): Effec
     catch: () => new Error(`${displayName} process cleanup failed.`),
   }).pipe(Effect.orDie);
 }
+
+/** What an added agent's version reads as until its `initialize` reply names one. */
+export const UNKNOWN_ACP_VERSION = "unknown";
 
 function parseVersion(
   profile: AcpProviderProfile,
@@ -1062,6 +1078,12 @@ export function probeAcpBinary(
             }),
           ),
         );
+      // An added agent's version is read where it answers; otherwise it is
+      // unknown here and its `initialize` reply names it.
+      const unknownVersion =
+        profile.process.versionProbe === "best-effort"
+          ? Effect.succeed({ binaryPath, version: UNKNOWN_ACP_VERSION })
+          : undefined;
       const onClose = (code: number | null) => {
         if (overflow) {
           finish(Effect.fail(failure("protocol", `${name} version output exceeded the limit.`)));
@@ -1069,11 +1091,12 @@ export function probeAcpBinary(
         }
         if (code !== 0) {
           finish(
-            Effect.fail(
-              failure("unavailable", `${name} version probe did not succeed.`, {
-                reason: "runtime-unavailable",
-              }),
-            ),
+            unknownVersion ??
+              Effect.fail(
+                failure("unavailable", `${name} version probe did not succeed.`, {
+                  reason: "runtime-unavailable",
+                }),
+              ),
           );
           return;
         }
@@ -1082,7 +1105,10 @@ export function probeAcpBinary(
           parseVersion(profile, diagnostics.toString("utf8").trimEnd());
         if (parsed === undefined) {
           finish(
-            Effect.fail(failure("protocol", `${name} returned an unrecognized version response.`)),
+            unknownVersion ??
+              Effect.fail(
+                failure("protocol", `${name} returned an unrecognized version response.`),
+              ),
           );
           return;
         }
@@ -1108,11 +1134,12 @@ export function probeAcpBinary(
       const timeout = setTimeout(
         () =>
           finish(
-            Effect.fail(
-              failure("unavailable", `${name} version probe timed out.`, {
-                reason: "runtime-unavailable",
-              }),
-            ),
+            unknownVersion ??
+              Effect.fail(
+                failure("unavailable", `${name} version probe timed out.`, {
+                  reason: "runtime-unavailable",
+                }),
+              ),
           ),
         timeoutMs,
       );
@@ -1189,6 +1216,7 @@ function acquireConnection(
   profile: AcpProviderProfile,
   launch: AcpLaunchSpec,
   version: string,
+  executionPolicy: ProviderExecutionPolicy,
   options: Required<Pick<AcpProcessOptions, "shutdownTimeoutMs" | "startupTimeoutMs">> &
     Pick<AcpProcessOptions, "onDiagnostic" | "stderrBytes">,
   clientCapabilities: AcpClientCapabilities | undefined,
@@ -1294,8 +1322,7 @@ function acquireConnection(
         {
           ...(clientCapabilities ?? { readTextFile: false, writeTextFile: false, terminal: false }),
           ...(profile.kind === "mistral-vibe" &&
-          version === "3.0.3" &&
-          profile.elicitationVersions?.includes(version) === true
+          acpExactReleaseClaim(profile.elicitationVersions, version, executionPolicy) !== "absent"
             ? { elicitationForm: true }
             : {}),
         },
@@ -1325,7 +1352,10 @@ function acquireConnection(
             resume(
               Effect.succeed({
                 connection: {
-                  version,
+                  version:
+                    version === UNKNOWN_ACP_VERSION
+                      ? (initialized.agentInfo?.version ?? version)
+                      : version,
                   pid: child.pid,
                   root: launch.cwd,
                   initialized,
@@ -1463,6 +1493,9 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           binaryPath: input.binaryPath,
           root: input.root,
           ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
+          ...(input.readOnlyFolders === undefined
+            ? {}
+            : { readOnlyFolders: input.readOnlyFolders }),
           managedHome: input.managedHome,
           mode: input.mode,
           executionPolicy: input.executionPolicy,
@@ -1482,6 +1515,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
             profile,
             launch,
             probe.version,
+            input.executionPolicy,
             {
               shutdownTimeoutMs,
               startupTimeoutMs,

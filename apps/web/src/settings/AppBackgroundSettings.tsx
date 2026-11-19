@@ -1,11 +1,13 @@
 import type {
   AppBackground,
+  AppBackgroundCharacterPattern,
   AppBackgroundEffect,
   AppBackgroundPercent,
   AppBackgroundScene,
   SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
+import type { ContributedGround } from "@octant/plugin-host/grounds";
 import { ASCII_DEFAULT_CELL, ASCII_MIN_CELL, asciiCell } from "@octant/domain/ascii-print";
 import {
   DEFAULT_CHARACTER_LEVEL,
@@ -21,6 +23,7 @@ import { SettingRow, SettingsDisclosure } from "./primitives";
 import { SliderField } from "./SliderField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { usePluginGrounds } from "../theme/pluginGrounds";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 
@@ -104,6 +107,9 @@ function carry(background: AppBackground) {
     ...(background.characterSpeed === undefined
       ? {}
       : { characterSpeed: background.characterSpeed }),
+    ...(background.characterPattern === undefined
+      ? {}
+      : { characterPattern: background.characterPattern }),
   };
 }
 
@@ -115,6 +121,14 @@ const STARTER_SETS = [
   { id: "shades", label: "Shades", characters: "░▒▓█" },
   { id: "lines", label: "Lines", characters: "─│┼╱╲" },
 ] as const;
+
+/** What the character field draws; all in turn is what it did before the choice. */
+const CHARACTER_PATTERNS = [
+  { id: "cycle", label: "All in turn" },
+  { id: "blotches", label: "Blotches" },
+  { id: "currents", label: "Currents" },
+  { id: "rings", label: "Rings" },
+] as const satisfies ReadonlyArray<{ id: AppBackgroundCharacterPattern; label: string }>;
 
 const CHARACTERS_HINT = "Up to 64 characters. The field draws only these.";
 // Shorter than the hint, so swapping one for the other never wraps the row.
@@ -185,6 +199,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const library = props.library;
   const background = props.background;
+  const pluginGrounds = usePluginGrounds();
   const savedCharacters =
     background.kind === "characters"
       ? (background.characterSet ?? DEFAULT_CHARACTER_SET)
@@ -214,6 +229,32 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     const pending = next ?? unsaved.current;
     unsaved.current = undefined;
     if (pending !== undefined) props.onChange(pending);
+  };
+  // A plugin's ground is copied into the person's own (never saved as a
+  // reference), so it keeps working when the plugin is switched off.
+  const pickPluginGround = (picked: ContributedGround) => {
+    const {
+      characterSet: _set,
+      characterDensity: _density,
+      characterSpeed: _speed,
+      characterPattern: _pattern,
+      ...rest
+    } = background;
+    setTyped(picked.ground.characterSet);
+    setTypedRefused(false);
+    saveCharacters({
+      ...rest,
+      characterSet: picked.ground.characterSet,
+      ...(picked.ground.characterDensity === undefined
+        ? {}
+        : { characterDensity: picked.ground.characterDensity }),
+      ...(picked.ground.characterSpeed === undefined
+        ? {}
+        : { characterSpeed: picked.ground.characterSpeed }),
+      ...(picked.ground.characterPattern === undefined
+        ? {}
+        : { characterPattern: picked.ground.characterPattern }),
+    });
   };
   const field = background.kind === "pixels";
   const scene: AppBackgroundScene = (field ? background.scene : undefined) ?? "drift";
@@ -741,6 +782,11 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                     aria-label="Starter character set"
                     className="settings-view__select"
                     onValueChange={(next) => {
+                      const plugin = pluginGrounds.find((option) => option.id === next);
+                      if (plugin !== undefined) {
+                        pickPluginGround(plugin);
+                        return;
+                      }
                       const starter = STARTER_SETS.find((option) => option.id === next);
                       if (starter !== undefined) {
                         setTyped(starter.characters);
@@ -751,6 +797,11 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                     options={[
                       ...STARTER_SETS.map((option) => ({ id: option.id, label: option.label })),
                       { id: "custom", label: "Custom", disabled: true },
+                      ...pluginGrounds.map((option) => ({
+                        id: option.id,
+                        label: `${option.displayName} (${option.pluginName})`,
+                        group: "From plugins",
+                      })),
                     ]}
                     value={
                       STARTER_SETS.find((option) => option.characters === savedCharacters)?.id ??
@@ -758,6 +809,28 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                     }
                   />
                 </span>
+              </SettingRow>
+              <SettingRow
+                description="The shape its patches take."
+                label="Pattern"
+                scope="app"
+                settingId="app-background-character-pattern"
+              >
+                <OctantSelectField
+                  aria-label="Character pattern"
+                  className="settings-view__select"
+                  onValueChange={(next) => {
+                    const pattern = CHARACTER_PATTERNS.find((option) => option.id === next);
+                    if (pattern !== undefined) {
+                      saveCharacters({ ...background, characterPattern: pattern.id });
+                    }
+                  }}
+                  options={CHARACTER_PATTERNS.map((option) => ({
+                    id: option.id,
+                    label: option.label,
+                  }))}
+                  value={background.characterPattern ?? "cycle"}
+                />
               </SettingRow>
               <SettingRow
                 description="How much of the field shows."
@@ -810,7 +883,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 />
               </SettingRow>
               <SettingRow
-                description="Back to the default letters and digits at the default density and speed."
+                description="Back to the default letters and digits, all patterns in turn, at the default density and speed."
                 label="Reset"
                 scope="app"
                 settingId="app-background-characters-reset"
@@ -821,6 +894,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                       characterSet: _set,
                       characterDensity: _density,
                       characterSpeed: _speed,
+                      characterPattern: _pattern,
                       ...rest
                     } = background;
                     setTyped(DEFAULT_CHARACTER_SET);

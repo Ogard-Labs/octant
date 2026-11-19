@@ -11,6 +11,7 @@ import {
   decodeProviderModelId,
   decodeProviderObservedState,
   decodeWindowId,
+  type ClaudeProviderConfiguration,
   type ProviderDefaults,
   type ProviderCatalogSnapshot,
   type ProviderInstance,
@@ -6513,6 +6514,61 @@ describe("a stored provider key and the base URL it was entered for", () => {
       expectedVersion: version,
     });
     expect(clearProviderCredential).toHaveBeenCalledTimes(5);
+  });
+
+  it("forgets a Claude gateway token when its address changes or the account leaves the gateway, and keeps it for an accent change", async () => {
+    const clearProviderCredential = vi.fn(async () => undefined);
+    const fixture = serviceFixture({ clearProviderCredential });
+    const gateway = (gatewayBaseUrl: string, accent?: "teal") =>
+      ({
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "gateway",
+        gatewayBaseUrl,
+        configDirectory: assignedClaudeAccountConfigDirectory(homedir(), instanceId),
+        ...(accent === undefined ? {} : { accent }),
+      }) as const;
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Team gateway",
+      configuration: gateway("https://gateway.example.com/"),
+    });
+    expect(fixture.persistence.readProviderInstance(instanceId)?.configuration).toMatchObject({
+      authentication: "gateway",
+      gatewayBaseUrl: "https://gateway.example.com",
+    });
+    let version = 1;
+    const change = async (configuration: ClaudeProviderConfiguration) => {
+      await fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: version,
+        configuration,
+      });
+      version += 1;
+      return clearProviderCredential.mock.calls.length;
+    };
+
+    expect(await change(gateway("https://gateway.example.com", "teal"))).toBe(0);
+    expect(await change(gateway("https://other-gateway.example.com", "teal"))).toBe(1);
+    expect(
+      await change({
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "api-key",
+        configDirectory: assignedClaudeAccountConfigDirectory(homedir(), instanceId),
+      }),
+    ).toBe(2);
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: version,
+        configuration: gateway("http://gateway.example.com"),
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid-configuration" } });
   });
 
   it("refuses an Amazon Bedrock configuration outside the commercial partition or without a model", async () => {

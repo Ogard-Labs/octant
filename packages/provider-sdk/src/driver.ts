@@ -131,6 +131,15 @@ export interface ProviderSessionStart {
    */
   readonly strict?: boolean;
   /**
+   * Tools the person blocked for this provider in Settings, by the name its
+   * runtime gives them, or `server__tool` for a tool of the provider's own
+   * MCP server. A driver keeps each one from the session at every level, in
+   * and out of Strict, through its runtime's own deny configuration or its
+   * own gate, and fails the start rather than run a session in which a
+   * blocked tool would still run. Absent or empty blocks nothing.
+   */
+  readonly blockedTools?: ReadonlyArray<string>;
+  /**
    * User-chosen values for options the model declares (`ProviderModel.options`),
    * keyed by option id. Drivers apply the ids they understand and ignore the
    * rest; absent means provider defaults.
@@ -176,8 +185,10 @@ export interface ProviderSessionStart {
   readonly outlivesTurn?: boolean;
   /**
    * The host answers the runtime's own asks to change the thread's level
-   * (`approval-request` with `levelChange`): it changes the level from the
-   * next session when the person approves, and ends the turn. A driver offers
+   * (`approval-request` with `levelChange`): when the person approves it
+   * changes the level, in place through {@link ProviderConnection.changeLevelInPlace}
+   * where the driver offers that change, and otherwise from the next session,
+   * ending the turn. A driver offers
    * its runtime's plan-mode tools only to a session that carries this, and
    * never lets the runtime switch its own mode.
    */
@@ -292,6 +303,8 @@ export interface ProviderSessionResume {
   readonly fullAccessSandbox?: boolean;
   /** Same meaning as in {@link ProviderSessionStart.strict}. */
   readonly strict?: boolean;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly blockedTools?: ReadonlyArray<string>;
   /**
    * The thread's current model. A driver that reports `modelSwitch` as
    * supported runs the resumed session on it; any other driver keeps the model
@@ -318,6 +331,19 @@ export interface ProviderSessionResume {
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly levelChanges?: boolean;
 }
+
+/**
+ * How an in-place level change ended. `applied`: the runtime switched its
+ * mode inside the running turn and the driver's gate holds every later call
+ * of that session to the new level. `refused`: the driver did not try (no
+ * running turn, or a session it cannot hold to the new level). `failed`: the
+ * runtime did not accept the switch; the gate still holds the session to the
+ * new level, and the host ends the turn.
+ */
+export type ProviderInPlaceLevelChange =
+  | { readonly status: "applied" }
+  | { readonly status: "refused"; readonly reason: string }
+  | { readonly status: "failed"; readonly reason: string };
 
 export interface ProviderSessionCompactionRequest {
   readonly sessionId: ProviderSessionId;
@@ -427,6 +453,19 @@ export interface ProviderNativeSessions {
     readonly projectRoot: string;
     readonly nativeSessionId: string;
   }) => Effect.Effect<ProviderNativeSessionCarry, ProviderFailure>;
+}
+
+/**
+ * Which of a runtime's own sessions an Octant thread holds, as the host
+ * records them: any session a journaled resume cursor of this driver kind
+ * names, for every instance of the kind, since instances of one runtime may
+ * share its session store. A driver that offers `nativeSessions` leaves a
+ * held session out of its list and refuses to adopt it, so two threads never
+ * drive one session. The host hands the same port to every driver, first-party
+ * or not.
+ */
+export interface ProviderSessionOwnership {
+  readonly held: (driverKind: ProviderDriverKind) => ReadonlySet<string>;
 }
 
 export type ProviderNativeSessionCarry =
@@ -631,6 +670,20 @@ export interface ProviderConnection {
   readonly compact?: (
     input: ProviderSessionCompactionRequest,
   ) => Effect.Effect<ProviderSessionCompaction, ProviderFailure>;
+  /**
+   * Moves a session to a narrower level inside its running turn, so an
+   * approved level change need not end the turn. Present only on a connection
+   * whose runtime can switch its mode in a running session and whose gate can
+   * hold that session to the new level's rules without launching it again,
+   * though the session keeps the tools and sandbox it launched with. The only
+   * change is `enter-plan`: leaving Plan widens what a session may do, which
+   * no session can be given in place. Absent, or anything but `applied`, and
+   * the host ends the turn and launches the next one at the new level.
+   */
+  readonly changeLevelInPlace?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly change: "enter-plan";
+  }) => Effect.Effect<ProviderInPlaceLevelChange>;
   readonly interrupt: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly stop: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   /**

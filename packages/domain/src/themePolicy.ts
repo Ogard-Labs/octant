@@ -1,4 +1,5 @@
 import type {
+  AppBackgroundCharacterPattern,
   AppBackgroundEffect,
   AppBackgroundScene,
   ThemeSettings,
@@ -135,6 +136,8 @@ export interface ResolvedAppBackground {
     readonly density: number;
     /** 0..100, 50 is the default pace, 0 holds one frame. */
     readonly speed: number;
+    /** Which pattern the field draws; `cycle` takes each in turn. */
+    readonly pattern: AppBackgroundCharacterPattern;
   };
 }
 
@@ -219,6 +222,7 @@ export function resolveAppBackground(
         characterSet: background.characterSet ?? DEFAULT_CHARACTER_SET,
         density: background.characterDensity ?? DEFAULT_CHARACTER_LEVEL,
         speed: characterSpeed,
+        pattern: background.characterPattern ?? "cycle",
       },
       backgroundId: null,
       backgroundUrl: null,
