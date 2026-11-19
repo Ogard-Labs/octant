@@ -310,6 +310,12 @@ export interface AgentRunSessionRuntimeOptions {
     readonly usage?: TurnUsage;
   }) => void;
   readonly context: AgentRunContextSnapshotPort;
+  /**
+   * The lead thread's person-memory block, or `undefined` when the lead does
+   * not take part or has nothing to say. Sent once on a fresh start and never
+   * duplicated on a continuation that already holds it.
+   */
+  readonly personMemoryBlock?: (run: AgentRun) => string | undefined;
   readonly inputsCurrent?: (manifest: ConversationInputManifest) => boolean;
   readonly prepareInputs?: (input: {
     readonly run: AgentRun;
@@ -578,9 +584,16 @@ export function createAgentRunSessionRuntime(
       );
     }
 
+    const personMemoryText =
+      continuation !== undefined || resolvedContext.some((block) => block.kind === "person-memory")
+        ? undefined
+        : options.personMemoryBlock?.(run);
     const source =
       run.workspaceReceipt.kind === "code-worktree" ? run.workspaceReceipt.source : undefined;
     const context: ReadonlyArray<ProviderContextBlock> = [
+      ...(personMemoryText === undefined
+        ? []
+        : [{ kind: "person-memory" as const, text: personMemoryText }]),
       ...resolvedContext,
       ...(source === undefined
         ? []

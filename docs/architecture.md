@@ -2033,9 +2033,9 @@ except where a bullet says otherwise.
 - **Written instructions.** Instructions the person writes for Octant itself,
   per person, per Project, and for coordinator threads, travel beside each
   provider's own instruction files as standing blocks placed before person
-  memory. Unlike person memory they reach every turn, including the turns the
-  host starts as itself; orchestration reaches only coordinator threads and
-  a Project's designated planner
+  memory. Unlike person memory they reach every turn even in Projects kept out
+  of memory or threads marked Leave no trace; orchestration reaches only
+  coordinator threads and a Project's designated planner
   ([Octant instructions](design/octant-instructions.md)).
 - **Searching past threads.** `octant_past_threads` is a read-only host tool,
   offered in Chat (not a Side Chat), Work, and Code beside the thread's other
@@ -2068,20 +2068,31 @@ except where a bullet says otherwise.
   setting. Entries were redacted before storage, so the export adds nothing
   beyond what Settings › Memory shows.
 - **Who may read it.**
-  - A local window or a paired device: read and change everything in Settings ›
-    Memory, and a turn either sends gets the block and the tool (maintainer
-    decision, 2026-11-12). Not built yet: today the memory routes refuse a
-    paired device, and a turn it sends gets no block and no tool.
-  - A turn the host starts as itself (a routine's run, a delivered child
-    result, a turn resumed after a usage limit): no block and no tool, since
-    no person is at the window. A provider session that held the block is
-    sent its standing context again once without it.
-  - A subagent (child run): neither; it receives only what its lead passes it.
+  - A local window or a paired device the host's own person approved: read and
+    change everything in Settings › Memory, and a turn either sends gets the
+    block and `octant_past_threads` under the thread's own participation rules
+    (memory on, Project not kept out, thread not Leave no trace). A device known
+    only through a hub's roster and a turn with no scope (such as a benchmark
+    runner's Chat turn) get neither.
+  - A routine's run or another turn the host starts as itself (a delivered child
+    result, a turn resumed after a usage limit, a goal round): gets the block
+    and `octant_past_threads` under the thread's own participation rules, so a
+    provider session keeps a stable standing-context prefix across person and
+    host-started turns.
+  - A subagent (child run): gets its lead thread's person-memory block once on
+    start (never duplicated on a continuation that already holds it) and
+    `octant_past_threads` scoped to its lead thread when its clamped authority
+    allows tools and its provider carries Octant's tools, so a child sees what
+    its lead sees and never more. A child whose lead is in a kept-out Project or
+    a Leave no trace thread gets neither.
+  - Only turns with the person's own message can write person memory (through
+    distillation of ended threads); routines, host-started turns, and subagents
+    read it without writing to it, and all caps stay unchanged.
   - A hub, spoke, or peer host: person memory stays on the host that wrote
     it and is never synced or relayed.
-  - A provider: sees memory only in a thread on that provider that uses it.
-    Memory learned in a thread on one provider can reach a thread on another,
-    and Settings › Memory says so in those words.
+  - A provider: sees memory only in a thread (or its subagent) on that provider
+    that uses it. Memory learned in a thread on one provider can reach a thread
+    on another, and Settings › Memory says so in those words.
 - **First run.** The first-run flow explains memory across threads and links
   to Settings › Memory without assuming that the host's current setting is on.
   The optional [Your first task capability card](design/start-screen.md#optional-capability-card-in-your-first-task)

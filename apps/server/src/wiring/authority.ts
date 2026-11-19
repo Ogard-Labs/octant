@@ -238,8 +238,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     !readDeviceApprovedByPerson(persistence.connection, String(scopeId));
   const personMemoryAccess = createPersonMemoryAccess({
     store: personMemory,
-    isPairedDeviceScope: isRestrictedDeviceScope,
-    isHostScope: isRoutineHostScope,
+    isRestrictedDeviceScope,
     projectLabel: (projectId) => persistence.readProject(decodeProjectId(projectId))?.name,
   });
   // The asks these services hold are not journaled when raised, so each says

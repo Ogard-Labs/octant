@@ -2968,3 +2968,123 @@ it("preserves an unsent follow-up for genuine resume after provider acquisition 
   expect(restored.sessions.read(run)).not.toHaveProperty("pendingContinuation");
   connection.close();
 });
+
+it("includes the lead thread's person-memory block once on start and does not send it again on a continuation", async () => {
+  const path = databasePath();
+  const connection = openSqlite(path);
+  applyMigrations(connection, MIGRATIONS, () => now);
+  const run = agentRun();
+  const durable = new AgentRunSessionStore({ connection, getById: () => run });
+  const provider = fakeProvider({ resumable: true });
+  const runtime = createAgentRunSessionRuntime(
+    runtimeOptions(provider, {
+      sessionStore: durable.sessions,
+      supportsResume: () => true,
+      personMemoryBlock: () => "What Octant remembers: prefers CSV.",
+    }),
+  );
+
+  const first = settled(runtime.start(run));
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+  expect(provider.turns[0]?.context?.filter((block) => block.kind === "person-memory")).toEqual([
+    { kind: "person-memory", text: "What Octant remembers: prefers CSV." },
+  ]);
+  await provider.emit({ kind: "text-delta", sessionId, text: "First answer", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  expect((await first).kind).toBe("completed");
+
+  const continued = runtime.resume?.(
+    { ...run, lifecycleStatus: "completed", generation: 2 },
+    { message: "Follow up on the export" },
+  );
+  if (continued === undefined) throw new Error("Missing resumed session");
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(2));
+  expect(provider.turns[1]?.context).toEqual([]);
+  await provider.emit({ kind: "text-delta", sessionId, text: "Second answer", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  expect((await settled(continued)).kind).toBe("completed");
+  connection.close();
+});
+
+it("omits the person-memory block when the lead thread does not take part and never duplicates one already in admitted context", async () => {
+  const provider = fakeProvider({
+    onSend: (emit) => {
+      void emit({ kind: "completed", sessionId });
+    },
+  });
+  const withoutMemory = createAgentRunSessionRuntime(
+    runtimeOptions(provider, {
+      personMemoryBlock: () => undefined,
+    }),
+  );
+  await settled(withoutMemory.start(agentRun()));
+  expect(provider.turns[0]?.context?.filter((block) => block.kind === "person-memory")).toEqual([]);
+
+  const secondProvider = fakeProvider({
+    onSend: (emit) => {
+      void emit({ kind: "completed", sessionId });
+    },
+  });
+  const alreadyHeld = createAgentRunSessionRuntime(
+    runtimeOptions(secondProvider, {
+      context: {
+        resolve: () => [{ kind: "person-memory", text: "Existing block." }],
+      },
+      personMemoryBlock: () => "Would duplicate.",
+    }),
+  );
+  await settled(alreadyHeld.start(agentRun()));
+  expect(
+    secondProvider.turns[0]?.context?.filter((block) => block.kind === "person-memory"),
+  ).toEqual([{ kind: "person-memory", text: "Existing block." }]);
+});
+
+it("offers octant_past_threads to a child only when its clamped authority allows tools", async () => {
+  const toolFactory = ({ authority: childAuthority }: { readonly authority: AgentRunAuthority }) =>
+    childAuthority.tools
+      ? {
+          definitions: [
+            {
+              name: "octant_past_threads",
+              description: "Search remembered past threads.",
+              inputSchema: { type: "object" },
+            },
+          ],
+          execute: async () => ({ result: { text: "No remembered thread matches." } }),
+        }
+      : undefined;
+
+  const withToolsProvider = fakeProvider({
+    onSend: (emit) => {
+      void emit({ kind: "text-delta", sessionId, text: "Checked." }).then(() =>
+        emit({ kind: "completed", sessionId }),
+      );
+    },
+  });
+  const withToolsRuntime = createAgentRunSessionRuntime(
+    runtimeOptions(withToolsProvider, {
+      appManagedTools: toolFactory,
+      appManagedToolTransport: () => "supported",
+    }),
+  );
+  await settled(withToolsRuntime.start(agentRun()));
+  expect(withToolsProvider.turns[0]?.tools?.map((tool) => tool.name)).toContain(
+    "octant_past_threads",
+  );
+
+  const withoutToolsProvider = fakeProvider({
+    onSend: (emit) => {
+      void emit({ kind: "text-delta", sessionId, text: "Checked." }).then(() =>
+        emit({ kind: "completed", sessionId }),
+      );
+    },
+  });
+  const withoutToolsRuntime = createAgentRunSessionRuntime(
+    runtimeOptions(withoutToolsProvider, {
+      appManagedTools: toolFactory,
+      appManagedToolTransport: () => "supported",
+    }),
+  );
+  await settled(withoutToolsRuntime.start(agentRun({ authority: { ...authority, tools: false } })));
+  expect(withoutToolsProvider.turns[0]?.tools).toEqual([]);
+});

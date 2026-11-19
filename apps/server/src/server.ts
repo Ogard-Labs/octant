@@ -372,6 +372,7 @@ export function startOctantServer(
       onAgentRunExecutionAccepted,
       options,
       persistence,
+      personMemoryAccess,
       providerRuntimeRegistry,
       selectCodeConversation,
       windowAuthorityStore,
