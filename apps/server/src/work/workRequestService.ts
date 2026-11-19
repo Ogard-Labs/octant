@@ -577,9 +577,7 @@ export class WorkRequestService {
       readonly providerSessionId: ProviderSessionId;
       readonly providerCallbackId: string;
     },
-    callback: (
-      settled?: { readonly person: boolean; readonly settledAt?: UtcTimestamp },
-    ) => void,
+    callback: (settled?: { readonly person: boolean; readonly settledAt?: UtcTimestamp }) => void,
   ): () => void {
     const key = settlementListenerKey(input.providerSessionId, input.providerCallbackId);
     const entry = this.#findByProviderSessionCallbackId(
@@ -599,9 +597,7 @@ export class WorkRequestService {
           : entry.settledActorKind !== undefined && entry.settledActorKind !== "agent";
       callback({
         person,
-        ...(entry.request.settledAt === undefined
-          ? {}
-          : { settledAt: entry.request.settledAt }),
+        ...(entry.request.settledAt === undefined ? {} : { settledAt: entry.request.settledAt }),
       });
       return () => undefined;
     }

@@ -485,10 +485,7 @@ export interface WorkTurnServiceDependencies {
   readonly forgeChanges?: RuntimeForgeChangeObserver;
   readonly onRequestSettled?: (
     input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
-    release: (settled?: {
-      readonly person: boolean;
-      readonly settledAt?: UtcTimestamp;
-    }) => void,
+    release: (settled?: { readonly person: boolean; readonly settledAt?: UtcTimestamp }) => void,
   ) => () => void;
   /**
    * The app-managed tools a Work turn may offer its provider. Absent on a host
