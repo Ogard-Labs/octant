@@ -108,6 +108,9 @@ const tailscaleFacts: RequestTransportFacts = {
   listenerTrust: "remote",
   sourceClass: "tailscale",
   sourceKey: "opaque-tailscale-source-key",
+  // Every test caller arrives from one tailnet address, which a new-device
+  // alert shows for a guest that reaches a spoke.
+  privateAddress: "100.101.102.250",
 };
 
 const NO_DELEGATION_HOST: PeerDelegationHost = {
@@ -825,8 +828,8 @@ export async function startHubTestHost(input: {
     record: (change) => delegationRecords.push(change),
     now: Date.now,
   });
-  const hubLink = async (request: Request) =>
-    (await hubLinkRoutes(request)) ??
+  const hubLink = async (request: Request, facts?: { readonly privateAddress?: string }) =>
+    (await hubLinkRoutes(request, facts)) ??
     (await peerDelegationRoutes(request)) ??
     (await peerCredentialRoutes(request)) ??
     (await threadMoveRoutes(request)) ??

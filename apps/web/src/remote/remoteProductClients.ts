@@ -58,6 +58,10 @@ import {
   createReplyDetailClient,
   type ReplyDetailClient,
 } from "@octant/client-runtime/reply-detail-client";
+import {
+  createNewDeviceAlertsClient,
+  type NewDeviceAlertsClient,
+} from "@octant/client-runtime/new-device-alerts-client";
 import { createBrowserHostRegistryStorage } from "../host/browserHostRegistryStorage";
 import { browserOwnerMergeUnlock, createBrowserGuestStore } from "../host/browserHubGuest";
 import { platformPasskeys } from "../host/ownerPasskey";
@@ -114,6 +118,16 @@ export function createRemoteExtensionClient(
     fetch: createRemoteProductFetch({ bridge }),
     windowCapability: NO_WINDOW_CAPABILITY,
     session,
+  });
+}
+
+/** The host's new-device alerts over the session, which every connected device reads. */
+export function createRemoteNewDeviceAlertsClient(
+  bridge: RemoteSessionBridge,
+): NewDeviceAlertsClient {
+  return createNewDeviceAlertsClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
   });
 }
 

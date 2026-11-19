@@ -42,6 +42,7 @@ import {
   holdsOnlyStatusGrant,
   hubRosterSigningPayload,
   introduceGuests,
+  newDevicePrivateAddress,
   newMemberConfirmationSigningPayload,
   reconcileHeldGrants,
   rosterMemberWebOrigin,
@@ -1520,14 +1521,18 @@ export class SpokeLinkService {
         )
       : [];
     const raisedAt = decodeTimestamp(new Date(this.#options.now()).toISOString());
-    const raised = added.map((member) => ({
-      alertId: decodeAlertId(randomUUID()),
-      memberId: member.memberId,
-      name: member.name,
-      role: member.role,
-      identityKeyFingerprint: member.identityKeyFingerprint,
-      raisedAt,
-    }));
+    const raised = added.map((member) => {
+      const privateAddress = newDevicePrivateAddress(member.addresses);
+      return {
+        alertId: decodeAlertId(randomUUID()),
+        memberId: member.memberId,
+        name: member.name,
+        role: member.role,
+        identityKeyFingerprint: member.identityKeyFingerprint,
+        raisedAt,
+        ...(privateAddress === undefined ? {} : { privateAddress }),
+      };
+    });
     const alerts = [...(link.alerts ?? []), ...raised].slice(-MAX_ALERTS);
     // A guest the roster no longer lists loses its device here. A spoke the
     // roster no longer lists is out: the hub principal is revoked and every
@@ -1602,6 +1607,8 @@ export class SpokeLinkService {
     readonly path: string;
     readonly body: string;
     readonly request: HubGuestAdmissionRequest;
+    /** The phone's private-network address from its connection, for its alert. */
+    readonly privateAddress?: string;
   }): GuestAdmission {
     this.settlePendingRevocations();
     const state = this.#options.state.load();
@@ -1673,6 +1680,15 @@ export class SpokeLinkService {
           ),
           { memberId: request.memberId, deviceId: device.deviceId },
         ],
+        // A guest names no address in the roster, so its alert learns one from
+        // the connection it is admitted over, if it has none yet.
+        alerts: (link.alerts ?? []).map((alert) =>
+          String(alert.memberId) === String(request.memberId) &&
+          alert.privateAddress === undefined &&
+          input.privateAddress !== undefined
+            ? { ...alert, privateAddress: input.privateAddress }
+            : alert,
+        ),
       },
     });
     if (existing !== undefined) {

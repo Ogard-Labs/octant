@@ -139,8 +139,64 @@ export const NewMemberAlert = Schema.Struct({
   role: HubMemberRole,
   identityKeyFingerprint: digest,
   raisedAt: UtcTimestamp,
+  /**
+   * The member's address on the private network, kept in the alert alone: the
+   * journal records that an alert was raised, never an address (maintainer
+   * decision, 2026-11-19). Absent when none is known yet, and on alerts raised
+   * before addresses were kept.
+   */
+  privateAddress: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
 }).annotations(strict);
 export type NewMemberAlert = typeof NewMemberAlert.Type;
+export const decodeNewMemberAlert = Schema.decodeUnknownSync(NewMemberAlert);
+
+/** A host's record that a device paired directly with it, kept until a window clears it. */
+export const PairedDeviceAlert = Schema.Struct({
+  alertId: NewMemberAlertId,
+  deviceId: Schema.UUID,
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  deviceKeyFingerprint: digest,
+  raisedAt: UtcTimestamp,
+  /** Its address on the private network when it paired; kept here, never in the journal. */
+  privateAddress: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+}).annotations(strict);
+export type PairedDeviceAlert = typeof PairedDeviceAlert.Type;
+
+/** A device that paired directly with this host, as every device connected to it reads it. */
+export const PairedDeviceAlertView = Schema.Struct({
+  kind: Schema.Literal("paired-device"),
+  ...PairedDeviceAlert.fields,
+}).annotations(strict);
+
+/** A spoke's new-member alert as every device connected to that host reads it. */
+export const HubMemberAlertView = Schema.Struct({
+  kind: Schema.Literal("hub-member"),
+  alertId: NewMemberAlertId,
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  role: HubMemberRole,
+  identityKeyFingerprint: digest,
+  raisedAt: UtcTimestamp,
+  privateAddress: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+}).annotations(strict);
+
+export const NewDeviceAlertView = Schema.Union(HubMemberAlertView, PairedDeviceAlertView);
+export type NewDeviceAlertView = typeof NewDeviceAlertView.Type;
+
+/** Every device connected to a host reads its new-device alerts here. */
+export const NEW_DEVICE_ALERTS_PATH = "/api/new-device-alerts";
+
+/**
+ * Every new-device alert a host holds, for any device connected to it
+ * (maintainer decision, 2026-11-19). `removesHere` says whether this caller may
+ * Remove from here: a window on the host may; every other device acts from such
+ * a window or from an owner device with an unlock.
+ */
+export const NewDeviceAlertList = Schema.Struct({
+  alerts: Schema.Array(NewDeviceAlertView),
+  removesHere: Schema.Boolean,
+}).annotations(strict);
+export type NewDeviceAlertList = typeof NewDeviceAlertList.Type;
+export const decodeNewDeviceAlertList = Schema.decodeUnknownSync(NewDeviceAlertList);
 
 /** A member a host holds status-only under Confirm new members until an owner or its window confirms it. */
 export const HeldMember = Schema.Struct({

@@ -1034,13 +1034,36 @@ the check that the new member is the person's own.
   member is accepted: its name, role, and key fingerprint, with **Remove** one
   tap away. The alert comes from each spoke itself, not from the hub, so a
   hub that adds a member cannot hide it. Decided 2026-11-19
-  ([decision H27](#decisions); designed, not built): every device connected
-  to the hub or to the host is told, not only spokes and owner devices. That
-  covers the hub, every spoke, guests (phones and browsers) and each host's
-  paired devices, whether the new device joined the hub (by code or over SSH)
-  or paired with a host. The alert names the new device and its IP address on
-  the private network, keeps the role and key fingerprint, and reaches a phone
-  as a push notification.
+  ([decision H27](#decisions)): every device connected to the hub or to the
+  host is told, not only spokes and owner devices. That covers the hub, every
+  spoke, guests (phones and browsers) and each host's paired devices, whether
+  the new device joined the hub (by code or over SSH) or paired with a host.
+  The alert names the new device and its IP address on the private network,
+  keeps the role and key fingerprint, and reaches a phone as a push
+  notification. Settled the same day:
+  - The address lives in the alert alone. A spoke takes a member's from its
+    roster entry; a guest names none there, so the spoke adds the address of
+    the connection the guest is admitted over. A host takes a directly paired
+    device's from the connection it claimed its ticket over, never from the
+    claim itself. Only a LAN or Tailscale address is kept; a public or
+    loopback one, or a hostname, never is. The journal records that an alert
+    was raised or cleared (`new-member-alerted`, and
+    `remote.device-alert-changed@1` for a direct pairing), never an address
+    or a name.
+  - Every device connected to a host reads its alerts on
+    `GET /api/new-device-alerts`: a window, a device the person paired and a
+    hub guest; an agent grant is no device and is refused. **Remove** stays
+    with a window on the host and an owner device with an unlock; any other
+    device is told where to go. A window can also dismiss a direct pairing's
+    alert, and a device that loses its standing takes its alert with it.
+  - The phone push is a new sealed "device joined" kind with its own phone
+    setting, on by default; turning it off leaves the in-app alert.
+
+  Partly built: the addresses, the read route, the direct-pairing alert, and
+  the alerts in the paired browser and the window. Not built: the phone push
+  and the phone's own list, and the hub telling its own window about a member
+  it added.
+
 - **Confirm new members (optional).** A spoke can turn on a setting that
   holds each new member at status-only until the person confirms it, after
   comparing a short code shown on the new device. They confirm either in that

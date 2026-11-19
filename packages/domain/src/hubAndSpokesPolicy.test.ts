@@ -27,6 +27,7 @@ import {
   honorOwner,
   hubRosterSigningPayload,
   mergeStandInMembership,
+  newDevicePrivateAddress,
   newMemberConfirmationSigningPayload,
   orderStandbys,
   OWNER_ADMINISTRATION_SESSION_MS,
@@ -136,6 +137,20 @@ const clampPosture = (
   });
   return result.status === "clamped" ? result.authority.posture : result.kind;
 };
+
+describe("newDevicePrivateAddress", () => {
+  it("names a new device by its private-network address and never a public one", () => {
+    expect(newDevicePrivateAddress(["fd7a:115c:a1e0::5", "100.101.102.103"])).toBe(
+      "100.101.102.103",
+    );
+    expect(newDevicePrivateAddress(["203.0.113.9", "192.168.1.20"])).toBe("192.168.1.20");
+    expect(newDevicePrivateAddress(["fd12:3456::1"])).toBe("fd12:3456::1");
+    expect(newDevicePrivateAddress(["203.0.113.9", "127.0.0.1", "spare.tail1234.ts.net"])).toBe(
+      undefined,
+    );
+    expect(newDevicePrivateAddress([])).toBe(undefined);
+  });
+});
 
 describe("clampDelegation", () => {
   it("never widens a request past the peer grant", () => {

@@ -15,6 +15,22 @@ import type {
   RosterMember,
   SignedHubRoster,
 } from "@octant/contracts";
+import { classifyRemoteListenerAddress } from "./remoteAccessPolicy";
+
+/**
+ * The address a new-device alert shows: the first private-network IP the device
+ * named, an IPv4 one before IPv6, or none. A public address, a loopback one and
+ * a hostname are never shown, so an alert can only point at the person's own
+ * network (maintainer decision, 2026-11-19).
+ */
+export function newDevicePrivateAddress(addresses: ReadonlyArray<string>): string | undefined {
+  const privateAddresses = addresses.filter((address) => {
+    const literal = /^[0-9.]+$/.test(address) || address.includes(":");
+    const kind = classifyRemoteListenerAddress(address);
+    return literal && (kind === "lan-private" || kind === "tailscale");
+  });
+  return privateAddresses.find((address) => !address.includes(":")) ?? privateAddresses[0];
+}
 
 const postureRank: Record<PeerDelegationPosture, number> = {
   plan: 0,

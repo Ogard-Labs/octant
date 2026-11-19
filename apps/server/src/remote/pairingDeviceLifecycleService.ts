@@ -83,6 +83,8 @@ interface TicketRecord {
   claimState: "unclaimed" | "claimed";
   failedAttempts: number;
   claim?: RetainedClaimFacts;
+  /** The claiming peer's private-network address, from the transport; kept in memory for the host's alert. */
+  claimedFrom?: string;
   decision?: PairingDecisionV1;
   deviceId?: DeviceId;
   /**
@@ -129,6 +131,11 @@ export interface PairingClaimResult {
   readonly comparisonCode: string;
   readonly claimedAt: string;
   readonly expiresAt: string;
+}
+
+/** What the transport, never the client, says about a claim. */
+export interface PairingClaimSource {
+  readonly privateAddress?: string;
 }
 
 export interface ApprovePairingTicketInput {
@@ -230,7 +237,7 @@ export class PairingDeviceLifecycleService {
     };
   }
 
-  claimTicket(input: unknown, nowOverride?: number): PairingClaimResult {
+  claimTicket(input: unknown, nowOverride?: number, from?: PairingClaimSource): PairingClaimResult {
     const now = nowOverride ?? this.#now();
     this.#purgeExpired(now);
     if (typeof input !== "object" || input === null) {
@@ -314,6 +321,7 @@ export class PairingDeviceLifecycleService {
     });
     record.claimState = "claimed";
     record.claim = claim;
+    if (from?.privateAddress !== undefined) record.claimedFrom = from.privateAddress;
     return {
       kind: "pending",
       ticketId: record.ticketId,
@@ -442,6 +450,10 @@ export class PairingDeviceLifecycleService {
   approveTicket(input: ApprovePairingTicketInput): {
     readonly decision: PairingDecisionV1;
     readonly device: DeviceRegistrationV1;
+    /** True only for the approval that registered the device, so its alert is raised once. */
+    readonly firstApproval: boolean;
+    /** The private-network address it claimed from, on the first approval only. */
+    readonly privateAddress?: string;
   } {
     const now = this.#now();
     this.#purgeExpired(now);
@@ -451,7 +463,7 @@ export class PairingDeviceLifecycleService {
       if (device === undefined) {
         throw new PairingDeviceLifecycleError("unavailable", "Pairing ticket is unavailable.");
       }
-      return { decision: existing.decision, device };
+      return { decision: existing.decision, device, firstApproval: false };
     }
     const record = this.#requireClaimedPending(input.ticketId, now);
     if (record.decision?.decision === "denied") {
@@ -530,7 +542,14 @@ export class PairingDeviceLifecycleService {
     // is cleared so deriveComparisonCode returns undefined. Same-decision
     // idempotency survives from decision/deviceId, not the retained claim.
     delete record.claim;
-    return { decision, device };
+    const privateAddress = record.claimedFrom;
+    delete record.claimedFrom;
+    return {
+      decision,
+      device,
+      firstApproval: true,
+      ...(privateAddress === undefined ? {} : { privateAddress }),
+    };
   }
 
   /**

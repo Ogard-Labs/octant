@@ -127,9 +127,12 @@ const SENDER_REFUSAL_STATUS: ReadonlySet<string> = new Set([
 
 export function createHubLinkRouteHandler(
   options: HubLinkRouteOptions,
-): (request: Request) => Promise<Response | undefined> {
+): (
+  request: Request,
+  facts?: { readonly privateAddress?: string },
+) => Promise<Response | undefined> {
   const memberVerifier = new HubLinkVerifier({ now: options.now ?? Date.now });
-  return async (request) => {
+  return async (request, facts) => {
     const url = new URL(request.url);
     const route = (Object.values(HUB_LINK_ROUTES) as ReadonlyArray<string>).includes(url.pathname)
       ? (url.pathname as RouteValue)
@@ -514,6 +517,7 @@ export function createHubLinkRouteHandler(
         path: route,
         body,
         request: admission,
+        ...(facts?.privateAddress === undefined ? {} : { privateAddress: facts.privateAddress }),
       });
       return admitted.status === "admitted"
         ? Response.json(

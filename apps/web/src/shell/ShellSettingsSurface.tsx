@@ -1,3 +1,4 @@
+import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
 import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
 import type { AgentGrantClient } from "@octant/client-runtime/agent-grant-client";
@@ -95,6 +96,7 @@ export interface ShellSettingsSurfaceProps {
     "manageExtensions" | "manageFlows" | "manageProfiles"
   >;
   readonly protectedFilesClient?: ProtectedFilesClient;
+  readonly newDeviceAlertsClient?: NewDeviceAlertsClient;
   readonly blockedToolsClient?: BlockedToolsClient;
   readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly sandboxScopes?: ReadonlyArray<SandboxSettingsScope>;
@@ -201,6 +203,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
               ? {}
               : { sandboxRestrictionsClient: props.sandboxRestrictionsClient })}
             {...(props.sandboxScopes === undefined ? {} : { sandboxScopes: props.sandboxScopes })}
+            {...(props.newDeviceAlertsClient === undefined
+              ? {}
+              : { newDeviceAlertsClient: props.newDeviceAlertsClient })}
             {...(props.protectedFilesClient === undefined
               ? {}
               : { protectedFilesClient: props.protectedFilesClient })}

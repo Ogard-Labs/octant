@@ -204,6 +204,32 @@ describe("PairingDeviceLifecycleService", () => {
     );
   });
 
+  it("hands the private address a device paired from to its host's alert once, and never takes one from the claim", () => {
+    const { service } = createService({
+      randomBytes: (size) => Uint8Array.from({ length: size }, (_, index) => index + 5),
+    });
+    const ticket = service.createTicket({ sourceClass: "lan-private" });
+    // An address the client names itself is refused like any other
+    // client-supplied transport fact.
+    expect(() =>
+      service.claimTicket({
+        ...claimInput(ticket.ticketId, ticket.ticketProof),
+        privateAddress: "192.168.1.99",
+      }),
+    ).toThrow(PairingDeviceLifecycleError);
+    service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof), undefined, {
+      privateAddress: "192.168.1.20",
+    });
+    const approved = service.approveTicket({ ticketId: ticket.ticketId });
+    expect(approved.firstApproval).toBe(true);
+    expect(approved.privateAddress).toBe("192.168.1.20");
+    // Approving again answers the same decision and raises nothing twice.
+    const again = service.approveTicket({ ticketId: ticket.ticketId });
+    expect(again.firstApproval).toBe(false);
+    expect(again).not.toHaveProperty("privateAddress");
+    expect(JSON.stringify(approved.device)).not.toContain("192.168.1.20");
+  });
+
   it("lists only bounded pending claim facts for local approval", () => {
     const { service } = createService({
       randomBytes: (size) => Uint8Array.from({ length: size }, (_, index) => index + 2),

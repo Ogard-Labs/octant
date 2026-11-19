@@ -1144,6 +1144,31 @@ describe("remote route policy", () => {
     expect(inspect("/api/pending-requests/defer", "POST")).toMatchObject({ maxBodyBytes: 1_024 });
   });
 
+  it("forwards the new-device alert read for every device, a hub guest included, as a read", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request("/api/new-device-alerts", {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    expect(inspect("GET")).toMatchObject({ kind: "allow", surface: "authenticated-product" });
+    expect(inspect("POST")).toMatchObject({ kind: "reject" });
+    // A catalogued read, so the product dispatch admits a hub guest too.
+    expect(
+      classifyProductAction(new Request(`${origin}/api/new-device-alerts`, { method: "GET" })),
+    ).toBe("project.overview.read");
+    expect(
+      classifyProductAction(new Request(`${origin}/api/new-device-alerts`, { method: "POST" })),
+    ).toBeUndefined();
+  });
+
   it("lets a paired device send the query an exact route declares, and refuses a query on an exact route that declares none", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string) =>

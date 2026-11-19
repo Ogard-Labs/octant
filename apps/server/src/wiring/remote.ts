@@ -119,6 +119,8 @@ import {
 } from "../agentAccess/agentAccessSession";
 import { stopAgentTurn } from "@octant/cli/agent-tools";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
+import { createNewDeviceAlertRouteHandler } from "../hub/newDeviceAlertRoutes";
+import { PairedDeviceAlerts } from "../remote/pairedDeviceAlerts";
 import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
 import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
 import { createOwnerPostureHost } from "../hub/ownerPostureHost";
@@ -506,6 +508,8 @@ export function wireRemote(deps: RemoteDependencies) {
       journal: persistence.journal,
       registrationLifetime: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).pairedDeviceLifetime,
+      onDevicePaired: (device) => pairedDeviceAlerts.raise(device),
+      onDeviceRemoved: (deviceId) => pairedDeviceAlerts.dropDevice(deviceId),
       hostId: identity.hostId,
       displayName: identity.displayName,
       serverBuildVersion: version,
@@ -579,7 +583,7 @@ export function wireRemote(deps: RemoteDependencies) {
         hubLink:
           services.hubLink ??
           (async (request, facts) =>
-            (await hubLinkRoutes(request)) ??
+            (await hubLinkRoutes(request, facts)) ??
             (await peerDelegationRoutes(request)) ??
             (await peerCredentialRoutes(request)) ??
             (await threadMoveRoutes(request)) ??
@@ -623,6 +627,15 @@ export function wireRemote(deps: RemoteDependencies) {
     options.authorityStateFiles?.hub,
   );
   const hubTransport = createPinnedHubTransport();
+  const pairedDeviceAlerts = new PairedDeviceAlerts({
+    state: hubStateStore,
+    journal: persistence.journal,
+    connection: persistence.connection,
+    hostId: () => String(resolveHubIdentity().hostId),
+    localActorId: OCTANT_LOCAL_ACTOR_ID,
+    uuid: randomUUID,
+    now: Date.now,
+  });
   let ownerBrowserAuthorityChanged: (() => void) | undefined;
   const writeHubMembership = createHubMembershipJournal({
     journal: persistence.journal,
@@ -917,6 +930,15 @@ export function wireRemote(deps: RemoteDependencies) {
   const ownerApprovalAnswerUnlock = new OwnerApprovalAnswerUnlock({
     state: hubStateStore,
     record: recordHubMembership,
+  });
+  const newDeviceAlertRoutes = createNewDeviceAlertRouteHandler({
+    memberAlerts: () => {
+      const status = spokeLinkService.status();
+      return status.membership === "member" ? status.alerts : [];
+    },
+    pairedAlerts: () => pairedDeviceAlerts.list(),
+    dismissPaired: (alertId) => pairedDeviceAlerts.dismiss(alertId),
+    windowAuthorityStore,
   });
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
@@ -2587,6 +2609,7 @@ export function wireRemote(deps: RemoteDependencies) {
     personQuitRoutes,
     supportBundleRoutes,
     hubAdministrationRoutes,
+    newDeviceAlertRoutes,
     localDeviceAdministrationRoutes,
     agentAccessAdministrationRoutes,
     agentAccessLoopbackRoutes,

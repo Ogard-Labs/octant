@@ -2736,7 +2736,15 @@ function readAlerts(rows: unknown): NewMemberAlertRow[] {
       typeof role === "string" &&
       typeof identity === "string"
     ) {
-      alerts.push({ alertId, memberId, name, role, identityKeyFingerprint: identity });
+      const privateAddress = field(entry, "privateAddress");
+      alerts.push({
+        alertId,
+        memberId,
+        name,
+        role,
+        identityKeyFingerprint: identity,
+        ...(typeof privateAddress === "string" ? { privateAddress } : {}),
+      });
     }
   }
   return alerts;
