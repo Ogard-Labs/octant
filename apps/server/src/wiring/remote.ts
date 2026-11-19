@@ -583,7 +583,7 @@ export function wireRemote(deps: RemoteDependencies) {
         hubLink:
           services.hubLink ??
           (async (request, facts) =>
-            (await hubLinkRoutes(request)) ??
+            (await hubLinkRoutes(request, facts)) ??
             (await peerDelegationRoutes(request)) ??
             (await peerCredentialRoutes(request)) ??
             (await threadMoveRoutes(request)) ??

@@ -1607,6 +1607,8 @@ export class SpokeLinkService {
     readonly path: string;
     readonly body: string;
     readonly request: HubGuestAdmissionRequest;
+    /** The phone's private-network address from its connection, for its alert. */
+    readonly privateAddress?: string;
   }): GuestAdmission {
     this.settlePendingRevocations();
     const state = this.#options.state.load();
@@ -1678,6 +1680,15 @@ export class SpokeLinkService {
           ),
           { memberId: request.memberId, deviceId: device.deviceId },
         ],
+        // A guest names no address in the roster, so its alert learns one from
+        // the connection it is admitted over, if it has none yet.
+        alerts: (link.alerts ?? []).map((alert) =>
+          String(alert.memberId) === String(request.memberId) &&
+          alert.privateAddress === undefined &&
+          input.privateAddress !== undefined
+            ? { ...alert, privateAddress: input.privateAddress }
+            : alert,
+        ),
       },
     });
     if (existing !== undefined) {

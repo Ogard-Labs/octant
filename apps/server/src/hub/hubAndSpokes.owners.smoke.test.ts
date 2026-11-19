@@ -1249,6 +1249,22 @@ describe("new-member alerts on a spoke", () => {
     });
   });
 
+  it("adds a guest phone's private address to its alert once the phone reaches the spoke", async () => {
+    const { network, hub, spoke } = await startOwnerWorld();
+    const guest = await joinGuest(hub, network, spoke, "Pocket");
+    const before = spoke.spoke.status();
+    if (before.membership !== "member") throw new Error("Not a member.");
+    // A guest names no address in the roster; the spoke learns it from the
+    // phone's own connection.
+    expect(before.alerts.find((alert) => alert.name === "Pocket")?.privateAddress).toBe(undefined);
+    expect((await guest.knock()).status).toBe("admitted");
+    const after = spoke.spoke.status();
+    if (after.membership !== "member") throw new Error("Not a member.");
+    expect(after.alerts.find((alert) => alert.name === "Pocket")?.privateAddress).toBe(
+      "100.101.102.250",
+    );
+  });
+
   it("raises an alert the hub cannot write, dismiss, or remove", async () => {
     const { network, hub, spoke, phone, authenticator } = await startOwnerWorld();
     listAsOwner(spoke, phone, authenticator);

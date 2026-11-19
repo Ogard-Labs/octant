@@ -178,7 +178,7 @@ export interface RemoteGatewayServices {
    */
   readonly hubLink?: (
     request: Request,
-    facts?: { readonly sourceKey: string },
+    facts?: { readonly sourceKey: string; readonly privateAddress?: string },
   ) => Promise<Response | undefined>;
   /**
    * An outside agent's key claim and MCP endpoint. Each request authenticates
