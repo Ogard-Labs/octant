@@ -2028,9 +2028,12 @@ export class CodeLanguageService {
       requestDeadlineMs: this.#requestDeadlineMs,
       // A frame over the cap, or one that is not a frame, ends the server.
       onViolation: () => void this.#crash(record, generation),
-      onPublishedDiagnostics: (uri, diagnostics) => {
+      onPublishedDiagnostics: (uri, diagnostics, version) => {
         const document = [...record.documents.values()].find((entry) => sameUri(entry.uri, uri));
         if (document === undefined) return;
+        // Ignore stale publications from an earlier document version so a slow
+        // push-only server never caches old diagnostics or wakes a newer waiter.
+        if (version !== undefined && version < document.version) return;
         record.pushed.set(document.uri, diagnostics);
         wakePushedWaiters(record, document.uri);
       },
@@ -2452,7 +2455,7 @@ function initializeParams(rootPath: string) {
       textDocument: {
         synchronization: { dynamicRegistration: false, didSave: false },
         diagnostic: { dynamicRegistration: false },
-        publishDiagnostics: {},
+        publishDiagnostics: { versionSupport: true },
         definition: { dynamicRegistration: false, linkSupport: true },
         references: { dynamicRegistration: true },
         rename: { dynamicRegistration: false },

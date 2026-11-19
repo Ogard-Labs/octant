@@ -5,6 +5,7 @@ import {
   decodeUtcTimestamp,
   MAX_NATIVE_HARNESS_SKILL_CHARACTERS,
   MAX_NATIVE_HARNESS_TOOL_DETAIL,
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
   NATIVE_HARNESS_TOOL_DEFINITIONS,
   NATIVE_HARNESS_TOOL_NAMES,
   decodeNativeHarnessToolArguments,
@@ -152,6 +153,11 @@ export interface NativeHarnessSkillPort {
 export type NativeHarnessEditDiagnosticsPort = (input: {
   readonly paths: ReadonlyArray<string>;
   readonly signal?: AbortSignal;
+  /**
+   * Whether attaching `diagnostics` to this edit's serialized tool result
+   * stays within the provider tool-result byte limit.
+   */
+  readonly fits?: (diagnostics: string) => boolean;
 }) => Promise<
   | {
       readonly text: string;
@@ -704,7 +710,9 @@ async function execute(
 
 /**
  * Attaches language-server diagnostics to a succeeded edit or write when a
- * server answered in time. A missing, refused, or timed-out check adds nothing.
+ * server answered in time, bounded so the full serialized tool result never
+ * exceeds the 64 KiB provider tool-result limit. A missing, refused, or
+ * timed-out check adds nothing.
  */
 async function withEditDiagnostics<T extends object>(
   outcome: T,
@@ -719,10 +727,22 @@ async function withEditDiagnostics<T extends object>(
   if (editDiagnostics === undefined || paths.length === 0) {
     return { result: outcome, isError: false };
   }
+  const fits = (diagnostics: string): boolean => {
+    try {
+      const serialized = JSON.stringify({ ...outcome, diagnostics });
+      return (
+        serialized !== undefined &&
+        Buffer.byteLength(serialized, "utf8") <= MAX_PROVIDER_TOOL_RESULT_BYTES
+      );
+    } catch {
+      return false;
+    }
+  };
   let checked: Awaited<ReturnType<NativeHarnessEditDiagnosticsPort>>;
   try {
     checked = await editDiagnostics({
       paths,
+      fits,
       ...(signal === undefined ? {} : { signal }),
     });
   } catch {
@@ -731,11 +751,60 @@ async function withEditDiagnostics<T extends object>(
   if (checked === undefined || checked.text.length === 0) {
     return { result: outcome, isError: false };
   }
+  const bounded = fits(checked.text)
+    ? { text: checked.text, retainedContent: true }
+    : boundEditDiagnosticText(checked.text, fits);
+  if (bounded === undefined) {
+    return { result: outcome, isError: false };
+  }
   return {
-    result: { ...outcome, diagnostics: checked.text },
+    result: { ...outcome, diagnostics: bounded.text },
     isError: false,
-    ...(checked.repositoryTooling === true ? { outsideContent: { labels: [] } } : {}),
+    ...(checked.repositoryTooling === true && bounded.retainedContent
+      ? { outsideContent: { labels: [] } }
+      : {}),
   };
+}
+
+/**
+ * Defense-in-depth bound for a diagnostics port that did not consult `fits`:
+ * retains as many leading lines as fit beside an explicit omission notice, or
+ * drops diagnostics when even the notice would exceed the tool-result limit.
+ */
+function boundEditDiagnosticText(
+  text: string,
+  fits: (diagnostics: string) => boolean,
+): { readonly text: string; readonly retainedContent: boolean } | undefined {
+  const lines = text.split("\n");
+  const kept: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line === undefined) continue;
+    const next = [...kept, line];
+    const omitted = lines.length - next.length;
+    const candidate =
+      omitted === 0
+        ? next.join("\n")
+        : [
+            ...next,
+            `Diagnostics omitted for ${omitted} more ${omitted === 1 ? "line" : "lines"} to keep the edit result within its size limit.`,
+          ].join("\n");
+    if (!fits(candidate)) break;
+    kept.push(line);
+  }
+  if (kept.length > 0) {
+    const omitted = lines.length - kept.length;
+    const finalText =
+      omitted === 0
+        ? kept.join("\n")
+        : [
+            ...kept,
+            `Diagnostics omitted for ${omitted} more ${omitted === 1 ? "line" : "lines"} to keep the edit result within its size limit.`,
+          ].join("\n");
+    return { text: finalText, retainedContent: true };
+  }
+  const notice = `Diagnostics omitted (${lines.length} ${lines.length === 1 ? "line" : "lines"}) to keep the edit result within its size limit.`;
+  return fits(notice) ? { text: notice, retainedContent: false } : undefined;
 }
 
 /** Says which replacement stopped the call and that nothing changed, so the model can fix that one and retry. */

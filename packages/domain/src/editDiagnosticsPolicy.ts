@@ -40,7 +40,8 @@ export function formatEditDiagnostics(
   const lines = errors.slice(0, MAX_EDIT_DIAGNOSTIC_ERRORS).map((diagnostic) => {
     const line = diagnostic.range.start.line + 1;
     const column = diagnostic.range.start.character + 1;
-    return `${diagnostic.path}:${line}:${column} ${truncateEditDiagnosticMessage(diagnostic.message)}`;
+    const displayPath = filePath.length > 0 ? filePath : diagnostic.path;
+    return `${displayPath}:${line}:${column} ${truncateEditDiagnosticMessage(diagnostic.message)}`;
   });
   if (errors.length > MAX_EDIT_DIAGNOSTIC_ERRORS) {
     lines.push(`and ${errors.length - MAX_EDIT_DIAGNOSTIC_ERRORS} more`);

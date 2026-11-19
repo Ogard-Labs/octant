@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   CODE_LANGUAGE_TOOL_NAME,
   decodeCodeProjectFilePath,
@@ -6,7 +7,11 @@ import {
   type CodeThread,
   type WindowId,
 } from "@octant/contracts";
-import { EDIT_DIAGNOSTICS_TIMEOUT_MS, formatEditDiagnostics } from "@octant/domain";
+import {
+  EDIT_DIAGNOSTICS_TIMEOUT_MS,
+  classifyPathContainment,
+  formatEditDiagnostics,
+} from "@octant/domain";
 import type {
   ExternalContentIngestionResult,
   RecordExternalContentIngestionInput,
@@ -19,20 +24,33 @@ import type { CodeLanguageAgentReadResult, CodeLanguageService } from "./codeLan
  * `editFiles`. Canonical: docs/design/language-services.md § Agent read rules.
  *
  * Reads the edited files through `CodeLanguageService.readForAgent` under one
- * shared 3.5 s budget so multi-file edits never multiply wait time. A server
- * that is running, or one the thread's access posture may start (any `static`
- * server, or a `repo-tooling` server at Full access), answers with errors only
- * (up to five `path:line:col message` lines cut to 200 characters plus
- * `and N more`, or `No errors in <file>`). Anything unavailable, refused (such
- * as an unapproved `repo-tooling` server below Full access), or past the
- * deadline adds nothing and never blocks or asks for approval. Answers from a
- * `repo-tooling` server are journaled as outside content before they are
- * attached, and withheld if the mark cannot be recorded.
+ * shared 3.5 s budget so multi-file edits never multiply wait time. Paths
+ * returned by `NativeHarnessFileSystem` are resolved against the harness
+ * filesystem root (`harnessRoot`, which may be a selected subdirectory or an
+ * approved extra working folder) and translated into main-checkout-relative
+ * paths or absolute extra-folder paths before querying `CodeLanguageService`.
+ *
+ * When attaching diagnostics to a large edit response (such as a 20-file
+ * `editFiles`), entries are bounded against `fits` before any outside-content
+ * ingestion is recorded so the edit result stays within the 64 KiB tool-result
+ * limit and `repo-tooling` provenance covers only retained entries.
  */
 
 export interface CodeEditDiagnosticsOptions {
   readonly windowId: WindowId;
   readonly thread: Pick<CodeThread, "id" | "checkoutId">;
+  /**
+   * The harness filesystem root (`active.providerRoot`) relative edit paths
+   * resolve against. Absent in tests where edited paths are already
+   * checkout-relative.
+   */
+  readonly harnessRoot?: string;
+  /**
+   * The thread's main checkout root (`active.checkoutRoot`). Used with
+   * `harnessRoot` to distinguish main-checkout subdirectories from approved
+   * extra working folders.
+   */
+  readonly mainCheckoutRoot?: string;
   readonly language: Pick<CodeLanguageService, "readForAgent">;
   readonly recordExternalContentIngestion: (
     input: RecordExternalContentIngestionInput,
@@ -53,7 +71,7 @@ export function createCodeEditDiagnostics(
   const timeoutMs = options.timeoutMs ?? EDIT_DIAGNOSTICS_TIMEOUT_MS;
   const now = options.now ?? (() => performance.now());
 
-  return async ({ paths, signal }) => {
+  return async ({ paths, signal, fits }) => {
     if (signal?.aborted === true) return undefined;
     const uniquePaths = [...new Set(paths)];
     if (uniquePaths.length === 0) return undefined;
@@ -75,8 +93,11 @@ export function createCodeEditDiagnostics(
     );
     if (present.length === 0) return undefined;
 
-    const repoToolingEntries = present.filter((entry) => entry.repositoryTooling === true);
-    let kept = present;
+    const fitted = selectFittedEntries(present, fits);
+    let kept = fitted.kept;
+    const omittedForSize = fitted.omittedForSize;
+
+    const repoToolingEntries = kept.filter((entry) => entry.repositoryTooling === true);
     let repositoryTooling = false;
     if (repoToolingEntries.length > 0) {
       const repoText = repoToolingEntries.map((entry) => entry.text).join("\n");
@@ -87,13 +108,82 @@ export function createCodeEditDiagnostics(
       } else {
         // Never leak unmarked repository-tooling output; keep any static
         // answers and let the already-written edit succeed cleanly.
-        kept = present.filter((entry) => entry.repositoryTooling !== true);
+        kept = kept.filter((entry) => entry.repositoryTooling !== true);
       }
     }
-    if (kept.length === 0) return undefined;
-    const text = kept.map((entry) => entry.text).join("\n");
+
+    const text = formatDiagnosticsWithNotice(kept, omittedForSize);
+    if (text.length === 0) return undefined;
+    if (fits !== undefined && !fits(text)) return undefined;
     return repositoryTooling ? { text, repositoryTooling: true } : { text };
   };
+}
+
+/**
+ * Translates a path returned by `NativeHarnessFileSystem` (relative to
+ * `harnessRoot`, or absolute for an extra root) into the path
+ * `CodeLanguageService.readForAgent` expects: relative to `mainCheckoutRoot`
+ * when inside the main checkout, or an absolute POSIX path when inside an
+ * approved extra folder.
+ */
+function resolveLanguagePath(
+  filePath: string,
+  harnessRoot: string | undefined,
+  mainCheckoutRoot: string | undefined,
+): CodeRelativePath | undefined {
+  try {
+    if (harnessRoot === undefined) {
+      return decodeCodeProjectFilePath(filePath);
+    }
+    const absolute = isAbsolute(filePath) ? resolve(filePath) : resolve(harnessRoot, filePath);
+    const checkoutRoot = mainCheckoutRoot ?? harnessRoot;
+    if (classifyPathContainment(checkoutRoot, absolute) === "contained") {
+      const rel = relative(checkoutRoot, absolute).split(sep).join("/");
+      if (rel === "" || rel === ".") return undefined;
+      return decodeCodeProjectFilePath(rel);
+    }
+    return decodeCodeProjectFilePath(absolute.split(sep).join("/"));
+  } catch {
+    return undefined;
+  }
+}
+
+function selectFittedEntries(
+  entries: ReadonlyArray<FormattedFileDiagnostics>,
+  fits: ((diagnostics: string) => boolean) | undefined,
+): {
+  readonly kept: ReadonlyArray<FormattedFileDiagnostics>;
+  readonly omittedForSize: number;
+} {
+  if (fits === undefined) return { kept: entries, omittedForSize: 0 };
+  const full = entries.map((entry) => entry.text).join("\n");
+  if (fits(full)) return { kept: entries, omittedForSize: 0 };
+
+  const kept: FormattedFileDiagnostics[] = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (entry === undefined) continue;
+    const next = [...kept, entry];
+    const omitted = entries.length - next.length;
+    if (!fits(formatDiagnosticsWithNotice(next, omitted))) break;
+    kept.push(entry);
+  }
+  return { kept, omittedForSize: entries.length - kept.length };
+}
+
+function formatDiagnosticsWithNotice(
+  kept: ReadonlyArray<FormattedFileDiagnostics>,
+  omittedForSize: number,
+): string {
+  const parts = kept.map((entry) => entry.text);
+  if (omittedForSize > 0) {
+    const noun = omittedForSize === 1 ? "file" : "files";
+    const prefix = kept.length > 0 ? "more " : "";
+    parts.push(
+      `Diagnostics omitted for ${omittedForSize} ${prefix}${noun} to keep the edit result within its size limit.`,
+    );
+  }
+  return parts.join("\n");
 }
 
 async function checkFile(input: {
@@ -106,12 +196,12 @@ async function checkFile(input: {
   if (input.signal?.aborted === true) return undefined;
   const remainingMs = input.deadline - input.now();
   if (remainingMs <= 0) return undefined;
-  let decodedPath: CodeRelativePath;
-  try {
-    decodedPath = decodeCodeProjectFilePath(input.filePath);
-  } catch {
-    return undefined;
-  }
+  const decodedPath = resolveLanguagePath(
+    input.filePath,
+    input.options.harnessRoot,
+    input.options.mainCheckoutRoot,
+  );
+  if (decodedPath === undefined) return undefined;
   const read = input.options.language
     .readForAgent(
       input.options.windowId,

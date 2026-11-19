@@ -649,12 +649,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       | ((input: {
           readonly windowId: WindowId;
           readonly thread: CodeThread;
+          readonly harnessRoot: string;
+          readonly mainCheckoutRoot: string;
         }) => NativeHarnessEditDiagnosticsPort | undefined)
       | undefined;
     const registerCodeEditDiagnostics = (
       factory: (input: {
         readonly windowId: WindowId;
         readonly thread: CodeThread;
+        readonly harnessRoot: string;
+        readonly mainCheckoutRoot: string;
       }) => NativeHarnessEditDiagnosticsPort | undefined,
     ): void => {
       codeEditDiagnosticsFactory = factory;
@@ -1167,6 +1171,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           const editDiagnostics = codeEditDiagnosticsFactory?.({
             windowId: input.windowId,
             thread: input.thread,
+            harnessRoot: input.checkoutRoot,
+            mainCheckoutRoot: input.mainCheckoutRoot ?? input.checkoutRoot,
           });
           return nativeHarnessComposition.forCode({
             ...input,

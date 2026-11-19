@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   MAX_NATIVE_HARNESS_SKILL_CHARACTERS,
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
   decodeNativeHarnessContextRemaining,
   type ProviderExecutionPolicy,
   type ToolActionAuthority,
@@ -907,6 +908,37 @@ describe("native harness tools", () => {
           diagnostics: "a.rs:1:1 mismatched types",
         },
         outsideContent: { labels: [] },
+      });
+    });
+
+    it("bounds oversized diagnostic text to keep the serialized edit result within 64 KiB", async () => {
+      const oversizedLines = Array.from(
+        { length: 400 },
+        (_, index) => `src/file.ts:${index + 1}:1 ${"x".repeat(200)}`,
+      ).join("\n");
+      const { tools } = await fixture(
+        {},
+        {
+          editDiagnostics: async () => ({
+            text: oversizedLines,
+            repositoryTooling: true,
+          }),
+        },
+      );
+      const written = await call(tools, "write", {
+        path: "big.ts",
+        content: "export const a = 1;\n",
+      });
+      expect(written.isError).toBe(false);
+      expect(Buffer.byteLength(JSON.stringify(written.result), "utf8")).toBeLessThanOrEqual(
+        MAX_PROVIDER_TOOL_RESULT_BYTES,
+      );
+      expect(written.result).toMatchObject({
+        kind: "written",
+        path: "big.ts",
+        diagnostics: expect.stringMatching(
+          /Diagnostics omitted for \d+ more lines? to keep the edit result within its size limit\.$/,
+        ),
       });
     });
   });

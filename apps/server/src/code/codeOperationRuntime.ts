@@ -758,6 +758,8 @@ export interface CodeOperationRuntimeOptions {
   readonly nativeHarnessTools?: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
+    /** The main checkout root when `checkoutRoot` is a selected subdirectory or extra folder. */
+    readonly mainCheckoutRoot?: string;
     readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
     /** The turn's resolved credential values, which a journal read redacts. */
@@ -6180,6 +6182,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
           checkoutRoot: active.providerRoot,
+          mainCheckoutRoot: active.checkoutRoot,
           ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           windowId: active.windowId,
           secrets: active.secrets,
