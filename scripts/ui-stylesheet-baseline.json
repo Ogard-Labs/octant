@@ -9,7 +9,7 @@
     "apps/web/src/styles/octant.css": 4
   },
   "important": {
-    "apps/web/src/styles/code.css": 1,
+    "apps/web/src/styles/code-overview.css": 1,
     "apps/web/src/styles/octant.css": 1,
     "apps/web/src/styles/project-threads.css": 3
   },

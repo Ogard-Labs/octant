@@ -1,3 +1,4 @@
+import "../styles/validation-evidence.css";
 import type {
   ValidationEvidenceSnapshot,
   ValidationOutcome,

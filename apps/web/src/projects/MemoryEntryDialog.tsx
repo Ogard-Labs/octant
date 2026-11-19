@@ -1,3 +1,4 @@
+import "../styles/project-memory.css";
 import type { MemoryEntryId, MemoryKind } from "@octant/contracts/projects";
 import { useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";

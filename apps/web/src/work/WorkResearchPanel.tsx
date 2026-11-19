@@ -1,3 +1,4 @@
+import "../styles/work-overview.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useState } from "react";
 import type { WorkResearchBriefView } from "@octant/client-runtime/work-research-client";

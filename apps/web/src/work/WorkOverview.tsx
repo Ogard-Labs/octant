@@ -1,3 +1,4 @@
+import "../styles/work-overview.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { attachAllowingFiles } from "../composer/attachmentMediaType";
 import {

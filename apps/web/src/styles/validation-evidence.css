@@ -1,0 +1,114 @@
+/* ── Validation evidence ──────────────────────────────────────────────── */
+
+.validation-qa {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 1.5rem;
+  background: var(--octant-workspace);
+  color: var(--octant-text-primary);
+}
+
+.validation-qa__header {
+  display: flex;
+  max-width: 60rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.validation-pane {
+  display: grid;
+  min-width: 0;
+  max-width: 60rem;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-surface-raised);
+}
+
+.validation-pane__header,
+.validation-pane__step,
+.validation-pane__timeline-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.validation-pane__steps,
+.validation-pane__timeline {
+  display: grid;
+  min-width: 0;
+  gap: 0.6rem;
+}
+
+.validation-pane__step,
+.validation-pane__timeline-entry {
+  min-width: 0;
+  padding: 0.7rem;
+  border-radius: var(--oct-radius-sm);
+  background: var(--octant-surface-muted);
+}
+
+.validation-pane__step-content,
+.validation-pane__timeline-content {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.25rem;
+}
+
+.validation-pane__step-meta,
+.validation-pane__timeline-time,
+.validation-pane__timeline-redacted {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+
+.validation-pane__timeline-ref,
+.validation-pane__timeline-detail {
+  overflow-wrap: anywhere;
+}
+
+.validation-pane__timeline-detail {
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.validation-pane__icon {
+  flex: 0 0 auto;
+}
+
+.validation-pane__icon--passed {
+  color: var(--octant-success-text);
+}
+
+.validation-pane__icon--failed,
+.validation-pane--denied .validation-pane__header {
+  color: var(--octant-danger-text);
+}
+
+.validation-pane__icon--inconclusive,
+.validation-pane__icon--interrupted,
+.validation-pane--stale .validation-pane__header,
+.validation-pane--superseded .validation-pane__header {
+  color: var(--octant-warning-text);
+}
+
+@media (max-width: 600px) {
+  .validation-qa {
+    padding: 0.75rem;
+  }
+
+  .validation-pane__timeline-entry {
+    flex-wrap: wrap;
+  }
+
+  .validation-pane__timeline-time {
+    width: 100%;
+    padding-left: 1.55rem;
+  }
+}
