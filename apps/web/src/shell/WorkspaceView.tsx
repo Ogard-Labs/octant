@@ -120,11 +120,9 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useChatController } from "../chat/useChatController";
 import type { ChatController, ChatReadCursorStore } from "../chat/useChatController";
 import { ChatWelcome } from "../chat/ChatWelcome";
-import { ChatProjectOverview } from "../chat/ChatProjectOverview";
 import type { CodeController } from "../code/useCodeController";
 import { useCodeThreadController, type CodeThreadControllers } from "../code/codeThreadControllers";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { CodeOverview } from "../code/CodeOverview";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
 import type { WorkTurnId } from "@octant/contracts/work-turns";
@@ -181,7 +179,6 @@ import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { WorkPromotionController } from "../work/useWorkPromotionController";
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
-import { ProjectCanvasInventory } from "../projects/ProjectCanvasInventory";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
 import type { DraftRecentThread } from "./DraftThreadWorkspace";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -218,6 +215,19 @@ const CodeThreadEnvironment = lazy(() =>
 const WorkThreadEnvironment = lazy(() =>
   import("../environment/WorkThreadEnvironment").then((module) => ({
     default: module.WorkThreadEnvironment,
+  })),
+);
+const ChatProjectOverview = lazy(() =>
+  import("../chat/ChatProjectOverview").then(({ ChatProjectOverview }) => ({
+    default: ChatProjectOverview,
+  })),
+);
+const CodeOverview = lazy(() =>
+  import("../code/CodeOverview").then(({ CodeOverview }) => ({ default: CodeOverview })),
+);
+const ProjectCanvasInventory = lazy(() =>
+  import("../projects/ProjectCanvasInventory").then(({ ProjectCanvasInventory }) => ({
+    default: ProjectCanvasInventory,
   })),
 );
 const ProjectOverview = lazy(() =>

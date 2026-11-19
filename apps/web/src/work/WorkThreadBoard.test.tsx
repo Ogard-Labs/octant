@@ -15,7 +15,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const srcDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const stylesCss = readFileSync(resolve(srcDir, "styles.css"), "utf-8");
+const boardCss = readFileSync(resolve(srcDir, "styles/board.css"), "utf-8");
 const octantCss = readFileSync(resolve(srcDir, "styles/octant.css"), "utf-8");
 
 const projectA = "00000000-0000-4000-8000-0000000060a1" as ProjectId;
@@ -421,8 +421,8 @@ describe("WorkThreadBoard", () => {
   });
 
   it("keeps the board body horizontally scrollable instead of overflowing the page", async () => {
-    expect(stylesCss).toMatch(/\.code-board__body\s*\{[^}]*overflow-x:\s*auto[^}]*\}/s);
-    expect(stylesCss).not.toMatch(/\.code-board__body\s*\{[^}]*overflow-y:\s*hidden[^}]*\}/s);
+    expect(boardCss).toMatch(/\.code-board__body\s*\{[^}]*overflow-x:\s*auto[^}]*\}/s);
+    expect(boardCss).not.toMatch(/\.code-board__body\s*\{[^}]*overflow-y:\s*hidden[^}]*\}/s);
     expect(octantCss).toMatch(/\.board\s*\{[^}]*overflow:\s*visible[^}]*\}/s);
     // Under ~1100px the columns keep a readable width and the body scrolls.
     expect(octantCss).toMatch(
@@ -446,7 +446,7 @@ describe("WorkThreadBoard", () => {
     expect(octantCss).toMatch(/\.board-card-title\s*\{[^}]*overflow:\s*hidden[^}]*\}/s);
     expect(octantCss).toMatch(/\.board-card-title\s*\{[^}]*-webkit-line-clamp:\s*2[^}]*\}/s);
     expect(octantCss).toMatch(/\.board-card-facts\s*\{[^}]*flex-wrap:\s*wrap[^}]*\}/s);
-    expect(stylesCss).toMatch(
+    expect(boardCss).toMatch(
       /\.code-board__card-open\s*\{[^}]*justify-content:\s*flex-start[^}]*text-align:\s*left[^}]*\}/s,
     );
 

@@ -14,6 +14,7 @@ import "../styles/debug.css";
 import "../styles/canvas-dashboard.css";
 import "../styles/remote-pairing.css";
 import "../styles/remote-shell.css";
+import "../styles/artifacts.css";
 import "../styles/project-overview.css";
 import "../styles/board.css";
 import "../styles/provider-settings.css";
@@ -21,6 +22,8 @@ import "../styles/shell.css";
 import "../styles/dock.css";
 import "../styles/panels.css";
 import "../styles/environment.css";
+import "../styles/thread-move-computer.css";
+import "../styles/prepare-to-shut-down.css";
 import "../styles/settings.css";
 // The shared component/material layer loads last, as it does in the app.
 import "../styles/components.css";

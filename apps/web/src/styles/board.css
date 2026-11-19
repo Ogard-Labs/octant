@@ -387,3 +387,420 @@ ul.board-col-body {
   flex: none;
   align-items: center;
 }
+
+.code-board__status-filter {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* The Board search is the shared toolbar field (surface.css). A second frame
+   here zeroed the input's padding, so the magnifier sat on top of the
+   placeholder, and drew an accent ring on focus. */
+
+.code-board__filters {
+  display: flex;
+}
+
+.code-board__filters-toggle {
+  gap: var(--oct-space-1);
+  height: var(--oct-rail-button-h);
+  padding: 0 12px;
+  color: var(--oct-fg-2);
+}
+
+.code-board__filters-toggle[aria-expanded="true"],
+.code-board__filters-toggle[data-active="true"],
+.code-board__filters-toggle:hover {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+.code-board__filters-toggle:active {
+  background: var(--oct-wash-pressed);
+}
+
+.code-board__filter-count {
+  min-width: 18px;
+  padding: 0 var(--oct-space-2);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
+  line-height: 18px;
+  text-align: center;
+  color: var(--oct-accent-on);
+  background: var(--oct-accent);
+}
+
+.code-board__view-popover {
+  position: absolute;
+  top: calc(100% + var(--oct-space-1));
+  right: 0;
+  left: auto;
+  max-width: 100%;
+  z-index: 6;
+}
+
+.code-board__filters-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+  width: 440px;
+  max-height: calc(100vh - 220px);
+  padding: var(--oct-space-3);
+  overflow-y: auto;
+}
+
+.code-board__filters-panel legend,
+.code-board__filter-fields label > span:first-child {
+  margin-bottom: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--oct-muted);
+}
+
+.code-board__filters-panel legend {
+  display: block;
+  padding: 0;
+}
+
+.code-board__status-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}
+
+.code-board__status-option {
+  position: relative;
+  display: flex;
+  cursor: default;
+}
+
+.code-board__status-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.code-board__status-option > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1) var(--oct-space-3) var(--oct-space-1) 8px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-muted);
+  background: transparent;
+  font-size: var(--oct-text-detail);
+  line-height: 1.3;
+}
+
+.code-board__status-option > span .st {
+  opacity: 0.45;
+}
+
+.code-board__status-option input:checked + span {
+  color: var(--oct-fg);
+  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
+  background: var(--oct-fg-soft);
+}
+
+.code-board__status-option input:checked + span .st {
+  opacity: 1;
+}
+
+.code-board__filter-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--oct-space-2) var(--oct-space-3);
+}
+
+.code-board__filter-fields label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.code-board__filters-panel select {
+  width: 100%;
+  min-width: 0;
+  padding: var(--oct-space-2) 8px;
+  font-size: var(--oct-text-sm);
+  color: var(--oct-fg);
+  background: var(--oct-bg);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.code-board__filters-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-border);
+}
+
+.code-board__view-options {
+  display: flex;
+  flex-direction: column;
+}
+
+.code-board__view-toggle {
+  display: inline-flex;
+  height: var(--oct-rail-button-h);
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-2);
+}
+
+/* Every control on the Board toolbar is one 28px rail control: the Board
+   and Group segmented choices, the search, Filters, Refresh, and View. The
+   segmented track keeps a 2px inset around 24px items so it lands on the
+   same height as the buttons beside it. */
+.code-board .surface-toolbar > button {
+  height: var(--oct-rail-button-h);
+  min-height: var(--oct-rail-button-h);
+}
+
+.code-board .surface-toolbar [data-slot="toggle-group"] {
+  padding: 2px;
+}
+
+.code-board .surface-toolbar [data-slot="toggle-group-item"] {
+  height: calc(var(--oct-rail-button-h) - 4px);
+  min-height: 0;
+}
+
+.code-board__view-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.code-board__card-details summary {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  cursor: default;
+  list-style: none;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-detail);
+}
+
+.code-board__card-details summary:hover {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+.code-board__card-details summary:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
+.code-board__view-popover {
+  display: grid;
+  left: auto;
+  right: 0;
+  min-width: 220px;
+  padding: var(--oct-space-2);
+  gap: var(--oct-space-2);
+}
+
+.code-board__view-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.code-board__view-label {
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-detail);
+}
+
+.code-board__view-popover label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+}
+
+.code-board__active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin: 0 0 var(--oct-space-3);
+}
+
+/*
+ * The four status columns share the board's width. Below the point where
+ * four readable columns no longer fit, the body scrolls sideways on its own
+ * so the page never grows a horizontal scrollbar; vertical scrolling stays
+ * inside each column.
+ */
+.code-board__body {
+  padding: 0 0 var(--oct-space-6);
+  overflow-x: auto;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.code-board__body[data-grouping="project"] {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.code-board .code-board__card-details {
+  margin-top: var(--oct-space-1);
+}
+
+.code-board .code-board__card-details summary,
+.code-board .code-board__card-meta {
+  font-family: var(--oct-font-display);
+}
+
+/* the whole card title is the click target; the system card supplies all
+   chrome, so the button contributes none of its own */
+.code-board__card-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.code-board__card-details {
+  margin-top: var(--oct-space-1);
+}
+
+.code-board__card-details summary {
+  width: fit-content;
+  padding: 2px var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-detail);
+  color: var(--oct-muted);
+}
+
+.code-board__card-details[open] summary {
+  color: var(--oct-fg);
+}
+
+.code-board__card-meta {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: var(--oct-space-2) 0 0;
+  padding: 0 var(--oct-space-2) 4px;
+  font-size: var(--oct-text-detail);
+  color: var(--oct-fg-2);
+}
+
+.code-board__card-meta div {
+  display: flex;
+  gap: var(--oct-space-1);
+}
+
+.code-board__card-meta dt {
+  min-width: 84px;
+  color: var(--oct-muted);
+}
+
+.code-board__card-meta dd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin: 0;
+  color: var(--oct-fg);
+}
+
+/* One line under the toolbar for refresh, error, and empty-board notices;
+   the columns underneath keep their shape either way. */
+.code-board__note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  margin: 0 0 var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+}
+
+.code-board__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-4);
+}
+
+.code-board__list-group {
+  min-width: 0;
+}
+
+.code-board__list-head {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3) 0 8px;
+  margin-bottom: var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.code-board__list-head > .oct-section-label {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.code-board__list-head .count {
+  margin-left: auto;
+}
+
+.code-board__list .issuelist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.code-board__list .issuerow {
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.code-board__list .issuerow .issuerow-title,
+.code-board__list .issuerow .issuerow-meta {
+  font-family: var(--oct-font-display);
+}
+
+.code-board__body[data-layout="list"] {
+  overflow: auto;
+}
+
+/* Narrow viewports collapse the board into a vertically-scrolled grouped
+   list; wide but zoomed viewports keep the horizontal kanban columns. */
+@media (max-width: 560px) {
+  .code-board__search {
+    order: 1;
+    flex: 1 1 100%;
+    min-width: auto;
+    max-width: none;
+  }
+
+  .code-board__filters {
+    order: 3;
+  }
+
+  .code-board__view-options {
+    order: 4;
+  }
+
+  .code-board__filter-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .code-board__body {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+}

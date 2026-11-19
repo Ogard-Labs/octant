@@ -1,3 +1,4 @@
+import "../../styles/prepare-to-shut-down.css";
 import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 import {
   SHUTDOWN_BATCH_MAX,

@@ -1,3 +1,4 @@
+import "../styles/artifacts.css";
 import type {
   ArtifactMirrorDestination,
   ArtifactMirrorProjectStatus,
