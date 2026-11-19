@@ -731,8 +731,7 @@ local window approves it for a checkout or the Code Project (a journaled
 `POST /api/code/language/approvals`, which a device the host's own person
 paired also answers and is journaled for; maintainer decision, 2026-11-12),
 with no approval at Full access, read from the level the turn runs at
-([the Full access rule](#security-and-authority); not built yet: today the
-approval is asked at every level), never in Plan or for any other
+([the Full access rule](#security-and-authority); built), never in Plan or for any other
 device session,
 may then write the checkout and run programs as a terminal does, and reaches
 the network through its own `proxied` egress proxy under the Project's rules,
@@ -750,13 +749,14 @@ Agents read the same servers through one read-only app-managed tool,
 `octant_code` (`code-language` in the closed catalog), whose `diagnostics`,
 `definition`, and `references` operations are allowed in Plan and ask nothing.
 It is offered on a Code turn whose provider carries Octant's tools only when a
-server an agent may start (`static` and effective, so the Settings switch is
-honoured) covers a file a bounded scan finds in the turn's checkout or extra
-folders, or a server that runs repository tooling is already running there
-for a turn outside Plan. It reads the saved file, never an editor's draft,
-returns at most 200 references, never starts a server that runs
-repository tooling, and reads through one only while it is already approved
-and running, outside Plan, marking that answer as outside content
+server an agent may start (`static` and effective, or `repo-tooling` at Full
+access, so the Settings switch is honoured) covers a file a bounded scan finds
+in the turn's checkout or extra folders, or an approved server that runs
+repository tooling is already running there for a turn outside Plan. It reads
+the saved file, never an editor's draft, returns at most 200 references, starts
+a `repo-tooling` server with no approval at Full access, and below Full access
+never starts one and reads through one only while it is already approved and
+running, outside Plan, marking that answer as outside content
 (maintainer request, 2026-11-12)
 ([agent read rules](design/language-services.md#agent-read-rules)).
 The debugger's seam and session host are built: the `debug-adapter`

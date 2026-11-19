@@ -46,6 +46,7 @@ import {
 import type { ExtensionLanguageServerClass } from "@octant/contracts/extensions";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import {
+  actsAsHostPerson,
   decideAgentReadThroughRepositoryTooling,
   decideLanguageServerLaunch,
   type LanguageServerHostPlatform,
@@ -394,6 +395,16 @@ interface ServerRecord {
   watch: AbortController | undefined;
   readonly documents: Map<string, OpenDocument>;
   readonly pushed: Map<string, ReadonlyArray<unknown>>;
+  /**
+   * Window/thread pairs that authorized this `repo-tooling` server at Full
+   * access without a recorded approval. Re-checked against live effective
+   * posture on crash restarts and sweeps so leaving Full access or revoking
+   * the window stops an unapproved server.
+   */
+  readonly fullAccessScopes: Map<
+    string,
+    { readonly scopeId: WindowId; readonly threadId: CodeThreadId }
+  >;
   crashTimes: number[];
   lastActivity: number;
 }
@@ -1016,14 +1027,14 @@ export class CodeLanguageService {
   /**
    * Whether an agent's language read could be answered for any file of these
    * folders, judged when a Code turn's tools are composed. Either some server
-   * effective now that an agent may start (`static`) covers a file a bounded
-   * scan finds there, or a `repo-tooling` server the person started is
-   * running on one of the folders for a turn outside Plan, since an agent
-   * reads through one but never starts it. The Settings switch and the
-   * Project's toolchain setting are read through the effective set, so a
-   * bundled server turned off, or replaced by the Project's own copy, covers
-   * nothing as `static`. It decides only whether the tool is offered; every
-   * read is still checked as it runs.
+   * effective now that an agent may start (`static`, or `repo-tooling` at Full
+   * access) covers a file a bounded scan finds there, or an approved
+   * `repo-tooling` server the person started is running on one of the folders
+   * for a turn outside Plan. The Settings switch and the Project's toolchain
+   * setting are read through the effective set, so a bundled server turned off
+   * or replaced by the Project's own copy covers nothing as `static`. It
+   * decides only whether the tool is offered; every read is still checked as
+   * it runs.
    */
   servesAgentsIn(
     folders: ReadonlyArray<string>,
@@ -1046,16 +1057,19 @@ export class CodeLanguageService {
           record.component.launchClass === "repo-tooling" &&
           record.state === "ready" &&
           String(record.projectId) === String(turn.projectId) &&
-          folders.includes(record.rootPath)
+          folders.includes(record.rootPath) &&
+          (turn.posture === "full-access" ||
+            this.#approvalHolds(record.projectId, record.checkoutId, record.component))
         )
           return true;
       }
     }
     const components =
       turn === undefined ? this.#components() : this.#componentsFor(turn.projectId);
+    const canStartRepositoryTooling = turn?.posture === "full-access";
     const languages = new Set(
       components
-        .filter((component) => component.launchClass === "static")
+        .filter((component) => component.launchClass === "static" || canStartRepositoryTooling)
         .flatMap((component) => component.languages),
     );
     if (languages.size === 0) return false;
@@ -1076,13 +1090,14 @@ export class CodeLanguageService {
    * it answers `unsaved-edits`, so the person's draft is neither replaced nor
    * read out to a provider.
    *
-   * The launch decision is asked, on every read, as a request the person at
-   * the machine did not make, as a paired device's is: an agent can start a
-   * `static` server and never starts one that runs repository tooling. It
-   * reads through such a server only while one the person started is running
-   * under an approval that still covers it, outside Plan, and that answer is
-   * marked `repositoryTooling`. It never resets the crash budget either;
-   * reopening in the editor stays the person's retry.
+   * The launch decision is asked on every read as an agent request: an agent
+   * can always start a `static` server, starts a `repo-tooling` server with no
+   * approval at Full access (read from the thread's effective turn posture),
+   * and below Full access reads through a `repo-tooling` server only while one
+   * the person started is running under an approval that still covers it,
+   * outside Plan. Any answer from a `repo-tooling` server is marked
+   * `repositoryTooling`. It never resets the crash budget either; reopening in
+   * the editor stays the person's retry.
    */
   async readForAgent(
     scopeId: WindowId,
@@ -1342,10 +1357,13 @@ export class CodeLanguageService {
             String(thread.checkoutId) === String(record.checkoutId) && isActiveThread(thread),
         ) &&
         current !== undefined &&
-        // A `repo-tooling` server runs only while an approval covers the
-        // package state it runs as now.
+        current.approvalKey === record.component.approvalKey &&
+        // A `repo-tooling` server runs only while an approval covers its
+        // package state or an active thread on its checkout still holds Full
+        // access.
         (current.launchClass === "static" ||
-          this.#approvalHolds(record.projectId, record.checkoutId, current));
+          this.#approvalHolds(record.projectId, record.checkoutId, current) ||
+          this.#fullAccessHolds(record));
       const idle = record.documents.size === 0 && now - record.lastActivity >= this.#idleMs;
       if (!live || idle) stops.push(this.#retire(record));
     }
@@ -1364,7 +1382,7 @@ export class CodeLanguageService {
     caller: CodeLanguageCaller,
     request: CodeLanguageApprovalRequest,
   ): Promise<CodeLanguageApprovalResult> {
-    if (caller.principal !== "local-window") {
+    if (!actsAsHostPerson(caller.principal)) {
       return { status: "refused", reason: "local-host-required" };
     }
     const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
@@ -1560,11 +1578,15 @@ export class CodeLanguageService {
     const { component } = chosen;
     const sandbox = sandboxToolPolicy() ?? activeSandboxPolicy(String(authorized.thread.id));
     const key = `${serverKey(authorized.checkout.id, component, extraFolder ? rootPath : undefined)}${sandbox === undefined ? "" : `:sandbox:${sandbox.context.sessionId}`}`;
-    if (intent === "agent-read" && component.launchClass === "repo-tooling") {
-      // An agent reads through this class only as it stands: nothing here
-      // starts, restarts, or retargets a server, so one that is stopped,
-      // crashed, mid-start, on another folder, or running a package state
-      // other than the effective one is the same as none.
+    if (
+      intent === "agent-read" &&
+      component.launchClass === "repo-tooling" &&
+      authorized.thread.executionPolicy !== "full-access"
+    ) {
+      // Below Full access an agent reads through this class only as it stands:
+      // nothing here starts, restarts, or retargets a server, so one that is
+      // stopped, crashed, mid-start, on another folder, or running a package
+      // state other than the effective one is the same as none.
       const running = this.#servers.get(key);
       const usable =
         running !== undefined &&
@@ -1590,7 +1612,7 @@ export class CodeLanguageService {
         ? { status: "refused", reason: "local-host-required" }
         : { status: "served", record: running };
     }
-    // Decided on every request, not only at the start: a paired device or a
+    // Decided on every request, not only at the start: a remote device or a
     // Plan thread is refused a running `repo-tooling` server too, because
     // what it opens is what the server then runs the repository's tooling on.
     const decision = decideLanguageServerLaunch({
@@ -1598,7 +1620,7 @@ export class CodeLanguageService {
       posture: authorized.thread.executionPolicy,
       platform: this.#platform,
       strict: this.#strictOf(authorized.thread.id),
-      startedBy: caller.principal,
+      startedBy: intent === "agent-read" ? "agent" : caller.principal,
       shellCommandApproval:
         component.launchClass === "repo-tooling" &&
         this.#approvalHolds(authorized.thread.projectId, authorized.checkout.id, component)
@@ -1608,9 +1630,13 @@ export class CodeLanguageService {
     if (decision.status === "refused") return decision;
 
     let record = this.#servers.get(key);
-    if (record !== undefined && rootPath !== undefined && record.rootPath !== rootPath) {
-      // The checkout now resolves somewhere else; the old server reads the
-      // old place and must not serve this one.
+    if (
+      record !== undefined &&
+      ((rootPath !== undefined && record.rootPath !== rootPath) ||
+        record.component.approvalKey !== component.approvalKey)
+    ) {
+      // The checkout moved or the package changed; the old server serves
+      // neither the new place nor the new package state.
       await this.#retire(record);
       record = undefined;
     }
@@ -1640,6 +1666,7 @@ export class CodeLanguageService {
         watch: undefined,
         documents: new Map(),
         pushed: new Map(),
+        fullAccessScopes: new Map(),
         crashTimes: [],
         lastActivity: this.#now(),
       };
@@ -1648,6 +1675,15 @@ export class CodeLanguageService {
         const owned = record;
         registerSandboxCleanup(sandbox, () => this.#retire(owned));
       }
+    }
+    if (
+      component.launchClass === "repo-tooling" &&
+      authorized.thread.executionPolicy === "full-access"
+    ) {
+      record.fullAccessScopes.set(`${String(caller.scopeId)}:${String(authorized.thread.id)}`, {
+        scopeId: caller.scopeId,
+        threadId: authorized.thread.id,
+      });
     }
     // A server whose output has ended is gone even before its exit is
     // reported; counting that now keeps a request from being served by the
@@ -1745,18 +1781,51 @@ export class CodeLanguageService {
   }
 
   /**
-   * Whether this server may start now: a `repo-tooling` one only while an
-   * approval covers its package state as it is now, not as it was when the
-   * record was made.
+   * Whether this server may start now: a `repo-tooling` one only while its
+   * package state is still the effective one and either an approval covers it
+   * or an active thread on its checkout still holds Full access.
    */
   #startCovered(record: ServerRecord): boolean {
     if (record.component.launchClass === "static") return true;
     const current = this.#componentsFor(record.projectId).find(
       (component) => component.componentKey === record.component.componentKey,
     );
+    if (current === undefined || current.approvalKey !== record.component.approvalKey) {
+      return false;
+    }
     return (
-      current !== undefined && this.#approvalHolds(record.projectId, record.checkoutId, current)
+      this.#approvalHolds(record.projectId, record.checkoutId, current) ||
+      this.#fullAccessHolds(record)
     );
+  }
+
+  /**
+   * Whether any window/thread pair that authorized this `repo-tooling` server
+   * at Full access is still active on its checkout at Full access.
+   */
+  #fullAccessHolds(record: ServerRecord): boolean {
+    let active = false;
+    for (const [entryKey, entry] of record.fullAccessScopes) {
+      const stored = this.#authority.readThread(entry.threadId);
+      if (
+        stored === undefined ||
+        !isActiveThread(stored) ||
+        !this.#authority.canAccessProject(entry.scopeId, stored.projectId)
+      ) {
+        record.fullAccessScopes.delete(entryKey);
+        continue;
+      }
+      const effective = this.#authority.effectiveThread(entry.scopeId, stored);
+      if (
+        String(effective.checkoutId) === String(record.checkoutId) &&
+        effective.executionPolicy === "full-access"
+      ) {
+        active = true;
+      } else {
+        record.fullAccessScopes.delete(entryKey);
+      }
+    }
+    return active;
   }
 
   /**

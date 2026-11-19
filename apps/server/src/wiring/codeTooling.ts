@@ -687,7 +687,12 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             : root;
         },
         canAccessProject: canAccessCodeProject,
-        effectiveThread: (scopeId, thread) => codeSessionAuthority.effectiveThread(scopeId, thread),
+        // Read from the level the turn runs at (window session grant clamped
+        // to any active turn posture), never only the thread's stored level.
+        effectiveThread: (scopeId, thread) => {
+          const session = codeSessionAuthority.effectiveThread(scopeId, thread);
+          return codeOperationRuntime?.threadWithActiveTurnPosture?.(session) ?? session;
+        },
         resolveRoot: resolveRootWithExtraFolders,
       },
       approvals: languageServerApprovals,
@@ -709,6 +714,9 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // A previous run's servers are ended before this run starts any.
     yield* Effect.promise(() => languageServerProcesses.reconcile().catch(() => undefined));
     languageService.startSweeping();
+    // Revoking a window discards its in-memory Full access grants; sweep at
+    // once so an unapproved `repo-tooling` server it kept alive stops too.
+    onWindowRevoked(() => void languageService.sweep().catch(() => undefined));
     // An archived or completed thread, a checkout that went away, the Settings
     // switch turned off, a Project's toolchain setting changed, or a server
     // whose trust or switch was withdrawn stops at once rather than at the

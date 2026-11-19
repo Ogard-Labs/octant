@@ -7,8 +7,8 @@ import {
   decideLanguageServerLaunch,
   type LanguageServerHostPlatform,
   type LanguageServerLaunchDecision,
+  type LanguageServerStarter,
 } from "./languageServerLaunchPolicy";
-import type { PrincipalKind } from "./remoteAccessPolicy";
 
 const classes: ReadonlyArray<ExtensionLanguageServerClass> = ["static", "repo-tooling"];
 const postures: ReadonlyArray<ProviderExecutionPolicy> = [
@@ -18,7 +18,12 @@ const postures: ReadonlyArray<ProviderExecutionPolicy> = [
   "full-access",
 ];
 const platforms: ReadonlyArray<LanguageServerHostPlatform> = ["macos", "linux", "windows", "other"];
-const principals: ReadonlyArray<PrincipalKind> = ["local-window", "remote-device"];
+const starters: ReadonlyArray<LanguageServerStarter> = [
+  "local-window",
+  "person-paired-device",
+  "remote-device",
+  "agent",
+];
 const approvals = ["granted", "absent"] as const;
 
 describe("language server launch policy", () => {
@@ -119,19 +124,46 @@ describe("language server launch policy", () => {
     ).toEqual({ status: "refused", reason: "local-host-required" });
   });
 
-  it("refuses a repo-tooling server that has no shell-command approval, whatever the posture", () => {
-    expect(
-      decideLanguageServerLaunch({
-        launchClass: "repo-tooling",
-        posture: "full-access",
-        platform: "macos",
-        startedBy: "local-window",
-        shellCommandApproval: "absent",
-      }),
-    ).toEqual({ status: "refused", reason: "approval-required" });
+  it("starts a repo-tooling server without approval at Full access for the person or agent, and refuses unapproved starts below Full access", () => {
+    for (const startedBy of ["local-window", "person-paired-device", "agent"] as const) {
+      expect(
+        decideLanguageServerLaunch({
+          launchClass: "repo-tooling",
+          posture: "full-access",
+          platform: "macos",
+          startedBy,
+          shellCommandApproval: "absent",
+        }),
+      ).toMatchObject({
+        status: "launch",
+        shape: { launchClass: "repo-tooling", network: "proxied-under-project-rules" },
+      });
+    }
+    for (const posture of ["approval-gated", "auto-accept-edits"] as const) {
+      for (const startedBy of ["local-window", "person-paired-device"] as const) {
+        expect(
+          decideLanguageServerLaunch({
+            launchClass: "repo-tooling",
+            posture,
+            platform: "macos",
+            startedBy,
+            shellCommandApproval: "absent",
+          }),
+        ).toEqual({ status: "refused", reason: "approval-required" });
+      }
+      expect(
+        decideLanguageServerLaunch({
+          launchClass: "repo-tooling",
+          posture,
+          platform: "macos",
+          startedBy: "agent",
+          shellCommandApproval: "granted",
+        }),
+      ).toEqual({ status: "refused", reason: "local-host-required" });
+    }
   });
 
-  it("lets an agent read through a repo-tooling server only while one runs under an approval, and never in Plan", () => {
+  it("lets an agent read through a repo-tooling server without approval at Full access, and only while approved and running below it", () => {
     const running = {
       posture: "approval-gated",
       platform: "linux",
@@ -143,26 +175,37 @@ describe("language server launch policy", () => {
         status: "read",
       });
     }
+    expect(
+      decideAgentReadThroughRepositoryTooling({
+        ...running,
+        posture: "full-access",
+        shellCommandApproval: "absent",
+      }),
+    ).toEqual({ status: "read" });
     expect(decideAgentReadThroughRepositoryTooling({ ...running, posture: "plan" })).toEqual({
       status: "refused",
       reason: "plan-read-only",
     });
-    // Starting one stays the person's act at the machine, at every level.
-    for (const posture of postures.filter((candidate) => candidate !== "plan")) {
+    // Below Full access, starting one stays the person's act at the machine.
+    for (const posture of ["approval-gated", "auto-accept-edits"] as const) {
       expect(
         decideAgentReadThroughRepositoryTooling({ ...running, posture, server: "not-running" }),
       ).toEqual({ status: "refused", reason: "local-host-required" });
+      expect(
+        decideAgentReadThroughRepositoryTooling({
+          ...running,
+          posture,
+          shellCommandApproval: "absent",
+        }),
+      ).toEqual({ status: "refused", reason: "approval-required" });
     }
-    expect(
-      decideAgentReadThroughRepositoryTooling({ ...running, shellCommandApproval: "absent" }),
-    ).toEqual({ status: "refused", reason: "approval-required" });
     expect(decideAgentReadThroughRepositoryTooling({ ...running, platform: "windows" })).toEqual({
       status: "refused",
       reason: "unsupported-platform",
     });
   });
 
-  it("starts every class unconfined on Windows outside Strict, keeping repository tooling's steps, and refuses under Strict", () => {
+  it("starts every class unconfined on Windows outside Strict, skips approval at Full access, and refuses under Strict", () => {
     for (const launchClass of classes) {
       expect(
         decideLanguageServerLaunch({
@@ -207,6 +250,16 @@ describe("language server launch policy", () => {
       status: "refused",
       reason: "approval-required",
     });
+    for (const startedBy of ["local-window", "person-paired-device", "agent"] as const) {
+      expect(
+        decideLanguageServerLaunch({
+          ...tooling,
+          posture: "full-access",
+          startedBy,
+          shellCommandApproval: "absent",
+        }),
+      ).toEqual({ status: "launch", shape: { launchClass: "repo-tooling", confinement: "none" } });
+    }
     expect(
       decideAgentReadThroughRepositoryTooling({
         posture: "approval-gated",
@@ -248,7 +301,7 @@ describe("language server launch policy", () => {
     for (const launchClass of classes) {
       for (const posture of postures) {
         for (const platform of platforms) {
-          for (const startedBy of principals) {
+          for (const startedBy of starters) {
             for (const shellCommandApproval of approvals) {
               const decision = decideLanguageServerLaunch({
                 launchClass,
@@ -281,21 +334,26 @@ describe("language server launch policy", () => {
       readonly launchClass: ExtensionLanguageServerClass;
       readonly posture: ProviderExecutionPolicy;
       readonly platform: LanguageServerHostPlatform;
-      readonly startedBy: PrincipalKind;
+      readonly startedBy: LanguageServerStarter;
       readonly shellCommandApproval: "granted" | "absent";
     }): "launch" | Extract<LanguageServerLaunchDecision, { status: "refused" }>["reason"] => {
       if (input.platform !== "macos" && input.platform !== "linux") return "unsupported-platform";
       if (input.launchClass === "static") return "launch";
       if (input.posture === "plan") return "plan-read-only";
-      if (input.startedBy !== "local-window") return "local-host-required";
-      if (input.shellCommandApproval !== "granted") return "approval-required";
+      if (input.startedBy === "agent") {
+        return input.posture === "full-access" ? "launch" : "local-host-required";
+      }
+      if (input.startedBy === "remote-device") return "local-host-required";
+      if (input.posture !== "full-access" && input.shellCommandApproval !== "granted") {
+        return "approval-required";
+      }
       return "launch";
     };
     const mismatches: Array<unknown> = [];
     for (const launchClass of classes) {
       for (const posture of postures) {
         for (const platform of platforms) {
-          for (const startedBy of principals) {
+          for (const startedBy of starters) {
             for (const shellCommandApproval of approvals) {
               const input = { launchClass, posture, platform, startedBy, shellCommandApproval };
               const decision = decideLanguageServerLaunch(input);
