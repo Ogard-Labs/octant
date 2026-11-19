@@ -249,6 +249,7 @@ describe("createCodeHomeForgeRead", () => {
     expect(result.status).toBe("ready");
     if (result.status !== "ready") return;
     expect(result.checkedAt).toBe(START_CHECKED_AT);
+    expect(result.queriedScope).toEqual([`${projectId}|octant-dev/octant`]);
     expect(result.records).toHaveLength(1);
     expect(result.records[0]).toMatchObject({
       projectId: String(projectId),
@@ -410,6 +411,12 @@ describe("createCodeHomeForgeRead", () => {
     if (result.status !== "partial") return;
     expect(result.records).toHaveLength(1);
     expect(result.checkedAt).toBe(START_CHECKED_AT);
+    // Every admitted repository counts toward the scope the read ran under,
+    // including the one that contributed no rows.
+    expect(result.queriedScope).toEqual([
+      `${projectId}|octant-dev/octant`,
+      `${projectId}|octant-dev/failing`,
+    ]);
   });
 
   it("evicts cached history when the signed-in account changes", async () => {

@@ -18,6 +18,18 @@ import type {
 const CACHE_TTL_MS = 60_000;
 const MAX_CACHE_ENTRIES = 32;
 
+/**
+ * The scope key one admitted Project/repository pair contributes. The read
+ * and the service's live listing build it identically, so a roster that
+ * changed while rows were gathered is refused rather than stamped.
+ */
+export const activityRepositoryScope = (repository: {
+  readonly projectId: ProjectId;
+  readonly repositoryOwner: string;
+  readonly repositoryName: string;
+}): string =>
+  `${String(repository.projectId)}|${repository.repositoryOwner.toLowerCase()}/${repository.repositoryName.toLowerCase()}`;
+
 interface CachedRepositoryRead {
   readonly storedAtMs: number;
   readonly checkedAt: string;
@@ -317,6 +329,10 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
       status: partial ? "partial" : "ready",
       account,
       checkedAt: decodeUtcTimestamp(checkedAt),
+      // The whole admitted set the read enumerated, not the repositories
+      // rows happened to come from: an empty repository still counts toward
+      // the view this result may be served under.
+      queriedScope: repositories.map(activityRepositoryScope),
       records,
       // The binding this read's rows stand on. A view or page built on them
       // fails closed when the source was released or swapped, or another

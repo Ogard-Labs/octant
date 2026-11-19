@@ -13,6 +13,7 @@ const otherWindow = "83000000-0000-4000-8000-0000000000bb" as WindowId;
 const project = "83000000-0000-4000-8000-000000000004";
 const codeThread = "83000000-0000-4000-8000-000000000020";
 const otherThread = "83000000-0000-4000-8000-000000000022";
+const defaultForgeScope = [`${project}|octant-dev/octant`];
 const now = decodeUtcTimestamp("2026-08-20T10:00:00.000Z");
 const until = decodeUtcTimestamp("2026-08-21T00:00:00.000Z");
 let uuidCounter = 0;
@@ -483,6 +484,7 @@ describe("CodeHomeActivityService", () => {
         status: "ready",
         account: "henrik",
         checkedAt: now,
+        queriedScope: defaultForgeScope,
         records: [
           forgeRecord(),
           forgeRecord(
@@ -514,6 +516,7 @@ describe("CodeHomeActivityService", () => {
         status: "ready",
         account: "henrik",
         checkedAt: now,
+        queriedScope: defaultForgeScope,
         records: [
           forgeRecord({ occurredAt: "2026-08-15T00:00:00.000Z" }),
           forgeRecord({
@@ -548,6 +551,7 @@ describe("CodeHomeActivityService", () => {
         status: "ready",
         account: "henrik",
         checkedAt: "2026-08-20T09:00:00.000Z" as UtcTimestamp,
+        queriedScope: defaultForgeScope,
         records: [
           forgeRecord(),
           ...Array.from({ length: 30 }, (_, index) =>
@@ -580,6 +584,7 @@ describe("CodeHomeActivityService", () => {
         status: "partial",
         account: "henrik",
         checkedAt: now,
+        queriedScope: defaultForgeScope,
         records: [
           forgeRecord({ occurredAt: "2026-08-15T00:00:00.000Z" }),
           forgeRecord({
@@ -639,6 +644,7 @@ describe("CodeHomeActivityService", () => {
         status: "ready",
         account: "henrik",
         checkedAt: now,
+        queriedScope: defaultForgeScope,
         records: [forgeRecord()],
       }),
       forgeAccount: async () => account,
@@ -695,6 +701,7 @@ describe("CodeHomeActivityService", () => {
         status: "ready",
         account: "henrik",
         checkedAt: now,
+        queriedScope: defaultForgeScope,
         records,
       }),
       forgeAccount: async () => "henrik",
@@ -731,6 +738,7 @@ describe("CodeHomeActivityService", () => {
           status: "ready",
           account: "henrik",
           checkedAt: now,
+          queriedScope: defaultForgeScope,
           records: [forgeRecord()],
         };
       },
@@ -755,6 +763,7 @@ describe("CodeHomeActivityService", () => {
         status: "ready",
         account: "henrik",
         checkedAt: now,
+        queriedScope: defaultForgeScope,
         records: [
           forgeRecord({ id: "octant-dev/octant#42", number: 42 }, project, "octant-dev/octant", 1),
           forgeRecord({ id: "octant-dev/octant#7", number: 7 }, project, "octant-dev/octant", 0),
@@ -781,6 +790,7 @@ describe("CodeHomeActivityService", () => {
         status: "ready",
         account: "henrik",
         checkedAt: now,
+        queriedScope: defaultForgeScope,
         records: [forgeRecord()],
         current: () => false,
       }),
@@ -798,6 +808,49 @@ describe("CodeHomeActivityService", () => {
     expect(view.records).toHaveLength(0);
   });
 
+  it("refuses a forge view whose read enumerated a scope that has since grown", async () => {
+    const { read } = fixture([], {
+      // The window now admits a second repository the read never saw: its
+      // result cannot stand in for the live set, even with zero rows.
+      forgeScope: [`${project}|octant-dev/octant`, `${project}|octant-dev/second`],
+      forge: async () => ({
+        status: "ready",
+        account: "henrik",
+        checkedAt: now,
+        queriedScope: defaultForgeScope,
+        records: [],
+      }),
+      forgeAccount: async () => "henrik",
+    });
+    const selected = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+    });
+    expect(selected.status).toBe("unavailable");
+    expect(selected.reason).toBe("authorization-changed");
+    expect(selected.count).toBeUndefined();
+    expect(selected.records).toHaveLength(0);
+    expect(selected.snapshotId).toBeUndefined();
+    const compared = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+      comparison: {
+        from: decodeUtcTimestamp("2026-07-01T00:00:00.000Z"),
+        until: decodeUtcTimestamp("2026-08-01T00:00:00.000Z"),
+      },
+    });
+    expect(compared.status).toBe("unavailable");
+    expect(compared.reason).toBe("authorization-changed");
+    expect(compared.count).toBeUndefined();
+    expect(compared.comparisonCount).toBeUndefined();
+    expect(compared.records).toHaveLength(0);
+    expect(compared.snapshotId).toBeUndefined();
+  });
+
   it("expires a github snapshot's pages when a comparison-only repository loses access", async () => {
     const epochs = new Map<string, number>();
     const { read } = fixture([], {
@@ -806,6 +859,7 @@ describe("CodeHomeActivityService", () => {
         status: "ready",
         account: "henrik",
         checkedAt: now,
+        queriedScope: [`${project}|octant-dev/octant`, `${project}|octant-dev/past`],
         records: [
           forgeRecord(),
           forgeRecord(
@@ -856,6 +910,7 @@ describe("CodeHomeActivityService", () => {
         status: "ready",
         account: "henrik",
         checkedAt: now,
+        queriedScope: defaultForgeScope,
         records: [forgeRecord()],
       }),
       // The repository loses admission while the page re-proves the account;
@@ -896,6 +951,7 @@ describe("CodeHomeActivityService", () => {
         status: "ready",
         account: "henrik",
         checkedAt: now,
+        queriedScope: defaultForgeScope,
         records: [forgeRecord()],
         current: () => binding,
       }),

@@ -20,6 +20,12 @@ import type { ActivityFact } from "../persistence/activityHistoryProjection";
 
 const PAGE_SIZE = 25;
 const MAX_SELECTED_RECORDS = 10_000;
+
+// Scope lists are unordered enumerations; the key is the deduped sorted set
+// so the same admitted roster compares equal however it was listed.
+const scopeKey = (scope: ReadonlyArray<string>): string =>
+  JSON.stringify([...new Set(scope)].sort());
+
 const SNAPSHOT_TTL_MS = 5 * 60 * 1_000;
 const MAX_SNAPSHOTS = 64;
 const RUN_IDENTITY = /^(code|chat|work|agent-run):/;
@@ -146,6 +152,12 @@ export type CodeHomeActivityForgeResult =
       /** The account whose `gh` answered, normalized; pages recheck it. */
       account: string;
       checkedAt: UtcTimestamp;
+      /**
+       * The admitted Project/repository set the read enumerated before
+       * gathering, including repositories that returned no rows. The view
+       * stamps its snapshot only when the live scope is still this set.
+       */
+      readonly queriedScope: ReadonlyArray<string>;
       records: ReadonlyArray<CodeHomeActivityForgeRecord>;
       /**
        * Whether the binding these records were read under still holds: a
@@ -352,7 +364,7 @@ export class CodeHomeActivityService {
       checkedAt: this.#ports.clock(),
       forgeKey: undefined,
       forgeEpochs: undefined,
-      admittedKey: admitted.slice().sort().join("|"),
+      admittedKey: scopeKey(admitted),
       all: records,
       filtered,
       authorityOf,
@@ -398,8 +410,14 @@ export class CodeHomeActivityService {
   ): Promise<ActivityView> {
     const scope = (await this.#ports.listForgeScope?.(windowId)) ?? [];
     // The scope await gave a source release or account swap time to land:
-    // rows gathered under a binding that no longer holds are never served.
-    if (!admission() || forge.current?.() === false) {
+    // rows gathered under a binding that no longer holds, or under an
+    // admitted set that is no longer this one, are never served.
+    const admittedKey = scopeKey(scope);
+    if (
+      !admission() ||
+      forge.current?.() === false ||
+      admittedKey !== scopeKey(forge.queriedScope)
+    ) {
       return this.#unavailable("github", "authorization-changed");
     }
     const admittedSet = new Set(scope);
@@ -476,7 +494,7 @@ export class CodeHomeActivityService {
       forgeKey: forge.account,
       forgeEpochs,
       ...(forge.current === undefined ? {} : { bindingCurrent: forge.current }),
-      admittedKey: scope.slice().sort().join("|"),
+      admittedKey,
       all: capped,
       filtered: capped,
       authorityOf,
@@ -536,10 +554,7 @@ export class CodeHomeActivityService {
       snapshot.source === "github"
         ? ((await this.#ports.listForgeScope?.(windowId)) ?? [])
         : await this.#ports.listProjects(windowId);
-    if (
-      scope.slice().sort().join("|") !== snapshot.admittedKey ||
-      snapshot.bindingCurrent?.() === false
-    ) {
+    if (scopeKey(scope) !== snapshot.admittedKey || snapshot.bindingCurrent?.() === false) {
       this.#snapshots.delete(query.snapshotId);
       return this.#unavailable(snapshot.source, "authorization-changed");
     }

@@ -45,7 +45,10 @@ import {
 } from "@octant/plugin-host/language-servers";
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
 import { CodeHomeActivityService } from "../activityHistory/codeHomeActivityService";
-import { createCodeHomeForgeRead } from "../activityHistory/codeHomeForgeRead";
+import {
+  activityRepositoryScope,
+  createCodeHomeForgeRead,
+} from "../activityHistory/codeHomeForgeRead";
 import { activityHistoryHeld, readActivityFacts } from "../persistence/activityHistoryProjection";
 import { createPairedMergeUnlockSlot } from "../hub/pairedMergeUnlock";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
@@ -922,10 +925,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       readFacts: (input) => readActivityFacts(persistence.connection, input),
       projectionHeld: () => activityHistoryHeld(persistence.connection),
       listForgeScope: async (windowId) =>
-        (await listActivityRepositories(windowId)).map(
-          (repository) =>
-            `${String(repository.projectId)}|${repository.repositoryOwner.toLowerCase()}/${repository.repositoryName.toLowerCase()}`,
-        ),
+        (await listActivityRepositories(windowId)).map(activityRepositoryScope),
       forgeRead,
       forgeAccount,
       forgeRepositoryEpoch,

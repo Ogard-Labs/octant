@@ -572,7 +572,8 @@ shows no comparison.
 For Code Home, a confirmed repository access loss invalidates cached reads
 and frozen pages for that account and repository, even when it contributed
 only to a comparison. An older read still in flight cannot restore those
-records.
+records, and the initial view is refused the same way when the admitted
+Project or repository set itself changes while the read is gathered.
 
 A timeframe resolves to a half-open
 `[start, end)` instant window plus an optional comparison window in the
