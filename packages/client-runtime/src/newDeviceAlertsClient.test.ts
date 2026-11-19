@@ -27,10 +27,7 @@ describe("reading a host's new-device alerts from any connected device", () => {
   });
 
   it("reads nothing, so the last alerts stay shown, when the host refuses or answers off-contract", async () => {
-    for (const answer of [
-      new Response("no", { status: 403 }),
-      Response.json({ alerts: "nope" }),
-    ]) {
+    for (const answer of [new Response("no", { status: 403 }), Response.json({ alerts: "nope" })]) {
       const client = createNewDeviceAlertsClient({
         baseUrl: "http://127.0.0.1",
         fetch: vi.fn(async () => answer),

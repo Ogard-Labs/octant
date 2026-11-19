@@ -51,8 +51,9 @@ describe("new-device alerts", () => {
     expect(screen.getByText(/100\.101\.102\.106/)).toBeTruthy();
     expect(screen.getByText(/192\.168\.1\.20/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Remove/ })).toBeNull();
-    expect(screen.getAllByText(/remove it from a window on this computer or an owner device/i))
-      .toHaveLength(2);
+    expect(
+      screen.getAllByText(/remove it from a window on this computer or an owner device/i),
+    ).toHaveLength(2);
   });
 
   it("lets a window dismiss a paired device's alert or remove the device", async () => {

@@ -11,7 +11,8 @@ import { PairedDeviceAlerts } from "./pairedDeviceAlerts";
 
 const directories: string[] = [];
 afterEach(() => {
-  for (const directory of directories.splice(0)) rmSync(directory, { force: true, recursive: true });
+  for (const directory of directories.splice(0))
+    rmSync(directory, { force: true, recursive: true });
 });
 
 function world() {

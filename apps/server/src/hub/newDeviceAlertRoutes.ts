@@ -38,7 +38,10 @@ export function createNewDeviceAlertRouteHandler(dependencies: NewDeviceAlertRou
     if (url.pathname === `${NEW_DEVICE_ALERTS_PATH}/dismiss`) return dismiss(request, url);
     if (url.pathname !== NEW_DEVICE_ALERTS_PATH) return undefined;
     const origin = request.headers.get("origin");
-    if (!isLoopbackHostname(url.hostname) || (origin !== null && !isAllowedRendererOrigin(origin))) {
+    if (
+      !isLoopbackHostname(url.hostname) ||
+      (origin !== null && !isAllowedRendererOrigin(origin))
+    ) {
       return refuse(400, "New-device alerts are read over loopback.", null);
     }
     if (request.method === "OPTIONS") {

@@ -65,7 +65,9 @@ export function NewDeviceAlerts(props: NewDeviceAlertsProps) {
             {alert.privateAddress === undefined ? null : `${alert.privateAddress} · `}
             {alert.kind === "hub-member" ? alert.role : "paired device"} · device key{" "}
             <code className="oct-meta--mono">
-              {alert.kind === "hub-member" ? alert.identityKeyFingerprint : alert.deviceKeyFingerprint}
+              {alert.kind === "hub-member"
+                ? alert.identityKeyFingerprint
+                : alert.deviceKeyFingerprint}
             </code>
             {list.removesHere
               ? ". If you did not add it, choose Remove."

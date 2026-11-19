@@ -107,9 +107,12 @@ describe("new-device alerts for every connected device", () => {
       const response = await route()(fromDevice({ admittedBy }));
       expect(response?.status).toBe(200);
       const body = await response?.json();
-      expect(body.alerts.map((alert: { name: string; privateAddress: string }) => [alert.name, alert.privateAddress])).toEqual([
-        ["Tablet", "100.101.102.106"],
-      ]);
+      expect(
+        body.alerts.map((alert: { name: string; privateAddress: string }) => [
+          alert.name,
+          alert.privateAddress,
+        ]),
+      ).toEqual([["Tablet", "100.101.102.106"]]);
       expect(body.removesHere).toBe(false);
     }
   });

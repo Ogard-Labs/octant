@@ -237,11 +237,7 @@ export class PairingDeviceLifecycleService {
     };
   }
 
-  claimTicket(
-    input: unknown,
-    nowOverride?: number,
-    from?: PairingClaimSource,
-  ): PairingClaimResult {
+  claimTicket(input: unknown, nowOverride?: number, from?: PairingClaimSource): PairingClaimResult {
     const now = nowOverride ?? this.#now();
     this.#purgeExpired(now);
     if (typeof input !== "object" || input === null) {
