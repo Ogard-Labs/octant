@@ -6,6 +6,7 @@ import {
   EventId,
   DEFAULT_AGENT_RUN_CREATION_POSTURE,
   decodeAgentRunPolicySettings,
+  effectiveKeepAwakePolicy,
   type AgentRunConcurrency,
   type HostResourcePolicy,
   type AgentRunPolicySettings,
@@ -112,9 +113,17 @@ export class AgentRunSettingsStore {
       );
     }
     const updatedAt = this.#clock();
+    const previousKeepAwake = effectiveKeepAwakePolicy(this.#current.resourcePolicy);
     let settings: AgentRunPolicySettings;
+    let eventPayload: AgentRunPolicySettings;
     try {
-      const resourcePolicy = input.resourcePolicy ?? this.#current.resourcePolicy;
+      const resourcePolicy =
+        input.resourcePolicy === undefined
+          ? this.#current.resourcePolicy
+          : input.resourcePolicy.keepAwake !== undefined ||
+              this.#current.resourcePolicy?.keepAwake === undefined
+            ? input.resourcePolicy
+            : { ...input.resourcePolicy, keepAwake: this.#current.resourcePolicy.keepAwake };
       const concurrency = input.concurrency ?? this.#current.concurrency;
       const noLimitAtFullAccess =
         input.noWorkingTimeLimitAtFullAccess ?? this.#current.noWorkingTimeLimitAtFullAccess;
@@ -137,6 +146,11 @@ export class AgentRunSettingsStore {
         version: decodeAggregateVersion(this.#current.version + 1),
         updatedAt,
       });
+      const nextKeepAwake = effectiveKeepAwakePolicy(settings.resourcePolicy);
+      eventPayload =
+        nextKeepAwake === previousKeepAwake
+          ? settings
+          : decodeAgentRunPolicySettings({ ...settings, previousKeepAwake });
     } catch {
       throw new AgentRunSettingsStoreError("invalid", "AgentRun settings update is invalid.");
     }
@@ -156,7 +170,7 @@ export class AgentRunSettingsStore {
             correlationId: decodeCorrelationId(this.#uuid()),
             actor,
             occurredAt: updatedAt,
-            payload: settings,
+            payload: eventPayload,
           },
         ],
       });
@@ -188,7 +202,9 @@ export class AgentRunSettingsStore {
       for (const envelope of batch) {
         afterVersion = envelope.aggregateVersion;
         if (envelope.eventName === AGENT_RUN_SETTINGS_UPDATED) {
-          latest = decodeAgentRunPolicySettings(envelope.payload);
+          const { previousKeepAwake: _previousKeepAwake, ...decoded } =
+            decodeAgentRunPolicySettings(envelope.payload);
+          latest = decoded;
         }
       }
       if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;

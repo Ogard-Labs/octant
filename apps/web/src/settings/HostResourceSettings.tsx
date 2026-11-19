@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_HOST_RESOURCE_POLICY,
+  effectiveKeepAwakePolicy,
   type AgentRunPolicySettings,
   type HostResourceBudgetSnapshot,
   type HostResourcePolicy,
+  type KeepAwakePolicy,
 } from "@octant/contracts";
 import {
   AgentRunSettingsClientFailure,
   type AgentRunSettingsClient,
 } from "@octant/client-runtime/agent-run-settings-client";
+import type { KeepAwakeStatus, OctantHostBridge } from "../shell/hostBridge";
 import { SettingRow, SettingsSection } from "./primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -24,16 +28,46 @@ const REASONS: Readonly<Record<HostResourceBudgetSnapshot["reason"], string>> = 
   recovering: "Waiting for load to stay low before starting more work.",
 };
 
+const KEEP_AWAKE_OPTIONS: ReadonlyArray<{
+  readonly id: KeepAwakePolicy;
+  readonly label: string;
+}> = [
+  { id: "on-power", label: "While on power" },
+  { id: "always", label: "Always" },
+  { id: "never", label: "Never" },
+];
+
+function keepAwakeStatusLine(status: KeepAwakeStatus | undefined): string {
+  if (status === undefined) return "Checking sleep-prevention status…";
+  if (status.state === "active") return status.summary;
+  if (status.state === "unavailable") {
+    return "Unavailable — this computer did not allow preventing sleep.";
+  }
+  if (status.reason === "disabled") {
+    return "Off — this computer may sleep while agents work.";
+  }
+  if (status.reason === "on-battery") {
+    return "Idle — on battery power.";
+  }
+  return "Idle — no agent work running.";
+}
+
 export function HostResourceSettings({
   client,
   focusedSetting,
+  hostBridge,
 }: {
   readonly client: AgentRunSettingsClient;
   readonly focusedSetting?: string;
+  readonly hostBridge?: Pick<
+    OctantHostBridge,
+    "subscribeKeepAwakeStatus" | "refreshKeepAwakeStatus"
+  >;
 }) {
   const [settings, setSettings] = useState<AgentRunPolicySettings>();
   const [draft, setDraft] = useState<HostResourcePolicy>(DEFAULT_HOST_RESOURCE_POLICY);
   const [snapshot, setSnapshot] = useState<HostResourceBudgetSnapshot>();
+  const [keepAwakeStatus, setKeepAwakeStatus] = useState<KeepAwakeStatus>();
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -44,6 +78,16 @@ export function HostResourceSettings({
       mounted.current = false;
     };
   }, []);
+  const subscribeKeepAwake = hostBridge?.subscribeKeepAwakeStatus;
+  useEffect(() => {
+    if (subscribeKeepAwake === undefined) {
+      setKeepAwakeStatus(undefined);
+      return;
+    }
+    return subscribeKeepAwake((next) => {
+      if (mounted.current) setKeepAwakeStatus(next);
+    });
+  }, [subscribeKeepAwake]);
   const refresh = useCallback(async () => {
     try {
       const result = await client.resources?.();
@@ -70,7 +114,10 @@ export function HostResourceSettings({
   useEffect(() => {
     void load();
   }, [load]);
-  const save = async (policy: HostResourcePolicy) => {
+  const save = async (
+    policy: HostResourcePolicy,
+    options?: { readonly preserveDraft?: boolean; readonly refreshKeepAwake?: boolean },
+  ) => {
     if (settings === undefined || saving) return;
     setSaving(true);
     setError(undefined);
@@ -82,8 +129,18 @@ export function HostResourceSettings({
       });
       if (!mounted.current) return;
       setSettings(current);
-      setDraft(current.resourcePolicy ?? DEFAULT_HOST_RESOURCE_POLICY);
+      if (options?.preserveDraft !== true) {
+        setDraft(current.resourcePolicy ?? DEFAULT_HOST_RESOURCE_POLICY);
+      }
       await refresh();
+      if (options?.refreshKeepAwake === true && hostBridge?.refreshKeepAwakeStatus !== undefined) {
+        try {
+          const nextStatus = await hostBridge.refreshKeepAwakeStatus();
+          if (mounted.current) setKeepAwakeStatus(nextStatus);
+        } catch {
+          // Live subscription keeps updating on the desktop poll cadence.
+        }
+      }
     } catch (failure) {
       if (!mounted.current) return;
       if (failure instanceof AgentRunSettingsClientFailure && failure.code === "conflict") {
@@ -215,7 +272,17 @@ export function HostResourceSettings({
           settingId="resource-save"
           focused={focusedSetting === "resource-save"}
         >
-          <OctantButton disabled={saving} onClick={() => void save(draft)}>
+          <OctantButton
+            disabled={saving}
+            onClick={() =>
+              void save({
+                ...draft,
+                ...(settings?.resourcePolicy?.keepAwake === undefined
+                  ? {}
+                  : { keepAwake: settings.resourcePolicy.keepAwake }),
+              })
+            }
+          >
             Save limits
           </OctantButton>
         </SettingRow>
@@ -239,7 +306,37 @@ export function HostResourceSettings({
             {paused ? "Resume automatic limits" : "Pause new work"}
           </OctantButton>
         </SettingRow>
+        <SettingRow
+          label="Keep the computer awake while agents work"
+          description="Prevents idle system sleep while turns, child runs, workers, or a routine due within 5 minutes are active. Display sleep is not prevented."
+          scope="host"
+          settingId="resource-keepAwake"
+          focused={focusedSetting === "resource-keepAwake"}
+        >
+          <OctantSelectField
+            aria-label="Keep the computer awake while agents work"
+            disabled={saving || loading}
+            onValueChange={(value) => {
+              if (value === "on-power" || value === "always" || value === "never") {
+                void save(
+                  {
+                    ...(settings?.resourcePolicy ?? DEFAULT_HOST_RESOURCE_POLICY),
+                    keepAwake: value,
+                  },
+                  { preserveDraft: true, refreshKeepAwake: true },
+                );
+              }
+            }}
+            options={KEEP_AWAKE_OPTIONS}
+            value={effectiveKeepAwakePolicy(settings?.resourcePolicy)}
+          />
+        </SettingRow>
       </fieldset>
+      {subscribeKeepAwake === undefined ? null : (
+        <p className="setgroup-note host-resources__keep-awake-status" role="status">
+          {keepAwakeStatusLine(keepAwakeStatus)}
+        </p>
+      )}
       {loading ? (
         <p aria-busy="true" className="host-resources__readings" role="status">
           Reading the host's load…

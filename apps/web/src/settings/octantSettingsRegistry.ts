@@ -74,6 +74,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "pause throttle testing helper agents commands",
         },
         {
+          id: settingId("resource-keepAwake"),
+          label: "Keep the computer awake while agents work",
+          scope: "host",
+          keywords:
+            "keep awake sleep prevent idle battery power ac suspend routines turns computer awake",
+        },
+        {
           id: settingId("resource-refresh"),
           label: "Refresh host load",
           scope: "host",

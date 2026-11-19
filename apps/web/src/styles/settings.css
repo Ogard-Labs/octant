@@ -760,6 +760,10 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   min-height: 3lh;
 }
 
+.host-resources__keep-awake-status {
+  min-height: 1lh;
+}
+
 .setgroup-note {
   margin: 0;
   padding: 0 0 12px;

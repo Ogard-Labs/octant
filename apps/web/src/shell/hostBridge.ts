@@ -44,6 +44,7 @@ import type {
   CodeOperationApprovalAnchor,
   ForgetPairedComputerOutcome,
   HostCapabilities,
+  KeepAwakeStatus,
   LocalPluginFolderPickerResult,
   MenuBarOpenThread,
   OpenInApplicationDescriptor,
@@ -93,6 +94,7 @@ export type {
   CodeOperationApprovalAnchor,
   ForgetPairedComputerOutcome,
   HostCapabilities,
+  KeepAwakeStatus,
   LocalPluginFolderPickerResult,
   MenuBarOpenThread,
   OpenInApplicationDescriptor,
@@ -578,6 +580,12 @@ export interface OctantHostBridge
    */
   readonly readBackgroundHost?: () => Promise<BackgroundHostState>;
   readonly changeBackgroundHost?: (change: BackgroundHostChange) => Promise<BackgroundHostState>;
+  /**
+   * Live sleep-prevention status held by the desktop main process (built from
+   * counts only, never thread titles). Absent in Nightly and on remote clients.
+   */
+  readonly subscribeKeepAwakeStatus?: (listener: (status: KeepAwakeStatus) => void) => () => void;
+  readonly refreshKeepAwakeStatus?: () => Promise<KeepAwakeStatus>;
   /**
    * Local What's new for the build on disk. Desktop-owned; never a network
    * fetch. Absent on a remote client.

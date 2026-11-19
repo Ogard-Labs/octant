@@ -890,6 +890,48 @@ quotas are not built. The panel states this boundary rather than claiming contro
 of all Node processes. Existing host memory relief still stops idle reusable
 provider runtimes and trims caches under pressure.
 
+### Keeping the computer awake while agents work
+
+While agent work runs, the desktop app (`apps/desktop`) holds a single
+`prevent-app-suspension` power-save assertion (`powerSaveBlocker.start('prevent-app-suspension')`)
+so idle system sleep does not cut off in-flight work. It never prevents display
+sleep, and the renderer holds no assertion of its own (maintainer decision,
+2026-11-19; built).
+
+- **Signal:** The local host serves `GET /api/desktop/agent-work` on loopback
+  for the desktop bridge principal alone (`x-octant-desktop-secret`, no `Origin`,
+  no forwarded remote principal, no Nightly native-main token). The response
+  carries only the effective keep-awake setting, running counts by kind (active
+  Chat, Work, and Code turns, running child runs, and running coordinator
+  workers), the earliest enabled routine `nextDueAt` (or `null`), and the host's
+  observation timestamp — never thread titles, routine names, or paths. The
+  desktop polls it every 5 seconds while attached to a running host.
+- **When held and released:** The assertion is taken as soon as any turn, child
+  run, or coordinator worker is running, or an enabled routine is due within the
+  next 5 minutes. It is released 10 seconds after the last work ends so a brief
+  gap between turns does not drop and re-take it, and released immediately when
+  the desktop quits, the host stops, the setting becomes Never, or the computer
+  switches to battery power under While on power.
+- **Setting and authority:** The choice (`While on power` default, `Always`,
+  `Never`) lives in the host resource policy inside the journaled
+  `agent-run-settings` aggregate (`Settings > General > Computer resources >
+Keep the computer awake while agents work`). Changes are journaled with who,
+  when, and the old and new values, and are admitted only from a local window or
+  a device the host's own person paired (`actsAsHostPerson`); a hub-introduced
+  or restricted device is refused. Old journals without a choice default to
+  `While on power`.
+- **Battery and platform limits:** `While on power` reads Electron's
+  `powerMonitor.isOnBatteryPower()` and watches `on-ac` and `on-battery` events;
+  when battery state cannot be read, the computer counts as on power. Linux and
+  Windows use the same Electron `powerSaveBlocker` API where supported. If
+  `powerSaveBlocker.isStarted(id)` is `false` immediately after `start` (or
+  `start` throws), the desktop reports `unavailable`, never `active`, and does
+  not try again until work next starts. Live status lines in Settings are built
+  strictly from work counts (for example, `Kept awake: 2 turns running` or
+  `Kept awake: routine due soon`) and never include thread titles.
+- **Out of scope:** Closed-lid operation, Low Power Mode switching, privileged
+  helpers or sudoers changes, Wi-Fi recovery, and pausing other apps.
+
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through
 `@octant/client-runtime` and never holds authority of its own. In development

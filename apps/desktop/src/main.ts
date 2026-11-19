@@ -19,6 +19,7 @@ import {
   decodeBackgroundHostChange,
   type BackgroundHostSettings,
 } from "./backgroundHost";
+import { KeepAwakeController, readDesktopAgentWork } from "./keepAwakeController";
 import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
@@ -89,6 +90,7 @@ import {
   Notification,
   desktopCapturer,
   powerMonitor,
+  powerSaveBlocker,
   screen,
   session,
   shell,
@@ -2471,6 +2473,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
     await writeDesktopBridgeProjection();
   }
   ensureHostTray();
+  ensureKeepAwake();
   // Host admission already proved readiness. Menu-bar activity and fleet data
   // may refresh beside native state and window authority preparation instead
   // of adding another loopback round trip to first paint.
@@ -3307,6 +3310,7 @@ async function startHostFromMenu(): Promise<void> {
     await writeDesktopBridgeProjection();
   }
   ensureHostTray();
+  ensureKeepAwake();
   await refreshHostActivity();
 }
 
@@ -3327,6 +3331,7 @@ async function restartHostFromMenu(): Promise<void> {
   serverInstanceId = host.instanceId;
   await writeDesktopBridgeProjection();
   ensureHostTray();
+  ensureKeepAwake();
   await refreshHostActivity();
 }
 
@@ -4134,6 +4139,14 @@ function installIpcHandlers(): void {
     const change = decodeBackgroundHostChange(value);
     if (change === undefined) throw new Error("Octant rejected an invalid background setting.");
     return backgroundHost().change(change);
+  });
+  ipcMain.handle(IPC_CHANNELS.keepAwakeStatus, (event) => {
+    ownedTopLevelWindowContext(event);
+    return keepAwakeController?.status() ?? { state: "idle", reason: "no-work" };
+  });
+  ipcMain.handle(IPC_CHANNELS.keepAwakeRefresh, (event) => {
+    ownedTopLevelWindowContext(event);
+    return ensureKeepAwake().pollNow();
   });
   ipcMain.handle(IPC_CHANNELS.appUpdateRing, (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
@@ -4964,6 +4977,7 @@ function closeBrowserAdmissionForQuit(): void {
 }
 
 async function stopHostForQuit(): Promise<void> {
+  disposeKeepAwake();
   closeBrowserAdmissionForQuit();
   const browserStopped = browserQuitCleanup;
   const prototypesStopped = canvasPrototypeSurface?.stop();
@@ -5002,6 +5016,11 @@ async function stopHostForQuit(): Promise<void> {
 }
 
 function finishQuit(): void {
+  try {
+    disposeKeepAwake();
+  } catch (error) {
+    logQuitProblem(`Octant could not release sleep prevention at quit: ${String(error)}`);
+  }
   try {
     destroyHostTray();
   } catch (error) {
@@ -5068,6 +5087,43 @@ async function prepareToQuit(stillRequested?: () => boolean): Promise<void> {
     log: logQuitProblem,
   });
   finishQuit();
+}
+
+let keepAwakeController: KeepAwakeController | undefined;
+function ensureKeepAwake(): KeepAwakeController {
+  if (keepAwakeController === undefined) {
+    keepAwakeController = new KeepAwakeController({
+      powerSaveBlocker,
+      powerMonitor,
+      readWork: async () => {
+        const snapshot = hostLifecycle.snapshot();
+        if (snapshot.state === "stopped" || snapshot.url === undefined) {
+          keepAwakeController?.hostStopped();
+          return undefined;
+        }
+        return await readDesktopAgentWork({
+          hostUrl: snapshot.url,
+          brokerHeaders: desktopBrokerHeaders(),
+          fetch: globalThis.fetch,
+        });
+      },
+      onStatusChanged: (status) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) {
+            window.webContents.send(IPC_CHANNELS.keepAwakeStatus, status);
+          }
+        }
+      },
+    });
+    keepAwakeController.start();
+  }
+  return keepAwakeController;
+}
+
+function disposeKeepAwake(): void {
+  const controller = keepAwakeController;
+  keepAwakeController = undefined;
+  controller?.dispose();
 }
 
 let backgroundHostSettings: BackgroundHostSettings | undefined;

@@ -69,6 +69,7 @@ const DEFAULT_COALESCE_MS = 250;
 
 interface LiveTurn {
   readonly owner: symbol;
+  readonly topic: MachineChangeTopic;
   readonly startedAt: UtcTimestamp;
   state: LiveTurnState;
   connection?: LiveTurnConnection;
@@ -123,7 +124,12 @@ export class LiveTurnRegistry {
         // the turn simply goes unreported rather than failing to run.
         try {
           const decoded = decodeUtcTimestamp(startedAt);
-          this.#turns.set(threadId, { owner, startedAt: decoded, state: startLiveTurn(decoded) });
+          this.#turns.set(threadId, {
+            owner,
+            topic,
+            startedAt: decoded,
+            state: startLiveTurn(decoded),
+          });
         } catch {
           this.#turns.delete(threadId);
         }
@@ -167,5 +173,17 @@ export class LiveTurnRegistry {
       turnStartedAt: turn.startedAt,
       ...(step === undefined ? {} : { liveStep: step }),
     };
+  }
+
+  /** Every turn currently running, by thread id and mode topic. */
+  activeEntries(): ReadonlyArray<{
+    readonly threadId: string;
+    readonly topic: MachineChangeTopic;
+  }> {
+    const entries: Array<{ readonly threadId: string; readonly topic: MachineChangeTopic }> = [];
+    for (const [threadId, turn] of this.#turns) {
+      entries.push({ threadId, topic: turn.topic });
+    }
+    return entries;
   }
 }

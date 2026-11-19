@@ -528,6 +528,17 @@ export class AgentRunProjection implements Projection {
     return { global, byParent };
   }
 
+  /** Child runs actively launching or executing right now (excludes parked/waiting runs). */
+  runningCount(): number {
+    let count = 0;
+    for (const run of this.#byId.values()) {
+      if (run.lifecycleStatus === "starting" || run.lifecycleStatus === "running") {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
   snapshot(): ReadonlyMap<AgentRunId, AgentRun> {
     return new Map(this.#byId);
   }

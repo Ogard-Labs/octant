@@ -1,6 +1,7 @@
 import {
   DEFAULT_HOST_RESOURCE_POLICY,
   decodeAgentRunParentThreadId,
+  effectiveKeepAwakePolicy,
   type NativeHarnessSlotCandidate,
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
@@ -1618,6 +1619,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     agentRunRouteDependencies,
     agentRunSessionStore,
     agentRunSettingsRoutes,
+    keepAwakePolicy: () => effectiveKeepAwakePolicy(agentRunSettingsStore.current().resourcePolicy),
     agentsManagedToolsFor,
     capacityScheduler,
     contributeChildTools,

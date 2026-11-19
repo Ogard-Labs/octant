@@ -2535,6 +2535,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
         <HostResourceSettings
           client={props.agentRunSettingsClient}
           focusedSetting={String(focusedSetting ?? "")}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         />
       )}
       <SettingsSection

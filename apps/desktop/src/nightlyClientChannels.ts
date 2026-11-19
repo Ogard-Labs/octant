@@ -57,6 +57,9 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   // The background service and login item belong to the app that owns the host.
   backgroundHostState: "octant-only",
   backgroundHostChange: "octant-only",
+  // Sleep prevention belongs to the app that owns the host.
+  keepAwakeStatus: "octant-only",
+  keepAwakeRefresh: "octant-only",
   computerUseTest: "octant-only",
   computerUseStatus: "brokered",
   computerUsePermissions: "brokered",

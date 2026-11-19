@@ -5,6 +5,11 @@ import {
   decodeAgentRunPolicySettings,
   decodeUpdateAgentRunPolicySettings,
 } from "./agentRunSettings";
+import {
+  DEFAULT_HOST_RESOURCE_POLICY,
+  decodeDesktopAgentWorkSnapshot,
+  effectiveKeepAwakePolicy,
+} from "./hostResourcePolicy";
 
 describe("AgentRunPolicySettings", () => {
   it("decodes a valid settings record", () => {
@@ -119,6 +124,75 @@ describe("UpdateAgentRunPolicySettings", () => {
         creationPosture: "off",
         expectedVersion: 2,
         mixedVendor: true,
+      }),
+    ).toThrow();
+  });
+
+  it("defaults keep-awake to on-power and accepts on-power, always, or never", () => {
+    expect(effectiveKeepAwakePolicy(undefined)).toBe("on-power");
+    expect(effectiveKeepAwakePolicy(DEFAULT_HOST_RESOURCE_POLICY)).toBe("on-power");
+    for (const keepAwake of ["on-power", "always", "never"] as const) {
+      const decoded = decodeUpdateAgentRunPolicySettings({
+        creationPosture: "automatic",
+        expectedVersion: 1,
+        resourcePolicy: { ...DEFAULT_HOST_RESOURCE_POLICY, keepAwake },
+      });
+      expect(effectiveKeepAwakePolicy(decoded.resourcePolicy)).toBe(keepAwake);
+    }
+    expect(() =>
+      decodeUpdateAgentRunPolicySettings({
+        creationPosture: "automatic",
+        expectedVersion: 1,
+        resourcePolicy: { ...DEFAULT_HOST_RESOURCE_POLICY, keepAwake: "display" as never },
+      }),
+    ).toThrow();
+  });
+});
+
+describe("DesktopAgentWorkSnapshot", () => {
+  it("decodes counts-only running work with an optional next routine due time", () => {
+    const decoded = decodeDesktopAgentWorkSnapshot({
+      keepAwake: "on-power",
+      turns: { chat: 1, work: 0, code: 2 },
+      childRuns: 1,
+      coordinatorWorkers: 3,
+      nextRoutineDueAt: "2026-11-19T20:30:00.000Z",
+      observedAt: "2026-11-19T20:27:00.000Z",
+    });
+    expect(decoded.turns).toEqual({ chat: 1, work: 0, code: 2 });
+    expect(decoded.nextRoutineDueAt).toBe("2026-11-19T20:30:00.000Z");
+
+    const idle = decodeDesktopAgentWorkSnapshot({
+      keepAwake: "never",
+      turns: { chat: 0, work: 0, code: 0 },
+      childRuns: 0,
+      coordinatorWorkers: 0,
+      nextRoutineDueAt: null,
+      observedAt: "2026-11-19T20:27:00.000Z",
+    });
+    expect(idle.nextRoutineDueAt).toBeNull();
+  });
+
+  it("rejects negative counts or excess properties like thread titles", () => {
+    expect(() =>
+      decodeDesktopAgentWorkSnapshot({
+        keepAwake: "always",
+        turns: { chat: -1, work: 0, code: 0 },
+        childRuns: 0,
+        coordinatorWorkers: 0,
+        nextRoutineDueAt: null,
+        observedAt: "2026-11-19T20:27:00.000Z",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeDesktopAgentWorkSnapshot({
+        keepAwake: "always",
+        turns: { chat: 1, work: 0, code: 0 },
+        childRuns: 0,
+        coordinatorWorkers: 0,
+        nextRoutineDueAt: null,
+        observedAt: "2026-11-19T20:27:00.000Z",
+        threadTitles: ["Secret title"],
       }),
     ).toThrow();
   });

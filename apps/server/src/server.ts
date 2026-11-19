@@ -57,6 +57,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CANVAS_PREVIEW_ASSET_FOLDER, CANVAS_PREVIEW_PAGE } from "./canvas/canvasPreviewRenderer";
 import { healthResponse, hostActivity } from "./health";
+import { createDesktopAgentWorkRouteHandler } from "./desktopAgentWorkRoutes";
 import {
   Persistence,
   type PersistenceService,
@@ -333,6 +334,7 @@ export function startOctantServer(
       agentRunRouteDependencies,
       agentRunSessionStore,
       agentRunSettingsRoutes,
+      keepAwakePolicy,
       hostResourceBudget,
       agentsManagedToolsFor,
       capacityScheduler,
@@ -2083,6 +2085,28 @@ export function startOctantServer(
       return "purged";
     };
 
+    const desktopAgentWorkRoutes = createDesktopAgentWorkRouteHandler({
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      keepAwakePolicy,
+      activeTurns: () => liveTurns.activeEntries(),
+      isCoordinatorWorker: (threadId) => {
+        try {
+          return (
+            persistence.readCodeThread(decodeCodeThreadId(threadId))?.coordinatorThreadId !==
+            undefined
+          );
+        } catch {
+          return false;
+        }
+      },
+      runningChildRuns: () => persistence.agentRunProjection.runningCount(),
+      routines: () =>
+        persistence.automationProjection.listDefinitions().map((definition) => ({
+          enabled: definition.lifecycle === "enabled",
+          nextDueAt: definition.nextDueAt,
+        })),
+    });
+
     yield* Effect.addFinalizer(() => Effect.promise(() => ownerBrowserControlService.close()));
     let remoteListenerError: PrivateListenerFailureCode | undefined;
     // Retained so shutdown can settle warming before the runtime registry
@@ -2161,6 +2185,7 @@ export function startOctantServer(
                 (await agentAccessAdministrationRoutes(request)) ??
                 (await agentAccessLoopbackRoutes(request)) ??
                 (await personQuitRoutes(request)) ??
+                (await desktopAgentWorkRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await supportBundleRoutes(request)) ??
                 (await externalContentRoutes(request)) ??

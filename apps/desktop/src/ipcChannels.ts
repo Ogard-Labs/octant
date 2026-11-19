@@ -46,6 +46,8 @@ export const DESKTOP_IPC_CHANNELS = {
   appUpdateAutomatic: "octant:app-update:automatic",
   backgroundHostState: "octant:background-host:state",
   backgroundHostChange: "octant:background-host:change",
+  keepAwakeStatus: "octant:keep-awake:status",
+  keepAwakeRefresh: "octant:keep-awake:refresh",
   computerUseStatus: "octant:computer-use:status",
   computerUseTest: "octant:computer-use:test",
   computerUsePermissions: "octant:computer-use:permissions",

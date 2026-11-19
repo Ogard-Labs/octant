@@ -242,4 +242,61 @@ describe("AgentRunSettingsStore", () => {
       limit: 1_000,
     });
   });
+
+  it("journals keep-awake changes with who, when, and the old and new values, and preserves the choice across unrelated updates and restarts", () => {
+    const journal = createJournal();
+    const store = createStore(journal);
+    const deviceActor = Schema.decodeUnknownSync(EventActor)({
+      kind: "remote-device",
+      actorId: "55000000-0000-4000-8000-000000000001",
+      deviceId: "55000000-0000-4000-8000-000000000001",
+    });
+
+    store.update(
+      {
+        creationPosture: "automatic",
+        expectedVersion: 0,
+        resourcePolicy: { ...DEFAULT_HOST_RESOURCE_POLICY, keepAwake: "always" },
+      },
+      deviceActor,
+    );
+    // An unrelated resource update that omits keepAwake keeps the stored choice.
+    store.update({
+      creationPosture: "automatic",
+      expectedVersion: 1,
+      resourcePolicy: { ...DEFAULT_HOST_RESOURCE_POLICY, maxWorkers: 2 },
+    });
+    store.update({
+      creationPosture: "automatic",
+      expectedVersion: 2,
+      resourcePolicy: { ...DEFAULT_HOST_RESOURCE_POLICY, maxWorkers: 2, keepAwake: "never" },
+    });
+
+    const events = journal.replayAggregate({
+      aggregateType: AGENT_RUN_SETTINGS_AGGREGATE_TYPE,
+      aggregateId: AGENT_RUN_SETTINGS_AGGREGATE_ID,
+      afterVersion: 0,
+      limit: 10,
+    });
+    expect(events).toHaveLength(3);
+    expect(events[0]?.actor).toEqual(deviceActor);
+    expect(events[0]?.occurredAt).toBe(now);
+    expect(events[0]?.payload).toMatchObject({
+      previousKeepAwake: "on-power",
+      resourcePolicy: { keepAwake: "always" },
+    });
+    expect(events[1]?.payload).not.toHaveProperty("previousKeepAwake");
+    expect(events[1]?.payload).toMatchObject({
+      resourcePolicy: { keepAwake: "always", maxWorkers: 2 },
+    });
+    expect(events[2]?.actor).toEqual(actor);
+    expect(events[2]?.payload).toMatchObject({
+      previousKeepAwake: "always",
+      resourcePolicy: { keepAwake: "never", maxWorkers: 2 },
+    });
+
+    const replayed = createStore(journal).current();
+    expect(replayed.resourcePolicy).toMatchObject({ keepAwake: "never", maxWorkers: 2 });
+    expect(replayed.previousKeepAwake).toBeUndefined();
+  });
 });

@@ -14,6 +14,7 @@ import {
   type BackgroundHostChange,
   type BackgroundHostState,
 } from "./backgroundHost";
+import { decodeKeepAwakeStatus, type KeepAwakeStatus } from "./keepAwakeStatus";
 import {
   validateExtensionPopupRequest,
   type ExtensionPopupRequest,
@@ -946,6 +947,35 @@ export function createHostBridge(
               await ipc.invoke(IPC_CHANNELS.backgroundHostChange, decoded),
             );
           },
+          subscribeKeepAwakeStatus: (listener: (status: KeepAwakeStatus) => void) => {
+            let active = true;
+            let receivedLive = false;
+            const receive: MaterialListener = (_event, value) => {
+              try {
+                const status = decodeKeepAwakeStatus(value);
+                if (!active) return;
+                receivedLive = true;
+                listener(status);
+              } catch {
+                // Ignore malformed native status instead of widening the bridge.
+              }
+            };
+            ipc.on(IPC_CHANNELS.keepAwakeStatus, receive);
+            void ipc
+              .invoke(IPC_CHANNELS.keepAwakeStatus)
+              .then((value) => {
+                if (active && !receivedLive) listener(decodeKeepAwakeStatus(value));
+              })
+              .catch(() => {
+                // A refused or malformed snapshot leaves live updates active.
+              });
+            return () => {
+              active = false;
+              ipc.removeListener(IPC_CHANNELS.keepAwakeStatus, receive);
+            };
+          },
+          refreshKeepAwakeStatus: async () =>
+            decodeKeepAwakeStatus(await ipc.invoke(IPC_CHANNELS.keepAwakeRefresh)),
         }),
     projectWindowCapability,
     subscribeProjectWindowCapability: (listener: (capability: string) => void) => {
@@ -1547,6 +1577,8 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "installNightly",
   "readBackgroundHost",
   "changeBackgroundHost",
+  "subscribeKeepAwakeStatus",
+  "refreshKeepAwakeStatus",
   "openNightly",
   "removeNightly",
   "pairWithPairingCode",

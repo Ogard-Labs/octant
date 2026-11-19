@@ -44,8 +44,11 @@ Secret stores, Memory: what an agent may touch, reach and remember), and
 Data & devices (Data & storage, Sync, Remote access, Host, Usage: what this
 computer stores and the other machines it talks to). An earlier Privacy & data
 group had grown to seven pages answering three different questions, Modes stood
-apart from the models its pages choose, and Advanced held two pages. General
-opens on Your identity (the profile), followed by Your instructions (a
+apart from the models its pages choose, and Advanced held two pages. General opens on Computer resources (automatic or manual local-work limits,
+Pause new work, and **Keep the computer awake while agents work** — `While on
+power` by default, `Always`, or `Never`, with a quiet counts-only live status
+line on the desktop app that reports held, idle, or unavailable and never shows
+thread titles) and Your identity (the profile), followed by Your instructions (a
 multi-line field with its count, limit, a likely-secret warning, and Save,
 read-only where the window cannot change it) and Orchestration, the same field
 for coordinator threads ([Octant instructions](octant-instructions.md#settings)),
