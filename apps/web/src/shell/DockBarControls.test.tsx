@@ -924,6 +924,145 @@ describe("the focused pane's bar controls for the command palette", () => {
     store.set("gone", undefined);
     expect(store.get()?.toolLabel).toBe("other");
   });
+
+  it("keeps the palette on the owner the person addressed while other owners' controls change", () => {
+    const store = createFocusedDockTool();
+    const seen: string[] = [];
+    store.set("tile", {
+      toolLabel: "tile",
+      items: [
+        {
+          kind: "button",
+          id: "stop",
+          label: "Stop",
+          icon: RefreshCw,
+          onSelect: () => seen.push("first"),
+        },
+      ],
+    });
+    store.set("terminal", { toolLabel: "terminal", items: [] });
+    store.focus("tile");
+    // An inactive owner's controls change — Stop becomes Restart — without
+    // taking the palette from the tile the person is in.
+    store.set("terminal", {
+      toolLabel: "terminal",
+      items: [
+        {
+          kind: "button",
+          id: "restart",
+          label: "Restart",
+          icon: RefreshCw,
+          onSelect: () => seen.push("restart"),
+        },
+      ],
+    });
+    expect(store.get()?.toolLabel).toBe("tile");
+    // A first registration from a third owner does not steal it either.
+    store.set("browser", { toolLabel: "browser", items: [] });
+    expect(store.get()?.toolLabel).toBe("tile");
+    // The person addresses the terminal; the tile's own changes cannot take
+    // the palette back.
+    store.focus("terminal");
+    store.set("tile", {
+      toolLabel: "tile",
+      items: [
+        {
+          kind: "button",
+          id: "stop",
+          label: "Stop",
+          icon: RefreshCw,
+          onSelect: () => seen.push("second"),
+        },
+      ],
+    });
+    expect(store.get()?.toolLabel).toBe("terminal");
+    // The addressed owner still sees its freshest callbacks.
+    const restart = store.get()?.items.find((item) => item.id === "restart");
+    if (restart?.kind !== "button") throw new Error("Missing restart button.");
+    restart.onSelect();
+    expect(seen).toEqual(["restart"]);
+    // When the addressed owner unmounts, the last published one stands up.
+    store.set("terminal", undefined);
+    expect(store.get()?.toolLabel).toBe("browser");
+  });
+
+  it("keeps the palette on the focused tile while the inactive bottom panel's controls change", () => {
+    const store = createFocusedDockTool();
+    const review = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === "review");
+    if (review === undefined) throw new Error("Missing review surface.");
+    const view = render(
+      <FocusedDockToolContext.Provider value={store}>
+        {dockOf(<Tool onRefresh={() => {}} />)}
+        <BottomUtilityPanel
+          activeSurface={review}
+          content={<Tool onRefresh={() => {}} />}
+          height={260}
+          launchableSurfaces={[]}
+          onClose={() => {}}
+          onCommitHeight={() => {}}
+          onOpenTool={() => {}}
+          onPreviewHeight={() => {}}
+          tabs={[review]}
+        />
+      </FocusedDockToolContext.Provider>,
+    );
+    // The focused tile holds the palette even though the panel registered.
+    expect(store.get()?.toolLabel).toBe("one");
+    // The panel's controls change while it is inactive: no steal.
+    view.rerender(
+      <FocusedDockToolContext.Provider value={store}>
+        {dockOf(<Tool onRefresh={() => {}} />)}
+        <BottomUtilityPanel
+          activeSurface={review}
+          content={<Plain />}
+          height={260}
+          launchableSurfaces={[]}
+          onClose={() => {}}
+          onCommitHeight={() => {}}
+          onOpenTool={() => {}}
+          onPreviewHeight={() => {}}
+          tabs={[review]}
+        />
+      </FocusedDockToolContext.Provider>,
+    );
+    expect(store.get()?.toolLabel).toBe("one");
+    view.unmount();
+  });
+
+  it("promotes the panel only when the person addresses it, then keeps it through the tile's changes", () => {
+    const store = createFocusedDockTool();
+    const review = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === "review");
+    if (review === undefined) throw new Error("Missing review surface.");
+    const view = render(
+      <FocusedDockToolContext.Provider value={store}>
+        {dockOf(<Tool onRefresh={() => {}} />)}
+        <BottomUtilityPanel
+          activeSurface={review}
+          content={<Tool onRefresh={() => {}} />}
+          height={260}
+          launchableSurfaces={[]}
+          onClose={() => {}}
+          onCommitHeight={() => {}}
+          onOpenTool={() => {}}
+          onPreviewHeight={() => {}}
+          tabs={[review]}
+        />
+      </FocusedDockToolContext.Provider>,
+    );
+    const panel = document.getElementById("bottom-utility-panel");
+    if (panel === null) throw new Error("Missing bottom panel.");
+    fireEvent.pointerDown(panel);
+    expect(store.get()?.toolLabel).toBe(review.label);
+    // The tile's controls change while the panel is the addressed owner —
+    // a plain click fires the choice without the pointer's promotion.
+    const tile = document.querySelector(".dock-tile");
+    if (tile === null) throw new Error("Missing tile.");
+    const option = within(tile as HTMLElement).getByRole("button", { name: "View B" });
+    fireEvent.click(option);
+    expect(store.get()?.toolLabel).toBe(review.label);
+    view.unmount();
+    expect(store.get()).toBeUndefined();
+  });
 });
 
 describe("a toolbar's keys", () => {

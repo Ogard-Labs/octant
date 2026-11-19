@@ -838,6 +838,7 @@ describe("desktop preload bridge", () => {
       "providerCredentialStatus",
       "providerDeviceSignIn",
       "readBackgroundHost",
+      "readBrowserSurfaceTabIcons",
       "readBundledWhatsNew",
       "readNightlyInstall",
       "reconcileExpiredRemoteDevices",
@@ -1869,6 +1870,51 @@ describe("desktop preload bridge", () => {
     await expect(bridge.selectBrowserSurfacePoint(request)).rejects.toThrow(
       "Invalid Browser selection state",
     );
+  });
+
+  it("reads Browser tab icons over the owned surface channel, decodes rows defensively, and bounds the request", async () => {
+    const contextId = "60000000-0000-4000-8000-000000000010";
+    const threadId = "60000000-0000-4000-8000-000000000011";
+    const png = `data:image/png;base64,${"A".repeat(64)}`;
+    const invoke = vi.fn(
+      async (_channel: string): Promise<unknown> => [
+        { tabId: "tab-1", revision: 7, active: true, dataUrl: png },
+        // A non-raster payload never reaches the renderer.
+        { tabId: "tab-2", revision: 1, active: false, dataUrl: "data:image/svg+xml;base64,AAAA" },
+        { tabId: "tab-3", revision: 2, active: false, sleeping: true },
+        { tabId: 9, revision: "soon" },
+      ],
+    );
+    const ipc: IpcRendererPort = { invoke, on: vi.fn(), removeListener: vi.fn() };
+    const bridge = createHostBridge(ipc, projectWindowCapability);
+    const request = { contextId, threadId, known: [{ tabId: "tab-1", revision: 6 }] };
+    await expect(bridge.readBrowserSurfaceTabIcons(request)).resolves.toEqual([
+      { tabId: "tab-1", revision: 7, active: true, dataUrl: png },
+      { tabId: "tab-3", revision: 2, active: false, sleeping: true },
+    ]);
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.browserSurfaceTabIcons, request);
+    // null is the host's owner refusal: the renderer reads it as no answer.
+    invoke.mockResolvedValueOnce(null);
+    await expect(bridge.readBrowserSurfaceTabIcons(request)).resolves.toBeUndefined();
+    // A non-array answer is ignored rather than trusted.
+    invoke.mockResolvedValueOnce({ wrong: true });
+    await expect(bridge.readBrowserSurfaceTabIcons(request)).resolves.toEqual([]);
+    // The remembered list is bounded, and a malformed request never reaches IPC.
+    await expect(
+      bridge.readBrowserSurfaceTabIcons({
+        ...request,
+        known: Array.from({ length: 129 }, (_, index) => ({
+          tabId: `tab-${index}`,
+          revision: 0,
+        })),
+      }),
+    ).rejects.toThrow("Invalid Browser tab icon request.");
+    await expect(
+      bridge.readBrowserSurfaceTabIcons({ contextId: "nope", threadId, known: [] }),
+    ).rejects.toThrow();
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === IPC_CHANNELS.browserSurfaceTabIcons),
+    ).toHaveLength(3);
   });
 });
 

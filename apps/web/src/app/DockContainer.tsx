@@ -20,7 +20,6 @@ import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/prov
 import type { buildModelPickerGroups } from "@octant/domain";
 import type { SideChatSidecar } from "@octant/contracts";
 import { memo, useEffect, useMemo, useRef } from "react";
-import { FocusedDockToolContext, type FocusedDockTool } from "../shell/dockBarControls";
 import { useMinuteTick } from "../polling/useMinuteTick";
 import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
 import type { createChatReadCursorStore } from "../chat/useChatController";
@@ -32,6 +31,7 @@ import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import { modelDisplayName } from "../providers/providerModelLabel";
 import type { ProviderController } from "../providers/useProviderController";
 import { BottomUtilityPanel } from "../shell/BottomUtilityPanel";
+import { FocusedDockToolContext, type FocusedDockTool } from "../shell/dockBarControls";
 import { DockBrowserCard } from "../shell/DockBrowserCard";
 import {
   browserTabName,

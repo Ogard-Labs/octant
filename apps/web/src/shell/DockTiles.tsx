@@ -706,17 +706,26 @@ function Tile(props: {
   // them here keeps the palette invoking the bar's own registered callbacks.
   const focusedDockTool = useContext(FocusedDockToolContext);
   const commandOwner = useId();
+  // Content updates publish without promoting: a background tile's fresh
+  // controls cannot steal the palette from the owner the person is in.
   useEffect(() => {
-    if (focusedDockTool === undefined || !props.focused || barItems === undefined) return;
-    const publish = () =>
-      focusedDockTool.set(commandOwner, { toolLabel: props.content.label, items: barItems });
-    publish();
-    republish.current = publish;
+    if (focusedDockTool === undefined || barItems === undefined) return;
+    focusedDockTool.set(commandOwner, { toolLabel: props.content.label, items: barItems });
+  }, [commandOwner, focusedDockTool, barItems, props.content.label]);
+  // Becoming the focused tile promotes this owner; only unmount clears the
+  // publication, so a control refresh never re-asserts it.
+  useEffect(() => {
+    if (focusedDockTool === undefined || !props.focused) return;
+    focusedDockTool.focus(commandOwner);
+  }, [commandOwner, focusedDockTool, props.focused]);
+  useEffect(() => {
+    if (focusedDockTool === undefined) return;
+    republish.current = () => focusedDockTool.focus(commandOwner);
     return () => {
       republish.current = () => undefined;
       focusedDockTool.set(commandOwner, undefined);
     };
-  }, [commandOwner, focusedDockTool, props.focused, barItems, props.content.label]);
+  }, [commandOwner, focusedDockTool]);
   const bar = useRef<HTMLDivElement>(null);
   // Every pane has the one bar, alone or among tiles: the same height, insets
   // and controls, so nothing in a pane moves when a neighbour opens or closes.

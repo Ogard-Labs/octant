@@ -154,34 +154,51 @@ export interface FocusedDockToolSource {
 }
 
 /**
- * One publication per owner, last asserted wins: the focused tile or the
- * bottom panel writes its merged items, a reader (the command palette's
- * source list) watches them. An owner clears only its own publication — a
- * publisher that unmounts while on top falls back to whatever published
- * before it instead of leaving the palette empty.
+ * One publication per owner, the last addressed wins: the focused tile or the
+ * bottom panel writes its merged items with `set`, and only `focus` — a
+ * pointer or focus the person gave that owner — promotes it to the palette's
+ * source. Updating controls never re-promotes, so a background tool's fresh
+ * items cannot steal the palette from the owner the person is in. An owner
+ * clears only its own publication — when the focused owner unmounts, the
+ * most recently published one stands back up instead of leaving the palette
+ * empty.
  */
 export interface FocusedDockTool {
   readonly get: () => FocusedDockToolSource | undefined;
   readonly set: (owner: string, source: FocusedDockToolSource | undefined) => void;
+  readonly focus: (owner: string) => void;
   readonly subscribe: (listener: () => void) => () => void;
 }
 
 export function createFocusedDockTool(): FocusedDockTool {
   const sources = new Map<string, FocusedDockToolSource>();
   const listeners = new Set<() => void>();
+  let focused: string | undefined;
   const emit = () => {
     for (const listener of listeners) listener();
   };
   return {
-    get: () => [...sources.values()].at(-1),
+    get: () => {
+      if (focused !== undefined) {
+        const source = sources.get(focused);
+        if (source !== undefined) return source;
+      }
+      return [...sources.values()].at(-1);
+    },
     set: (owner, source) => {
       if (source === undefined) {
         if (!sources.delete(owner)) return;
+        if (focused === owner) focused = undefined;
       } else {
-        // Delete first so a re-assert moves this owner to the top.
-        sources.delete(owner);
+        // Insert in place: a refresh keeps its owner's rank, and a first
+        // registration does not promote over whoever is focused.
         sources.set(owner, source);
       }
+      emit();
+    },
+    focus: (owner) => {
+      if (focused === owner) return;
+      focused = owner;
       emit();
     },
     subscribe: (listener) => {

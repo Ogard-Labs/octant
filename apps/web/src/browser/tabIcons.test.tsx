@@ -206,6 +206,60 @@ describe("useBrowserSurfaceTabIcons", () => {
     expect(result.current.get("ctx-1")?.icons.get("tab-1")).toBe(ICON_A);
   });
 
+  it("commits a multi-context read whole or not at all when the poll is replaced", async () => {
+    let hangSecondContext = false;
+    const read = vi.fn<ReadIcons>((request) => {
+      if (request.contextId === "ctx-1") {
+        return Promise.resolve(
+          request.known.length === 0
+            ? [row("tab-1", 1, true, ICON_A)]
+            : [row("tab-1", 2, true, ICON_B)],
+        );
+      }
+      // The second poll's read on ctx-2 stays open while the whole poll is
+      // replaced, so nothing it staged can be committed.
+      if (hangSecondContext && request.known.length !== 0) {
+        return new Promise<ReadonlyArray<BrowserSurfaceTabIcon>>(() => {});
+      }
+      return Promise.resolve([row("tab-9", 1, true, ICON_A)]);
+    });
+    const bridge = iconBridge(read);
+    const { result, rerender } = renderHook(
+      (props: { refreshKey: number }) =>
+        useBrowserSurfaceTabIcons({
+          contextIds: ["ctx-1", "ctx-2"],
+          hostBridge: bridge,
+          refreshKey: props.refreshKey,
+          threadId: "thread-1",
+        }),
+      { initialProps: { refreshKey: 0 } },
+    );
+    await waitFor(() => expect(result.current.get("ctx-1")?.icons.get("tab-1")).toBe(ICON_A));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    // Poll two answers ctx-1's new image but hangs on ctx-2; replacing it must
+    // not ack ctx-1's new revision early.
+    hangSecondContext = true;
+    rerender({ refreshKey: 1 });
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(4));
+    hangSecondContext = false;
+    rerender({ refreshKey: 2 });
+    await waitFor(() => expect(result.current.get("ctx-1")?.icons.get("tab-1")).toBe(ICON_B));
+    // The replaced poll's read of ctx-1 asked with the last committed
+    // revision — the hung poll's newer one was never acked.
+    const replacedPollRead = read.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.contextId === "ctx-1")
+      .at(-2);
+    expect(replacedPollRead?.known).toEqual([{ tabId: "tab-1", revision: 1 }]);
+    // And the committed poll's read still names that same revision until the
+    // new image actually lands — no stale ack.
+    const committedRead = read.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.contextId === "ctx-1")
+      .at(-1);
+    expect(committedRead?.known).toEqual([{ tabId: "tab-1", revision: 1 }]);
+  });
+
   it("forgets the old bridge's icons when the bridge changes", async () => {
     const readOld = vi.fn(async (_request: BrowserSurfaceTabIconsRequest) => [
       row("tab-1", 1, true, ICON_A),

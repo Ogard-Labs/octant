@@ -43,20 +43,27 @@ export function BottomUtilityPanel(props: BottomUtilityPanelProps) {
   // only this publication so a tile's own commands stand back up.
   const focusedDockTool = useContext(FocusedDockToolContext);
   const commandOwner = useId();
+  // Content updates publish without promoting: fresh items cannot steal the
+  // palette from a tile the person is in.
   useEffect(() => {
     if (focusedDockTool === undefined || items === undefined) return;
-    const publish = () =>
-      focusedDockTool.set(commandOwner, { toolLabel: props.activeSurface.label, items });
-    publish();
+    focusedDockTool.set(commandOwner, { toolLabel: props.activeSurface.label, items });
+  }, [commandOwner, focusedDockTool, items, props.activeSurface.label]);
+  // Only the person's own pointer or focus promotes this panel to the
+  // palette's source; unmount clears this publication and nothing else, so a
+  // control refresh never re-asserts it.
+  useEffect(() => {
+    if (focusedDockTool === undefined) return;
+    const promote = () => focusedDockTool.focus(commandOwner);
     const node = panel.current;
-    node?.addEventListener("pointerdown", publish, true);
-    node?.addEventListener("focusin", publish, true);
+    node?.addEventListener("pointerdown", promote, true);
+    node?.addEventListener("focusin", promote, true);
     return () => {
-      node?.removeEventListener("pointerdown", publish, true);
-      node?.removeEventListener("focusin", publish, true);
+      node?.removeEventListener("pointerdown", promote, true);
+      node?.removeEventListener("focusin", promote, true);
       focusedDockTool.set(commandOwner, undefined);
     };
-  }, [commandOwner, focusedDockTool, items, props.activeSurface.label]);
+  }, [commandOwner, focusedDockTool]);
   return (
     <section
       aria-label="Bottom panel"

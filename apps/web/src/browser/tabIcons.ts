@@ -121,7 +121,7 @@ export function useBrowserSurfaceTabIcons(input: {
       if (scopeRef.current.contexts.size > 0) setIcons(new Map());
       scopeRef.current = { hostBridge, threadId, contexts: new Map() };
     }
-    const held = scopeRef.current.contexts;
+    let held = scopeRef.current.contexts;
     const read = hostBridge?.readBrowserSurfaceTabIcons;
     const contextIds = contextIdsKey === "" ? [] : contextIdsKey.split("\n");
     if (read === undefined || threadId === undefined || contextIds.length === 0) {
@@ -138,8 +138,13 @@ export function useBrowserSurfaceTabIcons(input: {
       inFlight = true;
       try {
         let changed = false;
+        // The whole poll stages into a copy of the last fully committed
+        // snapshot: every request names the revisions that snapshot knew,
+        // and nothing is acked or rendered until all contexts answered and
+        // this poll is still current — a cancelled read acks nothing.
+        const staged = new Map(held);
         for (const contextId of contextIds) {
-          const prior = held.get(contextId);
+          const prior = staged.get(contextId);
           const known = [...(prior?.known ?? new Map<string, BrowserTabIconMemory>())]
             .slice(0, TAB_ICONS_KNOWN_LIMIT)
             .map(([tabId, memory]) => ({ tabId, revision: memory.revision }));
@@ -152,18 +157,17 @@ export function useBrowserSurfaceTabIcons(input: {
             // answers. Only a refusal (undefined) drops them.
             continue;
           }
-          if (!current) return;
           if (rows === undefined) {
             // The host refused: this window does not own the context any
             // more, and last-owner icons are not its to keep showing.
-            if (held.delete(contextId)) changed = true;
+            if (staged.delete(contextId)) changed = true;
             continue;
           }
           const merged = applyTabIconRows(prior?.known ?? new Map(), rows);
           // Always remember the answer — a new revision at identical bytes
           // still has to be named as known on the next read or the host will
           // keep resending it.
-          held.set(contextId, {
+          staged.set(contextId, {
             known: merged.next,
             ...(merged.activeTabId === undefined ? {} : { activeTabId: merged.activeTabId }),
             ...(merged.sleeping ? { sleeping: true } : {}),
@@ -176,16 +180,19 @@ export function useBrowserSurfaceTabIcons(input: {
             changed = true;
           }
         }
-        for (const contextId of [...held.keys()]) {
+        for (const contextId of [...staged.keys()]) {
           if (!contextIds.includes(contextId)) {
-            held.delete(contextId);
+            staged.delete(contextId);
             changed = true;
           }
         }
-        if (changed && current) {
+        if (!current) return;
+        scopeRef.current = { hostBridge, threadId, contexts: staged };
+        held = staged;
+        if (changed) {
           setIcons(
             new Map(
-              [...held].map(([contextId, entry]) => [
+              [...staged].map(([contextId, entry]) => [
                 contextId,
                 {
                   ...(entry.activeTabId === undefined ? {} : { activeTabId: entry.activeTabId }),
