@@ -1865,11 +1865,21 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         resolvePullRequestTarget: async (threadId) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return undefined;
-          const baseRepository = await serverPullRequestRepository(
-            { store: serverProjectStore, connection: serverConnection },
-            thread,
-          );
-          const owner = baseRepository.split("/")[0];
+          const threadLinks = pullRequestLinkService.listForThread(threadId);
+          const matchingLink =
+            threadLinks.find(
+              (link) =>
+                link.headBranch !== undefined &&
+                link.headBranch === thread.deliveryTarget.branchIntent,
+            ) ?? (threadLinks.length === 1 ? threadLinks[0] : undefined);
+          const baseRepository =
+            matchingLink !== undefined
+              ? `${matchingLink.repositoryOwner}/${matchingLink.repositoryName}`
+              : await serverPullRequestRepository(
+                  { store: serverProjectStore, connection: serverConnection },
+                  thread,
+                );
+          const owner = matchingLink?.headOwner ?? baseRepository.split("/")[0];
           if (owner === undefined || owner.length === 0) return undefined;
           return {
             authorization: "confirmed-delivery-target",
@@ -2003,6 +2013,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       history: {
         read: (threadId) => codeBoardEventStore.summaryForThread(threadId),
       },
+      pullRequestLinks: pullRequestLinkService,
     });
     // Persistent Code follow-up. Follow-up is a durable user
     // obligation independent of unread and runtime status; it reuses the
@@ -2467,6 +2478,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         };
       },
       authority: projectPullRequestService,
+      pullRequestLinks: pullRequestLinkService,
       forge: pullRequestSwitchForge ?? {
         readAutoMergeSettings: async () => ({ status: "unavailable", reason: "unavailable" }),
         enableAutoMerge: async () => ({ status: "unavailable", reason: "unavailable" }),

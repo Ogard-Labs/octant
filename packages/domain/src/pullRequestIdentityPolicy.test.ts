@@ -7,12 +7,16 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   applyPullRequestLinkEvent,
+  areSamePullRequestRepositoryInProject,
   buildDuplicatePullRequestSwitchNotices,
+  canonicalPullRequestRepositoryInProject,
   emptyPullRequestLinkRegistryState,
+  listPullRequestDisplayAliases,
   missingPullRequestForgeIds,
   pullRequestDisplayFieldsChanged,
   reconcileMergedPullRequestSwitches,
   resolveCanonicalPullRequestLink,
+  resolvePullRequestLink,
   selectSurvivingPullRequestLink,
 } from "./pullRequestIdentityPolicy";
 
@@ -223,5 +227,87 @@ describe("pull request identity policy", () => {
           "Merge when ready was turned off on pull request #19 because two duplicate links for the same pull request were merged and it was only on in one of them. You can turn it back on.",
       },
     ]);
+  });
+
+  it("resolves renamed and merged historical display coordinates to the canonical link and refuses conflicting forge node IDs", () => {
+    let state = emptyPullRequestLinkRegistryState();
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkEarly,
+          projectId,
+          threadIds: [threadA],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "old-repo",
+          number: 42,
+          pullRequestNodeId: "PR_kwDO42",
+          baseRepositoryNodeId: "R_kgDO1",
+          linkedAt: "2026-11-01T10:00:00.000Z",
+        }),
+      },
+      1,
+    );
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "display-updated",
+        payload: {
+          linkId: linkEarly,
+          repositoryOwner: "new-org",
+          repositoryName: "new-repo",
+          number: 42,
+          url: "https://github.com/new-org/new-repo/pull/42",
+        },
+      },
+      2,
+    );
+
+    expect(
+      resolvePullRequestLink(state, {
+        projectId,
+        repositoryOwner: "acme",
+        repositoryName: "old-repo",
+        number: 42,
+      })?.linkId,
+    ).toBe(linkEarly);
+    expect(
+      resolvePullRequestLink(state, {
+        projectId,
+        repositoryOwner: "acme",
+        repositoryName: "old-repo",
+        number: 42,
+        pullRequestNodeId: "PR_kwDOother99",
+      }),
+    ).toBeUndefined();
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "old-repo" },
+        { owner: "new-org", name: "new-repo" },
+      ),
+    ).toBe(true);
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "old-repo" },
+        { owner: "other", name: "unrelated" },
+      ),
+    ).toBe(false);
+    expect(
+      canonicalPullRequestRepositoryInProject(state, projectId, {
+        owner: "acme",
+        name: "old-repo",
+      }),
+    ).toEqual({
+      owner: "new-org",
+      name: "new-repo",
+      baseRepositoryNodeId: "R_kgDO1",
+    });
+    expect(listPullRequestDisplayAliases(state, linkEarly)).toHaveLength(2);
   });
 });

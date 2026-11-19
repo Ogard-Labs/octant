@@ -94,13 +94,15 @@ export type GhPullRequestSwitchObservation =
       failures: ReadonlyArray<GhAutoFixFailureDetail>;
       /** GitHub GraphQL node ID of the pull request, when available. */
       pullRequestNodeId?: string;
+      /** Canonical base repository (`owner/name`) observed from the pull request URL, when available. */
+      baseRepository?: string;
       /** Present only when the observation was asked for activity. */
       activity?: GhPullRequestActivity;
     }>
   | Readonly<{ status: "unavailable" }>;
 
 const VIEW_FIELDS =
-  "id,state,headRefOid,headRefName,baseRefName,mergeable,autoMergeRequest,reviewDecision";
+  "id,url,state,headRefOid,headRefName,baseRefName,mergeable,autoMergeRequest,reviewDecision";
 const ACTIVITY_VIEW_FIELDS = `${VIEW_FIELDS},statusCheckRollup`;
 /** The newest reviews and comments a watch keeps from one read. */
 const MAX_ACTIVITY_ENTRIES = 50;
@@ -181,12 +183,49 @@ export class GhPullRequestSwitchPort {
     request: GhPullRequestSwitchRequest & {
       readonly method: CodeProjectPullRequestMergeMethod;
       readonly headSha: string;
+      /**
+       * Expected GitHub pull request node ID from the identity owner. When
+       * supplied, verified before enabling auto-merge so a head check can
+       * never pass against another pull request's row.
+       */
+      readonly expectedPullRequestNodeId?: string;
     },
     signal: AbortSignal,
   ): Promise<GhAutoMergeResult> {
     const repository = `${request.owner}/${request.name}`;
     if (!validRepository(repository) || !validNumber(request.number)) {
       return { status: "refused", reason: "failed" };
+    }
+    if (request.expectedPullRequestNodeId !== undefined) {
+      const check = await this.#run(
+        [
+          "pr",
+          "view",
+          String(request.number),
+          "--repo",
+          repository,
+          "--json",
+          "id,headRefOid,state",
+        ],
+        signal,
+      );
+      if (check === undefined) return { status: "unavailable", reason: "disconnected" };
+      if (check.exitCode !== 0) return classifyFailure(check);
+      const parsed = parseJson(check.stdout);
+      if (!isRecord(parsed)) return { status: "unavailable", reason: "unavailable" };
+      if (
+        typeof parsed.id === "string" &&
+        /^[A-Za-z0-9+/=_-]{1,128}$/.test(parsed.id) &&
+        parsed.id !== request.expectedPullRequestNodeId
+      ) {
+        return { status: "refused", reason: "stale" };
+      }
+      if (typeof parsed.headRefOid === "string" && parsed.headRefOid !== request.headSha) {
+        return { status: "refused", reason: "stale" };
+      }
+      if (normalizeState(parsed.state) !== "open") {
+        return { status: "refused", reason: "not-open" };
+      }
     }
     const result = await this.#run(
       [
@@ -271,6 +310,10 @@ export class GhPullRequestSwitchPort {
       typeof pullRequest.id === "string" && /^[A-Za-z0-9+/=_-]{1,128}$/.test(pullRequest.id)
         ? pullRequest.id
         : undefined;
+    const baseRepository =
+      typeof pullRequest.url === "string"
+        ? repositoryFromPullRequestUrl(pullRequest.url)
+        : undefined;
     const base = {
       status: "observed" as const,
       state,
@@ -279,6 +322,7 @@ export class GhPullRequestSwitchPort {
       baseBranch: typeof pullRequest.baseRefName === "string" ? pullRequest.baseRefName : "",
       autoMergeEnabled: isRecord(pullRequest.autoMergeRequest),
       ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
+      ...(baseRepository === undefined ? {} : { baseRepository }),
       ...(activity === undefined ? {} : { activity }),
     };
     if (state !== "open" || !reads.failures) return { ...base, waitingOn: [], failures: [] };
@@ -684,4 +728,11 @@ function tailBytes(value: string, maxBytes: number): string {
   return bytes.byteLength <= maxBytes
     ? value
     : `…${bytes.subarray(bytes.byteLength - maxBytes).toString("utf8")}`;
+}
+
+function repositoryFromPullRequestUrl(url: string): string | undefined {
+  const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/\d+(?:\/.*)?$/.exec(url);
+  if (match === null) return undefined;
+  const full = `${match[1]}/${match[2]}`;
+  return validRepository(full) ? full : undefined;
 }

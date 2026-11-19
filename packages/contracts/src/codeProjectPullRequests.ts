@@ -13,6 +13,7 @@ import { UtcTimestamp } from "./events";
 import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
 import { HubMemberId } from "./hubAndSpokes";
 import { ProjectId } from "./projects";
+import { PullRequestLinkId } from "./pullRequestIdentity";
 import {
   PullRequestCheckCounts,
   PullRequestLineCount,
@@ -659,6 +660,12 @@ export const CodeProjectPullRequestRow = Schema.Struct({
    * this was recorded.
    */
   merging: Schema.optional(PullRequestMerging),
+  /**
+   * Stable host-local pull-request link identity when the pull request is known
+   * to the forge identity owner. Absent on snapshots recorded before link
+   * identity existed or for unlinked repository pull requests.
+   */
+  linkId: Schema.optional(PullRequestLinkId),
   linkedThreads: Schema.Array(CodeProjectPullRequestLinkedThread).pipe(
     Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS),
   ),
