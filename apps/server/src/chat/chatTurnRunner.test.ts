@@ -4058,7 +4058,7 @@ describe("ChatTurnRunner", () => {
         driverKind: "openai-compatible",
         // The recorded call is what makes the execute bounds trustworthy: a
         // person's wait inside them is measured and subtracted, not guessed.
-        toolEffects: { tools: (set) => set, observe: () => undefined } as never,
+        toolEffects: { tools: (set) => set, observe: () => undefined },
         execute: async ({ name }) =>
           name === "read-file"
             ? { result: { text: "hello" } }
