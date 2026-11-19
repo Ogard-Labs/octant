@@ -101,6 +101,26 @@ export async function whileAwaitingToolApproval<T>(wait: () => Promise<T>): Prom
 }
 
 /**
+ * One person-facing wait inside a recorded call's execution, for asks the
+ * call's own record is responsible for. Timing only: nothing joins the
+ * call's record, so a call's recovery and effect state stay exactly what
+ * they were whether the ask preceded every effect or not — the wait is
+ * still not run time. `whileAwaitingToolApproval` remains the path for an
+ * ask proven to precede the call's effects, where the record carries the
+ * wait.
+ */
+export async function whileApprovalWaited<T>(wait: () => Promise<T>): Promise<T> {
+  const call = recordedCall.getStore();
+  if (call === undefined || call.approvalWaited === undefined) return wait();
+  const startedAt = call.now?.() ?? Date.now();
+  try {
+    return await wait();
+  } finally {
+    call.approvalWaited((call.now?.() ?? Date.now()) - startedAt);
+  }
+}
+
+/**
  * The host tool a runtime's report of a tool start names, when the start is
  * the runtime's side of a call it hands to the host: the tool's own name
  * (Codex, Pi), or the name under the server the host's tools are offered

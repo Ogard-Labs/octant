@@ -260,7 +260,11 @@ import {
 } from "./codeAppManagedTools";
 import type { CodePlannerToolPort } from "./codePlannerTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
-import { executingToolCallId, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
+import {
+  executingToolCallId,
+  whileApprovalWaited,
+  type TurnToolEffects,
+} from "../toolEffects/toolEffectLedger";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import {
   PROVIDER_CONTEXT_RESTATED,
@@ -5219,54 +5223,61 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (signal?.aborted || active.abort.signal.aborted || active.toolApprovals.size >= 4)
       return Promise.resolve("cancelled");
     const approvalId = CodeApprovalId.make(this.#options.uuid());
-    return new Promise((resolve) => {
-      const finish = (outcome: "approved" | "denied" | "cancelled" | "expired") => {
-        if (!active.toolApprovals.delete(String(approvalId))) return;
-        active.approvalPostures.delete(String(approvalId));
-        signal?.removeEventListener("abort", abort);
-        active.abort.signal.removeEventListener("abort", abort);
-        // An answer journals its own operation result; abandonment journals
-        // nothing.
-        if (outcome === "cancelled" || outcome === "expired") {
-          // The ask is gone without an answer: its wait ends here, at the
-          // withdraw, so calls it overlapped subtract a bounded stretch.
-          active.turnTiming.approvalAnswered({
-            approvalId: String(approvalId),
-            occurredAt: this.#options.clock(),
+    // A host ask raised inside a recorded call's execution bills the person's
+    // wait to that call's measured interval — timing only, so no ask changes
+    // what the call's record says ran. Outside a recorded call the journaled
+    // approval events bound the wait on the turn tracker instead.
+    return whileApprovalWaited(
+      () =>
+        new Promise((resolve) => {
+          const finish = (outcome: "approved" | "denied" | "cancelled" | "expired") => {
+            if (!active.toolApprovals.delete(String(approvalId))) return;
+            active.approvalPostures.delete(String(approvalId));
+            signal?.removeEventListener("abort", abort);
+            active.abort.signal.removeEventListener("abort", abort);
+            // An answer journals its own operation result; abandonment journals
+            // nothing.
+            if (outcome === "cancelled" || outcome === "expired") {
+              // The ask is gone without an answer: its wait ends here, at the
+              // withdraw, so calls it overlapped subtract a bounded stretch.
+              active.turnTiming.approvalAnswered({
+                approvalId: String(approvalId),
+                occurredAt: this.#options.clock(),
+              });
+              this.#options.onPendingRequestWithdrawn?.();
+            }
+            resolve(outcome);
+          };
+          // No timer: the ask is a question, holding no secret and no native
+          // resource, so it waits until the person answers, the call or the turn
+          // stops, or the thread is archived (`withdrawThreadAsks`).
+          const abort = () => finish("cancelled");
+          active.toolApprovals.set(String(approvalId), {
+            ...(origin === undefined ? {} : { origin }),
+            finish,
           });
-          this.#options.onPendingRequestWithdrawn?.();
-        }
-        resolve(outcome);
-      };
-      // No timer: the ask is a question, holding no secret and no native
-      // resource, so it waits until the person answers, the call or the turn
-      // stops, or the thread is archived (`withdrawThreadAsks`).
-      const abort = () => finish("cancelled");
-      active.toolApprovals.set(String(approvalId), {
-        ...(origin === undefined ? {} : { origin }),
-        finish,
-      });
-      active.approvalPostures.set(String(approvalId), this.#approvalPosture(active));
-      signal?.addEventListener("abort", abort, { once: true });
-      active.abort.signal.addEventListener("abort", abort, { once: true });
-      try {
-        // The recorded call asking, when the ask rose inside one's execution:
-        // its wait is billed to that call alone.
-        const callingTool = executingToolCallId();
-        const frame = this.#appendTurnEvent(active, {
-          event: {
-            kind: "approval-requested",
-            approvalId,
-            action: "provider-tool",
-            summary,
-            ...(callingTool === undefined ? {} : { toolCallId: callingTool }),
-          },
-        });
-        active.cursor = frame.cursor;
-      } catch {
-        finish("cancelled");
-      }
-    });
+          active.approvalPostures.set(String(approvalId), this.#approvalPosture(active));
+          signal?.addEventListener("abort", abort, { once: true });
+          active.abort.signal.addEventListener("abort", abort, { once: true });
+          try {
+            // The recorded call asking, when the ask rose inside one's execution:
+            // its wait is billed to that call alone.
+            const callingTool = executingToolCallId();
+            const frame = this.#appendTurnEvent(active, {
+              event: {
+                kind: "approval-requested",
+                approvalId,
+                action: "provider-tool",
+                summary,
+                ...(callingTool === undefined ? {} : { toolCallId: callingTool }),
+              },
+            });
+            active.cursor = frame.cursor;
+          } catch {
+            finish("cancelled");
+          }
+        }),
+    );
   }
 
   withdrawThreadAsks(threadId: string): void {
@@ -6591,6 +6602,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             }),
           ...(appManagedTools === undefined ? {} : { appManagedTools }),
           ...(toolEffects === undefined ? {} : { toolEffects }),
+          // The host's clock bounds any measured execute interval, never a
+          // wall-clock default the runtime's own timestamps do not share.
+          clock: this.#options.clock,
           ...(active.onContextDelivered === undefined
             ? {}
             : { onPromptSent: active.onContextDelivered }),

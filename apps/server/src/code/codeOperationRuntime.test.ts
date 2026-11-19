@@ -5748,6 +5748,129 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("charges a host ask inside a recorded call's execution to the call's wait, not its run", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    let clockNow = "2026-07-21T13:00:00.000Z";
+    const move = (seconds: number) => {
+      clockNow = new Date(Date.parse("2026-07-21T13:00:00.000Z") + seconds * 1_000).toISOString();
+    };
+    const at = (seconds: number) =>
+      new Date(Date.parse("2026-07-21T13:00:00.000Z") + seconds * 1_000).toISOString();
+    // The call's own record, on its own store: the turn's journal cannot
+    // carry tool-effect events, and the wait must be real either way.
+    const effectsDirectory = mkdtempSync(join(tmpdir(), "octant-tool-effects-"));
+    directories.push(effectsDirectory);
+    const effectsConnection = openSqlite(join(effectsDirectory, "effects.sqlite3"));
+    applyMigrations(effectsConnection, MIGRATIONS, () => now);
+    const ledger = new ToolEffectLedger({
+      journal: new Journal({
+        connection: effectsConnection,
+        registry: registerToolEffectEvents(new EventRegistry()),
+        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+        clock: () => clockNow,
+      }),
+      uuid: randomUUID,
+      actor: { kind: "system", actorId: operationId(999) as never },
+      clock: () => clockNow,
+    });
+    const bindings: Array<
+      Parameters<
+        NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"]>
+      >[0]
+    > = [];
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      supportsAppManagedTools: true,
+      clock: () => clockNow,
+      nativeHarness: {
+        contextFor: () => [],
+        turnStarted: () => undefined,
+        turnCompleted: async () => undefined,
+        toolEffects: (turn) => ledger.forTurn(turn),
+      },
+      computerUseTools: (input) => {
+        bindings.push(input);
+        return {
+          definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+          // The tool asks the person before it acts, then works two more
+          // seconds: a 240-second wait on a 2-second call.
+          execute: async () => {
+            const answer = await input.ask("Send dist/notes-app into the desktop?");
+            move(242);
+            return { result: { kind: "answer", answer } };
+          },
+        };
+      },
+    });
+    const startOperation = operationId(1490);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "computer-1",
+            toolName: "octant_computer",
+            inputJson: "{}",
+          }),
+        ),
+      );
+      let approvalId: string | undefined;
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        const requested = events.find((event) => event.kind === "approval-requested");
+        if (requested?.kind === "approval-requested") {
+          // The ask names the call that raised it.
+          expect(requested.toolCallId).toBe("computer-1");
+          approvalId = String(requested.approvalId);
+        }
+        expect(approvalId).toBeDefined();
+      });
+      move(240);
+      await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1491),
+        threadId,
+        checkoutId,
+        approvalId: approvalId as never,
+        decision: "approved",
+      });
+      await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalledOnce());
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        const completed = events.find(
+          (event) => event.kind === "tool-activity" && event.state === "completed",
+        );
+        // The measured interval carries the person's wait separately: the
+        // call reads as two seconds of run after a four-minute ask, never
+        // as a 242-second execution.
+        expect(completed).toMatchObject({
+          kind: "tool-activity",
+          state: "completed",
+          timing: {
+            startedAt: at(0),
+            endedAt: at(242),
+            approvalWaitMs: 240_000,
+          },
+        });
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+      effectsConnection.close();
+    }
+  });
+
   it("does not charge a concurrent call for another call's approval wait", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
