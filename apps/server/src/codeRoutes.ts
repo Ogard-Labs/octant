@@ -629,6 +629,7 @@ export interface CodeRouteDependencies {
       windowId: WindowId,
       query: ActivityQuery,
       admission: () => boolean,
+      signal?: AbortSignal,
     ) => Promise<ActivityView>;
   };
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -2182,9 +2183,14 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           const view = await dependencies.homeActivity.read(
             authenticatedWindowId,
             activityQuery,
-            liveAdmissionCurrent,
+            admissionCurrent,
+            AbortSignal.any(
+              principalAbortSignal === undefined
+                ? [request.signal]
+                : [request.signal, principalAbortSignal],
+            ),
           );
-          if (!liveAdmissionCurrent()) {
+          if (!admissionCurrent()) {
             throw new CodeRouteRejected("Code Home activity admission ended during the read.", 409);
           }
           return jsonResponse(encodeActivityView(view), 200, origin);

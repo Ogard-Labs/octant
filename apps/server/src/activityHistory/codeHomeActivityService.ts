@@ -14,11 +14,18 @@ import {
   type ActivityRecord,
   type ActivitySnapshotId,
   type ActivityView,
+  type ActivityWindow as ActivityWindowContract,
 } from "@octant/contracts/code-home-activity";
 import type { ActivityFact } from "../persistence/activityHistoryProjection";
 
 const PAGE_SIZE = 25;
 const MAX_SELECTED_RECORDS = 10_000;
+
+// Scope lists are unordered enumerations; the key is the deduped sorted set
+// so the same admitted roster compares equal however it was listed.
+const scopeKey = (scope: ReadonlyArray<string>): string =>
+  JSON.stringify([...new Set(scope)].sort());
+
 const SNAPSHOT_TTL_MS = 5 * 60 * 1_000;
 const MAX_SNAPSHOTS = 64;
 const RUN_IDENTITY = /^(code|chat|work|agent-run):/;
@@ -80,25 +87,106 @@ export interface CodeHomeActivityServicePorts {
   /** The derived projection is held after a failed apply: its rows lag. */
   readonly projectionHeld: () => boolean;
   /**
-   * Whether the forge seam could answer for this host. Absent means no
-   * connection; `github` reads then fall back to Octant facts.
+   * The window's currently connected and admitted `projectId|owner/name`
+   * pairs. GitHub selections are authorized against this live set — never
+   * against the broader active-Project roster — and pages recheck it.
    */
-  readonly forgeReadiness?: () => "connected" | "disconnected" | "insecure";
+  readonly listForgeScope?: (windowId: WindowId) => Promise<ReadonlyArray<string>>;
+  /**
+   * The resolved forge history read; absent means no GitHub connection at
+   * all, so `github` reads fall back to Octant facts. Never called for runs.
+   */
+  readonly forgeRead?: (input: {
+    readonly windowId: WindowId;
+    readonly card: Exclude<ActivityKind, "runs">;
+    readonly current: ActivityWindowContract;
+    readonly comparison?: ActivityWindowContract;
+    readonly refresh: boolean;
+    readonly signal?: AbortSignal;
+    readonly admission?: () => boolean;
+  }) => Promise<CodeHomeActivityForgeResult>;
+  /**
+   * The normalized login the forge seam answers as, or undefined when no
+   * secure account is connected; github snapshots recheck it on every page.
+   */
+  readonly forgeAccount?: (card: Exclude<ActivityKind, "runs">) => Promise<string | undefined>;
+  /**
+   * The access epoch an account's forge repository is read under; a view or
+   * page compares the epoch its rows were captured on against it, so a
+   * confirmed access loss retires the snapshot instead of serving stale rows.
+   */
+  readonly forgeRepositoryEpoch?: (account: string, repositoryKey: string) => number;
   readonly uuid: () => string;
   readonly now: () => number;
   readonly clock: () => UtcTimestamp;
 }
 
+/** One forge row plus the Project, repository, and access epoch that witnessed it. */
+export interface CodeHomeActivityForgeRecord {
+  readonly record: ActivityRecord;
+  readonly projectId: string;
+  /** Normalized `owner/name`; authority is the projectId|repositoryKey pair. */
+  readonly repositoryKey: string;
+  /**
+   * The account's access epoch the row was captured under. A repository-missing
+   * that lands after the read began still retires the row at view time.
+   */
+  readonly repositoryEpoch: number;
+}
+
+/**
+ * What the forge seam answers: a connection problem the Octant facts cover,
+ * an honest refusal, or normalized rows the window is authorized for.
+ */
+export type CodeHomeActivityForgeResult =
+  | Readonly<{
+      status: "fallback";
+      fallback: "no-github-connection" | "insecure-github-storage";
+    }>
+  | Readonly<{
+      status: "unavailable";
+      reason: "not-connected" | "not-checked" | "incomplete" | "rate-limited" | "read-failed";
+    }>
+  | Readonly<{
+      status: "ready" | "partial";
+      /** The account whose `gh` answered, normalized; pages recheck it. */
+      account: string;
+      checkedAt: UtcTimestamp;
+      /**
+       * The admitted Project/repository set the read enumerated before
+       * gathering, including repositories that returned no rows. The view
+       * stamps its snapshot only when the live scope is still this set.
+       */
+      readonly queriedScope: ReadonlyArray<string>;
+      records: ReadonlyArray<CodeHomeActivityForgeRecord>;
+      /**
+       * Whether the binding these records were read under still holds: a
+       * live check on the source and account, never this request's signal.
+       * The view rechecks it after its own awaits and the snapshot keeps it
+       * so later pages fail closed after a release or account swap.
+       */
+      readonly current?: () => boolean;
+    }>;
+
 interface ThreadWitness {
   readonly mode: OctantMode;
-  readonly threadId: string;
+  /** Absent on forge-resolved rows, which witness a Project, not a thread. */
+  readonly threadId: string | undefined;
   readonly projectId: string | null;
 }
 
 interface ActivitySnapshot {
   readonly windowId: string;
   readonly source: ActivityCardSource;
+  readonly card: ActivityKind;
+  readonly checkedAt: UtcTimestamp;
   readonly admittedKey: string;
+  /** The forge account a github view was read as; octant snapshots carry none. */
+  readonly forgeKey: string | undefined;
+  /** Access epochs of the repositories a github snapshot's records came from. */
+  readonly forgeEpochs: ReadonlyMap<string, number> | undefined;
+  /** Liveness of the binding a github snapshot's records were read under. */
+  readonly bindingCurrent?: () => boolean;
   readonly all: ReadonlyArray<ActivityRecord>;
   readonly filtered: ReadonlyArray<ActivityRecord>;
   readonly authorityOf: ReadonlyMap<string, ThreadWitness>;
@@ -121,14 +209,23 @@ export class CodeHomeActivityService {
     windowId: WindowId,
     query: ActivityQuery,
     admission: () => boolean,
+    signal?: AbortSignal,
   ): Promise<ActivityView> {
     if (query.kind === "page") return this.#page(windowId, query, admission);
-    return this.#initial(windowId, query, admission);
+    return this.#initial(windowId, query, admission, signal);
   }
 
   #unavailable(
     source: ActivityCardSource,
-    reason: "read-failed" | "expired" | "authorization-changed" | "not-recorded" | "not-checked",
+    reason:
+      | "read-failed"
+      | "expired"
+      | "authorization-changed"
+      | "not-recorded"
+      | "not-checked"
+      | "not-connected"
+      | "incomplete"
+      | "rate-limited",
     fallback?: "no-github-connection" | "insecure-github-storage",
   ): ActivityView {
     return {
@@ -144,21 +241,48 @@ export class CodeHomeActivityService {
     windowId: WindowId,
     query: Extract<ActivityQuery, { kind: "read" }>,
     admission: () => boolean,
+    signal?: AbortSignal,
   ): Promise<ActivityView> {
-    // Releases are not journaled anywhere yet: the card answers honestly
-    // rather than inventing history or a fake zero.
-    if (query.card === "releases-published") {
-      return { status: "unavailable", source: query.source, reason: "not-recorded", records: [] };
+    // Octant has no release journal; GitHub resolves them through the forge
+    // seam. An Octant release read still answers honestly unavailable.
+    if (query.card === "releases-published" && query.source === "octant") {
+      return { status: "unavailable", source: "octant", reason: "not-recorded", records: [] };
     }
     let fallback: "no-github-connection" | "insecure-github-storage" | undefined;
-    if (query.source === "github") {
-      const readiness = this.#ports.forgeReadiness?.() ?? "disconnected";
-      if (readiness === "connected") {
-        // The resolved forge read arrives with its own slice; until then the
-        // card says it has not checked rather than claiming coverage.
-        return this.#unavailable("github", "not-checked");
+    if (query.source === "github" && query.card !== "runs") {
+      if (this.#ports.forgeRead === undefined) {
+        fallback = "no-github-connection";
+      } else {
+        const forge = await this.#ports.forgeRead({
+          windowId,
+          card: query.card,
+          current: query.current,
+          ...(query.comparison === undefined ? {} : { comparison: query.comparison }),
+          refresh: query.refresh === true,
+          ...(signal === undefined ? {} : { signal }),
+          admission,
+        });
+        if (forge.status === "fallback") fallback = forge.fallback;
+        else if (forge.status === "unavailable") {
+          return this.#unavailable("github", forge.reason);
+        } else {
+          return this.#forgeView(
+            windowId,
+            query,
+            forge,
+            () => admission() && signal?.aborted !== true,
+          );
+        }
       }
-      fallback = readiness === "insecure" ? "insecure-github-storage" : "no-github-connection";
+    }
+    if (query.card === "releases-published") {
+      return {
+        status: "unavailable",
+        source: "octant",
+        reason: "not-recorded",
+        ...(fallback === undefined ? {} : { fallback }),
+        records: [],
+      };
     }
     if (!admission()) return this.#unavailable("octant", "authorization-changed", fallback);
     if (this.#ports.projectionHeld()) {
@@ -236,7 +360,11 @@ export class CodeHomeActivityService {
     this.#snapshots.set(snapshotId, {
       windowId: String(windowId),
       source: "octant",
-      admittedKey: admitted.slice().sort().join("|"),
+      card: query.card,
+      checkedAt: this.#ports.clock(),
+      forgeKey: undefined,
+      forgeEpochs: undefined,
+      admittedKey: scopeKey(admitted),
       all: records,
       filtered,
       authorityOf,
@@ -269,6 +397,133 @@ export class CodeHomeActivityService {
     };
   }
 
+  /**
+   * The authorized forge view: records arrive normalized with the Project
+   * each was witnessed for, authority filters before dedupe just like the
+   * journal path, and the frozen snapshot is what every later page reads.
+   */
+  async #forgeView(
+    windowId: WindowId,
+    query: Extract<ActivityQuery, { kind: "read" }>,
+    forge: Extract<CodeHomeActivityForgeResult, { status: "ready" | "partial" }>,
+    admission: () => boolean,
+  ): Promise<ActivityView> {
+    const scope = (await this.#ports.listForgeScope?.(windowId)) ?? [];
+    // The scope await gave a source release or account swap time to land:
+    // rows gathered under a binding that no longer holds, or under an
+    // admitted set that is no longer this one, are never served.
+    const admittedKey = scopeKey(scope);
+    if (
+      !admission() ||
+      forge.current?.() === false ||
+      admittedKey !== scopeKey(forge.queriedScope)
+    ) {
+      return this.#unavailable("github", "authorization-changed");
+    }
+    const admittedSet = new Set(scope);
+    const scopeOf = (row: CodeHomeActivityForgeRecord) => `${row.projectId}|${row.repositoryKey}`;
+    const inWindow = (record: CodeHomeActivityForgeRecord) =>
+      (query.current.from === null || record.record.occurredAt >= query.current.from) &&
+      record.record.occurredAt < query.current.until;
+    // Every repository the view's records rest on, current and comparison,
+    // with the access epoch its rows were captured under: an access loss on
+    // any one of them retires this view and the snapshot's later pages.
+    const witnessedRepositories = new Map<string, number>();
+    // A row accepted under one epoch must not outlive a revocation that
+    // landed before this view was built. Each accepted row is checked
+    // itself: two Projects sharing a remote can report different epochs for
+    // it, and only the freshest write in a summary map would hide that.
+    const staleEpoch = (row: CodeHomeActivityForgeRecord) =>
+      this.#ports.forgeRepositoryEpoch !== undefined &&
+      this.#ports.forgeRepositoryEpoch(forge.account, row.repositoryKey) !== row.repositoryEpoch;
+    const byId = new Map<string, CodeHomeActivityForgeRecord>();
+    for (const row of forge.records) {
+      if (!inWindow(row) || byId.has(row.record.id)) continue;
+      if (!admittedSet.has(scopeOf(row))) continue;
+      if (staleEpoch(row)) return this.#unavailable("github", "authorization-changed");
+      witnessedRepositories.set(row.repositoryKey, row.repositoryEpoch);
+      byId.set(row.record.id, row);
+    }
+    const records = [...byId.values()]
+      .map((row) => row.record)
+      .sort(
+        (a, b) =>
+          (a.occurredAt < b.occurredAt ? 1 : a.occurredAt > b.occurredAt ? -1 : 0) ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
+    const capped = records.slice(0, MAX_SELECTED_RECORDS);
+    const partial = forge.status === "partial" || capped.length < records.length;
+
+    // A partial view never claims a previous-window count: the search could
+    // not prove what it counted. A ready one always compares — the windowed
+    // read is exact, so a real zero is honest.
+    let comparisonCount: number | undefined;
+    if (query.comparison !== undefined && !partial) {
+      const inComparison = (record: CodeHomeActivityForgeRecord) =>
+        (query.comparison?.from === undefined ||
+          query.comparison.from === null ||
+          record.record.occurredAt >= query.comparison.from) &&
+        record.record.occurredAt < (query.comparison?.until ?? record.record.occurredAt);
+      const comparisonIds = new Set<string>();
+      for (const row of forge.records) {
+        if (!inComparison(row) || !admittedSet.has(scopeOf(row))) continue;
+        if (staleEpoch(row)) return this.#unavailable("github", "authorization-changed");
+        witnessedRepositories.set(row.repositoryKey, row.repositoryEpoch);
+        comparisonIds.add(row.record.id);
+      }
+      comparisonCount = comparisonIds.size;
+    }
+
+    const authorityOf = new Map<string, ThreadWitness>();
+    for (const row of byId.values()) {
+      authorityOf.set(row.record.id, {
+        mode: "code",
+        threadId: undefined,
+        projectId: row.projectId,
+      });
+    }
+    const forgeEpochs =
+      this.#ports.forgeRepositoryEpoch === undefined ? undefined : witnessedRepositories;
+    this.#evictSnapshots();
+    const snapshotId = this.#ports.uuid();
+    this.#snapshots.set(snapshotId, {
+      windowId: String(windowId),
+      source: "github",
+      card: query.card,
+      checkedAt: forge.checkedAt,
+      forgeKey: forge.account,
+      forgeEpochs,
+      ...(forge.current === undefined ? {} : { bindingCurrent: forge.current }),
+      admittedKey,
+      all: capped,
+      filtered: capped,
+      authorityOf,
+      count: capped.length,
+      comparisonCount,
+      finished: undefined,
+      partial,
+      expiresAtMs: this.#ports.now() + SNAPSHOT_TTL_MS,
+    });
+    while (this.#snapshots.size > MAX_SNAPSHOTS) {
+      const oldest = this.#snapshots.keys().next().value;
+      if (oldest === undefined) break;
+      this.#snapshots.delete(oldest);
+    }
+    const page = capped.slice(0, PAGE_SIZE);
+    if (!admission()) return this.#unavailable("github", "authorization-changed");
+    return {
+      status: partial ? "partial" : "ready",
+      source: "github",
+      ...(partial ? { reason: "incomplete" as const } : {}),
+      checkedAt: forge.checkedAt,
+      count: capped.length,
+      ...(comparisonCount === undefined ? {} : { comparisonCount }),
+      snapshotId: snapshotId as ActivitySnapshotId,
+      records: page,
+      ...(page.length < capped.length ? { nextOffset: page.length } : {}),
+    };
+  }
+
   async #page(
     windowId: WindowId,
     query: Extract<ActivityQuery, { kind: "page" }>,
@@ -281,10 +536,42 @@ export class CodeHomeActivityService {
     if (snapshot === undefined || snapshot.windowId !== String(windowId) || !admission()) {
       return this.#unavailable("octant", "expired");
     }
-    const admitted = await this.#ports.listProjects(windowId);
-    if (admitted.slice().sort().join("|") !== snapshot.admittedKey) {
+    // A github view re-proves the secure account it was read as first: a
+    // logout or a different signed-in login ends the snapshot rather than
+    // paging another account's history under this one.
+    if (snapshot.forgeKey !== undefined && snapshot.card !== "runs") {
+      const account = await this.#ports.forgeAccount?.(snapshot.card);
+      if (account !== snapshot.forgeKey) {
+        this.#snapshots.delete(query.snapshotId);
+        return this.#unavailable(snapshot.source, "authorization-changed");
+      }
+    }
+    // The scope lookup is the last await a github page takes, so the checks
+    // below all observe post-await state: a repository dropped from the
+    // admitted set — or the binding itself released — while either call was
+    // in flight is still caught before any row is served.
+    const scope =
+      snapshot.source === "github"
+        ? ((await this.#ports.listForgeScope?.(windowId)) ?? [])
+        : await this.#ports.listProjects(windowId);
+    if (scopeKey(scope) !== snapshot.admittedKey || snapshot.bindingCurrent?.() === false) {
       this.#snapshots.delete(query.snapshotId);
       return this.#unavailable(snapshot.source, "authorization-changed");
+    }
+    // A repository whose access epoch moved since the read was confirmed
+    // lost underneath the snapshot — its rows are purged, so the frozen
+    // view must end rather than page them.
+    if (
+      snapshot.forgeEpochs !== undefined &&
+      snapshot.forgeKey !== undefined &&
+      this.#ports.forgeRepositoryEpoch !== undefined
+    ) {
+      for (const [repositoryKey, epoch] of snapshot.forgeEpochs) {
+        if (this.#ports.forgeRepositoryEpoch(snapshot.forgeKey, repositoryKey) !== epoch) {
+          this.#snapshots.delete(query.snapshotId);
+          return this.#unavailable(snapshot.source, "authorization-changed");
+        }
+      }
     }
     const list = query.allFinished === true ? snapshot.all : snapshot.filtered;
     const page = list.slice(query.offset, query.offset + PAGE_SIZE);
@@ -292,7 +579,13 @@ export class CodeHomeActivityService {
     // witnessed; losing any one of them expires the whole snapshot rather
     // than letting totals or rows leak past a scope change.
     for (const witness of snapshot.authorityOf.values()) {
-      const allowed = await this.#ports.canReadThread({ windowId, ...witness });
+      if (witness.threadId === undefined) continue;
+      const allowed = await this.#ports.canReadThread({
+        windowId,
+        mode: witness.mode,
+        threadId: witness.threadId,
+        projectId: witness.projectId,
+      });
       if (!allowed) {
         this.#snapshots.delete(query.snapshotId);
         return this.#unavailable(snapshot.source, "authorization-changed");
@@ -306,7 +599,7 @@ export class CodeHomeActivityService {
       status: snapshot.partial ? "partial" : "ready",
       source: snapshot.source,
       ...(snapshot.partial ? { reason: "incomplete" as const } : {}),
-      checkedAt: this.#ports.clock(),
+      checkedAt: snapshot.checkedAt,
       count: snapshot.count,
       ...(snapshot.comparisonCount === undefined
         ? {}
@@ -415,10 +708,16 @@ export class CodeHomeActivityService {
     // never admit them, and only Chat's own personal scope may.
     if (witness.projectId === null && witness.mode !== "chat") return false;
     if (witness.projectId !== null && !admitted.has(witness.projectId)) return false;
+    if (witness.threadId === undefined) return false;
     const key = `${witness.mode}:${witness.threadId}:${witness.projectId ?? ""}`;
     let pending = threadReads.get(key);
     if (pending === undefined) {
-      pending = this.#ports.canReadThread({ windowId, ...witness });
+      pending = this.#ports.canReadThread({
+        windowId,
+        mode: witness.mode,
+        threadId: witness.threadId,
+        projectId: witness.projectId,
+      });
       threadReads.set(key, pending);
     }
     return pending;

@@ -160,7 +160,8 @@ export const ActivityRecord = Schema.Union(
     repositoryName: GithubRepositoryName,
     number: PositiveInt,
     mergedBy: GithubActorLogin,
-    threadId: CodeThreadId,
+    /** The linked thread that witnessed it; absent on forge-resolved rows. */
+    threadId: Schema.optional(CodeThreadId),
     projectId: Schema.optional(ProjectId),
   }),
   Schema.Struct({
@@ -171,8 +172,10 @@ export const ActivityRecord = Schema.Union(
     repositoryOwner: GithubRepositoryOwner,
     repositoryName: GithubRepositoryName,
     number: PositiveInt,
-    closingPullRequest: ActivityClosingPullRequest,
-    threadId: CodeThreadId,
+    /** The pull request proved to have closed it; forge rows may not know. */
+    closingPullRequest: Schema.optional(ActivityClosingPullRequest),
+    /** The linked thread that witnessed it; absent on forge-resolved rows. */
+    threadId: Schema.optional(CodeThreadId),
     projectId: Schema.optional(ProjectId),
   }),
   Schema.Struct({
@@ -181,7 +184,11 @@ export const ActivityRecord = Schema.Union(
     id: Schema.NonEmptyTrimmedString,
     label: Schema.NonEmptyTrimmedString,
     tag: Schema.NonEmptyTrimmedString,
-    url: Schema.NonEmptyTrimmedString,
+    url: Schema.NonEmptyTrimmedString.pipe(
+      Schema.filter((value) => value.startsWith("https://github.com/"), {
+        description: "a github.com release link",
+      }),
+    ),
   }),
   Schema.Struct({
     kind: Schema.Literal("runs"),

@@ -1288,6 +1288,12 @@ export function wireCode(deps: CodeDependencies) {
       folderBrowseRoutes,
       folderBrowseService,
       isCodeProviderModelAllowed,
+      // The host-owned repository scope a Code Home activity read may draw
+      // from: connected repositories of Projects the window admits now.
+      listActivityRepositories: async (windowId: WindowId) =>
+        (await projectPullRequestService.listConnectedRepositories(windowId)).filter((repository) =>
+          canAccessCodeProject(windowId, repository.projectId),
+        ),
       onPullRequestSnapshotRefreshed,
       projectPullRequestActionService,
       projectPullRequestCadence,

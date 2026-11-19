@@ -45,6 +45,10 @@ import {
 } from "@octant/plugin-host/language-servers";
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
 import { CodeHomeActivityService } from "../activityHistory/codeHomeActivityService";
+import {
+  activityRepositoryScope,
+  createCodeHomeForgeRead,
+} from "../activityHistory/codeHomeForgeRead";
 import { activityHistoryHeld, readActivityFacts } from "../persistence/activityHistoryProjection";
 import { createPairedMergeUnlockSlot } from "../hub/pairedMergeUnlock";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
@@ -132,7 +136,11 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
   Pick<
     CodeWiring,
-    "canAccessCodeProject" | "codeFileWatch" | "codeWorkingDirectoryProbePath" | "roots"
+    | "canAccessCodeProject"
+    | "codeFileWatch"
+    | "codeWorkingDirectoryProbePath"
+    | "listActivityRepositories"
+    | "roots"
   > &
   Pick<
     CodeRuntimeWiring,
@@ -143,7 +151,10 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     "browserAuthority" | "workThreadProjection" | "resolveThreadStrict" | "resolveProjectStrict"
   > &
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
-  Pick<IntegrationsWiring, "toolEgressRules" | "providerRuntimeNetwork"> &
+  Pick<
+    IntegrationsWiring,
+    "toolEgressRules" | "providerRuntimeNetwork" | "repositoryActivitySource"
+  > &
   Pick<
     ProvidersWiring,
     | "extensionLifecycleService"
@@ -158,6 +169,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     browserAuthority,
     workThreadProjection,
     agentRunPersistence,
+    repositoryActivitySource,
+    listActivityRepositories,
     canAccessCodeProject,
     serverConnection,
     serverProjectStore,
@@ -847,6 +860,15 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // The hub side is wired after this; it binds the owner unlock a paired
     // client's merge may need into this slot.
     const pairedMergeUnlockSlot = createPairedMergeUnlockSlot();
+    // Repository activity history resolves through the source the bundled
+    // integration contributed; the host keeps the window's admitted
+    // repository scope and the source answers only account and per-repository
+    // record requests.
+    const { forgeRead, forgeAccount, forgeRepositoryEpoch } = createCodeHomeForgeRead({
+      source: repositoryActivitySource,
+      listRepositories: listActivityRepositories,
+      now: Date.now,
+    });
     // Code Home history reads authorized thread-by-thread against the same
     // Project access the Code routes use: an admitted window sees a fact only
     // while its witness thread still lives in a Project that window may read.
@@ -902,6 +924,11 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       },
       readFacts: (input) => readActivityFacts(persistence.connection, input),
       projectionHeld: () => activityHistoryHeld(persistence.connection),
+      listForgeScope: async (windowId) =>
+        (await listActivityRepositories(windowId)).map(activityRepositoryScope),
+      forgeRead,
+      forgeAccount,
+      forgeRepositoryEpoch,
       uuid: randomUUID,
       now: Date.now,
       clock: () => new Date().toISOString() as UtcTimestamp,
