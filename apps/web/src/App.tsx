@@ -228,7 +228,7 @@ import { threadMoveClientForBridge } from "./environment/threadMove/threadMoveCl
 // The shared component/material layer loads last so its assignments win.
 import "./styles/components.css";
 import { countSidebarTiles } from "./shell/sidebarTileCounts";
-import { createFocusedDockTool, FocusedDockToolContext } from "./shell/dockBarControls";
+import { createFocusedDockTool } from "./shell/dockBarControls";
 import { WorkKindChoiceContext, type WorkKindChoice } from "./shell/WorkKindSwitch";
 import {
   enabledWorkKinds,
@@ -6317,6 +6317,15 @@ function LaunchedShell(
     return controller.activateContentTab(place.paneId, place.tabId);
   }
 
+  // The focused pane publishes its bar's controls here so the palette's tool
+  // commands invoke the same registered callbacks the bar itself does.
+  const focusedDockTool = useMemo(() => createFocusedDockTool(), []);
+  const focusedToolSource = useSyncExternalStore(
+    focusedDockTool.subscribe,
+    focusedDockTool.get,
+    focusedDockTool.get,
+  );
+
   if (controller.status === "loading") {
     return (
       <main className="shell-boundary">
@@ -8297,14 +8306,6 @@ function LaunchedShell(
     actionsProject?.type === "code"
       ? (actionsProject.extraFolders ?? []).map((folder) => folder.canonicalRoot)
       : NO_PROJECT_EXTRA_FOLDERS;
-  // The focused pane publishes its bar's controls here so the palette's tool
-  // commands invoke the same registered callbacks the bar itself does.
-  const focusedDockTool = useMemo(() => createFocusedDockTool(), []);
-  const focusedToolSource = useSyncExternalStore(
-    focusedDockTool.subscribe,
-    focusedDockTool.get,
-    focusedDockTool.get,
-  );
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
@@ -8867,77 +8868,76 @@ function LaunchedShell(
                 restoreFocus={navigatorOpener}
               />
               <TabActivationProvider registry={dockTabActivation}>
-                <FocusedDockToolContext.Provider value={focusedDockTool}>
-                  <DockContainer
-                    actions={actions}
-                    splitPrimaryMinimum={dockSplitPrimaryMinimum}
-                    {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
-                    activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
-                    activeMode={activeMode}
-                    {...(activeProjectId === undefined ? {} : { activeProjectId })}
-                    {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
-                    {...(activeProjectExtraFolders.length === 0
-                      ? {}
-                      : { projectExtraFolders: activeProjectExtraFolders })}
-                    bottomPanelHeight={bottomPanelHeight}
-                    bottomPanelOpen={bottomPanelOpen}
-                    bottomPanelPresentation={bottomPanelPresentation}
-                    bottomPanelPresentedOpen={bottomPanelPresentedOpen}
-                    bottomPanelSurfaces={bottomPanelSurfaces}
-                    bottomPanelTabs={bottomPanelTabs}
-                    canvasRevisionsByThread={canvasRevisionsByThread}
-                    chatReadCursorStore={chatReadCursorStore}
-                    clients={launchedClients}
-                    codeNavigationRevision={machineChanges.codeNavigation}
-                    codeProviderGroups={codeProviderGroups}
-                    {...(toolsReadCodeController && activeCodeThreadController !== undefined
-                      ? { codeThreadController: activeCodeThreadController }
-                      : {})}
-                    {...(toolsReadCodeThreadView && activeCodeThreadView !== undefined
-                      ? { codeThreadView: activeCodeThreadView }
-                      : {})}
-                    {...(codeDiffLayout === undefined ? {} : { codeDiffLayout })}
-                    {...(contextController.snapshot === undefined
-                      ? {}
-                      : { contextSnapshot: contextController.snapshot })}
-                    displayedDockState={displayedDockState}
-                    {...(storedDockTabs === undefined ? {} : { storedDockTabs })}
-                    dockPresentationWidth={dockPresentationWidth}
-                    dockPresentedOpen={dockPresentedOpen}
-                    dockReferences={dockReferences}
-                    dockToolButtons={dockToolButtons}
-                    dockResolution={dockResolution}
-                    dockResolveSurface={dockResolveSurface}
-                    dockSidecarsByThread={dockSidecarsByThread}
-                    dockTabs={dockTabs}
-                    {...(dockThread === undefined ? {} : { dockThread })}
-                    {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
-                    {...(dockThreadHostId === undefined ? {} : { dockThreadHostId })}
-                    dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
-                    {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
-                    {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                    isNarrow={isNarrow}
-                    navigation={navigationModel}
-                    {...(dockOverviewThread === undefined
-                      ? {}
-                      : { overviewThread: dockOverviewThread })}
-                    projectNames={workingNowProjectNames}
-                    projectPullRequestReviewOpen={projectPullRequestReviewOpen}
-                    {...(toolsPresented ? { providerController } : {})}
-                    {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}
-                    {...(requestedCodeReviewFile === undefined ? {} : { requestedCodeReviewFile })}
-                    {...(requestedAgentView === undefined ? {} : { requestedAgentView })}
-                    {...(selectedProjectPullRequest === undefined
-                      ? {}
-                      : { selectedProjectPullRequest })}
-                    {...(selectedProjectPullRequestKey === undefined
-                      ? {}
-                      : { selectedProjectPullRequestKey })}
-                    serverUrl={props.launch.serverUrl}
-                    windowCapability={props.projectWindowCapability}
-                    writtenDocumentsByThread={writtenDocumentsByThread}
-                  />
-                </FocusedDockToolContext.Provider>
+                <DockContainer
+                  focusedTool={focusedDockTool}
+                  actions={actions}
+                  splitPrimaryMinimum={dockSplitPrimaryMinimum}
+                  {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
+                  activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
+                  activeMode={activeMode}
+                  {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                  {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
+                  {...(activeProjectExtraFolders.length === 0
+                    ? {}
+                    : { projectExtraFolders: activeProjectExtraFolders })}
+                  bottomPanelHeight={bottomPanelHeight}
+                  bottomPanelOpen={bottomPanelOpen}
+                  bottomPanelPresentation={bottomPanelPresentation}
+                  bottomPanelPresentedOpen={bottomPanelPresentedOpen}
+                  bottomPanelSurfaces={bottomPanelSurfaces}
+                  bottomPanelTabs={bottomPanelTabs}
+                  canvasRevisionsByThread={canvasRevisionsByThread}
+                  chatReadCursorStore={chatReadCursorStore}
+                  clients={launchedClients}
+                  codeNavigationRevision={machineChanges.codeNavigation}
+                  codeProviderGroups={codeProviderGroups}
+                  {...(toolsReadCodeController && activeCodeThreadController !== undefined
+                    ? { codeThreadController: activeCodeThreadController }
+                    : {})}
+                  {...(toolsReadCodeThreadView && activeCodeThreadView !== undefined
+                    ? { codeThreadView: activeCodeThreadView }
+                    : {})}
+                  {...(codeDiffLayout === undefined ? {} : { codeDiffLayout })}
+                  {...(contextController.snapshot === undefined
+                    ? {}
+                    : { contextSnapshot: contextController.snapshot })}
+                  displayedDockState={displayedDockState}
+                  {...(storedDockTabs === undefined ? {} : { storedDockTabs })}
+                  dockPresentationWidth={dockPresentationWidth}
+                  dockPresentedOpen={dockPresentedOpen}
+                  dockReferences={dockReferences}
+                  dockToolButtons={dockToolButtons}
+                  dockResolution={dockResolution}
+                  dockResolveSurface={dockResolveSurface}
+                  dockSidecarsByThread={dockSidecarsByThread}
+                  dockTabs={dockTabs}
+                  {...(dockThread === undefined ? {} : { dockThread })}
+                  {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
+                  {...(dockThreadHostId === undefined ? {} : { dockThreadHostId })}
+                  dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
+                  {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
+                  {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                  isNarrow={isNarrow}
+                  navigation={navigationModel}
+                  {...(dockOverviewThread === undefined
+                    ? {}
+                    : { overviewThread: dockOverviewThread })}
+                  projectNames={workingNowProjectNames}
+                  projectPullRequestReviewOpen={projectPullRequestReviewOpen}
+                  {...(toolsPresented ? { providerController } : {})}
+                  {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}
+                  {...(requestedCodeReviewFile === undefined ? {} : { requestedCodeReviewFile })}
+                  {...(requestedAgentView === undefined ? {} : { requestedAgentView })}
+                  {...(selectedProjectPullRequest === undefined
+                    ? {}
+                    : { selectedProjectPullRequest })}
+                  {...(selectedProjectPullRequestKey === undefined
+                    ? {}
+                    : { selectedProjectPullRequestKey })}
+                  serverUrl={props.launch.serverUrl}
+                  windowCapability={props.projectWindowCapability}
+                  writtenDocumentsByThread={writtenDocumentsByThread}
+                />
               </TabActivationProvider>
             </ThreadNotesProvider>
           </ThreadNativeSetupProvider>

@@ -20,6 +20,7 @@ import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/prov
 import type { buildModelPickerGroups } from "@octant/domain";
 import type { SideChatSidecar } from "@octant/contracts";
 import { memo, useEffect, useMemo, useRef } from "react";
+import { FocusedDockToolContext, type FocusedDockTool } from "../shell/dockBarControls";
 import { useMinuteTick } from "../polling/useMinuteTick";
 import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
 import type { createChatReadCursorStore } from "../chat/useChatController";
@@ -226,7 +227,7 @@ export interface DockContainerProps {
  */
 const NO_THREAD = "00000000-0000-4000-8000-000000000000";
 
-export const DockContainer = memo(function DockContainer(props: DockContainerProps) {
+const DockContainerBody = memo(function DockContainerBody(props: DockContainerProps) {
   const {
     actions,
     activeBottomSurface,
@@ -1005,3 +1006,19 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     </>
   );
 });
+
+/**
+ * The dock plus the focused-tool publication its inner panes register on: kept
+ * as the outer wrapper so callers pass `focusedTool` like any other prop and
+ * never wrap the body themselves.
+ */
+export function DockContainer(
+  props: DockContainerProps & { readonly focusedTool: FocusedDockTool },
+) {
+  const { focusedTool, ...rest } = props;
+  return (
+    <FocusedDockToolContext.Provider value={focusedTool}>
+      <DockContainerBody {...rest} />
+    </FocusedDockToolContext.Provider>
+  );
+}
