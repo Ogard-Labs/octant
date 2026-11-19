@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -224,6 +224,38 @@ describe("per-user service managers", () => {
       active: false,
       crashLoop: false,
     });
+  });
+
+  it("runs an installed build's own launcher, through the current link it was started from", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-installed-launcher-"));
+    roots.push(root);
+    const version = join(root, "install", "versions", "1.0.0");
+    await mkdir(join(version, "bin"), { recursive: true });
+    await writeFile(join(version, "octant-artifact.json"), "{}");
+    await writeFile(join(version, "bin", "octant"), "#!/bin/sh\n", { mode: 0o755 });
+    await writeFile(join(version, "bin", "octant.mjs"), "");
+    await symlink(version, join(root, "install", "current"));
+    const runtimePaths = xdgPaths(root);
+    const manager = createSystemdUserServiceManager({
+      paths: runtimePaths,
+      uid: process.getuid?.() ?? 0,
+      home: join(root, "home"),
+      cliEntryPoint: join(root, "install", "current", "bin", "octant.mjs"),
+      runtimeEnvironment: {},
+      runner: { run: vi.fn(async () => ({ stdout: "", stderr: "" })) },
+    });
+
+    await manager.install();
+
+    const unit = await readFile(
+      join(root, "home", ".config", "systemd", "user", "octant.service"),
+      "utf8",
+    );
+    // The launcher starts the Bun the build carries; through `current`, an
+    // upgrade's switch is what the next start runs.
+    expect(unit).toContain(
+      `ExecStart=${join(root, "install", "current", "bin", "octant")} server run`,
+    );
   });
 
   it("uses the absolute CLI artifact when no executable or entrypoint is injected", async () => {

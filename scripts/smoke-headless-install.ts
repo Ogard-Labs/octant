@@ -45,17 +45,17 @@ export function serviceDescriptorPath(platform: NodeJS.Platform, home: string): 
 /**
  * The installed CLI's environment: nothing from the caller's shell that could
  * point module resolution back at a checkout, only what the service manager
- * and the Bun runtime need.
+ * needs. No Bun directory is on `PATH`, so the install proves the build runs on
+ * the Bun it carries.
  */
 export function installedCliEnvironment(input: {
   readonly source: Readonly<Record<string, string | undefined>>;
-  readonly bunDirectory: string;
   readonly dataDirectory: string;
   readonly port: number;
 }): Record<string, string> {
   const environment: Record<string, string> = {
     HOME: input.source.HOME ?? homedir(),
-    PATH: `${input.bunDirectory}:/usr/bin:/bin`,
+    PATH: "/usr/bin:/bin",
     OCTANT_DATA_DIR: input.dataDirectory,
     OCTANT_SERVER_PORT: String(input.port),
   };
@@ -167,11 +167,15 @@ async function smokeHeadlessInstall(argv: readonly string[]): Promise<void> {
     throw new Error(`${descriptor} already exists; refusing to replace another Octant service.`);
   }
 
-  const bunDirectory = dirname(Bun.which("bun") ?? process.execPath);
+  const systemBun = Bun.which("bun", { PATH: "/usr/bin:/bin" });
+  if (systemBun !== null) {
+    process.stdout.write(
+      `Note: ${systemBun} is on the installed CLI's PATH, so this run cannot show the build needs no Bun of its own.\n`,
+    );
+  }
   const port = await freePort();
   const env = installedCliEnvironment({
     source: process.env,
-    bunDirectory,
     dataDirectory: join(prefix, "data"),
     port,
   });
