@@ -57,7 +57,7 @@ function fixture(
     readonly projects?: ReadonlyArray<string>;
     readonly deniedThreads?: ReadonlySet<string>;
     readonly held?: boolean;
-    readonly forgeScope?: ReadonlyArray<string>;
+    readonly forgeScope?: ReadonlyArray<string> | (() => ReadonlyArray<string>);
     readonly forge?: () => Promise<CodeHomeActivityForgeResult>;
     readonly forgeAccount?: () => Promise<string | undefined>;
     readonly forgeRepositoryEpoch?: (account: string, repositoryKey: string) => number;
@@ -75,7 +75,10 @@ function fixture(
           (input.from === null || fact.occurredAt >= input.from) && fact.occurredAt < input.until,
       ),
     projectionHeld: () => options.held === true,
-    listForgeScope: async () => options.forgeScope ?? [`${project}|octant-dev/octant`],
+    listForgeScope: async () =>
+      typeof options.forgeScope === "function"
+        ? options.forgeScope()
+        : (options.forgeScope ?? [`${project}|octant-dev/octant`]),
     ...(options.forge === undefined ? {} : { forgeRead: options.forge }),
     ...(options.forgeAccount === undefined ? {} : { forgeAccount: options.forgeAccount }),
     ...(options.forgeRepositoryEpoch === undefined
@@ -847,37 +850,73 @@ describe("CodeHomeActivityService", () => {
 
   it("expires a github snapshot when a connected repository leaves the admitted scope", async () => {
     let scope: ReadonlyArray<string> = [`${project}|octant-dev/octant`];
-    const service = new CodeHomeActivityService({
-      listProjects: async () => [project],
-      canReadThread: async () => true,
-      readFacts: () => [],
-      projectionHeld: () => false,
-      listForgeScope: async () => scope,
-      forgeRead: async () => ({
+    const { read } = fixture([], {
+      forgeScope: () => scope,
+      forge: async () => ({
         status: "ready",
         account: "henrik",
         checkedAt: now,
         records: [forgeRecord()],
       }),
-      forgeAccount: async () => "henrik",
-      uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
-      now: () => Date.now(),
-      clock: () => now,
+      // The repository loses admission while the page re-proves the account;
+      // the scope lookup after that await must still see it gone.
+      forgeAccount: async () => {
+        scope = [];
+        return "henrik";
+      },
     });
-    const first = await service.read(
-      windowId,
-      { kind: "read", card: "prs-merged", source: "github", current: { from: null, until } },
-      () => true,
-    );
+    const first = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+    });
     expect(first.status).toBe("ready");
-    scope = [];
-    const next = await service.read(
-      windowId,
-      { kind: "page", snapshotId: first.snapshotId!, offset: 0 },
-      () => true,
-    );
+    const next = await read({
+      kind: "page",
+      snapshotId: first.snapshotId!,
+      offset: 0,
+    });
     expect(next.status).toBe("unavailable");
     expect(next.count).toBeUndefined();
+  });
+
+  it("expires a github snapshot whose source binding ends while a page checks scope", async () => {
+    let binding = true;
+    let scopeReads = 0;
+    const { read } = fixture([], {
+      // The scope lookup that builds the view keeps the binding; the one a
+      // later page takes finds it released.
+      forgeScope: () => {
+        scopeReads += 1;
+        if (scopeReads > 1) binding = false;
+        return [`${project}|octant-dev/octant`];
+      },
+      forge: async () => ({
+        status: "ready",
+        account: "henrik",
+        checkedAt: now,
+        records: [forgeRecord()],
+        current: () => binding,
+      }),
+      forgeAccount: async () => "henrik",
+    });
+    const first = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+    });
+    expect(first.status).toBe("ready");
+    const next = await read({
+      kind: "page",
+      snapshotId: first.snapshotId!,
+      offset: 0,
+    });
+    expect(next.status).toBe("unavailable");
+    expect(next.reason).toBe("authorization-changed");
+    expect(next.count).toBeUndefined();
+    expect(next.records).toHaveLength(0);
   });
 
   it("never asks the forge for runs and reads the local journal instead", async () => {

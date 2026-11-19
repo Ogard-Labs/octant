@@ -318,10 +318,11 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
       account,
       checkedAt: decodeUtcTimestamp(checkedAt),
       records,
-      // The binding this read's rows stand on. A view built on them fails
-      // closed when the source was released or swapped, another caller
-      // confirmed a different account, or the read itself was abandoned.
-      current: () => ports.source() === source && cacheAccount === account && !signal.aborted,
+      // The binding this read's rows stand on. A view or page built on them
+      // fails closed when the source was released or swapped, or another
+      // caller confirmed a different account. It outlives this request's
+      // signal on a snapshot, so cancellation stays with the caller.
+      current: () => ports.source() === source && cacheAccount === account,
     };
   };
 

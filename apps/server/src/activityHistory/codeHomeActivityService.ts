@@ -148,10 +148,10 @@ export type CodeHomeActivityForgeResult =
       checkedAt: UtcTimestamp;
       records: ReadonlyArray<CodeHomeActivityForgeRecord>;
       /**
-       * Whether the binding these records were read under still holds. The
-       * view rechecks it after its own awaits so rows gathered under a
-       * released source or a since-changed account are never served. Not
-       * retained on the snapshot: pages re-prove under their own lifetime.
+       * Whether the binding these records were read under still holds: a
+       * live check on the source and account, never this request's signal.
+       * The view rechecks it after its own awaits and the snapshot keeps it
+       * so later pages fail closed after a release or account swap.
        */
       readonly current?: () => boolean;
     }>;
@@ -173,6 +173,8 @@ interface ActivitySnapshot {
   readonly forgeKey: string | undefined;
   /** Access epochs of the repositories a github snapshot's records came from. */
   readonly forgeEpochs: ReadonlyMap<string, number> | undefined;
+  /** Liveness of the binding a github snapshot's records were read under. */
+  readonly bindingCurrent?: () => boolean;
   readonly all: ReadonlyArray<ActivityRecord>;
   readonly filtered: ReadonlyArray<ActivityRecord>;
   readonly authorityOf: ReadonlyMap<string, ThreadWitness>;
@@ -252,7 +254,12 @@ export class CodeHomeActivityService {
         else if (forge.status === "unavailable") {
           return this.#unavailable("github", forge.reason);
         } else {
-          return this.#forgeView(windowId, query, forge, admission);
+          return this.#forgeView(
+            windowId,
+            query,
+            forge,
+            () => admission() && signal?.aborted !== true,
+          );
         }
       }
     }
@@ -468,6 +475,7 @@ export class CodeHomeActivityService {
       checkedAt: forge.checkedAt,
       forgeKey: forge.account,
       forgeEpochs,
+      ...(forge.current === undefined ? {} : { bindingCurrent: forge.current }),
       admittedKey: scope.slice().sort().join("|"),
       all: capped,
       filtered: capped,
@@ -510,15 +518,7 @@ export class CodeHomeActivityService {
     if (snapshot === undefined || snapshot.windowId !== String(windowId) || !admission()) {
       return this.#unavailable("octant", "expired");
     }
-    const scope =
-      snapshot.source === "github"
-        ? ((await this.#ports.listForgeScope?.(windowId)) ?? [])
-        : await this.#ports.listProjects(windowId);
-    if (scope.slice().sort().join("|") !== snapshot.admittedKey) {
-      this.#snapshots.delete(query.snapshotId);
-      return this.#unavailable(snapshot.source, "authorization-changed");
-    }
-    // A github view also re-proves the secure account it was read as: a
+    // A github view re-proves the secure account it was read as first: a
     // logout or a different signed-in login ends the snapshot rather than
     // paging another account's history under this one.
     if (snapshot.forgeKey !== undefined && snapshot.card !== "runs") {
@@ -527,6 +527,21 @@ export class CodeHomeActivityService {
         this.#snapshots.delete(query.snapshotId);
         return this.#unavailable(snapshot.source, "authorization-changed");
       }
+    }
+    // The scope lookup is the last await a github page takes, so the checks
+    // below all observe post-await state: a repository dropped from the
+    // admitted set — or the binding itself released — while either call was
+    // in flight is still caught before any row is served.
+    const scope =
+      snapshot.source === "github"
+        ? ((await this.#ports.listForgeScope?.(windowId)) ?? [])
+        : await this.#ports.listProjects(windowId);
+    if (
+      scope.slice().sort().join("|") !== snapshot.admittedKey ||
+      snapshot.bindingCurrent?.() === false
+    ) {
+      this.#snapshots.delete(query.snapshotId);
+      return this.#unavailable(snapshot.source, "authorization-changed");
     }
     // A repository whose access epoch moved since the read was confirmed
     // lost underneath the snapshot — its rows are purged, so the frozen
