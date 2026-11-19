@@ -13835,6 +13835,14 @@ filesystem, shell, or credential handles. OAuth access and refresh tokens remain
 in the host credential service; plugin state contains only opaque references.
 Plugin projections are namespaced by package id and remain rebuildable.
 
+An Integration can contribute a read-only repository activity source. The host
+selects one source for the configured integration and resolves the window's
+admitted repositories before requesting history. The source reports account
+availability and returns the signed-in person's delivery records for one
+repository and time range. Disabling the integration removes the source from
+lookup before any credential or network observation. Registering a source does
+not grant filesystem, shell, or credential access.
+
 **Switchable bundled plugins (maintainer decision, 2026-11-07).** GitHub,
 thread boards, and Zen are first-party plugins built into Octant that a person
 can switch off and on again. Every other surface below stays an integrated core
