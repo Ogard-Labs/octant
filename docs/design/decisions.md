@@ -44,7 +44,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
 | [Providers](#providers)                                                               | 9         | 7       | 2            | 0                   |
-| [Context and usage](#context-and-usage)                                               | 10        | 9       | 1            | 0                   |
+| [Context and usage](#context-and-usage)                                               | 10        | 8       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 7         | 5       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 8         | 7       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **286**   | **170** | **109**      | **7**               |
+| **All areas**                                                                         | **286**   | **169** | **110**      | **7**               |
 
 ## Principles and hard lines
 
@@ -1644,10 +1644,11 @@ Every runner feeds provider events to one pure policy that times turns and journ
 - Ceilings cover tokens, turns, run time and money. The server refuses at admission, and money is checked between turns, not reserved.
 - Cost is fixed when usage is journaled, from the provider's figure or the checked-in price table. Projections never price, so a later price change does not re-price history.
 - Unpriced usage refuses a money ceiling as unknown-spend. A provider that never reports usage is left out and shown as Not measured.
+- At Full access an ACP release newer than the one Octant reviewed counts as a measuring provider: its reported usage counts, and a Full access turn that ends with no usage report refuses as unknown spend; below Full access, where it reports none, its unreported turns stay Not measured (maintainer decision, 2026-11-19, "count it at full access"). Built for Code turns: the ledger records whether each turn ran at Full access, and a turn journaled before that record existed is read as before. Not built yet: Work turns and child runs do not record their level, so their unreported Full access turns are still left out as Not measured.
 - Child run spend counts against its parent thread's ceiling and that thread's current Project ceiling.
 - The spend ceiling rows on threads and the Project page show only when the person turns on Show spend ceiling (off by default) or a ceiling is set, so a set ceiling always stays reachable.
 
-Status: Built. Since: —. Detail: [Architecture: Stop reasons](../architecture.md#stop-reasons) and [Architecture: Context and usage accounting](../architecture.md#context-and-usage-accounting).
+Status: Partly built. Since: —. Detail: [Architecture: Stop reasons](../architecture.md#stop-reasons) and [Architecture: Context and usage accounting](../architecture.md#context-and-usage-accounting).
 
 ### Local usage history
 

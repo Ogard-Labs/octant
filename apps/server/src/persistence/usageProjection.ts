@@ -14,6 +14,7 @@ import {
   decodeContextUsageReconciled,
   decodeUsageRecord,
   type EventEnvelope,
+  type ProviderExecutionPolicy,
   type UsageAttributionEntry,
   type UsageQuality,
   type UsageRecord,
@@ -269,6 +270,11 @@ export class CodeUsageProjection implements Projection {
     );
     assertProjection(started.event.kind === "conversation-turn-started");
     assertProjection(String(started.threadId) === String(frame.threadId));
+    const ranAtFullAccess = turnRanAtFullAccess(
+      connection,
+      start.global_sequence,
+      started.event.executionPolicy,
+    );
     if (frame.event.kind !== "usage") {
       // A turn that ended without reporting usage — an ACP agent reports none
       // — still ran on the provider. Recording it as unreported and unpriced
@@ -285,8 +291,9 @@ export class CodeUsageProjection implements Projection {
           reconciliation_id, subject_type, subject_id, provider_instance_id,
           model_id, request_shape, quality, input_tokens, output_tokens,
           planned_input_tokens, variance_tokens, schema_version,
-          attribution_json, observed_at, last_sequence, host_id, planning_available
-        ) VALUES (?, 'code-thread', ?, ?, ?, 'code-provider-turn', 'unavailable', 0, 0, 0, 0, ?, '[]', ?, ?, ?, 0)
+          attribution_json, observed_at, last_sequence, host_id, planning_available,
+          ran_at_full_access
+        ) VALUES (?, 'code-thread', ?, ?, ?, 'code-provider-turn', 'unavailable', 0, 0, 0, 0, ?, '[]', ?, ?, ?, 0, ?)
         ON CONFLICT (reconciliation_id) DO NOTHING
       `)
         .run(
@@ -298,6 +305,7 @@ export class CodeUsageProjection implements Projection {
           frame.occurredAt,
           event.globalSequence,
           String(event.hostId),
+          ranAtFullAccess,
         );
       return;
     }
@@ -315,10 +323,12 @@ export class CodeUsageProjection implements Projection {
         model_id, request_shape, quality, input_tokens, output_tokens,
         cost_usd_micros, cost_kind,
         planned_input_tokens, variance_tokens, schema_version,
-        attribution_json, observed_at, last_sequence, host_id, planning_available
-      ) VALUES (?, 'code-thread', ?, ?, ?, 'code-provider-turn', 'exact', ?, ?, ?, ?, 0, 0, ?, '[]', ?, ?, ?, 0)
+        attribution_json, observed_at, last_sequence, host_id, planning_available,
+        ran_at_full_access
+      ) VALUES (?, 'code-thread', ?, ?, ?, 'code-provider-turn', 'exact', ?, ?, ?, ?, 0, 0, ?, '[]', ?, ?, ?, 0, ?)
       ON CONFLICT (reconciliation_id) DO UPDATE SET
         quality = excluded.quality,
+        ran_at_full_access = excluded.ran_at_full_access,
         input_tokens = excluded.input_tokens,
         output_tokens = excluded.output_tokens,
         cost_usd_micros = excluded.cost_usd_micros,
@@ -340,8 +350,28 @@ export class CodeUsageProjection implements Projection {
         frame.occurredAt,
         event.globalSequence,
         String(event.hostId),
+        ranAtFullAccess,
       );
   }
+}
+
+/**
+ * Whether the turn ran at Full access, as its start recorded it: 1 or 0, or
+ * NULL when not recorded. A spend ceiling reads an unreported turn by the
+ * usage capability of that level. A turn journaled before this build first
+ * ran stays NULL, on rebuild too, so its ceiling reads it as it always did.
+ */
+function turnRanAtFullAccess(
+  connection: SqliteConnection,
+  startSequence: number,
+  executionPolicy: ProviderExecutionPolicy | undefined,
+): 0 | 1 | null {
+  if (executionPolicy === undefined) return null;
+  const boundary = connection
+    .prepare("SELECT global_sequence FROM usage_turn_level_boundary WHERE singleton = 1")
+    .get() as { readonly global_sequence: number } | undefined;
+  if (boundary === undefined || startSequence <= boundary.global_sequence) return null;
+  return executionPolicy === "full-access" ? 1 : 0;
 }
 
 /** Whether the turn's provider session was ready for its prompt before it ended. */

@@ -99,6 +99,8 @@ function insertUsage(
     readonly costUsdMicros?: number;
     readonly costKind?: "provider-recorded" | "api-estimate";
     readonly providerInstanceId?: string;
+    /** Absent: a row written before the ledger recorded the turn's level. */
+    readonly ranAtFullAccess?: boolean;
   },
 ): void {
   connection
@@ -109,8 +111,8 @@ function insertUsage(
         cache_read_input_tokens, cache_write_input_tokens, provider_execution_duration_ms,
         cost_usd_micros, cost_kind,
         planned_input_tokens, variance_tokens, schema_version, attribution_json,
-        observed_at, last_sequence, host_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        observed_at, last_sequence, host_id, ran_at_full_access
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.id,
@@ -135,6 +137,7 @@ function insertUsage(
       input.observedAt ?? now,
       input.sequence,
       "local",
+      input.ranAtFullAccess === undefined ? null : input.ranAtFullAccess ? 1 : 0,
     );
 }
 
@@ -1319,6 +1322,7 @@ describe("notMeasuredProvider", () => {
     registry: ProviderRuntimeRegistry,
     id: string,
     usage: ProviderCapabilitySupport,
+    atFullAccess?: ProviderCapabilitySupport,
   ): void {
     registry.setObservedState({
       instanceId: id,
@@ -1343,10 +1347,147 @@ describe("notMeasuredProvider", () => {
         appManagedTools: "unsupported",
         citations: "unsupported",
         harnessAutoReview: "unsupported",
+        ...(atFullAccess === undefined
+          ? {}
+          : {
+              atFullAccess: {
+                release: "unverified",
+                usage: atFullAccess,
+                userQuestions: "unsupported",
+                appManagedTools: "unsupported",
+              },
+            }),
       },
       observedAt: now,
     });
   }
+
+  describe("an ACP release newer than the one Octant reviewed", () => {
+    // Its probe reads usage unsupported below Full access and supported at
+    // Full access, where the driver reports each turn's usage.
+    const unverified = {
+      providerInstanceId: decodeProviderInstanceId(providerIds.measuredOut),
+      displayName: "Mistral Vibe",
+    };
+
+    function openUnverified(dimension: "tokens" | "monetary") {
+      const registry = new ProviderRuntimeRegistry();
+      const opened = openService({
+        notMeasuredProvider: (id, ranAtFullAccess) =>
+          notMeasuredProvider(
+            {
+              readProviderInstances: () => readProviderInstances(opened.connection),
+              observedState: registry.observedState.bind(registry),
+            },
+            id,
+            ranAtFullAccess,
+          ),
+      });
+      append(opened.journal, providerIds.measuredOut, 0, "provider.instance-created@1", {
+        instance: instance(providerIds.measuredOut, {
+          displayName: "Mistral Vibe",
+          driverKind: "mistral-vibe",
+          configuration: {
+            kind: "mistral-vibe-acp",
+            binaryPath: "/usr/local/bin/vibe-acp",
+            authentication: "api-key",
+          },
+        }),
+      });
+      observe(registry, providerIds.measuredOut, "unsupported", "supported");
+      opened.service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: dimension === "tokens" ? { tokenBudget: 1_000 } : { costBudgetUsdCents: 25_00 },
+        window: { kind: "lifetime" },
+      });
+      return opened;
+    }
+
+    function turn(
+      connection: ReturnType<typeof openSqlite>,
+      input: { readonly reported: boolean; readonly ranAtFullAccess?: boolean },
+    ): void {
+      insertUsage(connection, {
+        id: "73000000-0000-4000-8000-000000000521",
+        subjectType: "chat-thread",
+        subjectId: ids.thread,
+        providerInstanceId: providerIds.measuredOut,
+        tokens: input.reported ? { input: 900, output: 50 } : { input: 0, output: 0 },
+        ...(input.reported ? { costUsdMicros: 30_000_000 } : { quality: "unavailable" }),
+        sequence: 1,
+        ...(input.ranAtFullAccess === undefined ? {} : { ranAtFullAccess: input.ranAtFullAccess }),
+      });
+    }
+
+    const admit = (service: SpendCeilingService) =>
+      service.admit({
+        reservationId: ids.reservationA,
+        threadId: ids.thread,
+        threadType: "chat-thread",
+        turnUpperBoundTokens: 100,
+      });
+    const remaining = (service: SpendCeilingService) =>
+      remainingOf(
+        service.snapshot({
+          principalKind: "local-window",
+          threadId: ids.thread,
+          threadType: "chat-thread",
+        }),
+        "thread",
+      );
+
+    it.each(["tokens", "monetary"] as const)(
+      "counts its reported Full access usage against a %s ceiling",
+      (dimension) => {
+        const { connection, service } = openUnverified(dimension);
+        turn(connection, { reported: true, ranAtFullAccess: true });
+
+        expect(admit(service)).toMatchObject({
+          status: "refused",
+          refusal: { kind: "exhausted", dimension },
+        });
+        expect(remaining(service)).not.toHaveProperty("notMeasuredProviders");
+      },
+    );
+
+    it.each(["tokens", "monetary"] as const)(
+      "refuses a %s ceiling over a Full access turn that reported no usage",
+      (dimension) => {
+        const { connection, service } = openUnverified(dimension);
+        turn(connection, { reported: false, ranAtFullAccess: true });
+
+        expect(admit(service)).toMatchObject({
+          status: "refused",
+          refusal: { kind: "unknown-spend", dimension },
+        });
+        expect(remaining(service)).not.toHaveProperty("notMeasuredProviders");
+      },
+    );
+
+    it.each(["tokens", "monetary"] as const)(
+      "leaves a guarded turn that reported no usage out of a %s ceiling and names it not measured",
+      (dimension) => {
+        const { connection, service } = openUnverified(dimension);
+        turn(connection, { reported: false, ranAtFullAccess: false });
+
+        expect(admit(service).status).toBe("admitted");
+        expect(remaining(service)).toMatchObject({ notMeasuredProviders: [unverified] });
+      },
+    );
+
+    it.each(["tokens", "monetary"] as const)(
+      "reads an unreported row that recorded no level as before under a %s ceiling",
+      (dimension) => {
+        const { connection, service } = openUnverified(dimension);
+        turn(connection, { reported: false });
+
+        expect(admit(service).status).toBe("admitted");
+        expect(remaining(service)).toMatchObject({ notMeasuredProviders: [unverified] });
+      },
+    );
+  });
 
   it.each([
     ["historical unreported", "tokens"],
@@ -1357,13 +1498,14 @@ describe("notMeasuredProvider", () => {
     (quality, dimension) => {
       const registry = new ProviderRuntimeRegistry();
       const { connection, journal, service } = openService({
-        notMeasuredProvider: (id) =>
+        notMeasuredProvider: (id, ranAtFullAccess) =>
           notMeasuredProvider(
             {
               readProviderInstances: () => readProviderInstances(connection),
               observedState: registry.observedState.bind(registry),
             },
             id,
+            ranAtFullAccess,
           ),
       });
       const providerId = providerIds.measuredOut;
@@ -1449,7 +1591,7 @@ describe("notMeasuredProvider", () => {
       observedState: registry.observedState.bind(registry),
     };
 
-    expect(notMeasuredProvider(host, providerIds.measuredOut)).toEqual({
+    expect(notMeasuredProvider(host, providerIds.measuredOut, false)).toEqual({
       providerInstanceId: decodeProviderInstanceId(providerIds.measuredOut),
       displayName: "Agent 501",
     });
@@ -1459,7 +1601,7 @@ describe("notMeasuredProvider", () => {
       providerIds.unprobed,
       providerIds.unproven,
     ]) {
-      expect(notMeasuredProvider(host, counted)).toBeUndefined();
+      expect(notMeasuredProvider(host, counted, false)).toBeUndefined();
     }
   });
 });
