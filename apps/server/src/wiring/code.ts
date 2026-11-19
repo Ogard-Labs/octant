@@ -13,6 +13,8 @@ import {
   type RepositoryIdentityObservation,
 } from "../code/repositoryIdentity";
 import { createHash, randomUUID } from "node:crypto";
+import { CODE_HOME_DELIVERY_OBSERVED } from "@octant/contracts/code-home-activity";
+import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { lstat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -561,6 +563,7 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
       },
       detail: {
         observeReviewByIdentity: (request, signal) => port.observeReviewByIdentity(request, signal),
+        observeIssueClosure: (request, signal) => port.observeIssueClosure(request, signal),
       },
       merge: {
         mergeByIdentity: (request, signal) => port.mergeByIdentity(request, signal),
@@ -1177,6 +1180,40 @@ export function wireCode(deps: CodeDependencies) {
           clock: () => new Date().toISOString(),
           ...(actor === undefined ? {} : { actor }),
         }),
+      recordDelivery: (record) => {
+        const aggregate = {
+          aggregateType: "code-home-activity",
+          aggregateId: createHash("sha256")
+            .update(
+              JSON.stringify([
+                record.kind,
+                record.projectId,
+                record.threadId,
+                record.repositoryOwner.toLowerCase(),
+                record.repositoryName.toLowerCase(),
+                record.number,
+                new Date(record.occurredAt).toISOString(),
+              ]),
+            )
+            .digest("hex"),
+        };
+        if (persistence.journal.latestAggregateEvent(aggregate) !== undefined) return;
+        persistence.journal.append({
+          aggregate,
+          expectedVersion: 0,
+          events: [
+            {
+              eventId: randomUUID(),
+              eventName: CODE_HOME_DELIVERY_OBSERVED,
+              eventVersion: 1,
+              correlationId: randomUUID(),
+              actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+              occurredAt: record.occurredAt,
+              payload: record,
+            },
+          ],
+        });
+      },
       cacheStats,
       snapshotStore: new CodeProjectPullRequestSnapshotStore(
         join(persistence.dataDirectory, "code", "pull-request-snapshot.json"),

@@ -2080,6 +2080,15 @@ const NativeSessionAdoptedEvent = Schema.Struct({
   nativeSessionId: CodeNativeSessionId,
   providerInstanceId: ProviderInstanceId,
 }).annotations(strict);
+/**
+ * The person asked to stop this turn, journaled at the request so a later
+ * `interrupted` reads as their cancellation rather than a cut-off. Only an
+ * authorized `cancel-provider-turn`/`force-stop-provider-turn` writes it —
+ * restart reconciliation and runtime cleanup never do.
+ */
+const ConversationTurnStopRequestedEvent = Schema.Struct({
+  kind: Schema.Literal("conversation-turn-stop-requested"),
+}).annotations(strict);
 
 const ProviderSessionReadyEvent = Schema.Struct({
   kind: Schema.Literal("provider-session-ready"),
@@ -2366,6 +2375,7 @@ export const CodeOperationEvent = Schema.Union(
   ProviderRetryEvent,
   RuntimeTurnStartedEvent,
   NativeSessionAdoptedEvent,
+  ConversationTurnStopRequestedEvent,
   ResultEvent,
 );
 export type CodeOperationEvent = typeof CodeOperationEvent.Type;

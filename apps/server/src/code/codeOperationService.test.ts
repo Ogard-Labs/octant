@@ -1923,6 +1923,50 @@ describe("CodeOperationService", () => {
       },
     );
 
+    it("journals the person's stop request ahead of a preparing start's interrupted result", async () => {
+      const writer = liveTurn({}).thread;
+      const restorer = decodeCodeThread({ ...thread(), projectId: otherProject });
+      const { service, restoreCheckpoint, cancel, append } = restoreFixture([], restorer, [writer]);
+      cancel.mockResolvedValueOnce({ state: "interrupted", stoppedOperationId: ids.operation });
+      const entered = Promise.withResolvers<void>();
+      const overwrite = Promise.withResolvers<void>();
+      restoreCheckpoint.mockImplementationOnce(async () => {
+        entered.resolve();
+        await overwrite.promise;
+        return { status: "applied", undo: { worktree: "e".repeat(40), index: "f".repeat(40) } };
+      });
+      const startEventKinds = () =>
+        append.mock.calls
+          .filter(([input]) => String(input.operationId) === String(startProviderTurn.operationId))
+          .map(([input]) => input.event.kind);
+
+      const restoring = service.execute(ids.window, restoreCommand);
+      await entered.promise;
+      const starting = service.execute(ids.window, {
+        ...startProviderTurn,
+        threadId: writer.id,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await service.execute(ids.window, {
+        kind: "cancel-provider-turn",
+        operationId: decodeCodeOperationId("55555555-5555-4555-8555-555555555555"),
+        threadId: writer.id,
+        checkoutId: ids.checkout,
+      });
+      expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ stopRequestedBy: "person" }));
+
+      overwrite.resolve();
+      await restoring;
+      await expect(starting).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "interrupted",
+      });
+      const kinds = startEventKinds();
+      const resultIndex = kinds.lastIndexOf("operation-result");
+      expect(resultIndex).toBeGreaterThan(0);
+      expect(kinds[resultIndex - 1]).toBe("conversation-turn-stop-requested");
+    });
+
     it("refuses discard from a thread whose turn is still capturing its checkpoint", async () => {
       const { service, discard, checkpoint } = restoreFixture([]);
       const entered = Promise.withResolvers<void>();

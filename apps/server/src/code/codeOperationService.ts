@@ -1119,12 +1119,16 @@ export interface CodeOperationTurnPort {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
     readonly turnOperationId: CodeOperationId;
+    /** `"person"` only on the person's own Stop command; cleanup callers omit it. */
+    readonly stopRequestedBy?: "person";
   }) => Promise<CodeOperationTurnResult>;
   readonly cancel: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
     /** When set, only this turn may be stopped; a different live turn is left running. */
     readonly turnOperationId?: CodeOperationId;
+    /** `"person"` only on the person's own Stop command; cleanup callers omit it. */
+    readonly stopRequestedBy?: "person";
   }) => Promise<
     CodeOperationTurnResult & {
       /** The operation of the live turn this stopped, when there was one. */
@@ -1517,6 +1521,8 @@ interface StartingTurn {
   /** What the start's operation reads as once it was stopped. */
   readonly stopped: CodeOperationResult;
   cancelled: boolean;
+  /** `"person"` when the person's own Stop released the start; nothing else sets it. */
+  stopRequestedBy: "person" | undefined;
   /**
    * Whether the start's own result is journaled, by the start or by the Stop
    * that released it. Exactly one of them writes it.
@@ -1973,6 +1979,7 @@ export class CodeOperationService {
                       this.#providerResult(command.operationId, { state: "interrupted" }),
                     ),
                     cancelled: false,
+                    stopRequestedBy: undefined,
                     journaled: false,
                   }
                 : undefined;
@@ -2325,6 +2332,7 @@ export class CodeOperationService {
         checkoutRoot: root.checkoutRoot,
         stopped,
         cancelled: false,
+        stopRequestedBy: undefined,
         journaled: false,
       };
       startingTurn = held;
@@ -2383,6 +2391,18 @@ export class CodeOperationService {
         const page = this.#replay(starting.thread.id, starting.operationId, cursor, 256);
         cursor = page.nextCursor;
         if (page.frames.length < 256) break;
+      }
+      // The person's Stop reads as their cancellation: the marker goes on
+      // record ahead of the interrupted result, the same order the runtime's
+      // own marker takes on a live turn.
+      if (starting.stopRequestedBy === "person") {
+        this.#options.events.append({
+          threadId: starting.thread.id,
+          operationId: starting.operationId,
+          expectedCursor: cursor,
+          event: { kind: "conversation-turn-stop-requested" },
+        });
+        cursor += 1;
       }
       this.#options.events.append({
         threadId: starting.thread.id,
@@ -4586,6 +4606,7 @@ export class CodeOperationService {
                 thread,
                 checkoutRoot: root.checkoutRoot,
                 turnOperationId: command.turnOperationId,
+                stopRequestedBy: "person",
               }),
         );
       case "cancel-provider-turn": {
@@ -4601,6 +4622,7 @@ export class CodeOperationService {
               String(starting.operationId) === String(command.turnOperationId))
           ) {
             starting.cancelled = true;
+            starting.stopRequestedBy = "person";
             this.#startingTurns.delete(starting);
             stoppedStarts.push(starting);
           }
@@ -4608,6 +4630,7 @@ export class CodeOperationService {
         const cancelled = await this.#options.turns.cancel({
           thread,
           checkoutRoot: root.checkoutRoot,
+          stopRequestedBy: "person",
           ...(command.turnOperationId === undefined
             ? {}
             : { turnOperationId: command.turnOperationId }),

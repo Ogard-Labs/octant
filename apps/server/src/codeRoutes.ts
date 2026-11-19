@@ -1,6 +1,12 @@
 import type { EventActor } from "@octant/contracts";
 import { requiresLiveCodeReviewAuthority } from "./code/codeReviewAuthority";
 import {
+  decodeActivityQuery,
+  encodeActivityView,
+  type ActivityQuery,
+  type ActivityView,
+} from "@octant/contracts/code-home-activity";
+import {
   decodeCodeProviderFileReviewRequest,
   decodeCodeProviderFileReviewRead,
   type CodeProviderFileReviewRequest,
@@ -614,6 +620,17 @@ export interface CodeRouteDependencies {
    * `unavailable` rather than 404.
    */
   readonly debug?: Pick<CodeDebugService, "configurations" | "approve" | "start" | "session">;
+  /**
+   * Authorized Code Home activity reads; absent on a host without the
+   * journal-backed history, which then answers `unavailable` rather than 404.
+   */
+  readonly homeActivity?: {
+    readonly read: (
+      windowId: WindowId,
+      query: ActivityQuery,
+      admission: () => boolean,
+    ) => Promise<ActivityView>;
+  };
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly maxFileBodySize?: number;
@@ -2131,6 +2148,47 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "home-activity": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          // The history is the person's own: no renderer-authored identity
+          // and nothing reachable through an agent grant or a remote scope
+          // that is not the paired host person.
+          if (agentGrantSession || callerAuthority !== "local-window") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Code Home activity belongs to the person's own scope.",
+              },
+              403,
+              origin,
+            );
+          }
+          if (dependencies.homeActivity === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code Home activity is unavailable." },
+              503,
+              origin,
+            );
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          refuseRendererAuthoredIdentity(value);
+          let activityQuery: ActivityQuery;
+          try {
+            activityQuery = decodeActivityQuery(value);
+          } catch {
+            throw new CodeRouteRejected("The Code Home activity request is invalid.", 400);
+          }
+          const view = await dependencies.homeActivity.read(
+            authenticatedWindowId,
+            activityQuery,
+            liveAdmissionCurrent,
+          );
+          if (!liveAdmissionCurrent()) {
+            throw new CodeRouteRejected("Code Home activity admission ended during the read.", 409);
+          }
+          return jsonResponse(encodeActivityView(view), 200, origin);
+        }
         case "composer-activity": {
           requireMethodAndEmptyQuery(request, url, "POST");
           requireJsonContentType(request);
@@ -2545,6 +2603,7 @@ type MatchedRoute =
         | "project-pull-requests-merge-when-ready"
         | "project-pull-requests-auto-fix"
         | "composer-activity"
+        | "home-activity"
         | "provider-file-review";
     }>
   | Readonly<{ kind: "planner"; projectId: string }>
@@ -2699,6 +2758,7 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
     return { kind: "project-pull-requests-auto-fix" };
   }
   if (pathname === "/api/code/composer-activity") return { kind: "composer-activity" };
+  if (pathname === "/api/code/home-activity") return { kind: "home-activity" };
   if (pathname === "/api/code/provider-file-review") return { kind: "provider-file-review" };
   if (pathname === "/api/code/language/documents") return { kind: "language-documents" };
   if (pathname === "/api/code/language/read") return { kind: "language-read" };

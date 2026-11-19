@@ -14,11 +14,14 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import {
   decodeBrowserThreadId,
+  decodeChatThreadId,
   decodeCodeCheckoutId,
   decodeCodeFileId,
   decodeCodeThreadId,
   decodeProjectId,
+  decodeWorkThreadId,
   decodeWindowId,
+  type UtcTimestamp,
   type WindowId,
 } from "@octant/contracts";
 import { Effect, Schema } from "effect";
@@ -41,6 +44,8 @@ import {
   resolveBundledLanguageServerActivation,
 } from "@octant/plugin-host/language-servers";
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
+import { CodeHomeActivityService } from "../activityHistory/codeHomeActivityService";
+import { activityHistoryHeld, readActivityFacts } from "../persistence/activityHistoryProjection";
 import { createPairedMergeUnlockSlot } from "../hub/pairedMergeUnlock";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
 import {
@@ -88,6 +93,7 @@ import { createCodeThreadLocalServerScopeResolver } from "../localServers/localS
 import { createRunningServiceScopeResolver } from "../localServers/runningServiceScopeResolver";
 import { LocalServerService } from "../localServers/localServerService";
 import { defaultShellSettings, enabledModes, projectExtraFolderRoots } from "@octant/domain";
+import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { pathIsProjectConfined } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -841,8 +847,68 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // The hub side is wired after this; it binds the owner unlock a paired
     // client's merge may need into this slot.
     const pairedMergeUnlockSlot = createPairedMergeUnlockSlot();
+    // Code Home history reads authorized thread-by-thread against the same
+    // Project access the Code routes use: an admitted window sees a fact only
+    // while its witness thread still lives in a Project that window may read.
+    const codeHomeActivity = new CodeHomeActivityService({
+      listProjects: async (windowId) =>
+        (await projectService.bootstrap(windowId)).active.map((project) => String(project.id)),
+      canReadThread: async ({ windowId, mode, threadId, projectId }) => {
+        // A projection can still hold a purged thread's row, so the tombstone
+        // — not the projection alone — is the purge authority, as the
+        // AgentRun parent-thread check treats it.
+        if (
+          persistence.connection
+            .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
+            .get(threadId) !== undefined
+        )
+          return false;
+        if (mode === "code") {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          if (thread === undefined) return false;
+          return (
+            String(thread.projectId) === projectId &&
+            canAccessCodeProject(windowId, thread.projectId)
+          );
+        }
+        if (mode === "work") {
+          const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+          if (thread === undefined) return false;
+          return (
+            String(thread.projectId) === projectId &&
+            (personPairedDevice(windowId) ||
+              windowCanAccessWorkProject({
+                workspace: persistence.readWindowWorkspace(windowId)?.workspace,
+                projectId: thread.projectId,
+              }))
+          );
+        }
+        const thread = persistence.readChatThread(decodeChatThreadId(threadId));
+        if (
+          thread === undefined ||
+          thread.lifecycle === "deleting" ||
+          thread.lifecycle === "deleted"
+        )
+          return false;
+        // A projectless Chat turn is the person's own; the route already
+        // admits only the host person and paired devices acting as them.
+        if (thread.projectId === undefined) return projectId === null;
+        const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+        return (
+          String(thread.projectId) === projectId &&
+          (personPairedDevice(windowId) ||
+            (workspace !== undefined && windowAdmitsProject(workspace, "chat", thread.projectId)))
+        );
+      },
+      readFacts: (input) => readActivityFacts(persistence.connection, input),
+      projectionHeld: () => activityHistoryHeld(persistence.connection),
+      uuid: randomUUID,
+      now: Date.now,
+      clock: () => new Date().toISOString() as UtcTimestamp,
+    });
     const codeRoutes = createCodeRouteHandler({
       service: routeCodeService,
+      homeActivity: codeHomeActivity,
       pairedMergeUnlock: pairedMergeUnlockSlot.current,
       ...(projectTerminals === undefined ? {} : { projectTerminals }),
       language: languageService,
