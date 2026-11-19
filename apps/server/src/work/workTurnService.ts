@@ -485,7 +485,10 @@ export interface WorkTurnServiceDependencies {
   readonly forgeChanges?: RuntimeForgeChangeObserver;
   readonly onRequestSettled?: (
     input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
-    release: () => void,
+    release: (settled?: {
+      readonly person: boolean;
+      readonly settledAt?: UtcTimestamp;
+    }) => void,
   ) => () => void;
   /**
    * The app-managed tools a Work turn may offer its provider. Absent on a host
@@ -767,6 +770,7 @@ export class WorkTurnService {
   readonly #liveResponses = new Map<string, string>();
   readonly #liveTasks = new Map<string, ThreadTaskProgressList>();
   readonly #liveToolSteps = new Map<string, ThreadToolSteps>();
+  readonly #liveReasoningMs = new Map<string, number>();
 
   readonly #moveHold: ((threadId: string) => boolean) | undefined;
   readonly #wakeupsForThread: WorkTurnServiceDependencies["wakeupsForThread"];
@@ -2462,6 +2466,7 @@ export class WorkTurnService {
         this.#liveResponses.delete(String(command.requestId));
         this.#liveTasks.delete(String(command.requestId));
         this.#liveToolSteps.delete(String(command.requestId));
+        this.#liveReasoningMs.delete(String(command.requestId));
       });
       this.#inflight.set(String(command.requestId), launch);
       toolsLaunched = true;
@@ -2807,13 +2812,19 @@ export class WorkTurnService {
     const liveStepsHeld = this.#liveToolSteps.get(String(turn.requestId));
     const liveSteps =
       liveStepsHeld === undefined ? undefined : withoutPublishedSnapshots(liveStepsHeld);
+    const liveReasoningMs = this.#liveReasoningMs.get(String(turn.requestId));
     const withSteps =
-      liveSteps === undefined || liveSteps.steps.length === 0
+      (liveSteps === undefined || liveSteps.steps.length === 0) && liveReasoningMs === undefined
         ? turn
         : decodeWorkTurnState({
             ...turn,
-            toolSteps: liveSteps.steps,
-            ...(liveSteps.truncated ? { toolStepsTruncated: true } : {}),
+            ...(liveSteps === undefined || liveSteps.steps.length === 0
+              ? {}
+              : {
+                  toolSteps: liveSteps.steps,
+                  ...(liveSteps.truncated ? { toolStepsTruncated: true } : {}),
+                }),
+            ...(liveReasoningMs === undefined ? {} : { reasoningMs: liveReasoningMs }),
           });
     const live = this.#liveResponses.get(String(turn.requestId));
     if (live === undefined) return withSteps;
@@ -3321,6 +3332,15 @@ export class WorkTurnService {
             truncated: toolSteps.truncated,
           });
         },
+        onReasoningMs: (reasoningMs) => {
+          if (input.signal.aborted) return;
+          if (reasoningMs === this.#liveReasoningMs.get(String(input.command.requestId))) return;
+          this.#liveReasoningMs.set(String(input.command.requestId), reasoningMs);
+          this.#liveUpdates.appendToolStep(input.command.threadId, input.command.requestId, {
+            truncated: this.#liveToolSteps.get(String(input.command.requestId))?.truncated === true,
+            reasoningMs,
+          });
+        },
       });
       runOutcome = outcome;
       const wroteFiles = observation?.finish();
@@ -3350,7 +3370,12 @@ export class WorkTurnService {
         // person the folder was untouched when it was not. The tool calls it
         // made are recorded the same way, whether or not a file changed.
         const cancelledToolSteps = this.#liveToolSteps.get(String(input.command.requestId));
-        if (wroteFiles !== undefined || cancelledToolSteps !== undefined) {
+        const cancelledReasoningMs = this.#liveReasoningMs.get(String(input.command.requestId));
+        if (
+          wroteFiles !== undefined ||
+          cancelledToolSteps !== undefined ||
+          cancelledReasoningMs !== undefined
+        ) {
           const settledTasks = this.#liveTasks.get(String(input.command.requestId));
           const settledToolSteps = cancelledToolSteps;
           this.#persistUpdate(latest, {
@@ -3359,6 +3384,7 @@ export class WorkTurnService {
             ...(wroteFiles === undefined ? {} : { wroteFiles }),
             ...(settledTasks === undefined ? {} : { tasks: settledTasks }),
             ...(settledToolSteps === undefined ? {} : { toolSteps: settledToolSteps }),
+            ...(cancelledReasoningMs === undefined ? {} : { reasoningMs: cancelledReasoningMs }),
           });
           const settledCancel = this.#projection.lookup(input.command.requestId);
           if (settledCancel !== undefined) {
@@ -3374,6 +3400,7 @@ export class WorkTurnService {
         wroteFiles,
         this.#liveTasks.get(String(input.command.requestId)),
         this.#liveToolSteps.get(String(input.command.requestId)),
+        this.#liveReasoningMs.get(String(input.command.requestId)),
       );
       if (outcome.kind === "completed" && wroteFiles !== undefined) {
         await this.#backfillStatus(
@@ -3861,11 +3888,14 @@ export class WorkTurnService {
     tasks?: ThreadTaskProgressList,
     // Held in process for the same reason as the task list.
     toolSteps?: ThreadToolSteps,
+    // The turn's measured reasoning total, held the same way.
+    reasoningMs?: number,
   ): void {
     const written = wroteFiles === undefined ? {} : { wroteFiles };
     const recordedTasks = {
       ...(tasks === undefined ? {} : { tasks }),
       ...(toolSteps === undefined ? {} : { toolSteps }),
+      ...(reasoningMs === undefined ? {} : { reasoningMs }),
     };
     if (outcome.kind === "completed") {
       this.#persistUpdate(turn, {
@@ -3873,6 +3903,7 @@ export class WorkTurnService {
         response: outcome.response,
         ...written,
         ...recordedTasks,
+        ...(reasoningMs === undefined ? {} : { reasoningMs }),
       });
       return;
     }
@@ -3890,6 +3921,7 @@ export class WorkTurnService {
       ...(turn.response === undefined ? {} : { response: turn.response }),
       ...written,
       ...recordedTasks,
+      ...(reasoningMs === undefined ? {} : { reasoningMs }),
       failure: outcome.failure,
     });
   }
@@ -3903,6 +3935,7 @@ export class WorkTurnService {
       readonly failure?: WorkTurnState["failure"];
       readonly tasks?: ThreadTaskProgressList;
       readonly toolSteps?: ThreadToolSteps;
+      readonly reasoningMs?: number;
       readonly childObservations?: WorkTurnState["childObservations"];
       readonly strictKept?: WorkTurnState["strictKept"];
     },
@@ -3948,6 +3981,7 @@ export class WorkTurnService {
               toolSteps: toolSteps.steps,
               ...(toolSteps.truncated ? { toolStepsTruncated: true } : {}),
             }),
+        ...(update.reasoningMs === undefined ? {} : { reasoningMs: update.reasoningMs }),
         ...(update.strictKept === undefined ? {} : { strictKept: update.strictKept }),
         ...(update.childObservations === undefined
           ? {}

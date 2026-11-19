@@ -56,9 +56,26 @@ export function registerToolEffectEvents(registry: EventRegistry): EventRegistry
  * the safe one.
  */
 const recordedCall = new AsyncLocalStorage<{
+  readonly toolCallId: string;
   readonly awaitingApproval: () => boolean;
   readonly approvalAnswered: () => void;
+  /**
+   * Receives one person-facing wait's measured span, so a caller timing the
+   * whole execution subtracts it instead of reading it as run time.
+   */
+  readonly approvalWaited?: (waitMs: number) => void;
+  /** The scope's clock in epoch milliseconds; `Date.now` when unset. */
+  readonly now?: () => number;
 }>();
+
+/**
+ * The recorded call whose execution this async scope serves, when one is.
+ * An approval a tool asks while it runs carries this id, so the person's wait
+ * is billed to that call alone — never guessed from whatever row is near.
+ */
+export function executingToolCallId(): string | undefined {
+  return recordedCall.getStore()?.toolCallId;
+}
 
 /**
  * Runs one wait for a person's answer to a tool call's own approval. The
@@ -74,10 +91,12 @@ const recordedCall = new AsyncLocalStorage<{
 export async function whileAwaitingToolApproval<T>(wait: () => Promise<T>): Promise<T> {
   const call = recordedCall.getStore();
   if (call === undefined || !call.awaitingApproval()) return wait();
+  const startedAt = call.now?.() ?? Date.now();
   try {
     return await wait();
   } finally {
     call.approvalAnswered();
+    call.approvalWaited?.((call.now?.() ?? Date.now()) - startedAt);
   }
 }
 
@@ -199,17 +218,24 @@ export class ToolEffectLedger {
             return { result: { error: "tool-call-unrecorded" }, isError: true };
           }
           let outcome: ToolEffectSettled["outcome"] = "failed";
+          let approvalWaitMs = 0;
           try {
             const result = await recordedCall.run(
               {
+                toolCallId,
                 awaitingApproval: () => this.#awaitApproval(turn, toolCallId),
                 approvalAnswered: () => this.#intend(turn, toolCallId, input.name, "host"),
+                approvalWaited: (waitMs) => {
+                  approvalWaitMs += waitMs;
+                },
+                now: () => Date.parse(this.#clock()),
               },
               () => withSandboxToolPolicy(turn.threadId, () => set.execute(input)),
             );
             if (result.isError !== true) outcome = "succeeded";
             return result;
           } finally {
+            if (approvalWaitMs > 0) input.onApprovalWait?.(approvalWaitMs);
             this.#settle(turn, toolCallId, "host", outcome);
           }
         },

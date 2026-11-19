@@ -5,6 +5,7 @@ import type {
   ThreadRoutineReceipt,
   ThreadToolStep,
 } from "@octant/contracts";
+import { completedCallDurationMs } from "@octant/domain";
 import { toolDisplayName } from "./toolKinds";
 
 /**
@@ -34,6 +35,8 @@ export type TurnActivityRow =
       readonly routine?: ThreadRoutineReceipt;
       /** How long the call ran, when the host recorded its start and end. */
       readonly durationMs?: number;
+      /** The person-facing approval wait subtracted from `durationMs`, when any. */
+      readonly waitedMs?: number;
     }
   | {
       readonly kind: "task";
@@ -88,8 +91,11 @@ export const EMPTY_TURN_ACTIVITY: TurnActivity = { rows: [], reasoning: "" };
 export function toolStepsActivity(
   steps: ReadonlyArray<ThreadToolStep> | undefined,
   truncated: boolean | undefined,
+  reasoningMs?: number | undefined,
 ): TurnActivity | undefined {
-  if (steps === undefined || steps.length === 0) return undefined;
+  if (steps === undefined || steps.length === 0) {
+    return reasoningMs === undefined ? undefined : { rows: [], reasoning: "", reasoningMs };
+  }
   return {
     rows: steps.map((step) =>
       step.shield !== undefined
@@ -108,10 +114,25 @@ export function toolStepsActivity(
             ...(step.published === undefined ? {} : { published: step.published }),
             ...(step.outsideContent === undefined ? {} : { outsideContent: step.outsideContent }),
             ...(step.routine === undefined ? {} : { routine: step.routine }),
+            ...callTimingRowFields(step.timing),
           },
     ),
     reasoning: "",
+    ...(reasoningMs === undefined ? {} : { reasoningMs }),
     ...(truncated === true ? { truncated: true } : {}),
+  };
+}
+
+/** The duration and attributed wait a step's timing gives the row; absent bounds give none. */
+function callTimingRowFields(timing: ThreadToolStep["timing"]): {
+  readonly durationMs?: number;
+  readonly waitedMs?: number;
+} {
+  const completed = completedCallDurationMs(timing);
+  if (completed === undefined) return {};
+  return {
+    durationMs: completed.durationMs,
+    ...(completed.waitedMs === 0 ? {} : { waitedMs: completed.waitedMs }),
   };
 }
 

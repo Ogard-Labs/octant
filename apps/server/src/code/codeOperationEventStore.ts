@@ -1865,9 +1865,14 @@ function foldTurnFrame(
         ? {}
         : { outsideContent: frame.event.outsideContent }),
       ...(frame.event.routine === undefined ? {} : { routine: frame.event.routine }),
+      ...(frame.event.timing === undefined ? {} : { timing: frame.event.timing }),
     };
     if (existing === -1) appendStep(builder, step);
     else builder.steps[existing] = step;
+  } else if (frame.event.kind === "reasoning-time") {
+    // The frame carries the latest cumulative total, so replay assigns it
+    // rather than adding: re-reading the stream can never double-count.
+    builder.reasoningMs = frame.event.reasoningMs;
   } else if (frame.event.kind === "approval-reviewed") {
     appendStep(builder, {
       kind: "review",
@@ -2114,6 +2119,7 @@ type CodeConversationBuilder = {
   assistant: Array<CodeConversationTurn["assistant"][number]>;
   steps: Array<CodeConversationStep>;
   stepsTruncated: boolean;
+  reasoningMs?: number;
   status: CodeConversationTurn["status"];
   failure?: CodeConversationTurn["failure"];
   changedFiles?: CodeConversationTurn["changedFiles"];

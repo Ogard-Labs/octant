@@ -16,6 +16,7 @@ import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
+  executingToolCallId,
   registerToolEffectEvents,
   ToolEffectLedger,
   whileAwaitingToolApproval,
@@ -127,6 +128,20 @@ describe("tool effect ledger", () => {
       outcome: "succeeded",
     });
     expect(host.ledger.certainty(turnId)).toEqual({ kind: "settled" });
+  });
+
+  it("names the executing call to asks it raises while it runs", async () => {
+    const host = hostOn(openConnection());
+    let ambient: string | undefined;
+    const tools = host.ledger.forTurn({ threadId, turnId }).tools(
+      toolSet(["shell"], async () => {
+        ambient = executingToolCallId();
+        return { result: { ok: true } };
+      }),
+    );
+    await tools.execute({ name: "shell", inputJson: "{}", toolCallId: "call-9" });
+    expect(ambient).toBe("call-9");
+    expect(executingToolCallId()).toBeUndefined();
   });
 
   it("records the tool's name and never its arguments", async () => {

@@ -131,7 +131,11 @@ function appendedFrame(
 
 function toolStepFrame(
   sequence: number,
-  change: { readonly toolStep?: Record<string, unknown>; readonly toolStepsTruncated?: true },
+  change: {
+    readonly toolStep?: Record<string, unknown>;
+    readonly toolStepsTruncated?: true;
+    readonly reasoningMs?: number;
+  },
 ): ChatEventFrame {
   return decodeChatEventFrame({
     threadId,
@@ -148,6 +152,48 @@ function toolStepFrame(
 }
 
 describe("applyChatAttemptFrame", () => {
+  it("restates the attempt's reasoning total and keeps a step's measured bounds", () => {
+    const current = view([attempt("streaming", [first])], [first]);
+    const next = applyChatAttemptFrame(
+      current,
+      toolStepFrame(5, {
+        toolStep: {
+          toolCallId: "call-1",
+          toolName: "Web search",
+          state: "completed",
+          timing: {
+            startedAt: "2026-07-19T12:00:00.000Z",
+            endedAt: "2026-07-19T12:00:02.000Z",
+            approvalWaitMs: 500,
+          },
+        },
+        reasoningMs: 4_000,
+      }),
+    );
+    const nextAttempt = next?.turns[0]?.attempts[0];
+    expect(nextAttempt?.reasoningMs).toBe(4_000);
+    expect(nextAttempt?.toolSteps).toEqual([
+      {
+        toolCallId: "call-1",
+        toolName: "Web search",
+        state: "completed",
+        timing: {
+          startedAt: "2026-07-19T12:00:00.000Z",
+          endedAt: "2026-07-19T12:00:02.000Z",
+          approvalWaitMs: 500,
+        },
+      },
+    ]);
+    // A later frame without the field leaves the measured total alone.
+    const later = applyChatAttemptFrame(
+      next ?? current,
+      toolStepFrame(6, {
+        toolStep: { toolCallId: "call-2", toolName: "Fetch", state: "started" },
+      }),
+    );
+    expect(later?.turns[0]?.attempts[0]?.reasoningMs).toBe(4_000);
+  });
+
   it("puts a streamed tool step on its attempt by tool call id, without asking for the thread", () => {
     const current = view([attempt("streaming", [first])], [first]);
     const started = applyChatAttemptFrame(

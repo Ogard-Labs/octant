@@ -3014,6 +3014,12 @@ const ProviderRuntimeEventFields = {
   sequence: Schema.Int.pipe(Schema.positive()),
   correlationId: CorrelationId,
   occurredAt: UtcTimestamp,
+  /**
+   * Set when the adapter folded stored or replayed provider output into this
+   * event rather than reporting a live instant: `occurredAt` then names the
+   * batch, not the moment, so nothing downstream may time a span by it.
+   */
+  synthesized: Schema.optional(Schema.Literal(true)),
 } as const;
 
 /**
@@ -3437,6 +3443,13 @@ export const ProviderRuntimeEvent = Schema.Union(
     requestId: Schema.NonEmptyTrimmedString,
     action: Schema.NonEmptyTrimmedString,
     description: Schema.NonEmptyTrimmedString,
+    /**
+     * The runtime's own identity for the call this ask gates, when it sent
+     * one (a tool_use id, a toolCall id, an item id). Forwarded to the
+     * journaled ask so the person's wait is attributed to that call alone;
+     * absent means nothing is attributed by adjacency.
+     */
+    toolCallId: Schema.optional(Schema.NonEmptyTrimmedString),
     /**
      * The runtime asks to change the thread's level rather than to run a
      * tool: `enter-plan` to plan read-only first, `exit-plan` to leave Plan

@@ -259,6 +259,79 @@ describe("CodeTurnRunner", () => {
     ]);
   });
 
+  it("stamps a host-run tool's end at the host's finish, not the request's stamp", async () => {
+    const finish = "2026-07-21T00:00:09.000Z";
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "host-call",
+            toolName: "octant_browser",
+            inputJson: "{}",
+            occurredAt: now,
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            clock: () => finish,
+            appManagedTools: {
+              definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              execute: async () => ({ result: { ok: true } }),
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    const request = observed.find(
+      (next) => next.category === "tool" && next.status === "app-managed-request",
+    );
+    const completed = observed.find(
+      (next) => next.category === "tool" && next.status === "completed",
+    );
+    expect(request?.occurredAt).toBe(now);
+    expect(completed?.occurredAt).toBe(finish);
+  });
+
+  it("forwards the provider's call identity on an approval request", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "approval-request",
+            requestId: "approval-1",
+            toolCallId: "call-9",
+            action: "Bash",
+            description: "Run tests",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    expect(observed).toContainEqual(
+      expect.objectContaining({ category: "approval", toolCallId: "call-9" }),
+    );
+  });
+
   it("cancels a pending app tool when its transport request expires without answering a stale call", async () => {
     const request = new AbortController();
     const connection = fakeConnection({

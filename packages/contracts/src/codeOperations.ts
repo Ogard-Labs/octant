@@ -15,6 +15,7 @@ import { AccountMoveTextHandoffCause, ContextHandoffOmissions } from "./contextH
 import { ProviderChildActivityEvent } from "./providers";
 import { ProviderNativeSessionId } from "./providerNativeSession";
 import { ThreadPublishedPage } from "./threadToolSteps";
+import { ThreadCallTiming } from "./threadToolStepList";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
 import { DescribedImageName, DescribedTurnImages, ImageDescribedBy } from "./imageDescription";
 import { Schema } from "effect";
@@ -1847,6 +1848,8 @@ const ToolEvent = Schema.Struct({
   outsideContent: Schema.optional(ToolOutsideContentMark),
   /** The routine the call set up; the transcript shows what was created. */
   routine: Schema.optional(ThreadRoutineReceipt),
+  /** Present only on a terminal state of a call whose bounds were trusted. */
+  timing: Schema.optional(ThreadCallTiming),
 }).annotations(strict);
 /**
  * The bounds a Code approval or question is journaled under. Exported so a
@@ -1898,6 +1901,12 @@ const ApprovalEvent = Schema.Struct({
     "level-change",
   ),
   summary: CodeApprovalSummaryText,
+  /**
+   * The provider's own identity for the call this ask gates, when the runtime
+   * supplied one. It ties the person's wait to that call alone; absent when
+   * the runtime gave none, so no wait is ever attributed by adjacency.
+   */
+  toolCallId: Schema.optional(ProviderRequestId),
   /**
    * With `level-change`: the level the agent asks the thread to move to, and
    * the plan it asks the person to approve when it asks to leave Plan. An
@@ -2338,7 +2347,18 @@ const ContextHandoffAttachedEvent = Schema.Union(
   AccountMoveNativeSessionHandoffAttachedEvent,
 );
 
+/**
+ * One operation's cumulative reasoning total, journaled when a span closes —
+ * at the next non-reasoning event or the terminal. Replayed by assignment:
+ * each event carries the latest whole-millisecond total, not a delta, so a
+ * repeated or re-read frame never double-counts.
+ */
+const ReasoningTimeEvent = Schema.Struct({
+  kind: Schema.Literal("reasoning-time"),
+  reasoningMs: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
 export const CodeOperationEvent = Schema.Union(
+  ReasoningTimeEvent,
   ProviderSessionReadyEvent,
   ContextHandoffAttachedEvent,
   ForkContextMergedEvent,
@@ -2419,6 +2439,8 @@ export const CodeConversationStep = Schema.Union(
     published: Schema.optional(ThreadPublishedPage),
     outsideContent: Schema.optional(ToolOutsideContentMark),
     routine: Schema.optional(ThreadRoutineReceipt),
+    /** Present only on a completed step whose bounds were trusted. */
+    timing: Schema.optional(ThreadCallTiming),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("reasoning"),
@@ -2511,6 +2533,12 @@ export const CodeConversationTurn = Schema.Struct({
   ),
   /** Whether the turn journaled more steps than `steps` carries. */
   stepsTruncated: Schema.optional(Schema.Boolean),
+  /**
+   * Cumulative reasoning-channel span time in whole milliseconds, from the
+   * journaled `reasoning-time` totals. Absent on turns that recorded none and
+   * every turn journaled before them.
+   */
+  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   /**
    * What this turn's new provider session started with beyond its own prompt:
    * a provider switch's text handoff, or a fork's text handoff or copied

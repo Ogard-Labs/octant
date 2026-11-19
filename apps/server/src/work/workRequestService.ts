@@ -169,7 +169,10 @@ export class WorkRequestService {
   /** One process owns a pending external callback delivery at a time. */
   readonly #activeDeliveries = new Set<string>();
   readonly #interruptedSessions = new Set<string>();
-  readonly #settlementListeners = new Map<string, Set<() => void>>();
+  readonly #settlementListeners = new Map<
+    string,
+    Set<(settled?: { readonly person: boolean; readonly settledAt?: UtcTimestamp }) => void>
+  >();
   /**
    * The thread's posture when each pending approval in this process was
    * asked, by request id. A request restored after a restart has none, and
@@ -574,7 +577,9 @@ export class WorkRequestService {
       readonly providerSessionId: ProviderSessionId;
       readonly providerCallbackId: string;
     },
-    callback: () => void,
+    callback: (
+      settled?: { readonly person: boolean; readonly settledAt?: UtcTimestamp },
+    ) => void,
   ): () => void {
     const key = settlementListenerKey(input.providerSessionId, input.providerCallbackId);
     const entry = this.#findByProviderSessionCallbackId(
@@ -582,10 +587,29 @@ export class WorkRequestService {
       input.providerCallbackId,
     );
     if (entry !== undefined && entry.request.status !== "pending") {
-      callback();
+      const { status } = entry.request;
+      // Interrupted and expired settles are the system's own, and the wait
+      // was person-facing until it ran out. A resolved or cancelled request
+      // settled by a person or by an automated reviewer only the actor can
+      // tell apart: when the settle was journaled without one (a replayed
+      // frame carries none), billing would be a guess, so it is omitted.
+      const person =
+        status === "interrupted" || status === "expired"
+          ? true
+          : entry.settledActorKind !== undefined && entry.settledActorKind !== "agent";
+      callback({
+        person,
+        ...(entry.request.settledAt === undefined
+          ? {}
+          : { settledAt: entry.request.settledAt }),
+      });
       return () => undefined;
     }
-    const listeners = this.#settlementListeners.get(key) ?? new Set<() => void>();
+    const listeners =
+      this.#settlementListeners.get(key) ??
+      new Set<
+        (settled?: { readonly person: boolean; readonly settledAt?: UtcTimestamp }) => void
+      >();
     listeners.add(callback);
     this.#settlementListeners.set(key, listeners);
     return () => {
@@ -754,7 +778,7 @@ export class WorkRequestService {
         "Work request event journal could not be written through the authoritative flow.",
       );
     }
-    this.#projection.apply(frame);
+    this.#projection.apply(frame, actor);
     const currentEntry = this.#projection.lookup(current.requestId);
     const listenerKey =
       currentEntry === undefined
@@ -765,7 +789,12 @@ export class WorkRequestService {
           );
     const listeners = this.#settlementListeners.get(listenerKey);
     this.#settlementListeners.delete(listenerKey);
-    for (const callback of listeners ?? []) callback();
+    // The ask was person-facing the whole time it stood open: a person's
+    // answer and a person-facing wait that ran out — expiry, interrupt, a
+    // withdraw — both end person time at this settle. Only an automated
+    // reviewer's `agent` settle is not person wait.
+    const person = actor.kind !== "agent";
+    for (const callback of listeners ?? []) callback({ person, settledAt });
     return ok(nextRequest);
   }
 

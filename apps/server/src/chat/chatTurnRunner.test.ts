@@ -3936,6 +3936,97 @@ describe("ChatTurnRunner", () => {
     expect(attempts.at(-1)?.toolSteps).toHaveLength(2);
   });
 
+  it("journals each call's measured bounds and the reasoning total, once each, from the provider's own stamps", async () => {
+    const { attempts, steps } = await runToolTurn([
+      {
+        kind: "reasoning-delta",
+        text: "Thinking",
+        occurredAt: "2026-08-11T12:00:00.000Z",
+      },
+      {
+        kind: "tool-start",
+        toolCallId: "call-1",
+        toolName: "Web search",
+        occurredAt: "2026-08-11T12:00:02.000Z",
+      },
+      {
+        kind: "tool-start",
+        toolCallId: "call-2",
+        toolName: "Fetch page",
+        occurredAt: "2026-08-11T12:00:03.000Z",
+      },
+      {
+        kind: "tool-success",
+        toolCallId: "call-1",
+        summary: "3 results",
+        occurredAt: "2026-08-11T12:00:05.000Z",
+      },
+      {
+        kind: "tool-failure",
+        toolCallId: "call-2",
+        message: "Timed out",
+        occurredAt: "2026-08-11T12:00:07.000Z",
+      },
+    ]);
+    // The reasoning span closed at the first non-reasoning event: its total
+    // is journaled on the small step frame and on every later whole attempt.
+    expect(attempts.at(-1)?.reasoningMs).toBe(2_000);
+    expect(steps.some(({ step }) => step === undefined)).toBe(true);
+    expect(attempts.at(-1)?.toolSteps).toEqual([
+      {
+        toolCallId: "call-1",
+        toolName: "Web search",
+        state: "completed",
+        summary: "3 results",
+        timing: {
+          startedAt: "2026-08-11T12:00:02.000Z",
+          endedAt: "2026-08-11T12:00:05.000Z",
+        },
+      },
+      {
+        toolCallId: "call-2",
+        toolName: "Fetch page",
+        state: "failed",
+        summary: "Timed out",
+        timing: {
+          startedAt: "2026-08-11T12:00:03.000Z",
+          endedAt: "2026-08-11T12:00:07.000Z",
+        },
+      },
+    ]);
+  });
+
+  it("bills no approval wait: an attempt declines its native asks itself, and unstamped events time nothing", async () => {
+    const { attempts, steps } = await runToolTurn([
+      { kind: "tool-start", toolCallId: "call-1", toolName: "Web search" },
+      {
+        kind: "approval-request",
+        requestId: "ask-1",
+        action: "run",
+        description: "Search the web",
+        toolCallId: "call-1",
+      },
+      { kind: "tool-success", toolCallId: "call-1", summary: "3 results" },
+    ]);
+    // No stamps, no invented bounds: the step ends untimed, and the
+    // auto-denied ask left no person wait to subtract anyway.
+    expect(attempts.at(-1)?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Web search", state: "completed", summary: "3 results" },
+    ]);
+    expect(attempts.at(-1)?.reasoningMs).toBeUndefined();
+    expect(steps.every(({ step }) => step === undefined || !("timing" in (step as object)))).toBe(
+      true,
+    );
+  });
+
+  it("keeps the reasoning total off attempts whose events carry no trustworthy stamps", async () => {
+    const { attempts } = await runToolTurn([
+      { kind: "reasoning-delta", text: "Thinking" },
+      { kind: "text-delta", text: "Working" },
+    ]);
+    expect(attempts.at(-1)?.reasoningMs).toBeUndefined();
+  });
+
   it("keeps as many tool calls as the person's limit and says once that the attempt called more", async () => {
     const { attempts, steps } = await runToolTurn(
       Array.from({ length: 5 }, (_unused, index) => ({
@@ -3968,13 +4059,34 @@ describe("ChatTurnRunner", () => {
     );
     expect(steps.map(({ step }) => step)).toEqual([
       { toolCallId: "call-1", toolName: "read-file", state: "started" },
-      { toolCallId: "call-1", toolName: "read-file", state: "completed" },
+      {
+        toolCallId: "call-1",
+        toolName: "read-file",
+        state: "completed",
+        // A call Octant ran itself is timed from its own execute bounds.
+        timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+      },
       { toolCallId: "call-2", toolName: "run-command", state: "started" },
-      { toolCallId: "call-2", toolName: "run-command", state: "failed" },
+      {
+        toolCallId: "call-2",
+        toolName: "run-command",
+        state: "failed",
+        timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+      },
     ]);
     expect(attempts.at(-1)?.toolSteps).toEqual([
-      { toolCallId: "call-1", toolName: "read-file", state: "completed" },
-      { toolCallId: "call-2", toolName: "run-command", state: "failed" },
+      {
+        toolCallId: "call-1",
+        toolName: "read-file",
+        state: "completed",
+        timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+      },
+      {
+        toolCallId: "call-2",
+        toolName: "run-command",
+        state: "failed",
+        timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+      },
     ]);
   });
 

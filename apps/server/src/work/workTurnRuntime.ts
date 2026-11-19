@@ -18,6 +18,7 @@ import {
   recordThreadAppToolStep,
   recordThreadShieldReview,
   recordThreadToolStep,
+  createTurnActivityTiming,
   startTurnMetrics,
   workThreadAccessOf,
   type ThreadToolSteps,
@@ -49,8 +50,11 @@ import {
   MAX_THREAD_TASKS_PER_TURN,
   restateThreadTaskList,
   upsertThreadTaskProgress,
+  type ThreadCallTiming,
   type ThreadTaskProgress,
   type ThreadTaskProgressList,
+  type UtcTimestamp,
+  decodeUtcTimestamp,
 } from "@octant/contracts";
 import type {
   ProviderDriver,
@@ -193,6 +197,11 @@ export interface WorkTurnRuntimePort {
     /** The turn's tool calls, whole, whenever one starts, moves, or ends. */
     readonly onToolSteps?: (toolSteps: ThreadToolSteps) => void;
     /**
+     * The turn's cumulative reasoning total in whole milliseconds, restated
+     * when a span closes. Never reasoning text — only the measured total.
+     */
+    readonly onReasoningMs?: (reasoningMs: number) => void;
+    /**
      * How many tool calls the turn keeps: the person's setting for the level
      * this turn runs at, or `"off"` for no limit. Absent reads as the default
      * below Full access.
@@ -203,7 +212,11 @@ export interface WorkTurnRuntimePort {
     readonly onChildActivity?: (event: ProviderChildActivityEvent) => void;
     readonly onRequestSettled?: (
       input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
-      release: () => void,
+      release: (settled?: {
+        readonly person: boolean;
+        /** The request journal's own settle stamp; the wait ends there, not at the callback. */
+        readonly settledAt?: UtcTimestamp;
+      }) => void,
     ) => () => void;
     /** Told once when the turn is over, whatever its outcome, with what it cost and how it ran. */
     readonly onTurnEnded?: (turn: TurnEndSummary) => void;
@@ -448,6 +461,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           await input.appManagedTools?.close?.();
         }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
       );
+      const clock = input.clock ?? (() => new Date().toISOString());
       let reachedTerminalEvent = false;
       const shareEventLoop = makeEventLoopShare();
       const outsideContentMarks = input.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS;
@@ -460,6 +474,10 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         });
       }
       let toolSteps: ThreadToolSteps | undefined;
+      // One tracker per turn: reasoning spans and tool-call bounds fold from
+      // the same provider stamps the journal keeps, so live and rebuilt
+      // views show identical measurements.
+      const turnTiming = createTurnActivityTiming();
       const stepLimit =
         input.toolStepLimit === "off"
           ? undefined
@@ -680,6 +698,23 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             ),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
+                // Timed before any case may ignore the event: the same
+                // provider stamps bound reasoning spans and call durations.
+                const provenance =
+                  event.synthesized === true ? ("synthesized" as const) : undefined;
+                const reasoningTotal = turnTiming.observeEvent({
+                  isReasoning: event.kind === "reasoning-delta",
+                  occurredAt: event.occurredAt,
+                  ...(provenance === undefined ? {} : { provenance }),
+                });
+                if (reasoningTotal !== undefined) input.onReasoningMs?.(reasoningTotal);
+                if (event.kind === "tool-start") {
+                  turnTiming.callStarted({
+                    toolCallId: event.toolCallId,
+                    occurredAt: event.occurredAt,
+                    ...(provenance === undefined ? {} : { provenance }),
+                  });
+                }
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 // Marked before the budget is looked at: what the runtime
                 // read reached its model either way.
@@ -783,7 +818,15 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   tasks = next;
                   input.onTasks?.(next);
                 }
-                const nextToolSteps = recordThreadToolStep(toolSteps, event, stepLimit);
+                const callTiming =
+                  event.kind === "tool-success" || event.kind === "tool-failure"
+                    ? turnTiming.callEnded({
+                        toolCallId: event.toolCallId,
+                        occurredAt: event.occurredAt,
+                        ...(provenance === undefined ? {} : { provenance }),
+                      })
+                    : undefined;
+                const nextToolSteps = recordThreadToolStep(toolSteps, event, stepLimit, callTiming);
                 if (nextToolSteps !== toolSteps && nextToolSteps !== undefined) {
                   toolSteps = nextToolSteps;
                   input.onToolSteps?.(nextToolSteps);
@@ -820,18 +863,24 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   if (executionSignal.aborted) return;
                   // Keyed by the request id, which the call's record is kept
                   // under, so the row opens that record.
-                  const showAppTool = (state: "started" | "completed" | "failed") => {
+                  const showAppTool = (
+                    state: "started" | "completed" | "failed",
+                    timing?: ThreadCallTiming,
+                  ) => {
                     if (!announcesNoCall) return;
                     const next = recordThreadAppToolStep(
                       toolSteps,
                       { toolCallId: event.requestId, toolName: event.toolName, state },
                       stepLimit,
+                      timing,
                     );
                     if (next === undefined || next === toolSteps) return;
                     toolSteps = next;
                     input.onToolSteps?.(next);
                   };
+                  const appToolStartedAt = clock();
                   showAppTool("started");
+                  let appToolApprovalWaitMs = 0;
                   const execution = yield* idle.during(
                     Effect.promise(async () => {
                       try {
@@ -840,6 +889,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                           inputJson: event.inputJson,
                           signal: executionSignal,
                           toolCallId: event.requestId,
+                          onApprovalWait: (waitMs) => {
+                            appToolApprovalWaitMs += waitMs;
+                          },
                         });
                       } catch {
                         return {
@@ -871,7 +923,21 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       input.onToolSteps?.(next);
                     }
                   }
-                  showAppTool(execution.isError === true ? "failed" : "completed");
+                  // The run time is the actual execute interval minus any
+                  // person wait the recorded call measured inside it. Without
+                  // the recorded-call boundary a wait could sit inside the
+                  // interval unseen, so no bounds are offered at all.
+                  const appToolTiming: ThreadCallTiming | undefined =
+                    input.toolEffects === undefined
+                      ? undefined
+                      : {
+                          startedAt: decodeUtcTimestamp(appToolStartedAt),
+                          endedAt: decodeUtcTimestamp(clock()),
+                          ...(appToolApprovalWaitMs > 0
+                            ? { approvalWaitMs: appToolApprovalWaitMs }
+                            : {}),
+                        };
+                  showAppTool(execution.isError === true ? "failed" : "completed", appToolTiming);
                   const resultJson = boundedToolResultJson(execution.result);
                   input.toolCallRecords?.appTool({
                     toolCallId: event.requestId,
@@ -893,6 +959,15 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (event.kind === "approval-request" || event.kind === "user-input-request") {
                   const providerCallbackId = normalizedProviderCallbackId(event.requestId);
                   if (providerCallbackId === undefined) return;
+                  // A question is the person's time but never an approval
+                  // wait: only approval asks may be billed to a call.
+                  if (event.kind === "approval-request") {
+                    turnTiming.approvalAsked({
+                      approvalId: providerCallbackId,
+                      occurredAt: event.occurredAt,
+                      ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }),
+                    });
+                  }
                   const requestKey = `${String(event.sessionId)}:${providerCallbackId}`;
                   const hold = yield* Deferred.make<void>();
                   pendingRequestHolds.set(requestKey, hold);
@@ -901,7 +976,24 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       providerSessionId: event.sessionId,
                       providerCallbackId,
                     },
-                    () => releaseRequestHold(requestKey),
+                    (settled) => {
+                      // The wait ends where the request journal settled the
+                      // ask — a person's answer, or a person-facing wait that
+                      // ran out (expired, interrupted, withdrawn). Only an
+                      // automated reviewer's settle is unbilled, and it still
+                      // closes the ask.
+                      if (event.kind === "approval-request") {
+                        if (settled?.person === true) {
+                          turnTiming.approvalAnswered({
+                            approvalId: providerCallbackId,
+                            occurredAt: settled.settledAt ?? clock(),
+                          });
+                        } else {
+                          turnTiming.approvalSettled({ approvalId: providerCallbackId });
+                        }
+                      }
+                      releaseRequestHold(requestKey);
+                    },
                   );
                   if (cleanup !== undefined) {
                     pendingRequestCleanups.set(requestKey, cleanup);
@@ -909,7 +1001,11 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   yield* Effect.forkScoped(idle.during(Deferred.await(hold)));
                   return;
                 }
-                if (isTerminalEvent(event)) terminal = event;
+                if (isTerminalEvent(event)) {
+                  terminal = event;
+                  const closed = turnTiming.closeReasoningAt(event.occurredAt);
+                  if (closed !== undefined) input.onReasoningMs?.(closed);
+                }
               }),
             ),
           ),

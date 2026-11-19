@@ -1,4 +1,5 @@
 import type { CodeOperationEvent } from "@octant/contracts";
+import { completedCallDurationMs } from "@octant/domain";
 import type { ThreadTaskProgress } from "../transcript/ThreadTasksPanel";
 import type { TurnActivity, TurnActivityRow } from "../transcript/turnActivity";
 
@@ -91,6 +92,7 @@ function foldToolEvent(
   const published = event.published ?? previous?.published;
   const outsideContent = event.outsideContent ?? previous?.outsideContent;
   const routine = event.routine ?? previous?.routine;
+  const timing = completedCallDurationMs(event.timing);
   return {
     kind: "tool",
     id: String(event.toolCallId),
@@ -100,6 +102,12 @@ function foldToolEvent(
     ...(published === undefined ? {} : { published }),
     ...(outsideContent === undefined ? {} : { outsideContent }),
     ...(routine === undefined ? {} : { routine }),
+    ...(timing === undefined
+      ? {}
+      : {
+          durationMs: timing.durationMs,
+          ...(timing.waitedMs > 0 ? { waitedMs: timing.waitedMs } : {}),
+        }),
   };
 }
 
@@ -112,6 +120,13 @@ export function applyActivityEvent(
   activity: TurnActivity,
   event: CodeOperationEvent,
 ): TurnActivity {
+  if (event.kind === "reasoning-time") {
+    // The journal carries the latest cumulative total; assigning it again is
+    // a no-op, so a re-read frame can never double-count.
+    return activity.reasoningMs === event.reasoningMs
+      ? activity
+      : { ...activity, reasoningMs: event.reasoningMs };
+  }
   if (event.kind === "tool-activity") {
     const id = String(event.toolCallId);
     // A tool call ends a retry wait as content does: a retried response that

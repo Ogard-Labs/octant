@@ -182,6 +182,11 @@ export interface CodeTurnEvent {
   readonly taskIds?: ReadonlyArray<string>;
   readonly toolCallId?: string;
   readonly toolName?: string;
+  /**
+   * Set when the adapter folded stored or replayed output into this event:
+   * `occurredAt` names the batch, not the instant, so timing ignores it.
+   */
+  readonly synthesized?: true;
   /** The provider reviewer's verdict and reason; only on `review`. */
   readonly reason?: string;
   readonly verdict?: "allow" | "deny";
@@ -803,6 +808,7 @@ export class CodeTurnRunner {
                     if (executionSignal?.aborted) {
                       yield* input.persistEvent({
                         ...normalized,
+                        occurredAt: clock() as ProviderRuntimeEvent["occurredAt"],
                         status: "interrupted",
                         text: "App-managed action was cancelled.",
                       });
@@ -829,6 +835,7 @@ export class CodeTurnRunner {
                     if (executionSignal?.aborted) {
                       yield* input.persistEvent({
                         ...normalized,
+                        occurredAt: clock() as ProviderRuntimeEvent["occurredAt"],
                         status: "interrupted",
                         text: "App-managed action was cancelled.",
                       });
@@ -844,6 +851,7 @@ export class CodeTurnRunner {
                     });
                     yield* input.persistEvent({
                       ...normalized,
+                      occurredAt: clock() as ProviderRuntimeEvent["occurredAt"],
                       status: answer.isError ? "failed" : "completed",
                       text: answer.isError
                         ? appManagedActionFailureText(execution.result)
@@ -1053,6 +1061,7 @@ function normalizeProviderEvent(
     sessionId: event.sessionId,
     sequence: event.sequence,
     occurredAt: event.occurredAt,
+    ...(event.synthesized === true ? { synthesized: true as const } : {}),
   } as const;
   const text = (value: string) => boundedUtf8(value, MAX_CODE_TURN_FIELD_BYTES);
   const observation = (claimText?: string) =>
@@ -1156,6 +1165,7 @@ function normalizeProviderEvent(
         category: "approval",
         ...(event.requiresUser === undefined ? {} : { requiresUser: event.requiresUser }),
         requestId: text(event.requestId),
+        ...(event.toolCallId === undefined ? {} : { toolCallId: text(event.toolCallId) }),
         // A description that already names the tool is not prefixed with it
         // again; "Edit: Claude requests permission to use Edit." said the same
         // word twice on every prompt.

@@ -6974,6 +6974,7 @@ export class ChatService {
             attemptId: attempt.id,
             ...(step === undefined ? {} : { toolStep: step }),
             ...(attempt.toolStepsTruncated === true ? { toolStepsTruncated: true } : {}),
+            ...(attempt.reasoningMs === undefined ? {} : { reasoningMs: attempt.reasoningMs }),
             updatedAt: attempt.updatedAt,
           }),
         ],
