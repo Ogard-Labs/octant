@@ -126,19 +126,28 @@ function defaultTarball(): string {
   return newest;
 }
 
+const USAGE =
+  "Usage: smoke-headless-install.ts [--tarball <path>] [--prefix <empty dir>] [--self-built]";
+
 function parseArguments(argv: readonly string[]): {
   readonly tarball?: string;
   readonly prefix?: string;
+  readonly selfBuilt: boolean;
 } {
-  const parsed: { tarball?: string; prefix?: string } = {};
-  for (let index = 0; index < argv.length; index += 2) {
+  const parsed: { tarball?: string; prefix?: string; selfBuilt: boolean } = { selfBuilt: false };
+  for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
+    if (flag === "--self-built") {
+      parsed.selfBuilt = true;
+      continue;
+    }
     const value = argv[index + 1];
     if (value === undefined || (flag !== "--tarball" && flag !== "--prefix")) {
-      throw new Error("Usage: smoke-headless-install.ts [--tarball <path>] [--prefix <empty dir>]");
+      throw new Error(USAGE);
     }
     if (flag === "--tarball") parsed.tarball = resolve(value);
     else parsed.prefix = resolve(value);
+    index += 1;
   }
   return parsed;
 }
@@ -182,7 +191,18 @@ async function smokeHeadlessInstall(argv: readonly string[]): Promise<void> {
     "octant server install",
     await run(
       join(artifactRoot, "bin", "octant"),
-      ["server", "install", "--artifact", artifactRoot, "--install-root", installRoot],
+      // A build made here carries no release signature, so it installs only as
+      // self-built; a published tarball is smoked without the flag, which
+      // proves its signature verifies against the keys this CLI trusts.
+      [
+        "server",
+        "install",
+        "--artifact",
+        artifactRoot,
+        "--install-root",
+        installRoot,
+        ...(options.selfBuilt ? ["--self-built"] : []),
+      ],
       { cwd: prefix, env },
     ),
   );

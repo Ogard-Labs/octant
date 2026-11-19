@@ -1,10 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import {
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   readlinkSync,
   rmSync,
   symlinkSync,
@@ -13,8 +14,12 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  createReleaseFeedVerifier,
   encodeHeadlessArtifactManifest,
+  encodeHeadlessArtifactSignature,
   HEADLESS_ARTIFACT_MANIFEST_FILENAME,
+  HEADLESS_ARTIFACT_SIGNATURE_FILENAME,
+  signHeadlessArtifactManifest,
   type HeadlessArtifactManifest,
 } from "@octant/host-runtime";
 import { afterEach, describe, expect, it } from "vitest";
@@ -45,10 +50,29 @@ const runtime = {
   wireVersion: "1",
 } as const;
 
+// A preview ring key made for this suite, so the fixtures are release-signed
+// the way a published build is, without the real release keys.
+const releaseKey = (() => {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  return {
+    publicKeyBase64: publicKey.export({ format: "der", type: "spki" }).toString("base64"),
+    privateKeyBase64: privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
+  };
+})();
+const signature = {
+  kind: "release-keys",
+  verifier: createReleaseFeedVerifier({
+    stable: [],
+    preview: [releaseKey.publicKeyBase64],
+    candidate: [],
+  }),
+} as const;
+
 function writeArtifact(options: {
   readonly version: string;
   readonly storeVersion: number;
   readonly marker?: string;
+  readonly unsigned?: true;
 }): string {
   const root = temporaryRoot("octant-cli-artifact-");
   const contents: ReadonlyArray<readonly [string, string, string]> = [
@@ -85,6 +109,14 @@ function writeArtifact(options: {
     join(root, HEADLESS_ARTIFACT_MANIFEST_FILENAME),
     encodeHeadlessArtifactManifest(manifest),
   );
+  if (options.unsigned !== true) {
+    writeFileSync(
+      join(root, HEADLESS_ARTIFACT_SIGNATURE_FILENAME),
+      encodeHeadlessArtifactSignature(
+        signHeadlessArtifactManifest(manifest, "preview", releaseKey.privateKeyBase64),
+      ),
+    );
+  }
   return root;
 }
 
@@ -156,7 +188,12 @@ describe("stageHeadlessArtifact", () => {
   it("stages and verifies an artifact into an immutable version directory", async () => {
     const installRoot = join(temporaryRoot("octant-install-"), "install");
     const artifact = writeArtifact({ version: "1.0.0", storeVersion: 1 });
-    const staged = await stageHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime });
+    const staged = await stageHeadlessArtifact({
+      artifactRoot: artifact,
+      installRoot,
+      runtime,
+      signature,
+    });
     expect(staged.manifest.artifactVersion).toBe("1.0.0");
     expect(staged.versionRoot).toBe(join(installRoot, "versions", "1.0.0"));
     expect(existsSync(join(staged.versionRoot, "lib/server/main.mjs"))).toBe(true);
@@ -170,7 +207,7 @@ describe("stageHeadlessArtifact", () => {
     const artifact = writeArtifact({ version: "1.0.0", storeVersion: 1 });
     writeFileSync(join(artifact, "lib/server/main.mjs"), "tampered");
     await expect(
-      stageHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime }),
+      stageHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime, signature }),
     ).rejects.toMatchObject({ code: "artifact-rejected" });
     expect(existsSync(join(installRoot, "versions", "1.0.0"))).toBe(false);
   });
@@ -183,16 +220,76 @@ describe("stageHeadlessArtifact", () => {
         artifactRoot: artifact,
         installRoot,
         runtime: { ...runtime, platform: runtime.platform === "darwin" ? "linux" : "darwin" },
+        signature,
       }),
     ).rejects.toMatchObject({ code: "artifact-rejected" });
+  });
+
+  it("keeps the release signature beside the staged manifest", async () => {
+    const installRoot = join(temporaryRoot("octant-install-"), "install");
+    const artifact = writeArtifact({ version: "1.0.0", storeVersion: 1 });
+    const staged = await stageHeadlessArtifact({
+      artifactRoot: artifact,
+      installRoot,
+      runtime,
+      signature,
+    });
+    expect(existsSync(join(staged.versionRoot, HEADLESS_ARTIFACT_SIGNATURE_FILENAME))).toBe(true);
+  });
+
+  it("refuses a build with no release signature without installing anything", async () => {
+    const installRoot = join(temporaryRoot("octant-install-"), "install");
+    const artifact = writeArtifact({ version: "1.0.0", storeVersion: 1, unsigned: true });
+    await expect(
+      stageHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime, signature }),
+    ).rejects.toMatchObject({ code: "artifact-unsigned" });
+    expect(existsSync(join(installRoot, "versions", "1.0.0"))).toBe(false);
+  });
+
+  it("refuses a build whose manifest changed after it was signed", async () => {
+    const installRoot = join(temporaryRoot("octant-install-"), "install");
+    const artifact = writeArtifact({ version: "1.0.0", storeVersion: 1 });
+    const manifestPath = join(artifact, HEADLESS_ARTIFACT_MANIFEST_FILENAME);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as HeadlessArtifactManifest;
+    writeFileSync(manifestPath, encodeHeadlessArtifactManifest({ ...manifest, storeVersion: 2 }));
+    await expect(
+      stageHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime, signature }),
+    ).rejects.toMatchObject({ code: "artifact-unsigned" });
+    expect(existsSync(join(installRoot, "versions", "1.0.0"))).toBe(false);
+  });
+
+  it("refuses a build signed by a key the release keys do not trust", async () => {
+    const installRoot = join(temporaryRoot("octant-install-"), "install");
+    const artifact = writeArtifact({ version: "1.0.0", storeVersion: 1 });
+    await expect(
+      stageHeadlessArtifact({
+        artifactRoot: artifact,
+        installRoot,
+        runtime,
+        signature: { kind: "release-keys" },
+      }),
+    ).rejects.toMatchObject({ code: "artifact-unsigned" });
+  });
+
+  it("installs an unsigned build only when the person says they built it", async () => {
+    const installRoot = join(temporaryRoot("octant-install-"), "install");
+    const artifact = writeArtifact({ version: "1.0.0", storeVersion: 1, unsigned: true });
+    const staged = await stageHeadlessArtifact({
+      artifactRoot: artifact,
+      installRoot,
+      runtime,
+      signature: { kind: "self-built" },
+    });
+    expect(staged.manifest.artifactVersion).toBe("1.0.0");
+    expect(existsSync(join(staged.versionRoot, HEADLESS_ARTIFACT_SIGNATURE_FILENAME))).toBe(false);
   });
 
   it("refuses to overwrite an already-installed version", async () => {
     const installRoot = join(temporaryRoot("octant-install-"), "install");
     const artifact = writeArtifact({ version: "1.0.0", storeVersion: 1 });
-    await stageHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime });
+    await stageHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime, signature });
     await expect(
-      stageHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime }),
+      stageHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime, signature }),
     ).rejects.toMatchObject({ code: "version-already-installed" });
   });
 });
@@ -205,6 +302,7 @@ describe("installHeadlessArtifact", () => {
       artifactRoot: artifact,
       installRoot,
       runtime,
+      signature,
     });
     expect(report).toMatchObject({ outcome: "installed", version: "1.0.0" });
     expect(readlinkSync(join(installRoot, "current"))).toBe(join(installRoot, "versions", "1.0.0"));
@@ -215,7 +313,7 @@ describe("upgradeHeadlessArtifact", () => {
   async function installedRoot(version: string, storeVersion: number): Promise<string> {
     const installRoot = join(temporaryRoot("octant-install-"), "install");
     const artifact = writeArtifact({ version, storeVersion });
-    await installHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime });
+    await installHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime, signature });
     return installRoot;
   }
 
@@ -227,6 +325,7 @@ describe("upgradeHeadlessArtifact", () => {
       artifactRoot: candidate,
       installRoot,
       runtime,
+      signature,
       ports: fixture.ports,
     });
     expect(report).toMatchObject({
@@ -256,6 +355,7 @@ describe("upgradeHeadlessArtifact", () => {
       artifactRoot: candidate,
       installRoot,
       runtime,
+      signature,
       ports: fixture.ports,
     });
     expect(report).toMatchObject({ outcome: "upgraded", storeMigration: false });
@@ -271,6 +371,7 @@ describe("upgradeHeadlessArtifact", () => {
         artifactRoot: candidate,
         installRoot,
         runtime,
+        signature,
         ports: fixture.ports,
       }),
     ).rejects.toMatchObject({ code: "backup-required" });
@@ -287,6 +388,7 @@ describe("upgradeHeadlessArtifact", () => {
         artifactRoot: candidate,
         installRoot,
         runtime,
+        signature,
         ports: fixture.ports,
       }),
     ).rejects.toMatchObject({ code: "incompatible-downgrade" });
@@ -302,6 +404,7 @@ describe("upgradeHeadlessArtifact", () => {
         artifactRoot: candidate,
         installRoot,
         runtime,
+        signature,
         ports: fixture.ports,
       }),
     ).rejects.toMatchObject({ code: "owner-stop-refused" });
@@ -316,6 +419,7 @@ describe("upgradeHeadlessArtifact", () => {
       artifactRoot: candidate,
       installRoot,
       runtime,
+      signature,
       ports: fixture.ports,
     });
     expect(report).toMatchObject({
@@ -340,6 +444,7 @@ describe("upgradeHeadlessArtifact", () => {
       artifactRoot: candidate,
       installRoot,
       runtime,
+      signature,
       ports: fixture.ports,
     });
     expect(report).toMatchObject({ outcome: "recovery-required" });
@@ -360,6 +465,7 @@ describe("upgradeHeadlessArtifact", () => {
       artifactRoot: candidate,
       installRoot,
       runtime,
+      signature,
       ports: fixture.ports,
     });
     expect(report).toMatchObject({ outcome: "rolled-back", storeRestored: false });
@@ -376,7 +482,7 @@ describe("uninstallHeadlessArtifact", () => {
     mkdirSync(dataDirectory, { recursive: true });
     writeFileSync(join(dataDirectory, "octant.sqlite3"), "store-bytes");
     const artifact = writeArtifact({ version: "1.0.0", storeVersion: 1 });
-    await installHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime });
+    await installHeadlessArtifact({ artifactRoot: artifact, installRoot, runtime, signature });
 
     const report = await uninstallHeadlessArtifact({ installRoot, dataDirectory });
 

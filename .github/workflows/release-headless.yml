@@ -1,0 +1,151 @@
+# The headless build for a release: the host and `octant` command a computer
+# with no desktop installs (`docs/architecture.md`, "Headless install"),
+# built for each target, signed with the ring's release key, and attached to
+# the release.
+#
+# Called by `release-build.yml` (Octant's candidate ring) and
+# `release-stable.yml`. Octant Nightly never installs a host, so its releases
+# carry no headless build. Two jobs so that no job both runs the built
+# source's own code and holds a key:
+#
+#   build  runs the source (install scripts, build, packaging) on each
+#          target's own runner, because the build vendors native modules
+#          built there, and holds no secret.
+#   sign   reads only the ring's key and runs only this workflow's own
+#          scripts: it checks every file against the manifest, signs the
+#          manifest, packs the build again and attaches it to the release.
+#
+# Signing fails closed: with the ring's key unset, or a key `octant` does not
+# trust for the ring, nothing is attached. `octant server install` refuses a
+# build without the signature unless the person says they built it.
+name: Release headless (shared)
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to build and publish."
+        required: true
+        type: string
+      ring:
+        description: "Update ring: stable or candidate."
+        required: true
+        type: string
+      product:
+        description: "Product name, with its space, for a release this job creates."
+        required: true
+        type: string
+      environment:
+        description: "Environment holding the ring's release key: stable or preview."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the headless package (${{ matrix.target }}, unsigned)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
+      # The macOS build carries the desktop's sandbox scope helper.
+      - if: startsWith(matrix.target, 'darwin-')
+        run: bun run --cwd apps/desktop build
+      - name: Package the headless build
+        env:
+          OCTANT_ARTIFACT_VERSION: ${{ inputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: bun scripts/package-headless.ts "$TARGET"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: headless-${{ matrix.target }}
+          path: out/headless/octant-${{ inputs.version }}-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  sign:
+    name: Sign and attach the headless package (${{ matrix.target }})
+    needs: build
+    # A target whose build failed has no tarball and fails here; the other
+    # targets still publish.
+    if: ${{ !cancelled() }}
+    environment: ${{ inputs.environment }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [darwin-arm64, linux-x64, linux-arm64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: headless-${{ matrix.target }}
+          path: ${{ runner.temp }}/headless
+      - name: Sign the headless package
+        env:
+          # Only the ring's own key: the stable key never reaches a preview
+          # environment job, and the preview key never signs a stable build.
+          OCTANT_UPDATE_FEED_PRIVATE_KEY: ${{ inputs.ring == 'stable' && secrets.OCTANT_UPDATE_FEED_PRIVATE_KEY || '' }}
+          OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY: ${{ inputs.ring != 'stable' && secrets.OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY || '' }}
+          VERSION: ${{ inputs.version }}
+          RING: ${{ inputs.ring }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          name="octant-${VERSION}-${TARGET}.tar.gz"
+          mkdir -p "${RUNNER_TEMP}/signed"
+          bun scripts/sign-headless-artifact.ts \
+            --tarball "${RUNNER_TEMP}/headless/${name}" \
+            --ring "$RING" \
+            --out "${RUNNER_TEMP}/signed/${name}"
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          RING: ${{ inputs.ring }}
+          PRODUCT: ${{ inputs.product }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          file="${RUNNER_TEMP}/signed/octant-${VERSION}-${TARGET}.tar.gz"
+          tag="v${VERSION}"
+          # The desktop rows may create the release first; attach to it.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$file" --clobber
+          elif [ "$RING" = "stable" ]; then
+            gh release create "$tag" "$file" --title "${PRODUCT} ${VERSION}" --generate-notes \
+              || gh release upload "$tag" "$file" --clobber
+          else
+            gh release create "$tag" "$file" \
+              --prerelease \
+              --target "${GITHUB_SHA}" \
+              --title "${PRODUCT} ${VERSION} (${RING})" \
+              --notes "${RING} build of ${GITHUB_REF_NAME} at ${GITHUB_SHA}. Not a stable release." \
+              || gh release upload "$tag" "$file" --clobber
+          fi
