@@ -87,6 +87,7 @@ import {
   decodeGuardrailLevelLowered,
   GUARDRAIL_LEVEL_LOWERED,
 } from "@octant/contracts/guardrail-lowering";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { Schema } from "effect";
 import { realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -674,6 +675,15 @@ export class ProjectService implements ProjectServiceApi {
       });
     }
     this.#assertReady();
+    // A create names the computer the Project is for, and this host makes only
+    // its own. A window whose create could not reach the other computer used to
+    // send it here, which filed a local folder under that computer's name.
+    if ("hostId" in command && String(command.hostId) !== String(LOCAL_HOST_ID)) {
+      throw new ProjectServiceError({
+        category: "unauthorized",
+        message: "This host creates Projects only for itself.",
+      });
+    }
     try {
       const current = this.#persistence.readProject(command.projectId);
       this.#assertExpectedVersion(current, command.expectedVersion);

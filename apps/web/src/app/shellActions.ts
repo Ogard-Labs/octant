@@ -210,6 +210,7 @@ export type ShellActions = {
     readonly action: string;
     readonly requiredCapability?: string;
     readonly projectHostId?: HostId;
+    readonly onlyThisHost?: boolean;
     readonly onRefuse: (reason: string) => void;
   }) => HostId | undefined;
   readonly addProjectExtraFolder: ProjectController["addExtraFolder"];

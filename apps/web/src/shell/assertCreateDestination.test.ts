@@ -60,6 +60,29 @@ describe("assertCreateDestination", () => {
     expect(mutationDecision).toHaveBeenCalledWith(LOCAL, "create-project");
   });
 
+  it("refuses a create naming another computer when the window can only create on its own", () => {
+    const decision = assertCreateDestinationFromHosts({
+      hosts: [host(LOCAL, "healthy", "This Mac"), host(LAPTOP, "healthy", "Laptop")],
+      createHostId: LAPTOP,
+      action: "create-code-thread",
+      onlyThisHost: true,
+    });
+    expect(decision.kind).toBe("refused");
+    if (decision.kind !== "refused") return;
+    expect(decision.reason).toMatch(/another computer/i);
+  });
+
+  it("still accepts this computer when the window can only create on its own", () => {
+    expect(
+      assertCreateDestinationFromHosts({
+        hosts: [host(LOCAL, "healthy", "This Mac"), host(LAPTOP, "healthy", "Laptop")],
+        createHostId: LOCAL,
+        action: "create-code-thread",
+        onlyThisHost: true,
+      }),
+    ).toEqual({ kind: "ok", hostId: LOCAL });
+  });
+
   it("maps every rejection reason to user-facing copy", () => {
     expect(createDestinationRefusalMessage("unknown-host")).toMatch(/not registered/i);
     expect(createDestinationRefusalMessage("host-unavailable")).toMatch(/Reconnect/i);
