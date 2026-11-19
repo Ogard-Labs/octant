@@ -7,8 +7,8 @@ import {
 } from "./agentRunSettings";
 import {
   DEFAULT_HOST_RESOURCE_POLICY,
+  DEFAULT_KEEP_AWAKE_POLICY,
   decodeDesktopAgentWorkSnapshot,
-  effectiveKeepAwakePolicy,
 } from "./hostResourcePolicy";
 
 describe("AgentRunPolicySettings", () => {
@@ -129,15 +129,14 @@ describe("UpdateAgentRunPolicySettings", () => {
   });
 
   it("defaults keep-awake to on-power and accepts on-power, always, or never", () => {
-    expect(effectiveKeepAwakePolicy(undefined)).toBe("on-power");
-    expect(effectiveKeepAwakePolicy(DEFAULT_HOST_RESOURCE_POLICY)).toBe("on-power");
+    expect(DEFAULT_KEEP_AWAKE_POLICY).toBe("on-power");
     for (const keepAwake of ["on-power", "always", "never"] as const) {
       const decoded = decodeUpdateAgentRunPolicySettings({
         creationPosture: "automatic",
         expectedVersion: 1,
         resourcePolicy: { ...DEFAULT_HOST_RESOURCE_POLICY, keepAwake },
       });
-      expect(effectiveKeepAwakePolicy(decoded.resourcePolicy)).toBe(keepAwake);
+      expect(decoded.resourcePolicy?.keepAwake).toBe(keepAwake);
     }
     expect(() =>
       decodeUpdateAgentRunPolicySettings({

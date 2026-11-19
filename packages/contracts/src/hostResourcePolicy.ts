@@ -32,13 +32,6 @@ export const DEFAULT_HOST_RESOURCE_POLICY: HostResourcePolicy = {
   maxAgents: 4,
 };
 
-/** The keep-awake policy in force: the stored choice, or `on-power` when absent. */
-export function effectiveKeepAwakePolicy(
-  policy?: Pick<HostResourcePolicy, "keepAwake">,
-): KeepAwakePolicy {
-  return policy?.keepAwake ?? DEFAULT_KEEP_AWAKE_POLICY;
-}
-
 const Count = Schema.Int.pipe(Schema.greaterThanOrEqualTo(0));
 export const HostResourceBudgetSnapshot = Schema.Struct({
   policy: HostResourcePolicy,

@@ -2373,6 +2373,7 @@ export async function restartDesktopHostAndRefreshWindowAuthorities(options: {
 }
 
 async function restartDesktopHost(): Promise<HostAdmission> {
+  keepAwakeController?.hostStopped();
   const finishRestart = desktopClientLifetime.beginHostRestart();
   const outcome = await restartDesktopHostAndRefreshWindowAuthorities({
     restart: async () => {
@@ -2395,6 +2396,8 @@ async function restartDesktopHost(): Promise<HostAdmission> {
       activityUnconfirmed: true,
     });
     updateHostTray();
+  } else {
+    void keepAwakeController?.pollNow();
   }
   return { status: "running", host: outcome.host };
 }
@@ -2411,6 +2414,7 @@ const desktopBackendSupervisor = createDesktopBackendSupervisor({
     return server;
   },
   reportFatal: (error) => {
+    keepAwakeController?.hostStopped();
     showNoticeWithoutBlocking(
       mainWindow,
       "Octant could not restart its local server",
@@ -3242,6 +3246,7 @@ async function refreshHostActivity(): Promise<void> {
     }
   }
   if (probe === undefined || probe.instanceId !== snapshot.instanceId) {
+    keepAwakeController?.hostStopped();
     hostLifecycle.setActivity({
       activeAgentCount: 0,
       attentionRequired: true,
@@ -3319,6 +3324,7 @@ async function stopHostFromMenu(): Promise<void> {
   if (snapshot.ownership !== "desktop-owned") {
     throw new Error("Octant cannot stop a separately managed host.");
   }
+  keepAwakeController?.hostStopped();
   await hostLifecycle.stop();
   updateHostTray();
 }
@@ -5095,18 +5101,13 @@ function ensureKeepAwake(): KeepAwakeController {
     keepAwakeController = new KeepAwakeController({
       powerSaveBlocker,
       powerMonitor,
-      readWork: async () => {
-        const snapshot = hostLifecycle.snapshot();
-        if (snapshot.state === "stopped" || snapshot.url === undefined) {
-          keepAwakeController?.hostStopped();
-          return undefined;
-        }
-        return await readDesktopAgentWork({
-          hostUrl: snapshot.url,
-          brokerHeaders: desktopBrokerHeaders(),
+      readWork: async () =>
+        await readDesktopAgentWork({
+          host: hostLifecycle.snapshot(),
+          brokerHeaders: desktopBrokerHeaders,
           fetch: globalThis.fetch,
-        });
-      },
+          onHostLost: () => keepAwakeController?.hostStopped(),
+        }),
       onStatusChanged: (status) => {
         for (const window of BrowserWindow.getAllWindows()) {
           if (!window.isDestroyed()) {

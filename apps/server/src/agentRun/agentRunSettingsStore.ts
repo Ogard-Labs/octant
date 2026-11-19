@@ -6,12 +6,12 @@ import {
   EventId,
   DEFAULT_AGENT_RUN_CREATION_POSTURE,
   decodeAgentRunPolicySettings,
-  effectiveKeepAwakePolicy,
   type AgentRunConcurrency,
   type HostResourcePolicy,
   type AgentRunPolicySettings,
   type AgentRunSelectableCreationPosture,
 } from "@octant/contracts";
+import { effectiveKeepAwakePolicy } from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";

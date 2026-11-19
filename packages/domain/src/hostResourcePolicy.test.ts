@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { decideHostResourceLimits } from "./hostResourcePolicy";
+import type { HostResourcePolicy } from "@octant/contracts";
+import { decideHostResourceLimits, effectiveKeepAwakePolicy } from "./hostResourcePolicy";
 
-const policy = {
+const policy: HostResourcePolicy = {
   mode: "automatic" as const,
   cpuTargetPercent: 60,
   memoryReservePercent: 20,
@@ -98,5 +99,12 @@ describe("host resource admission", () => {
       agents: 1,
       reason: "unavailable",
     });
+  });
+
+  it("resolves an absent keep-awake choice to on-power and preserves explicit choices", () => {
+    expect(effectiveKeepAwakePolicy(undefined)).toBe("on-power");
+    expect(effectiveKeepAwakePolicy(policy)).toBe("on-power");
+    expect(effectiveKeepAwakePolicy({ keepAwake: "always" })).toBe("always");
+    expect(effectiveKeepAwakePolicy({ keepAwake: "never" })).toBe("never");
   });
 });

@@ -5,6 +5,7 @@ import {
   type KeepAwakePolicy,
 } from "@octant/contracts";
 import type { KeepAwakeStatus } from "./keepAwakeStatus";
+import { probeLocalHost, type LocalHostProbe } from "./localHostProbe";
 
 export const DESKTOP_AGENT_WORK_ROUTE = "/api/desktop/agent-work";
 export const KEEP_AWAKE_POLL_INTERVAL_MS = 5_000;
@@ -103,24 +104,57 @@ function sameStatus(left: KeepAwakeStatus, right: KeepAwakeStatus): boolean {
   return true;
 }
 
+export interface KeepAwakeHostSnapshot {
+  readonly state: "stopped" | "starting" | "running" | "attention-required";
+  readonly ownership: "desktop-owned" | "managed" | undefined;
+  readonly url?: string;
+  readonly instanceId?: string;
+  readonly activityUnconfirmed?: boolean;
+}
+
 /**
  * Reads the server's loopback-only `/api/desktop/agent-work` signal using the
- * desktop bridge secret. Returns `undefined` when no host is running or the
- * poll fails.
+ * desktop bridge secret. Refuses to transmit the bridge secret unless the host
+ * is confirmed running and an unauthenticated `/health` probe still matches its
+ * expected `instanceId`, so a stale cached port after a managed host exits can
+ * never receive `x-octant-desktop-secret`.
  */
 export async function readDesktopAgentWork(options: {
-  readonly hostUrl: string | undefined;
-  readonly brokerHeaders: Readonly<Record<string, string>>;
+  readonly host: KeepAwakeHostSnapshot;
+  readonly brokerHeaders: () => Readonly<Record<string, string>>;
   readonly fetch: typeof globalThis.fetch;
+  readonly probeHost?: (input: {
+    readonly url: string;
+    readonly fetch: typeof globalThis.fetch;
+  }) => Promise<LocalHostProbe | undefined>;
+  readonly onHostLost?: () => void;
   readonly timeoutMs?: number;
 }): Promise<DesktopAgentWorkSnapshot | undefined> {
-  if (options.hostUrl === undefined) return undefined;
+  const { host } = options;
+  if (
+    host.state === "stopped" ||
+    host.state === "starting" ||
+    host.activityUnconfirmed === true ||
+    host.url === undefined ||
+    host.instanceId === undefined
+  ) {
+    options.onHostLost?.();
+    return undefined;
+  }
+  const probe = await (options.probeHost ?? probeLocalHost)({
+    url: host.url,
+    fetch: options.fetch,
+  });
+  if (probe === undefined || probe.instanceId !== host.instanceId) {
+    options.onHostLost?.();
+    return undefined;
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? WORK_POLL_TIMEOUT_MS);
   try {
-    const response = await options.fetch(new URL(DESKTOP_AGENT_WORK_ROUTE, options.hostUrl), {
+    const response = await options.fetch(new URL(DESKTOP_AGENT_WORK_ROUTE, probe.url), {
       method: "GET",
-      headers: options.brokerHeaders,
+      headers: options.brokerHeaders(),
       signal: controller.signal,
     });
     if (!response.ok) return undefined;
@@ -382,27 +416,37 @@ export class KeepAwakeController {
 
   #acquireBlocker(): boolean {
     if (this.#powerSaveBlocker === undefined) return false;
+    let id: number | undefined;
     try {
-      const id = this.#powerSaveBlocker.start("prevent-app-suspension");
+      id = this.#powerSaveBlocker.start("prevent-app-suspension");
       if (this.#powerSaveBlocker.isStarted(id)) {
         this.#blockerId = id;
         return true;
       }
+      this.#stopBlockerId(id);
       return false;
     } catch {
+      if (id !== undefined) {
+        this.#stopBlockerId(id);
+      }
       return false;
+    }
+  }
+
+  #stopBlockerId(id: number): void {
+    if (this.#powerSaveBlocker === undefined) return;
+    try {
+      this.#powerSaveBlocker.stop(id);
+    } catch {
+      // Best-effort release; never throw during cleanup, battery switch, or quit.
     }
   }
 
   #releaseBlocker(): void {
     const id = this.#blockerId;
     this.#blockerId = undefined;
-    if (id === undefined || this.#powerSaveBlocker === undefined) return;
-    try {
-      this.#powerSaveBlocker.stop(id);
-    } catch {
-      // Best-effort release; never throw during battery switch or quit.
-    }
+    if (id === undefined) return;
+    this.#stopBlockerId(id);
   }
 
   #scheduleReleaseTimer(): void {

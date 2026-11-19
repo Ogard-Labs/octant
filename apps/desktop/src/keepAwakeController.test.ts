@@ -51,6 +51,7 @@ function createFakePower(
     readonly unreadableBattery?: boolean;
     readonly refuseStart?: boolean;
     readonly throwOnStart?: boolean;
+    readonly throwOnIsStarted?: boolean;
   } = {},
 ) {
   let nextId = 1;
@@ -59,6 +60,7 @@ function createFakePower(
   const stoppedIds: Array<number> = [];
   let refuseStart = options.refuseStart ?? false;
   let throwOnStart = options.throwOnStart ?? false;
+  let throwOnIsStarted = options.throwOnIsStarted ?? false;
 
   const powerSaveBlocker: KeepAwakePowerSaveBlocker = {
     start: vi.fn((type: "prevent-app-suspension") => {
@@ -73,7 +75,10 @@ function createFakePower(
       stoppedIds.push(id);
       activeIds.delete(id);
     }),
-    isStarted: vi.fn((id: number) => activeIds.has(id)),
+    isStarted: vi.fn((id: number) => {
+      if (throwOnIsStarted) throw new Error("isStarted failed");
+      return activeIds.has(id);
+    }),
   };
 
   let battery = options.onBattery ?? false;
@@ -113,6 +118,9 @@ function createFakePower(
     },
     setThrowOnStart: (value: boolean) => {
       throwOnStart = value;
+    },
+    setThrowOnIsStarted: (value: boolean) => {
+      throwOnIsStarted = value;
     },
   };
 }
@@ -397,6 +405,63 @@ describe("KeepAwakeController", () => {
     controller.dispose();
   });
 
+  it("stops the returned assertion id instead of leaking it when powerSaveBlocker.isStarted throws", async () => {
+    const power = createFakePower({ throwOnIsStarted: true });
+    let currentWork: DesktopAgentWorkSnapshot = makeSnapshot({ code: 1 });
+    const controller = new KeepAwakeController({
+      powerSaveBlocker: power.powerSaveBlocker,
+      powerMonitor: power.powerMonitor,
+      readWork: async () => currentWork,
+    });
+
+    controller.start();
+    await Promise.resolve();
+    expect(power.startedTypes).toEqual(["prevent-app-suspension"]);
+    expect(power.stoppedIds).toEqual([1]);
+    expect(power.activeIds.size).toBe(0);
+    expect(controller.status()).toEqual({ state: "unavailable" });
+
+    // Does not retry while the same work continues.
+    await vi.advanceTimersByTimeAsync(KEEP_AWAKE_POLL_INTERVAL_MS * 2);
+    expect(power.startedTypes).toHaveLength(1);
+    expect(controller.status()).toEqual({ state: "unavailable" });
+
+    // Retries once work stops and next starts.
+    currentWork = makeSnapshot();
+    await controller.pollNow();
+    power.setThrowOnIsStarted(false);
+    currentWork = makeSnapshot({ code: 1 });
+    await controller.pollNow();
+    expect(power.startedTypes).toHaveLength(2);
+    expect(power.activeIds.size).toBe(1);
+    expect(controller.status()).toEqual({
+      state: "active",
+      summary: "Kept awake: 1 turn running",
+    });
+
+    controller.dispose();
+  });
+
+  it("releases the assertion immediately when the host stops without waiting for the 10 s grace window", async () => {
+    const power = createFakePower();
+    const controller = new KeepAwakeController({
+      powerSaveBlocker: power.powerSaveBlocker,
+      powerMonitor: power.powerMonitor,
+      readWork: async () => makeSnapshot({ chat: 1 }),
+    });
+
+    controller.start();
+    await Promise.resolve();
+    expect(power.activeIds.size).toBe(1);
+
+    controller.hostStopped();
+    expect(power.activeIds.size).toBe(0);
+    expect(power.stoppedIds).toEqual([1]);
+    expect(controller.status()).toEqual({ state: "idle", reason: "no-work" });
+
+    controller.dispose();
+  });
+
   it("builds status summaries strictly from counts and never thread titles", () => {
     expect(
       formatKeepAwakeSummary({
@@ -432,10 +497,21 @@ describe("KeepAwakeController", () => {
     ).toBe("Kept awake: 1 turn, 2 child runs, 1 worker, routine due soon");
   });
 
-  it("reads /api/desktop/agent-work with the desktop broker secret and decodes bridge status payloads", async () => {
+  it("verifies host liveness and instanceId before sending the desktop broker secret to /api/desktop/agent-work", async () => {
+    const calls: Array<{ readonly url: string; readonly headers?: RequestInit["headers"] }> = [];
     const fetchMock: typeof globalThis.fetch = Object.assign(
       vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-        expect(String(input)).toBe(`http://127.0.0.1:4567${DESKTOP_AGENT_WORK_ROUTE}`);
+        const url = String(input);
+        calls.push({ url, ...(init?.headers === undefined ? {} : { headers: init.headers }) });
+        if (url === "http://127.0.0.1:4567/health") {
+          return Response.json({
+            product: "Octant",
+            status: "ok",
+            storage: "ready",
+            instanceId: "inst-live",
+          });
+        }
+        expect(url).toBe(`http://127.0.0.1:4567${DESKTOP_AGENT_WORK_ROUTE}`);
         expect(init?.method).toBe("GET");
         expect(init?.headers).toEqual({ "x-octant-desktop-secret": "bridge-secret" });
         return Response.json(makeSnapshot({ chat: 1, childRuns: 2 }));
@@ -444,14 +520,22 @@ describe("KeepAwakeController", () => {
     );
 
     const snapshot = await readDesktopAgentWork({
-      hostUrl: "http://127.0.0.1:4567",
-      brokerHeaders: { "x-octant-desktop-secret": "bridge-secret" },
+      host: {
+        state: "running",
+        ownership: "managed",
+        url: "http://127.0.0.1:4567",
+        instanceId: "inst-live",
+      },
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "bridge-secret" }),
       fetch: fetchMock,
     });
     expect(snapshot).toMatchObject({
       turns: { chat: 1, work: 0, code: 0 },
       childRuns: 2,
     });
+    expect(calls[0]?.url).toBe("http://127.0.0.1:4567/health");
+    expect(calls[0]?.headers).toBeUndefined();
+    expect(calls[1]?.url).toBe(`http://127.0.0.1:4567${DESKTOP_AGENT_WORK_ROUTE}`);
 
     expect(decodeKeepAwakeStatus({ state: "unavailable" })).toEqual({ state: "unavailable" });
     expect(decodeKeepAwakeStatus({ state: "idle", reason: "on-battery" })).toEqual({
@@ -463,5 +547,66 @@ describe("KeepAwakeController", () => {
     ).toEqual({ state: "active", summary: "Kept awake: 2 turns running" });
     expect(() => decodeKeepAwakeStatus({ state: "active", summary: "" })).toThrow();
     expect(() => decodeKeepAwakeStatus({ state: "idle", reason: "unknown" })).toThrow();
+  });
+
+  it("never sends the desktop bridge secret to a stale cached port after a managed host exits", async () => {
+    const brokerHeaders = vi.fn(() => ({ "x-octant-desktop-secret": "bridge-secret" }));
+    const onHostLost = vi.fn();
+
+    // Case 1: Host activity is already unconfirmed (managed host exited and reattach failed).
+    const unconfirmedFetch = Object.assign(
+      vi.fn(async () => {
+        throw new Error("must not touch a stale port when host is unconfirmed");
+      }),
+      { preconnect: vi.fn() },
+    );
+    const unconfirmed = await readDesktopAgentWork({
+      host: {
+        state: "attention-required",
+        ownership: "managed",
+        url: "http://127.0.0.1:4567",
+        instanceId: "inst-old",
+        activityUnconfirmed: true,
+      },
+      brokerHeaders,
+      fetch: unconfirmedFetch,
+      onHostLost,
+    });
+    expect(unconfirmed).toBeUndefined();
+    expect(unconfirmedFetch).not.toHaveBeenCalled();
+    expect(brokerHeaders).not.toHaveBeenCalled();
+    expect(onHostLost).toHaveBeenCalledTimes(1);
+
+    // Case 2: Managed host exited between health ticks and another process bound its port.
+    const seenHeaders: Array<RequestInit["headers"]> = [];
+    const hijackedPortFetch = Object.assign(
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        seenHeaders.push(init?.headers);
+        expect(String(input)).toBe("http://127.0.0.1:4567/health");
+        return Response.json({
+          product: "Octant",
+          status: "ok",
+          storage: "ready",
+          instanceId: "inst-impostor",
+        });
+      }),
+      { preconnect: vi.fn() },
+    );
+    const hijacked = await readDesktopAgentWork({
+      host: {
+        state: "running",
+        ownership: "managed",
+        url: "http://127.0.0.1:4567",
+        instanceId: "inst-old",
+      },
+      brokerHeaders,
+      fetch: hijackedPortFetch,
+      onHostLost,
+    });
+    expect(hijacked).toBeUndefined();
+    expect(hijackedPortFetch).toHaveBeenCalledTimes(1);
+    expect(seenHeaders).toEqual([undefined]);
+    expect(brokerHeaders).not.toHaveBeenCalled();
+    expect(onHostLost).toHaveBeenCalledTimes(2);
   });
 });

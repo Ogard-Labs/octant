@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_HOST_RESOURCE_POLICY,
-  effectiveKeepAwakePolicy,
   type AgentRunPolicySettings,
   type HostResourceBudgetSnapshot,
   type HostResourcePolicy,
   type KeepAwakePolicy,
 } from "@octant/contracts";
+import { effectiveKeepAwakePolicy } from "@octant/domain/host-resource-policy";
 import {
   AgentRunSettingsClientFailure,
   type AgentRunSettingsClient,

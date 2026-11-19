@@ -1,4 +1,15 @@
-import type { HostResourcePolicy } from "@octant/contracts";
+import {
+  DEFAULT_KEEP_AWAKE_POLICY,
+  type HostResourcePolicy,
+  type KeepAwakePolicy,
+} from "@octant/contracts";
+
+/** The keep-awake policy in force: the stored choice, or `on-power` when absent. */
+export function effectiveKeepAwakePolicy(
+  policy?: Pick<HostResourcePolicy, "keepAwake">,
+): KeepAwakePolicy {
+  return policy?.keepAwake ?? DEFAULT_KEEP_AWAKE_POLICY;
+}
 
 export interface HostResourceReading {
   readonly cores: number;

@@ -1,10 +1,10 @@
 import {
   DEFAULT_HOST_RESOURCE_POLICY,
   decodeAgentRunParentThreadId,
-  effectiveKeepAwakePolicy,
   type NativeHarnessSlotCandidate,
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
+import { effectiveKeepAwakePolicy } from "@octant/domain/host-resource-policy";
 import { HostResourceBudget } from "../process/hostResourceBudget";
 import { conversationInputSource, supportsConversationInput } from "./conversationInputs";
 import { prepareConversationInputs } from "../attachments/conversationInputs";
