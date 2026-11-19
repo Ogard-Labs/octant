@@ -2406,13 +2406,6 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   align-content: center;
 }
 
-/* A row is read by its title, so it starts at the leading edge; the shared
-   button recipe centres its content, which set each row's facts adrift. */
-.dock-artifacts .artifact-row__open {
-  justify-content: flex-start;
-  text-align: start;
-}
-
 .dock-artifacts__note {
   margin: var(--oct-space-2) 0 0;
   color: var(--octant-text-muted);
