@@ -958,6 +958,37 @@ describe("code client", () => {
     );
   });
 
+  it("a poll-mode client asks for thread events without waiting and says it polls", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(`${JSON.stringify(frame(42))}\n`, {
+        headers: { "content-type": "application/x-ndjson" },
+      }),
+    );
+    const client = createCodeClient({
+      baseUrl,
+      fetch,
+      windowCapability: capability,
+      threadEvents: "poll",
+    });
+    const observed: number[] = [];
+    for await (const event of client.subscribe(
+      ids.thread as never,
+      41,
+      new AbortController().signal,
+    )) {
+      observed.push(event.sequence);
+    }
+
+    expect(observed).toEqual([42]);
+    expect(client.threadEvents).toBe("poll");
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      `${baseUrl}/api/code/threads/${ids.thread}/events?afterSequence=41&wait=0`,
+    );
+    expect(createCodeClient({ baseUrl, fetch, windowCapability: capability }).threadEvents).toBe(
+      undefined,
+    );
+  });
+
   it("replays only ordered bounded same-thread frames and requests a snapshot after a gap", async () => {
     const fetch = vi.fn().mockResolvedValue(
       new Response(`${JSON.stringify(frame(42))}\n${JSON.stringify(frame(44))}\n`, {

@@ -431,6 +431,38 @@ describe("ProjectService", () => {
     ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
   });
 
+  it("refuses to create a Project for another host and leaves its folder receipt unspent", async () => {
+    const receipts = new BindingReceiptStore(() => Buffer.alloc(32));
+    const issued = receipts.issue({
+      windowId,
+      projectType: "work",
+      canonicalBinding: { canonicalRoot: "/canonical/work" },
+      now: 0,
+    });
+    const fixture = fixtureService({ receipts, nowMs: 1 });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "create-work-project",
+        projectId: workId,
+        expectedVersion: 0,
+        name: "Work",
+        receiptId: issued.receiptId,
+        hostId: "22222222-2222-4222-8222-222222222222",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "create-work-project",
+        projectId: workId,
+        expectedVersion: 0,
+        name: "Work",
+        receiptId: issued.receiptId,
+        hostId: "local",
+      }),
+    ).resolves.toMatchObject({ kind: "work-project-created" });
+  });
+
   it("rejects disabled modes and archived mutations", async () => {
     const fixture = fixtureService({ settings: { chatEnabled: false, workEnabled: false } });
     const archived = fixtureService({ projects: [{ ...chatProject(), lifecycle: "archived" }] });

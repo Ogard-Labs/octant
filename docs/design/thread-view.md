@@ -511,9 +511,11 @@ everywhere or per mode ([Settings](settings.md)); off, the composer says
 A start-screen composer in a window that reaches more than one computer shows
 a computer picker. The thread is made on the computer it names, in one of that
 computer's Projects, with its providers, models and defaults, and never on
-this one in its place (maintainer decision, 2026-11-19; designed, not built;
-until the window can route a create, one aimed at another computer is
-refused with a sentence;
+this one in its place (maintainer decision, 2026-11-19). Built for a
+computer the window paired directly: the pane shows that computer's own Code
+start screen and threads, with the picker kept on top. Until the window can
+route a create for any other computer, one aimed there is refused with a
+sentence;
 [Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
 
 Attachment and model controls sit on the left; access, context usage and send

@@ -1,4 +1,4 @@
-import type { HostId, HostIdentity } from "@octant/contracts/host";
+import { LOCAL_HOST_ID, type HostId, type HostIdentity } from "@octant/contracts/host";
 import {
   selectCreateHost,
   type SelectCreateHostRequest,
@@ -25,7 +25,17 @@ export interface AssertCreateDestinationInput extends SelectCreateHostRequest {
     hostId: HostId | string,
     action: string,
   ) => AuthorityMutationDecision;
+  /**
+   * The window can send this create only to its own host. Code and Project
+   * creates go through the window's loopback clients and their commands name no
+   * host, so a create aimed at another computer used to run on this one under
+   * the other computer's name. Refuse it instead until the create is routed.
+   */
+  readonly onlyThisHost?: boolean;
 }
+
+export const OTHER_COMPUTER_CREATE_REFUSAL =
+  "This window can't start this on another computer yet. Choose this computer, or use that computer's own window.";
 
 export function createDestinationRefusalMessage(reason: HostRejectionReason): string {
   switch (reason) {
@@ -59,6 +69,9 @@ export function assertCreateDestination(
       reason: createDestinationRefusalMessage(selection.reason),
     };
   }
+  if (input.onlyThisHost === true && String(selection.host.hostId) !== String(LOCAL_HOST_ID)) {
+    return { kind: "refused", reason: OTHER_COMPUTER_CREATE_REFUSAL };
+  }
   if (input.mutationDecision !== undefined) {
     const decision = input.mutationDecision(selection.host.hostId, input.action);
     if (!decision.allowed) {
@@ -76,6 +89,7 @@ export function assertCreateDestinationFromHosts(input: {
   readonly projectHostId?: HostId;
   readonly requiredCapability?: string;
   readonly mutationDecision?: AssertCreateDestinationInput["mutationDecision"];
+  readonly onlyThisHost?: boolean;
 }): CreateDestinationDecision {
   return assertCreateDestination({
     hosts: input.hosts,
@@ -86,5 +100,6 @@ export function assertCreateDestinationFromHosts(input: {
       ? {}
       : { requiredCapability: input.requiredCapability }),
     ...(input.mutationDecision === undefined ? {} : { mutationDecision: input.mutationDecision }),
+    ...(input.onlyThisHost === undefined ? {} : { onlyThisHost: input.onlyThisHost }),
   });
 }

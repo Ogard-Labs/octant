@@ -1580,6 +1580,33 @@ describe("Code routes", () => {
     expect(subscribe).toHaveBeenCalledWith(windowId, threadId, 41, expect.any(AbortSignal));
   });
 
+  it("answers thread events at once with wait=0 instead of waiting for the next change", async () => {
+    const subscribe = vi.fn(async function* () {
+      yield { ...frame, sequence: 42 } as CodeEventFrame;
+    });
+    const route = routeFixture({ subscribe });
+
+    const response = await route(
+      request(`/api/code/threads/${threadId}/events?afterSequence=41&wait=0`),
+    );
+
+    expect(response?.status).toBe(200);
+    expect((await response?.text())?.trim().split("\n")).toHaveLength(1);
+    // No signal tells the service to stop once caught up rather than park on
+    // the next change, which a paired computer's bounded channel cannot hold.
+    expect(subscribe).toHaveBeenCalledWith(windowId, threadId, 41, undefined);
+  });
+
+  it("refuses a thread events wait other than 0 and any other extra query", async () => {
+    const route = routeFixture({ subscribe: vi.fn(async function* () {}) });
+
+    for (const query of ["afterSequence=41&wait=1", "afterSequence=41&wait=0&x=1"]) {
+      expect((await route(request(`/api/code/threads/${threadId}/events?${query}`)))?.status).toBe(
+        400,
+      );
+    }
+  });
+
   it("replays strict operation frames through the authenticated thread scope", async () => {
     const operationFrame = {
       threadId,

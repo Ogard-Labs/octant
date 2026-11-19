@@ -40,13 +40,19 @@ export const PAIRED_COMPUTER_REQUEST_LIMITS = {
  * route; and the product calls the main window makes of a paired computer:
  * its resources, its running servers, and the person's to-do list when that
  * computer keeps it (the to-do routes refuse any device but the person's
- * own). Anything else, including
- * the relay under `/api/server-proxy/<grant>/`, which the desktop's own
- * forwarder drives, is refused.
+ * own); and the Code routes a window needs to start a thread on that
+ * computer and follow it there. A `:id` segment matches only a lowercase
+ * UUID, which is how the host names threads and operations. Thread events
+ * are carried only with `wait=0`, because without it the host holds the read
+ * open until the next change, past this channel's time limit. Anything else,
+ * including the relay under `/api/server-proxy/<grant>/`, which the desktop's
+ * own forwarder drives, is refused.
  */
 export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
-  readonly method: "GET" | "POST";
+  readonly method: "GET" | "POST" | "PUT";
   readonly path: string;
+  /** Query parameters the request must carry with exactly these values. */
+  readonly requiredQuery?: Readonly<Record<string, string>>;
 }> = [
   { method: "GET", path: "/api/remote/hello" },
   { method: "POST", path: "/api/remote/pairing" },
@@ -64,7 +70,33 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   { method: "POST", path: "/api/code/local-servers/commands" },
   { method: "GET", path: "/api/todos" },
   { method: "POST", path: "/api/todos/commands" },
+  { method: "GET", path: "/api/code/bootstrap" },
+  { method: "GET", path: "/api/code/navigation" },
+  { method: "GET", path: "/api/code/threads/:id" },
+  { method: "GET", path: "/api/code/threads/:id/conversation" },
+  { method: "GET", path: "/api/code/threads/:id/conversation/window" },
+  { method: "GET", path: "/api/code/threads/:id/events", requiredQuery: { wait: "0" } },
+  { method: "GET", path: "/api/code/threads/:id/operations/:id/events" },
+  { method: "POST", path: "/api/code/commands" },
+  { method: "PUT", path: "/api/code/evidence" },
+  { method: "GET", path: "/api/projects/bootstrap" },
+  { method: "GET", path: "/api/providers/bootstrap" },
+  { method: "GET", path: "/api/pending-requests" },
 ];
+
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** True when `pathname` fills the allowed path, an `:id` segment taking only a lowercase UUID. */
+function pathMatches(pattern: string, pathname: string): boolean {
+  const expected = pattern.split("/");
+  const actual = pathname.split("/");
+  if (expected.length !== actual.length) return false;
+  return expected.every((segment, index) => {
+    const given = actual[index];
+    if (given === undefined) return false;
+    return segment === ":id" ? UUID_SEGMENT.test(given) : segment === given;
+  });
+}
 
 /** The routes a pairing uses; only these may be held to a pin that is staged and not yet recorded. */
 const PAIRING_PATHS: ReadonlySet<string> = new Set([
@@ -83,6 +115,7 @@ const ALLOWED_REQUEST_HEADERS: ReadonlySet<string> = new Set([
   "x-octant-device-proof",
   "x-octant-csrf",
   "x-octant-command-id",
+  "x-octant-code-thread-id",
 ]);
 
 /** Octant's own session cookies for a paired computer, and nothing else. */
@@ -255,7 +288,12 @@ function isAllowedRequest(origin: string, path: unknown, method: string): boolea
   }
   if (url.origin !== origin || `${url.pathname}${url.search}` !== path) return false;
   return PAIRED_COMPUTER_ALLOWED_REQUESTS.some(
-    (allowed) => allowed.method === method && allowed.path === url.pathname,
+    (allowed) =>
+      allowed.method === method &&
+      pathMatches(allowed.path, url.pathname) &&
+      Object.entries(allowed.requiredQuery ?? {}).every(
+        ([name, value]) => url.searchParams.get(name) === value,
+      ),
   );
 }
 

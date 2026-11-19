@@ -154,6 +154,13 @@ export interface CodeClientOptions {
    * Absent in a desktop window, whose own click needs none.
    */
   readonly ownerMergeUnlock?: OwnerMergeUnlock;
+  /**
+   * How thread events are followed. `"poll"` asks the host not to wait for
+   * the next change (`wait=0`), for a window that reaches its host through a
+   * bounded request channel that cannot hold a request open; the controller
+   * then reads again on a timer. Absent, the host holds the read until a change.
+   */
+  readonly threadEvents?: "wait" | "poll";
 }
 
 export interface CodeFileIdentity {
@@ -175,6 +182,8 @@ export interface CodeFileSave {
 }
 
 export interface CodeClient {
+  /** `"poll"` when thread events are read without waiting; see `CodeClientOptions`. */
+  readonly threadEvents?: "poll";
   readProviderFileReview?(
     input: CodeProviderFileReviewRequest,
     signal?: AbortSignal,
@@ -431,6 +440,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         ),
     });
   return {
+    ...(options.threadEvents === "poll" ? { threadEvents: "poll" as const } : {}),
     providerCloudSessions: createProviderCloudSessionClient(options),
     bootstrap() {
       return request(
@@ -1225,6 +1235,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         options.baseUrl,
       );
       url.searchParams.set("afterSequence", String(afterSequence));
+      if (options.threadEvents === "poll") url.searchParams.set("wait", "0");
       return parseNdjsonFrames(
         requestRaw(fetch, url.toString(), { method: "GET", headers, signal }),
         threadId,

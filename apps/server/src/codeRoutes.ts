@@ -1379,13 +1379,17 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             throw new CodeRouteRejected("HTTP method is not supported for this route.", 400);
           }
           const threadId = decodePathThreadId(route.threadId);
-          const afterSequence = decodeReplayCursor(url);
+          const { afterSequence, waits } = decodeThreadEventsQuery(url);
           const frames: CodeEventFrame[] = [];
+          // Without a signal the service stops once it has caught up instead of
+          // parking on the next change. A paired computer's window reads through
+          // a bounded request channel that cannot hold a request open, so it
+          // asks with `wait=0` and reads again on a timer.
           for await (const frame of dependencies.service.subscribe(
             authenticatedWindowId,
             threadId,
             afterSequence,
-            request.signal,
+            waits ? request.signal : undefined,
           )) {
             frames.push(decodeCodeEventFrame(frame));
             if (frames.length === MAX_CODE_REPLAY_FRAMES) break;
@@ -2804,9 +2808,30 @@ function decodePathContentId(value: string): string {
   }
 }
 
+function decodeThreadEventsQuery(url: URL): {
+  readonly afterSequence: number;
+  readonly waits: boolean;
+} {
+  const wait = url.searchParams.get("wait");
+  if (wait === null) return { afterSequence: decodeReplayCursor(url), waits: true };
+  if (wait !== "0" || url.searchParams.size !== 2) {
+    throw new CodeRouteRejected("Code replay cursor is invalid.", 400);
+  }
+  return {
+    afterSequence: decodeReplayCursorValue(url.searchParams.get("afterSequence")),
+    waits: false,
+  };
+}
+
 function decodeReplayCursor(url: URL): number {
-  const value = url.searchParams.get("afterSequence");
-  if (value === null || url.searchParams.size !== 1 || !/^(?:0|[1-9]\d*)$/.test(value)) {
+  if (url.searchParams.size !== 1) {
+    throw new CodeRouteRejected("Code replay cursor is invalid.", 400);
+  }
+  return decodeReplayCursorValue(url.searchParams.get("afterSequence"));
+}
+
+function decodeReplayCursorValue(value: string | null): number {
+  if (value === null || !/^(?:0|[1-9]\d*)$/.test(value)) {
     throw new CodeRouteRejected("Code replay cursor is invalid.", 400);
   }
   try {

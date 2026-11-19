@@ -231,6 +231,46 @@ describe("WorkspaceView welcome", () => {
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("");
   });
 
+  it("shows the paired computer's Code start screen in place of the local Code draft", () => {
+    const first = codeProject("active");
+    const tab = {
+      kind: "draft-thread",
+      id: decodeWorkspaceTabId(ids.tab),
+      mode: "code",
+      title: "New Code thread",
+      projectId: first.id,
+    } as WorkspaceTab;
+    render(
+      <WorkspaceView
+        {...propsFor(tab)}
+        projects={[first]}
+        renderPairedComputerCodeStart={() => <p>Laptop's Code threads</p>}
+      />,
+    );
+    expect(screen.getByText("Laptop's Code threads")).toBeInTheDocument();
+    // No local composer is offered, so nothing can be created on this computer.
+    expect(screen.queryByRole("textbox", { name: "First message" })).toBeNull();
+  });
+
+  it("keeps the local Code draft while the picker names this computer", async () => {
+    const first = codeProject("active");
+    const tab = {
+      kind: "draft-thread",
+      id: decodeWorkspaceTabId(ids.tab),
+      mode: "code",
+      title: "New Code thread",
+      projectId: first.id,
+    } as WorkspaceTab;
+    render(
+      <WorkspaceView
+        {...propsFor(tab)}
+        projects={[first]}
+        renderPairedComputerCodeStart={() => undefined}
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: "First message" })).toBeInTheDocument();
+  });
+
   it("clears only the draft pane whose reset revision moved", async () => {
     const otherPane = "10000000-0000-4000-8000-000000000033";
     const first = codeProject("active");

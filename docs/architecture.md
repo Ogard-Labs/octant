@@ -17946,15 +17946,29 @@ approval-gated` command that undoes it. The terminal shows no one-time
       `/api/remote/auth/server-proxy-session`, `/api/remote/auth/sign-out`,
       `/api/remote/auth/rotate-key`, `/api/remote/auth/revoke-self`;
       `GET /api/remote/auth/device`; `POST /api/server-proxy/grants`;
-      `GET /api/host/resources`; `POST /api/code/local-servers/commands`.
+      `GET /api/host/resources`; `POST /api/code/local-servers/commands`;
+      `GET /api/todos` and `POST /api/todos/commands`; and the Code routes a
+      window needs to start a thread on that computer and follow it there:
+      `GET /api/code/bootstrap`, `/api/code/navigation`,
+      `/api/code/threads/:id`, `.../conversation`, `.../conversation/window`,
+      `.../operations/:id/events`, and `.../events` only with `wait=0`;
+      `POST /api/code/commands`; `PUT /api/code/evidence`; and
+      `GET /api/projects/bootstrap`, `/api/providers/bootstrap` and
+      `/api/pending-requests`. An `:id` segment matches only a lowercase UUID.
+      Thread events are carried only with `wait=0` because without it the
+      computer holds the read open until the next change, past this channel's
+      time limit; with it the computer answers once it has caught up, and the
+      window reads again on a timer (750 ms after frames, backing off to 3
+      seconds), the pace the phone follows a thread at (maintainer request,
+      2026-11-19; [Hub and spokes: the hub coordinates](design/hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
       Anything else, including the relay under
       `/api/server-proxy/<grant>/`, which the desktop's forwarder drives with
       its own signing, is refused. A request carries only the headers a signed
       request has (`accept`, `content-type`, `cookie` naming only the
       computer's Octant session cookies, `origin` equal to the computer's
       origin, `sec-fetch-site: same-origin`, `x-octant-device-proof`,
-      `x-octant-csrf`, `x-octant-command-id`); any other header refuses the
-      request. A body is text or bytes, at most 8 MiB, and not on `GET`. A
+      `x-octant-csrf`, `x-octant-command-id`, and `x-octant-code-thread-id`
+      for a thread's first prompt); any other header refuses the request. A body is text or bytes, at most 8 MiB, and not on `GET`. A
       redirect is returned and never followed. A reply's cookies and any header
       whose name reads as a credential (`authorization`, `credential`,
       `secret`, `token`, `key`) are removed, a reply over 16 MiB or slower than

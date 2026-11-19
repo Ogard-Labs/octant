@@ -81,7 +81,8 @@ view of the provider's own app, never against a real provider sign-in. After thi
 added the same day and is designed, not built. Slices 13 to 19, starting a
 coding session on any member from one window, the hub as the front door, Code
 delegation, adding a computer over SSH and placement advice, were added on
-2026-11-19 and are designed, not built
+2026-11-19; slice 13 is built for a directly paired computer and the rest are
+designed, not built
 ([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work)).
 What remains of slices 1 to 10 is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
@@ -541,7 +542,13 @@ otherwise.
   as its person. Until the window can route a create, a create aimed at
   another computer is refused with a reason and never runs on this one, as
   [Hosts never trust each other](../architecture.md#security-and-authority)
-  requires.
+  requires. Built for a computer the window paired directly (slice 13): when
+  the Code start screen's picker names it and its session is ready, the pane
+  shows that computer's own Code start screen and threads, the paired
+  browser's Code surface over that computer's session, and an open thread is
+  followed by short reads through the desktop's paired-computer channel. A
+  computer the hub introduced follows in slice 16; choosing a folder there,
+  merged lists across computers, and image attachments are not built yet.
 - **What a hub-introduced device may do.** A device the member's own person
   paired acts as that person there. A device that only the hub introduced acts
   within the member's **Act** hub-grant item: the Projects it names, the
@@ -3518,7 +3525,11 @@ a numbered slice. Built, with these narrower readings:
     each member a row names, and each destination's total and estimate show
     at the rate to that member, with one basis line each.
 
-13. **Start a coding session on a paired computer from one window.** A Code
+13. **Start a coding session on a paired computer from one window.** Built for a
+    computer paired directly: the Code start screen shows that computer's Code
+    surface over its session, the desktop's paired-computer channel carries
+    the Code routes, and thread events are read without waiting (`wait=0`). A
+    Code
     client per host on the client runtime's routing to the owning host, the
     desktop's paired-computer channel carrying the Code commands, reads and
     stream, and the composer reading that host's Projects, providers, models
