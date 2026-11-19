@@ -36,7 +36,11 @@ import {
   pullRequestIdentitiesFromHistory,
 } from "./codeThreadMetadataService";
 import type { GhPullRequestSwitchObservation } from "./ghPullRequestSwitchPort";
-import { PullRequestLinkService, collectLegacyPullRequestLinks } from "./pullRequestLinkService";
+import {
+  PullRequestLinkService,
+  collectLegacyPullRequestLinks,
+  deriveLegacyPullRequestLinkId,
+} from "./pullRequestLinkService";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
@@ -857,5 +861,637 @@ describe("pull request link identity and backfill", () => {
       threadIds: [threadA],
     });
     expect(links.findByForgeId(projectId, "PR_kwDO99")).toBeUndefined();
+  });
+
+  it("keeps Merge when ready on and retries duplicate reconciliation when GitHub fails to disable auto-merge", async () => {
+    let now = "2026-11-01T10:00:00.000Z";
+    const journal = openJournal(() => now);
+    const oldTarget = decodeCodeProjectPullRequestSwitchTarget({
+      projectId,
+      repositoryOwner: "old-org",
+      repositoryName: "repo",
+      number: 78,
+    });
+    const { switches, forge, threads } = switchFixture({
+      journal,
+      clock: () => now,
+      linkedByTarget: new Map([
+        ["old-org/repo#78", [String(threadA)]],
+        ["new-org/repo#78", [String(threadB)]],
+      ]),
+      linkedPullRequestsByThread: new Map(),
+    });
+
+    await switches.setMergeWhenReady(
+      windowId,
+      { kind: "enable", target: oldTarget, headSha: "a".repeat(40), method: "squash" },
+      "local-window",
+      signal,
+    );
+
+    const links = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+      switchReconciler: switches,
+    });
+    const firstLink = await links.recordObservation({
+      projectId,
+      repositoryOwner: "old-org",
+      repositoryName: "repo",
+      number: 78,
+      pullRequestNodeId: "PR_kwDO78",
+      baseRepositoryNodeId: "R_kgDO78Base",
+      threadIds: [threadA],
+    });
+    now = "2026-11-02T10:00:00.000Z";
+    await links.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      number: 78,
+      threadIds: [threadB],
+    });
+    if (firstLink.status !== "created") throw new Error("expected first link");
+
+    // First attempt: forge answers unavailable -> switch stays ON, merge deferred, no notice.
+    vi.mocked(forge.disableAutoMerge).mockResolvedValueOnce({
+      status: "unavailable",
+      reason: "disconnected",
+    });
+    now = "2026-11-19T12:00:00.000Z";
+    const firstAttempt = await links.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      number: 78,
+      pullRequestNodeId: "PR_kwDO78",
+      baseRepositoryNodeId: "R_kgDO78Base",
+    });
+    expect(firstAttempt).toMatchObject({
+      status: "merge-deferred",
+      reason: "merge-when-ready-disable-failed",
+    });
+    expect((await switches.query(windowId, oldTarget)).mergeWhenReady.status).toBe("on");
+    expect(links.listActive()).toHaveLength(2);
+    expect(
+      linkEventsOf(journal).filter(
+        (event) => event.eventName === CODE_PULL_REQUEST_LINK_MERGED_INTO,
+      ),
+    ).toHaveLength(0);
+    expect(threads.notifyPerson).not.toHaveBeenCalled();
+
+    // Second attempt: forge throws -> switch STILL stays ON, merge still deferred.
+    vi.mocked(forge.disableAutoMerge).mockRejectedValueOnce(new Error("connection reset"));
+    now = "2026-11-19T12:05:00.000Z";
+    const secondAttempt = await links.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      number: 78,
+      pullRequestNodeId: "PR_kwDO78",
+      baseRepositoryNodeId: "R_kgDO78Base",
+    });
+    expect(secondAttempt).toMatchObject({
+      status: "merge-deferred",
+      reason: "merge-when-ready-disable-failed",
+    });
+    expect((await switches.query(windowId, oldTarget)).mergeWhenReady.status).toBe("on");
+    expect(links.listActive()).toHaveLength(2);
+    expect(threads.notifyPerson).not.toHaveBeenCalled();
+
+    // Third attempt: forge confirms disabled -> switch turns OFF, links merge, threads notified.
+    vi.mocked(forge.disableAutoMerge).mockResolvedValueOnce({ status: "disabled" });
+    now = "2026-11-19T12:10:00.000Z";
+    const thirdAttempt = await links.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      number: 78,
+      pullRequestNodeId: "PR_kwDO78",
+      baseRepositoryNodeId: "R_kgDO78Base",
+    });
+    expect(thirdAttempt.status).toBe("merged");
+    if (thirdAttempt.status !== "merged") throw new Error("expected merged on retry");
+    expect(thirdAttempt.link.linkId).toBe(firstLink.link.linkId);
+    expect(thirdAttempt.disabledSwitches).toEqual(["merge-when-ready"]);
+    expect((await switches.query(windowId, oldTarget)).mergeWhenReady.status).toBe("off");
+    expect(links.listActive()).toHaveLength(1);
+    expect(threads.notifyPerson).toHaveBeenCalledWith(
+      threadA,
+      expect.stringContaining("Merge when ready"),
+    );
+    expect(threads.notifyPerson).toHaveBeenCalledWith(
+      threadB,
+      expect.stringContaining("Merge when ready"),
+    );
+  });
+
+  it("does not materialize a second link from operation history for a PR already tracked in the link registry", async () => {
+    let now = "2026-11-19T10:00:00.000Z";
+    const journal = openJournal(() => now);
+    const operationStore = new CodeOperationEventStore({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const readLegacy = () => {
+      const history = operationStore.summaryForThread(threadA);
+      return collectLegacyPullRequestLinks({
+        journal,
+        threads: [
+          {
+            threadId: threadA,
+            projectId,
+            frames: history.status === "ok" ? history.frames : [],
+          },
+        ],
+      });
+    };
+
+    const links = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+      legacyLinks: readLegacy,
+    });
+
+    // Post-change creation offline (no forge IDs yet) creates a random-UUID link,
+    // and the operation result enters thread history without forge IDs too.
+    const created = await links.recordObservation({
+      projectId,
+      repositoryOwner: "old-org",
+      repositoryName: "repo",
+      number: 205,
+      url: "https://github.com/old-org/repo/pull/205",
+      baseBranch: "main",
+      headOwner: "octocat",
+      headBranch: "feature/post-change",
+      threadIds: [threadA],
+    });
+    if (created.status !== "created") throw new Error("expected created");
+
+    const opResult: CodeOperationResult = {
+      kind: "pull-request-state",
+      operationId: decodeCodeOperationId("30000000-0000-4000-8000-000000000205"),
+      state: "created",
+      number: 205,
+      url: "https://github.com/old-org/repo/pull/205",
+      headRepository: "octocat",
+      headBranch: "feature/post-change",
+      baseRepository: "old-org/repo",
+      baseBranch: "main",
+    };
+    operationStore.append({
+      threadId: threadA,
+      operationId: opResult.operationId,
+      expectedCursor: 0,
+      event: { kind: "operation-result", result: opResult },
+    });
+
+    // Next observation backfills forge IDs and sees a rename — must NOT materialize
+    // a duplicate legacy link from operation history.
+    now = "2026-11-19T11:00:00.000Z";
+    const backfilled = await links.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      lookupRepositoryOwner: "old-org",
+      lookupRepositoryName: "repo",
+      number: 205,
+      url: "https://github.com/new-org/repo/pull/205",
+      baseBranch: "main",
+      headOwner: "octocat",
+      headBranch: "feature/post-change",
+      pullRequestNodeId: "PR_kwDO205",
+      baseRepositoryNodeId: "R_kgDO205Base",
+      threadIds: [threadA],
+    });
+    expect(backfilled.status).toBe("updated");
+    expect(links.listActive()).toHaveLength(1);
+    expect(links.listActive()[0]?.linkId).toBe(created.link.linkId);
+    expect(
+      linkEventsOf(journal).filter((event) => event.eventName === CODE_PULL_REQUEST_LINK_CREATED),
+    ).toHaveLength(1);
+
+    // Even after restart and another observation querying the old owner/name,
+    // no duplicate link is ever materialized.
+    const restarted = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+      legacyLinks: readLegacy,
+    });
+    const afterRestart = await restarted.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      lookupRepositoryOwner: "old-org",
+      lookupRepositoryName: "repo",
+      number: 205,
+      url: "https://github.com/new-org/repo/pull/205",
+      baseBranch: "main",
+      headOwner: "octocat",
+      headBranch: "feature/post-change",
+      pullRequestNodeId: "PR_kwDO205",
+      baseRepositoryNodeId: "R_kgDO205Base",
+      threadIds: [threadA],
+    });
+    expect(afterRestart.status).toBe("unchanged");
+    expect(restarted.listActive()).toHaveLength(1);
+    expect(
+      linkEventsOf(journal).filter((event) => event.eventName === CODE_PULL_REQUEST_LINK_CREATED),
+    ).toHaveLength(1);
+  });
+
+  it("creates a separate link instead of overwriting or merging when a reused repository name serves a different forge ID", async () => {
+    let now = "2026-11-01T10:00:00.000Z";
+    const journal = openJournal(() => now);
+    const links = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+    });
+
+    const original = await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "tools",
+      number: 42,
+      url: "https://github.com/acme/tools/pull/42",
+      baseBranch: "main",
+      headOwner: "acme",
+      headBranch: "feature/old-repo",
+      pullRequestNodeId: "PR_kwDOOld42",
+      baseRepositoryNodeId: "R_kgDOOldRepo",
+      threadIds: [threadA],
+    });
+    if (original.status !== "created") throw new Error("expected original created");
+
+    // The old repository moved away and a brand-new repository reuses `acme/tools`
+    // with its own PR #42 and distinct GitHub node IDs.
+    now = "2026-11-19T12:00:00.000Z";
+    const replacement = await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "tools",
+      number: 42,
+      url: "https://github.com/acme/tools/pull/42",
+      baseBranch: "main",
+      headOwner: "acme",
+      headBranch: "feature/new-repo",
+      pullRequestNodeId: "PR_kwDONew42",
+      baseRepositoryNodeId: "R_kgDONewRepo",
+      threadIds: [threadB],
+    });
+    expect(replacement.status).toBe("created");
+    if (replacement.status !== "created") throw new Error("expected separate link");
+    expect(replacement.link.linkId).not.toBe(original.link.linkId);
+    expect(links.listActive()).toHaveLength(2);
+    expect(links.findByForgeId(projectId, "PR_kwDOOld42")).toMatchObject({
+      linkId: original.link.linkId,
+      baseRepositoryNodeId: "R_kgDOOldRepo",
+      threadIds: [threadA],
+    });
+    expect(links.findByForgeId(projectId, "PR_kwDONew42")).toMatchObject({
+      linkId: replacement.link.linkId,
+      baseRepositoryNodeId: "R_kgDONewRepo",
+      threadIds: [threadB],
+    });
+
+    // Re-observing the replacement repo stays on the new link without touching the old one.
+    const repeat = await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "tools",
+      number: 42,
+      url: "https://github.com/acme/tools/pull/42",
+      baseBranch: "main",
+      headOwner: "acme",
+      headBranch: "feature/new-repo",
+      pullRequestNodeId: "PR_kwDONew42",
+      baseRepositoryNodeId: "R_kgDONewRepo",
+      threadIds: [threadB],
+    });
+    expect(repeat.status).toBe("unchanged");
+    if (repeat.status !== "unchanged") throw new Error("expected unchanged");
+    expect(repeat.link.linkId).toBe(replacement.link.linkId);
+  });
+
+  it("preserves switches that were on in both duplicate links when a merge commit is interrupted and retried", async () => {
+    let now = "2026-11-01T10:00:00.000Z";
+    const journal = openJournal(() => now);
+    const oldTarget = decodeCodeProjectPullRequestSwitchTarget({
+      projectId,
+      repositoryOwner: "old-org",
+      repositoryName: "repo",
+      number: 88,
+    });
+    const newTarget = decodeCodeProjectPullRequestSwitchTarget({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      number: 88,
+    });
+    const { switches, forge, threads } = switchFixture({
+      journal,
+      clock: () => now,
+      linkedByTarget: new Map([
+        ["old-org/repo#88", [String(threadA)]],
+        ["new-org/repo#88", [String(threadB)]],
+      ]),
+      linkedPullRequestsByThread: new Map(),
+    });
+
+    await switches.setMergeWhenReady(
+      windowId,
+      { kind: "enable", target: oldTarget, headSha: "a".repeat(40), method: "squash" },
+      "local-window",
+      signal,
+    );
+    await switches.setMergeWhenReady(
+      windowId,
+      { kind: "enable", target: newTarget, headSha: "a".repeat(40), method: "squash" },
+      "local-window",
+      signal,
+    );
+
+    let failNextMergeAppend = true;
+    const flakyJournal: Pick<Journal, "append" | "replayAggregateType"> = {
+      replayAggregateType: (query) => journal.replayAggregateType(query),
+      append: (request) => {
+        const events =
+          typeof request === "object" &&
+          request !== null &&
+          "events" in request &&
+          Array.isArray(request.events)
+            ? request.events
+            : [];
+        if (
+          failNextMergeAppend &&
+          events.some(
+            (event) =>
+              typeof event === "object" &&
+              event !== null &&
+              "eventName" in event &&
+              event.eventName === CODE_PULL_REQUEST_LINK_MERGED_INTO,
+          )
+        ) {
+          failNextMergeAppend = false;
+          throw new Error("simulated crash before merged-into commit");
+        }
+        return journal.append(request);
+      },
+    };
+
+    const links = new PullRequestLinkService({
+      journal: flakyJournal,
+      uuid: randomUUID,
+      clock: () => now,
+      switchReconciler: switches,
+    });
+    const firstLink = await links.recordObservation({
+      projectId,
+      repositoryOwner: "old-org",
+      repositoryName: "repo",
+      number: 88,
+      pullRequestNodeId: "PR_kwDO88",
+      baseRepositoryNodeId: "R_kgDO88Base",
+      threadIds: [threadA],
+    });
+    now = "2026-11-02T10:00:00.000Z";
+    await links.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      number: 88,
+      threadIds: [threadB],
+    });
+    if (firstLink.status !== "created") throw new Error("expected first link");
+
+    // First attempt crashes right as `merged-into` is about to persist.
+    now = "2026-11-19T12:00:00.000Z";
+    await expect(
+      links.recordObservation({
+        projectId,
+        repositoryOwner: "new-org",
+        repositoryName: "repo",
+        number: 88,
+        pullRequestNodeId: "PR_kwDO88",
+        baseRepositoryNodeId: "R_kgDO88Base",
+      }),
+    ).rejects.toThrow("simulated crash");
+
+    // Neither target's Merge when ready switch was turned off before the crash.
+    expect((await switches.query(windowId, oldTarget)).mergeWhenReady.status).toBe("on");
+    expect((await switches.query(windowId, newTarget)).mergeWhenReady.status).toBe("on");
+    expect(forge.disableAutoMerge).not.toHaveBeenCalled();
+
+    // Retry after restart completes the merge and keeps Merge when ready ON on the survivor.
+    const restarted = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+      switchReconciler: switches,
+    });
+    const retried = await restarted.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      number: 88,
+      pullRequestNodeId: "PR_kwDO88",
+      baseRepositoryNodeId: "R_kgDO88Base",
+    });
+    expect(retried.status).toBe("merged");
+    if (retried.status !== "merged") throw new Error("expected merged on retry");
+    expect(retried.link.linkId).toBe(firstLink.link.linkId);
+    expect(retried.disabledSwitches).toEqual([]);
+    expect((await switches.query(windowId, oldTarget)).mergeWhenReady.status).toBe("on");
+    expect((await switches.query(windowId, newTarget)).mergeWhenReady.status).toBe("off");
+    expect(forge.disableAutoMerge).not.toHaveBeenCalled();
+    expect(threads.notifyPerson).not.toHaveBeenCalled();
+  });
+
+  it("keeps the earliest linkedAt timestamp from full thread operation history when selecting a legacy survivor", async () => {
+    let now = "2026-11-01T10:00:00.000Z";
+    const journal = openJournal(() => now);
+    const operationStore = new CodeOperationEventStore({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+
+    // Thread A linked `old-org/repo#91` earliest (Nov 1), then observed it again latest (Nov 18).
+    operationStore.append({
+      threadId: threadA,
+      operationId: decodeCodeOperationId("30000000-0000-4000-8000-000000000091"),
+      expectedCursor: 0,
+      event: {
+        kind: "operation-result",
+        result: {
+          kind: "pull-request-state",
+          operationId: decodeCodeOperationId("30000000-0000-4000-8000-000000000091"),
+          state: "created",
+          number: 91,
+          url: "https://github.com/old-org/repo/pull/91",
+          headRepository: "octocat",
+          headBranch: "feature/earliest",
+          baseRepository: "old-org/repo",
+          baseBranch: "main",
+        },
+      },
+    });
+    // Thread B linked `new-org/repo#91` second (Nov 2), with last observation earlier than A's (Nov 10).
+    now = "2026-11-02T10:00:00.000Z";
+    operationStore.append({
+      threadId: threadB,
+      operationId: decodeCodeOperationId("30000000-0000-4000-8000-000000000092"),
+      expectedCursor: 0,
+      event: {
+        kind: "operation-result",
+        result: {
+          kind: "pull-request-state",
+          operationId: decodeCodeOperationId("30000000-0000-4000-8000-000000000092"),
+          state: "existing",
+          number: 91,
+          url: "https://github.com/new-org/repo/pull/91",
+          headRepository: "octocat",
+          headBranch: "feature/earliest",
+          baseRepository: "new-org/repo",
+          baseBranch: "main",
+        },
+      },
+    });
+    now = "2026-11-10T10:00:00.000Z";
+    operationStore.append({
+      threadId: threadB,
+      operationId: decodeCodeOperationId("30000000-0000-4000-8000-000000000093"),
+      expectedCursor: 0,
+      event: {
+        kind: "operation-result",
+        result: {
+          kind: "pull-request-state",
+          operationId: decodeCodeOperationId("30000000-0000-4000-8000-000000000093"),
+          state: "existing",
+          number: 91,
+          url: "https://github.com/new-org/repo/pull/91",
+          headRepository: "octocat",
+          headBranch: "feature/earliest",
+          baseRepository: "new-org/repo",
+          baseBranch: "main",
+        },
+      },
+    });
+    now = "2026-11-18T10:00:00.000Z";
+    operationStore.append({
+      threadId: threadA,
+      operationId: decodeCodeOperationId("30000000-0000-4000-8000-000000000094"),
+      expectedCursor: 0,
+      event: {
+        kind: "operation-result",
+        result: {
+          kind: "pull-request-state",
+          operationId: decodeCodeOperationId("30000000-0000-4000-8000-000000000094"),
+          state: "existing",
+          number: 91,
+          url: "https://github.com/old-org/repo/pull/91",
+          headRepository: "octocat",
+          headBranch: "feature/earliest",
+          baseRepository: "old-org/repo",
+          baseBranch: "main",
+        },
+      },
+    });
+
+    const links = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+      legacyLinks: () =>
+        collectLegacyPullRequestLinks({
+          journal,
+          threads: [threadA, threadB].map((threadId) => {
+            const history = operationStore.historyForThread(threadId);
+            return {
+              threadId,
+              projectId,
+              frames: history.status === "ok" ? history.frames : [],
+            };
+          }),
+        }),
+    });
+
+    now = "2026-11-19T12:00:00.000Z";
+    const merged = await links.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      lookupRepositoryOwner: "old-org",
+      lookupRepositoryName: "repo",
+      number: 91,
+      pullRequestNodeId: "PR_kwDO91",
+      baseRepositoryNodeId: "R_kgDO91Base",
+    });
+
+    expect(merged.status).toBe("merged");
+    if (merged.status !== "merged") throw new Error("expected merged");
+    const expectedOldId = deriveLegacyPullRequestLinkId({
+      projectId,
+      repositoryOwner: "old-org",
+      repositoryName: "repo",
+      number: 91,
+    });
+    expect(merged.link.linkId).toBe(expectedOldId);
+    expect(merged.link.linkedAt).toBe("2026-11-01T10:00:00.000Z");
+  });
+
+  it("carries a known base repository node ID from a merged duplicate onto the surviving link when the observation omits it", async () => {
+    let now = "2026-11-01T10:00:00.000Z";
+    const journal = openJournal(() => now);
+    const links = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+    });
+
+    // Earlier link has no forge IDs yet.
+    const earlier = await links.recordObservation({
+      projectId,
+      repositoryOwner: "old-org",
+      repositoryName: "repo",
+      number: 95,
+      threadIds: [threadA],
+    });
+    // Later duplicate link already knows both PR and base repository node IDs.
+    now = "2026-11-02T10:00:00.000Z";
+    await links.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      number: 95,
+      pullRequestNodeId: "PR_kwDO95",
+      baseRepositoryNodeId: "R_kgDO95Base",
+      threadIds: [threadB],
+    });
+    if (earlier.status !== "created") throw new Error("expected earlier link");
+
+    // Merging observation carries PR node ID only (base repository lookup rate-limited).
+    now = "2026-11-19T12:00:00.000Z";
+    const merged = await links.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      lookupRepositoryOwner: "old-org",
+      lookupRepositoryName: "repo",
+      number: 95,
+      pullRequestNodeId: "PR_kwDO95",
+    });
+    expect(merged.status).toBe("merged");
+    if (merged.status !== "merged") throw new Error("expected merged");
+    expect(merged.link.linkId).toBe(earlier.link.linkId);
+    expect(merged.link.pullRequestNodeId).toBe("PR_kwDO95");
+    expect(merged.link.baseRepositoryNodeId).toBe("R_kgDO95Base");
   });
 });

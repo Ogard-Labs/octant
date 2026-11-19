@@ -1361,4 +1361,33 @@ describe("GhPullRequestPort forge node IDs", () => {
       ],
     });
   });
+
+  it("preserves the requested baseRepository for delivery-target matching while exposing canonicalBaseRepository after a rename", async () => {
+    const renamedPr = {
+      ...pullRequest,
+      id: "PR_kwDORename175",
+      url: "https://github.com/renamed-org/renamed-repo/pull/175",
+    };
+    const { port } = fixture([
+      listResult([renamedPr]),
+      repoIdentityResult("R_kgDORenamedBase", "renamed-org", "renamed-repo"),
+    ]);
+
+    const result = await port.ensure(request, new AbortController().signal);
+    expect(result).toEqual({
+      status: "existing",
+      pullRequest: {
+        number: 175,
+        url: renamedPr.url,
+        state: "open",
+        baseRepository: target.baseRepository,
+        canonicalBaseRepository: "renamed-org/renamed-repo",
+        baseBranch: target.baseBranch,
+        headOwner: "octocat",
+        headBranch: "feature/phase-7",
+        pullRequestNodeId: "PR_kwDORename175",
+        baseRepositoryNodeId: "R_kgDORenamedBase",
+      },
+    });
+  });
 });

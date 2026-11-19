@@ -73,6 +73,11 @@ export interface GhPullRequestIdentity {
   readonly url: string;
   readonly state: "open" | "closed";
   readonly baseRepository: string;
+  /**
+   * Canonical `owner/name` reported by GitHub when it differs from the
+   * requested `baseRepository` (for example after a repository rename).
+   */
+  readonly canonicalBaseRepository?: string;
   readonly baseBranch: string;
   readonly headOwner: string;
   readonly headBranch: string;
@@ -126,6 +131,7 @@ export type GhPullRequestReviewResult =
         title: string;
         state: "open" | "merged" | "closed" | "draft";
         baseRepository: string;
+        canonicalBaseRepository?: string;
         baseBranch: string;
         headRepository: string;
         headBranch: string;
@@ -597,6 +603,9 @@ export class GhPullRequestPort {
         title: detail?.title ?? "",
         state: detail?.state ?? "open",
         baseRepository: identity.baseRepository,
+        ...(identity.canonicalBaseRepository === undefined
+          ? {}
+          : { canonicalBaseRepository: identity.canonicalBaseRepository }),
         baseBranch: identity.baseBranch,
         headRepository: identity.headOwner,
         headBranch: identity.headBranch,
@@ -667,7 +676,7 @@ export class GhPullRequestPort {
     const baseRepositoryIdentity =
       detail === undefined ? undefined : await this.#observeBaseRepository(repository, signal);
     const canonicalBaseRepository =
-      baseRepositoryIdentity?.repository ?? repositoryFromPullRequestUrl(url) ?? repository;
+      baseRepositoryIdentity?.repository ?? repositoryFromPullRequestUrl(url);
 
     return {
       status: "observed",
@@ -679,7 +688,10 @@ export class GhPullRequestPort {
         url,
         title: detail?.title ?? "",
         state: detail?.state ?? "open",
-        baseRepository: canonicalBaseRepository,
+        baseRepository: repository,
+        ...(canonicalBaseRepository !== undefined && canonicalBaseRepository !== repository
+          ? { canonicalBaseRepository }
+          : {}),
         baseBranch: detail?.baseBranch ?? "",
         headRepository: detail?.headRepository ?? "",
         headBranch: detail?.headBranch ?? "",
@@ -1115,14 +1127,18 @@ export class GhPullRequestPort {
       signal,
     );
     const canonicalBaseRepository =
-      baseRepositoryIdentity?.repository ??
-      repositoryFromPullRequestUrl(decoded.url) ??
-      decoded.baseRepository;
+      baseRepositoryIdentity?.repository ?? repositoryFromPullRequestUrl(decoded.url);
     return {
       status: "observed",
       pullRequest: {
         ...decoded,
-        baseRepository: canonicalBaseRepository,
+        // Preserve `decoded.baseRepository` (`request.baseRepository`) for
+        // existing delivery-target readers while surfacing any renamed owner/name
+        // via `canonicalBaseRepository` for link-identity recording.
+        ...(canonicalBaseRepository !== undefined &&
+        canonicalBaseRepository !== decoded.baseRepository
+          ? { canonicalBaseRepository }
+          : {}),
         ...(baseRepositoryIdentity === undefined
           ? {}
           : { baseRepositoryNodeId: baseRepositoryIdentity.nodeId }),

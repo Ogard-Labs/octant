@@ -1179,22 +1179,30 @@ export function wireCode(deps: CodeDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       switchReconciler: {
-        reconcileDuplicateLinks: (input) =>
-          pullRequestSwitchReconciler === undefined
-            ? Promise.resolve([])
-            : pullRequestSwitchReconciler.reconcileDuplicateLinks(input),
+        reconcileDuplicateLinks: (input) => {
+          if (pullRequestSwitchReconciler === undefined) {
+            input.commitMerge?.([]);
+            return Promise.resolve({ status: "reconciled" as const, disabledSwitches: [] });
+          }
+          return pullRequestSwitchReconciler.reconcileDuplicateLinks(input);
+        },
       },
-      legacyLinks: () =>
+      legacyLinks: (projectId) =>
         collectLegacyPullRequestLinks({
           journal: persistence.journal,
-          threads: persistence.readCodeThreads().map((thread) => {
-            const history = codeBoardEventStore.summaryForThread(thread.id);
-            return {
-              threadId: thread.id,
-              projectId: thread.projectId,
-              frames: history.status === "ok" ? history.frames : [],
-            };
-          }),
+          threads: persistence
+            .readCodeThreads()
+            .filter((thread) => String(thread.projectId) === String(projectId))
+            .map((thread) => {
+              // Use full history rather than summary so superseded PR results
+              // keep the earliest linkedAt timestamp for survivor selection.
+              const history = codeBoardEventStore.historyForThread(thread.id);
+              return {
+                threadId: thread.id,
+                projectId: thread.projectId,
+                frames: history.status === "ok" ? history.frames : [],
+              };
+            }),
         }),
     });
     const projectPullRequestService = new CodeProjectPullRequestService({

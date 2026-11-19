@@ -53,6 +53,16 @@ const decodeRepositoryOwner = Schema.decodeUnknownSync(GithubRepositoryOwner);
 const decodeRepositoryName = Schema.decodeUnknownSync(GithubRepositoryName);
 const decodeRepositoryNodeId = Schema.decodeUnknownSync(GithubRepositoryNodeId);
 
+export type PullRequestLinkSwitchReconciliationResult =
+  | {
+      readonly status: "reconciled";
+      readonly disabledSwitches: ReadonlyArray<PullRequestSwitchKind>;
+    }
+  | {
+      readonly status: "retry-required";
+      readonly reason: "merge-when-ready-disable-failed";
+    };
+
 /**
  * Reconciles Merge when ready, Auto-fix, and pull-request watch when backfill
  * discovers that two existing links resolve to the same github.com pull request
@@ -63,8 +73,15 @@ export interface PullRequestLinkSwitchReconciler {
     readonly survivingTarget: CodeProjectPullRequestSwitchTarget;
     readonly mergedTarget: CodeProjectPullRequestSwitchTarget;
     readonly allLinkedThreadIds: ReadonlyArray<CodeThreadId>;
+    /**
+     * Commits the link-registry backfill and `merged-into` events once any
+     * required forge auto-merge cancellation is confirmed and before retiring
+     * local switch records, so an interruption before merge commit never leaves
+     * a retained switch disabled on only one link.
+     */
+    readonly commitMerge?: (disabledSwitches: ReadonlyArray<PullRequestSwitchKind>) => void;
     readonly signal?: AbortSignal;
-  }): Promise<ReadonlyArray<PullRequestSwitchKind>>;
+  }): Promise<PullRequestLinkSwitchReconciliationResult>;
 }
 
 /**
@@ -127,6 +144,11 @@ export type PullRequestLinkObservationResult =
       readonly mergedLinkIds: ReadonlyArray<PullRequestLinkId>;
       readonly disabledSwitches: ReadonlyArray<PullRequestSwitchKind>;
     }
+  | {
+      readonly status: "merge-deferred";
+      readonly link: PullRequestLinkRecord;
+      readonly reason: "merge-when-ready-disable-failed";
+    }
   | { readonly status: "unchanged"; readonly link: PullRequestLinkRecord }
   | { readonly status: "ignored" };
 
@@ -177,8 +199,17 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #switchReconciler: PullRequestLinkSwitchReconciler | undefined;
-  readonly #legacyLinks: (() => ReadonlyArray<LegacyPullRequestLinkSeed>) | undefined;
+  readonly #legacyLinks:
+    | ((projectId: ProjectId) => ReadonlyArray<LegacyPullRequestLinkSeed>)
+    | undefined;
   readonly #versions = new Map<string, number>();
+  /**
+   * Every `(projectId, owner/name, number)` display key ever recorded in
+   * `code-pull-request-link` (across created and display-updated events), so
+   * legacy-history scanning never materializes a second link for an already
+   * tracked pull request even after a rename.
+   */
+  readonly #knownDisplayKeys = new Set<string>();
   #state: PullRequestLinkRegistryState = emptyPullRequestLinkRegistryState();
   #sequence = 0;
   #queue: Promise<unknown> = Promise.resolve();
@@ -188,7 +219,7 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
     readonly uuid: () => string;
     readonly clock?: () => string;
     readonly switchReconciler?: PullRequestLinkSwitchReconciler;
-    readonly legacyLinks?: () => ReadonlyArray<LegacyPullRequestLinkSeed>;
+    readonly legacyLinks?: (projectId: ProjectId) => ReadonlyArray<LegacyPullRequestLinkSeed>;
   }) {
     this.#journal = options.journal;
     this.#uuid = options.uuid;
@@ -333,32 +364,15 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
     // linked first, reconcile switches, merge later link(s) into the survivor,
     // and update the survivor's display fields to the live observation.
     const { survivor, duplicates } = selectSurvivingPullRequestLink(matched);
-    const pullRequestNodeId = normalized.pullRequestNodeId ?? survivor.pullRequestNodeId;
+    const pullRequestNodeId = normalized.pullRequestNodeId;
     if (pullRequestNodeId === undefined) {
       return { status: "unchanged", link: survivor };
     }
 
-    const missingOnSurvivor = missingPullRequestForgeIds(survivor, {
-      pullRequestNodeId,
-      ...(normalized.baseRepositoryNodeId === undefined
-        ? {}
-        : { baseRepositoryNodeId: normalized.baseRepositoryNodeId }),
-    });
-    if (missingOnSurvivor !== undefined) {
-      const payload = decodeCodePullRequestLinkForgeIdsBackfilled({
-        linkId: survivor.linkId,
-        ...missingOnSurvivor,
-      });
-      this.#appendEvent(
-        survivor.linkId,
-        CODE_PULL_REQUEST_LINK_FORGE_IDS_BACKFILLED,
-        { kind: "forge-ids-backfilled", payload },
-        actor,
-      );
-    }
-
     const mergedLinkIds: PullRequestLinkId[] = [];
     const allDisabledSwitches: PullRequestSwitchKind[] = [];
+    let deferredReason: "merge-when-ready-disable-failed" | undefined;
+
     for (const duplicate of duplicates) {
       const latestSurvivor = this.#state.byId.get(String(survivor.linkId)) ?? survivor;
       const allLinkedThreadIds = uniqueThreads([
@@ -366,39 +380,83 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
         ...duplicate.threadIds,
         ...normalized.threadIds,
       ]);
-      const disabledSwitches =
+      const baseRepositoryNodeId =
+        normalized.baseRepositoryNodeId ??
+        latestSurvivor.baseRepositoryNodeId ??
+        duplicate.baseRepositoryNodeId;
+      let mergeCommitted = false;
+      const commitMerge = (disabledSwitches: ReadonlyArray<PullRequestSwitchKind>): void => {
+        if (mergeCommitted) return;
+        const currentSurvivor = this.#state.byId.get(String(survivor.linkId)) ?? latestSurvivor;
+        const missingOnSurvivor = missingPullRequestForgeIds(currentSurvivor, {
+          pullRequestNodeId,
+          ...(baseRepositoryNodeId === undefined ? {} : { baseRepositoryNodeId }),
+        });
+        if (missingOnSurvivor !== undefined) {
+          const payload = decodeCodePullRequestLinkForgeIdsBackfilled({
+            linkId: survivor.linkId,
+            ...missingOnSurvivor,
+          });
+          this.#appendEvent(
+            survivor.linkId,
+            CODE_PULL_REQUEST_LINK_FORGE_IDS_BACKFILLED,
+            { kind: "forge-ids-backfilled", payload },
+            actor,
+          );
+        }
+        const survivorAfterBackfill =
+          this.#state.byId.get(String(survivor.linkId)) ?? currentSurvivor;
+        const existingThreadKeys = new Set(survivorAfterBackfill.threadIds.map((id) => String(id)));
+        const movedThreadIds = uniqueThreads(
+          duplicate.threadIds.filter((id) => !existingThreadKeys.has(String(id))),
+        );
+        const mergePayload = decodeCodePullRequestLinkMergedInto({
+          linkId: duplicate.linkId,
+          survivingLinkId: survivor.linkId,
+          pullRequestNodeId,
+          ...(baseRepositoryNodeId === undefined ? {} : { baseRepositoryNodeId }),
+          movedThreadIds,
+          disabledSwitches: [...disabledSwitches],
+        });
+        this.#appendEvent(
+          duplicate.linkId,
+          CODE_PULL_REQUEST_LINK_MERGED_INTO,
+          { kind: "merged-into", payload: mergePayload },
+          actor,
+        );
+        mergeCommitted = true;
+      };
+      const reconciliation: PullRequestLinkSwitchReconciliationResult =
         this.#switchReconciler === undefined
-          ? []
+          ? { status: "reconciled", disabledSwitches: [] }
           : await this.#switchReconciler.reconcileDuplicateLinks({
               survivingTarget: switchTargetOf(latestSurvivor),
               mergedTarget: switchTargetOf(duplicate),
               allLinkedThreadIds,
+              commitMerge,
               ...(signal === undefined ? {} : { signal }),
             });
-      const existingThreadKeys = new Set(latestSurvivor.threadIds.map((id) => String(id)));
-      const movedThreadIds = uniqueThreads(
-        duplicate.threadIds.filter((id) => !existingThreadKeys.has(String(id))),
-      );
-      const mergePayload = decodeCodePullRequestLinkMergedInto({
-        linkId: duplicate.linkId,
-        survivingLinkId: survivor.linkId,
-        pullRequestNodeId,
-        ...(normalized.baseRepositoryNodeId === undefined
-          ? {}
-          : { baseRepositoryNodeId: normalized.baseRepositoryNodeId }),
-        movedThreadIds,
-        disabledSwitches: [...disabledSwitches],
-      });
-      this.#appendEvent(
-        duplicate.linkId,
-        CODE_PULL_REQUEST_LINK_MERGED_INTO,
-        { kind: "merged-into", payload: mergePayload },
-        actor,
-      );
+      if (reconciliation.status === "retry-required") {
+        // Forge auto-merge could not be confirmed off; leave this duplicate
+        // active and switches untouched so the next observation retries cleanly.
+        deferredReason = reconciliation.reason;
+        continue;
+      }
+      if (!mergeCommitted) {
+        commitMerge(reconciliation.disabledSwitches);
+      }
       mergedLinkIds.push(duplicate.linkId);
-      for (const kind of disabledSwitches) {
+      for (const kind of reconciliation.disabledSwitches) {
         if (!allDisabledSwitches.includes(kind)) allDisabledSwitches.push(kind);
       }
+    }
+
+    if (mergedLinkIds.length === 0 && deferredReason !== undefined) {
+      return {
+        status: "merge-deferred",
+        link: this.#state.byId.get(String(survivor.linkId)) ?? survivor,
+        reason: deferredReason,
+      };
     }
 
     const afterMerge = this.#state.byId.get(String(survivor.linkId)) ?? survivor;
@@ -495,34 +553,57 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
     normalized: NormalizedObservation,
   ): ReadonlyArray<PullRequestLinkRecord> {
     const matched = new Map<string, PullRequestLinkRecord>();
+    const conflictsWithObservation = (link: PullRequestLinkRecord): boolean =>
+      (normalized.pullRequestNodeId !== undefined &&
+        link.pullRequestNodeId !== undefined &&
+        link.pullRequestNodeId !== normalized.pullRequestNodeId) ||
+      (normalized.baseRepositoryNodeId !== undefined &&
+        link.baseRepositoryNodeId !== undefined &&
+        link.baseRepositoryNodeId !== normalized.baseRepositoryNodeId);
     const add = (link: PullRequestLinkRecord | undefined) => {
       if (link !== undefined && link.status === "active") {
         matched.set(String(link.linkId), link);
       }
     };
-    if (normalized.pullRequestNodeId !== undefined) {
-      add(this.findByForgeId(normalized.projectId, normalized.pullRequestNodeId));
-    }
-    add(
-      this.findByDisplay(
+    const addByDisplay = (owner: string, name: string) => {
+      const wanted = pullRequestDisplayLookupKey(
         normalized.projectId,
-        normalized.repositoryOwner,
-        normalized.repositoryName,
+        owner,
+        name,
         normalized.number,
-      ),
-    );
+      );
+      for (const link of this.#state.byId.values()) {
+        if (
+          link.status === "active" &&
+          !conflictsWithObservation(link) &&
+          pullRequestDisplayLookupKey(
+            link.projectId,
+            link.repositoryOwner,
+            link.repositoryName,
+            link.number,
+          ) === wanted
+        ) {
+          add(link);
+        }
+      }
+    };
+    if (normalized.pullRequestNodeId !== undefined) {
+      for (const link of this.#state.byId.values()) {
+        if (
+          link.status === "active" &&
+          String(link.projectId) === String(normalized.projectId) &&
+          link.pullRequestNodeId === normalized.pullRequestNodeId
+        ) {
+          add(link);
+        }
+      }
+    }
+    addByDisplay(normalized.repositoryOwner, normalized.repositoryName);
     if (
       normalized.lookupRepositoryOwner !== undefined &&
       normalized.lookupRepositoryName !== undefined
     ) {
-      add(
-        this.findByDisplay(
-          normalized.projectId,
-          normalized.lookupRepositoryOwner,
-          normalized.lookupRepositoryName,
-          normalized.number,
-        ),
-      );
+      addByDisplay(normalized.lookupRepositoryOwner, normalized.lookupRepositoryName);
     }
     return [...matched.values()];
   }
@@ -550,7 +631,15 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
         ),
       );
     }
-    for (const seed of this.#legacyLinks()) {
+    let needsLegacyScan = false;
+    for (const key of wantedKeys) {
+      if (!this.#knownDisplayKeys.has(key)) {
+        needsLegacyScan = true;
+        break;
+      }
+    }
+    if (!needsLegacyScan) return;
+    for (const seed of this.#legacyLinks(normalized.projectId)) {
       const key = pullRequestDisplayLookupKey(
         seed.projectId,
         seed.repositoryOwner,
@@ -559,7 +648,11 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
       );
       if (!wantedKeys.has(key)) continue;
       const linkId = deriveLegacyPullRequestLinkId(seed);
-      if (this.#state.byId.has(String(linkId))) continue;
+      // Skip if this deterministic legacy link already exists OR if any link
+      // in `code-pull-request-link` has already tracked this `(projectId,
+      // owner/name, number)` display key (for example a post-change link with
+      // a random UUID, even if its repository was later renamed).
+      if (this.#state.byId.has(String(linkId)) || this.#knownDisplayKeys.has(key)) continue;
       let payload;
       try {
         payload = decodeCodePullRequestLinkCreated({
@@ -585,6 +678,33 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
         { kind: "created", payload },
         actor,
       );
+    }
+  }
+
+  #recordKnownDisplayKey(event: PullRequestLinkJournalEvent): void {
+    if (event.kind === "created") {
+      this.#knownDisplayKeys.add(
+        pullRequestDisplayLookupKey(
+          event.payload.projectId,
+          event.payload.repositoryOwner,
+          event.payload.repositoryName,
+          event.payload.number,
+        ),
+      );
+      return;
+    }
+    if (event.kind === "display-updated") {
+      const existing = this.#state.byId.get(String(event.payload.linkId));
+      if (existing !== undefined) {
+        this.#knownDisplayKeys.add(
+          pullRequestDisplayLookupKey(
+            existing.projectId,
+            event.payload.repositoryOwner,
+            event.payload.repositoryName,
+            event.payload.number,
+          ),
+        );
+      }
     }
   }
 
@@ -618,6 +738,7 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
     const envelope = committed.events[0];
     this.#versions.set(key, envelope?.aggregateVersion ?? expectedVersion + 1);
     this.#sequence = envelope?.globalSequence ?? this.#sequence + 1;
+    this.#recordKnownDisplayKey(event);
     this.#state = applyPullRequestLinkEvent(this.#state, event, this.#sequence);
   }
 
@@ -635,6 +756,7 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
         this.#versions.set(envelope.aggregateId, envelope.aggregateVersion);
         const decoded = decodeEnvelopeEvent(envelope.eventName, envelope.payload);
         if (decoded !== undefined) {
+          this.#recordKnownDisplayKey(decoded);
           this.#state = applyPullRequestLinkEvent(this.#state, decoded, envelope.globalSequence);
         }
       }
@@ -941,6 +1063,9 @@ export function collectLegacyPullRequestLinks(input: {
         result.kind === "pull-request-state" &&
         (result.state === "created" || result.state === "existing" || result.state === "merged")
       ) {
+        // Frames carrying forge node IDs were written after link identity
+        // tracking existed, not from a pre-identity journal.
+        if (result.pullRequestNodeId !== undefined) continue;
         const repo = splitRepositoryName(result.baseRepository);
         if (repo === undefined) continue;
         record({
@@ -956,6 +1081,7 @@ export function collectLegacyPullRequestLinks(input: {
           threadId: thread.threadId,
         });
       } else if (result.kind === "pull-request-review" && result.state === "observed") {
+        if (result.pullRequestNodeId !== undefined) continue;
         const repo = splitRepositoryName(result.baseRepository);
         if (repo === undefined) continue;
         record({

@@ -48,7 +48,10 @@ import {
   reconcileMergedPullRequestSwitches,
   type PullRequestLinkSwitchSnapshot,
 } from "@octant/domain/pull-request-identity-policy";
-import type { PullRequestLinkSwitchReconciler } from "./pullRequestLinkService";
+import type {
+  PullRequestLinkSwitchReconciler,
+  PullRequestLinkSwitchReconciliationResult,
+} from "./pullRequestLinkService";
 import type { Journal } from "../persistence/journal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type {
@@ -471,11 +474,15 @@ export class CodeProjectPullRequestSwitchService
     readonly survivingTarget: CodeProjectPullRequestSwitchTarget;
     readonly mergedTarget: CodeProjectPullRequestSwitchTarget;
     readonly allLinkedThreadIds: ReadonlyArray<CodeThreadId>;
+    readonly commitMerge?: (disabledSwitches: ReadonlyArray<PullRequestSwitchKind>) => void;
     readonly signal?: AbortSignal;
-  }): Promise<ReadonlyArray<PullRequestSwitchKind>> {
+  }): Promise<PullRequestLinkSwitchReconciliationResult> {
     const survivingKey = pullRequestSwitchKey(input.survivingTarget);
     const mergedKey = pullRequestSwitchKey(input.mergedTarget);
-    if (survivingKey === mergedKey) return [];
+    if (survivingKey === mergedKey) {
+      input.commitMerge?.([]);
+      return { status: "reconciled", disabledSwitches: [] };
+    }
 
     const survivingFold = this.#fold(input.survivingTarget);
     const mergedFold = this.#fold(input.mergedTarget);
@@ -485,9 +492,31 @@ export class CodeProjectPullRequestSwitchService
 
     if (decision.mergeWhenReady === "turn-off") {
       const activeTarget = surviving.mergeWhenReadyOn ? input.survivingTarget : input.mergedTarget;
-      await this.#forge
-        .disableAutoMerge(forgeRequest(activeTarget), input.signal ?? new AbortController().signal)
-        .catch(() => undefined);
+      let forgeDisabled = false;
+      try {
+        const result = await this.#forge.disableAutoMerge(
+          forgeRequest(activeTarget),
+          input.signal ?? new AbortController().signal,
+        );
+        forgeDisabled = result.status === "disabled";
+      } catch {
+        forgeDisabled = false;
+      }
+      if (!forgeDisabled) {
+        // Never record Merge when ready as off or notify threads until GitHub
+        // confirms auto-merge is disabled; leaving both links and switches
+        // untouched lets the next observation retry cleanly.
+        return { status: "retry-required", reason: "merge-when-ready-disable-failed" };
+      }
+    }
+
+    // Commit the link merge before retiring duplicate switch records so an
+    // interruption before `merged-into` is persisted never leaves a retained
+    // both-ON switch disabled on one side and misread as mixed on retry.
+    input.commitMerge?.(decision.disabledSwitches);
+
+    if (decision.mergeWhenReady === "turn-off") {
+      const activeTarget = surviving.mergeWhenReadyOn ? input.survivingTarget : input.mergedTarget;
       this.#waitingOn.delete(pullRequestSwitchKey(activeTarget));
       this.#recordMergeWhenReady(activeTarget, { kind: "disabled" }, systemActor());
     } else if (decision.mergeWhenReady === "keep-on") {
@@ -563,7 +592,7 @@ export class CodeProjectPullRequestSwitchService
         .notifyPerson(decodeCodeThreadId(entry.threadId), entry.notice)
         .catch(() => undefined);
     }
-    return decision.disabledSwitches;
+    return { status: "reconciled", disabledSwitches: decision.disabledSwitches };
   }
 
   /**

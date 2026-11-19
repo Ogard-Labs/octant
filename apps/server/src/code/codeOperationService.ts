@@ -867,6 +867,7 @@ interface CodeOperationPullRequestIdentity {
   readonly number: number;
   readonly url: string;
   readonly baseRepository: string;
+  readonly canonicalBaseRepository?: string;
   readonly baseBranch: string;
   readonly headOwner: string;
   readonly headBranch: string;
@@ -998,6 +999,7 @@ export type CodeOperationPullRequestReview =
         readonly title: string;
         readonly state: "open" | "merged" | "closed" | "draft";
         readonly baseRepository: string;
+        readonly canonicalBaseRepository?: string;
         readonly baseBranch: string;
         readonly headRepository: string;
         readonly headBranch: string;
@@ -6432,6 +6434,9 @@ export class CodeOperationService {
       number: pr.number,
       url: pr.url,
       baseRepository: pr.baseRepository,
+      ...(pr.canonicalBaseRepository === undefined
+        ? {}
+        : { canonicalBaseRepository: pr.canonicalBaseRepository }),
       baseBranch: pr.baseBranch,
       headOwner: pr.headRepository,
       headBranch: pr.headBranch,
@@ -6476,9 +6481,11 @@ export class CodeOperationService {
     pr: CodeOperationPullRequestIdentity,
   ): Promise<void> {
     if (this.#options.pullRequestLinks === undefined) return;
-    const repo = splitRepositoryName(pr.baseRepository);
+    const repo = splitRepositoryName(pr.canonicalBaseRepository ?? pr.baseRepository);
     if (repo === undefined) return;
-    const lookup = splitRepositoryName(thread.deliveryTarget.proposedBaseRepository);
+    const lookup =
+      splitRepositoryName(pr.baseRepository) ??
+      splitRepositoryName(thread.deliveryTarget.proposedBaseRepository);
     await this.#options.pullRequestLinks
       .recordObservation({
         projectId: thread.projectId,

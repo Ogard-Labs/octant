@@ -1691,7 +1691,9 @@ export class CodeProjectPullRequestService {
   ): Promise<void> {
     if (this.#pullRequestLinks === undefined) return;
     const pullRequest = observed.pullRequest;
-    const canonical = splitRepositoryName(pullRequest.baseRepository);
+    const canonical = splitRepositoryName(
+      pullRequest.canonicalBaseRepository ?? pullRequest.baseRepository,
+    );
     const repositoryOwner = canonical?.owner ?? repository.repositoryOwner;
     const repositoryName = canonical?.name ?? repository.repositoryName;
     const renamed =

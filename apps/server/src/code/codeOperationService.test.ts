@@ -3320,6 +3320,65 @@ describe("CodeOperationService", () => {
     );
   });
 
+  it("keeps the delivery-target baseRepository in PR results while recording a renamed canonicalBaseRepository in the link registry", async () => {
+    const recordObservation = vi.fn(async () => ({ status: "ignored" as const }));
+    const ensure = vi.fn(async () => ({
+      status: "existing" as const,
+      pullRequest: {
+        number: 176,
+        url: "https://github.com/renamed-org/renamed-repo/pull/176",
+        baseRepository: "octant/octant",
+        canonicalBaseRepository: "renamed-org/renamed-repo",
+        baseBranch: "main",
+        headOwner: "octant",
+        headBranch: "feature/exact",
+        pullRequestNodeId: "PR_kwDO176",
+        baseRepositoryNodeId: "R_kgDORenamedBase",
+      },
+    }));
+    const fixture = providerTurnFixture({
+      pullRequests: {
+        ensure,
+        observeReview: vi.fn(async () => ({ status: "unavailable" as const })),
+      },
+      pullRequestLinks: { recordObservation },
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "full-access" }),
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "create-pull-request",
+      operationId: decodeCodeOperationId("51515151-5151-4515-8515-515151515152"),
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      title: "Renamed repo PR",
+      body: "Follows redirect.",
+      idempotencyKey: "pr-renamed-canonical",
+      authorization: { kind: "full-access" },
+    });
+
+    expect(result).toMatchObject({
+      kind: "pull-request-state",
+      state: "existing",
+      number: 176,
+      baseRepository: "octant/octant",
+      pullRequestNodeId: "PR_kwDO176",
+      baseRepositoryNodeId: "R_kgDORenamedBase",
+    });
+    expect(recordObservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: thread().projectId,
+        repositoryOwner: "renamed-org",
+        repositoryName: "renamed-repo",
+        lookupRepositoryOwner: "octant",
+        lookupRepositoryName: "octant",
+        number: 176,
+        pullRequestNodeId: "PR_kwDO176",
+        baseRepositoryNodeId: "R_kgDORenamedBase",
+        threadIds: [ids.thread],
+      }),
+    );
+  });
+
   it("refuses a selected skill before Code provider execution when no material resolver exists", async () => {
     const fixture = providerTurnFixture();
     const result = await fixture.service.execute(ids.window, {
