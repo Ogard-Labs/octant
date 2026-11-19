@@ -35,6 +35,7 @@ import {
   type ProviderExecutionPolicy,
   type ProviderToolDefinition,
   type ProviderToolImage,
+  type ShieldWatcherLabel,
   type ToolActionAuthority,
 } from "@octant/contracts";
 import { planRefusesApprovalClass } from "@octant/domain/tool-call-policy";
@@ -144,11 +145,30 @@ export interface NativeHarnessSkillPort {
 }
 
 /**
+ * Post-edit language-server errors for files just written by `write`, `edit`,
+ * or `editFiles`. Absent, or returning undefined, leaves the edit result with
+ * nothing extra.
+ */
+export type NativeHarnessEditDiagnosticsPort = (input: {
+  readonly paths: ReadonlyArray<string>;
+  readonly signal?: AbortSignal;
+}) => Promise<
+  | {
+      readonly text: string;
+      /** Set when any included diagnostic answer came from a `repo-tooling` server. */
+      readonly repositoryTooling?: true;
+    }
+  | undefined
+>;
+
+/**
  * What the harness may reach. Every port is optional: a mode or a host that
  * lacks one simply does not offer the tool, it never fakes it.
  */
 export interface NativeHarnessToolPorts {
   readonly filesystem?: NativeHarnessFileSystemPort;
+  /** Language-server errors checked after a successful Code file edit or write. */
+  readonly editDiagnostics?: NativeHarnessEditDiagnosticsPort;
   /**
    * Whether the session's model takes image input, read at each call. Absent
    * or false, `read` refuses an image rather than hand the model bytes it
@@ -311,6 +331,7 @@ export function createNativeHarnessTools(
         result: outcome.result,
         ...(outcome.isError === undefined ? {} : { isError: outcome.isError }),
         ...(outcome.images === undefined ? {} : { images: outcome.images }),
+        ...(outcome.outsideContent === undefined ? {} : { outsideContent: outcome.outsideContent }),
       };
     },
   };
@@ -330,6 +351,7 @@ export function createNativeHarnessTools(
     readonly isError?: boolean;
     readonly refused?: boolean;
     readonly images?: ReadonlyArray<ProviderToolImage>;
+    readonly outsideContent?: { readonly labels: ReadonlyArray<ShieldWatcherLabel> };
   }> {
     if (signal?.aborted) return refused("tool-interrupted");
     if (!isToolName(name) || !offered.some((definition) => definition.name === name)) {
@@ -406,11 +428,15 @@ export function createNativeHarnessTools(
     return withSteering(outcome);
   }
 
-  function withSteering(outcome: {
-    readonly result: unknown;
-    readonly isError?: boolean;
-    readonly refused?: boolean;
-  }): { readonly result: unknown; readonly isError?: boolean; readonly refused?: boolean } {
+  function withSteering<
+    T extends {
+      readonly result: unknown;
+      readonly isError?: boolean;
+      readonly refused?: boolean;
+      readonly images?: ReadonlyArray<ProviderToolImage>;
+      readonly outsideContent?: { readonly labels: ReadonlyArray<ShieldWatcherLabel> };
+    },
+  >(outcome: T): T {
     const notes = options.ports.steering?.() ?? [];
     if (notes.length === 0 || typeof outcome.result !== "object" || outcome.result === null) {
       return outcome;
@@ -481,6 +507,7 @@ async function execute(
   readonly result: unknown;
   readonly isError?: boolean;
   readonly images?: ReadonlyArray<ProviderToolImage>;
+  readonly outsideContent?: { readonly labels: ReadonlyArray<ShieldWatcherLabel> };
 }> {
   switch (name) {
     case "read": {
@@ -511,17 +538,27 @@ async function execute(
     }
     case "edit": {
       const input = args as NativeHarnessEditArguments;
+      if (ports.filesystem === undefined) return refused("tool-unavailable");
       if ("edits" in input) {
-        if (ports.filesystem === undefined) return refused("tool-unavailable");
-        return editedFiles(input.edits, await ports.filesystem.editFiles(input.edits));
+        const outcome = await ports.filesystem.editFiles(input.edits);
+        if (outcome.kind !== "edited") return editedFiles(input.edits, outcome);
+        return withEditDiagnostics(
+          outcome,
+          outcome.files.map((file) => file.path),
+          ports.editDiagnostics,
+          signal,
+        );
       }
-      const outcome = await ports.filesystem!.edit(input);
-      return outcome.kind === "refused" ? refused(outcome.reason, outcome.message) : ok(outcome);
+      const outcome = await ports.filesystem.edit(input);
+      if (outcome.kind === "refused") return refused(outcome.reason, outcome.message);
+      return withEditDiagnostics(outcome, [outcome.path], ports.editDiagnostics, signal);
     }
     case "write": {
       const input = args as NativeHarnessWriteArguments;
-      const outcome = await ports.filesystem!.write(input);
-      return outcome.kind === "refused" ? refused(outcome.reason, outcome.message) : ok(outcome);
+      if (ports.filesystem === undefined) return refused("tool-unavailable");
+      const outcome = await ports.filesystem.write(input);
+      if (outcome.kind === "refused") return refused(outcome.reason, outcome.message);
+      return withEditDiagnostics(outcome, [outcome.path], ports.editDiagnostics, signal);
     }
     case "bash": {
       const input = args as NativeHarnessBashArguments;
@@ -663,6 +700,42 @@ async function execute(
       // command as a `bash` call; reaching here would skip that.
       return refused("tool-unavailable");
   }
+}
+
+/**
+ * Attaches language-server diagnostics to a succeeded edit or write when a
+ * server answered in time. A missing, refused, or timed-out check adds nothing.
+ */
+async function withEditDiagnostics<T extends object>(
+  outcome: T,
+  paths: ReadonlyArray<string>,
+  editDiagnostics: NativeHarnessEditDiagnosticsPort | undefined,
+  signal: AbortSignal | undefined,
+): Promise<{
+  readonly result: T & { readonly diagnostics?: string };
+  readonly isError: false;
+  readonly outsideContent?: { readonly labels: ReadonlyArray<ShieldWatcherLabel> };
+}> {
+  if (editDiagnostics === undefined || paths.length === 0) {
+    return { result: outcome, isError: false };
+  }
+  let checked: Awaited<ReturnType<NativeHarnessEditDiagnosticsPort>>;
+  try {
+    checked = await editDiagnostics({
+      paths,
+      ...(signal === undefined ? {} : { signal }),
+    });
+  } catch {
+    return { result: outcome, isError: false };
+  }
+  if (checked === undefined || checked.text.length === 0) {
+    return { result: outcome, isError: false };
+  }
+  return {
+    result: { ...outcome, diagnostics: checked.text },
+    isError: false,
+    ...(checked.repositoryTooling === true ? { outsideContent: { labels: [] } } : {}),
+  };
 }
 
 /** Says which replacement stopped the call and that nothing changed, so the model can fix that one and retry. */

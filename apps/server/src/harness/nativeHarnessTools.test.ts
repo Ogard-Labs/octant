@@ -775,4 +775,139 @@ describe("native harness tools", () => {
       expect(rest.result).toEqual({ name: "long", instructions: "x".repeat(10), truncated: false });
     });
   });
+
+  describe("post-edit diagnostics", () => {
+    it("attaches diagnostics to write, edit, and editFiles results and passes every edited file path", async () => {
+      const checked: Array<ReadonlyArray<string>> = [];
+      const { root, tools } = await fixture(
+        {},
+        {
+          editDiagnostics: async ({ paths }) => {
+            checked.push(paths);
+            return {
+              text: paths
+                .map((path) => (path === "b.ts" ? "b.ts:1:1 Type error." : `No errors in ${path}`))
+                .join("\n"),
+            };
+          },
+        },
+      );
+      await writeFile(join(root, "b.ts"), "before\n");
+
+      const written = await call(tools, "write", {
+        path: "c.ts",
+        content: "export const x = 1;\n",
+      });
+      expect(written).toEqual({
+        isError: false,
+        result: {
+          kind: "written",
+          path: "c.ts",
+          bytes: 20,
+          created: true,
+          diagnostics: "No errors in c.ts",
+        },
+      });
+
+      await call(tools, "read", { path: "a.ts" });
+      const edited = await call(tools, "edit", { path: "a.ts", oldText: "hello", newText: "hi" });
+      expect(edited).toEqual({
+        isError: false,
+        result: {
+          kind: "edited",
+          path: "a.ts",
+          replacements: 1,
+          fuzzy: false,
+          diagnostics: "No errors in a.ts",
+        },
+      });
+
+      await call(tools, "read", { path: "b.ts" });
+      const multi = await call(tools, "edit", {
+        edits: [
+          { path: "a.ts", oldText: "hi", newText: "hey" },
+          { path: "b.ts", oldText: "before", newText: "after" },
+        ],
+      });
+      expect(multi).toEqual({
+        isError: false,
+        result: {
+          kind: "edited",
+          files: [
+            { path: "a.ts", replacements: 1, fuzzy: false },
+            { path: "b.ts", replacements: 1, fuzzy: false },
+          ],
+          diagnostics: "No errors in a.ts\nb.ts:1:1 Type error.",
+        },
+      });
+      expect(checked).toEqual([["c.ts"], ["a.ts"], ["a.ts", "b.ts"]]);
+    });
+
+    it("adds nothing when diagnostics return undefined or throw, and skips refused edits", async () => {
+      let called = 0;
+      const silent = await fixture(
+        {},
+        {
+          editDiagnostics: async () => {
+            called += 1;
+            return undefined;
+          },
+        },
+      );
+      const written = await call(silent.tools, "write", { path: "c.ts", content: "x\n" });
+      expect(written.isError).toBe(false);
+      expect(written.result).not.toHaveProperty("diagnostics");
+
+      // Refused edit (not read first) does not invoke editDiagnostics.
+      const refusedEdit = await call(silent.tools, "edit", {
+        path: "a.ts",
+        oldText: "hello",
+        newText: "hi",
+      });
+      expect(refusedEdit.isError).toBe(true);
+      expect(called).toBe(1);
+
+      const failing = await fixture(
+        {},
+        {
+          editDiagnostics: async () => {
+            throw new Error("boom");
+          },
+        },
+      );
+      const writtenAfterThrow = await call(failing.tools, "write", {
+        path: "d.ts",
+        content: "ok\n",
+      });
+      expect(writtenAfterThrow).toEqual({
+        isError: false,
+        result: { kind: "written", path: "d.ts", bytes: 3, created: true },
+      });
+      expect(await readFile(join(failing.root, "d.ts"), "utf8")).toBe("ok\n");
+    });
+
+    it("carries the outside-content mark when diagnostics came from repository tooling", async () => {
+      const { tools } = await fixture(
+        {},
+        {
+          editDiagnostics: async () => ({
+            text: "a.rs:1:1 mismatched types",
+            repositoryTooling: true,
+          }),
+        },
+      );
+      const written = await call(tools, "write", { path: "a.rs", content: "fn main() {}\n" });
+      expect(written).toEqual({
+        isError: false,
+        result: {
+          kind: "written",
+          path: "a.rs",
+          bytes: 13,
+          created: true,
+          diagnostics: "a.rs:1:1 mismatched types",
+        },
+        outsideContent: { labels: [] },
+      });
+    });
+  });
 });
