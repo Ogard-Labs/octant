@@ -1463,7 +1463,11 @@ host as a self-contained SVG and is absent when it could not be drawn;
 opening an entry opens the same document by `canvasId`; and the listing is
 bounded and says when it is cut. The dock's **Artifacts** tool reads the
 same listing asked for the thread's Project, and opens an entry in the dock
-beside the thread rather than in a tab.
+beside the thread rather than in a tab. Its list is the library's List table
+(not a second row design). In the dock it keeps the name and the sync mark at
+every width, without the tags, share and edited columns, so a dock resized past
+its 480px minimum never squeezes the name to make room for them. Below 360px the
+Export and Versions words go too.
 
 The page opens grouped by Project, because that is how a person comes back to
 their work; **All** stays the flat reading, **Shared** the live shares, and

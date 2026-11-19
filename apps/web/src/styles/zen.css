@@ -617,5 +617,5 @@ html[data-octant-increased-contrast="true"] .zen-surface [data-slot="card"][data
   z-index: 20;
   display: grid;
   place-items: center;
-  color: var(--oct-muted-foreground);
+  color: var(--oct-muted);
 }

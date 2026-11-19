@@ -1587,8 +1587,9 @@ narrowest pane's width.
   immediately before the mode control, only while the thread is below Full
   access (at Full access nothing shows; it opens the same review as the
   Environment panel's "Outside content · read N times" row). The thread's
-  Project, branch, folder, pull requests and plan usage live in the Environment
-  panel, and its info and plan proposal are items of the + menu: a full row
+  Project, branch, folder and pull requests live in the Environment panel (plan
+  usage does not: it shows in the account menu, on a start screen and in
+  Settings), and its info and plan proposal are items of the + menu: a full row
   truncated every label in a thread's column. Labels 12px meta, icons 16px,
   nothing filled at rest.
 - **The row above the box** (start screens): where the work runs, as quiet
