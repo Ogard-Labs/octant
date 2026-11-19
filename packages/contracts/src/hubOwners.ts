@@ -148,6 +148,32 @@ export const NewMemberAlert = Schema.Struct({
   privateAddress: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
 }).annotations(strict);
 export type NewMemberAlert = typeof NewMemberAlert.Type;
+export const decodeNewMemberAlert = Schema.decodeUnknownSync(NewMemberAlert);
+
+/** A spoke's new-member alert as every device connected to that host reads it. */
+export const NewDeviceAlertView = Schema.Struct({
+  kind: Schema.Literal("hub-member"),
+  alertId: NewMemberAlertId,
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  role: HubMemberRole,
+  identityKeyFingerprint: digest,
+  raisedAt: UtcTimestamp,
+  privateAddress: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+}).annotations(strict);
+export type NewDeviceAlertView = typeof NewDeviceAlertView.Type;
+
+/**
+ * Every new-device alert a host holds, for any device connected to it
+ * (maintainer decision, 2026-11-19). `removesHere` says whether this caller may
+ * Remove from here: a window on the host may; every other device acts from such
+ * a window or from an owner device with an unlock.
+ */
+export const NewDeviceAlertList = Schema.Struct({
+  alerts: Schema.Array(NewDeviceAlertView),
+  removesHere: Schema.Boolean,
+}).annotations(strict);
+export type NewDeviceAlertList = typeof NewDeviceAlertList.Type;
+export const decodeNewDeviceAlertList = Schema.decodeUnknownSync(NewDeviceAlertList);
 
 /** A member a host holds status-only under Confirm new members until an owner or its window confirms it. */
 export const HeldMember = Schema.Struct({

@@ -1,5 +1,6 @@
 import { authorizePrincipalAction } from "@octant/domain";
 import { removeImageMetadata } from "./attachments/imageMetadataRemoval";
+import { NEW_DEVICE_ALERTS_PATH } from "./hub/newDeviceAlertRoutes";
 import {
   principalActsAsHostPerson,
   principalAuthorityKind,
@@ -84,6 +85,10 @@ export function classifyProductAction(request: Request): string | undefined {
     }
     if (method === "GET" || method === "HEAD") return "project.overview.read";
     return undefined;
+  }
+  // Every connected device is told when a new device joins; a read only.
+  if (path === NEW_DEVICE_ALERTS_PATH) {
+    return method === "GET" ? "project.overview.read" : undefined;
   }
   if (path === "/api/machine/changes") {
     return method === "GET" || method === "HEAD" ? "project.overview.read" : undefined;

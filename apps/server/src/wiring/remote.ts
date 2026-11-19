@@ -119,6 +119,7 @@ import {
 } from "../agentAccess/agentAccessSession";
 import { stopAgentTurn } from "@octant/cli/agent-tools";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
+import { createNewDeviceAlertRouteHandler } from "../hub/newDeviceAlertRoutes";
 import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
 import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
 import { createOwnerPostureHost } from "../hub/ownerPostureHost";
@@ -917,6 +918,13 @@ export function wireRemote(deps: RemoteDependencies) {
   const ownerApprovalAnswerUnlock = new OwnerApprovalAnswerUnlock({
     state: hubStateStore,
     record: recordHubMembership,
+  });
+  const newDeviceAlertRoutes = createNewDeviceAlertRouteHandler({
+    memberAlerts: () => {
+      const status = spokeLinkService.status();
+      return status.membership === "member" ? status.alerts : [];
+    },
+    windowAuthorityStore,
   });
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
@@ -2587,6 +2595,7 @@ export function wireRemote(deps: RemoteDependencies) {
     personQuitRoutes,
     supportBundleRoutes,
     hubAdministrationRoutes,
+    newDeviceAlertRoutes,
     localDeviceAdministrationRoutes,
     agentAccessAdministrationRoutes,
     agentAccessLoopbackRoutes,
