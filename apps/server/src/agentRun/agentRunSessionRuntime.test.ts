@@ -3209,8 +3209,13 @@ it("restores person memory on retry and resume after restart for a trusted windo
       personMemoryBlock: (run, ownerWindowId) =>
         personMemoryAccess.childBlockFor(leadOf(run, ownerWindowId)),
       appManagedTools: ({ run, authority: childAuthority, ownerWindowId }) =>
-        personMemoryAccess.childToolsFor(leadOf(run, ownerWindowId), childAuthority, () =>
-          resolveOwner(run, ownerWindowId),
+        personMemoryAccess.childToolsFor(
+          leadOf(run, ownerWindowId),
+          childAuthority,
+          // Live execution checks only the live owner binding, never falling
+          // back to the captured `ownerWindowId`, so revocation takes effect
+          // immediately while the child is still running.
+          () => executionOwners.get(String(run.requestId)),
         ),
     }),
   );
@@ -3265,6 +3270,10 @@ it("restores person memory on retry and resume after restart for a trusted windo
     ownerWindowId: String(LOCAL),
   });
   expect(retried).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "starting" } });
+  // Matches `agentRunRoutes` binding synchronously after `retry` is accepted.
+  if (retried.kind === "run-updated") {
+    executionOwners.set(String(retried.run.requestId), LOCAL);
+  }
   await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
   expect(provider.turns[0]?.context?.filter((block) => block.kind === "person-memory")).toEqual([
     expect.objectContaining({
@@ -3273,6 +3282,33 @@ it("restores person memory on retry and resume after restart for a trusted windo
     }),
   ]);
   expect(provider.turns[0]?.tools?.map((tool) => tool.name)).toContain("octant_past_threads");
+  // While the window binding is live, `octant_past_threads` succeeds; once
+  // revoked, the very next call on the same running child is refused.
+  await provider.emit({
+    kind: "tool-request",
+    sessionId,
+    instanceId: providerInstanceId,
+    sequence: 1,
+    requestId: "past-threads-before-revoke",
+    toolName: "octant_past_threads",
+    inputJson: JSON.stringify({ query: "invoice" }),
+    occurredAt: now,
+  });
+  await vi.waitFor(() => expect(provider.answeredTools).toHaveLength(1));
+  expect(provider.answeredTools[0]?.isError).toBeFalsy();
+  executionOwners.delete(String(admitted.run.requestId));
+  await provider.emit({
+    kind: "tool-request",
+    sessionId,
+    instanceId: providerInstanceId,
+    sequence: 2,
+    requestId: "past-threads-after-revoke",
+    toolName: "octant_past_threads",
+    inputJson: JSON.stringify({ query: "invoice" }),
+    occurredAt: now,
+  });
+  await vi.waitFor(() => expect(provider.answeredTools).toHaveLength(2));
+  expect(provider.answeredTools[1]?.isError).toBe(true);
   await provider.emit({ kind: "text-delta", sessionId, text: "First reply", occurredAt: now });
   await provider.emit({ kind: "completed", sessionId });
   await vi.waitFor(() =>
@@ -3302,6 +3338,31 @@ it("restores person memory on retry and resume after restart for a trusted windo
   await vi.waitFor(() => expect(provider.turns).toHaveLength(2));
   expect(provider.turns[1]?.context).toEqual([]);
   expect(provider.turns[1]?.tools?.map((tool) => tool.name)).toContain("octant_past_threads");
+  await provider.emit({
+    kind: "tool-request",
+    sessionId,
+    instanceId: providerInstanceId,
+    sequence: 3,
+    requestId: "past-threads-resumed-live",
+    toolName: "octant_past_threads",
+    inputJson: JSON.stringify({ query: "invoice" }),
+    occurredAt: now,
+  });
+  await vi.waitFor(() => expect(provider.answeredTools).toHaveLength(3));
+  expect(provider.answeredTools[2]?.isError).toBeFalsy();
+  executionOwners.delete(String(admitted.run.requestId));
+  await provider.emit({
+    kind: "tool-request",
+    sessionId,
+    instanceId: providerInstanceId,
+    sequence: 4,
+    requestId: "past-threads-resumed-revoked",
+    toolName: "octant_past_threads",
+    inputJson: JSON.stringify({ query: "invoice" }),
+    occurredAt: now,
+  });
+  await vi.waitFor(() => expect(provider.answeredTools).toHaveLength(4));
+  expect(provider.answeredTools[3]?.isError).toBe(true);
   await provider.emit({ kind: "text-delta", sessionId, text: "Second reply", occurredAt: now });
   await provider.emit({ kind: "completed", sessionId });
   await vi.waitFor(() =>

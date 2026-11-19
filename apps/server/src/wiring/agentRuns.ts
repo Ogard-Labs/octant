@@ -850,7 +850,11 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     return lead === undefined
       ? undefined
       : personMemoryAccess.childToolsFor(lead, authority, () => {
-          const owner = agentRunRequestOwner(run) ?? ownerWindowId;
+          // Live tool execution reads only the current execution-owner binding
+          // (bound synchronously when start/retry/resume is accepted) and never
+          // falls back to the captured `ownerWindowId`, so revoking the window
+          // immediately refuses subsequent searches on an active child.
+          const owner = agentRunRequestOwner(run);
           if (owner === undefined) return undefined;
           try {
             return decodeWindowId(owner);
