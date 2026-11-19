@@ -663,6 +663,215 @@ describe("MonacoEditorPane", () => {
     draftStore.clear(`${draftKey}:base`);
   });
 
+  it("asks once for a document two views hold dirty when one view's save clears both", async () => {
+    const scopeA = filesCloseScope(undefined, ids.thread);
+    const scopeB = filesCloseScope("host-b", ids.thread);
+    const values = new Map<string, string>();
+    const draftStore = {
+      clear: (key: string) => values.delete(key),
+      read: (key: string) => values.get(key),
+      write: (key: string, value: string) => values.set(key, value),
+    };
+    const code = client();
+    const fixtureA = runtime();
+    const fixtureB = runtime();
+    render(
+      <MonacoEditorPane
+        client={code}
+        draftStore={draftStore}
+        file={textFile()}
+        filesCloseScope={scopeA}
+        loadRuntime={fixtureA.loadRuntime}
+      />,
+    );
+    render(
+      <MonacoEditorPane
+        client={code}
+        draftStore={draftStore}
+        file={textFile()}
+        filesCloseScope={scopeB}
+        loadRuntime={fixtureB.loadRuntime}
+      />,
+    );
+    await screen.findAllByRole("region", { name: "Editor for src/index.ts" });
+    await waitFor(() => {
+      expect(fixtureA.options).toBeDefined();
+      expect(fixtureB.options).toBeDefined();
+    });
+    // The two views hold the same document's text through their own refs.
+    act(() => fixtureA.options?.onChange("shared draft"));
+    act(() => fixtureB.options?.onChange("shared draft"));
+
+    // A close spanning both views must ask once for the document, not once
+    // per view holding it.
+    let confirmed!: Promise<boolean>;
+    await act(async () => {
+      confirmed = confirmFilesClose();
+    });
+    await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("index.ts"));
+    let closed!: boolean;
+    await act(async () => {
+      filesClosePromptSnapshot()?.answer("save");
+      closed = await confirmed;
+    });
+    expect(closed).toBe(true);
+    expect(code.save).toHaveBeenCalledTimes(1);
+
+    // The peer adopted the saved text as its baseline: closing its own view
+    // asks nothing.
+    await expect(confirmFilesClose(scopeB)).resolves.toBe(true);
+    expect(filesClosePromptSnapshot()).toBeUndefined();
+  });
+
+  it("keeps a peer view's edit made during the save dirty and loses nothing", async () => {
+    const scopeA = filesCloseScope(undefined, ids.thread);
+    const scopeB = filesCloseScope("host-b", ids.thread);
+    const values = new Map<string, string>();
+    const draftStore = {
+      clear: (key: string) => values.delete(key),
+      read: (key: string) => values.get(key),
+      write: (key: string, value: string) => values.set(key, value),
+    };
+    const code = client();
+    let completeSave!: (value: unknown) => void;
+    vi.mocked(code.save).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          completeSave = resolve;
+        }) as never,
+    );
+    const fixtureA = runtime();
+    const fixtureB = runtime();
+    render(
+      <MonacoEditorPane
+        client={code}
+        draftStore={draftStore}
+        file={textFile()}
+        filesCloseScope={scopeA}
+        loadRuntime={fixtureA.loadRuntime}
+      />,
+    );
+    render(
+      <MonacoEditorPane
+        client={code}
+        draftStore={draftStore}
+        file={textFile()}
+        filesCloseScope={scopeB}
+        loadRuntime={fixtureB.loadRuntime}
+      />,
+    );
+    await screen.findAllByRole("region", { name: "Editor for src/index.ts" });
+    await waitFor(() => {
+      expect(fixtureA.options).toBeDefined();
+      expect(fixtureB.options).toBeDefined();
+    });
+    act(() => fixtureA.options?.onChange("shared draft"));
+    act(() => fixtureB.options?.onChange("shared draft"));
+    const draftKey = modelUri(ids.checkout as never, ids.file as never);
+
+    let confirmed!: Promise<boolean>;
+    await act(async () => {
+      confirmed = confirmFilesClose();
+    });
+    await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("index.ts"));
+    await act(async () => {
+      filesClosePromptSnapshot()?.answer("save");
+    });
+    await waitFor(() => expect(code.save).toHaveBeenCalledTimes(1));
+    // An edit to the shared document while the save is in flight is newer
+    // than the text that was sent: it stays dirty on both views' refs.
+    act(() => fixtureA.options?.onChange("edit during save"));
+    act(() => fixtureB.options?.onChange("edit during save"));
+    await act(async () => {
+      completeSave({ status: "completed", metadata: { ...metadata, digest: "c".repeat(64) } });
+    });
+    await vi.waitFor(() =>
+      expect(filesClosePromptSnapshot()?.failure).toBe(
+        "index.ts could not be saved. Your edits are still here.",
+      ),
+    );
+    let closed!: boolean;
+    await act(async () => {
+      filesClosePromptSnapshot()?.answer("cancel");
+      closed = await confirmed;
+    });
+    expect(closed).toBe(false);
+    expect(values.get(draftKey)).toBe("edit during save");
+
+    // The peer stayed dirty against the new baseline rather than going clean
+    // on a save its newer text never took part in: a fresh close still asks.
+    let peerConfirmed!: Promise<boolean>;
+    await act(async () => {
+      peerConfirmed = confirmFilesClose();
+    });
+    await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("index.ts"));
+    let peerClosed!: boolean;
+    await act(async () => {
+      filesClosePromptSnapshot()?.answer("cancel");
+      peerClosed = await peerConfirmed;
+    });
+    expect(peerClosed).toBe(false);
+    expect(values.get(draftKey)).toBe("edit during save");
+    draftStore.clear(draftKey);
+    draftStore.clear(`${draftKey}:base`);
+  });
+
+  it("discards the shared document once when two views hold it", async () => {
+    const scopeA = filesCloseScope(undefined, ids.thread);
+    const scopeB = filesCloseScope("host-b", ids.thread);
+    const values = new Map<string, string>();
+    const draftStore = {
+      clear: (key: string) => values.delete(key),
+      read: (key: string) => values.get(key),
+      write: (key: string, value: string) => values.set(key, value),
+    };
+    const code = client();
+    const fixtureA = runtime();
+    const fixtureB = runtime();
+    render(
+      <MonacoEditorPane
+        client={code}
+        draftStore={draftStore}
+        file={textFile()}
+        filesCloseScope={scopeA}
+        loadRuntime={fixtureA.loadRuntime}
+      />,
+    );
+    render(
+      <MonacoEditorPane
+        client={code}
+        draftStore={draftStore}
+        file={textFile()}
+        filesCloseScope={scopeB}
+        loadRuntime={fixtureB.loadRuntime}
+      />,
+    );
+    await screen.findAllByRole("region", { name: "Editor for src/index.ts" });
+    await waitFor(() => {
+      expect(fixtureA.options).toBeDefined();
+      expect(fixtureB.options).toBeDefined();
+    });
+    act(() => fixtureA.options?.onChange("shared draft"));
+    act(() => fixtureB.options?.onChange("shared draft"));
+
+    let confirmed!: Promise<boolean>;
+    await act(async () => {
+      confirmed = confirmFilesClose();
+    });
+    await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("index.ts"));
+    let closed!: boolean;
+    await act(async () => {
+      filesClosePromptSnapshot()?.answer("discard");
+      closed = await confirmed;
+    });
+    expect(closed).toBe(true);
+
+    // One discard answered for the document: the peer view dropped its draft
+    // too rather than asking the same question again.
+    await expect(confirmFilesClose(scopeB)).resolves.toBe(true);
+    expect(filesClosePromptSnapshot()).toBeUndefined();
+  });
+
   it.each([
     ["binary", "Binary files are read-only."],
     ["oversized", "Files larger than 5 MiB are read-only."],
