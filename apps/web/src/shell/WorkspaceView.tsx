@@ -1827,6 +1827,21 @@ function renderCodeTab(
                       threadId: String(tab.threadId),
                       title: tab.title,
                       projectId: String(project.id),
+                      ...(activeThread === undefined
+                        ? {}
+                        : {
+                            providerInstanceId: String(activeThread.providerInstanceId),
+                            modelId: String(activeThread.modelId),
+                            ...(activeThread.workingFolderId === undefined
+                              ? {}
+                              : { workingFolderId: String(activeThread.workingFolderId) }),
+                          }),
+                      ...(activeCheckout === undefined
+                        ? {}
+                        : {
+                            checkoutKind: activeCheckout.kind,
+                            checkoutAvailability: activeCheckout.availability,
+                          }),
                     }),
                 })}
             checkoutKind={activeCheckout?.kind}

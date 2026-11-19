@@ -3391,9 +3391,14 @@ branch… opens the ordinary new-task draft in this Project on the New
 worktree choice with its Where > Start from picker already open and loading
 the checkout's real refs; it is absent without a connected, readable
 Project. The **Project row** opens the same Move to Project dialog the
-sidebar row menu opens — never a second move surface — but only while
-another active Code Project bound to the same repository folder could take
-the thread; with none it states the Project as a fact.
+sidebar row menu opens — never a second move surface — whenever another
+active Code Project exists, even one the host would refuse: the dialog
+lists every destination and greys the refused ones with the reason — a
+different folder, the thread's working folder being bound to its current
+Project, a remote-root or unavailable checkout, or a provider policy the
+thread's provider or model fails, naming the unknown instead when the
+model is not yet known. Only with no other active Code Project does the
+row state the Project as a fact.
 
 **Switching a thread's branch.** The Switch branch dialog reads the working
 tree as it opens — the status entries and the state token, one observation —

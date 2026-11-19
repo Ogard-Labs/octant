@@ -26,7 +26,6 @@ import type {
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
-import { decideThreadMove, folderContains } from "@octant/domain/thread-project-move-policy";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ChevronRight,
@@ -369,35 +368,19 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           },
         ]),
   ];
-  // The Project row is itself the move control — but only while the shared
-  // dialog could actually take the thread: another active Code Project bound
-  // to the same repository folder. Otherwise the row stays a fact.
-  const currentFolder = project?.type === "code" ? project.binding.canonicalRoot : undefined;
+  // The Project row is itself the move control whenever another active Code
+  // Project exists: the shared dialog shows the destinations it would refuse
+  // greyed with their reason, so the person can always read why — a row that
+  // hid the dialog would hide the reasons too.
   const moveToProjectAvailable =
     project !== undefined &&
     props.onMoveToProject !== undefined &&
-    currentFolder !== undefined &&
-    (props.projects ?? []).some((candidate) => {
-      if (
-        candidate.type !== "code" ||
-        candidate.lifecycle !== "active" ||
-        String(candidate.id) === String(project.id)
-      ) {
-        return false;
-      }
-      const folder = candidate.binding.canonicalRoot;
-      const decision = decideThreadMove({
-        thread: { lifecycle: "active", executing: false, awaitingInput: false },
-        source: { id: String(project.id), mode: "code", folder: currentFolder },
-        destination: {
-          id: String(candidate.id),
-          mode: "code",
-          lifecycle: candidate.lifecycle,
-          folder,
-        },
-      });
-      return decision.status === "allowed" && folderContains(currentFolder, folder);
-    });
+    (props.projects ?? []).some(
+      (candidate) =>
+        candidate.type === "code" &&
+        candidate.lifecycle === "active" &&
+        String(candidate.id) !== String(project.id),
+    );
   // A checkout that cannot be read already shows "New task in this Project" as
   // its way out, so the menu offers it for every other state.
   const changesMenu: ReadonlyArray<{

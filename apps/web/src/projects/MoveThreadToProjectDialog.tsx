@@ -1,4 +1,6 @@
 import type { ProjectSummary } from "@octant/contracts/projects";
+import type { ProviderInstance, ProviderModel } from "@octant/contracts/providers";
+import { isProviderAllowedByProjectPolicy } from "@octant/domain/project-provider-policy";
 import {
   THREAD_MOVE_REFUSALS,
   decideThreadMove,
@@ -38,6 +40,26 @@ export interface MoveThreadToProjectDialogProps {
   readonly busy?: boolean;
   /** Every Project the window knows; the dialog picks the ones this thread may join. */
   readonly projects: ReadonlyArray<ProjectSummary>;
+  /**
+   * The thread's actual provider and model, when the surface that opened the
+   * dialog knew them: a destination whose policy refuses either shows the
+   * reason instead of offering a move the host would deny.
+   */
+  readonly threadProvider?: ProviderInstance | undefined;
+  readonly threadModel?: ProviderModel | undefined;
+  /**
+   * The thread's approved working folder, when it has one: the host refuses
+   * every move to a different Project then, so each destination shows that
+   * reason rather than a dead choice.
+   */
+  readonly threadWorkingFolderId?: string | undefined;
+  /**
+   * The thread's checkout kind and availability, when its view knew them: a
+   * remote-root or unavailable checkout plainly cannot move, and shows the
+   * host's refusal up front. A plain folder alone is no refusal.
+   */
+  readonly threadCheckoutKind?: string | undefined;
+  readonly threadCheckoutAvailability?: "available" | "unavailable" | "waiting" | undefined;
   readonly onMove: (
     projectId: string,
     when?: "after-turn" | "stop-now",
@@ -47,6 +69,9 @@ export interface MoveThreadToProjectDialogProps {
 
 const CODE_SAME_FOLDER =
   "A Code thread can only move to a Project bound to the same repository folder.";
+const WORKING_FOLDER_BOUND =
+  "This task's working folder is bound to its current Project. Start a new task in the destination Project.";
+const CHECKOUT_UNAVAILABLE = "Code thread checkout is unavailable.";
 
 const KIND: Record<MovableThreadMode, { readonly noun: string; readonly project: string }> = {
   work: { noun: "task", project: "Work Project" },
@@ -88,6 +113,16 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
     if (folder === undefined || currentFolder === undefined) {
       return THREAD_MOVE_REFUSALS["destination-unavailable"];
     }
+    // The host refuses any move once the thread is bound to a working folder,
+    // whatever the destination — the same string it answers with.
+    if (props.threadWorkingFolderId !== undefined) return WORKING_FOLDER_BOUND;
+    if (
+      props.mode === "code" &&
+      (props.threadCheckoutKind === "remote-root" ||
+        props.threadCheckoutAvailability === "unavailable")
+    ) {
+      return CHECKOUT_UNAVAILABLE;
+    }
     const decision = decideThreadMove({
       thread: { lifecycle: "active", executing: false, awaitingInput: false },
       source: { id: props.currentProjectId, mode: props.mode, folder: currentFolder },
@@ -100,6 +135,18 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
     });
     if (decision.status === "refused") return THREAD_MOVE_REFUSALS[decision.reason];
     if (props.mode === "code" && !folderContains(currentFolder, folder)) return CODE_SAME_FOLDER;
+    if (
+      props.threadProvider !== undefined &&
+      project.type !== "chat" &&
+      !isProviderAllowedByProjectPolicy(project, props.threadProvider, props.threadModel)
+    ) {
+      // A refusal against an unknown model may only be missing data, not a
+      // policy the thread actually breaks — say which it is.
+      if (props.threadModel === undefined) {
+        return "This thread's model is not known here; the host decides whether this Project's provider policy allows it.";
+      }
+      return "This Project's provider policy does not allow this thread's provider or model.";
+    }
     return undefined;
   }
 
@@ -195,7 +242,9 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
       ) : null}
       {candidates.length === 0 ? (
         <p>
-          There is no other {kind.project} to move this {kind.noun} into.
+          {current === undefined
+            ? `There is no other ${kind.project} to move this ${kind.noun} into.`
+            : `This thread belongs to “${current.name}”. There is no other ${kind.project} to move this ${kind.noun} into.`}
         </p>
       ) : (
         <ul aria-label={`${kind.project}s`} className="move-thread__list">

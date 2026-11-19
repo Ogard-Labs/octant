@@ -158,6 +158,7 @@ import type {
   ProviderInstance,
   VoiceSettings,
 } from "@octant/contracts";
+
 import type {
   CodeBoardQuery,
   CodeProjectPullRequestDetailObserved,
@@ -9125,6 +9126,10 @@ function LaunchedShell(
           projectAnnouncementSequence={projectController.announcementSequence}
         />
       </ShellFrame>
+      <PrepareToShutDownHost
+        hostBridge={props.hostBridge}
+        onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
+      />
       <OctantDialogPresence>
         <FilesClosePrompt />
       </OctantDialogPresence>
@@ -9146,6 +9151,30 @@ function LaunchedShell(
             currentProjectId={moveRequest.projectId}
             mode={moveRequest.mode}
             onClose={() => setMoveRequest(undefined)}
+            {...(() => {
+              const moveProvider = providerController.instances.find(
+                (instance) => String(instance.id) === moveRequest.providerInstanceId,
+              );
+              const moveModel =
+                moveProvider === undefined || moveRequest.modelId === undefined
+                  ? undefined
+                  : providerController.observedByInstance
+                      .get(moveProvider.id)
+                      ?.models.find((listed) => String(listed.id) === moveRequest.modelId);
+              return {
+                ...(moveProvider === undefined ? {} : { threadProvider: moveProvider }),
+                ...(moveModel === undefined ? {} : { threadModel: moveModel }),
+                ...(moveRequest.workingFolderId === undefined
+                  ? {}
+                  : { threadWorkingFolderId: moveRequest.workingFolderId }),
+                ...(moveRequest.checkoutKind === undefined
+                  ? {}
+                  : { threadCheckoutKind: moveRequest.checkoutKind }),
+                ...(moveRequest.checkoutAvailability === undefined
+                  ? {}
+                  : { threadCheckoutAvailability: moveRequest.checkoutAvailability }),
+              };
+            })()}
             onMove={async (projectId: string, when?: "after-turn" | "stop-now") =>
               moveRequest.mode === "code"
                 ? actions.moveCodeThread(
@@ -9165,10 +9194,6 @@ function LaunchedShell(
           />
         )}
       </OctantDialogPresence>
-      <PrepareToShutDownHost
-        hostBridge={props.hostBridge}
-        onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
-      />
       {(() => {
         const coordinator = codeController.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(coordinatorBoundsThreadId),

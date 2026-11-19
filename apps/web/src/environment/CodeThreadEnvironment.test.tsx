@@ -1385,17 +1385,39 @@ describe("CodeThreadEnvironment branch and move actions", () => {
     expect(onMoveToProject).toHaveBeenCalledOnce();
   });
 
-  it("states the Project row as a fact when no other same-folder Code Project could take it", async () => {
+  it("opens the shared move dialog even when every other Code Project sits in another folder, so its reasons show", async () => {
+    const onMoveToProject = vi.fn();
     const elsewhere = {
       ...codeProject(decodeProjectId("00000000-0000-4000-8000-000000000903")),
       binding: { canonicalRoot: "/Users/example/Dev/Repos/elsewhere" },
     } as ProjectSummary;
+    const user = userEvent.setup();
+    const { container } = render(
+      <CodeThreadEnvironment
+        environmentOpen
+        onMoveToProject={onMoveToProject}
+        project={codeProject()}
+        projects={[codeProject(), elsewhere]}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    const row = projectRowElement(container);
+    expect(row?.tagName).toBe("BUTTON");
+    await user.click(row as HTMLElement);
+    expect(onMoveToProject).toHaveBeenCalledOnce();
+  });
+
+  it("states the Project row as a fact only while no other active Code Project exists", async () => {
     const { container, unmount } = render(
       <CodeThreadEnvironment
         environmentOpen
         onMoveToProject={vi.fn()}
         project={codeProject()}
-        projects={[codeProject(), elsewhere]}
+        projects={[]}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
       >

@@ -2,6 +2,7 @@ import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { OwnerUnlockNotGiven } from "@octant/client-runtime";
 import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
 import type {
+  CodeCheckoutIdentity,
   CodeProjectPullRequestDetailObserved,
   CodeTerminalId,
   CodeProjectPullRequestDetailQuery,
@@ -76,6 +77,14 @@ export interface ThreadMoveRequest {
   readonly title: string;
   readonly projectId: string;
   readonly busy?: boolean;
+  /** The thread's provider and model, when the surface that asked knows them. */
+  readonly providerInstanceId?: string;
+  readonly modelId?: string;
+  /** The thread's approved working folder, when it has one. */
+  readonly workingFolderId?: string;
+  /** The thread's checkout kind and availability, when its view knows them. */
+  readonly checkoutKind?: CodeCheckoutIdentity["kind"];
+  readonly checkoutAvailability?: CodeCheckoutIdentity["availability"];
 }
 
 export type ShellActions = {
