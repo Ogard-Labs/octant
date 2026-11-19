@@ -701,6 +701,7 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly readThread: () => CodeThread | undefined;
     readonly folders: ReadonlyArray<string>;
+    readonly operationId?: string;
     /** The routine run this turn was started for, from the dispatcher only. */
     readonly routineRun?: AutomationRunReference;
     /**
@@ -6079,6 +6080,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           thread: active.thread,
           readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
           folders: [active.providerRoot, ...active.extraFolders],
+          operationId: String(active.operationId),
           ...(active.routineRun === undefined ? {} : { routineRun: active.routineRun }),
           askPerson: (summary, signal) => {
             const bounded = boundProviderSummary(summary);

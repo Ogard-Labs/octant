@@ -88,6 +88,7 @@
     "./event-policy": "./src/eventPolicy.ts",
     "./thread-retention-policy": "./src/threadRetentionPolicy.ts",
     "./thread-completion-policy": "./src/threadCompletionPolicy.ts",
+    "./finished-receipt-policy": "./src/finishedReceiptPolicy.ts",
     "./thread-project-move-policy": "./src/threadProjectMovePolicy.ts",
     "./managed-device-stream": "./src/managedDeviceStream.ts",
     "./memory-policy": "./src/memoryPolicy.ts",

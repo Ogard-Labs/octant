@@ -1,11 +1,14 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   describeChord,
+  formatFinishedReceiptSendBackPrefill,
   matchPageKeybinding,
   resolveSnoozePresets,
   type OctantKeybindingActionId,
   type OctantKeybindings,
 } from "@octant/domain";
+import type { ThreadFinishedReceipt } from "@octant/contracts";
+import { FinishedReceiptCard } from "../finishedReceipts/FinishedReceiptCard";
 import { Check, Clock, CornerUpLeft, Minus, X, type IconComponent } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedDiffFile } from "../code/unifiedDiff";
@@ -267,6 +270,13 @@ export function ReviewPage(props: ReviewPageProps) {
   const reply = useLoaded<ReviewReply | undefined>(readKey, (signal) =>
     selected === undefined ? Promise.resolve(undefined) : props.source.loadReply(selected, signal),
   );
+  const finishedReceipt = useLoaded<ThreadFinishedReceipt | undefined>(readKey, async (signal) =>
+    selected === undefined || props.source.loadFinishedReceipt === undefined
+      ? undefined
+      : await props.source.loadFinishedReceipt(selected, signal),
+  );
+  const activeFinishedReceipt =
+    finishedReceipt.status === "ready" ? finishedReceipt.value : undefined;
   // The checks and the diff need the checkout the board named, so they wait for
   // the facts read to settle, and read again when a thread whose facts had not
   // arrived yet (one that just finished) gets them.
@@ -350,7 +360,13 @@ export function ReviewPage(props: ReviewPageProps) {
         return;
       case "review-send-back":
         setSnoozeOpen(false);
-        setComposing(true);
+        setComposing((open) => {
+          if (!open) {
+            const prefill = formatFinishedReceiptSendBackPrefill(activeFinishedReceipt);
+            if (prefill.length > 0) setFollowUp((current) => (current === "" ? prefill : current));
+          }
+          return true;
+        });
         return;
       case "review-snooze":
         setComposing(false);
@@ -570,7 +586,17 @@ export function ReviewPage(props: ReviewPageProps) {
                     disabled={pending}
                     onClick={() => {
                       setSnoozeOpen(false);
-                      setComposing((open) => !open);
+                      setComposing((open) => {
+                        const next = !open;
+                        if (next) {
+                          const prefill =
+                            formatFinishedReceiptSendBackPrefill(activeFinishedReceipt);
+                          if (prefill.length > 0) {
+                            setFollowUp((current) => (current === "" ? prefill : current));
+                          }
+                        }
+                        return next;
+                      });
                     }}
                     size="sm"
                     type="button"
@@ -708,6 +734,11 @@ export function ReviewPage(props: ReviewPageProps) {
                         settled={decision.unlisted}
                       />
                     </section>
+                  )}
+                  {activeFinishedReceipt === undefined ? null : (
+                    <div className="review-section">
+                      <FinishedReceiptCard receipt={activeFinishedReceipt} />
+                    </div>
                   )}
                   <LastReply reply={reply} />
                   {selected.mode === "chat" ? null : (

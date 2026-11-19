@@ -101,6 +101,10 @@ import {
   offeringTurnStanding,
 } from "../sideTasks/sideTaskThreads";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
+import {
+  createReportFinishedTool,
+  observeFolderFinishedDiff,
+} from "../finishedReceipts/finishedReceiptTools";
 import { createWorkThreadMentionDirectory } from "../chat/threadMentionService";
 import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
 import { workSiblingThreadSource } from "../siblingThreads/workSiblingThreadSource";
@@ -186,12 +190,14 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "managedWorktreeReceipts"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
+    | "finishedReceipts"
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
   > &
   Pick<
     HarnessStateWiring,
     | "threadAwaitsHarnessQuestion"
+    | "nativeHarnessApprovals"
     | "nativeHarnessSessions"
     | "serverConnection"
     | "serverProjectStore"
@@ -216,6 +222,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     WorkspaceWiring,
     | "authorizeWorkThreadForWindow"
     | "contextHarness"
+    | "gitObservationPort"
     | "goalService"
     | "keptImageChoices"
     | "projectMemoryAccess"
@@ -264,6 +271,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "onHarnessPausedByPerson"
     | "shieldServerStore"
     | "sideTaskHost"
+    | "finishedCheckShell"
   > &
   Pick<ChatWiring, "chatService" | "guardChatAttachmentPurge" | "threadMentionService"> &
   Pick<CanvasWiring, "canvasAgentToolPort" | "canvasService" | "resolveCanvasWorkspace"> &
@@ -356,6 +364,10 @@ export function wireWork(deps: WorkDependencies) {
     sideTaskHost,
     routineProposalService,
     sideTasks,
+    finishedReceipts,
+    finishedCheckShell,
+    gitObservationPort,
+    nativeHarnessApprovals,
     siblingThreadsService,
     agentMessageService,
     spendCeiling,
@@ -474,6 +486,7 @@ export function wireWork(deps: WorkDependencies) {
     };
     const workThreadService = new WorkThreadService({
       moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "work", threadId }),
+      readLatestFinishedReceipt: (threadId) => finishedReceipts.latest(threadId),
       persistence,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       projects: projectService,
@@ -968,9 +981,60 @@ export function wireWork(deps: WorkDependencies) {
               fullAccess: () =>
                 runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
             });
+        const folder = input.projectRoot.length > 0 ? input.projectRoot : undefined;
+        const readWorkFinishedPosture = () => {
+          const running = runningWorkTurns.get(String(input.thread.id))?.access;
+          return workTurnToolLevel(running ?? input.thread.access).posture;
+        };
+        const reportFinishedTools = !browserSupported
+          ? undefined
+          : createReportFinishedTool({
+              mode: "work",
+              threadId: String(input.thread.id),
+              projectId: String(input.thread.projectId),
+              turnId: String(input.turnId),
+              readPosture: readWorkFinishedPosture,
+              ...(folder === undefined ? {} : { folder }),
+              ...(input.extraFolders === undefined || input.extraFolders.length === 0
+                ? {}
+                : { extraFolders: input.extraFolders }),
+              shell: {
+                run: (req) =>
+                  finishedCheckShell(readWorkFinishedPosture() === "full-access").run(req),
+              },
+              ...(input.routineRun !== undefined || isRoutineHostScope(input.windowId)
+                ? {}
+                : {
+                    askPerson: async (summary, signal) => {
+                      const outcome = await nativeHarnessApprovals.ask({
+                        threadId: String(input.thread.id),
+                        mode: "work",
+                        projectId: input.thread.projectId,
+                        lead: {
+                          hostId: LOCAL_HOST_ID,
+                          providerInstanceId: input.thread.providerInstanceId,
+                          modelId: input.thread.modelId,
+                        },
+                        toolName: "provider-action",
+                        summary,
+                        approvalClass: "shell-commands",
+                        singleUse: true,
+                        signal,
+                      });
+                      return outcome === "too-many-waiting" ? ("denied" as const) : outcome;
+                    },
+                  }),
+              readGoal: () => goalService.read(String(input.thread.id)).goal ?? undefined,
+              observeDiff: (signal) =>
+                observeFolderFinishedDiff({ folder, git: gitObservationPort, signal }),
+              store: finishedReceipts,
+              uuid: randomUUID,
+              clock: () => new Date().toISOString(),
+            });
         if (
           pastThreads === undefined &&
           projectMemoryTools === undefined &&
+          reportFinishedTools === undefined &&
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
@@ -996,6 +1060,7 @@ export function wireWork(deps: WorkDependencies) {
           lookTools,
           pastThreads,
           projectMemoryTools,
+          reportFinishedTools,
         );
       },
       nativeHarness: nativeHarnessHooks,

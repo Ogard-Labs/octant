@@ -5922,6 +5922,7 @@ function serviceFixture(
     readonly probeProvider?: CodeServiceOptions["probeProvider"];
     readonly content?: CodeContentStoreOptions;
     readonly pullRequests?: CodeServiceOptions["pullRequests"];
+    readonly readLatestFinishedReceipt?: CodeServiceOptions["readLatestFinishedReceipt"];
     readonly gitHistory?: CodeServiceOptions["gitHistory"];
     readonly serverGitHistory?: CodeServiceOptions["serverGitHistory"];
     readonly liveTurns?: CodeServiceOptions["liveTurns"];
@@ -6026,6 +6027,9 @@ function serviceFixture(
   });
   const service = new CodeService({
     ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
+    ...(options.readLatestFinishedReceipt === undefined
+      ? {}
+      : { readLatestFinishedReceipt: options.readLatestFinishedReceipt }),
     persistence: persistence as unknown as CodePersistencePort,
     access,
     checkouts,
@@ -6241,6 +6245,81 @@ describe("completing and snoozing a Code thread", () => {
       failure: { category: "unauthorized", message: "Only a person can mark a Code thread Done." },
     });
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("attaches a fresh finished receipt as completion evidence when marking Code Done, ignores stale ones, and clears it on reopen", async () => {
+    const receiptId = "88888888-8888-4888-8888-888888888888";
+    const receipt = (stale: boolean) =>
+      ({
+        receipt: {
+          receiptId,
+          threadId: String(ids.thread),
+          mode: "code",
+          projectId: ids.project,
+          summary: "Verified all unit tests.",
+          items: [
+            {
+              kind: "check",
+              label: "bun run test",
+              command: "bun run test",
+              status: "proven",
+              exitCode: 0,
+            },
+          ],
+          diff: { status: "observed", changedFiles: 2, insertions: 10, deletions: 2 },
+          recordedAt: now,
+        },
+        status: stale ? "stale" : "proven",
+        stale,
+        provenCount: 1,
+        claimedCount: 0,
+        failedCount: 0,
+        unavailableCount: 0,
+      }) as never;
+
+    const freshFixture = serviceFixture({
+      threads: [thread()],
+      readLatestFinishedReceipt: () => receipt(false),
+    });
+    const freshDone = await freshFixture.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(freshDone).toMatchObject({
+      kind: "thread-updated",
+      thread: { markedDoneAt: now, completionReceiptId: receiptId, version: 2 },
+    });
+
+    const markedFixture = serviceFixture({
+      threads: [thread({ markedDoneAt: nowAt, completionReceiptId: receiptId as never })],
+    });
+    const reopened = await markedFixture.service.execute(ids.window, {
+      kind: "reopen-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(reopened).toMatchObject({ kind: "thread-updated", thread: { version: 2 } });
+    if ("thread" in reopened) {
+      expect(reopened.thread).not.toHaveProperty("completionReceiptId");
+    }
+
+    const staleFixture = serviceFixture({
+      threads: [thread()],
+      readLatestFinishedReceipt: () => receipt(true),
+    });
+    const staleDone = await staleFixture.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(staleDone).toMatchObject({
+      kind: "thread-updated",
+      thread: { markedDoneAt: now, version: 2 },
+    });
+    if ("thread" in staleDone) {
+      expect(staleDone.thread).not.toHaveProperty("completionReceiptId");
+    }
   });
 
   it("reopens a completed thread and wakes a snoozed one back into play", async () => {

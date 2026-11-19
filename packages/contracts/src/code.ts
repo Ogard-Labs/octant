@@ -3,6 +3,7 @@ import { AnyAttachmentMediaType, NATIVE_IMAGE_ATTACHMENT_MEDIA_TYPES } from "./a
 import { Option, Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
+import { FinishedReceiptId } from "./finishedReceipt";
 import { ThreadRestFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { GithubIssueContextRequest } from "./githubIssueContext";
@@ -398,6 +399,8 @@ export const CodeThread = Schema.Struct({
    * the journal. Absent on every thread nobody marked.
    */
   markedDoneAt: Schema.optional(UtcTimestamp),
+  /** Fresh finished receipt recorded as completion evidence when a person marked the thread Done. */
+  completionReceiptId: Schema.optional(FinishedReceiptId),
   lifecycle: CodeThreadLifecycle,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,

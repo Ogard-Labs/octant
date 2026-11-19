@@ -23,6 +23,7 @@ import { UsageResumeThreadState } from "./usageResume";
 import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
+import { FinishedReceiptId } from "./finishedReceipt";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -123,6 +124,8 @@ export const WorkThread = Schema.Struct({
   lifecycle: Schema.Literal("active", "archived", "deleting", "deleted"),
   completionConfirmed: Schema.optional(Schema.Boolean),
   completionEvidence: Schema.optional(WorkThreadCompletionEvidence),
+  /** Fresh finished receipt recorded as completion evidence when a person marked the thread Done. */
+  completionReceiptId: Schema.optional(FinishedReceiptId),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   modelOptionValues: Schema.optional(ProviderModelOptionValues),

@@ -4,6 +4,7 @@ import {
   MAX_WORK_BOARD_CARD_SUMMARY_BYTES,
   UtcTimestamp,
   type ProjectId,
+  type ThreadBoardFinishedMark,
   type ThreadGoalStatus,
   type WorkBoardCard,
   type WorkBoardQuery,
@@ -158,6 +159,10 @@ export interface WorkThreadBoardServiceDependencies {
   readonly threads: WorkBoardThreadSource;
   readonly evidence: WorkBoardEvidenceSource;
   readonly runtime: WorkBoardRuntimeSource;
+  /** Fresh finished-with-proof mark per thread; absent when none exists or stale. Never moves column. */
+  readonly finishedReceipts?: {
+    read(threadId: WorkThreadId): ThreadBoardFinishedMark | undefined;
+  };
   readonly clock?: () => string;
 }
 
@@ -171,12 +176,14 @@ export class WorkThreadBoardService {
   readonly #threads: WorkBoardThreadSource;
   readonly #evidence: WorkBoardEvidenceSource;
   readonly #runtime: WorkBoardRuntimeSource;
+  readonly #finishedReceipts: WorkThreadBoardServiceDependencies["finishedReceipts"];
   readonly #clock: () => string;
 
   constructor(dependencies: WorkThreadBoardServiceDependencies) {
     this.#threads = dependencies.threads;
     this.#evidence = dependencies.evidence;
     this.#runtime = dependencies.runtime;
+    this.#finishedReceipts = dependencies.finishedReceipts;
     this.#clock = dependencies.clock ?? (() => new Date().toISOString());
   }
 
@@ -190,7 +197,8 @@ export class WorkThreadBoardService {
       if (entry.thread.completedAt !== undefined) continue;
       const evidence = await this.#evidence.forThread(entry);
       const activity = await this.#observeRuntime(entry.thread.id);
-      cards.push(buildCard(entry, evidence, activity));
+      const finishedReceipt = this.#finishedReceipts?.read(entry.thread.id);
+      cards.push(buildCard(entry, evidence, activity, finishedReceipt));
     }
 
     const appliedStatuses = query.statuses ?? ALL_BOARD_STATUSES;
@@ -223,6 +231,7 @@ function buildCard(
   entry: WorkBoardThread,
   evidence: WorkBoardEvidence,
   activity: WorkBoardRuntimeActivity,
+  finishedReceipt?: ThreadBoardFinishedMark,
 ): WorkBoardCard {
   const pullRequestSummaries = joinWorkThreadBoardPullRequests();
   const recovery = recoveryFrom(entry);
@@ -269,6 +278,7 @@ function buildCard(
     ...(blockingReason === undefined ? {} : { blockingReason }),
     followUp: entry.followUp,
     lastMeaningfulActivityAt: lastActivity === null ? null : decodeTimestamp(lastActivity),
+    ...(finishedReceipt === undefined ? {} : { finishedReceipt }),
   };
 }
 

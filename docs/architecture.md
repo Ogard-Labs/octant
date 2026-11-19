@@ -3162,6 +3162,30 @@ callers are refused when they try to reopen a thread a person marked. An optiona
 kept as the thread's completion evidence; without one the thread carries no
 evidence record.
 
+A Work or Code lead outside Plan may call `octant_report_finished` to say a
+thread is finished with proof built by the host (maintainer decision,
+2026-11-19). The tool is never offered in Chat, in Plan, or to a child run.
+It accepts a summary (at most 1,000 characters) and up to 12 check commands
+(each at most 200 characters). The host runs each named check and any goal
+criterion check once in the thread's checkout or folder under the thread's
+guardrail level (no prompt at Full access, normal approval rules below it),
+marks goal criteria without a check `claimed`, and records the observed diff
+file and line counts (or `unavailable` when no folder exists). If any check
+fails, nothing is recorded as finished and each failed check returns with the
+last 2,000 characters of its output in the same turn so the agent can fix and
+report again; outside Strict Octant adds no retry cap and never starts a new
+turn on its own. When no check fails, the host journals
+`thread.finished-receipt-recorded@1` (`thread-finished-receipt` aggregate).
+The receipt renders as a "Finished, with proof" card at the end of the turn
+and above the last reply on the Review page (whose Send back prefills any
+failed or claimed items), and places a compact "Finished" mark with the proven
+check count on the board card without changing its column and without adding
+Work threads to To review. Any later file-change journal event marks the
+receipt `stale` (ordered strictly by journal sequence) and clears the board
+mark. Marking a Work or Code thread Done while a fresh receipt stands attaches
+that receipt (`completionReceiptId`) as the thread's completion evidence, and
+Reopen clears it. Reporting finished never marks a thread Done.
+
 The Work mark locks the thread on the host until the person reopens it
 (archiving and reactivating the thread clears it too); a lock only in the window let a queued message,
 a routine, or a child's result start a turn anyway. Work turn admission, the

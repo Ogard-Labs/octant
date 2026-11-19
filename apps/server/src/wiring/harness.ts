@@ -73,6 +73,7 @@ import {
   type FollowUpSuggestionActionDependencies,
 } from "../followUps/followUpSuggestionRoutes";
 import { createSideTaskRouteHandler } from "../sideTasks/sideTaskRoutes";
+import { createFinishedReceiptRouteHandler } from "../finishedReceipts/finishedReceiptRoutes";
 import type { SideTaskStartDependencies } from "../sideTasks/sideTaskStart";
 import {
   createNativeHarnessSessionRouteHandler,
@@ -148,6 +149,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "contributeChildTools"
     | "externalContentIngestionStore"
     | "sideTasks"
+    | "finishedReceipts"
     | "threadFollowUpSuggestions"
     | "turnMetrics"
   > &
@@ -227,6 +229,7 @@ export function wireHarness(deps: HarnessDependencies) {
     runningWorkTurnAccess,
     runningWorkTurnSandbox,
     sideTasks,
+    finishedReceipts,
     threadFollowUpSuggestions,
     toolEgressRules,
     turnMetrics,
@@ -667,6 +670,11 @@ export function wireHarness(deps: HarnessDependencies) {
       Promise.resolve({ kind: "refused", message: "This thread cannot take a message now." }),
     clock: () => new Date().toISOString(),
   });
+  const finishedReceiptRoutes = createFinishedReceiptRouteHandler({
+    store: finishedReceipts,
+    windowAuthorityStore,
+    authorizeThread: authorizeFollowUpThread,
+  });
   const nativeHarnessEgressRoutes = createNativeHarnessEgressRouteHandler({
     windowAuthorityStore,
     rules: toolEgressRules,
@@ -1101,6 +1109,26 @@ export function wireHarness(deps: HarnessDependencies) {
     branches: (threadId) => codeThreadBranches(persistence, threadId),
     record: (input) => shieldServerStore.recordForgeChange(input),
   });
+  const finishedDefaultShell =
+    windowsHarnessCommandShell ??
+    createNativeHarnessShell({
+      process: harnessProcessPort,
+      scriptDirectory: harnessScriptDirectory,
+      sshAgentSocket,
+      cloudCliEnvironment,
+      googleCliCredentials: googleCliCommands.prepare,
+    });
+  const finishedFullAccessShell =
+    windowsHarnessCommandShell ??
+    createNativeHarnessShell({
+      process: harnessFullAccessProcessPort,
+      scriptDirectory: harnessScriptDirectory,
+      sshAgentSocket,
+      cloudCliEnvironment,
+      googleCliCredentials: googleCliCommands.prepare,
+    });
+  const finishedCheckShell = (fullAccess: boolean) =>
+    fullAccess ? finishedFullAccessShell : finishedDefaultShell;
   const nativeHarnessComposition = createNativeHarnessComposition({
     forgeChanges: {
       branches: (threadId) => codeThreadBranches(persistence, threadId),
@@ -1344,6 +1372,8 @@ export function wireHarness(deps: HarnessDependencies) {
     webSearchSettings,
     sideTaskHost,
     sideTaskRoutes,
+    finishedReceiptRoutes,
+    finishedCheckShell,
     hostShield,
     threadWork,
   };

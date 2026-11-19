@@ -112,6 +112,7 @@ import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
 import { ThreadFollowUpSuggestionStore } from "../followUps/threadFollowUpSuggestionStore";
 import { SideTaskStore } from "../sideTasks/sideTaskStore";
+import { ThreadFinishedReceiptStore } from "../finishedReceipts/finishedReceiptStore";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import {
@@ -664,6 +665,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     clock: () => new Date().toISOString(),
   });
   const sideTasks = new SideTaskStore({
+    journal: persistence.journal,
+    uuid: randomUUID,
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    clock: () => new Date().toISOString(),
+  });
+  const finishedReceipts = new ThreadFinishedReceiptStore({
     journal: persistence.journal,
     uuid: randomUUID,
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
@@ -1630,6 +1637,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     remoteDelegationHolder,
     runtimeOutsideContentMarks,
     sideTasks,
+    finishedReceipts,
     spendCeiling,
     spendCeilingHolder,
     threadAwaitsHarnessApproval,

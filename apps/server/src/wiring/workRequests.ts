@@ -54,7 +54,11 @@ import { listWorkTurnDecisions, workTurnDecision } from "../turnDecisions/workTu
 import { DecisionReviews, type DecisionReviewDependencies } from "../turnDecisions/decisionReviews";
 import { replyBeforeTurnDecision } from "@octant/domain/turn-decision-policy";
 import { defaultShellSettings, workProjectKeepsStatusFile } from "@octant/domain";
-import { resolveAgentRunParentThreadTitle, resolveHarnessThreadFacts } from "./agentRuns";
+import {
+  resolveAgentRunParentThreadTitle,
+  resolveHarnessThreadFacts,
+  type AgentRunsWiring,
+} from "./agentRuns";
 import {
   listLeadApprovalRequests,
   listLeadQuestionRequests,
@@ -123,6 +127,7 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
     | "workThreadServiceWithWorkflows"
   > &
   Pick<WorkFilesWiring, "workResearchProjection"> &
+  Pick<AgentRunsWiring, "finishedReceipts"> &
   Pick<FoundationsWiring, "workArtifactProjection" | "workThreadProjection" | "workTurnProjection">;
 
 export function wireWorkRequests(deps: WorkRequestsDependencies) {
@@ -142,6 +147,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     codeTurnDecisions,
     gitObservationPort,
     goalService,
+    finishedReceipts,
     nativeHarnessApprovals,
     nativeHarnessQuestions,
     nativeHarnessSessions,
@@ -533,6 +539,9 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
         });
         const board = new WorkThreadBoardService({
           threads: { list: () => boardThreads },
+          finishedReceipts: {
+            read: (threadId) => finishedReceipts.boardMark(String(threadId)),
+          },
           evidence: {
             forThread: (entry) =>
               composeWorkBoardEvidence({

@@ -606,7 +606,10 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
   > &
   Pick<
     AgentRunsWiring,
-    "externalContentIngestionStore" | "managedWorktreeReceipts" | "threadAwaitsHarnessApproval"
+    | "externalContentIngestionStore"
+    | "finishedReceipts"
+    | "managedWorktreeReceipts"
+    | "threadAwaitsHarnessApproval"
   > &
   Pick<
     IntegrationsWiring,
@@ -653,6 +656,7 @@ export function wireCode(deps: CodeDependencies) {
     codeEvidence,
     codeSessionAuthority,
     externalContentIngestionStore,
+    finishedReceipts,
     gitEnvironmentPort,
     githubIssueContextService,
     gitObservationPort,
@@ -922,6 +926,7 @@ export function wireCode(deps: CodeDependencies) {
           moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
           liveTurns,
           awaitsHarnessApproval: threadAwaitsHarnessApproval,
+          readLatestFinishedReceipt: (threadId) => finishedReceipts.latest(threadId),
           gitHistory: new GitHistoryPort(),
           serverGitHistory: (thread) => {
             const project = serverProjectOf(serverProjectStore, thread);

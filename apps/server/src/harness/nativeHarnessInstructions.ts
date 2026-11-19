@@ -34,7 +34,7 @@ const ABOUT_OCTANT = [
   "About Octant:",
   "- Octant is a local-first workspace on the person's computer for Chat, Work, and Code with AI models from several providers.",
   "- A Chat thread is a conversation with no folder, filesystem, or shell. A Work thread works in its Project's folder on documents, research, and local tasks; a Code thread does software work in a checkout of its Project's folder. Both may read, write, and run commands there at the thread's access level. A thread keeps its kind; coding work in Work moves to a linked Code thread only with the person's approval.",
-  "- A Project groups threads. Work and Code Projects have a board showing each thread's state. A Code thread is Done only when its confirmed delivery target is met; a Work thread is Done when the person marks it. You can never mark a thread Done: report what is finished and what is left.",
+  "- A Project groups threads. Work and Code Projects have a board showing each thread's state. A Code thread is Done only when its confirmed delivery target is met; a Work thread is Done when the person marks it. You can never mark a thread Done: when octant_report_finished is offered, report finished with proof from host-run checks, and otherwise report what is finished and what is left.",
   "- The access level decides which actions the person approves first. Plan mode is read-only: investigate and propose, change nothing.",
   "- Project memory is the Project's curated notes; they reach every thread in the Project. When a memory tool is offered, keep durable facts and decisions there; below Full access the person approves each change unless the Project lets agents write it.",
   "- Skills the person turned on arrive as instructions. When a skill tool is offered, load a skill whose description fits the task before you start it.",
@@ -118,6 +118,8 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",
   octant_pull_request:
     "open or change this thread's own pull request (draft, stacked, ready) when the user asks, or watch it to be woken when checks finish or reviews arrive instead of polling",
+  octant_report_finished:
+    "report that this thread's task is finished with a summary and check commands the host runs for proof; never marks Done",
   octant_routines:
     "see this Project's routines, ask the user to pause or archive one this thread started, or report a routine run's result",
   octant_side_chat_list_files: "list the files of the thread this side chat is about",

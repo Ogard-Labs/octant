@@ -119,6 +119,7 @@ import { createProjectBrowserClient } from "@octant/client-runtime/project-brows
 import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import { createFollowUpSuggestionClient } from "@octant/client-runtime/follow-up-suggestion-client";
 import { createSideTaskClient } from "@octant/client-runtime/side-task-client";
+import { createFinishedReceiptClient } from "@octant/client-runtime/finished-receipt-client";
 import { createThreadNotesClient } from "@octant/client-runtime/thread-notes-client";
 import { createGoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import {
@@ -221,6 +222,7 @@ export interface LaunchedShellClients {
   readonly projectTerminalClient: ReturnType<typeof createProjectTerminalClient>;
   readonly followUpSuggestionClient: ReturnType<typeof createFollowUpSuggestionClient>;
   readonly sideTaskClient: ReturnType<typeof createSideTaskClient>;
+  readonly finishedReceiptClient: ReturnType<typeof createFinishedReceiptClient>;
   readonly threadNotesClient: ReturnType<typeof createThreadNotesClient>;
   readonly goalLoopClient: ReturnType<typeof createGoalLoopClient>;
   readonly hostClient: HostClient;
@@ -407,6 +409,7 @@ export function createLaunchedShellClients(
     projectTerminalClient: createProjectTerminalClient(port),
     followUpSuggestionClient: createFollowUpSuggestionClient(port),
     sideTaskClient: createSideTaskClient(port),
+    finishedReceiptClient: createFinishedReceiptClient(port),
     threadNotesClient: createThreadNotesClient(port),
     goalLoopClient: createGoalLoopClient(port),
     hostClient: options.hostClient ?? createHostClient({ baseUrl: options.serverUrl, fetch }),

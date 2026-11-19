@@ -4,6 +4,7 @@ import {
   NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE,
   TOOL_EGRESS_PROJECT_AGGREGATE,
   TOOL_EGRESS_THREAD_AGGREGATE,
+  THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE,
   TURN_METRICS_AGGREGATE_TYPE,
   decodeChatThread,
   decodeContextSubjectRef,
@@ -459,6 +460,7 @@ function collectOwnedAggregates(
   // aggregate is taken by its id rather than by a payload path.
   add(TOOL_EGRESS_THREAD_AGGREGATE, threadId);
   add(TURN_METRICS_AGGREGATE_TYPE, threadId);
+  add(THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE, threadId);
   // Coordinator wakes are journaled on the woken thread's id (coordinatorWakeJournal.ts).
   add("coordinator-wake", threadId);
   for (const match of aggregatesMatching(connection, THREAD_OWNERSHIP_PATHS, threadId)) {

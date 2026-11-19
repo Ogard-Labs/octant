@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { ThreadGoalStatus } from "./goal";
+import { ThreadBoardFinishedMark } from "./finishedReceipt";
 import { BindingRevisionId, ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
@@ -163,6 +164,8 @@ export const WorkBoardCard = Schema.Struct({
   blockingReason: Schema.optional(boundedNonEmptyText(MAX_WORK_BOARD_CARD_BLOCKING_REASON_BYTES)),
   followUp: Schema.Boolean,
   lastMeaningfulActivityAt: Schema.NullOr(UtcTimestamp),
+  /** Fresh finished-with-proof mark; absent when none exists or when stale. Never moves the column. */
+  finishedReceipt: Schema.optional(ThreadBoardFinishedMark),
 }).annotations(strict);
 export type WorkBoardCard = typeof WorkBoardCard.Type;
 

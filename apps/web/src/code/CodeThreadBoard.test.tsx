@@ -1401,4 +1401,21 @@ describe("CodeThreadBoard waiting cards", () => {
     expect(within(waiting).queryByRole("button", { name: "Approve" })).toBeNull();
     expect(within(waiting).queryByRole("group")).toBeNull();
   });
+
+  it("shows a Finished mark with the proven check count on a Code board card without moving its column", async () => {
+    const finishedCard = {
+      ...card({ id: "05", status: "waiting", title: "Refactor parser" }),
+      finishedReceipt: {
+        receiptId: "22222222-2222-4222-8222-222222222222",
+        provenCount: 3,
+        claimedCount: 0,
+        recordedAt: "2026-11-19T12:00:00.000Z",
+      },
+    } as unknown as CodeBoardCard;
+    renderBoard([finishedCard], boardPendingSource(undefined));
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    expect(within(waiting).getByRole("button", { name: "Refactor parser" })).toBeVisible();
+    expect(within(waiting).getByText("Finished · 3 proven")).toBeVisible();
+  });
 });

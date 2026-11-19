@@ -200,6 +200,11 @@ import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { SideTaskInline, sideTasksAfterTurn, useThreadSideTasks } from "../followUps/SideTaskCards";
+import {
+  FinishedReceiptInline,
+  finishedReceiptsAfterTurn,
+  useThreadFinishedReceipts,
+} from "../finishedReceipts/FinishedReceiptCard";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TurnActions } from "../transcript/TurnActions";
@@ -273,6 +278,13 @@ type WorkTranscriptRow =
       readonly key: string;
       readonly turnId: string;
       readonly running: boolean;
+      readonly last: boolean;
+      readonly loadedTurnIds: ReadonlySet<string>;
+    }
+  | {
+      readonly kind: "finished-receipt";
+      readonly key: string;
+      readonly turnId: string;
       readonly last: boolean;
       readonly loadedTurnIds: ReadonlySet<string>;
     }
@@ -1557,6 +1569,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     revealTurnId,
   ]);
   const sideTasks = useThreadSideTasks();
+  const finishedReceipts = useThreadFinishedReceipts();
   const loadedTurnIds = useMemo(() => new Set(turns.map((turn) => String(turn.turnId))), [turns]);
   const transcriptRows = useMemo<ReadonlyArray<WorkTranscriptRow>>(() => {
     const rows: WorkTranscriptRow[] = [];
@@ -1628,6 +1641,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         last: turn === turns.at(-1),
         loadedTurnIds,
       };
+      if (finishedReceiptsAfterTurn(finishedReceipts, placement).length > 0) {
+        rows.push({
+          kind: "finished-receipt",
+          key: `${String(turn.requestId)}-finished-receipt`,
+          ...placement,
+        });
+      }
       if (sideTasksAfterTurn(sideTasks, placement).length > 0) {
         rows.push({
           kind: "side-tasks",
@@ -1643,7 +1663,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
     if (status !== undefined) rows.push({ kind: "status", key: "status", text: status });
     return rows;
-  }, [firstPageSettled, loadedTurnIds, pendingRequests, sideTasks, status, turns]);
+  }, [
+    finishedReceipts,
+    firstPageSettled,
+    loadedTurnIds,
+    pendingRequests,
+    sideTasks,
+    status,
+    turns,
+  ]);
   // The turn's first row, whichever kind opens it (its prompt, or the header
   // a reply opens with), is where the reader lands.
   const revealKey =
@@ -2839,6 +2867,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       </p>
                     ) : null}
                   </section>
+                );
+              }
+              if (row.kind === "finished-receipt") {
+                return (
+                  <FinishedReceiptInline
+                    last={row.last}
+                    loadedTurnIds={row.loadedTurnIds}
+                    turnId={row.turnId}
+                  />
                 );
               }
               if (row.kind === "side-tasks") {

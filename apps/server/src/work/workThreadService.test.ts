@@ -2093,6 +2093,77 @@ describe("WorkThreadService", () => {
     ).resolves.toMatchObject({ kind: "thread-completion-confirmed", thread: { version: 5 } });
   });
 
+  it("attaches a fresh finished receipt as completion evidence when marking Work Done, ignores stale ones, and clears it on reopen", async () => {
+    const receiptId = "77777777-7777-4777-8777-777777777777";
+    let stale = false;
+    const fixture = serviceFixture({
+      threads: [thread()],
+      readLatestFinishedReceipt: () =>
+        ({
+          receipt: {
+            receiptId,
+            threadId: String(ids.thread),
+            mode: "work",
+            projectId: ids.project,
+            summary: "Finished drafting brief.",
+            items: [
+              {
+                kind: "check",
+                label: "check-doc",
+                command: "check-doc",
+                status: "proven",
+                exitCode: 0,
+              },
+            ],
+            diff: { status: "unavailable", reason: "No Git diff." },
+            recordedAt: now,
+          },
+          status: stale ? "stale" : "proven",
+          stale,
+          provenCount: 1,
+          claimedCount: 0,
+          failedCount: 0,
+          unavailableCount: 0,
+        }) as never,
+    });
+
+    const freshDone = await fixture.service.execute(ids.window, {
+      kind: "confirm-work-thread-completion",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      deliveryTarget: "Draft brief",
+    });
+    expect(freshDone).toMatchObject({
+      kind: "thread-completion-confirmed",
+      thread: { completionConfirmed: true, completionReceiptId: receiptId, version: 2 },
+    });
+
+    const reopened = await fixture.service.execute(ids.window, {
+      kind: "reopen-work-thread",
+      threadId: ids.thread,
+      expectedVersion: 2,
+    });
+    expect(reopened).toMatchObject({ kind: "thread-updated", thread: { version: 3 } });
+    if ("thread" in reopened) {
+      expect(reopened.thread).not.toHaveProperty("completionReceiptId");
+    }
+
+    stale = true;
+    const staleDone = await fixture.service.execute(ids.window, {
+      kind: "confirm-work-thread-completion",
+      threadId: ids.thread,
+      expectedVersion: 3,
+      deliveryTarget: "Draft brief",
+    });
+    expect(staleDone).toMatchObject({
+      kind: "thread-completion-confirmed",
+      thread: { completionConfirmed: true, version: 4 },
+    });
+    if ("thread" in staleDone) {
+      expect(staleDone.thread).not.toHaveProperty("completionReceiptId");
+    }
+  });
+
   it("refuses a routine or anything else acting as the host when it tries to reopen a thread a person marked Done", async () => {
     const fixture = serviceFixture({ threads: [thread({ completionConfirmed: true })] });
 
@@ -2406,6 +2477,7 @@ function serviceFixture(
     readonly terminalSessions?: TerminalSessionImportPort;
     readonly turnProjection?: WorkThreadServiceDependencies["turnProjection"];
     readonly isMarked?: WorkThreadServiceDependencies["isMarked"];
+    readonly readLatestFinishedReceipt?: WorkThreadServiceDependencies["readLatestFinishedReceipt"];
     readonly uuid?: () => string;
     readonly serverProjects?: WorkThreadServiceDependencies["serverProjects"];
   } = {},
@@ -2487,6 +2559,9 @@ function serviceFixture(
     turnProjection,
     uuid: options.uuid ?? (() => "72000000-0000-4000-8000-000000000099"),
     ...(options.isMarked === undefined ? {} : { isMarked: options.isMarked }),
+    ...(options.readLatestFinishedReceipt === undefined
+      ? {}
+      : { readLatestFinishedReceipt: options.readLatestFinishedReceipt }),
     clock: () => now,
     workingDirectories,
     onWorkingDirectoryChanged,

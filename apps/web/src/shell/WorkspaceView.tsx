@@ -447,7 +447,10 @@ export interface WorkspaceViewProps {
   }) => void;
   readonly onPreviewResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   /** Offers each local thread pane's follow-up suggestions over its composer. */
-  readonly followUpSuggestions?: Pick<ComposerOffers, "client" | "sideTaskClient" | "onCreated">;
+  readonly followUpSuggestions?: Pick<
+    ComposerOffers,
+    "client" | "sideTaskClient" | "finishedReceiptClient" | "onCreated"
+  >;
   /** A keyboard path to the edge-drop gesture: split a pane onto a welcome. */
   readonly onSplitPane: (
     paneId: PaneId,
@@ -1108,7 +1111,8 @@ function useStableFollowUpOffers(host: WorkspaceViewProps["followUpSuggestions"]
     if (
       cached !== undefined &&
       cached.client === fresh.client &&
-      cached.sideTaskClient === fresh.sideTaskClient
+      cached.sideTaskClient === fresh.sideTaskClient &&
+      cached.finishedReceiptClient === fresh.finishedReceiptClient
     ) {
       return cached;
     }

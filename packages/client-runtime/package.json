@@ -58,6 +58,7 @@
     "./safe-networks-client": "./src/safeNetworksClient.ts",
     "./follow-up-suggestion-client": "./src/followUpSuggestionClient.ts",
     "./side-task-client": "./src/sideTaskClient.ts",
+    "./finished-receipt-client": "./src/finishedReceiptClient.ts",
     "./thread-notes-client": "./src/threadNotesClient.ts",
     "./mobile-native-harness-client": "./src/mobileNativeHarnessClient.ts",
     "./mobile-speech-client": "./src/mobileSpeechClient.ts",

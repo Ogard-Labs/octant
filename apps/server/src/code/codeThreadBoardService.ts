@@ -9,6 +9,7 @@ import {
   type CodeThreadId,
   type CodeThreadOperationalMetadata,
   type ProjectId,
+  type ThreadBoardFinishedMark,
 } from "@octant/contracts";
 import {
   compareThreadBoardActivityDescending,
@@ -194,6 +195,10 @@ export interface CodeThreadBoardServiceDependencies {
   readonly pullRequests: CodeBoardPullRequestSource;
   readonly planProgress?: CodeBoardPlanProgressSource;
   readonly outsideContent?: CodeBoardOutsideContentSource;
+  /** Fresh finished-with-proof mark per thread; absent when none exists or stale. Never moves column. */
+  readonly finishedReceipts?: {
+    read(threadId: CodeThreadId): ThreadBoardFinishedMark | undefined;
+  };
   readonly clock?: () => string;
 }
 
@@ -212,6 +217,7 @@ export class CodeThreadBoardService {
   readonly #pullRequests: CodeBoardPullRequestSource;
   readonly #planProgress: CodeBoardPlanProgressSource;
   readonly #outsideContent: CodeBoardOutsideContentSource | undefined;
+  readonly #finishedReceipts: CodeThreadBoardServiceDependencies["finishedReceipts"];
   readonly #clock: () => string;
 
   constructor(dependencies: CodeThreadBoardServiceDependencies) {
@@ -221,6 +227,7 @@ export class CodeThreadBoardService {
     this.#pullRequests = dependencies.pullRequests;
     this.#planProgress = dependencies.planProgress ?? { read: () => ({ kind: "none" }) };
     this.#outsideContent = dependencies.outsideContent;
+    this.#finishedReceipts = dependencies.finishedReceipts;
     this.#clock = dependencies.clock ?? (() => new Date().toISOString());
   }
 
@@ -280,6 +287,7 @@ export class CodeThreadBoardService {
         if (activity === undefined) return undefined;
         const planProgress = this.#planProgress.read(entry.thread.id);
         const outsideContent = this.#outsideContent?.read(entry.thread.id);
+        const finishedReceipt = this.#finishedReceipts?.read(entry.thread.id);
         return buildCard(
           entry,
           metadata,
@@ -287,6 +295,7 @@ export class CodeThreadBoardService {
           pullRequestSnapshot,
           planProgress,
           outsideContent,
+          finishedReceipt,
         );
       })
       .filter((card): card is CodeBoardCard => card !== undefined);
@@ -326,6 +335,7 @@ function buildCard(
   pullRequestSnapshot: ThreadBoardPullRequestSnapshot,
   planProgress: CodeBoardCard["planProgress"],
   outsideContent: CodeBoardCard["outsideContent"],
+  finishedReceipt?: ThreadBoardFinishedMark,
 ): CodeBoardCard {
   const pullRequestSummaries = joinCodeThreadBoardPullRequests({
     threadId: entry.thread.id,
@@ -373,6 +383,7 @@ function buildCard(
     ...(entry.thread.coordinatorThreadId === undefined
       ? {}
       : { coordinatorThreadId: entry.thread.coordinatorThreadId }),
+    ...(finishedReceipt === undefined ? {} : { finishedReceipt }),
   };
 }
 

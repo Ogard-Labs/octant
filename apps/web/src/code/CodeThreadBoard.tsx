@@ -23,6 +23,7 @@ import {
 } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  ThreadBoardCardFinishedMark,
   ThreadBoardCardLive,
   ThreadBoardCardMeta,
   type ThreadBoardCardMetaProps,
@@ -831,6 +832,7 @@ function CodeBoardCardView(props: {
               onResolve={(outcome) => resolveStep(step.workId, outcome)}
             />
           ))}
+      <ThreadBoardCardFinishedMark mark={card.finishedReceipt} />
       <ThreadBoardPullRequestSummaries
         {...(props.onSelectPullRequest === undefined
           ? {}

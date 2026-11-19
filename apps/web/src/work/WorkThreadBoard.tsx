@@ -13,6 +13,7 @@ import { THREAD_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/thread-board-po
 import { ChevronDown, Filter, Folder, RefreshCw, Search } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  ThreadBoardCardFinishedMark,
   ThreadBoardCardLive,
   ThreadBoardCardMeta,
   type ThreadBoardCardMetaProps,
@@ -511,6 +512,7 @@ function WorkBoardCardView(props: {
       {props.request === undefined ? null : (
         <ThreadBoardCardRequest onOpenThread={onOpenThread} request={props.request} />
       )}
+      <ThreadBoardCardFinishedMark mark={card.finishedReceipt} />
       <ThreadBoardPullRequestSummaries
         {...(props.onSelectPullRequest === undefined
           ? {}

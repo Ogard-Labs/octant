@@ -8,6 +8,7 @@ import {
   NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
   THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE,
+  THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE,
   THREAD_RETENTION_EVENT_NAMES,
   THREAD_SIDE_TASKS_AGGREGATE_TYPE,
 } from "@octant/contracts";
@@ -250,6 +251,9 @@ function topicsForEvent(event: {
     aggregateType === BROWSER_STEP_AGGREGATE_TYPE
   )
     return ["browser-captures"];
+  if (aggregateType === THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE) {
+    return ["thread-follow-ups", "work-navigation", "code-navigation"];
+  }
   if (
     aggregateType === THREAD_SIDE_TASKS_AGGREGATE_TYPE ||
     aggregateType === THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE
