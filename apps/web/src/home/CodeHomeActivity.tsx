@@ -122,6 +122,9 @@ interface ActivityCardInput {
   readonly pinned: boolean;
   readonly source: ActivityCardSource;
   readonly read: CodeHomeActivityProps["read"];
+  /** The client's calendar the range resolved under; part of the read's scope. */
+  readonly timeZone: string;
+  readonly weekStartsOn: number;
   /** Absent when the range could not resolve; the card says so and reads nothing. */
   readonly query: ActivityQuery | undefined;
   /** "Mar 9, 9:30 AM – Mar 16, 9:30 AM", or "Everything recorded" for Total. */
@@ -276,8 +279,10 @@ export function CodeHomeActivity(props: CodeHomeActivityProps) {
         resolveActivityRange({ range, nowMs, timeZone, weekStartsOn }),
     [nowMs, timeZone, weekStartsOn],
   );
-  // One input per card, memoized so a card's read effect keys on real change
-  // — new timeframe, source or account — and not on every render's rebuild.
+  // One candidate input per card for this batch of changes. Any change
+  // rebuilds all four, so each ActivityCard retains its previous input while
+  // its own effective choices, the refresh epoch and the read client are
+  // unchanged — a sibling's edit never re-reads it.
   const cardInputs = useMemo<ReadonlyArray<ActivityCardInput>>(
     () =>
       ACTIVITY_CARDS.map((meta) => {
@@ -302,11 +307,13 @@ export function CodeHomeActivity(props: CodeHomeActivityProps) {
           pinned: activity.pins.some((pin) => pin.card === meta.card),
           source,
           read: props.read,
+          timeZone,
+          weekStartsOn,
           query,
           windowText: resolved.status === "ready" ? windowLabel(resolved.current) : "No window",
         };
       }),
-    [activity, resolve, props.read],
+    [activity, resolve, props.read, timeZone, weekStartsOn],
   );
   const definitions: ReadonlyArray<ActivityCardDefinition> = cardInputs.map((input) => ({
     id: input.meta.id,
@@ -381,16 +388,36 @@ export function CodeHomeActivity(props: CodeHomeActivityProps) {
 
 /**
  * The parts of a card read an explicit refresh may hold on to: same card,
- * source and range choice. Any of them moving means the last answer belongs
- * to a different question and must not stay on screen or keep its snapshot
- * pageable.
+ * source, range choice and the calendar it resolved under. Any of them
+ * moving means the last answer belongs to a different question and must not
+ * stay on screen or keep its snapshot pageable.
  */
 function activityScopeKey(input: ActivityCardInput): string {
-  return JSON.stringify({
-    card: input.meta.card,
-    range: input.range,
-    source: input.source,
-  });
+  return JSON.stringify([
+    input.meta.card,
+    input.source,
+    input.range.kind,
+    input.range.kind === "custom" ? input.range.startDate : null,
+    input.range.kind === "custom" ? input.range.endDate : null,
+    input.timeZone,
+    input.weekStartsOn,
+  ]);
+}
+
+/**
+ * The candidate input this card's read actually stands on. A change to any
+ * card rebuilds every candidate, so each card keeps its previous input while
+ * its own scope, the refresh epoch and the read client are unchanged — a
+ * sibling's edit, a reorder or a repaint then never re-reads it.
+ */
+function useEffectiveCardInput(candidate: ActivityCardInput, epoch: number): ActivityCardInput {
+  const scope = activityScopeKey(candidate);
+  const [prior, setPrior] = useState(() => ({ scope, epoch, input: candidate }));
+  if (prior.scope === scope && prior.epoch === epoch && prior.input.read === candidate.read) {
+    return prior.input;
+  }
+  setPrior({ scope, epoch, input: candidate });
+  return candidate;
 }
 
 /** What `ActivityCard` needs from one card's read: the answer plus the drill-down it opened. */
@@ -491,7 +518,9 @@ function ActivityCard(props: {
   readonly onOpenExternal: CodeHomeActivityProps["onOpenExternal"];
 }) {
   const { definition } = props;
-  const input = definition.input;
+  // The input this card reads, opens records for and labels its window from
+  // is the retained one; the pin badge alone follows the live candidate.
+  const input = useEffectiveCardInput(definition.input, props.epoch);
   const { read, drill, openRecords, closeRecords, renewAfterStale } = useActivityCardContent(
     input,
     props.epoch,
@@ -598,7 +627,7 @@ function ActivityCard(props: {
         <h2 className="oct-section-label home-card__title" id={titleId}>
           {definition.title}
         </h2>
-        {input.pinned ? (
+        {definition.input.pinned ? (
           <span className="oct-meta code-home-activity-card__range">
             {activityRangeLabel(input.range)}
           </span>

@@ -1,7 +1,9 @@
 import {
   decodeActivityView,
   type ActivityQuery,
+  type ActivityRangeChoice,
   type ActivityView,
+  type HomeActivityPin,
 } from "@octant/contracts/code-home-activity";
 import type { HomeCardCustomization } from "@octant/contracts/shell";
 import { resolveActivityRange } from "@octant/domain/activity-range-policy";
@@ -318,12 +320,19 @@ describe("Customize activity", () => {
     const dialog = await screen.findByRole("dialog", { name: "Customize activity" });
     await user.click(within(dialog).getByRole("combobox", { name: "History source" }));
     await user.click(await screen.findByRole("option", { name: "Recorded by Octant" }));
-    await waitFor(() => expect(source.calls().length).toBeGreaterThanOrEqual(8));
+    // The source moves only the three delivery cards: runs always reads
+    // from Octant, so its question is unchanged and it is not re-read.
+    await waitFor(() => expect(source.calls()).toHaveLength(7));
     const laterReads = source
       .calls()
       .slice(4)
       .flatMap((query) => (query.kind === "read" ? [query] : []));
-    expect(laterReads.some((query) => query.source === "octant")).toBe(true);
+    expect(laterReads.map((query) => query.card).sort()).toEqual([
+      "issues-closed",
+      "prs-merged",
+      "releases-published",
+    ]);
+    expect(laterReads.every((query) => query.source === "octant")).toBe(true);
   });
 });
 
@@ -790,5 +799,82 @@ describe("a changed scope", () => {
     expect(calls.some((query) => query.kind === "read" && query.refresh === true)).toBe(true);
     act(() => pending.forEach((resolve) => resolve(view({ count: 5 }))));
     expect(await within(card).findByText("5")).toBeInTheDocument();
+  });
+
+  it("re-reads only the cards whose own timeframe moved across prop updates", async () => {
+    const source = reads(() => view());
+    const customization = (
+      sharedRange: ActivityRangeChoice,
+      pins: ReadonlyArray<HomeActivityPin>,
+    ): HomeCardCustomization => ({
+      order: [],
+      visibility: [],
+      activity: { sharedRange, source: "github", pins: [...pins] },
+    });
+    const panel = (settings: HomeCardCustomization) => (
+      <CodeHomeActivity
+        customization={settings}
+        onCustomizationChange={() => undefined}
+        onOpenThread={() => undefined}
+        read={source.read}
+        weekStartsOn={1}
+      />
+    );
+    const { rerender } = render(
+      panel(
+        customization({ kind: "this-week" }, [
+          { card: "prs-merged", range: { kind: "last-month" } },
+        ]),
+      ),
+    );
+    await waitFor(() => expect(source.calls()).toHaveLength(4));
+
+    // The shared range moves: the unpinned cards re-read while the pinned
+    // card kept its own timeframe and reads nothing.
+    rerender(
+      panel(
+        customization({ kind: "today" }, [{ card: "prs-merged", range: { kind: "last-month" } }]),
+      ),
+    );
+    await waitFor(() => expect(source.calls()).toHaveLength(7));
+    expect(
+      source
+        .calls()
+        .slice(4)
+        .flatMap((query) => (query.kind === "read" ? [query.card] : []))
+        .sort(),
+    ).toEqual(["issues-closed", "releases-published", "runs"]);
+
+    // The pinned card's own range moves: it alone re-reads.
+    rerender(
+      panel(
+        customization({ kind: "today" }, [{ card: "prs-merged", range: { kind: "this-year" } }]),
+      ),
+    );
+    await waitFor(() => expect(source.calls()).toHaveLength(8));
+    expect(
+      source
+        .calls()
+        .slice(7)
+        .flatMap((query) => (query.kind === "read" ? [query.card] : [])),
+    ).toEqual(["prs-merged"]);
+
+    // Pinning another card to the timeframe it already reads only adds the
+    // decoration: the question never changed, so nothing re-reads.
+    rerender(
+      panel(
+        customization({ kind: "today" }, [
+          { card: "prs-merged", range: { kind: "this-year" } },
+          { card: "issues-closed", range: { kind: "today" } },
+        ]),
+      ),
+    );
+    const issues = await screen.findByRole("region", { name: "Issues closed" });
+    await waitFor(() =>
+      expect(
+        within(issues).getByText("Today", { selector: ".code-home-activity-card__range" }),
+      ).toBeInTheDocument(),
+    );
+    expect(source.calls()).toHaveLength(8);
   });
 });
