@@ -3,12 +3,12 @@ import {
   COMPUTER_TOOL_HOST_LINE,
   computerUseSelection,
   isComputerUseSelection,
-  COMPUTER_USE_PLUGIN,
+  computerUsePluginManifest,
 } from "./computerUsePlugin";
 
 describe("Computer use selection", () => {
   it("recognizes a selection from an older draft so a send can ignore it", () => {
-    expect(COMPUTER_USE_PLUGIN.displayName).toBe("Computer use");
+    expect(computerUsePluginManifest().displayName).toBe("Computer use");
     expect(isComputerUseSelection(computerUseSelection("older-draft"))).toBe(true);
   });
 });

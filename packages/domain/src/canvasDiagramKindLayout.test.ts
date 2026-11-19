@@ -13,10 +13,10 @@ const snapshot = JSON.parse(
 
 describe("entity-relationship, swimlane, and mind map layout", () => {
   it("lays an entity-relationship model out the same way every time", () => {
-    const layout = layoutCanvasEr(orderSchemaBlock);
+    const layout = layoutCanvasEr(orderSchemaBlock());
 
     expect(layout).toEqual(snapshot.er);
-    expect(layoutCanvasEr(orderSchemaBlock)).toEqual(layout);
+    expect(layoutCanvasEr(orderSchemaBlock())).toEqual(layout);
     const byId = new Map(layout.entities.map((entity) => [entity.entityId, entity]));
     const person = byId.get("person");
     const order = byId.get("order");
@@ -34,7 +34,7 @@ describe("entity-relationship, swimlane, and mind map layout", () => {
   });
 
   it("keeps a relationship's label and both cardinalities apart from one another", () => {
-    const layout = layoutCanvasEr(orderSchemaBlock);
+    const layout = layoutCanvasEr(orderSchemaBlock());
     const places = layout.relationships.find((entry) => entry.label === "places");
     if (places === undefined) throw new Error("The places relationship was not routed.");
     const [start, end] = places.points;
@@ -56,10 +56,10 @@ describe("entity-relationship, swimlane, and mind map layout", () => {
   });
 
   it("stacks swimlane lanes in order and lays each lane's steps left to right", () => {
-    const layout = layoutCanvasSwimlane(supportFlowBlock);
+    const layout = layoutCanvasSwimlane(supportFlowBlock());
 
     expect(layout).toEqual(snapshot.swimlane);
-    expect(layoutCanvasSwimlane(supportFlowBlock)).toEqual(layout);
+    expect(layoutCanvasSwimlane(supportFlowBlock())).toEqual(layout);
     const [customer, support, engineering] = layout.lanes;
     expect(customer?.label).toBe("Customer");
     expect(support?.y ?? 0).toBeGreaterThan(customer?.y ?? 0);
@@ -72,7 +72,7 @@ describe("entity-relationship, swimlane, and mind map layout", () => {
   });
 
   it("starts each lane's first step clear of the lane's header divider", () => {
-    const layout = layoutCanvasSwimlane(supportFlowBlock);
+    const layout = layoutCanvasSwimlane(supportFlowBlock());
     for (const lane of layout.lanes) {
       const first = layout.steps.find((step) => step.laneId === lane.laneId);
       if (first === undefined) continue;
@@ -83,10 +83,10 @@ describe("entity-relationship, swimlane, and mind map layout", () => {
   });
 
   it("draws a mind map as one root with each generation a column to the right", () => {
-    const layout = layoutCanvasMindmap(releaseMindmapBlock);
+    const layout = layoutCanvasMindmap(releaseMindmapBlock());
 
     expect(layout).toEqual(snapshot.mindmap);
-    expect(layoutCanvasMindmap(releaseMindmapBlock)).toEqual(layout);
+    expect(layoutCanvasMindmap(releaseMindmapBlock())).toEqual(layout);
     const root = layout.nodes.find((node) => node.root);
     const docs = layout.nodes.find((node) => node.nodeId === "docs");
     const architecture = layout.nodes.find((node) => node.nodeId === "architecture");
@@ -96,6 +96,6 @@ describe("entity-relationship, swimlane, and mind map layout", () => {
     // A note makes its topic taller so the remark has room without overlap.
     const tests = layout.nodes.find((node) => node.nodeId === "tests");
     expect(tests?.height).toBeGreaterThan(docs?.height ?? 0);
-    expect(layout.edges).toHaveLength(releaseMindmapBlock.nodes.length - 1);
+    expect(layout.edges).toHaveLength(releaseMindmapBlock().nodes.length - 1);
   });
 });

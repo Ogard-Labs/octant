@@ -36,7 +36,7 @@ function expectInert(mockup: HTMLElement) {
 
 describe("mockup wireframe", () => {
   it("exposes a settings screen as a labelled tree and keeps its controls inert", () => {
-    draw(settingsScreenExampleBlock);
+    draw(settingsScreenExampleBlock());
 
     const mockup = screen.getByRole("region", { name: "Settings, Desktop mockup" });
     expect(mockup).toHaveAttribute("aria-roledescription", "mockup");
@@ -65,7 +65,7 @@ describe("mockup wireframe", () => {
   });
 
   it("shows one tab panel, not every tab's content", () => {
-    draw(settingsScreenExampleBlock);
+    draw(settingsScreenExampleBlock());
     const tree = within(screen.getByRole("region", { name: "Settings, Desktop mockup" })).getByRole(
       "tree",
       { name: "Settings" },
@@ -77,7 +77,7 @@ describe("mockup wireframe", () => {
   });
 
   it("numbers each callout on its node and lists the notes beside the frame", () => {
-    draw(settingsScreenExampleBlock);
+    draw(settingsScreenExampleBlock());
     const mockup = screen.getByRole("region", { name: "Settings, Desktop mockup" });
     expect(
       within(mockup).getByRole("treeitem", { name: "Button, Save, accent, callout 2" }),
@@ -93,7 +93,7 @@ describe("mockup wireframe", () => {
 
   it("pins a callout on the window itself inside the frame", () => {
     draw({
-      ...settingsScreenExampleBlock,
+      ...settingsScreenExampleBlock(),
       annotations: [{ nodeId: "screen", note: "Opens from the app menu." }],
     });
     const mockup = screen.getByRole("region", { name: "Settings, Desktop mockup" });
@@ -102,7 +102,7 @@ describe("mockup wireframe", () => {
   });
 
   it("offers the component tree as an outline list", async () => {
-    draw(settingsScreenExampleBlock);
+    draw(settingsScreenExampleBlock());
     await userEvent.click(screen.getByText("Outline"));
     const outline = screen.getByText("Outline").closest("details");
     if (outline === null) throw new Error("Outline disclosure is missing.");
@@ -115,7 +115,7 @@ describe("mockup wireframe", () => {
   });
 
   it("draws every state of a styled screen side by side, each a labelled tree", () => {
-    draw(notificationStatesExampleBlock);
+    draw(notificationStatesExampleBlock());
     const mockup = screen.getByRole("region", { name: "Notifications, Phone mockup" });
     expect(mockup).toHaveAttribute("data-fidelity", "styled");
     for (const state of ["Loaded", "Empty", "Error"]) {
@@ -175,7 +175,7 @@ describe("mockup wireframe", () => {
   });
 
   it.each(devices)("names the %s preset without offering a live control", (device, name) => {
-    draw({ ...settingsScreenExampleBlock, device });
+    draw({ ...settingsScreenExampleBlock(), device });
     const mockup = screen.getByRole("region", { name: `Settings, ${name} mockup` });
     expect(mockup).toHaveAttribute("data-device", device);
     expect(mockup.querySelector(`.canvas-mockup__frame[data-device="${device}"]`)).not.toBeNull();
@@ -183,7 +183,7 @@ describe("mockup wireframe", () => {
   });
 
   it("draws a custom frame at its own size", () => {
-    draw({ ...settingsScreenExampleBlock, device: "custom", size: { width: 600, height: 400 } });
+    draw({ ...settingsScreenExampleBlock(), device: "custom", size: { width: 600, height: 400 } });
     const mockup = screen.getByRole("region", { name: "Settings, Custom mockup" });
     const frame = mockup.querySelector<HTMLElement>(".canvas-mockup__frame");
     expect(frame?.style.getPropertyValue("--canvas-mockup-frame-w")).toBe("600px");

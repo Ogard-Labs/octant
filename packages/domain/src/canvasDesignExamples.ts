@@ -252,8 +252,18 @@ function designBlock(value: unknown): CanvasDesignBlock {
   return block;
 }
 
-export const onboardingFlowExampleBlock = designBlock(onboardingFlowExample);
-export const launchDeckExampleBlock = designBlock(launchDeckExample);
-export const searchSpecExampleBlock = designBlock(searchSpecExample);
-export const cartPrototypeExampleBlock = designBlock(cartPrototypeExample);
-export const appWindowPrototypeExampleBlock = designBlock(appWindowPrototypeExample);
+export function onboardingFlowExampleBlock() {
+  return designBlock(onboardingFlowExample);
+}
+export function launchDeckExampleBlock() {
+  return designBlock(launchDeckExample);
+}
+export function searchSpecExampleBlock() {
+  return designBlock(searchSpecExample);
+}
+export function cartPrototypeExampleBlock() {
+  return designBlock(cartPrototypeExample);
+}
+export function appWindowPrototypeExampleBlock() {
+  return designBlock(appWindowPrototypeExample);
+}

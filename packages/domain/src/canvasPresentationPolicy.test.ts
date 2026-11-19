@@ -38,11 +38,11 @@ const table = decodeCanvasBlock({
 
 describe("canvasInlineRefusal", () => {
   it("admits every chart type, a dashboard, a table, and math in the thread", () => {
-    expect(chartExampleBlocks.length).toBeGreaterThan(0);
-    for (const chart of chartExampleBlocks) expect(canvasInlineRefusal([chart])).toBeUndefined();
-    expect(canvasInlineRefusal(opsDashboardExampleBlocks)).toBeUndefined();
+    expect(chartExampleBlocks().length).toBeGreaterThan(0);
+    for (const chart of chartExampleBlocks()) expect(canvasInlineRefusal([chart])).toBeUndefined();
+    expect(canvasInlineRefusal(opsDashboardExampleBlocks())).toBeUndefined();
     expect(canvasInlineRefusal([table])).toBeUndefined();
-    expect(canvasInlineRefusal(mathExampleBlocks)).toBeUndefined();
+    expect(canvasInlineRefusal(mathExampleBlocks())).toBeUndefined();
   });
 
   it("admits a diagram board, which the thread draws without its editing runtime", () => {
@@ -50,12 +50,12 @@ describe("canvasInlineRefusal", () => {
   });
 
   it("admits the agent's inline request for a design drawn as a document", () => {
-    expect(canvasInlineRefusal([searchSpecExampleBlock])).toBeUndefined();
+    expect(canvasInlineRefusal([searchSpecExampleBlock()])).toBeUndefined();
   });
 
   it("admits a document-size design that runs script, which waits in the thread for Run", () => {
     const page = decodeCanvasBlock({
-      ...searchSpecExampleBlock,
+      ...searchSpecExampleBlock(),
       theme: "none",
       runsScript: true,
     });
@@ -64,9 +64,9 @@ describe("canvasInlineRefusal", () => {
 
   it("keeps a device-size design in the sidebar and tells the agent the thread shows a preview card", () => {
     for (const [design, size] of [
-      [onboardingFlowExampleBlock, "phone"],
-      [launchDeckExampleBlock, "slide"],
-      [appWindowPrototypeExampleBlock, "desktop"],
+      [onboardingFlowExampleBlock(), "phone"],
+      [launchDeckExampleBlock(), "slide"],
+      [appWindowPrototypeExampleBlock(), "desktop"],
     ] as const) {
       const refusal = canvasInlineRefusal([design]);
       expect(refusal).toContain(`${size} design`);
@@ -78,7 +78,7 @@ describe("canvasInlineRefusal", () => {
   it("keeps a plan and a mockup in the sidebar, even beside blocks the thread could draw", () => {
     const plan = decodeCanvasBlock(launchGanttExample);
     expect(canvasInlineRefusal([table, plan])).toContain("plan block");
-    expect(canvasInlineRefusal([board, settingsScreenExampleBlock])).toContain("mockup block");
+    expect(canvasInlineRefusal([board, settingsScreenExampleBlock()])).toContain("mockup block");
   });
 
   it("keeps a choice in the sidebar, where its answer can be sent to the thread", () => {

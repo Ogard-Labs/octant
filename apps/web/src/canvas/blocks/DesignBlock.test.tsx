@@ -156,7 +156,7 @@ function frames(container: ParentNode): ReadonlyArray<HTMLIFrameElement> {
 }
 
 function design(fields: Partial<Pick<CanvasDesignBlock, "size" | "theme">>): CanvasDesignBlock {
-  const block = decodeCanvasBlock({ ...onboardingFlowExampleBlock, ...fields });
+  const block = decodeCanvasBlock({ ...onboardingFlowExampleBlock(), ...fields });
   if (block.kind !== "design") throw new Error("Fixture is not a design.");
   return block;
 }
@@ -164,7 +164,7 @@ function design(fields: Partial<Pick<CanvasDesignBlock, "size" | "theme">>): Can
 /** A deck long enough that drawing every slide at once would be felt. */
 function deck(slides: number): CanvasDesignBlock {
   const block = decodeCanvasBlock({
-    ...launchDeckExampleBlock,
+    ...launchDeckExampleBlock(),
     frames: Array.from({ length: slides }, (_, index) => ({
       frameId: `slide-${String(index + 1)}`,
       title: `Slide ${String(index + 1)}`,
@@ -257,7 +257,7 @@ afterEach(() => {
 describe("design block", () => {
   it("draws every screen in a frame that runs nothing and loads nothing", () => {
     render(
-      <CanvasDocument definition={{ ...canvasFixture, blocks: [onboardingFlowExampleBlock] }} />,
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [onboardingFlowExampleBlock()] }} />,
     );
 
     const design = screen.getByRole("region", { name: "Onboarding, Phone design" });
@@ -375,7 +375,7 @@ describe("design block", () => {
 
   it("plays the whole flow from the screen a person picks, so its links work", () => {
     render(
-      <CanvasDocument definition={{ ...canvasFixture, blocks: [onboardingFlowExampleBlock] }} />,
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [onboardingFlowExampleBlock()] }} />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Play from Address" }));
@@ -483,7 +483,9 @@ describe("design block", () => {
   });
 
   it("presents slides in order and moves with the arrow keys", () => {
-    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [launchDeckExampleBlock] }} />);
+    render(
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [launchDeckExampleBlock()] }} />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Present" }));
     const player = screen.getByRole("dialog", { name: "Presenting Launch plan" });
@@ -532,7 +534,9 @@ describe("design block", () => {
 
   it("offers no Notes control for a deck without notes", () => {
     window.sessionStorage.clear();
-    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [launchDeckExampleBlock] }} />);
+    render(
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [launchDeckExampleBlock()] }} />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Present" }));
     const player = screen.getByRole("dialog", { name: "Presenting Launch plan" });
@@ -549,7 +553,7 @@ describe("design block", () => {
     Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: true });
     try {
       render(
-        <CanvasDocument definition={{ ...canvasFixture, blocks: [launchDeckExampleBlock] }} />,
+        <CanvasDocument definition={{ ...canvasFixture, blocks: [launchDeckExampleBlock()] }} />,
       );
       fireEvent.click(screen.getByRole("button", { name: "Present" }));
       const player = screen.getByRole("dialog", { name: "Presenting Launch plan" });
@@ -702,7 +706,7 @@ describe("design block", () => {
         <CanvasDocument
           definition={{
             ...canvasFixture,
-            blocks: [prototype(size), onboardingFlowExampleBlock, searchSpecExampleBlock],
+            blocks: [prototype(size), onboardingFlowExampleBlock(), searchSpecExampleBlock()],
           }}
           designRunRuntime={runtime}
         />,
@@ -731,7 +735,9 @@ describe("design block", () => {
     const root = document.documentElement;
     root.dataset.octantThemeMode = "dark";
     root.style.setProperty("--oct-fg", "rgb(240, 240, 240)");
-    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [searchSpecExampleBlock] }} />);
+    render(
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [searchSpecExampleBlock()] }} />,
+    );
 
     const article = screen.getByRole("region", { name: "Search ranking spec, document" });
     expect(within(article).queryByRole("button", { name: "Play" })).toBeNull();
@@ -782,7 +788,7 @@ describe("design block", () => {
     });
     try {
       render(
-        <CanvasDocument definition={{ ...canvasFixture, blocks: [searchSpecExampleBlock] }} />,
+        <CanvasDocument definition={{ ...canvasFixture, blocks: [searchSpecExampleBlock()] }} />,
       );
       const article = screen.getByRole("region", { name: "Search ranking spec, document" });
       expect(frames(article)[0]?.srcdoc).toContain("--oct-fg: rgb(240, 240, 240);");
@@ -806,7 +812,7 @@ describe("design block", () => {
 
   it("keeps a phone design unthemed at its device size unless it asks for the theme", () => {
     render(
-      <CanvasDocument definition={{ ...canvasFixture, blocks: [onboardingFlowExampleBlock] }} />,
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [onboardingFlowExampleBlock()] }} />,
     );
     const [screenFrame] = frames(screen.getByRole("region", { name: "Onboarding, Phone design" }));
     expect(screenFrame?.getAttribute("sandbox")).toBe("");
@@ -828,7 +834,7 @@ describe("design block", () => {
 
   it("draws a brand design in its own tokens and never writes an unsafe value into the frame", () => {
     const block = decodeCanvasBlock({
-      ...onboardingFlowExampleBlock,
+      ...onboardingFlowExampleBlock(),
       schemaVersion: 21,
       theme: "brand",
       brand: {

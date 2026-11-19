@@ -13,10 +13,10 @@ const snapshot = JSON.parse(
 
 describe("sequence and state diagram layout", () => {
   it("lays a login sequence out the same way every time", () => {
-    const layout = layoutCanvasSequence(loginSequenceBlock);
+    const layout = layoutCanvasSequence(loginSequenceBlock());
 
     expect(layout).toEqual(snapshot.sequence);
-    expect(layoutCanvasSequence(loginSequenceBlock)).toEqual(layout);
+    expect(layoutCanvasSequence(loginSequenceBlock())).toEqual(layout);
     const [person, browser, auth] = layout.participants;
     expect(person?.x).toBeLessThan(browser?.x ?? 0);
     expect(browser?.x).toBeLessThan(auth?.x ?? 0);
@@ -29,7 +29,7 @@ describe("sequence and state diagram layout", () => {
 
   it("bends a message a participant sends to itself out beside its lifeline", () => {
     const block: CanvasSequenceBlock = {
-      ...loginSequenceBlock,
+      ...loginSequenceBlock(),
       messages: [
         {
           messageId: "retry" as never,
@@ -51,10 +51,10 @@ describe("sequence and state diagram layout", () => {
   });
 
   it("lays an order state machine out the same way every time", () => {
-    const layout = layoutCanvasState(orderStateBlock);
+    const layout = layoutCanvasState(orderStateBlock());
 
     expect(layout).toEqual(snapshot.state);
-    expect(layoutCanvasState(orderStateBlock)).toEqual(layout);
+    expect(layoutCanvasState(orderStateBlock())).toEqual(layout);
     const byId = new Map(layout.states.map((state) => [state.stateId, state]));
     const start = byId.get("start");
     const placed = byId.get("placed");

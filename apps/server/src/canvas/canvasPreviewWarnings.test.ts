@@ -203,7 +203,7 @@ describe("canvasPreviewWarnings", () => {
   });
 
   it("reports a sankey as no empty series and a funnel's long stage as no clipped slot", () => {
-    const blocks = chartExampleBlocks.filter(
+    const blocks = chartExampleBlocks().filter(
       (candidate) =>
         candidate.chartType === "sankey" ||
         candidate.chartType === "funnel" ||

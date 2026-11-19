@@ -37,7 +37,7 @@ function libraryEntryWithPreview(markup: string) {
 }
 
 function exampleChart(chartType: string) {
-  const block = chartExampleBlocks.find((candidate) => candidate.chartType === chartType);
+  const block = chartExampleBlocks().find((candidate) => candidate.chartType === chartType);
   if (block === undefined) throw new Error(`${chartType} example is missing.`);
   return block;
 }
@@ -81,7 +81,7 @@ const treemap = decodeCanvasBlock({
 
 describe("drawing a preview of an artifact", () => {
   it("names a mind map's root and its topics in the exported picture", () => {
-    const markup = renderArtifactSidecarSvg(definition([releaseMindmapBlock]));
+    const markup = renderArtifactSidecarSvg(definition([releaseMindmapBlock()]));
 
     // The root and each drawn child carry their topic, clamped to the box.
     expect(markup).toContain(">Release readi");
@@ -91,7 +91,7 @@ describe("drawing a preview of an artifact", () => {
   });
 
   it("names each swimlane lane and its first step in the exported picture", () => {
-    const markup = renderArtifactSidecarSvg(definition([supportFlowBlock]));
+    const markup = renderArtifactSidecarSvg(definition([supportFlowBlock()]));
 
     expect(markup).toContain(">Customer<");
     expect(markup).toContain(">Report a problem<");
@@ -162,12 +162,12 @@ describe("drawing a preview of an artifact", () => {
   it("produces a preview the contract will accept", () => {
     const pictures = [
       [chart],
-      chartExampleBlocks,
-      opsDashboardExampleBlocks,
-      [releaseMindmapBlock],
-      [settingsScreenExampleBlock],
-      [supportFlowBlock],
-      [notificationStatesExampleBlock],
+      chartExampleBlocks(),
+      opsDashboardExampleBlocks(),
+      [releaseMindmapBlock()],
+      [settingsScreenExampleBlock()],
+      [supportFlowBlock()],
+      [notificationStatesExampleBlock()],
     ].map((blocks) => renderArtifactThumbnail(definition(blocks)));
     for (const markup of pictures.filter((picture) => picture.length > 0)) {
       expect(() => libraryEntryWithPreview(markup)).not.toThrow();
@@ -406,14 +406,16 @@ describe("drawing a preview of an artifact", () => {
   });
 
   it("draws one frame per mockup variant, and a styled screen apart from a wireframe", () => {
-    const states = renderArtifactThumbnail(definition([notificationStatesExampleBlock]));
-    const single = renderArtifactThumbnail(definition([settingsScreenExampleBlock]));
+    const states = renderArtifactThumbnail(definition([notificationStatesExampleBlock()]));
+    const single = renderArtifactThumbnail(definition([settingsScreenExampleBlock()]));
     const frames = (markup: string) => (markup.match(/data-mockup-frame/g) ?? []).length;
 
     expect(frames(states)).toBe(3);
     expect(frames(single)).toBe(1);
     const wireframe = renderArtifactThumbnail(
-      definition([decodeCanvasBlock({ ...notificationStatesExampleBlock, fidelity: "wireframe" })]),
+      definition([
+        decodeCanvasBlock({ ...notificationStatesExampleBlock(), fidelity: "wireframe" }),
+      ]),
     );
     expect(wireframe).not.toBe(states);
     expect(states).not.toMatch(/<\s*script/i);
@@ -615,7 +617,7 @@ describe("drawing a preview of an artifact", () => {
   });
 
   it("draws a dashboard as a grid of its cells, side by side, each placed block once", () => {
-    const markup = renderArtifactSidecarSvg(definition(opsDashboardExampleBlocks));
+    const markup = renderArtifactSidecarSvg(definition(opsDashboardExampleBlocks()));
     // Each cell is a nested viewport, so a label's place is its cell's.
     const labelAt = (label: string) => {
       const before = markup.slice(0, markup.indexOf(`>${label}<`));
@@ -634,7 +636,7 @@ describe("drawing a preview of an artifact", () => {
     expect(markup).toContain(">Service health<");
     expect(markup).not.toContain("<script");
     // The thumbnail is bounded like every other preview.
-    expect(renderArtifactThumbnail(definition(opsDashboardExampleBlocks)).length).toBeGreaterThan(
+    expect(renderArtifactThumbnail(definition(opsDashboardExampleBlocks())).length).toBeGreaterThan(
       0,
     );
   });

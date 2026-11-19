@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  BROWSER_USE_PLUGIN,
+  browserUsePluginManifest,
   BROWSER_TOOL_HOST_LINE,
   browserUseSelection,
   isBrowserUseSelection,
@@ -9,7 +9,7 @@ import {
 describe("Browser use selection", () => {
   it("pins the host-owned Browser plugin identity", () => {
     const selection = browserUseSelection("composer");
-    expect(BROWSER_USE_PLUGIN.slug).toBe("browser");
+    expect(browserUsePluginManifest().slug).toBe("browser");
     expect(isBrowserUseSelection(selection)).toBe(true);
   });
 

@@ -3,13 +3,13 @@ import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
-  FIRST_PARTY_PLUGIN_CATALOG,
+  firstPartyPluginCatalog,
   firstPartyPluginsEffectiveFromSnapshot,
 } from "./firstPartyPluginCatalog";
 import { useHostFirstPartyPluginsEffective } from "./firstPartyPluginsEffective";
 
 function manifest(slug: string) {
-  const found = FIRST_PARTY_PLUGIN_CATALOG.find((plugin) => plugin.slug === slug);
+  const found = firstPartyPluginCatalog().find((plugin) => plugin.slug === slug);
   if (found === undefined) throw new Error(`${slug} is not in the first-party catalog.`);
   return found;
 }

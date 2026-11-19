@@ -2,6 +2,7 @@ import {
   decodeExtensionPackageManifest,
   decodeExtensionSelection,
   decodeExtensionComponentId,
+  type ExtensionPackageManifest,
   type ExtensionSelection,
 } from "@octant/contracts/extensions";
 
@@ -9,35 +10,38 @@ import {
  * The host-owned Browser capability. It is a tool the host offers on every
  * eligible turn, not a mention: a selection naming it is ignored.
  */
-export const BROWSER_USE_PLUGIN = decodeExtensionPackageManifest({
-  manifestVersion: 1,
-  extensionId: "31b0bb51-a114-41a9-8de0-e31797c21503",
-  packageId: "31b0bb51-a114-41a9-8de0-e31797c21504",
-  slug: "browser",
-  displayName: "Browser",
-  version: "1.0.0",
-  digest: "sha256:5c93bcbf74a13be17db3d72e5d60b2ff4a7a2fef8e5db0b4f2e1db7c57e4a1d3",
-  source: { kind: "bundled", sourceRef: "app:browser" },
-  provenance: { publisher: "Octant", reviewed: true },
-  license: { kind: "spdx", identifier: "MIT" },
-  compatibility: {
-    platforms: ["macos", "linux", "windows"],
-    modes: ["work", "code"],
-    providerFamilies: [],
-  },
-  declaredCapabilities: ["browser"],
-  primaryComponentId: "browser",
-  components: [
-    {
-      id: "browser",
-      kind: "mcp-server",
-      displayName: "Browser",
-      description: "Use Octant's isolated built-in browser for this task.",
-      declaredCapabilities: ["browser"],
-      entryPoint: "builtin:browser",
+let browserUsePluginManifestCache: ExtensionPackageManifest | undefined;
+export function browserUsePluginManifest(): ExtensionPackageManifest {
+  return (browserUsePluginManifestCache ??= decodeExtensionPackageManifest({
+    manifestVersion: 1,
+    extensionId: "31b0bb51-a114-41a9-8de0-e31797c21503",
+    packageId: "31b0bb51-a114-41a9-8de0-e31797c21504",
+    slug: "browser",
+    displayName: "Browser",
+    version: "1.0.0",
+    digest: "sha256:5c93bcbf74a13be17db3d72e5d60b2ff4a7a2fef8e5db0b4f2e1db7c57e4a1d3",
+    source: { kind: "bundled", sourceRef: "app:browser" },
+    provenance: { publisher: "Octant", reviewed: true },
+    license: { kind: "spdx", identifier: "MIT" },
+    compatibility: {
+      platforms: ["macos", "linux", "windows"],
+      modes: ["work", "code"],
+      providerFamilies: [],
     },
-  ],
-});
+    declaredCapabilities: ["browser"],
+    primaryComponentId: "browser",
+    components: [
+      {
+        id: "browser",
+        kind: "mcp-server",
+        displayName: "Browser",
+        description: "Use Octant's isolated built-in browser for this task.",
+        declaredCapabilities: ["browser"],
+        entryPoint: "builtin:browser",
+      },
+    ],
+  }));
+}
 
 /**
  * The one host line a turn that offers `octant_browser` carries, 40 tokens or
@@ -50,12 +54,12 @@ export const BROWSER_TOOL_HOST_LINE =
 export function browserUseSelection(reference: string): ExtensionSelection {
   return decodeExtensionSelection({
     kind: "plugin",
-    extensionId: BROWSER_USE_PLUGIN.extensionId,
-    packageId: BROWSER_USE_PLUGIN.packageId,
+    extensionId: browserUsePluginManifest().extensionId,
+    packageId: browserUsePluginManifest().packageId,
     componentId: decodeExtensionComponentId("browser"),
-    packageVersion: BROWSER_USE_PLUGIN.version,
-    packageDigest: BROWSER_USE_PLUGIN.digest,
-    catalogEpoch: BROWSER_USE_PLUGIN.digest,
+    packageVersion: browserUsePluginManifest().version,
+    packageDigest: browserUsePluginManifest().digest,
+    catalogEpoch: browserUsePluginManifest().digest,
     origin: { kind: "draft", reference },
   });
 }
@@ -68,7 +72,7 @@ export function browserUseSelection(reference: string): ExtensionSelection {
 export function isBrowserUseSelection(selection: ExtensionSelection): boolean {
   return (
     selection.kind === "plugin" &&
-    (String(selection.extensionId) === String(BROWSER_USE_PLUGIN.extensionId) ||
-      String(selection.packageId) === String(BROWSER_USE_PLUGIN.packageId))
+    (String(selection.extensionId) === String(browserUsePluginManifest().extensionId) ||
+      String(selection.packageId) === String(browserUsePluginManifest().packageId))
   );
 }

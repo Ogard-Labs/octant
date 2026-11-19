@@ -185,8 +185,8 @@ describe("comparison matrix weighted totals", () => {
   });
 
   it("decodes every describe example and scores it", () => {
-    expect(comparisonMatrixExampleBlocks.length).toBeGreaterThan(0);
-    for (const example of comparisonMatrixExampleBlocks) {
+    expect(comparisonMatrixExampleBlocks().length).toBeGreaterThan(0);
+    for (const example of comparisonMatrixExampleBlocks()) {
       expect(layoutCanvasComparisonMatrix(example).leaders.length).toBeGreaterThan(0);
     }
   });

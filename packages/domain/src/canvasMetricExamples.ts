@@ -64,5 +64,6 @@ function metricBlock(value: unknown): CanvasMetricBlock {
   return block;
 }
 
-export const metricExampleBlocks: ReadonlyArray<CanvasMetricBlock> =
-  metricExamples.map(metricBlock);
+export function metricExampleBlocks(): ReadonlyArray<CanvasMetricBlock> {
+  return metricExamples.map(metricBlock);
+}

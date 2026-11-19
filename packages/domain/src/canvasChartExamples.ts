@@ -269,4 +269,6 @@ function chartBlock(value: unknown): CanvasChartBlock {
   return block;
 }
 
-export const chartExampleBlocks = chartExamples.map(chartBlock);
+export function chartExampleBlocks() {
+  return chartExamples.map(chartBlock);
+}

@@ -132,5 +132,9 @@ function treemapBlock(value: unknown): CanvasTreemapBlock {
   return block;
 }
 
-export const treemapExampleBlocks = treemapExamples.map(treemapBlock);
-export const repositoryMapBlock = treemapBlock(repositoryMapExample);
+export function treemapExampleBlocks() {
+  return treemapExamples.map(treemapBlock);
+}
+export function repositoryMapBlock() {
+  return treemapBlock(repositoryMapExample);
+}

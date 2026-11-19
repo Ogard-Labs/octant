@@ -22,7 +22,7 @@ function cellKinds(region: HTMLElement): ReadonlyArray<string | null> {
 
 describe("dashboard layout", () => {
   it("draws a labelled region whose cells read in the order the dashboard lists them", () => {
-    const [board, ...placed] = opsDashboardExampleBlocks;
+    const [board, ...placed] = opsDashboardExampleBlocks();
     if (board === undefined || board.kind !== "dashboard") throw new Error("missing dashboard");
     // Two placed blocks sit before the dashboard; they still read inside it.
     render(
@@ -61,7 +61,9 @@ describe("dashboard layout", () => {
   it("keeps a placed chart's data table and a placed table's grid reachable by keyboard", async () => {
     const user = userEvent.setup();
     render(
-      <CanvasDocument definition={{ ...canvasFixture, blocks: releaseHealthBoardExampleBlocks }} />,
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: releaseHealthBoardExampleBlocks() }}
+      />,
     );
     const region = screen.getByRole("region", { name: "Release 4.2 health" });
     const summary = within(region).getByText("View chart data");
@@ -85,7 +87,7 @@ describe("dashboard layout", () => {
           openRowCounts: new Map(),
           onOpen,
         }}
-        definition={{ ...canvasFixture, blocks: releaseHealthBoardExampleBlocks }}
+        definition={{ ...canvasFixture, blocks: releaseHealthBoardExampleBlocks() }}
       />,
     );
     expect(screen.getByRole("button", { name: "Comment on Release 4.2 health" })).toBeVisible();
@@ -93,12 +95,14 @@ describe("dashboard layout", () => {
     const blockMarkers = region.querySelectorAll(
       ".canvas-dashboard__cell > .canvas-block > .canvas-block__comment-marker",
     );
-    expect(blockMarkers).toHaveLength(releaseHealthBoardExampleBlocks.length - 1);
+    expect(blockMarkers).toHaveLength(releaseHealthBoardExampleBlocks().length - 1);
   });
 
   it("titles the region at the heading level its surface asks for", () => {
     const { unmount } = render(
-      <CanvasDocument definition={{ ...canvasFixture, blocks: releaseHealthBoardExampleBlocks }} />,
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: releaseHealthBoardExampleBlocks() }}
+      />,
     );
     expect(screen.getByRole("heading", { level: 2, name: "Release 4.2 health" })).toBeVisible();
     unmount();

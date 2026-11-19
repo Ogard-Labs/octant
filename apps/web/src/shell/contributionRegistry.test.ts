@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  FIRST_PARTY_PLUGIN_CATALOG,
-  FIRST_PARTY_PLUGINS_EFFECTIVE,
-} from "./firstPartyPluginCatalog";
+import { firstPartyPluginCatalog, FIRST_PARTY_PLUGINS_EFFECTIVE } from "./firstPartyPluginCatalog";
 import {
   isAppearancePresetAvailable,
   isPreviewViewerAvailable,
@@ -27,7 +24,7 @@ function effectiveMap(
 
 describe("first-party plugin catalog", () => {
   it("decodes every bundled first-party manifest on the current version", () => {
-    expect(FIRST_PARTY_PLUGIN_CATALOG.map((plugin) => plugin.slug)).toEqual([
+    expect(firstPartyPluginCatalog().map((plugin) => plugin.slug)).toEqual([
       "board",
       "github",
       "linear",
@@ -36,13 +33,13 @@ describe("first-party plugin catalog", () => {
       "preview-viewers",
       "zen",
     ]);
-    expect(FIRST_PARTY_PLUGIN_CATALOG.every((plugin) => plugin.manifestVersion === 1)).toBe(true);
+    expect(firstPartyPluginCatalog().every((plugin) => plugin.manifestVersion === 1)).toBe(true);
   });
 });
 
 describe("first-party Zen plugin", () => {
   it("is a bundled ui-surface allowed in every mode and effective by default", () => {
-    const zen = FIRST_PARTY_PLUGIN_CATALOG.find((plugin) => plugin.slug === "zen");
+    const zen = firstPartyPluginCatalog().find((plugin) => plugin.slug === "zen");
     expect(zen?.compatibility.modes).toEqual(["chat", "work", "code"]);
     expect(zen?.components.map((component) => [String(component.id), component.kind])).toEqual([
       ["zen", "ui-surface"],

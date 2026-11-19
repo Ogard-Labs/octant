@@ -16,7 +16,7 @@ const spoken: Record<string, string> = {
 };
 
 describe("chart marks", () => {
-  it.each(chartExampleBlocks)(
+  it.each(chartExampleBlocks())(
     "draws a $chartType chart with a legend and a data table",
     async (block) => {
       const user = userEvent.setup();
@@ -44,7 +44,7 @@ describe("chart marks", () => {
 
   it("hides a pie slice from the legend and keeps the reading in the data table", async () => {
     const user = userEvent.setup();
-    const pie = chartExampleBlocks.find((block) => block.chartType === "pie");
+    const pie = chartExampleBlocks().find((block) => block.chartType === "pie");
     if (pie === undefined) throw new Error("Pie example is missing.");
     render(<CanvasDocument definition={{ ...canvasFixture, blocks: [pie] }} />);
 
@@ -65,7 +65,7 @@ describe("chart marks", () => {
 
   it("hides a stacked series from the legend", async () => {
     const user = userEvent.setup();
-    const stacked = chartExampleBlocks.find((block) => block.chartType === "stacked-bar");
+    const stacked = chartExampleBlocks().find((block) => block.chartType === "stacked-bar");
     if (stacked === undefined) throw new Error("Stacked bar example is missing.");
     render(<CanvasDocument definition={{ ...canvasFixture, blocks: [stacked] }} />);
 
@@ -207,7 +207,7 @@ describe("chart marks", () => {
 
 describe("chart titles and callouts", () => {
   const chart = (chartType: string) => {
-    const block = chartExampleBlocks.find((candidate) => candidate.chartType === chartType);
+    const block = chartExampleBlocks().find((candidate) => candidate.chartType === chartType);
     if (block === undefined) throw new Error(`${chartType} example is missing.`);
     return block;
   };
@@ -352,7 +352,7 @@ describe("chart tooltip", () => {
 
 describe("funnel, radar, and sankey charts", () => {
   function example(chartType: string): CanvasChartBlock {
-    const block = chartExampleBlocks.find((candidate) => candidate.chartType === chartType);
+    const block = chartExampleBlocks().find((candidate) => candidate.chartType === chartType);
     if (block === undefined) throw new Error(`${chartType} example is missing.`);
     return block;
   }

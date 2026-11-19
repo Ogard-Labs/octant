@@ -1,12 +1,12 @@
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import {
-  FIRST_PARTY_PLUGIN_CATALOG,
+  firstPartyPluginCatalog,
   isFirstPartyPluginComponentId,
   type FirstPartyPluginComponentId,
 } from "@octant/plugin-host/first-party-plugins";
 
 export {
-  FIRST_PARTY_PLUGIN_CATALOG,
+  firstPartyPluginCatalog,
   firstPartyContributions,
   isFirstPartyPluginComponentId,
   type FirstPartyPluginComponentId,
@@ -20,7 +20,7 @@ export {
  */
 export const FIRST_PARTY_PLUGINS_EFFECTIVE: ReadonlyMap<FirstPartyPluginComponentId, boolean> =
   new Map(
-    FIRST_PARTY_PLUGIN_CATALOG.flatMap((plugin) =>
+    firstPartyPluginCatalog().flatMap((plugin) =>
       plugin.components.flatMap((component) => {
         const id = String(component.id);
         return isFirstPartyPluginComponentId(id) ? [[id, true] as const] : [];
@@ -39,7 +39,7 @@ export function firstPartyPluginsEffectiveFromSnapshot(
 ): ReadonlyMap<FirstPartyPluginComponentId, boolean> {
   if (snapshot === undefined) return FIRST_PARTY_PLUGINS_EFFECTIVE;
   const effective = new Map(FIRST_PARTY_PLUGINS_EFFECTIVE);
-  for (const plugin of FIRST_PARTY_PLUGIN_CATALOG) {
+  for (const plugin of firstPartyPluginCatalog()) {
     const row = snapshot.packages.find(
       (candidate) =>
         String(candidate.extensionId) === String(plugin.extensionId) &&

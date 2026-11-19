@@ -3,7 +3,7 @@ import {
   decodeProviderInstanceId,
   type ProviderInstance,
 } from "@octant/contracts";
-import { BUNDLED_PROVIDER_DRIVER_PLUGINS } from "@octant/plugin-host/provider-drivers";
+import { bundledProviderDriverPlugins } from "@octant/plugin-host/provider-drivers";
 import { DISCOVERY_DESCRIPTORS } from "@octant/provider-sdk/discovery";
 import { isAcpHostProfileDriver } from "@octant/provider-sdk/driver-plugins";
 import { providerKeepsConversation } from "@octant/domain";
@@ -43,7 +43,8 @@ describe("bundled provider-driver plugins", () => {
     // An added ACP agent is never discovered: the person adds it from the
     // ACP registry or as their own command.
     expect(
-      BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => plugin.driverKind)
+      bundledProviderDriverPlugins()
+        .map((plugin) => plugin.driverKind)
         .filter((kind) => kind !== "acp-agent")
         .sort(),
     ).toEqual(DISCOVERY_DESCRIPTORS.map((descriptor) => descriptor.driverKind).sort());
@@ -51,9 +52,9 @@ describe("bundled provider-driver plugins", () => {
 
   it("keeps ACP vendors on the host ACP stack", () => {
     expect(
-      BUNDLED_PROVIDER_DRIVER_PLUGINS.filter((plugin) =>
-        isAcpHostProfileDriver(plugin.driverKind),
-      ).map((plugin) => plugin.driverKind),
+      bundledProviderDriverPlugins()
+        .filter((plugin) => isAcpHostProfileDriver(plugin.driverKind))
+        .map((plugin) => plugin.driverKind),
     ).toEqual([
       "kilo",
       "devin",

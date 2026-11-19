@@ -109,5 +109,6 @@ function comparisonMatrixBlock(value: unknown): CanvasComparisonMatrixBlock {
   return block;
 }
 
-export const comparisonMatrixExampleBlocks: ReadonlyArray<CanvasComparisonMatrixBlock> =
-  comparisonMatrixExamples.map(comparisonMatrixBlock);
+export function comparisonMatrixExampleBlocks(): ReadonlyArray<CanvasComparisonMatrixBlock> {
+  return comparisonMatrixExamples.map(comparisonMatrixBlock);
+}

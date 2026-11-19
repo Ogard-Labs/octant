@@ -229,8 +229,12 @@ function mockupBlock(value: unknown): CanvasMockupBlock {
   return block;
 }
 
-export const settingsScreenExampleBlock = mockupBlock(settingsScreenExample);
-export const notificationStatesExampleBlock = mockupBlock(notificationStatesExample);
+export function settingsScreenExampleBlock() {
+  return mockupBlock(settingsScreenExample);
+}
+export function notificationStatesExampleBlock() {
+  return mockupBlock(notificationStatesExample);
+}
 
 /** Every mockup describe returns, in the order an agent reads them. */
 export const mockupExamples = [settingsScreenExample, notificationStatesExample] as const;

@@ -11,7 +11,7 @@ import type {
   ExtensionSnapshot,
 } from "@octant/contracts/extension-rpc";
 import type { ExtensionActivationScope } from "@octant/contracts/extensions";
-import { FIRST_PARTY_PLUGIN_CATALOG } from "../shell/firstPartyPluginCatalog";
+import { firstPartyPluginCatalog } from "../shell/firstPartyPluginCatalog";
 import { ExtensionsSettingsView } from "./ExtensionsSettingsView";
 
 const extensionId = "15000000-0000-4000-8000-000000000001";
@@ -980,7 +980,7 @@ describe("ExtensionsSettingsView", () => {
   });
 
   it("shows a plugin built into Octant with only its on/off switch, and switches it off through the client", async () => {
-    const github = FIRST_PARTY_PLUGIN_CATALOG.find((plugin) => plugin.slug === "github");
+    const github = firstPartyPluginCatalog().find((plugin) => plugin.slug === "github");
     if (github === undefined) throw new Error("GitHub is not in the first-party catalog.");
     const on = baseActivation({ trusted: true, pluginDesired: true, componentDesired: true });
     const snapshot = {
