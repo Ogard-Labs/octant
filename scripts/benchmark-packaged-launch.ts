@@ -111,10 +111,15 @@ async function launch(executable: string, profile: "cold" | "warm" | "warm-prime
       controller.signal.throwIfAborted();
       const current = marks();
       const at = (name: string) => current.find((mark) => mark.name === name)?.at;
-      if (at("ready-to-show") !== undefined && at("chat-bootstrap-answered") !== undefined) break;
+      if (
+        at("ready-to-show") !== undefined &&
+        at("chat-bootstrap-answered") !== undefined &&
+        at("usable-painted") !== undefined
+      )
+        break;
       if (Date.now() > deadline || child.exitCode !== null || child.signalCode !== null) {
         throw new Error(
-          `Launch ${profile}/${index} did not reach bootstrap.${appOutputContext(outputTail)}`,
+          `Launch ${profile}/${index} did not reach usable.${appOutputContext(outputTail)}`,
         );
       }
       await delay(25, undefined, { signal: controller.signal });
@@ -131,6 +136,14 @@ async function launch(executable: string, profile: "cold" | "warm" | "warm-prime
     for (const phase of ["host-running", "renderer-preconnect-started", "window-create-start"]) {
       const mark = observations.find((candidate) => candidate.name === phase);
       if (mark === undefined) throw new Error(`Launch ${profile}/${index} lacked ${phase}.`);
+      phaseSamples.push({ phase, value: mark.at - launchedAt });
+    }
+    for (const [name, phase] of [
+      ["shell-committed-painted", "first committed paint"],
+      ["usable-painted", "usable interaction"],
+    ] as const) {
+      const mark = observations.find((candidate) => candidate.name === name);
+      if (mark === undefined) throw new Error(`Launch ${profile}/${index} lacked ${name}.`);
       phaseSamples.push({ phase, value: mark.at - launchedAt });
     }
     phaseSamples.push({ phase: "process-group RSS MiB", value: rssKiB / 1024 });
