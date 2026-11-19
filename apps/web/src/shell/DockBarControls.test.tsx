@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { StrictMode, useState, type ReactNode } from "react";
 import { DockBarTestHost } from "./dockBarHost.test-support";
+import { buildOctantCommands, type OctantCommandSources } from "../palette/buildOctantCommands";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockTiles, type DockTileContent } from "./DockTiles";
 import { BottomUtilityPanel } from "./BottomUtilityPanel";
@@ -1062,6 +1063,206 @@ describe("the focused pane's bar controls for the command palette", () => {
     expect(store.get()?.toolLabel).toBe(review.label);
     view.unmount();
     expect(store.get()).toBeUndefined();
+  });
+
+  it("does not wake the palette when only the tool-drawn parts or a callback change", () => {
+    const store = createFocusedDockTool();
+    const wakes: number[] = [];
+    store.subscribe(() => wakes.push(wakes.length + 1));
+    const button = (label: string, onSelect: () => void): DockBarItem => ({
+      kind: "button",
+      id: "go",
+      label,
+      icon: RefreshCw,
+      onSelect,
+    });
+    const node = (id: string): DockBarItem => ({
+      kind: "node",
+      id,
+      width: 40,
+      node: <div data-testid={id} />,
+    });
+    const cue = (text: string): DockBarItem => ({ kind: "text", id: "cue", text });
+    store.set("tool", { toolLabel: "tool", items: [button("Go", () => {}), node("a")] });
+    expect(wakes).toHaveLength(1);
+    // The tool repaints its node and its cue, and swaps the button's callback:
+    // the commands the palette lists are the same, so nothing wakes it.
+    store.set("tool", {
+      toolLabel: "tool",
+      items: [button("Go", () => {}), node("b"), cue("busy")],
+    });
+    expect(wakes).toHaveLength(1);
+    // A real command change — a label, a disabled flag, a menu entry — still
+    // wakes the palette to read the fresh items.
+    store.set("tool", { toolLabel: "tool", items: [button("Go again", () => {})] });
+    expect(wakes).toHaveLength(2);
+    expect(store.get()?.items.find((item) => item.id === "go")).toMatchObject({
+      label: "Go again",
+    });
+  });
+
+  it("clears the palette's former commands when the addressed owner drops its controls", () => {
+    const store = createFocusedDockTool();
+    const seen: string[] = [];
+    store.set("terminal", {
+      toolLabel: "Terminal",
+      items: [
+        {
+          kind: "button",
+          id: "stop",
+          label: "Stop",
+          icon: RefreshCw,
+          onSelect: () => seen.push("stop"),
+        },
+      ],
+    });
+    store.focus("terminal");
+    expect(store.get()?.items).toHaveLength(1);
+    // The terminal's controls go away. Rather than silence — which would leave
+    // Stop in the palette — it publishes an empty source and stays the owner.
+    store.set("terminal", { toolLabel: "Terminal", items: [] });
+    const published = store.get();
+    expect(published?.toolLabel).toBe("Terminal");
+    expect(published?.items).toHaveLength(0);
+  });
+
+  const paletteSources = (
+    focusedToolCommands: ReturnType<ReturnType<typeof createFocusedDockTool>["get"]>,
+  ): OctantCommandSources => ({
+    activeMode: "code",
+    modes: ["chat", "work", "code"],
+    onSelectMode: vi.fn(),
+    onNewThread: vi.fn(),
+    onOpenSearch: vi.fn(),
+    onOpenSettings: vi.fn(),
+    threads: [],
+    onOpenThread: vi.fn(),
+    projects: [],
+    onOpenProject: vi.fn(),
+    skills: [],
+    pluginServers: [],
+    appleProjects: [],
+    onOpenAppleProject: vi.fn(),
+    ...(focusedToolCommands === undefined ? {} : { focusedToolCommands }),
+  });
+
+  const runCommand = (commandId: string, commands: ReturnType<typeof buildOctantCommands>) => {
+    const command = commands.find((candidate) => candidate.id === commandId);
+    if (command === undefined) throw new Error(`Missing palette command ${commandId}.`);
+    if (command.action.kind !== "run") throw new Error("Expected a runnable command.");
+    command.action.run();
+  };
+
+  it("runs the newest callback through a command the palette captured before a callback-only update", () => {
+    const store = createFocusedDockTool();
+    const seen: string[] = [];
+    const stop = (mark: string): DockBarItem => ({
+      kind: "button",
+      id: "stop",
+      label: "Stop",
+      icon: RefreshCw,
+      onSelect: () => seen.push(mark),
+    });
+    store.set("tile", { toolLabel: "Terminal", items: [stop("first")] });
+    store.focus("tile");
+    const captured = buildOctantCommands(paletteSources(store.get()));
+    // Only the callback changed: the palette keeps its captured command, and
+    // the command resolves the owner's latest publication when it runs.
+    store.set("tile", { toolLabel: "Terminal", items: [stop("second")] });
+    runCommand("tool-command:stop", captured);
+    expect(seen).toEqual(["second"]);
+  });
+
+  it("never runs an owner the palette moved past, and nothing once it relinquishes", () => {
+    const store = createFocusedDockTool();
+    const seen: string[] = [];
+    store.set("tile", {
+      toolLabel: "Terminal",
+      items: [
+        {
+          kind: "button",
+          id: "stop",
+          label: "Stop",
+          icon: RefreshCw,
+          onSelect: () => seen.push("tile"),
+        },
+      ],
+    });
+    store.focus("tile");
+    const captured = buildOctantCommands(paletteSources(store.get()));
+    // The person addresses the panel: the old owner's captured command is
+    // dead even though its publication still stands.
+    store.set("panel", {
+      toolLabel: "Panel",
+      items: [
+        {
+          kind: "button",
+          id: "stop",
+          label: "Stop",
+          icon: RefreshCw,
+          onSelect: () => seen.push("panel"),
+        },
+      ],
+    });
+    store.focus("panel");
+    runCommand("tool-command:stop", captured);
+    expect(seen).toEqual([]);
+    // Relinquished entirely, the captured command stays harmless.
+    store.set("tile", undefined);
+    runCommand("tool-command:stop", captured);
+    expect(seen).toEqual([]);
+  });
+
+  it("does not re-render subscribers when a source with no commands repaints its nodes", () => {
+    const store = createFocusedDockTool();
+    const wakes = vi.fn();
+    store.subscribe(wakes);
+    store.set("tool", {
+      toolLabel: "tool",
+      items: [
+        { kind: "node", id: "pop", width: 40, node: <div /> },
+        { kind: "text", id: "cue", text: "one" },
+      ],
+    });
+    wakes.mockClear();
+    const first = store.get();
+    store.set("tool", {
+      toolLabel: "tool",
+      items: [
+        { kind: "node", id: "pop", width: 80, node: <div /> },
+        { kind: "text", id: "cue", text: "two" },
+      ],
+    });
+    // Nothing a person can run changed: no wake, and readers keep the same
+    // projected snapshot.
+    expect(wakes).not.toHaveBeenCalled();
+    expect(store.get()).toBe(first);
+  });
+
+  it("settles on the last addressed owner through rapid control and focus changes", () => {
+    const store = createFocusedDockTool();
+    const seen: string[] = [];
+    const stop = (mark: string): DockBarItem => ({
+      kind: "button",
+      id: "stop",
+      label: "Stop",
+      icon: RefreshCw,
+      onSelect: () => seen.push(mark),
+    });
+    // A burst of publications and promotions the way fast pane switches and
+    // control refreshes interleave.
+    for (let round = 0; round < 12; round += 1) {
+      store.set("tile", { toolLabel: "Terminal", items: [stop(`tile-${round}`)] });
+      store.focus("tile");
+      store.set("panel", { toolLabel: "Panel", items: [stop(`panel-${round}`)] });
+      store.focus("panel");
+    }
+    expect(store.get()?.toolLabel).toBe("Panel");
+    const published = store.get();
+    const item = published?.items.find((candidate) => candidate.id === "stop");
+    if (item?.kind !== "button") throw new Error("Missing Stop button.");
+    item.onSelect();
+    expect(seen).toEqual(["panel-11"]);
   });
 });
 

@@ -709,8 +709,13 @@ function Tile(props: {
   // Content updates publish without promoting: a background tile's fresh
   // controls cannot steal the palette from the owner the person is in.
   useEffect(() => {
-    if (focusedDockTool === undefined || barItems === undefined) return;
-    focusedDockTool.set(commandOwner, { toolLabel: props.content.label, items: barItems });
+    if (focusedDockTool === undefined) return;
+    // A tool that drops its controls publishes an empty source, not silence:
+    // while it is the addressed owner its former commands leave the palette.
+    focusedDockTool.set(commandOwner, {
+      toolLabel: props.content.label,
+      items: barItems ?? [],
+    });
   }, [commandOwner, focusedDockTool, barItems, props.content.label]);
   // Becoming the focused tile promotes this owner; only unmount clears the
   // publication, so a control refresh never re-asserts it.

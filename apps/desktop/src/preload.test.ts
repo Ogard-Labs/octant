@@ -1879,7 +1879,8 @@ describe("desktop preload bridge", () => {
     const invoke = vi.fn(
       async (_channel: string): Promise<unknown> => [
         { tabId: "tab-1", revision: 7, active: true, dataUrl: png },
-        // A non-raster payload never reaches the renderer.
+        // A non-raster payload never reaches the renderer, but the tab itself
+        // still does so its revision is acknowledged rather than resent.
         { tabId: "tab-2", revision: 1, active: false, dataUrl: "data:image/svg+xml;base64,AAAA" },
         { tabId: "tab-3", revision: 2, active: false, sleeping: true },
         { tabId: 9, revision: "soon" },
@@ -1890,6 +1891,7 @@ describe("desktop preload bridge", () => {
     const request = { contextId, threadId, known: [{ tabId: "tab-1", revision: 6 }] };
     await expect(bridge.readBrowserSurfaceTabIcons(request)).resolves.toEqual([
       { tabId: "tab-1", revision: 7, active: true, dataUrl: png },
+      { tabId: "tab-2", revision: 1, active: false },
       { tabId: "tab-3", revision: 2, active: false, sleeping: true },
     ]);
     expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.browserSurfaceTabIcons, request);

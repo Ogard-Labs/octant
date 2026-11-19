@@ -740,17 +740,22 @@ export function createHostBridge(
           typeof row.tabId !== "string" ||
           typeof row.revision !== "number" ||
           !Number.isSafeInteger(row.revision) ||
-          typeof row.active !== "boolean" ||
-          (row.dataUrl !== undefined &&
-            (typeof row.dataUrl !== "string" || !isSurfaceFaviconDataUrl(row.dataUrl)))
+          typeof row.active !== "boolean"
         ) {
           continue;
         }
+        // A tab that names an unacceptable image still exists: its row keeps
+        // the revision so the host acknowledges it once and never resends the
+        // rejected bytes, while the icon itself simply falls back to the globe.
+        const dataUrl =
+          typeof row.dataUrl === "string" && isSurfaceFaviconDataUrl(row.dataUrl)
+            ? row.dataUrl
+            : undefined;
         icons.push({
           tabId: row.tabId,
           revision: row.revision,
           active: row.active,
-          ...(row.dataUrl === undefined ? {} : { dataUrl: row.dataUrl }),
+          ...(dataUrl === undefined ? {} : { dataUrl }),
           ...(row.sleeping === true ? { sleeping: true } : {}),
         });
       }

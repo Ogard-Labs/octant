@@ -46,8 +46,13 @@ export function BottomUtilityPanel(props: BottomUtilityPanelProps) {
   // Content updates publish without promoting: fresh items cannot steal the
   // palette from a tile the person is in.
   useEffect(() => {
-    if (focusedDockTool === undefined || items === undefined) return;
-    focusedDockTool.set(commandOwner, { toolLabel: props.activeSurface.label, items });
+    if (focusedDockTool === undefined) return;
+    // A tool that drops its controls publishes an empty source, not silence:
+    // while it is the addressed owner its former commands leave the palette.
+    focusedDockTool.set(commandOwner, {
+      toolLabel: props.activeSurface.label,
+      items: items ?? [],
+    });
   }, [commandOwner, focusedDockTool, items, props.activeSurface.label]);
   // Only the person's own pointer or focus promotes this panel to the
   // palette's source; unmount clears this publication and nothing else, so a

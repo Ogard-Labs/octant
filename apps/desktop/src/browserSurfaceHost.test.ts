@@ -394,7 +394,7 @@ describe("BrowserSurfaceHost", () => {
       const created = view();
       const fetch = vi.fn(async () => ({
         ok: true,
-        headers: { get: () => "image/png" },
+        headers: { get: (): string => "image/png" },
         body: {
           getReader: () => {
             let sent = false;
@@ -479,7 +479,7 @@ describe("BrowserSurfaceHost", () => {
       const created: BrowserSurfaceViewPort[] = [];
       const fetch = vi.fn(async () => ({
         ok: true,
-        headers: { get: () => "image/png" },
+        headers: { get: (): string => "image/png" },
         body: {
           getReader: () => {
             let sent = false;
@@ -576,6 +576,43 @@ describe("BrowserSurfaceHost", () => {
         ]);
         expect(moved?.revision).not.toBe(row!.revision);
         expect(moved?.dataUrl).toBeUndefined();
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("withholds an unaccepted image's bytes but still answers the tab once", async () => {
+      const { created, fetch, host } = await withTabs(1);
+      try {
+        const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>');
+        fetch.mockResolvedValue({
+          ok: true,
+          headers: { get: () => "image/svg+xml" },
+          body: {
+            getReader: () => {
+              let sent = false;
+              return {
+                read: async () =>
+                  sent ? { done: true } : ((sent = true), { done: false, value: svg }),
+                cancel: async () => undefined,
+              };
+            },
+          },
+        });
+        fire(created[0]!, "page-favicon-updated", ["https://example.com/icon.svg"]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const [row] = host.tabIcons(contextId, owner, []);
+        // The tab is real and its revision answers; the SVG markup itself
+        // never transports to a person-facing strip.
+        expect(row?.dataUrl).toBeUndefined();
+        expect(row?.revision).toBeGreaterThan(0);
+        // Acknowledging that revision is final: the same rejected image is
+        // not offered again on the next poll.
+        const [again] = host.tabIcons(contextId, owner, [
+          { tabId: row!.tabId, revision: row!.revision },
+        ]);
+        expect(again?.revision).toBe(row!.revision);
+        expect(again?.dataUrl).toBeUndefined();
       } finally {
         await host.closeAll();
       }

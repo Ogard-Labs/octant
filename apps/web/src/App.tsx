@@ -8302,10 +8302,13 @@ function LaunchedShell(
       : { id: actionsProject.id, name: actionsProject.name };
   // Only a Code Project's extra folders are listed by the Files tool; a Work
   // Project's own Files listing already walks them.
-  const activeProjectExtraFolders =
-    actionsProject?.type === "code"
-      ? (actionsProject.extraFolders ?? []).map((folder) => folder.canonicalRoot)
-      : NO_PROJECT_EXTRA_FOLDERS;
+  const activeProjectExtraFolders = useMemo(
+    () =>
+      actionsProject?.type === "code"
+        ? (actionsProject.extraFolders ?? []).map((folder) => folder.canonicalRoot)
+        : NO_PROJECT_EXTRA_FOLDERS,
+    [actionsProject],
+  );
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
@@ -8923,6 +8926,8 @@ function LaunchedShell(
                     ? {}
                     : { overviewThread: dockOverviewThread })}
                   projectNames={workingNowProjectNames}
+                  projectClient={projectController.client}
+                  projects={projectController.allProjects}
                   projectPullRequestReviewOpen={projectPullRequestReviewOpen}
                   {...(toolsPresented ? { providerController } : {})}
                   {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}

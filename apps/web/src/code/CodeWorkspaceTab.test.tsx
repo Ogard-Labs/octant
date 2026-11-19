@@ -192,6 +192,62 @@ describe("CodeWorkspaceTab repository tests", () => {
  * A code-file tab is only usable when the host's authoritative open answer
  * reaches the editor pane. The renderer never invents file content.
  */
+describe("CodeWorkspaceTab checkout reason", () => {
+  const codeProject = {
+    type: "code",
+    id: "70000000-0000-4000-8000-000000000099",
+    name: "Checkout Project",
+  } as never;
+
+  it("asks the Project service why once a checkout is unreadable", async () => {
+    const client = codeClient();
+    const projectClient = {
+      environment: vi.fn(),
+      environmentForThread: vi.fn(async () => ({
+        status: "refused",
+        reason: "The checkout's repository could not be opened.",
+      })),
+    };
+    render(
+      <CodeWorkspaceTab
+        controller={controller(client, undefined, "full-access", "unavailable")}
+        project={codeProject}
+        projectClient={projectClient as never}
+        tab={testTab()}
+      />,
+    );
+    await screen.findByRole("button", { name: "Run Web tests" });
+    await waitFor(() =>
+      expect(projectClient.environmentForThread).toHaveBeenCalledExactlyOnceWith(
+        "70000000-0000-4000-8000-000000000099",
+        ids.thread,
+        expect.any(AbortSignal),
+      ),
+    );
+    // The Project-level read is never the pane's: the thread-scoped one is.
+    expect(projectClient.environment).not.toHaveBeenCalled();
+  });
+
+  it("never asks again while the checkout reads fine", async () => {
+    const client = codeClient();
+    const projectClient = {
+      environment: vi.fn(),
+      environmentForThread: vi.fn(),
+    };
+    render(
+      <CodeWorkspaceTab
+        controller={controller(client)}
+        project={codeProject}
+        projectClient={projectClient as never}
+        tab={testTab()}
+      />,
+    );
+    await screen.findByRole("button", { name: "Run Web tests" });
+    expect(projectClient.environmentForThread).not.toHaveBeenCalled();
+    expect(projectClient.environment).not.toHaveBeenCalled();
+  });
+});
+
 describe("CodeWorkspaceTab code files", () => {
   it("opens the selected file through the host and renders the editor surface", async () => {
     const client = codeClient();
@@ -472,6 +528,7 @@ function controller(
   client: ReturnType<typeof codeClient>,
   editorDrafts?: ReturnType<typeof draftStore>,
   executionPolicy: "full-access" | "plan" = "full-access",
+  availability: "available" | "unavailable" = "available",
 ) {
   return {
     client,
@@ -483,7 +540,7 @@ function controller(
         id: ids.checkout,
         repositoryId: "c0000000-0000-4000-8000-000000000001",
         kind: "existing-worktree",
-        availability: "available",
+        availability,
         head: { kind: "branch", name: "feature/tests", oid: "a".repeat(40) },
         observedAt: "2026-08-15T08:00:00.000Z",
       },

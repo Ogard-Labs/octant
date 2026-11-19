@@ -12,7 +12,8 @@ import {
   type CodeBootstrap,
   type CodeThreadView,
 } from "@octant/contracts/code";
-import type { CodeProjectPullRequestDetailQuery } from "@octant/contracts";
+import type { CodeProjectPullRequestDetailQuery, ProjectSummary } from "@octant/contracts";
+import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -196,6 +197,9 @@ export interface DockContainerProps {
   readonly navigation: ShellNavigationModel;
   readonly overviewThread?: DockOverviewThread;
   readonly projectNames: ReadonlyMap<string, string>;
+  /** The Project catalogue a docked Code tool resolves its thread's Project from. */
+  readonly projects?: ReadonlyArray<ProjectSummary>;
+  readonly projectClient?: ProjectClient;
   readonly projectPullRequestReviewOpen: boolean;
   /** Like `codeThreadController`: only while a tool is on screen. */
   readonly providerController?: ProviderController;
@@ -462,6 +466,8 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
           });
         }}
         providerController={providerController}
+        {...(props.projects === undefined ? {} : { projects: props.projects })}
+        {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
         serverUrl={serverUrl}
         {...(selectedProjectPullRequestKey === undefined ? {} : { selectedProjectPullRequestKey })}
         {...(sidecarThreadId === undefined ? {} : { sidecarThreadId })}

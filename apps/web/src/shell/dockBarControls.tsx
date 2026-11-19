@@ -162,6 +162,12 @@ export interface FocusedDockToolSource {
  * clears only its own publication — when the focused owner unmounts, the
  * most recently published one stands back up instead of leaving the palette
  * empty.
+ *
+ * `get` returns a stable actionable projection of the current source — the
+ * same object while its owner and named commands stay the same — whose
+ * callbacks dispatch to whatever the owner publishes when the command runs.
+ * A command captured earlier runs the owner's latest callback, never a
+ * stale one, and nothing once the owner loses the palette or clears.
  */
 export interface FocusedDockTool {
   readonly get: () => FocusedDockToolSource | undefined;
@@ -170,22 +176,135 @@ export interface FocusedDockTool {
   readonly subscribe: (listener: () => void) => () => void;
 }
 
+/**
+ * What a reader may act on: named commands alone, without the callbacks or
+ * the tool-drawn nodes and text cues that never reach the palette. A change
+ * invisible here must not wake subscribers — a control that only swapped its
+ * callback or repainted a node still answers through the stored latest
+ * publication.
+ */
+function describeActionable(source: FocusedDockToolSource | undefined): string {
+  if (source === undefined) return "";
+  return JSON.stringify({
+    toolLabel: source.toolLabel,
+    items: source.items.flatMap((item): unknown[] => {
+      switch (item.kind) {
+        case "button":
+          return [[item.id, item.label, item.disabled === true]];
+        case "menu":
+          return [
+            [
+              item.id,
+              item.label,
+              item.items.map((entry) => [entry.id, entry.label, entry.disabled === true]),
+            ],
+          ];
+        case "choice":
+          return [
+            [
+              item.id,
+              item.label,
+              item.value,
+              item.options.map((option) => [option.id, option.label]),
+            ],
+          ];
+        default:
+          return [];
+      }
+    }),
+  });
+}
+
 export function createFocusedDockTool(): FocusedDockTool {
   const sources = new Map<string, FocusedDockToolSource>();
   const listeners = new Set<() => void>();
   let focused: string | undefined;
-  const emit = () => {
+  const top = ():
+    | { readonly owner: string; readonly source: FocusedDockToolSource }
+    | undefined => {
+    if (focused !== undefined) {
+      const source = sources.get(focused);
+      if (source !== undefined) return { owner: focused, source };
+    }
+    const last = [...sources.entries()].at(-1);
+    return last === undefined ? undefined : { owner: last[0], source: last[1] };
+  };
+  // What readers hold is a projection, not the publication itself: its
+  // callbacks resolve the latest matching control at invocation time, so a
+  // command the palette captured keeps running the owner's newest callback —
+  // and runs nothing once another owner is the palette's source or this one
+  // cleared its publication.
+  const project = (owner: string, source: FocusedDockToolSource): FocusedDockToolSource => {
+    const current = (id: string, kind: "button" | "menu" | "choice") => {
+      const entry = top();
+      if (entry === undefined || entry.owner !== owner) return undefined;
+      return entry.source.items.find((item) => item.id === id && item.kind === kind);
+    };
+    return {
+      toolLabel: source.toolLabel,
+      items: source.items.map((item): DockBarItem => {
+        switch (item.kind) {
+          case "button":
+            return {
+              ...item,
+              onSelect: () => {
+                const match = current(item.id, "button");
+                if (match?.kind === "button" && match.disabled !== true) match.onSelect();
+              },
+            };
+          case "menu":
+            return {
+              ...item,
+              onSelect: (entryId) => {
+                const match = current(item.id, "menu");
+                if (
+                  match?.kind === "menu" &&
+                  match.items.some((entry) => entry.id === entryId && entry.disabled !== true)
+                )
+                  match.onSelect(entryId);
+              },
+            };
+          case "choice":
+            return {
+              ...item,
+              onChange: (option) => {
+                const match = current(item.id, "choice");
+                if (match?.kind === "choice" && match.options.some((entry) => entry.id === option))
+                  match.onChange(option);
+              },
+            };
+          default:
+            return item;
+        }
+      }),
+    };
+  };
+  // The projection stays referentially stable while its owner and actionable
+  // description do, so `get` can serve `useSyncExternalStore` directly: a
+  // callback- or node-only update changes nothing a reader can act on, and
+  // emits exactly nothing.
+  const snapshotKey = (entry: { owner: string; source: FocusedDockToolSource } | undefined) =>
+    entry === undefined ? "" : `${entry.owner}${describeActionable(entry.source)}`;
+  let published: { readonly key: string; readonly snapshot: FocusedDockToolSource } | undefined;
+  const get = (): FocusedDockToolSource | undefined => {
+    const entry = top();
+    if (entry === undefined) {
+      published = undefined;
+      return undefined;
+    }
+    const key = snapshotKey(entry);
+    if (published?.key === key) return published.snapshot;
+    published = { key, snapshot: project(entry.owner, entry.source) };
+    return published.snapshot;
+  };
+  const emitWhenSnapshotChanged = (before: string) => {
+    if (snapshotKey(top()) === before) return;
     for (const listener of listeners) listener();
   };
   return {
-    get: () => {
-      if (focused !== undefined) {
-        const source = sources.get(focused);
-        if (source !== undefined) return source;
-      }
-      return [...sources.values()].at(-1);
-    },
+    get,
     set: (owner, source) => {
+      const before = snapshotKey(top());
       if (source === undefined) {
         if (!sources.delete(owner)) return;
         if (focused === owner) focused = undefined;
@@ -194,12 +313,13 @@ export function createFocusedDockTool(): FocusedDockTool {
         // registration does not promote over whoever is focused.
         sources.set(owner, source);
       }
-      emit();
+      emitWhenSnapshotChanged(before);
     },
     focus: (owner) => {
       if (focused === owner) return;
+      const before = snapshotKey(top());
       focused = owner;
-      emit();
+      emitWhenSnapshotChanged(before);
     },
     subscribe: (listener) => {
       listeners.add(listener);

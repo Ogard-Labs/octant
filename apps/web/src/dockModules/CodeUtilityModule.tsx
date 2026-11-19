@@ -13,7 +13,9 @@ export type CodeUtilityProps = Pick<
   | "codeController"
   | "codeProviderGroups"
   | "hostBridge"
+  | "projectClient"
   | "projectExtraFolders"
+  | "projects"
   | "providerController"
   | "serverUrl"
   | "subject"
@@ -44,7 +46,15 @@ export function CodeUtilityModule(
     );
   }
   const tab = codeUtilityTab(props.surface, threadId, props.appleProjectPath, props.utilityTabId);
-  const providerInstanceId = controller.activeView.thread.providerInstanceId;
+  const view = controller.activeView;
+  // The dock shows whichever thread it was opened for, not the window's active
+  // Project, so the checkout's unreadable reason resolves against that thread's
+  // own Project.
+  const project = props.projects?.find(
+    (candidate) =>
+      candidate.type === "code" && String(candidate.id) === String(view.thread.projectId),
+  );
+  const providerInstanceId = view.thread.providerInstanceId;
   const autoReview =
     props.providerController === undefined
       ? undefined
@@ -73,6 +83,8 @@ export function CodeUtilityModule(
         {...(props.projectExtraFolders === undefined
           ? {}
           : { projectExtraFolders: props.projectExtraFolders })}
+        {...(project === undefined ? {} : { project })}
+        {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
         tab={tab}

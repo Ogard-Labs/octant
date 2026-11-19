@@ -15,6 +15,7 @@ import type {
   BrowserPageScriptNativeCommand,
   BrowserPageScriptPreparation,
 } from "@octant/contracts/browser-page-script";
+import { isBrowserSurfaceFaviconDataUrl } from "@octant/contracts/browser-automation";
 import { BrowserPageEditMenu } from "./browserPageEditMenu";
 import { BrowserTextComposition, type BrowserTextSource } from "./browserTextComposition";
 import {
@@ -3716,11 +3717,19 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         sleeping: boolean,
       ): void => {
         const changed = remembered.get(tabId) !== revision;
+        // An unaccepted image — a declared SVG is fetched, but person-facing
+        // surfaces take raster only — is withheld here too, so its bytes never
+        // transport; the row still rides so the revision is acknowledged once
+        // rather than resent on every poll.
+        const image =
+          changed && dataUrl !== undefined && isBrowserSurfaceFaviconDataUrl(dataUrl)
+            ? dataUrl
+            : undefined;
         rows.push({
           tabId,
           revision,
           active: tabId === owned.activeTabId,
-          ...(changed && dataUrl !== undefined ? { dataUrl } : {}),
+          ...(image === undefined ? {} : { dataUrl: image }),
           ...(sleeping ? { sleeping } : {}),
         });
       };
