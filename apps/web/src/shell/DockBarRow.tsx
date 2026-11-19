@@ -1,3 +1,4 @@
+import "../styles/device-dot.css";
 import { ChevronDown, Ellipsis } from "../ui/icons";
 import {
   useLayoutEffect,

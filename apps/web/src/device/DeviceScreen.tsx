@@ -1,3 +1,4 @@
+import "../styles/device.css";
 import { useRef, type FocusEventHandler } from "react";
 import { gestureFrom, keyIntentFor, type PointerSample } from "../apple/simulatorGestures";
 import type { DeviceInputIntent, EnqueueDeviceInput } from "./deviceInput";

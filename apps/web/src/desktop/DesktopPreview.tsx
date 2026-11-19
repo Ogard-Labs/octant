@@ -1,3 +1,4 @@
+import "../styles/desktop.css";
 import { useEffect, useId, useRef, useState } from "react";
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import type { DesktopPreviewAnswer, DesktopPreviewRequest } from "@octant/contracts";

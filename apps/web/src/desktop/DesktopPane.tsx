@@ -1,3 +1,5 @@
+import "../styles/device.css";
+import "../styles/desktop.css";
 import type {
   DesktopFrameAnswer,
   DesktopPaneClient,

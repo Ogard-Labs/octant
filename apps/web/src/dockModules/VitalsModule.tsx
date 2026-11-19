@@ -1,3 +1,4 @@
+import "../styles/vitals.css";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { useEffect, useMemo, useState } from "react";
 import { createHostResourceClient } from "@octant/client-runtime/host-resource-client";

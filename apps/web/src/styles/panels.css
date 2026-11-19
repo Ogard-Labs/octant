@@ -267,13 +267,6 @@
   overflow-wrap: anywhere;
 }
 
-/* A device line (the approval question and its two buttons) wraps its buttons
-   under the question at a narrow width instead of squeezing the words to 0. */
-.device-line {
-  flex-wrap: wrap;
-  row-gap: var(--oct-space-1);
-}
-
 /* ─── the Browser's empty and error states are left-aligned lines ─────── */
 .browser-workspace__empty,
 .browser-workspace__remote-empty,

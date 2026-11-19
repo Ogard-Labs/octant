@@ -1,3 +1,5 @@
+@import "./device-dot.css";
+
 /* The device pane: the iOS Simulator and the Android emulator in the dock.
    One toolbar, at most one line, and the device on a quiet stage. The pane
    adapts to its container, so a wide dock gets the roomier layout. */
@@ -161,37 +163,6 @@
   background: var(--oct-wash-pressed);
 }
 
-.device-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-meta);
-}
-
-.device-dot[data-dot="running"] {
-  background: var(--oct-success);
-  animation: device-dot-pulse var(--oct-motion-pulse) ease-out infinite;
-}
-
-.device-dot[data-dot="busy"] {
-  background: var(--oct-warn);
-}
-
-.device-dot[data-dot="lost"] {
-  background: var(--oct-danger);
-}
-
-@keyframes device-dot-pulse {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in oklab, var(--oct-success) 45%, transparent);
-  }
-  70%,
-  100% {
-    box-shadow: 0 0 0 5px transparent;
-  }
-}
-
 .device-chip {
   display: inline-flex;
   flex: none;
@@ -216,7 +187,8 @@
   grid-row: 2;
   display: flex;
   align-items: center;
-  gap: var(--oct-space-2);
+  flex-wrap: wrap;
+  gap: var(--oct-space-1) var(--oct-space-2);
   min-width: 0;
   min-height: 40px;
   padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-1) var(--oct-space-3);
@@ -697,7 +669,6 @@
 
 /* ─── motion ───────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  .device-dot[data-dot="running"],
   .device-spinner {
     animation: none;
   }
@@ -712,7 +683,6 @@
   }
 }
 
-html[data-octant-reduced-motion="true"] .device-dot[data-dot="running"],
 html[data-octant-reduced-motion="true"] .device-spinner {
   animation: none;
 }

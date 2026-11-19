@@ -1,3 +1,4 @@
+import "../styles/apple.css";
 import type { AppleDiscoveryStep } from "@octant/contracts/apple-toolchain";
 import type { AppleDiscoverySnapshot } from "@octant/contracts/apple-toolchain-rpc";
 import type {
