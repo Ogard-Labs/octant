@@ -180,7 +180,7 @@ describe("ThreadComposer", () => {
     });
     const client = { list: vi.fn(async () => snapshot) } as unknown as ProviderUsageLimitsClient;
     const { container } = render(
-      <PlanUsageProvider barStyle="smooth" client={client}>
+      <PlanUsageProvider client={client}>
         <ThreadComposer
           input={<textarea aria-label="Message" className="composer-input" />}
           planUsage={{ providerInstanceId }}

@@ -1463,7 +1463,11 @@ host as a self-contained SVG and is absent when it could not be drawn;
 opening an entry opens the same document by `canvasId`; and the listing is
 bounded and says when it is cut. The dock's **Artifacts** tool reads the
 same listing asked for the thread's Project, and opens an entry in the dock
-beside the thread rather than in a tab.
+beside the thread rather than in a tab. Its list is the library's List table
+(not a second row design). In the dock it keeps the name and the sync mark at
+every width, without the tags, share and edited columns, so a dock resized past
+its 480px minimum never squeezes the name to make room for them. Below 360px the
+Export and Versions words go too.
 
 The page opens grouped by Project, because that is how a person comes back to
 their work; **All** stays the flat reading, **Shared** the live shares, and
@@ -2249,7 +2253,9 @@ artifact format and copies no other product's identifiers.
   context and is refused. The paired browser offers **Import HTML…** in a
   Chat thread's Canvas tools to a device that acts as the host's person, on
   its own: a device's plain create is not built, so no create draft is
-  shown beside it.
+  shown beside it. The phone offers the same import from a Chat thread's
+  Views and panes, from a file or pasted markup with an optional title, and
+  shows the host's summary of what was taken out or its refusal.
 - **Bounds and refusals.** The page is at most 256 KiB of UTF-8
   (`CANVAS_HTML_IMPORT_MAX_BYTES`), checked on the host; a body past the
   route's 1 MiB read is answered as too large too. What survives the import

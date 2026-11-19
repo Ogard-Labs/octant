@@ -43,6 +43,7 @@ import {
   approvalRequestIsProjectConfined,
   codexExecutionSettings,
   codexReviewRequest,
+  codexStrictProjectConfigRefusal,
   CODEX_OCTANT_PROFILE,
   withHeldTurnInput,
   codexTurnExecutionSettings,
@@ -64,13 +65,16 @@ const projectRoot = "/tmp/octant-codex-project";
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeCodexCli.ts", import.meta.url));
 const processDirectories: string[] = [];
 
-function processFixture(mode: string): { readonly binaryPath: string; readonly root: string } {
+function processFixture(
+  mode: string,
+  version = "0.144.4",
+): { readonly binaryPath: string; readonly root: string } {
   const root = mkdtempSync(join(tmpdir(), "octant-codex-driver-"));
   processDirectories.push(root);
   const binaryPath = join(root, "codex-fixture");
   writeFileSync(
     binaryPath,
-    `#!/bin/sh\nFAKE_CODEX_MODE='${mode}' FAKE_CODEX_ROOT='${root}' exec '${fakeCliPath}' "$@"\n`,
+    `#!/bin/sh\nFAKE_CODEX_MODE='${mode}' FAKE_CODEX_VERSION='${version}' FAKE_CODEX_ROOT='${root}' exec '${fakeCliPath}' "$@"\n`,
   );
   chmodSync(binaryPath, 0o755);
   return { binaryPath, root };
@@ -158,7 +162,9 @@ function fixture(
       readonly nextCursor: string | null;
     }>;
     readonly configRead?: () => Promise<CodexConfigReadResult>;
-    readonly skillsList?: () => Promise<CodexSkillsListResult>;
+    readonly skillsList?: (
+      input: Parameters<CodexClientPort["skillsList"]>[0],
+    ) => Promise<CodexSkillsListResult>;
     readonly threadResume?: (input: CodexThreadResumeInput) => Promise<CodexThreadResult>;
     readonly threadStart?: (input: CodexThreadStartInput) => Promise<CodexThreadResult>;
     readonly respondApproval?: (input: unknown) => Promise<void>;
@@ -169,6 +175,8 @@ function fixture(
     readonly version?: string;
     readonly threadCompactStart?: (input: { readonly threadId: string }) => Promise<void>;
     readonly threadInjectItems?: (input: unknown) => Promise<void>;
+    readonly threadFork?: NonNullable<CodexClientPort["threadFork"]>;
+    readonly pluginInstalled?: NonNullable<CodexClientPort["pluginInstalled"]>;
   } = {},
 ): Fixture {
   const calls: Array<{ method: string; input?: unknown }> = [];
@@ -177,6 +185,7 @@ function fixture(
   let closes = 0;
   let resolveExit: () => void = () => undefined;
   const pages = input.modelPages ?? [{ data: [model()], nextCursor: null }];
+  const { threadFork, pluginInstalled } = input;
   let page = 0;
   const client: CodexClientPort = {
     accountRead: async () => {
@@ -208,7 +217,7 @@ function fixture(
       calls.push({ method: "skills/list", input: value });
       return input.skillsList === undefined
         ? { data: [{ skills: [], errors: [] }] }
-        : input.skillsList();
+        : input.skillsList(value);
     },
     threadStart: async (value) => {
       calls.push({ method: "thread/start", input: value });
@@ -264,6 +273,22 @@ function fixture(
       calls.push({ method: "tool/respond", input: value });
       await input.respondTool?.(value);
     },
+    ...(threadFork === undefined
+      ? {}
+      : {
+          threadFork: async (value: Parameters<typeof threadFork>[0]) => {
+            calls.push({ method: "thread/fork", input: value });
+            return threadFork(value);
+          },
+        }),
+    ...(pluginInstalled === undefined
+      ? {}
+      : {
+          pluginInstalled: async (value: Parameters<typeof pluginInstalled>[0]) => {
+            calls.push({ method: "plugin/installed", input: value });
+            return pluginInstalled(value);
+          },
+        }),
     subscribe: (listener) => {
       calls.push({ method: "subscribe" });
       listeners.add(listener);
@@ -719,7 +744,12 @@ describe("Codex driver probe and runtime lifecycle", () => {
     const probe = await Effect.runPromise(
       Effect.scoped(makeCodexDriver(f.options()).probe({ instanceId })),
     );
-    expect(f.calls.map(({ method }) => method)).toEqual(["account/read", "model/list"]);
+    expect(f.calls.map(({ method }) => method)).toEqual([
+      "account/read",
+      "model/list",
+      // The account's own skills, for the composer's @ menu.
+      "skills/list",
+    ]);
     expect(probe).toMatchObject({
       readiness: "ready",
       detectedVersion: "0.144.4",
@@ -1291,7 +1321,12 @@ describe("Codex thread and turn lifecycle", () => {
       sandbox: "read-only",
       approvalsReviewer: "user",
       serviceTier: "fast",
-      config: { model_reasoning_effort: "low", web_search: "disabled", skills: { config: [] } },
+      config: {
+        model_reasoning_effort: "low",
+        web_search: "disabled",
+        skills: { config: [] },
+        projects: { [projectRoot]: { trust_level: "trusted" } },
+      },
     });
     expect(starts[1]?.input).toEqual({
       cwd: projectRoot,
@@ -1299,7 +1334,11 @@ describe("Codex thread and turn lifecycle", () => {
       approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "user",
-      config: { web_search: "disabled", skills: { config: [] } },
+      config: {
+        web_search: "disabled",
+        skills: { config: [] },
+        projects: { [projectRoot]: { trust_level: "trusted" } },
+      },
     });
     await acquired.close();
   });
@@ -1911,10 +1950,72 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
+  it("switches off the tools the person blocked through Codex's own config on start and every resume, at Full access too", async () => {
+    const f = fixture({
+      configRead: async () => ({
+        config: { mcp_servers: { docs: { command: "docs", disabled_tools: ["delete"] } } },
+      }),
+    });
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    // `ghost__read` names a server the person's config lacks, so no partial
+    // entry is written for it.
+    const blockedTools = ["shell", "view_image", "docs__search", "ghost__read"];
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        blockedTools,
+        nativeSetup: { webTools: true } as never,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId: "session-resumed" as never,
+        resumeCursor: { driverKind: "codex", value: "thread-existing" },
+        executionPolicy: "full-access",
+        blockedTools,
+      }),
+    );
+    for (const method of ["thread/start", "thread/resume"]) {
+      const input = f.calls.find((call) => call.method === method)?.input;
+      expect(input).toMatchObject({
+        config: {
+          "features.shell_tool": false,
+          "features.unified_exec": false,
+          "features.view_image": false,
+          // The person's own `delete` stays off beside Octant's block.
+          mcp_servers: { docs: { disabled_tools: ["delete", "search"] } },
+        },
+      });
+      expect(input).not.toHaveProperty(["config", "mcp_servers", "ghost"]);
+    }
+    await acquired.close();
+  });
+
+  it("refuses to start a session with a blocked Codex tool its config cannot switch off", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    const exit = await Effect.runPromiseExit(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        blockedTools: ["apply_patch"],
+      }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(f.calls.some(({ method }) => method === "thread/start")).toBe(false);
+    await acquired.close();
+  });
+
   it("lets a Work thread read the Project's AGENTS.md and keep Codex's shell, as Code does, on start and every resume", async () => {
     const workOff = {
       web_search: "disabled",
       skills: { config: [] },
+      // The Project the person added is trusted, so Codex reads its AGENTS.md
+      // and never records a trust decision of its own.
+      projects: { [projectRoot]: { trust_level: "trusted" } },
     };
     const f = fixture();
     const work = await acquireConnection(makeCodexDriver(f.options()), "work");
@@ -3149,7 +3250,12 @@ describe("Codex execution authority and approvals", () => {
         approvalPolicy,
         sandbox,
         approvalsReviewer: "user",
-        config: { web_search: "disabled", skills: { config: [] } },
+        config: {
+          web_search: "disabled",
+          skills: { config: [] },
+          // Plan records no trust; every other level tells Codex the Project is trusted.
+          ...(policy === "plan" ? {} : { projects: { [projectRoot]: { trust_level: "trusted" } } }),
+        },
       });
       await acquired.close();
     },
@@ -3332,13 +3438,14 @@ describe("Codex execution authority and approvals", () => {
       hooks: true,
       projectCode: true,
     } as const;
+    const extra = "/tmp/octant-codex-extra";
     const startWith = async (input: {
       readonly executionPolicy: "approval-gated" | "plan";
       readonly strict?: boolean;
       readonly projectCode: boolean;
     }) => {
       const f = fixture();
-      const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), "work", [extra]);
       await Effect.runPromise(
         acquired.connection.start({
           sessionId,
@@ -3352,22 +3459,95 @@ describe("Codex execution authority and approvals", () => {
       return f.calls.find(({ method }) => method === "thread/start")?.input;
     };
 
-    it("loads in a Project trusted for Codex outside Plan and Strict", async () => {
-      expect(
-        await startWith({ executionPolicy: "approval-gated", strict: false, projectCode: true }),
-      ).toMatchObject({ config: { projects: { [projectRoot]: { trust_level: "trusted" } } } });
-    });
-
     it.each([
-      ["under Strict", { executionPolicy: "approval-gated", projectCode: true }],
-      ["in Plan", { executionPolicy: "plan", strict: false, projectCode: false }],
+      ["outside Strict", { executionPolicy: "approval-gated", strict: false, projectCode: true }],
       [
-        "in a Project not trusted for Codex",
+        "for an account whose setup carries no Project code",
         { executionPolicy: "approval-gated", strict: false, projectCode: false },
       ],
-    ] as const)("is not trusted by Octant %s", async (_name, input) => {
-      const thread = await startWith(input);
-      expect(thread).not.toHaveProperty(["config", "projects"]);
+      ["under Strict", { executionPolicy: "approval-gated", projectCode: false }],
+    ] as const)(
+      "tells Codex the Project and its extra folders are trusted %s, so it never trusts them by itself",
+      async (_name, input) => {
+        expect(await startWith(input)).toMatchObject({
+          config: {
+            projects: {
+              [projectRoot]: { trust_level: "trusted" },
+              [extra]: { trust_level: "trusted" },
+            },
+          },
+        });
+      },
+    );
+
+    it("records no trust in Plan, whose read-only thread never trusts a folder by itself", async () => {
+      for (const strict of [false, undefined]) {
+        const thread = await startWith({
+          executionPolicy: "plan",
+          projectCode: false,
+          ...(strict === undefined ? {} : { strict }),
+        });
+        expect(thread).not.toHaveProperty(["config", "projects"]);
+        expect(JSON.stringify(thread)).not.toContain("untrusted");
+      }
+    });
+
+    it("refuses a Strict thread whose Project holds .codex/config.toml until the person allows the Project's code", () => {
+      const holds = (path: string) => path === join(projectRoot, ".codex", "config.toml");
+      const refusal = (input: {
+        readonly executionPolicy: "approval-gated" | "plan";
+        readonly strict?: boolean;
+        readonly projectCode?: boolean;
+        readonly exists?: (path: string) => boolean;
+      }) =>
+        codexStrictProjectConfigRefusal({
+          projectRoot,
+          mode: "code",
+          executionPolicy: input.executionPolicy,
+          strict: input.strict,
+          nativeSetup:
+            input.projectCode === undefined
+              ? undefined
+              : { ...trustedSetup, projectCode: input.projectCode },
+          exists: input.exists ?? holds,
+        });
+      expect(refusal({ executionPolicy: "approval-gated" })).toContain(".codex/config.toml");
+      expect(refusal({ executionPolicy: "approval-gated", projectCode: false })).toContain(
+        "Allow Project code",
+      );
+      // Confirmed, outside Strict, in Plan, or with no such file, it starts.
+      expect(refusal({ executionPolicy: "approval-gated", projectCode: true })).toBeUndefined();
+      expect(refusal({ executionPolicy: "approval-gated", strict: false })).toBeUndefined();
+      expect(refusal({ executionPolicy: "plan" })).toBeUndefined();
+      expect(refusal({ executionPolicy: "approval-gated", exists: () => false })).toBeUndefined();
+    });
+
+    it("fails the Strict session start in such a Project before any thread starts", async () => {
+      const root = mkdtempSync(join(tmpdir(), "octant-codex-strict-config-"));
+      try {
+        mkdirSync(join(root, ".codex"));
+        writeFileSync(join(root, ".codex", "config.toml"), 'model = "gpt-5.4"\n');
+        const f = fixture();
+        const scope = await Effect.runPromise(Scope.make());
+        const connection = await Effect.runPromise(
+          makeCodexDriver(f.options())
+            .acquire({ instanceId, projectRoot: root, mode: "code" })
+            .pipe(Effect.provideService(Scope.Scope, scope)),
+        );
+        const exit = await Effect.runPromiseExit(
+          connection.start({
+            sessionId,
+            modelId: "gpt-5.4" as never,
+            executionPolicy: "approval-gated",
+          }),
+        );
+        await Effect.runPromise(Scope.close(scope, Exit.void));
+        expect(Exit.isFailure(exit)).toBe(true);
+        expect(JSON.stringify(exit)).toContain("Allow Project code");
+        expect(f.calls.some(({ method }) => method === "thread/start")).toBe(false);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
   });
 
@@ -5564,5 +5744,425 @@ describe("Codex running as itself", () => {
     });
     expect(JSON.stringify([child, mark])).not.toContain("private detail");
     await acquired.close();
+  });
+});
+
+describe("Codex sessions begun outside Octant, native copies, and skill and plugin references", () => {
+  /** The host's journal, as the session-ownership port reads it: the Codex threads Octant holds. */
+  const journalHolding = (held: ReadonlySet<string>) => ({
+    held: (driverKind: string) => (driverKind === "codex" ? held : new Set<string>()),
+  });
+  const fakeCodexDriver = (
+    target: { readonly binaryPath: string },
+    held: ReadonlySet<string> = new Set(),
+  ) =>
+    makeCodexDriver({
+      instanceId,
+      binaryPath: target.binaryPath,
+      process: makeCodexProcessLive({
+        octantVersion: "0.1.0-test",
+        startupTimeoutMs: 2_000,
+        shutdownTimeoutMs: 50,
+        // These cases assert the session wire, not the profile (see the
+        // transport case above).
+        versionProbeConfinement: {
+          prepare: (input) => ({ command: input.executable, args: input.args }),
+        },
+        confinement: { prepare: (input) => ({ command: input.executable, args: input.args }) },
+      }),
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      idleLeaseMs: 0,
+      sessionOwnership: journalHolding(held),
+    });
+
+  it("offers the person's own Codex session in the folder, takes it up once, and gives it back when released", async () => {
+    const target = processFixture("sessions", "0.170.0");
+    const sessions = fakeCodexDriver(target).nativeSessions;
+    if (sessions === undefined) throw new Error("Codex offers no sessions.");
+
+    const listed = await Effect.runPromise(sessions.list({ instanceId, projectRoot }));
+    // Octant's own thread and a subagent's are never offered.
+    expect(listed).toEqual([
+      {
+        nativeSessionId: "person-1",
+        title: "Fix the login form",
+        lastModified: 1_795_028_942_000,
+        gitBranch: "fix-login",
+      },
+    ]);
+    expect(
+      processRecords(target.root).find(
+        (record) => record.kind === "request" && record.method === "thread/list",
+      ),
+    ).toMatchObject({
+      params: {
+        cwd: projectRoot,
+        sortKey: "updated_at",
+        archived: false,
+        sourceKinds: ["cli", "vscode", "exec", "appServer"],
+      },
+    });
+
+    const adopt = (nativeSessionId: string, id = sessionId) =>
+      Effect.runPromise(
+        Effect.either(
+          sessions.adopt({
+            instanceId,
+            projectRoot,
+            mode: "code",
+            sessionId: id,
+            nativeSessionId,
+            modelId: "gpt-5.4" as never,
+          }),
+        ),
+      );
+    const adopted = await adopt("person-1");
+    expect(adopted).toMatchObject({
+      _tag: "Right",
+      right: {
+        driverKind: "codex",
+        value: "person-1",
+        adopted: true,
+        tools: [],
+        toolDefinitions: [],
+        binding: { instanceId, sessionId, projectRoot, mode: "code" },
+      },
+    });
+    // The person's thread is read, never loaded, copied or written.
+    const methods = processRecords(target.root)
+      .filter((record) => record.kind === "request")
+      .map((record) => record.method);
+    expect(methods).toContain("thread/read");
+    expect(methods).not.toContain("thread/resume");
+    expect(methods).not.toContain("thread/fork");
+
+    expect(await Effect.runPromise(sessions.list({ instanceId, projectRoot }))).toEqual([]);
+    expect(await adopt("person-1", secondSessionId)).toMatchObject({
+      _tag: "Left",
+      left: { message: "That Codex session already belongs to an Octant thread." },
+    });
+
+    // A release for another Octant session leaves the claim; this one's gives it back.
+    await Effect.runPromise(
+      sessions.release?.({ instanceId, nativeSessionId: "person-1", sessionId: secondSessionId }) ??
+        Effect.void,
+    );
+    expect(await Effect.runPromise(sessions.list({ instanceId, projectRoot }))).toEqual([]);
+    await Effect.runPromise(
+      sessions.release?.({ instanceId, nativeSessionId: "person-1", sessionId }) ?? Effect.void,
+    );
+    expect(
+      (await Effect.runPromise(sessions.list({ instanceId, projectRoot }))).map(
+        (session) => session.nativeSessionId,
+      ),
+    ).toEqual(["person-1"]);
+  });
+
+  it("refuses a Codex session from another folder, one Octant started, and one an Octant thread already holds", async () => {
+    const sessions = fakeCodexDriver(
+      processFixture("sessions", "0.170.0"),
+      new Set(["person-held"]),
+    ).nativeSessions;
+    if (sessions === undefined) throw new Error("Codex offers no sessions.");
+    const adopt = (nativeSessionId: string) =>
+      Effect.runPromise(
+        Effect.either(
+          sessions.adopt({
+            instanceId,
+            projectRoot,
+            mode: "work",
+            sessionId,
+            nativeSessionId,
+            modelId: "gpt-5.4" as never,
+          }),
+        ),
+      );
+    for (const nativeSessionId of ["person-elsewhere", "octant-1", "../escape"])
+      expect(await adopt(nativeSessionId)).toMatchObject({
+        _tag: "Left",
+        left: { category: "stale-resume" },
+      });
+
+    // The journal records an Octant thread holding it, so it is neither offered nor taken up.
+    expect(await adopt("person-held")).toMatchObject({
+      _tag: "Left",
+      left: { message: "That Codex session already belongs to an Octant thread." },
+    });
+    expect(
+      (await Effect.runPromise(sessions.list({ instanceId, projectRoot }))).map(
+        (session) => session.nativeSessionId,
+      ),
+    ).toEqual(["person-1"]);
+  });
+
+  it("resumes a taken-up Codex session with Octant's tools offered, rather than handing it over as text", async () => {
+    const f = fixture();
+    const driver = makeCodexDriver(f.options());
+    const cursor = {
+      driverKind: "codex" as const,
+      value: "person-1",
+      tools: [],
+      toolDefinitions: [],
+      adopted: true as const,
+      binding: {
+        instanceId,
+        sessionId,
+        projectRoot,
+        mode: "code" as const,
+        modelId: decodeProviderModelId("gpt-5.4"),
+      },
+    };
+    expect(
+      driver.toolCatalogContinuation?.({ resumeCursor: cursor, tools: [BROWSER_TOOL_DEFINITION] }),
+    ).toBe("unchanged");
+    const acquired = await acquireConnection(driver, "code");
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: cursor,
+        executionPolicy: "approval-gated",
+        modelId: "gpt-5.4" as never,
+        tools: [BROWSER_TOOL_DEFINITION],
+      }),
+    );
+    expect(f.calls).toContainEqual(
+      expect.objectContaining({
+        method: "thread/resume",
+        input: expect.objectContaining({ threadId: "person-1" }),
+      }),
+    );
+    // The session has no Octant tools, so no rule describes one to its model.
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "Carry on.",
+        context: [{ kind: "instructions", tool: "octant_browser", text: "Use the browser." }],
+        attachments: [],
+        tools: [BROWSER_TOOL_DEFINITION],
+      }),
+    );
+    const turn = f.calls.find((call) => call.method === "turn/start")?.input as CodexTurnStartInput;
+    expect(JSON.stringify(turn)).not.toContain("Use the browser.");
+    await acquired.close();
+  });
+
+  it("copies a session at a turn with Codex's own fork, on a process that closes before the copy is resumed", async () => {
+    const f = fixture({
+      version: "0.170.0",
+      threadFork: async (value) => ({
+        thread: { id: `copy-of-${value.threadId}` },
+        model: "gpt-5.4",
+        modelProvider: "openai",
+        serviceTier: null,
+        cwd: value.cwd,
+      }),
+    });
+    const driver = makeCodexDriver(f.options());
+    const source = {
+      driverKind: "codex" as const,
+      value: "thread-source",
+      tools: ["octant_browser"],
+      toolDefinitions: [{ name: "octant_browser", digest: "a".repeat(64) }],
+      binding: {
+        instanceId,
+        sessionId,
+        projectRoot,
+        mode: "code" as const,
+        modelId: decodeProviderModelId("gpt-5.4"),
+      },
+    };
+    const fork = (overrides: Partial<Parameters<NonNullable<typeof driver.forkSession>>[0]> = {}) =>
+      Effect.runPromise(
+        driver.forkSession?.({
+          instanceId,
+          sessionId: secondSessionId,
+          source,
+          anchor: "turn-2",
+          projectRoot,
+          mode: "code",
+          modelId: decodeProviderModelId("gpt-5.4"),
+          ...overrides,
+        }) ?? Effect.succeed(undefined),
+      );
+
+    const copied = await fork();
+    expect(copied).toEqual({
+      driverKind: "codex",
+      value: "copy-of-thread-source",
+      tools: source.tools,
+      toolDefinitions: source.toolDefinitions,
+      binding: {
+        instanceId,
+        sessionId: secondSessionId,
+        projectRoot,
+        mode: "code",
+        modelId: "gpt-5.4",
+      },
+    });
+    expect(f.calls).toContainEqual({
+      method: "thread/fork",
+      input: {
+        threadId: "thread-source",
+        lastTurnId: "turn-2",
+        cwd: projectRoot,
+        excludeTurns: true,
+      },
+    });
+    // The copying process is gone, so the copy's own lease can resume it.
+    expect(f.startCount()).toBe(1);
+    expect(f.closeCount()).toBe(1);
+
+    // Another folder or mode, or a Codex whose fork cannot cut at a turn, goes back as the text handoff.
+    expect(await fork({ projectRoot: "/tmp/another-project" })).toBeUndefined();
+    expect(await fork({ mode: "work" })).toBeUndefined();
+    const older = fixture({
+      version: "0.142.5",
+      threadFork: async () => {
+        throw new Error("never asked");
+      },
+    });
+    expect(
+      await Effect.runPromise(
+        makeCodexDriver(older.options()).forkSession?.({
+          instanceId,
+          sessionId: secondSessionId,
+          source,
+          anchor: "turn-2",
+          projectRoot,
+          mode: "code",
+          modelId: decodeProviderModelId("gpt-5.4"),
+        }) ?? Effect.succeed(undefined),
+      ),
+    ).toBeUndefined();
+    expect(older.calls.some((call) => call.method === "thread/fork")).toBe(false);
+  });
+
+  it("makes each of two concurrent copies on its own process, so neither copy is still held when it is returned", async () => {
+    let releaseFirst: () => void = () => undefined;
+    const firstAsked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let forks = 0;
+    const f = fixture({
+      version: "0.170.0",
+      threadFork: async (value) => {
+        forks += 1;
+        // The first copy waits until the second has started, so both are in flight at once.
+        if (forks === 1) await firstAsked;
+        else releaseFirst();
+        return {
+          thread: { id: `copy-for-${value.lastTurnId}` },
+          model: "gpt-5.4",
+          modelProvider: "openai",
+          serviceTier: null,
+          cwd: value.cwd,
+        };
+      },
+    });
+    const driver = makeCodexDriver(f.options());
+    const source = {
+      driverKind: "codex" as const,
+      value: "thread-source",
+      binding: {
+        instanceId,
+        sessionId,
+        projectRoot,
+        mode: "code" as const,
+        modelId: decodeProviderModelId("gpt-5.4"),
+      },
+    };
+    const copy = (id: typeof sessionId, anchor: string) =>
+      Effect.runPromise(
+        driver.forkSession?.({
+          instanceId,
+          sessionId: id,
+          source,
+          anchor,
+          projectRoot,
+          mode: "code",
+          modelId: decodeProviderModelId("gpt-5.4"),
+        }) ?? Effect.succeed(undefined),
+      );
+    const third = decodeProviderSessionId("90000000-0000-4000-8000-000000000063");
+    const copies = await Promise.all([copy(secondSessionId, "turn-1"), copy(third, "turn-2")]);
+    expect(copies.map((copied) => copied?.value)).toEqual(["copy-for-turn-1", "copy-for-turn-2"]);
+    expect(f.startCount()).toBe(2);
+    expect(f.closeCount()).toBe(2);
+  });
+
+  it("lists the account's own Codex skills and installed plugins for the composer's @ menu", async () => {
+    const target = processFixture("sessions", "0.170.0");
+    const result = await Effect.runPromise(
+      Effect.scoped(fakeCodexDriver(target).probe({ instanceId })),
+    );
+    // A Project's skill is not the account's, and is not offered here.
+    expect(result.mentions).toEqual([
+      { kind: "skill", name: "tidy", description: "Tidy the code" },
+      { kind: "plugin", name: "docs", description: "Search the docs" },
+    ]);
+  });
+
+  it("sends the skills and plugins a prompt names as Codex input items, never one switched off for the thread", async () => {
+    const userSkill = {
+      name: "tidy",
+      path: "/home/person/.codex/skills/tidy/SKILL.md",
+      scope: "user",
+    };
+    const projectSkill = {
+      name: "local",
+      path: `${projectRoot}/.agents/skills/local/SKILL.md`,
+      scope: "repo",
+    };
+    const f = fixture({
+      skillsList: async () => ({
+        data: [
+          {
+            skills: [
+              { ...userSkill, enabled: true },
+              { ...projectSkill, enabled: true },
+              {
+                name: "off",
+                path: "/home/person/.codex/skills/off/SKILL.md",
+                scope: "user",
+                enabled: false,
+              },
+            ],
+            errors: [],
+          },
+        ],
+      }),
+      pluginInstalled: async () => ({
+        marketplaces: [
+          {
+            plugins: [
+              { id: "docs@local", name: "docs", installed: true, enabled: true },
+              { id: "mail@local", name: "mail", installed: true, enabled: false },
+            ],
+          },
+        ],
+      }),
+    });
+    const driver = makeCodexDriver(f.options());
+    const turnInput = async (mode: "chat" | "code", prompt: string) => {
+      const before = f.calls.length;
+      const acquired = await acquireConnection(driver, mode);
+      await startSession(acquired.connection);
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt, attachments: [], tools: [] }),
+      );
+      await acquired.close();
+      const turn = f.calls.slice(before).find((call) => call.method === "turn/start");
+      return (turn?.input as CodexTurnStartInput | undefined)?.input;
+    };
+
+    expect(
+      await turnInput("code", "Use $tidy and $local, $off, then ask @docs and @mail."),
+    ).toEqual([
+      { type: "text", text: "Use $tidy and $local, $off, then ask @docs and @mail." },
+      { type: "skill", name: "tidy", path: userSkill.path },
+      { type: "mention", name: "docs", path: "plugin://docs@local" },
+    ]);
+    // A Chat thread has its plugins switched off, so it names none.
+    expect(await turnInput("chat", "Ask @docs.")).toEqual([{ type: "text", text: "Ask @docs." }]);
   });
 });

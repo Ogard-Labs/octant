@@ -5,7 +5,6 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { useActionShortcut } from "../keybindings/useActionShortcut";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { IconButton } from "./IconButton";
-import { TitleBandChanges, type TitleBandChangesFacts } from "./TitleBandChanges";
 import { ApplicationIdentity } from "./ApplicationIdentity";
 import type { WindowHistory } from "./windowHistory";
 import { WindowHistoryButtons } from "./WindowHistoryButtons";
@@ -28,8 +27,6 @@ export interface WindowChromeProps {
   readonly onNewThread?: () => void;
   readonly newThreadLabel?: string;
   readonly zenRecoveryNeeded?: boolean;
-  /** The open Code thread's uncommitted changes; absent when it has no checkout to measure. */
-  readonly changes?: TitleBandChangesFacts;
   /** Back and forward, shown beside Show sidebar while the sidebar is hidden. */
   readonly history?: WindowHistory;
 }
@@ -147,13 +144,10 @@ export function WindowChrome(props: WindowChromeProps) {
               ? {}
               : { onRecoverZen: recoverZen })}
           />
-        ) : props.changes === undefined ? null : (
-          <TitleBandChanges changes={props.changes} />
-        )}
+        ) : null}
         {/* The focused pane's tool buttons, outermost at the bar's end in a
-            wide window: the pane draws them into this slot. Last, so a change
-            count or a Project action that comes and goes beside them never
-            moves them. A narrow window keeps them in the pane's own header,
+            wide window: the pane draws them into this slot. Last, so a Project
+            action that comes and goes beside them never moves them. A narrow window keeps them in the pane's own header,
             so it has no slot. */}
         {props.isNarrow ? null : (
           <span className="window-chrome__pane-tools" ref={setPaneToolsHost} />

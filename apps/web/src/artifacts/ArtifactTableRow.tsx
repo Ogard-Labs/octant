@@ -5,7 +5,18 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { ArtifactSyncStatus } from "./ArtifactSyncStatus";
 import { KIND_LABEL } from "./ArtifactCard";
 import { ArtifactTags } from "./ArtifactTags";
-import type { ArtifactListRowProps } from "./ArtifactListRow";
+import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
+
+export interface ArtifactTableRowProps {
+  readonly entry: ArtifactLibraryEntry;
+  readonly observedAt: string;
+  readonly onOpen: (entry: ArtifactLibraryEntry) => void;
+  readonly onExport?: (entry: ArtifactLibraryEntry) => void;
+  readonly onSync?: (canvasId: ArtifactLibraryEntry["canvasId"]) => void;
+  readonly onRestore?: (canvasId: ArtifactLibraryEntry["canvasId"]) => void;
+  readonly onTagAdd?: (canvasId: ArtifactLibraryEntry["canvasId"], tag: string) => void;
+  readonly onTagRemove?: (canvasId: ArtifactLibraryEntry["canvasId"], tag: string) => void;
+}
 
 /** The column names, drawn once over each list; every row says the same in its own words. */
 export function ArtifactTableHead() {
@@ -26,7 +37,7 @@ export function ArtifactTableHead() {
  * buttons of their own, and a button cannot hold a button, so they sit beside
  * it in the row's grid and the open button's description carries the facts.
  */
-export function ArtifactTableRow(props: ArtifactListRowProps) {
+export function ArtifactTableRow(props: ArtifactTableRowProps) {
   const { entry } = props;
   const rowId = useId();
   const edited = artifactEditedAgo(String(entry.updatedAt), props.observedAt);
@@ -93,6 +104,7 @@ export function ArtifactTableRow(props: ArtifactListRowProps) {
         />
         {props.onExport === undefined ? null : (
           <OctantButton
+            className="artifact-table-row__action"
             onClick={() => props.onExport?.(entry)}
             size="sm"
             type="button"
@@ -104,6 +116,7 @@ export function ArtifactTableRow(props: ArtifactListRowProps) {
         {props.onSync === undefined || entry.writtenOn === undefined ? null : (
           <OctantButton
             aria-label={`Versions of ${entry.title}`}
+            className="artifact-table-row__action"
             onClick={() => props.onSync?.(entry.canvasId)}
             size="sm"
             type="button"

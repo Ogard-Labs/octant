@@ -81,3 +81,29 @@ it("labels a proved runtime mixed once Full access launches it outside the sandb
     threadAppToolSupport({ appManagedTools: "unsupported" }, { executionPolicy: "full-access" }),
   ).toBe("unsupported");
 });
+
+it("carries Octant's tools to a newer unverified release at Full access only", () => {
+  const unverified = {
+    appManagedTools: "unsupported" as const,
+    atFullAccess: {
+      release: "unverified" as const,
+      usage: "unsupported" as const,
+      userQuestions: "unsupported" as const,
+      appManagedTools: "supported" as const,
+    },
+  };
+  for (const level of [
+    { executionPolicy: "full-access" as const },
+    { executionPolicy: "full-access" as const, fullAccessSandbox: true },
+  ]) {
+    expect(threadAppToolSupport(unverified, level)).toBe("supported");
+    expect(browserToolTransport({ capabilities: unverified }, "model", level)).toBe(true);
+  }
+  for (const executionPolicy of ["plan", "approval-gated", "auto-accept-edits"] as const) {
+    expect(threadAppToolSupport(unverified, { executionPolicy })).toBe("unsupported");
+    expect(browserToolTransport({ capabilities: unverified }, "model", { executionPolicy })).toBe(
+      false,
+    );
+  }
+  expect(browserToolTransport({ capabilities: unverified }, "model")).toBe(false);
+});

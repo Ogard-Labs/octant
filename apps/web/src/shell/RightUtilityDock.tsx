@@ -66,7 +66,6 @@ export interface RightUtilityDockProps {
   readonly tiles?: DockTileControls;
   /** The row of tool buttons the drawer's header carries; absent when docked. */
   readonly toolRow?: DockToolButtonsProps;
-  readonly toolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly width: number;
 }
 
@@ -89,10 +88,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
     ...(props.tiles?.minimised === undefined ? {} : { minimised: props.tiles.minimised }),
   });
   const stripOpen =
-    !props.isNarrow &&
-    props.tiles !== undefined &&
-    split.environmentTabId !== undefined &&
-    !(props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface");
+    !props.isNarrow && props.tiles !== undefined && split.environmentTabId !== undefined;
   // Fixed tools never resize, so their column draws no handle.
   const columnFixed = dockColumnIsFixed(
     props.tabs.map((tab) => ("surface" in tab ? tab.surface : tab).id),
@@ -205,9 +201,6 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       columnsFit={columnsFit}
       {...(stripOpen && !columnFixed ? { toolResizeHandle: resizeHandle } : {})}
       {...(props.toolRow === undefined ? {} : { toolRow: props.toolRow })}
-      {...(props.toolsAwaitingThread === undefined
-        ? {}
-        : { toolsAwaitingThread: props.toolsAwaitingThread })}
       {...dismiss}
     />
   );
