@@ -900,6 +900,56 @@ describe("single owner control socket", () => {
     if (replacement.kind === "owner") owners.push(replacement);
   });
 
+  it("recovers a socket left by a dead owner without the attachment grace period", async () => {
+    const runtimeBase = await realpath(tmpdir());
+    const root = await mkdtemp(join(runtimeBase, "octant-stale-owner-"));
+    temporaryRoots.push(root);
+    const paths = resolveHostRuntimePaths({
+      env: { OCTANT_DATA_DIR: join(root, "data") },
+      platform: filesystemTestPlatform,
+      home: join(root, "home"),
+      temporaryDirectory: runtimeBase,
+      uid: process.getuid?.() ?? 1000,
+    });
+    await prepareHostRuntimePaths(paths);
+    // A child bound the socket and exited: a real socket file with nothing
+    // listening and a pid the live-process check reports dead.
+    const stalePid = await leaveStaleSocket(paths.socketPath);
+    const secret = "stale-control-secret";
+    const staleReceipt = {
+      schemaVersion: 1 as const,
+      hostId: "11111111-1111-4111-8111-111111111111",
+      instanceId: "22222222-2222-4222-8222-222222222222",
+      endpoint: paths.socketPath,
+      pid: stalePid,
+      processStart: "stale-start",
+      serverVersion: "1.2.2",
+      wireVersion: "1",
+      serviceMode: "foreground" as const,
+      nonceDigest: createHash("sha256").update(secret).digest("hex"),
+      createdAt: "2026-08-09T10:00:00.000Z",
+    };
+    await writeFile(paths.controlSecretPath, secret, { mode: 0o600 });
+    await writeFile(paths.ownerReceiptPath, encodeOwnerReceipt(staleReceipt), { mode: 0o600 });
+
+    const started = performance.now();
+    const replacement = await acquireHostRuntimeOwner({
+      paths,
+      hostId: staleReceipt.hostId,
+      instanceId: "33333333-3333-4333-8333-333333333333",
+      serverVersion: "1.2.3",
+      wireVersion: "1",
+      serviceMode: "foreground",
+      processStart: "replacement-start",
+    });
+    const elapsed = performance.now() - started;
+    expect(replacement.kind).toBe("owner");
+    if (replacement.kind === "owner") owners.push(replacement);
+    // The wait this path used to pay is fifty attach tries a heartbeat apart;
+    // a provably dead socket answers in single-digit milliseconds.
+    expect(elapsed).toBeLessThan(500);
+  });
+
   it("recovers stale authority when data and runtime directories are on different filesystems", async () => {
     const runtimeBase = await realpath(tmpdir());
     const root = await mkdtemp(join(runtimeBase, "octant-stale-owner-"));
