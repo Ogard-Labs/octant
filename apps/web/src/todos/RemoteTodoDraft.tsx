@@ -364,7 +364,6 @@ export function RemoteTodoDraft(props: {
       )}
       <DraftThreadWorkspace
         mode={mode}
-        startPresentation="new-task"
         projectId={project.id}
         projectName={project.name}
         {...(project.type === "chat" ? {} : { projectRoot: project.binding.canonicalRoot })}
