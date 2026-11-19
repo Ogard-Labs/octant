@@ -11,6 +11,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { join } from "node:path";
 import {
   AppUpdateFeed,
+  PairedDeviceAlert,
   HardwareAddress,
   HubAutoApplyKind,
   HubDirectPushEnvironment,
@@ -397,6 +398,8 @@ export const HubState = Schema.Struct({
   link: Schema.optional(HubLinkState),
   /** Guest devices a dropped link could not revoke because the device pairing was not running; revoked once it is. */
   pendingDeviceRevocations: Schema.optional(Schema.Array(Schema.UUID)),
+  /** Devices that paired directly with this host, until a window clears each alert or the device is removed. */
+  pairedDeviceAlerts: Schema.optional(Schema.Array(PairedDeviceAlert)),
   /** A paired phone or web client's merge needs a fresh unlock on an owner device; set only from a window on this host. */
   ownerUnlockBeforePairedMerge: Schema.optional(Schema.Literal(true)),
   /** Each approval answer from an owner device needs its own fresh unlock; unset, an open session covers them. Set only from a window on this host. */

@@ -2,6 +2,7 @@ import {
   decodeNewDeviceAlertList,
   type NewDeviceAlertList,
   type NewMemberAlert,
+  type PairedDeviceAlert,
 } from "@octant/contracts";
 import { isAgentGrantSession } from "../clientPrincipal";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
@@ -13,6 +14,10 @@ export const NEW_DEVICE_ALERTS_PATH = "/api/new-device-alerts";
 export interface NewDeviceAlertRouteDependencies {
   /** The alerts this host raised as a spoke for members a newer roster added. */
   readonly memberAlerts: () => ReadonlyArray<NewMemberAlert>;
+  /** The alerts this host raised for devices that paired directly with it. */
+  readonly pairedAlerts?: () => ReadonlyArray<PairedDeviceAlert>;
+  /** Clears one of those alerts; asked only from a window on this host. */
+  readonly dismissPaired?: (alertId: string) => { readonly status: "dismissed" | "refused" };
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
 }
@@ -29,6 +34,7 @@ export function createNewDeviceAlertRouteHandler(dependencies: NewDeviceAlertRou
   const now = dependencies.now ?? Date.now;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
+    if (url.pathname === `${NEW_DEVICE_ALERTS_PATH}/dismiss`) return dismiss(request, url);
     if (url.pathname !== NEW_DEVICE_ALERTS_PATH) return undefined;
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname) || (origin !== null && !isAllowedRendererOrigin(origin))) {
@@ -58,14 +64,60 @@ export function createNewDeviceAlertRouteHandler(dependencies: NewDeviceAlertRou
       throw error;
     }
     const list: NewDeviceAlertList = decodeNewDeviceAlertList({
-      alerts: dependencies.memberAlerts().map(({ memberId: _memberId, ...alert }) => ({
-        kind: "hub-member",
-        ...alert,
-      })),
+      alerts: [
+        ...dependencies.memberAlerts().map(({ memberId: _memberId, ...alert }) => ({
+          kind: "hub-member",
+          ...alert,
+        })),
+        ...(dependencies.pairedAlerts?.() ?? []).map((alert) => ({
+          kind: "paired-device",
+          ...alert,
+        })),
+      ],
       removesHere,
     });
     return Response.json(list, { status: 200, headers: corsHeaders(origin) });
   };
+
+  // Clearing an alert for a device that paired here is the host's own act, so
+  // only a window on this host may do it; the private listener never forwards
+  // this path.
+  async function dismiss(request: Request, url: URL): Promise<Response> {
+    const origin = request.headers.get("origin");
+    if (
+      request.method !== "POST" ||
+      !isLoopbackHostname(url.hostname) ||
+      (origin !== null && !isAllowedRendererOrigin(origin))
+    ) {
+      return refuse(405, "Dismiss an alert with a POST from a window on this host.", null);
+    }
+    try {
+      const { principal } = authenticateRoutePrincipal({
+        request,
+        store: dependencies.windowAuthorityStore,
+        now: now(),
+      });
+      if (principal.kind !== "local-window") {
+        return refuse(403, "Alerts are cleared from a window on this host.", origin);
+      }
+    } catch (error) {
+      if (error instanceof WindowAuthorityError) {
+        return refuse(401, "New-device alert dismissal is unauthorized.", origin);
+      }
+      throw error;
+    }
+    const body: unknown = await request.json().catch(() => undefined);
+    const alertId =
+      typeof body === "object" && body !== null && "alertId" in body ? body.alertId : undefined;
+    if (typeof alertId !== "string" || dependencies.dismissPaired === undefined) {
+      return refuse(400, "Name the alert to dismiss.", origin);
+    }
+    const result = dependencies.dismissPaired(alertId);
+    return Response.json(result, {
+      status: result.status === "dismissed" ? 200 : 404,
+      headers: corsHeaders(origin),
+    });
+  }
 }
 
 function refuse(status: number, message: string, origin: string | null): Response {

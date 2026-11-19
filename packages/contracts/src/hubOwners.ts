@@ -150,8 +150,26 @@ export const NewMemberAlert = Schema.Struct({
 export type NewMemberAlert = typeof NewMemberAlert.Type;
 export const decodeNewMemberAlert = Schema.decodeUnknownSync(NewMemberAlert);
 
+/** A host's record that a device paired directly with it, kept until a window clears it. */
+export const PairedDeviceAlert = Schema.Struct({
+  alertId: NewMemberAlertId,
+  deviceId: Schema.UUID,
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  deviceKeyFingerprint: digest,
+  raisedAt: UtcTimestamp,
+  /** Its address on the private network when it paired; kept here, never in the journal. */
+  privateAddress: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+}).annotations(strict);
+export type PairedDeviceAlert = typeof PairedDeviceAlert.Type;
+
+/** A device that paired directly with this host, as every device connected to it reads it. */
+export const PairedDeviceAlertView = Schema.Struct({
+  kind: Schema.Literal("paired-device"),
+  ...PairedDeviceAlert.fields,
+}).annotations(strict);
+
 /** A spoke's new-member alert as every device connected to that host reads it. */
-export const NewDeviceAlertView = Schema.Struct({
+export const HubMemberAlertView = Schema.Struct({
   kind: Schema.Literal("hub-member"),
   alertId: NewMemberAlertId,
   name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
@@ -160,6 +178,8 @@ export const NewDeviceAlertView = Schema.Struct({
   raisedAt: UtcTimestamp,
   privateAddress: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
 }).annotations(strict);
+
+export const NewDeviceAlertView = Schema.Union(HubMemberAlertView, PairedDeviceAlertView);
 export type NewDeviceAlertView = typeof NewDeviceAlertView.Type;
 
 /**

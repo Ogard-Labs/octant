@@ -220,6 +220,8 @@ export class RemoteProtocolService {
   claimPairing(input: {
     readonly sourceClass: RemoteSourceClass;
     readonly request: unknown;
+    /** From the transport, for the host's new-device alert; never read from the request. */
+    readonly privateAddress?: string;
   }): PairingClaimResult {
     this.#requireTrustedSourceClass(input.sourceClass);
     let request;
@@ -233,7 +235,11 @@ export class RemoteProtocolService {
       throw new RemoteProtocolError("unauthorized", "Remote protocol request is unauthorized.");
     }
     try {
-      return this.#lifecycle.claimTicket({ ...request, sourceClass: input.sourceClass });
+      return this.#lifecycle.claimTicket(
+        { ...request, sourceClass: input.sourceClass },
+        undefined,
+        input.privateAddress === undefined ? {} : { privateAddress: input.privateAddress },
+      );
     } catch (error) {
       if (error instanceof PairingDeviceLifecycleError) {
         throw new RemoteProtocolError(

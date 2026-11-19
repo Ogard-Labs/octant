@@ -323,6 +323,20 @@ export const DeviceRegistrationDeadlineChangedV1 = Schema.Struct({
 }).annotations(strict);
 export type DeviceRegistrationDeadlineChangedV1 = typeof DeviceRegistrationDeadlineChangedV1.Type;
 
+/**
+ * A host raised the alert that a device paired directly with it, or a window
+ * cleared it. Every device connected to the host is told; the alert keeps the
+ * device's private address, the journal never does (maintainer decision,
+ * 2026-11-19).
+ */
+export const DeviceAlertChangedV1 = Schema.Struct({
+  change: Schema.Literal("raised", "dismissed"),
+  alertId: Schema.UUID,
+  deviceId: DeviceId,
+  changedAt: UtcTimestamp,
+}).annotations(strict);
+export type DeviceAlertChangedV1 = typeof DeviceAlertChangedV1.Type;
+
 export const HostKeyRotatedV1 = Schema.Struct({
   hostId: StableHostId,
   previousKeyGeneration: positiveInteger,
@@ -434,9 +448,11 @@ export const REMOTE_ACCESS_EVENT_NAMES = {
   hostKeyRotated: "remote.host-key-rotated@1",
   commandReceiptRecorded: "remote.command-receipt-recorded@1",
   securityAuditRecorded: "remote.security-audit-recorded@1",
+  deviceAlertChanged: "remote.device-alert-changed@1",
 } as const;
 
 export const decodeClientHelloV1 = Schema.decodeUnknownSync(ClientHelloV1);
+export const decodeDeviceAlertChangedV1 = Schema.decodeUnknownSync(DeviceAlertChangedV1);
 export const decodeHostHelloV1 = Schema.decodeUnknownSync(HostHelloV1);
 export const decodeStableHostId = Schema.decodeUnknownSync(StableHostId);
 export const decodePairingRequestV1 = Schema.decodeUnknownSync(PairingRequestV1);

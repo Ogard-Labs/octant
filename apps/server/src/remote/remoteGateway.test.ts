@@ -132,6 +132,8 @@ interface SetupOptions {
   readonly clock?: () => string;
   readonly registrationLifetime?: () => PairedDeviceLifetime;
   readonly uuid?: () => string;
+  readonly onDevicePaired?: RemoteGatewayOptions["onDevicePaired"];
+  readonly onDeviceRemoved?: RemoteGatewayOptions["onDeviceRemoved"];
 }
 
 function setup(options: SetupOptions = {}) {
@@ -208,6 +210,8 @@ function setup(options: SetupOptions = {}) {
     ...(options.registrationLifetime === undefined
       ? {}
       : { registrationLifetime: options.registrationLifetime }),
+    ...(options.onDevicePaired === undefined ? {} : { onDevicePaired: options.onDevicePaired }),
+    ...(options.onDeviceRemoved === undefined ? {} : { onDeviceRemoved: options.onDeviceRemoved }),
     pushTokenStore: pushRegistrations,
     config: options.config ?? makeConfig(),
   };
@@ -1339,6 +1343,8 @@ describe("RemoteGateway — approval for a window that never finished", () => {
   async function approveForWindow(
     wall: { value: number },
     registrationLifetime?: () => PairedDeviceLifetime,
+    hooks: Pick<SetupOptions, "onDevicePaired" | "onDeviceRemoved"> = {},
+    facts: RequestTransportFacts = lanFacts,
   ) {
     const { serve, getFetch } = createCapturingServe();
     const made = setup({
@@ -1346,6 +1352,7 @@ describe("RemoteGateway — approval for a window that never finished", () => {
       now: () => wall.value,
       clock: () => new Date(wall.value).toISOString(),
       ...(registrationLifetime === undefined ? {} : { registrationLifetime }),
+      ...hooks,
     });
     await made.gateway.start();
     const fetch = getFetch()!;
@@ -1375,12 +1382,39 @@ describe("RemoteGateway — approval for a window that never finished", () => {
           browserCapabilities: ["webcrypto"],
         },
       }),
-      lanFacts,
+      facts,
     );
     expect(claim.status).toBe(200);
     const { device } = admin.approvePairing({ ticketId: ticket.ticketId });
     return { ...made, admin, device, ticket, fetch };
   }
+
+  it("tells the host once that a device paired, with the private address it paired from, and again when it is removed", async () => {
+    const paired: unknown[] = [];
+    const removed: string[] = [];
+    const { admin, device, ticket } = await approveForWindow(
+      { value: nowMs },
+      undefined,
+      {
+        onDevicePaired: (entry) => void paired.push(entry),
+        onDeviceRemoved: (deviceId) => void removed.push(deviceId),
+      },
+      { ...lanFacts, privateAddress: "192.168.1.20" },
+    );
+    expect(paired).toEqual([
+      {
+        deviceId: String(device.deviceId),
+        name: "Second window",
+        deviceKeyFingerprint: device.deviceKeyFingerprint,
+        privateAddress: "192.168.1.20",
+      },
+    ]);
+    // Approving the same ticket again tells nobody a second time.
+    admin.approvePairing({ ticketId: ticket.ticketId });
+    expect(paired).toHaveLength(1);
+    admin.revokeDevice({ deviceId: String(device.deviceId) });
+    expect(removed).toEqual([String(device.deviceId)]);
+  });
 
   it("removes the approved device after the ticket's life, with a journaled revoke", async () => {
     vi.useFakeTimers();

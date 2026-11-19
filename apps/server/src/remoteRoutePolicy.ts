@@ -1543,6 +1543,8 @@ export interface RemoteRouteHandlerOptions {
 export interface RemoteRouteFacts {
   readonly sourceClass: "loopback" | "lan-private" | "tailscale" | "unknown";
   readonly sourceKey: string;
+  /** The peer's private-network address, for a new-device alert only. */
+  readonly privateAddress?: string;
 }
 
 export const REMOTE_SECURITY_POLICY = {

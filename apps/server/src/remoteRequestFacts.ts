@@ -67,10 +67,17 @@ export function createRemoteRequestFacts(input: {
   readonly salt: Uint8Array;
 }): RequestTransportFacts {
   const normalized = normalizePeerAddress(input.peerAddress, input.family);
+  const sourceClass = classifyRemoteSourceClass(normalized);
   return Object.freeze({
     listenerTrust: input.listenerTrust,
-    sourceClass: classifyRemoteSourceClass(normalized),
+    sourceClass,
     sourceKey: deriveRemoteSourceKey(normalized, input.salt),
+    // Only a private-network address leaves here, for the alert every
+    // connected device sees when a device pairs (maintainer decision,
+    // 2026-11-19). It is never journaled or used to decide anything.
+    ...(sourceClass === "lan-private" || sourceClass === "tailscale"
+      ? { privateAddress: normalized }
+      : {}),
   });
 }
 
