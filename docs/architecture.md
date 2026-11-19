@@ -434,6 +434,17 @@ Electron preconnects the renderer's loopback origin before constructing its
 preparation instead of delaying first paint; host readiness, bridge projection,
 and window-authority registration remain required before renderer navigation.
 
+The renderer defers code and styles used only by workspaces such as Browser
+and Canvas until they open. Shared shell controls keep their styles in the
+initial load. The server loads its validation evidence reader on the first
+evidence request, then checks the request's window and Project authority
+before reading. Persistence and recovery do not wait for that reader.
+
+The sandbox restrictions notice and Settings share one poll per client and
+scope while the document is visible. A successful change publishes the host's
+snapshot immediately. An older in-flight read cannot replace it. The last
+subscriber stops polling and cancels any outstanding read.
+
 Chat navigation shares one in-flight read between timer and Machine invalidations,
 with one pending follow-up for notices received during that read. Hidden windows
 hold invalidations until visible. Reads have a ten-second deadline and are
