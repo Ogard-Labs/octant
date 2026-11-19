@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import {
+  decodeBrowserThreadId,
   decodeToolActionAuthority,
   decodeAgentRun,
   decodeProviderModelId,
@@ -315,6 +316,178 @@ it.each([
           grants: [],
         });
       }
+    } finally {
+      await tools.close?.();
+      grants.close();
+      await children.close();
+    }
+  },
+);
+
+it.each(["routine", "child"] as const)(
+  "applies the owning thread's Strict posture and configured Browser wait limit to a %s execution",
+  async (kind) => {
+    const windowId = decodeWindowId("10000000-0000-4000-8000-000000000011");
+    const parentThreadId = "33333333-3333-4333-8333-333333333344";
+    const projectId = "40000000-0000-4000-8000-000000000011";
+    const syntheticExecutionId = "90000000-0000-4000-8000-000000000011";
+    const childRunId = "20000000-0000-4000-8000-000000000012";
+    const reviewCommand = decodeBrowserSessionGrantsCommand({
+      kind: "review",
+      grantee:
+        kind === "child"
+          ? { kind: "child", runId: childRunId }
+          : { kind: "routine", routineId: "20000000-0000-4000-8000-000000000011" },
+      profile: { kind: "personal" },
+      origins: ["https://example.com"],
+      durationMinutes: 15,
+    });
+    if (reviewCommand.kind !== "review") throw Error("Expected review command");
+    const target: BrowserSessionTarget = {
+      grantee: reviewCommand.grantee,
+      label: kind === "child" ? "Child check" : "Nightly check",
+      modelId: decodeProviderModelId("example-model"),
+      authority: decodeToolActionAuthority({
+        hostId: "30000000-0000-4000-8000-000000000011",
+        mode: "work",
+        projectId,
+        providerInstanceId: "50000000-0000-4000-8000-000000000011",
+        extension: { kind: "core" },
+      }),
+    };
+    const runtime: BrowserRuntimePort = {
+      available: async () => true,
+      nativeAvailable: async () => true,
+      createContext: vi.fn(async () => "native-live" as const),
+      inspectTarget: async () => ({ sensitive: false }),
+      act: vi.fn(async () => ({
+        url: "https://example.com",
+        title: "Ready",
+        snapshot: "Ready",
+      })),
+      closeContext: vi.fn(async () => {}),
+      closeAll: vi.fn(async () => {}),
+    };
+    let children: BrowserDelegatedChildren | undefined;
+    const grants = new BrowserSessionGrants({
+      now: Date.now,
+      uuid: () => crypto.randomUUID(),
+      isLocalWindow: () => true,
+      canReview: () => true,
+      targets: () => [{ target, revision: "one" }],
+      current: () => ({ target, revision: "one" }),
+      profileLabel: async () => "Personal",
+      record: () => {},
+      onRevoked: (id) => {
+        void children?.revoke(id);
+      },
+    });
+    let strictEnabled = false;
+    let waitLimitMs = 120_000;
+    const strictResolver = vi.fn(
+      (scope: { readonly threadId?: string; readonly projectId?: string }) => {
+        expect(scope).toEqual({ threadId: parentThreadId, projectId });
+        expect(scope.threadId).not.toBe(syntheticExecutionId);
+        expect(scope.threadId).not.toBe(childRunId);
+        return strictEnabled;
+      },
+    );
+    children = new BrowserDelegatedChildren({
+      runtime,
+      grants,
+      waitLimitMs: () => waitLimitMs,
+      strict: strictResolver,
+      now: Date.now,
+      uuid: () => crypto.randomUUID(),
+      recordExternalContentIngestion: () => ({
+        kind: "ignored" as const,
+        reason: "not-tainting" as const,
+      }),
+    });
+    const tools = children.tools({
+      target,
+      ...(kind === "child"
+        ? { strictThreadId: parentThreadId }
+        : {
+            executionId: syntheticExecutionId,
+            contentThreadId: decodeBrowserThreadId(parentThreadId),
+          }),
+      executionPolicy: "approval-gated",
+      current: () => target,
+    });
+    try {
+      const review = await grants.execute(windowId, reviewCommand);
+      if (review.kind !== "browser-session-review") throw Error("Expected review");
+      const granted = await grants.execute(windowId, { kind: "grant", reviewId: review.reviewId });
+      if (granted.kind !== "browser-session-granted") throw Error("Expected grant");
+
+      expect(
+        await tools.execute({
+          name: "octant_browser",
+          inputJson: JSON.stringify({
+            operation: "navigate",
+            url: "https://example.com/status",
+            profile: "personal",
+          }),
+        }),
+      ).toMatchObject({ isError: false });
+
+      // Outside Strict, a wait longer than ten minutes (and longer than the Strict setting) is admitted.
+      expect(
+        await tools.execute({
+          name: "octant_browser",
+          inputJson: JSON.stringify({
+            operation: "wait",
+            selector: "#done",
+            timeoutMs: 900_000,
+          }),
+        }),
+      ).toMatchObject({ isError: false });
+      expect(strictResolver).toHaveBeenCalledTimes(1);
+
+      // Under Strict, the configured Settings ceiling (2 minutes) refuses longer waits and admits ones within it.
+      strictEnabled = true;
+      const refused = await tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify({
+          operation: "wait",
+          selector: "#done",
+          timeoutMs: 120_001,
+        }),
+      });
+      expect(refused).toMatchObject({
+        isError: true,
+        result: {
+          status: "failed",
+          failure: {
+            category: "policy-denied",
+            message: "A wait may last at most 2 minutes, the limit set in Settings.",
+          },
+        },
+      });
+      expect(
+        await tools.execute({
+          name: "octant_browser",
+          inputJson: JSON.stringify({
+            operation: "wait",
+            selector: "#done",
+            timeoutMs: 120_000,
+          }),
+        }),
+      ).toMatchObject({ isError: false });
+
+      // Raising the setting takes effect on the next call under Strict.
+      waitLimitMs = 1_200_000;
+      expect(
+        await tools.execute({
+          name: "octant_browser",
+          inputJson: JSON.stringify({
+            operation: "wait",
+            selector: "#done",
+            timeoutMs: 900_000,
+          }),
+        }),
+      ).toMatchObject({ isError: false });
     } finally {
       await tools.close?.();
       grants.close();

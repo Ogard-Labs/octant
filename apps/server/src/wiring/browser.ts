@@ -26,11 +26,13 @@ import {
   decodeAggregateVersion,
   decodeCodeThreadId,
   LOCAL_HOST_ID,
+  type CodeThreadId,
   type ProjectId,
   type RememberedBrowserTransfer,
   type StoredBrowserProfile,
   sameToolActionAuthority,
   type WindowId,
+  type WorkThreadId,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import { createHostPersonScopes, createPersonProjectReach } from "../hostPersonScope";
@@ -128,6 +130,7 @@ export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "browserAuthority"
     | "codeEvidence"
     | "providerRuntimeRegistry"
+    | "resolveProjectStrict"
     | "resolveThreadStrict"
     | "workThreadProjection"
   >;
@@ -136,6 +139,7 @@ export function wireBrowser(deps: BrowserDependencies) {
   const {
     browserAuthority,
     providerRuntimeRegistry,
+    resolveProjectStrict,
     resolveThreadStrict,
     contributeChildTools,
     agentRunInteractions,
@@ -552,6 +556,9 @@ export function wireBrowser(deps: BrowserDependencies) {
         machineChangeFeed.publish(["tool-approvals"]);
       },
     });
+    const browserWaitLimitMs = () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+        .browserWaitLimitMinutes * 60_000;
     delegatedChildren = new BrowserDelegatedChildren({
       persistentOwnerEnabled,
       runtime: browserRuntime,
@@ -559,6 +566,17 @@ export function wireBrowser(deps: BrowserDependencies) {
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       agentDownloadsEnabled: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).agentBrowserDownloads,
+      waitLimitMs: browserWaitLimitMs,
+      strict: ({ threadId, projectId }) => {
+        if (
+          threadId !== undefined &&
+          (persistence.readCodeThread(threadId as CodeThreadId) !== undefined ||
+            workThreadProjection.read(threadId as WorkThreadId) !== undefined)
+        ) {
+          return resolveThreadStrict(threadId);
+        }
+        return projectId === undefined ? true : resolveProjectStrict(String(projectId));
+      },
       downloads: createBrowserDownloadJournal({
         journal: persistence.journal,
         connection: persistence.connection,
@@ -657,6 +675,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       if (target === undefined || !authority.tools) return undefined;
       return browserDelegatedChildren.tools({
         target,
+        strictThreadId: String(run.parentThreadId),
         executionPolicy: authority.executionPolicy,
         current: () =>
           agentRunInteractions.isCurrent(run)
@@ -816,9 +835,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).agentBrowserDownloads,
       transferLimits: () =>
         browserTransferLimits(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
-      waitLimitMs: () =>
-        (persistence.readShellSettings()?.settings ?? defaultShellSettings())
-          .browserWaitLimitMinutes * 60_000,
+      waitLimitMs: browserWaitLimitMs,
       strict: resolveThreadStrict,
       downloads: createBrowserDownloadJournal({
         journal: persistence.journal,
