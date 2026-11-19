@@ -489,6 +489,69 @@ describe("UsageProjection", () => {
     connection.close();
   });
 
+  it("records whether a Code turn ran at Full access, only for turns started after the ledger began recording it", () => {
+    const { connection, journal } = openDatabase();
+    const turn = (operationId: string, executionPolicy?: string) =>
+      journal.append({
+        aggregate: { aggregateType: "code-operation", aggregateId: operationId },
+        expectedVersion: 0,
+        events: [
+          {
+            kind: "conversation-turn-started",
+            providerInstanceId: ids.provider,
+            modelId: "acp-agent",
+            sessionId: ids.entry,
+            prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+            ...(executionPolicy === undefined ? {} : { executionPolicy }),
+          },
+          { kind: "operation-state", state: "completed" },
+        ].map((event, index) =>
+          pending("code.operation-event-recorded@1", {
+            threadId: ids.aggregate,
+            operationId,
+            cursor: index + 1,
+            occurredAt: now,
+            event,
+          }),
+        ),
+      });
+    // Journaled and projected before this build, which had no level to
+    // write; the migration then places the boundary after it.
+    turn(ids.usage, "full-access");
+    connection.prepare("UPDATE usage_record_projection SET ran_at_full_access = NULL").run();
+    connection.prepare("UPDATE usage_turn_level_boundary SET global_sequence = ?").run(
+      (
+        connection.prepare("SELECT MAX(global_sequence) AS sequence FROM event_journal").get() as {
+          readonly sequence: number;
+        }
+      ).sequence,
+    );
+    turn(ids.usage2, "full-access");
+    turn(ids.usage3, "approval-gated");
+    // A turn whose start recorded no level is read as before too.
+    turn(ids.checkout);
+
+    const rows = () =>
+      connection
+        .prepare(
+          `SELECT reconciliation_id, ran_at_full_access
+          FROM usage_record_projection ORDER BY last_sequence`,
+        )
+        .all();
+    const expected = [
+      { reconciliation_id: ids.usage, ran_at_full_access: null },
+      { reconciliation_id: ids.usage2, ran_at_full_access: 1 },
+      { reconciliation_id: ids.usage3, ran_at_full_access: 0 },
+      { reconciliation_id: ids.checkout, ran_at_full_access: null },
+    ];
+    expect(rows()).toEqual(expected);
+    const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(rows()).toEqual(expected);
+    connection.close();
+  });
+
   it("keeps a completed request without provider usage as unavailable, not zero", () => {
     const { connection, journal } = openDatabase();
     appendFullUsageCycle(journal, {
