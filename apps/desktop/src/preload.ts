@@ -3103,7 +3103,12 @@ export function installHostBridge(
   localUpdatePreferences = process.argv.includes("--octant-local-update-preferences"),
   applicationIdentity = applicationIdentityArgument(process.argv),
   nightlyClient = process.argv.includes("--octant-nightly-client"),
+  perfTrace = process.env.OCTANT_PERF_TRACE === "1",
 ): void {
+  // The renderer's opt-in interaction marks read this flag off the main
+  // world, and contextIsolation gives them no process.env — the preload is
+  // the only channel early enough to turn them on for a traced launch.
+  if (perfTrace) context.exposeInMainWorld("__OCTANT_PERF_TRACE", true);
   context.exposeInMainWorld(
     HOST_BRIDGE_KEY,
     createHostBridge(
