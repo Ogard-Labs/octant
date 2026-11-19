@@ -170,7 +170,7 @@ export class CodeProjectPullRequestSwitchService
   readonly #authority: PullRequestSwitchAuthority;
   readonly #forge: PullRequestSwitchForge;
   readonly #threads: PullRequestAutoFixThreads;
-  readonly #journal: Pick<Journal, "append">;
+  readonly #journal: Pick<Journal, "append"> & Partial<Pick<Journal, "transaction">>;
   readonly #clock: () => string;
   readonly #uuid: () => string;
   readonly #folds = new Map<string, PullRequestSwitchFold>();
@@ -192,7 +192,8 @@ export class CodeProjectPullRequestSwitchService
     readonly authority: PullRequestSwitchAuthority;
     readonly forge: PullRequestSwitchForge;
     readonly threads: PullRequestAutoFixThreads;
-    readonly journal: Pick<Journal, "append" | "replayAggregateType">;
+    readonly journal: Pick<Journal, "append" | "replayAggregateType"> &
+      Partial<Pick<Journal, "transaction">>;
     readonly clock?: () => string;
     readonly uuid: () => string;
     /**
@@ -510,20 +511,50 @@ export class CodeProjectPullRequestSwitchService
       }
     }
 
-    // Commit the link merge before retiring duplicate switch records so an
-    // interruption before `merged-into` is persisted never leaves a retained
-    // both-ON switch disabled on one side and misread as mixed on retry.
-    input.commitMerge?.(decision.disabledSwitches);
+    type PendingSwitchWrite =
+      | {
+          readonly kind: "merge-when-ready";
+          readonly eventName: typeof CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED;
+          readonly record: CodeProjectPullRequestMergeWhenReadyRecorded;
+        }
+      | {
+          readonly kind: "auto-fix";
+          readonly eventName: typeof CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED;
+          readonly record: CodeProjectPullRequestAutoFixRecorded;
+        }
+      | {
+          readonly kind: "watch";
+          readonly eventName: typeof CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED;
+          readonly record: CodeProjectPullRequestWatchRecorded;
+        };
+
+    const pendingWrites: PendingSwitchWrite[] = [];
+    const waitingOnKeysToClear: string[] = [];
+    const pausedKeysToClear: string[] = [];
 
     if (decision.mergeWhenReady === "turn-off") {
       const activeTarget = surviving.mergeWhenReadyOn ? input.survivingTarget : input.mergedTarget;
-      this.#waitingOn.delete(pullRequestSwitchKey(activeTarget));
-      this.#recordMergeWhenReady(activeTarget, { kind: "disabled" }, systemActor());
+      waitingOnKeysToClear.push(pullRequestSwitchKey(activeTarget));
+      pendingWrites.push({
+        kind: "merge-when-ready",
+        eventName: CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
+        record: decodeCodeProjectPullRequestMergeWhenReadyRecorded({
+          target: activeTarget,
+          change: { kind: "disabled" },
+        }),
+      });
     } else if (decision.mergeWhenReady === "keep-on") {
       // Same PR on GitHub: keep the surviving link's switch ON and retire only
       // the duplicate merged target entry without calling disableAutoMerge.
-      this.#waitingOn.delete(mergedKey);
-      this.#recordMergeWhenReady(input.mergedTarget, { kind: "disabled" }, systemActor());
+      waitingOnKeysToClear.push(mergedKey);
+      pendingWrites.push({
+        kind: "merge-when-ready",
+        eventName: CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
+        record: decodeCodeProjectPullRequestMergeWhenReadyRecorded({
+          target: input.mergedTarget,
+          change: { kind: "disabled" },
+        }),
+      });
     }
 
     if (decision.autoFix === "turn-off") {
@@ -532,43 +563,82 @@ export class CodeProjectPullRequestSwitchService
         ? surviving.autoFix.threadId
         : merged.autoFix.threadId;
       if (activeThreadId !== undefined) {
-        this.#paused.delete(pullRequestSwitchKey(activeTarget));
-        this.#recordAutoFix(
-          activeTarget,
-          decodeCodeThreadId(activeThreadId),
-          { kind: "disabled" },
-          systemActor(),
-        );
+        pausedKeysToClear.push(pullRequestSwitchKey(activeTarget));
+        pendingWrites.push({
+          kind: "auto-fix",
+          eventName: CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
+          record: decodeCodeProjectPullRequestAutoFixRecorded({
+            target: activeTarget,
+            threadId: decodeCodeThreadId(activeThreadId),
+            change: { kind: "disabled" },
+          }),
+        });
       }
     } else if (decision.autoFix === "keep-on" && merged.autoFix.threadId !== undefined) {
-      this.#paused.delete(mergedKey);
-      this.#recordAutoFix(
-        input.mergedTarget,
-        decodeCodeThreadId(merged.autoFix.threadId),
-        { kind: "disabled" },
-        systemActor(),
-      );
+      pausedKeysToClear.push(mergedKey);
+      pendingWrites.push({
+        kind: "auto-fix",
+        eventName: CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
+        record: decodeCodeProjectPullRequestAutoFixRecorded({
+          target: input.mergedTarget,
+          threadId: decodeCodeThreadId(merged.autoFix.threadId),
+          change: { kind: "disabled" },
+        }),
+      });
     }
 
     if (decision.watch === "turn-off") {
       const activeTarget = surviving.watch.on ? input.survivingTarget : input.mergedTarget;
       const activeThreadId = surviving.watch.on ? surviving.watch.threadId : merged.watch.threadId;
       if (activeThreadId !== undefined) {
-        this.#recordWatch(
-          activeTarget,
-          decodeCodeThreadId(activeThreadId),
-          { kind: "disabled" },
-          systemActor(),
-        );
+        pendingWrites.push({
+          kind: "watch",
+          eventName: CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
+          record: decodeCodeProjectPullRequestWatchRecorded({
+            target: activeTarget,
+            threadId: decodeCodeThreadId(activeThreadId),
+            change: { kind: "disabled" },
+          }),
+        });
       }
     } else if (decision.watch === "keep-on" && merged.watch.threadId !== undefined) {
-      this.#recordWatch(
-        input.mergedTarget,
-        decodeCodeThreadId(merged.watch.threadId),
-        { kind: "disabled" },
-        systemActor(),
-      );
+      pendingWrites.push({
+        kind: "watch",
+        eventName: CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
+        record: decodeCodeProjectPullRequestWatchRecorded({
+          target: input.mergedTarget,
+          threadId: decodeCodeThreadId(merged.watch.threadId),
+          change: { kind: "disabled" },
+        }),
+      });
     }
+
+    // Commit the link merge (`forge-ids-backfilled` + `merged-into`) and every
+    // required switch disable/retirement in one atomic journal transaction so an
+    // interruption never leaves a retained switch disabled on one side OR a
+    // retired duplicate with mixed switches still enabled.
+    const actor = systemActor();
+    const runAtomic = <A>(body: () => A): A =>
+      this.#journal.transaction === undefined ? body() : this.#journal.transaction(body);
+    const committedEvents = runAtomic(() => {
+      input.commitMerge?.(decision.disabledSwitches);
+      const events: PullRequestSwitchEvent[] = [];
+      for (const write of pendingWrites) {
+        const occurredAt = this.#append(write.eventName, write.record, actor);
+        if (write.kind === "merge-when-ready") {
+          events.push({ kind: "merge-when-ready", occurredAt, record: write.record });
+        } else if (write.kind === "auto-fix") {
+          events.push({ kind: "auto-fix", occurredAt, record: write.record });
+        } else {
+          events.push({ kind: "watch", occurredAt, record: write.record });
+        }
+      }
+      return events;
+    });
+
+    for (const key of waitingOnKeysToClear) this.#waitingOn.delete(key);
+    for (const key of pausedKeysToClear) this.#paused.delete(key);
+    for (const event of committedEvents) this.#apply(event);
 
     const mergedWindow = this.#vouchingWindows.get(mergedKey);
     this.#vouchingWindows.delete(mergedKey);

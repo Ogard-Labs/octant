@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
   CODE_PULL_REQUEST_LINK_AGGREGATE,
   CODE_PULL_REQUEST_LINK_CREATED,
   CODE_PULL_REQUEST_LINK_DISPLAY_UPDATED,
@@ -81,7 +82,7 @@ function linkEventsOf(journal: Journal) {
 }
 
 function switchFixture(input: {
-  readonly journal: Journal;
+  readonly journal: Pick<Journal, "append" | "replayAggregateType" | "transaction">;
   readonly clock: () => string;
   readonly linkedByTarget: ReadonlyMap<string, ReadonlyArray<string>>;
   readonly linkedPullRequestsByThread: ReadonlyMap<
@@ -1493,5 +1494,208 @@ describe("pull request link identity and backfill", () => {
     expect(merged.link.linkId).toBe(earlier.link.linkId);
     expect(merged.link.pullRequestNodeId).toBe("PR_kwDO95");
     expect(merged.link.baseRepositoryNodeId).toBe("R_kgDO95Base");
+  });
+
+  it("rolls back the duplicate link merge atomically when a switch-disable journal write fails and completes cleanly on retry", async () => {
+    let now = "2026-11-01T10:00:00.000Z";
+    const journal = openJournal(() => now);
+    const oldTarget = decodeCodeProjectPullRequestSwitchTarget({
+      projectId,
+      repositoryOwner: "old-org",
+      repositoryName: "repo",
+      number: 96,
+    });
+    const newTarget = decodeCodeProjectPullRequestSwitchTarget({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      number: 96,
+    });
+
+    let failNextAutoFixDisable = false;
+    const flakyJournal: Pick<Journal, "append" | "replayAggregateType" | "transaction"> = {
+      replayAggregateType: (query) => journal.replayAggregateType(query),
+      transaction: (body) => journal.transaction(body),
+      append: (request) => {
+        const events =
+          typeof request === "object" &&
+          request !== null &&
+          "events" in request &&
+          Array.isArray(request.events)
+            ? request.events
+            : [];
+        if (
+          failNextAutoFixDisable &&
+          events.some(
+            (event) =>
+              typeof event === "object" &&
+              event !== null &&
+              "eventName" in event &&
+              event.eventName === CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
+          )
+        ) {
+          failNextAutoFixDisable = false;
+          throw new Error("simulated switch write failure after commitMerge");
+        }
+        return journal.append(request);
+      },
+    };
+
+    const { switches, forge, threads } = switchFixture({
+      journal: flakyJournal,
+      clock: () => now,
+      linkedByTarget: new Map([
+        ["old-org/repo#96", [String(threadA)]],
+        ["new-org/repo#96", [String(threadB)]],
+      ]),
+      linkedPullRequestsByThread: new Map([
+        [String(threadA), [oldTarget]],
+        [String(threadB), [newTarget]],
+      ]),
+    });
+
+    // Both links have Merge when ready ON; Auto-fix is ON only on oldTarget;
+    // watch is ON only on newTarget.
+    await switches.setMergeWhenReady(
+      windowId,
+      { kind: "enable", target: oldTarget, headSha: "a".repeat(40), method: "squash" },
+      "local-window",
+      signal,
+    );
+    await switches.setMergeWhenReady(
+      windowId,
+      { kind: "enable", target: newTarget, headSha: "a".repeat(40), method: "squash" },
+      "local-window",
+      signal,
+    );
+    await switches.setAutoFix(
+      windowId,
+      { kind: "enable", target: oldTarget, threadId: threadA },
+      "user",
+    );
+    await switches.watch({
+      windowId,
+      threadId: threadB,
+      providerInstanceId,
+      signal,
+    });
+    expect((await switches.query(windowId, oldTarget)).autoFix.status).toBe("on");
+
+    const links = new PullRequestLinkService({
+      journal: flakyJournal,
+      uuid: randomUUID,
+      clock: () => now,
+      switchReconciler: switches,
+    });
+    const firstLink = await links.recordObservation({
+      projectId,
+      repositoryOwner: "old-org",
+      repositoryName: "repo",
+      number: 96,
+      threadIds: [threadA],
+    });
+    now = "2026-11-02T10:00:00.000Z";
+    await links.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      number: 96,
+      threadIds: [threadB],
+    });
+    if (firstLink.status !== "created") throw new Error("expected first link");
+
+    // Inject failure on the Auto-fix disable append (which runs AFTER commitMerge
+    // inside the atomic transaction).
+    failNextAutoFixDisable = true;
+    now = "2026-11-19T12:00:00.000Z";
+    await expect(
+      links.recordObservation({
+        projectId,
+        repositoryOwner: "new-org",
+        repositoryName: "repo",
+        lookupRepositoryOwner: "old-org",
+        lookupRepositoryName: "repo",
+        number: 96,
+        pullRequestNodeId: "PR_kwDO96",
+        baseRepositoryNodeId: "R_kgDO96Base",
+      }),
+    ).rejects.toThrow("simulated switch write failure");
+
+    // Atomic rollback: zero `merged-into` or `forge-ids-backfilled` events committed,
+    // both links remain active in memory AND journal, all switches remain intact,
+    // and no thread notices were sent prematurely.
+    expect(links.listActive()).toHaveLength(2);
+    expect(
+      linkEventsOf(journal).filter(
+        (event) =>
+          event.eventName === CODE_PULL_REQUEST_LINK_MERGED_INTO ||
+          event.eventName === CODE_PULL_REQUEST_LINK_FORGE_IDS_BACKFILLED,
+      ),
+    ).toHaveLength(0);
+    expect((await switches.query(windowId, oldTarget)).mergeWhenReady.status).toBe("on");
+    expect((await switches.query(windowId, newTarget)).mergeWhenReady.status).toBe("on");
+    expect((await switches.query(windowId, oldTarget)).autoFix.status).toBe("on");
+    expect(switches.watching).toBe(true);
+    expect(threads.notifyPerson).not.toHaveBeenCalled();
+
+    // Restart from the durable journal and retry: reconciliation completes atomically,
+    // keeps Merge when ready ON, turns mixed Auto-fix and watch OFF, and notifies threads.
+    const restartedSwitches = switchFixture({
+      journal,
+      clock: () => now,
+      linkedByTarget: new Map([
+        ["old-org/repo#96", [String(threadA)]],
+        ["new-org/repo#96", [String(threadB)]],
+      ]),
+      linkedPullRequestsByThread: new Map([
+        [String(threadA), [oldTarget]],
+        [String(threadB), [newTarget]],
+      ]),
+    });
+    const restartedLinks = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+      switchReconciler: restartedSwitches.switches,
+    });
+    expect(restartedLinks.listActive()).toHaveLength(2);
+
+    const recovered = await restartedLinks.recordObservation({
+      projectId,
+      repositoryOwner: "new-org",
+      repositoryName: "repo",
+      lookupRepositoryOwner: "old-org",
+      lookupRepositoryName: "repo",
+      number: 96,
+      pullRequestNodeId: "PR_kwDO96",
+      baseRepositoryNodeId: "R_kgDO96Base",
+    });
+    expect(recovered.status).toBe("merged");
+    if (recovered.status !== "merged") throw new Error("expected merged after recovery");
+    expect(recovered.link.linkId).toBe(firstLink.link.linkId);
+    expect(recovered.disabledSwitches).toEqual(["auto-fix", "watch"]);
+    expect(restartedLinks.listActive()).toHaveLength(1);
+    expect(
+      (await restartedSwitches.switches.query(windowId, oldTarget)).mergeWhenReady.status,
+    ).toBe("on");
+    expect(
+      (await restartedSwitches.switches.query(windowId, newTarget)).mergeWhenReady.status,
+    ).toBe("off");
+    expect((await restartedSwitches.switches.query(windowId, oldTarget)).autoFix.status).toBe(
+      "off",
+    );
+    await expect(
+      restartedSwitches.switches.unwatch({ threadId: threadB, providerInstanceId }),
+    ).resolves.toEqual({ status: "not-watching" });
+    expect(forge.disableAutoMerge).not.toHaveBeenCalled();
+    expect(restartedSwitches.forge.disableAutoMerge).not.toHaveBeenCalled();
+    expect(restartedSwitches.threads.notifyPerson).toHaveBeenCalledWith(
+      threadA,
+      expect.stringContaining("Auto-fix"),
+    );
+    expect(restartedSwitches.threads.notifyPerson).toHaveBeenCalledWith(
+      threadB,
+      expect.stringContaining("Pull request watch"),
+    );
   });
 });

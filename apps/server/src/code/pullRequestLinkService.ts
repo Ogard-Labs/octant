@@ -385,8 +385,10 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
         latestSurvivor.baseRepositoryNodeId ??
         duplicate.baseRepositoryNodeId;
       let mergeCommitted = false;
+      let mergeAttempted = false;
       const commitMerge = (disabledSwitches: ReadonlyArray<PullRequestSwitchKind>): void => {
         if (mergeCommitted) return;
+        mergeAttempted = true;
         const currentSurvivor = this.#state.byId.get(String(survivor.linkId)) ?? latestSurvivor;
         const missingOnSurvivor = missingPullRequestForgeIds(currentSurvivor, {
           pullRequestNodeId,
@@ -426,16 +428,27 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
         );
         mergeCommitted = true;
       };
-      const reconciliation: PullRequestLinkSwitchReconciliationResult =
-        this.#switchReconciler === undefined
-          ? { status: "reconciled", disabledSwitches: [] }
-          : await this.#switchReconciler.reconcileDuplicateLinks({
-              survivingTarget: switchTargetOf(latestSurvivor),
-              mergedTarget: switchTargetOf(duplicate),
-              allLinkedThreadIds,
-              commitMerge,
-              ...(signal === undefined ? {} : { signal }),
-            });
+      let reconciliation: PullRequestLinkSwitchReconciliationResult;
+      try {
+        reconciliation =
+          this.#switchReconciler === undefined
+            ? { status: "reconciled", disabledSwitches: [] }
+            : await this.#switchReconciler.reconcileDuplicateLinks({
+                survivingTarget: switchTargetOf(latestSurvivor),
+                mergedTarget: switchTargetOf(duplicate),
+                allLinkedThreadIds,
+                commitMerge,
+                ...(signal === undefined ? {} : { signal }),
+              });
+      } catch (error) {
+        if (mergeAttempted) {
+          // The atomic journal transaction rolled back after `commitMerge`
+          // appended link events; rebuild in-memory state from the journal so
+          // both links remain active and the next observation retries cleanly.
+          this.#resetAndReplay();
+        }
+        throw error;
+      }
       if (reconciliation.status === "retry-required") {
         // Forge auto-merge could not be confirmed off; leave this duplicate
         // active and switches untouched so the next observation retries cleanly.
@@ -740,6 +753,14 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
     this.#sequence = envelope?.globalSequence ?? this.#sequence + 1;
     this.#recordKnownDisplayKey(event);
     this.#state = applyPullRequestLinkEvent(this.#state, event, this.#sequence);
+  }
+
+  #resetAndReplay(): void {
+    this.#versions.clear();
+    this.#knownDisplayKeys.clear();
+    this.#state = emptyPullRequestLinkRegistryState();
+    this.#sequence = 0;
+    this.#replay();
   }
 
   #replay(): void {
