@@ -129,3 +129,76 @@ describe("moving a Work or Code thread to another Project", () => {
     expect(screen.getByText(/no other Work Project/i)).toBeVisible();
   });
 });
+
+describe("moving a busy thread", () => {
+  it("defaults to moving after the current turn and sends that choice", async () => {
+    const onMove = vi.fn(async () => ({ status: "ok" }) as const);
+    open({ busy: true, onMove });
+
+    expect(screen.getByRole("radio", { name: "Move after this turn" })).toBeChecked();
+    await userEvent.click(screen.getByRole("button", { name: /All docs/ }));
+
+    expect(onMove).toHaveBeenCalledWith("p-parent", "after-turn");
+  });
+
+  it("sends stop-now only when the person picks it", async () => {
+    const onMove = vi.fn(async () => ({ status: "ok" }) as const);
+    open({ busy: true, onMove });
+
+    await userEvent.click(screen.getByRole("radio", { name: "Stop and move now" }));
+    await userEvent.click(screen.getByRole("button", { name: /All docs/ }));
+
+    expect(onMove).toHaveBeenCalledWith("p-parent", "stop-now");
+  });
+
+  it("keeps the queued move visible, drops it on Cancel, and shows a refusal on dispatch", async () => {
+    let resolveSettled: (outcome: never) => void = () => undefined;
+    const cancel = vi.fn(() => resolveSettled({ status: "cancelled" } as never));
+    const settled = new Promise((resolve) => {
+      resolveSettled = resolve as never;
+    });
+    const onMove = vi.fn(async () => ({ status: "deferred", settled, cancel }) as never);
+    const { onClose } = open({ busy: true, onMove });
+
+    await userEvent.click(screen.getByRole("button", { name: /All docs/ }));
+    expect(await screen.findByText(/queued for when this turn finishes/)).toBeVisible();
+    expect(screen.getByRole("button", { name: /All docs/ })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel move" }));
+    expect(cancel).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("drops the queued move when the dialog is dismissed without cancelling first", async () => {
+    const cancel = vi.fn();
+    const onMove = vi.fn(
+      async () => ({ status: "deferred", settled: new Promise(() => {}), cancel }) as never,
+    );
+    const { onClose } = open({ busy: true, onMove });
+
+    await userEvent.click(screen.getByRole("button", { name: /All docs/ }));
+    expect(await screen.findByText(/queued for when this turn finishes/)).toBeVisible();
+
+    await userEvent.keyboard("{Escape}");
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("surfaces the host's refusal when the deferred move dispatches", async () => {
+    let resolveSettled: (outcome: never) => void = () => undefined;
+    const settled = new Promise((resolve) => {
+      resolveSettled = resolve as never;
+    });
+    const onMove = vi.fn(async () => ({ status: "deferred", settled, cancel: vi.fn() }) as never);
+    const { onClose } = open({ busy: true, onMove });
+
+    await userEvent.click(screen.getByRole("button", { name: /All docs/ }));
+    resolveSettled({
+      status: "refused",
+      message: "The thread started another turn; move it when it is idle.",
+    } as never);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/started another turn/);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});

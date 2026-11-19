@@ -179,6 +179,8 @@ export interface DraftThreadWorkspaceProps {
   readonly projectName?: string;
   readonly projectRoot?: string;
   readonly branchName?: string;
+  /** Opens the draft's branch choice on first draw — the branch-menu entry lands here. */
+  readonly startFromOpen?: boolean;
   /**
    * Present while this Code draft was opened with New coordinator. It applies
    * only while that Project stays selected.
@@ -1003,6 +1005,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           ? {}
           : { baseRepository: connectedBaseRepository })}
         {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
+        {...(props.startFromOpen === true ? { startFromOpen: true } : {})}
         {...(props.coordinator === undefined ||
         String(props.coordinator.projectId) !== String(selectedProjectId)
           ? {}

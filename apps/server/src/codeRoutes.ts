@@ -995,6 +995,9 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               actor: callerActor,
               ...(operation.kind === "start-provider-turn" ||
               requiresLiveCodeReviewAuthority(operation) ||
+              // A switch may wait behind another Git mutation in the queue;
+              // its admission is asked again when its turn to run arrives.
+              operation.kind === "switch-git-branch" ||
               [
                 "prepare-git-hunks",
                 "stage-git-hunks",

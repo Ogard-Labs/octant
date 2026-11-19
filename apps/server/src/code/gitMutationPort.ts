@@ -5,6 +5,7 @@ import {
 } from "../process/sandboxRuntimePolicy";
 import { execFile as nodeExecFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { MAX_CODE_GIT_HUNK_PATCH_BYTES, type ProviderExecutionPolicy } from "@octant/contracts";
@@ -62,7 +63,12 @@ export interface GitTreeSnapshot {
 }
 
 export type GitMutationResult =
-  | { readonly status: "applied"; readonly oid?: string }
+  | {
+      readonly status: "applied";
+      readonly oid?: string;
+      /** The branch Git reports the checkout holding, read after it ran. */
+      readonly branch?: string;
+    }
   | {
       readonly status: "rejected";
       readonly reason:
@@ -79,7 +85,11 @@ export type GitMutationResult =
         | "stale-state"
         | "invalid-hunks"
         | "hunk-offset"
-        | "read-only";
+        | "read-only"
+        | "invalid-branch"
+        | "branch-in-use"
+        | "dirty-checkout"
+        | "unsupported-git";
     }
   | {
       readonly status: "failed";
@@ -568,6 +578,195 @@ export class GitMutationPort {
       ? { status: "applied", oid }
       : failedMutation(head.stderr);
   }
+
+  /**
+   * Point the checkout's HEAD at another local branch.
+   *
+   * The branch must already be an exact local ref: no revisions, remote
+   * names, or guesses (`--no-guess` never resolves `foo` into
+   * `origin/foo`'s new branch, and `--no-overwrite-ignore` keeps ignored
+   * files that would collide instead of replacing them). A branch another
+   * worktree holds is refused before Git is asked. `dirty` is the caller's
+   * word on uncommitted work: `refuse` stops on any change, and `stash`
+   * saves tracked and untracked work aside with `git stash push
+   * --include-untracked` — saved, never popped and never discarded — before
+   * the switch runs. A switch that fails after a stash reports the failure
+   * with the stash left in place.
+   */
+  async switchBranch(
+    input: {
+      readonly checkoutRoot: string;
+      readonly branch: string;
+      readonly dirty: "refuse" | "stash";
+    } & GitMutationPolicy,
+    signal?: AbortSignal,
+  ): Promise<GitMutationResult> {
+    if (!validBranchName(input.branch) || input.branch.includes("@{"))
+      return { status: "rejected", reason: "invalid-branch" };
+    const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
+    if (lock === "failed") return { status: "failed" };
+    if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    if (!(await this.#switchFlagsSupported(input.checkoutRoot, signal, input.executionPolicy))) {
+      return { status: "rejected", reason: "unsupported-git" };
+    }
+    // The branch must exist as the exact local ref named, resolved by Git's
+    // own rules rather than by what the caller claims is there.
+    const ref = await this.#run(
+      ["-C", input.checkoutRoot, "show-ref", "--verify", "--quiet", `refs/heads/${input.branch}`],
+      signal,
+      undefined,
+      input.executionPolicy,
+    );
+    if (ref.exitCode !== 0) return { status: "rejected", reason: "invalid-branch" };
+    // Already on it: nothing to switch to and nothing to stash.
+    const current = await this.#run(
+      ["-C", input.checkoutRoot, "branch", "--show-current"],
+      signal,
+      undefined,
+      input.executionPolicy,
+    );
+    if (current.exitCode !== 0) return failedMutation(current.stderr);
+    if (current.stdout.trim() === input.branch)
+      return this.#switchAnswer(input.checkoutRoot, signal, input.executionPolicy);
+    const worktrees = await this.#run(
+      ["-C", input.checkoutRoot, "worktree", "list", "--porcelain"],
+      signal,
+      undefined,
+      input.executionPolicy,
+    );
+    if (worktrees.exitCode !== 0) return failedMutation(worktrees.stderr);
+    if (worktreeHoldsBranchElsewhere(worktrees.stdout, input.checkoutRoot, input.branch)) {
+      return { status: "rejected", reason: "branch-in-use" };
+    }
+    // `all`: a config hiding untracked files would let the switch carry or
+    // collide with work the status never showed the person.
+    const status = await this.#run(
+      ["-C", input.checkoutRoot, "status", "--porcelain", "--untracked-files=all"],
+      signal,
+      undefined,
+      input.executionPolicy,
+    );
+    if (status.exitCode !== 0) return failedMutation(status.stderr);
+    let stashed = false;
+    if (status.stdout.trim() !== "") {
+      if (input.dirty === "refuse") return { status: "rejected", reason: "dirty-checkout" };
+      const stash = await this.#run(
+        [
+          "-C",
+          input.checkoutRoot,
+          "stash",
+          "push",
+          "--include-untracked",
+          "-m",
+          `Octant: saved before switching to ${input.branch}`,
+        ],
+        signal,
+        undefined,
+        input.executionPolicy,
+      );
+      if (stash.exitCode !== 0) return failedMutation(stash.stderr);
+      stashed = true;
+      const remaining = await this.#run(
+        ["-C", input.checkoutRoot, "status", "--porcelain", "--untracked-files=all"],
+        signal,
+        undefined,
+        input.executionPolicy,
+      );
+      if (remaining.exitCode !== 0)
+        return stashedFailure(
+          remaining.stderr,
+          `Changes were saved to the stash and stayed there, but the tree could not be read again. The branch was not switched.`,
+        );
+      if (remaining.stdout.trim() !== "")
+        return stashedFailure(
+          "",
+          `Changes were saved to the stash and stayed there, but the stash did not put all of them away. The branch was not switched.`,
+        );
+    }
+    const switched = await this.#run(
+      [
+        "-C",
+        input.checkoutRoot,
+        "switch",
+        "--no-guess",
+        "--no-overwrite-ignore",
+        "--",
+        input.branch,
+      ],
+      signal,
+      undefined,
+      input.executionPolicy,
+    );
+    if (switched.exitCode !== 0)
+      return stashed
+        ? stashedFailure(
+            switched.stderr,
+            `The switch was refused and your changes stayed in the stash. Look for "Octant: saved before switching" in \`git stash list\`.`,
+          )
+        : failedMutation(switched.stderr);
+    return this.#switchAnswer(input.checkoutRoot, signal, input.executionPolicy);
+  }
+
+  /**
+   * What Git now reports about the checkout: the branch name and head as read
+   * back after the switch, never echoed from the request.
+   */
+  async #switchAnswer(
+    checkoutRoot: string,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
+  ): Promise<GitMutationResult> {
+    const head = await this.#run(
+      ["-C", checkoutRoot, "rev-parse", "--verify", "HEAD"],
+      signal,
+      undefined,
+      executionPolicy,
+    );
+    if (head.exitCode !== 0) return failedMutation(head.stderr);
+    const oid = head.stdout.trim();
+    const name = await this.#run(
+      ["-C", checkoutRoot, "branch", "--show-current"],
+      signal,
+      undefined,
+      executionPolicy,
+    );
+    const branch = name.stdout.trim();
+    return name.exitCode === 0 && validBranchName(branch)
+      ? { status: "applied", ...(isObjectId(oid) ? { oid } : {}), branch }
+      : { status: "applied", ...(isObjectId(oid) ? { oid } : {}) };
+  }
+
+  /**
+   * Whether this install's `git switch` takes the flags the switch depends
+   * on. `--no-guess` arrived in Git 2.30 and `--no-overwrite-ignore` in
+   * Git 2.27, so 2.30 covers both; anything older answers unsupported
+   * rather than switching with weaker guarantees.
+   */
+  async #switchFlagsSupported(
+    checkoutRoot: string,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
+  ): Promise<boolean> {
+    if (this.#switchFlags !== undefined) return this.#switchFlags;
+    const version = await this.#run(
+      ["-C", checkoutRoot, "version"],
+      signal,
+      undefined,
+      executionPolicy,
+    );
+    if (version.exitCode !== 0) return false;
+    const match = /git version (\d+)\.(\d+)/.exec(version.stdout);
+    // Cache only a definitive answer: a broken probe could be this root or a
+    // transient failure, and an answer cached now would keep every later
+    // switch refused long after the install reads fine.
+    this.#switchFlags =
+      match !== null &&
+      match[1] !== undefined &&
+      match[2] !== undefined &&
+      (Number(match[1]) > 2 || (Number(match[1]) === 2 && Number(match[2]) >= 30));
+    return this.#switchFlags;
+  }
+  #switchFlags: boolean | undefined;
 
   async revertCommit(
     input: { readonly checkoutRoot: string; readonly oid: string } & GitMutationPolicy,
@@ -1362,6 +1561,16 @@ function failedMutation(stderr: string): GitMutationResult {
 }
 
 /**
+ * A failure after the stash ran: the person is told where their work is in
+ * the detail itself, because Git's stderr alone never mentions the stash.
+ */
+function stashedFailure(stderr: string, saved: string): GitMutationResult {
+  const detail = stderr.trim();
+  const text = detail === "" ? saved : `${saved}\n${detail}`;
+  return { status: "failed", detail: text.slice(0, 2_048) };
+}
+
+/**
  * A failed push is a definite failure only when Git said the remote refused
  * it: a `[rejected]` or `[remote rejected]` porcelain line for the ref (a
  * non-fast-forward, a stale lease, a hook), or a remote that refused the
@@ -1381,6 +1590,38 @@ function failedPush(result: CommandResult): GitMutationResult {
   return detail === ""
     ? { status: "failed", unconfirmed: true }
     : { status: "failed", detail: detail.slice(0, 2_048), unconfirmed: true };
+}
+
+/**
+ * Whether `git worktree list` holds `branch` checked out anywhere but
+ * `checkoutRoot`. Porcelain blocks read `worktree <path>` then `branch
+ * refs/heads/<name>`; a detached entry has no branch line and cannot hold it.
+ */
+function worktreeHoldsBranchElsewhere(
+  porcelain: string,
+  checkoutRoot: string,
+  branch: string,
+): boolean {
+  // Git reports canonical worktree paths; the caller's root may still carry a
+  // symlinked prefix (macOS /var resolves to /private/var), so both sides are
+  // resolved before "elsewhere" is decided.
+  const ownRoot = canonicalPath(checkoutRoot);
+  const wanted = `branch refs/heads/${branch}`;
+  let path: string | undefined;
+  for (const line of porcelain.split("\n")) {
+    if (line.startsWith("worktree ")) path = line.slice("worktree ".length);
+    else if (line === wanted && path !== undefined && canonicalPath(path) !== ownRoot) return true;
+    else if (line === "") path = undefined;
+  }
+  return false;
+}
+
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 function validPaths(paths: readonly string[]): boolean {

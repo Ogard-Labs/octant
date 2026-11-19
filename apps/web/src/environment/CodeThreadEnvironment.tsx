@@ -16,6 +16,7 @@ import type {
   CodeDeliveryOutcomeKind,
   CodeOperationId,
   CodeProjectPullRequestRow,
+  CodeWorktreeRef,
   LocalServerOpenTarget,
   ProjectSummary,
   ThreadBoardPullRequestIdentity,
@@ -24,10 +25,12 @@ import type {
 } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { decideThreadMove, folderContains } from "@octant/domain/thread-project-move-policy";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ChevronRight,
   FolderOpen,
+  GitBranch,
   GitCommitHorizontal,
   GitFork,
   GitPullRequest,
@@ -71,6 +74,8 @@ import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { EnvironmentRoutines } from "./EnvironmentRoutines";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import { OctantMenu } from "../ui/base/OctantMenu";
+import { SwitchBranchDialog } from "./SwitchBranchDialog";
+import type { CodeBranchPreviewOutcome, SwitchCodeBranchOutcome } from "../code/switchCodeBranch";
 import { CODE_DELIVERY_OUTCOME_OPTIONS } from "../code/composer/CodeDeliveryOutcomeSelector";
 
 type CodeThreadWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
@@ -88,7 +93,19 @@ export interface CodeThreadEnvironmentProps {
    * is back, so a read sent earlier fails and is never repeated.
    */
   readonly checkoutAvailability?: CodeCheckoutIdentity["availability"] | undefined;
+  /**
+   * The checkout's recorded kind. A remote root or a plain folder has no local
+   * branch to move HEAD to, so Switch branch stays off the row's menu; absent,
+   * the host is still the one that would refuse.
+   */
+  readonly checkoutKind?: CodeCheckoutIdentity["kind"] | undefined;
   readonly project?: ProjectSummary | undefined;
+  /**
+   * Every Project the window knows, for the Project row's move affordance:
+   * the row opens the shared Move dialog only while another same-folder Code
+   * Project could take this thread.
+   */
+  readonly projects?: ReadonlyArray<ProjectSummary> | undefined;
   readonly projectClient?: ProjectClient | undefined;
   /**
    * The thread's most recent turn to have settled. The checkout is read again
@@ -107,6 +124,34 @@ export interface CodeThreadEnvironmentProps {
    * observe its own checkout again, so a new thread is the way forward.
    */
   readonly onNewThreadInProject?: (projectId: ProjectSummary["id"]) => void;
+  /**
+   * Opens a fresh task draft in this Project with its branch choice shown —
+   * the normal "Where > Start from" flow, not worktree setup. Absent hides
+   * the menu entry.
+   */
+  readonly onNewTaskOnBranch?: () => void;
+  /**
+   * The working-tree reading the switch dialog shows before a stash consent:
+   * its state token is the one the switch sends, so consent is always to what
+   * was last observed. Absent hides "Switch branch…".
+   */
+  readonly onObserveBranchState?: () => Promise<CodeBranchPreviewOutcome>;
+  /**
+   * Sends the person's approved branch switch for this thread's checkout
+   * against the preview's own state token. Absent hides "Switch branch…".
+   */
+  readonly onSwitchBranch?: (request: {
+    readonly branch: string;
+    readonly dirty: "refuse" | "stash";
+    readonly expectedStateToken: string;
+  }) => Promise<SwitchCodeBranchOutcome>;
+  /** Opens the existing Move to Project dialog for this thread. */
+  readonly onMoveToProject?: () => void;
+  /**
+   * True while a turn occupies the thread: branch switching waits for idle
+   * (the host also refuses mid-turn) and the busy move choice is offered.
+   */
+  readonly threadBusy?: boolean;
   readonly onExecute?: (
     command: CodeCommand,
     signal?: AbortSignal,
@@ -222,25 +267,85 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     props.onCreatePullRequest !== undefined &&
     readyObservation !== undefined &&
     readyObservation.branch.kind === "named";
-  // A checkout that cannot be read already shows "New task in this Project" as
-  // its way out, so the menu offers it for every other state.
-  const changesMenu: ReadonlyArray<{
+  const [switchBranchOpen, setSwitchBranchOpen] = useState(false);
+  const onExecute = props.onExecute;
+  const fetchLocalRefs = useCallback(async (): Promise<ReadonlyArray<CodeWorktreeRef>> => {
+    if (onExecute === undefined || project === undefined) return [];
+    const result = await onExecute({ kind: "list-code-worktree-refs", projectId: project.id });
+    return result !== undefined && result.kind === "worktree-refs-listed" ? result.refs : [];
+  }, [onExecute, project]);
+  const onSwitchBranch = props.onSwitchBranch;
+  const switchBranchRequest = useCallback(
+    async (request: {
+      readonly branch: string;
+      readonly dirty: "refuse" | "stash";
+      readonly expectedStateToken: string;
+    }) => {
+      if (onSwitchBranch === undefined) {
+        return { status: "refused" as const, message: "Branch switching is unavailable." };
+      }
+      const outcome = await onSwitchBranch(request);
+      // A completed switch moved the head this panel reports; the host already
+      // journaled it and this read only follows what was recorded.
+      if (outcome.status === "ok") void controller.refresh();
+      return outcome;
+    },
+    [onSwitchBranch, controller],
+  );
+  const onObserveBranchState = props.onObserveBranchState;
+  const fetchBranchPreview = useCallback(async (): Promise<CodeBranchPreviewOutcome> => {
+    if (onObserveBranchState === undefined) {
+      return { status: "refused", message: "The checkout could not be read." };
+    }
+    return onObserveBranchState();
+  }, [onObserveBranchState]);
+  // Only a local checkout has a HEAD the switch can move: a remote root and a
+  // plain folder are reported as themselves, and "New task in this Project" is
+  // the way out of a checkout that cannot be read at all.
+  const localCheckout =
+    props.checkoutKind !== "remote-root" && props.checkoutKind !== "plain-folder";
+  const switchBranchOffered =
+    project !== undefined &&
+    props.onSwitchBranch !== undefined &&
+    props.onObserveBranchState !== undefined &&
+    readyObservation !== undefined &&
+    localCheckout;
+  // The branch row's own menu: everything that moves this checkout's work or
+  // starts work beside it lives on the row that names the branch.
+  const branchMenu: ReadonlyArray<{
     readonly value: string;
     readonly label: string;
     readonly icon: ReactNode;
+    readonly disabled?: boolean;
+    readonly description?: string;
     readonly run: () => void;
   }> = [
-    ...(project === undefined || onNewThreadInProject === undefined || checkoutUnusable
+    ...(switchBranchOffered
+      ? [
+          {
+            value: "switch-branch",
+            label: "Switch branch…",
+            icon: <GitFork aria-hidden="true" size={16} />,
+            // A switch while a turn runs would move the ground under the
+            // provider; the host refuses too, and the greyed row says why.
+            ...(props.threadBusy === true
+              ? { disabled: true, description: "Available when the current turn finishes." }
+              : {}),
+            run: () => setSwitchBranchOpen(true),
+          },
+        ]
+      : []),
+    ...(project === undefined || props.onNewTaskOnBranch === undefined || checkoutUnusable
       ? []
       : [
           {
-            value: "new-task",
-            label: "New task in this Project",
+            value: "new-task-branch",
+            label: "New task on another branch…",
             icon: <Plus aria-hidden="true" size={16} />,
-            run: () => onNewThreadInProject(project.id),
+            run: props.onNewTaskOnBranch,
           },
         ]),
-    ...(props.onOpenWorktrees === undefined
+    ...(props.onOpenWorktrees === undefined || !localCheckout
       ? []
       : [
           {
@@ -251,6 +356,53 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           },
         ]),
   ];
+  // The Project row is itself the move control — but only while the shared
+  // dialog could actually take the thread: another active Code Project bound
+  // to the same repository folder. Otherwise the row stays a fact.
+  const currentFolder = project?.type === "code" ? project.binding.canonicalRoot : undefined;
+  const moveToProjectAvailable =
+    project !== undefined &&
+    props.onMoveToProject !== undefined &&
+    currentFolder !== undefined &&
+    (props.projects ?? []).some((candidate) => {
+      if (
+        candidate.type !== "code" ||
+        candidate.lifecycle !== "active" ||
+        String(candidate.id) === String(project.id)
+      ) {
+        return false;
+      }
+      const folder = candidate.binding.canonicalRoot;
+      const decision = decideThreadMove({
+        thread: { lifecycle: "active", executing: false, awaitingInput: false },
+        source: { id: String(project.id), mode: "code", folder: currentFolder },
+        destination: {
+          id: String(candidate.id),
+          mode: "code",
+          lifecycle: candidate.lifecycle,
+          folder,
+        },
+      });
+      return decision.status === "allowed" && folderContains(currentFolder, folder);
+    });
+  // A checkout that cannot be read already shows "New task in this Project" as
+  // its way out, so the menu offers it for every other state.
+  const changesMenu: ReadonlyArray<{
+    readonly value: string;
+    readonly label: string;
+    readonly icon: ReactNode;
+    readonly run: () => void;
+  }> =
+    project === undefined || onNewThreadInProject === undefined || checkoutUnusable
+      ? []
+      : [
+          {
+            value: "new-task",
+            label: "New task in this Project",
+            icon: <Plus aria-hidden="true" size={16} />,
+            run: () => onNewThreadInProject(project.id),
+          },
+        ];
   const localServersAvailable = localServersSection?.available === true;
   const localServers = useLocalServersController({
     enabled: localServersAvailable,
@@ -321,6 +473,59 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 />
               ),
             })}
+        {...(moveToProjectAvailable && props.onMoveToProject !== undefined
+          ? { projectAction: props.onMoveToProject }
+          : {})}
+        {...(branchMenu.length === 0 || readyObservation === undefined
+          ? {}
+          : {
+              branchRow: (
+                <OctantMenu
+                  items={branchMenu.map(({ value, label, icon, disabled, description }) => ({
+                    value,
+                    label,
+                    icon,
+                    ...(disabled === true ? { disabled } : {}),
+                    ...(description === undefined ? {} : { description }),
+                  }))}
+                  onValueChange={(value) =>
+                    branchMenu.find((entry) => entry.value === value)?.run()
+                  }
+                  selectionMode="action"
+                  trigger={
+                    <>
+                      <EnvironmentTile icon={GitBranch} />
+                      <span className="environment-row__title">
+                        {readyObservation.branch.kind === "named"
+                          ? readyObservation.branch.name
+                          : `Detached ${readyObservation.branch.oid.slice(0, 7)}`}
+                      </span>
+                      {readyObservation.workingFolder?.kind === "extra" ? (
+                        <span className="environment-row__detail">Shared folder</span>
+                      ) : (
+                        <span className="environment-row__detail">
+                          {readyObservation.worktreeRoot === readyObservation.repositoryRoot
+                            ? "Main folder"
+                            : "Worktree"}
+                        </span>
+                      )}
+                      <ChevronRight
+                        aria-hidden="true"
+                        className="environment-row__trailing"
+                        size={14}
+                      />
+                    </>
+                  }
+                  triggerClassName="environment-row environment-link"
+                  triggerLabel={
+                    readyObservation.branch.kind === "named"
+                      ? `Branch ${readyObservation.branch.name}`
+                      : "Detached head"
+                  }
+                  value=""
+                />
+              ),
+            })}
         open={environmentOpen}
         headerContent={
           <EnvironmentCard
@@ -362,6 +567,18 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
               failureRef={failure}
               status={controller.status}
             />
+            {/* The connected repository is a credential-free owner/name the
+                host already sanitized; it routes to this Project's pull
+                requests, never to a remote URL the renderer would compose. */}
+            {project?.type === "code" &&
+            project.connectedRepository !== undefined &&
+            props.onOpenPullRequests !== undefined ? (
+              <EnvironmentRow
+                icon={GitPullRequest}
+                label={`${project.connectedRepository.owner}/${project.connectedRepository.repository}`}
+                onClick={props.onOpenPullRequests}
+              />
+            ) : null}
             {offersCommitOrPush ? (
               <EnvironmentRow
                 icon={GitCommitHorizontal}
@@ -645,6 +862,20 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           {props.children}
         </CodeCheckoutProvider>
       </div>
+      {switchBranchOpen && readyObservation !== undefined && project !== undefined ? (
+        <SwitchBranchDialog
+          currentBranch={
+            readyObservation.branch.kind === "named"
+              ? readyObservation.branch.name
+              : `Detached ${readyObservation.branch.oid.slice(0, 7)}`
+          }
+          fetchPreview={fetchBranchPreview}
+          fetchRefs={fetchLocalRefs}
+          {...(props.onOpenGit === undefined ? {} : { onOpenGit: props.onOpenGit })}
+          onClose={() => setSwitchBranchOpen(false)}
+          onSwitch={switchBranchRequest}
+        />
+      ) : null}
     </div>
   );
 }

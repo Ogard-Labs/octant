@@ -837,6 +837,42 @@
   margin-top: 2px;
 }
 
+/* The busy-move choices read like the rows around them: one plain button per
+   choice with a dot at the leading edge, the same grammar as the Where
+   menu's radio rows. */
+.move-thread__when {
+  margin: var(--oct-space-3) 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.move-thread__when-choices {
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.move-thread__when-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  width: 100%;
+  height: auto;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  text-align: left;
+}
+
+.move-thread__when-dot {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 1px solid var(--octant-border-strong);
+  border-radius: 50%;
+}
+
+.move-thread__when-choice[aria-checked="true"] .move-thread__when-dot {
+  border: 4px solid var(--octant-text-primary);
+}
+
 /* The button recipe owns the height, the inset and the type. This class set
    its own 31px height and 12px type, a step that exists nowhere else: in a
    dialog's footer Cancel stood 3px taller than the primary button beside

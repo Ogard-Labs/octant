@@ -102,6 +102,8 @@ import {
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
+import { observeCodeBranchState, switchCodeBranch } from "../code/switchCodeBranch";
+import type { ThreadMoveRequest } from "../app/shellActions";
 import {
   Component,
   lazy,
@@ -550,7 +552,15 @@ export interface WorkspaceViewProps {
   /** Session record of which tabs the person activated, opened, or created. */
   readonly tabActivation?: TabActivationRegistry;
   /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
-  readonly onNewThreadInProject?: (projectId: ProjectSummary["id"]) => void;
+  readonly onNewThreadInProject?: (
+    projectId: ProjectSummary["id"],
+    options?: { readonly startFrom?: boolean | undefined },
+  ) => void;
+  /**
+   * Opens the shared Move to Project request for a thread — the same dialog
+   * sidebar rows open, never a second move surface.
+   */
+  readonly onRequestMoveToProject?: (request: ThreadMoveRequest) => void;
   readonly projectClient?: ProjectClient;
   /** Each Project's instructions, shown beside its memory. */
   readonly octantInstructionsClient?: OctantInstructionsClient;
@@ -590,6 +600,15 @@ export interface WorkspaceViewProps {
   readonly draftBranchName?: string;
   /** Present while the Code draft was opened with New coordinator. */
   readonly draftCoordinator?: import("./DraftThreadWorkspace").CoordinatorDraft;
+  /**
+   * A draft opened with "New task on another branch…" starts with its
+   * branch choice open — the same picker "Where > Start from" draws.
+   */
+  /**
+   * A branch-start intent scoped to the draft it was opened for: the draft
+   * named by this Project opens its Where > Start from branch picker once.
+   */
+  readonly draftStartFrom?: { readonly projectId: string } | undefined;
   readonly draftApprovalLabel?: string;
   readonly draftSelectedProviderInstanceId?: import("@octant/contracts/providers").ProviderInstanceId;
   readonly draftSelectedModelId?: import("@octant/contracts/providers").ProviderModelId;
@@ -1556,15 +1575,16 @@ function renderCodeTab(
       : codeController.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(tab.threadId),
         );
-  const checkoutAvailability =
+  const activeCheckout =
     activeThread === undefined
       ? undefined
       : codeController.activeView !== undefined &&
           String(codeController.activeView.thread.id) === String(tab.threadId)
-        ? codeController.activeView.checkout.availability
+        ? codeController.activeView.checkout
         : codeController.bootstrap?.checkouts.find(
             (checkout) => String(checkout.id) === String(activeThread.checkoutId),
-          )?.availability;
+          );
+  const checkoutAvailability = activeCheckout?.availability;
   const providerInstanceId = activeThread?.providerInstanceId;
   const autoReview = autoReviewFor({
     providerInstanceId,
@@ -1762,6 +1782,46 @@ function renderCodeTab(
             {...(props.onNewThreadInProject === undefined
               ? {}
               : { onNewThreadInProject: props.onNewThreadInProject })}
+            {...(project === undefined || props.onNewThreadInProject === undefined
+              ? {}
+              : {
+                  onNewTaskOnBranch: () =>
+                    props.onNewThreadInProject?.(project.id, { startFrom: true }),
+                })}
+            {...(project === undefined || activeThread === undefined
+              ? {}
+              : {
+                  onObserveBranchState: () =>
+                    observeCodeBranchState(
+                      codeController.client,
+                      () => globalThis.crypto.randomUUID(),
+                      { threadId: tab.threadId, checkoutId: activeThread.checkoutId },
+                    ),
+                  onSwitchBranch: (request) =>
+                    switchCodeBranch(
+                      codeController.client,
+                      () => globalThis.crypto.randomUUID(),
+                      { threadId: tab.threadId, checkoutId: activeThread.checkoutId },
+                      request,
+                    ),
+                })}
+            {...(project === undefined || props.onRequestMoveToProject === undefined
+              ? {}
+              : {
+                  onMoveToProject: () =>
+                    props.onRequestMoveToProject?.({
+                      mode: "code",
+                      threadId: String(tab.threadId),
+                      title: tab.title,
+                      projectId: String(project.id),
+                    }),
+                })}
+            checkoutKind={activeCheckout?.kind}
+            projects={props.projects}
+            {...(props.runningThreadIds?.has(String(tab.threadId)) === true ||
+            props.waitingThreadIds?.has(String(tab.threadId)) === true
+              ? { threadBusy: true }
+              : {})}
             {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
             {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
             {...(props.projectWindowCapability === undefined
@@ -2029,6 +2089,11 @@ function renderNonCodeTab(
           {...(props.draftProjectName === undefined ? {} : { projectName: props.draftProjectName })}
           {...(props.draftProjectRoot === undefined ? {} : { projectRoot: props.draftProjectRoot })}
           {...(props.draftBranchName === undefined ? {} : { branchName: props.draftBranchName })}
+          {...(props.draftStartFrom !== undefined &&
+          draftProjectId !== undefined &&
+          props.draftStartFrom.projectId === String(draftProjectId)
+            ? { startFromOpen: true }
+            : {})}
           {...(props.draftCoordinator === undefined || tab.mode !== "code"
             ? {}
             : { coordinator: props.draftCoordinator })}

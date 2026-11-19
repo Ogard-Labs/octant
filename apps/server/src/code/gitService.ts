@@ -90,6 +90,11 @@ interface MutationPort {
     input: Parameters<GitMutationPort["revertCommit"]>[0],
     signal?: AbortSignal,
   ): Promise<GitMutationResult>;
+  /** Optional: a mutation fake without it refuses a branch switch as failed. */
+  switchBranch?(
+    input: Parameters<GitMutationPort["switchBranch"]>[0],
+    signal?: AbortSignal,
+  ): Promise<GitMutationResult>;
   snapshotWorkingTree(
     input: Parameters<GitMutationPort["snapshotWorkingTree"]>[0],
     signal?: AbortSignal,
@@ -125,7 +130,10 @@ export type GitServiceResult =
         | "unborn-head"
         | "branch-mismatch"
         | "remote-unavailable"
-        | "dirty-checkout";
+        | "dirty-checkout"
+        | "invalid-branch"
+        | "branch-in-use"
+        | "unsupported-git";
     }
   | { readonly status: "unavailable" };
 
@@ -662,6 +670,50 @@ export class GitService {
         {
           checkoutRoot: current.checkoutRoot,
           oid: input.oid,
+          ...mutationPolicy(input.executionPolicy),
+        },
+        signal,
+      );
+    });
+  }
+
+  /**
+   * Point the checkout at another local branch under the caller's token: the
+   * observation the person saw must still be current when the queued switch
+   * runs, or it is refused as stale rather than applied to a tree that moved.
+   */
+  switchBranch(
+    input: {
+      readonly checkoutId: string;
+      readonly checkoutRoot: string;
+      readonly branch: string;
+      readonly dirty: "refuse" | "stash";
+      readonly expectedStateToken: string;
+      readonly executionPolicy?: ProviderExecutionPolicy;
+      /**
+       * The live admission for the request that queued this switch, asked
+       * again inside the queue just before Git runs: a wait behind another
+       * mutation can outlive the window's authority, and a switch that
+       * reached its turn after that is refused rather than applied.
+       */
+      readonly current?: () => boolean;
+    },
+    signal?: AbortSignal,
+  ): Promise<GitServiceResult> {
+    return this.#serialized(input.checkoutId, async () => {
+      const current = await this.#ready(input.checkoutRoot, signal);
+      if (!current) return { status: "unavailable" };
+      if (current.stateToken !== input.expectedStateToken)
+        return { status: "rejected", reason: "stale-state" };
+      // Detached HEAD holds no branch to lose, so switching to an existing
+      // local branch from it is as safe as switching between branches.
+      if (this.#mutation.switchBranch === undefined) return { status: "unavailable" };
+      if (input.current?.() === false) return { status: "rejected", reason: "stale-state" };
+      return this.#mutation.switchBranch(
+        {
+          checkoutRoot: current.checkoutRoot,
+          branch: input.branch,
+          dirty: input.dirty,
           ...mutationPolicy(input.executionPolicy),
         },
         signal,

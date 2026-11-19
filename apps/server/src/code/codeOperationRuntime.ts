@@ -353,6 +353,7 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 
 export interface CodeOperationRuntimeOptions {
   readonly prepareWorktree?: CodeOperationServiceOptions["prepareWorktree"];
+  readonly checkoutObserved?: CodeOperationServiceOptions["checkoutObserved"];
   /** How long a Stop waits for the runtime to confirm it; defaults to {@link STOP_CONFIRMATION_MS}. */
   readonly stopConfirmationMs?: number;
   /**
@@ -1590,6 +1591,9 @@ export function createCodeOperationRuntime(
     },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
     ...(options.prepareWorktree === undefined ? {} : { prepareWorktree: options.prepareWorktree }),
+    ...(options.checkoutObserved === undefined
+      ? {}
+      : { checkoutObserved: options.checkoutObserved }),
     terminals: terminal,
     ...(options.terminalBrowserGrants === undefined
       ? {}
@@ -8115,6 +8119,7 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
         })),
       }),
     push: (input) => git.push(input),
+    switchBranch: (input) => git.switchBranch(input),
     unstage: (input) => git.unstage(input),
     checkpoint: (input) => git.checkpoint(input),
     restoreCheckpoint: (input) => git.restoreCheckpoint(input),

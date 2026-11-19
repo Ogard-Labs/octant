@@ -55,7 +55,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import type { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
-import type { ShellActions } from "./shellActions";
+import type { ShellActions, ThreadMoveRequest } from "./shellActions";
 import type { ShellNavigationModel } from "./shellNavigationModel";
 
 type ProjectController = ReturnType<typeof useProjectController>;
@@ -63,6 +63,8 @@ type ProjectController = ReturnType<typeof useProjectController>;
 export interface SidebarContainerProps {
   /** False when the Zen plugin is off: the profile menu offers no Zen row. */
   readonly zenEnabled: boolean;
+  /** The open Move to Project request, owned by the shell so any surface can ask. */
+  readonly moveRequest: ThreadMoveRequest | undefined;
   readonly actions: Pick<
     ShellActions,
     | "archiveCodeThread"
@@ -78,6 +80,7 @@ export interface SidebarContainerProps {
     | "markCodeThreadRead"
     | "moveCodeThread"
     | "moveProject"
+    | "requestMoveToProject"
     | "noteHandedOffDocument"
     | "openAgentsCenter"
     | "openArchive"
@@ -305,18 +308,12 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
   const { codeSidebarThreads, markedThreadGroups, withProviderMark, workProjectThreads } =
     navigation;
 
-  // The thread whose Move to Project choice is open. Work and Code rows ask for
-  // it from their right-click menu; the dialog lives here, beside the Project
-  // list it reads, so the move never reaches through another surface.
-  const [moveRequest, setMoveRequest] = useState<
-    | {
-        readonly mode: "work" | "code";
-        readonly threadId: string;
-        readonly title: string;
-        readonly projectId: string;
-      }
-    | undefined
-  >(undefined);
+  // The thread whose Move to Project choice is open. Work and Code rows ask
+  // for it from their right-click menu and the Environment asks through the
+  // same action; the dialog lives here, beside the Project list it reads, so
+  // the move never reaches through another surface.
+  const moveRequest = props.moveRequest;
+  const setMoveRequest = (request: typeof moveRequest) => actions.requestMoveToProject(request);
 
   // The plugin-contributed destinations act through the same overlay and board
   // openers the first-party rows use; resolved here, where the rows are drawn.
@@ -632,15 +629,19 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
   );
   const workThreadRowActions = rowActions.work;
 
-  const moveThread = (request: NonNullable<typeof moveRequest>) => async (projectId: string) =>
-    request.mode === "code"
-      ? actions.moveCodeThread(decodeCodeThreadId(request.threadId), decodeProjectId(projectId))
-      : actions.tryWorkRestCommand(request.threadId, (expectedVersion) => ({
-          kind: "move-work-thread",
-          threadId: decodeWorkThreadId(request.threadId),
-          expectedVersion,
-          projectId: decodeProjectId(projectId),
-        }));
+  const moveThread =
+    (request: NonNullable<typeof moveRequest>) =>
+    async (projectId: string, when?: "after-turn" | "stop-now") =>
+      request.mode === "code"
+        ? actions.moveCodeThread(decodeCodeThreadId(request.threadId), decodeProjectId(projectId), {
+            when,
+          })
+        : actions.tryWorkRestCommand(request.threadId, (expectedVersion) => ({
+            kind: "move-work-thread",
+            threadId: decodeWorkThreadId(request.threadId),
+            expectedVersion,
+            projectId: decodeProjectId(projectId),
+          }));
 
   return (
     <>
@@ -1016,6 +1017,15 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       <OctantDialogPresence>
         {moveRequest === undefined ? null : (
           <MoveThreadToProjectDialog
+            {...(moveRequest.busy === true ||
+            (moveRequest.mode === "code" &&
+              codeSidebarThreads.some(
+                (thread) =>
+                  String(thread.threadId) === moveRequest.threadId &&
+                  (thread.activity === "working" || thread.activity === "attention"),
+              ))
+              ? { busy: true }
+              : {})}
             currentProjectId={moveRequest.projectId}
             mode={moveRequest.mode}
             onClose={() => setMoveRequest(undefined)}

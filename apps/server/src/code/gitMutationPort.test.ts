@@ -923,6 +923,125 @@ describe("GitMutationPort", () => {
       port.stage({ checkoutRoot: temporaryDirectory(), paths: ["README.md"] }),
     ).resolves.toEqual({ status: "failed" });
   });
+
+  it("switches a clean checkout to an existing local branch", async () => {
+    const repository = createRepository(temporaryDirectory());
+    git(repository, "branch", "feature");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    await expect(
+      port.switchBranch({ checkoutRoot: repository, branch: "feature", dirty: "refuse" }),
+    ).resolves.toMatchObject({ status: "applied", oid: expect.stringMatching(/^[a-f0-9]{40}$/) });
+    expect(gitOutput(repository, "branch", "--show-current").trim()).toBe("feature");
+  });
+
+  it("refuses a branch that is not an exact local ref", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    for (const branch of ["missing", "main~1", "HEAD", "-bad"]) {
+      await expect(
+        port.switchBranch({ checkoutRoot: repository, branch, dirty: "refuse" }),
+      ).resolves.toEqual({ status: "rejected", reason: "invalid-branch" });
+    }
+    expect(gitOutput(repository, "branch", "--show-current").trim()).toBe("main");
+  });
+
+  it("refuses a branch another worktree holds", async () => {
+    const repository = createRepository(temporaryDirectory());
+    git(repository, "branch", "held");
+    const other = join(temporaryDirectory(), "other-worktree");
+    git(repository, "worktree", "add", other, "held");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    await expect(
+      port.switchBranch({ checkoutRoot: repository, branch: "held", dirty: "refuse" }),
+    ).resolves.toEqual({ status: "rejected", reason: "branch-in-use" });
+    expect(gitOutput(repository, "branch", "--show-current").trim()).toBe("main");
+    // The branch this very checkout already holds is never "in use elsewhere".
+    git(repository, "switch", "-c", "here");
+    await expect(
+      port.switchBranch({ checkoutRoot: repository, branch: "here", dirty: "refuse" }),
+    ).resolves.toMatchObject({ status: "applied" });
+  });
+
+  it("leaves a dirty tree alone when the caller asked to refuse", async () => {
+    const repository = createRepository(temporaryDirectory());
+    git(repository, "branch", "feature");
+    writeFileSync(join(repository, "README.md"), "edited\n");
+    writeFileSync(join(repository, "new.txt"), "untracked\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    await expect(
+      port.switchBranch({ checkoutRoot: repository, branch: "feature", dirty: "refuse" }),
+    ).resolves.toEqual({ status: "rejected", reason: "dirty-checkout" });
+    expect(gitOutput(repository, "branch", "--show-current").trim()).toBe("main");
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("edited\n");
+    expect(existsSync(join(repository, "new.txt"))).toBe(true);
+    expect(gitOutput(repository, "stash", "list").trim()).toBe("");
+  });
+
+  it("stashes tracked and untracked work aside, then switches", async () => {
+    const repository = createRepository(temporaryDirectory());
+    git(repository, "branch", "feature");
+    writeFileSync(join(repository, "README.md"), "edited\n");
+    writeFileSync(join(repository, "new.txt"), "untracked\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    await expect(
+      port.switchBranch({ checkoutRoot: repository, branch: "feature", dirty: "stash" }),
+    ).resolves.toMatchObject({ status: "applied" });
+    expect(gitOutput(repository, "branch", "--show-current").trim()).toBe("feature");
+    // The save stays put: the stash entry remains and nothing was popped back.
+    expect(gitOutput(repository, "stash", "list").trim()).toContain("stash@{0}");
+    const stash = gitOutput(repository, "stash", "show", "--include-untracked", "--name-only");
+    expect(stash).toContain("README.md");
+    expect(stash).toContain("new.txt");
+  });
+
+  it("keeps the stash and reports the failure when the switch itself fails", async () => {
+    const repository = createRepository(temporaryDirectory());
+    git(repository, "branch", "feature");
+    // An ignored file whose ignored twin exists on the branch makes
+    // `--no-overwrite-ignore` stop the switch after the stash happened.
+    writeFileSync(join(repository, ".gitignore"), "built.txt\n");
+    git(repository, "add", "--", ".gitignore");
+    git(repository, "commit", "-m", "ignore built");
+    git(repository, "switch", "feature");
+    writeFileSync(join(repository, "built.txt"), "tracked\n");
+    git(repository, "add", "--", "built.txt");
+    git(repository, "commit", "-m", "tracked built");
+    git(repository, "switch", "main");
+    writeFileSync(join(repository, "built.txt"), "ignored\n");
+    writeFileSync(join(repository, "README.md"), "edited\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    const outcome = await port.switchBranch({
+      checkoutRoot: repository,
+      branch: "feature",
+      dirty: "stash",
+    });
+    expect(outcome.status).toBe("failed");
+    // The failure names where the work went: Git's stderr alone never would.
+    if (outcome.status !== "failed" || outcome.detail === undefined)
+      throw new Error("Expected a detail-carrying failure.");
+    expect(outcome.detail).toContain("stash");
+    expect(gitOutput(repository, "branch", "--show-current").trim()).toBe("main");
+    expect(gitOutput(repository, "stash", "list").trim()).toContain("stash@{0}");
+  });
+
+  it("leaves a dirty tree untouched when it is asked for the branch it already holds", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, "README.md"), "edited\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    await expect(
+      port.switchBranch({ checkoutRoot: repository, branch: "main", dirty: "stash" }),
+    ).resolves.toMatchObject({ status: "applied", branch: "main" });
+    // Idempotent: no stash was made and the work is exactly where it was.
+    expect(gitOutput(repository, "stash", "list").trim()).toBe("");
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("edited\n");
+  });
 });
 
 function createEmptyRepository(root: string): string {

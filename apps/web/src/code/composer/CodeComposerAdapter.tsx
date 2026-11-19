@@ -123,6 +123,8 @@ export interface CodeComposerAdapterProps {
    * worktree from it, and the checkout's head does not replace it.
    */
   readonly branchName?: string;
+  /** Opens the Where menu on first draw — "New task on another branch…" lands here. */
+  readonly startFromOpen?: boolean;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly selectedHostId?: HostId;
   readonly fixedHostId?: HostId;
@@ -490,8 +492,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // a branch starts a worktree from that branch instead.
   const handedWorkspace: CodeNewThreadWorkspace | undefined =
     handedBranch === undefined ? undefined : "managed-worktree";
+  // "New task on another branch…" opens this draft for a worktree started from
+  // a picked branch, so it begins on the worktree choice: the Where menu's
+  // Start from picker is what the intent is for. A choice the draft already
+  // recorded still outranks the intent.
+  const startFromWorkspace: CodeNewThreadWorkspace | undefined =
+    props.startFromOpen === true ? "managed-worktree" : undefined;
   const [workspaceOverride, setWorkspaceOverride] = useState<CodeNewThreadWorkspace | undefined>(
-    storedCheckout?.workspaceOverride ?? handedWorkspace,
+    storedCheckout?.workspaceOverride ?? handedWorkspace ?? startFromWorkspace,
   );
   // A thread on a server starts in the bound folder unless the person picks a
   // new worktree, which is then made on the server; a remembered habit is
@@ -595,7 +603,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       skipProjectReset.current = false;
       return;
     }
-    setWorkspaceOverride(handedWorkspace);
+    setWorkspaceOverride(handedWorkspace ?? startFromWorkspace);
     // A ref the reader picked belongs to the Project they picked it in. Left
     // standing, it both kept the previous Project's branch on screen and told
     // the adoption below that this Project's head had already been overruled.
@@ -848,6 +856,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       branch={resolvedBaseBranch ?? "Default branch"}
       loading={refsLoading}
       onOpen={loadWorktreeRefs}
+      {...(props.startFromOpen === true ? { startOpen: true } : {})}
       onSelectRef={handleSelectRef}
       onStartFromOriginChange={setStartFromOriginOverride}
       presentation="row"
@@ -881,6 +890,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     <>
       {serverLocation}
       <CodeWhereControl
+        {...(props.startFromOpen === true ? { startOpen: true } : {})}
         baseBranchPicker={branchPicker}
         sourceControl={sourceControl}
         branch={resolvedBaseBranch ?? "Default branch"}

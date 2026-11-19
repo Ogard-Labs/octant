@@ -1634,7 +1634,16 @@ while the thread had no Project no longer matches its new scope and is refused
 until it is selected again.
 
 A Work or Code thread can be filed into another Project of its own mode from its
-row menu (**Move to Project…**). The server's `move-work-thread` and
+row menu (**Move to Project…**) or, for Code, from its Environment's Project
+row — both open the same dialog, and the row acts only while another active
+Code Project bound to the same repository folder could take the thread. When
+the thread's turn is still running the
+dialog offers Move after this turn, which queues an intent scoped to that
+thread and that turn and dispatches the move once when it settles (dismissing
+the dialog drops it; a newer turn ending it reports a refusal), or an explicit
+Stop and move now, which interrupts only the turn the window itself started
+and refuses — rather than stopping whichever turn happens to run — when that
+identity is not this window's. The server's `move-work-thread` and
 `move-code-thread` commands keep the thread's kind, history, and guardrail
 level, and add no filesystem reach: the pure `decideThreadMove` policy admits
 only an active Project of the same mode whose bound folder is the thread's
