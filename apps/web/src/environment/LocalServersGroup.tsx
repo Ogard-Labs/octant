@@ -1,3 +1,4 @@
+import "../styles/local-servers.css";
 import type {
   LocalServerListener,
   LocalServerListenerId,

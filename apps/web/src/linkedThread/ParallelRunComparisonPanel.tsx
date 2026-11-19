@@ -1,3 +1,4 @@
+import "./parallel-runs.css";
 import type { ParallelRunComparison, ParallelRunComparisonEntry } from "@octant/domain";
 import { GitMerge } from "../ui/icons";
 import { useState } from "react";

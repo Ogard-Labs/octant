@@ -1,3 +1,4 @@
+import "../styles/browser-feedback.css";
 import { Fragment, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 

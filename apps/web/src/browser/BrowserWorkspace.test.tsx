@@ -317,7 +317,7 @@ describe("BrowserWorkspace", () => {
   });
 
   it("lays the notes and the tool band under the page at their own heights, outranking the workspace's grid", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/browser-feedback.css"), "utf8");
     // The workspace's grid is declared at one class's weight in a later sheet,
     // so the notes layout needs two: while the grid won, the row's 45% cap
     // measured its own row and cut its text in half.
@@ -328,7 +328,7 @@ describe("BrowserWorkspace", () => {
     expect(styles).toMatch(
       /\.browser-workspace\.browser-workspace--feedback \{\s*display: flex;\s*flex-direction: column;/,
     );
-    const row = styles.match(/\n\.product-feedback \{([^}]*)\}/)?.[1] ?? "";
+    const row = styles.match(/(?:^|\n)\.product-feedback \{([^}]*)\}/)?.[1] ?? "";
     expect(row).toMatch(/flex:\s*0 0 auto/);
     expect(row).toMatch(/max-height:\s*min\(45%, 420px\)/);
   });

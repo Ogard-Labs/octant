@@ -1,0 +1,213 @@
+.product-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  padding: 8px 12px;
+  border-top: 1px solid var(--octant-border-subtle);
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  box-sizing: border-box;
+  /* It keeps its own height up to the cap and scrolls past it; the page above
+     gives way, never this row. */
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: min(45%, 420px);
+  overflow: auto;
+}
+
+/* Named twice so it outranks the workspace's own grid, which is declared in a
+   later stylesheet at the same weight. While the grid won, the notes row sat in
+   an implicit row and its 45% cap measured that row, not the pane: the row was
+   cut to under half its own height and "Point at something" lost its lower
+   half (measured 20px of a 44px row, 2026-11-16). */
+.browser-workspace.browser-workspace--feedback {
+  display: flex;
+  flex-direction: column;
+}
+
+.browser-workspace--feedback > .browser-workspace__chrome {
+  flex: 0 0 auto;
+  min-height: var(--oct-title-rail-h, 40px);
+}
+
+.browser-workspace--feedback > .browser-workspace__message {
+  flex: 0 0 auto;
+}
+
+.browser-workspace--feedback > .browser-workspace__native,
+.browser-workspace--feedback > .browser-workspace__remote,
+.browser-workspace--feedback > .browser-workspace__markup-page,
+.browser-workspace--feedback > .browser-workspace__start {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* The page's tools: one band under the page with the toolbar centred in it.
+   The band has one height whatever is armed, said or counted, so a live page
+   (a window-level view placed by its rectangle) never resizes for a tool. What
+   the armed tool waits for reads at its left and the notes' count at its
+   right; both give way to the toolbar in a narrow pane. */
+.browser-annotate {
+  display: grid;
+  height: 44px;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  /* No gap between the columns: in a 280px pane the toolbar takes nearly the
+     whole band, and a gap the side columns could not give back pushed it 9px
+     off centre. The words beside it keep their own distance instead. */
+  padding: 0 var(--oct-space-3);
+  box-sizing: border-box;
+  border-top: 1px solid var(--octant-pane-line, var(--octant-border-subtle));
+}
+
+.browser-annotate__status {
+  min-width: 0;
+  margin: 0;
+  padding-inline-end: var(--oct-space-2);
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-annotate__notes {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+  padding-inline-start: var(--oct-space-2);
+  overflow: hidden;
+}
+
+/* One toolbar, a pill a step off the pane with round tools in it, the way the
+   composer's box holds its round buttons. Flat: a wash of the ink, no edge and
+   no shadow, since it stands in the band and not over the page. */
+.browser-annotate__pill {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--oct-space-1);
+  background: var(--oct-fill-4);
+  border-radius: var(--oct-radius-pill);
+}
+
+.browser-annotate__tool {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  place-items: center;
+  color: var(--oct-fg-2);
+  border-radius: 50%;
+}
+
+.browser-annotate__tool:hover:not(:disabled) {
+  color: var(--oct-fg);
+  background: var(--octant-control-hover);
+}
+.browser-annotate__tool:active:not(:disabled):not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--octant-control-pressed);
+}
+
+.browser-annotate__tool[aria-pressed="true"] {
+  color: var(--oct-fg);
+  background: var(--oct-fill-2);
+}
+
+.browser-annotate__tool:disabled {
+  opacity: 0.4;
+}
+
+.browser-annotate__rule {
+  width: 1px;
+  height: 16px;
+  flex: none;
+  margin: 0 var(--oct-space-1);
+  background: var(--octant-pane-line, var(--octant-border-subtle));
+}
+
+.product-feedback__composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+}
+
+.product-feedback__composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}
+
+.product-feedback__input {
+  width: 100%;
+  padding: var(--oct-space-2) 8px;
+  font: inherit;
+}
+
+.product-feedback__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.product-feedback__note {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding-block: var(--oct-space-2);
+  border-top: 1px solid var(--octant-border-subtle);
+}
+
+.product-feedback__selection {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.product-feedback__note-heading {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font: inherit;
+}
+
+.product-feedback__crop {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: contain;
+}
+
+.product-feedback__evidence,
+.product-feedback__source {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.product-feedback__evidence dd {
+  margin-inline-start: var(--oct-space-2);
+}
+
+.product-feedback__evidence th,
+.product-feedback__evidence td {
+  padding: var(--oct-space-1);
+  text-align: start;
+  vertical-align: top;
+}
+
+.product-feedback__note-comment {
+  color: var(--octant-text-primary);
+}
+
+.product-feedback__note-element {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -400,7 +400,7 @@ describe("CodeDiffPane", () => {
     const read = (file: string) => readFileSync(resolve(import.meta.dirname, file), "utf8");
     const tokens = read("../styles/octant.css");
     expect(tokens.match(/^\s*--oct-line-diff:/gm)).toHaveLength(1);
-    const table = read("../styles/code.css");
+    const table = read("../styles/unified-diff.css");
     const from = table.indexOf("\n.unified-diff__table {");
     expect(table.slice(from, table.indexOf("}", from))).toMatch(
       /line-height:\s*var\(--oct-line-diff\)/,
