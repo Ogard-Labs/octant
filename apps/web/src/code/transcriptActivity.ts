@@ -1,5 +1,5 @@
 import type { CodeOperationEvent } from "@octant/contracts";
-import { completedCallDurationMs } from "@octant/domain";
+import { completedCallDurationMs } from "@octant/domain/turn-activity-timing";
 import type { ThreadTaskProgress } from "../transcript/ThreadTasksPanel";
 import type { TurnActivity, TurnActivityRow } from "../transcript/turnActivity";
 

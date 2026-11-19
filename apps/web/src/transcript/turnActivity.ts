@@ -5,7 +5,7 @@ import type {
   ThreadRoutineReceipt,
   ThreadToolStep,
 } from "@octant/contracts";
-import { completedCallDurationMs } from "@octant/domain";
+import { completedCallDurationMs } from "@octant/domain/turn-activity-timing";
 import { toolDisplayName } from "./toolKinds";
 
 /**

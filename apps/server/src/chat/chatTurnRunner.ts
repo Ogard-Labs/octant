@@ -1478,6 +1478,7 @@ export class ChatTurnRunner {
                       : AbortSignal.any([executionSignal, toolAbort.signal]);
                   const appToolStartedAt = updatedAt();
                   yield* showAppTool(event, "started");
+                  let appToolApprovalWaitMs = 0;
                   // App-owned work suspends the stalled-turn limit, so the call
                   // gets a deadline of its own: a tool that never returns ends
                   // the turn with a named cause instead of hanging it, whatever
@@ -1491,6 +1492,9 @@ export class ChatTurnRunner {
                             inputJson: event.inputJson,
                             signal: toolSignal,
                             toolCallId: event.requestId,
+                            onApprovalWait: (waitMs) => {
+                              appToolApprovalWaitMs += waitMs;
+                            },
                           }),
                         catch: () =>
                           decodeChatFailure({
@@ -1542,10 +1546,23 @@ export class ChatTurnRunner {
                       execution.outsideContent.labels,
                     );
                   }
-                  yield* showAppTool(event, execution.isError === true ? "failed" : "completed", {
-                    startedAt: appToolStartedAt,
-                    endedAt: updatedAt(),
-                  });
+                  // The run time is the actual execute interval minus any
+                  // person wait the recorded call measured inside it. Without
+                  // the recorded-call boundary a wait could sit inside the
+                  // interval unseen, so no bounds are offered at all.
+                  yield* showAppTool(
+                    event,
+                    execution.isError === true ? "failed" : "completed",
+                    input.toolEffects === undefined
+                      ? undefined
+                      : {
+                          startedAt: appToolStartedAt,
+                          endedAt: updatedAt(),
+                          ...(appToolApprovalWaitMs > 0
+                            ? { approvalWaitMs: appToolApprovalWaitMs }
+                            : {}),
+                        },
+                  );
                   const resultJson = boundedToolResultJson(execution.result);
                   input.toolCallRecords?.appTool({
                     toolCallId: event.requestId,

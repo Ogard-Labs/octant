@@ -26,6 +26,7 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { ChatTurnRunner } from "./chatTurnRunner";
+import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { createWebSearchTools } from "./research/webSearchTools";
 
 const now = "2026-07-19T22:00:00.000Z";
@@ -3825,6 +3826,8 @@ describe("ChatTurnRunner", () => {
         readonly result: unknown;
         readonly isError?: boolean;
       }>;
+      readonly clock?: () => string;
+      readonly toolEffects?: TurnToolEffects;
     } = {},
   ) {
     const attempts: Array<ChatAttempt> = [];
@@ -3881,6 +3884,8 @@ describe("ChatTurnRunner", () => {
           estimatedTokens: 100,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
+          ...(extra.clock === undefined ? {} : { clock: extra.clock }),
+          ...(extra.toolEffects === undefined ? {} : { toolEffects: extra.toolEffects }),
           ...(extra.toolStepLimit === undefined ? {} : { toolStepLimit: extra.toolStepLimit }),
           ...(extra.execute === undefined
             ? {}
@@ -4051,6 +4056,9 @@ describe("ChatTurnRunner", () => {
       ],
       {
         driverKind: "openai-compatible",
+        // The recorded call is what makes the execute bounds trustworthy: a
+        // person's wait inside them is measured and subtracted, not guessed.
+        toolEffects: { tools: (set) => set, observe: () => undefined } as never,
         execute: async ({ name }) =>
           name === "read-file"
             ? { result: { text: "hello" } }
@@ -4087,6 +4095,60 @@ describe("ChatTurnRunner", () => {
         state: "failed",
         timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
       },
+    ]);
+  });
+
+  it("times an app tool's own bounds apart from the person's wait inside it, or not at all", async () => {
+    let nowMs = Date.parse("2026-08-11T12:00:00.000Z");
+    // The recorded-call wrapper reports the wait the host measured, exactly
+    // as the tool-effects ledger does when a call asks a person inside it.
+    const toolEffects = {
+      tools: (set: { execute: (call: never) => Promise<unknown> }) => ({
+        ...set,
+        execute: async (call: { onApprovalWait?: (waitMs: number) => void }) => {
+          const result = await set.execute(call as never);
+          call.onApprovalWait?.(240_000);
+          return result;
+        },
+      }),
+      observe: () => undefined,
+    } as const;
+    const { attempts } = await runToolTurn(
+      [{ kind: "tool-request", requestId: "call-1", toolName: "read-file", inputJson: "{}" }],
+      {
+        driverKind: "openai-compatible",
+        clock: () => new Date(nowMs).toISOString(),
+        toolEffects: toolEffects as never,
+        execute: async () => {
+          // Four minutes asking, two seconds doing: the row shows both apart.
+          nowMs += 242_000;
+          return { result: { text: "hello" } };
+        },
+      },
+    );
+    expect(attempts.at(-1)?.toolSteps).toEqual([
+      {
+        toolCallId: "call-1",
+        toolName: "read-file",
+        state: "completed",
+        timing: {
+          startedAt: "2026-08-11T12:00:00.000Z",
+          endedAt: "2026-08-11T12:04:02.000Z",
+          approvalWaitMs: 240_000,
+        },
+      },
+    ]);
+    // With no recorded call the same bounds would hide a wait inside them,
+    // so the step ends untimed.
+    const unrecorded = await runToolTurn(
+      [{ kind: "tool-request", requestId: "call-1", toolName: "read-file", inputJson: "{}" }],
+      {
+        driverKind: "openai-compatible",
+        execute: async () => ({ result: { text: "hello" } }),
+      },
+    );
+    expect(unrecorded.attempts.at(-1)?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "read-file", state: "completed" },
     ]);
   });
 
