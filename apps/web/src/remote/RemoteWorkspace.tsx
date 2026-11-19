@@ -434,8 +434,26 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
   );
 }
 
-function RemoteCodeSurface(props: RemoteSurfaceProps) {
+export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "clients"> {
+  /** Canvas is absent where its routes do not reach the host (a desktop window's paired computer). */
+  readonly clients: Pick<RemoteProductClients, "code" | "project"> & {
+    readonly canvas?: RemoteProductClients["canvas"];
+  };
+  /**
+   * False in a desktop window showing a paired computer's threads: the page's
+   * address names a thread on this computer, never on the other one.
+   */
+  readonly followsContinuationLink?: boolean;
+}
+
+/**
+ * A host's Code threads over a remote session: the list, the start form for a
+ * device the host's own person paired, and the open thread. The paired browser
+ * shows its host's; a desktop window shows a paired computer's here too.
+ */
+export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
   const [activeThreadId, setActiveThreadId] = useState<CodeThreadId | undefined>(() => {
+    if (props.followsContinuationLink === false) return undefined;
     const link = readContinuationLink(globalThis.location?.href ?? "");
     return link?.mode === "code" ? decodeCodeThreadId(link.threadId) : undefined;
   });
@@ -491,7 +509,7 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
             />
           )}
           <CodeThreadWorkspace
-            canvasClient={props.clients.canvas}
+            {...(props.clients.canvas === undefined ? {} : { canvasClient: props.clients.canvas })}
             onOpenCanvas={props.onOpenCanvas}
             onOpenCanvasInSidebar={props.onOpenCanvas}
             canvasOpenLabel="Open Canvas"

@@ -201,6 +201,8 @@ export interface ThreadPaneContainerProps {
   readonly crossContextOffer: ShellController["crossContextOffer"];
   readonly createHostId: HostId;
   readonly createHostViewScope: CreateHostViewScope;
+  /** The paired computer's Code start screen while the picker names one; see WorkspaceView. */
+  readonly renderPairedComputerCodeStart?: () => ReactNode | undefined;
   readonly dockOpen: boolean;
   readonly dockSurface?: RightUtilityDockSurfaceId;
   readonly draftCreating: boolean;
@@ -305,6 +307,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     crossContextOffer,
     createHostId,
     createHostViewScope,
+    renderPairedComputerCodeStart,
     dockOpen,
     dockSurface,
     draftCreating,
@@ -721,6 +724,9 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   hosts={hosts}
                   selectedCreateHostId={createHostId}
                   createHostViewScope={createHostViewScope}
+                  {...(renderPairedComputerCodeStart === undefined
+                    ? {}
+                    : { renderPairedComputerCodeStart })}
                   {...(lastSelectedHealthyHostId === undefined
                     ? {}
                     : { lastSelectedHealthyHostId })}

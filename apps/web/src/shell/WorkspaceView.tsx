@@ -291,6 +291,12 @@ export interface WorkspaceViewProps {
   readonly lastSelectedHealthyHostId?: import("@octant/contracts/host").HostId;
   readonly createHostViewScope?: import("@octant/domain").CreateHostViewScope;
   readonly onSelectCreateHost?: (hostId: import("@octant/contracts/host").HostId) => void;
+  /**
+   * The Code start screen of the paired computer the picker names, when it can
+   * be reached; undefined while the picker names this computer. Shown in place
+   * of the local Code draft, so no local create is ever aimed at that computer.
+   */
+  readonly renderPairedComputerCodeStart?: () => ReactNode | undefined;
   readonly hidden?: boolean;
   readonly layout: WorkspaceLayoutNode;
   readonly memoryRevision?: number;
@@ -1957,6 +1963,9 @@ function renderNonCodeTab(
     );
   }
   if (tab.kind === "draft-thread") {
+    const pairedComputerStart =
+      tab.mode === "code" ? props.renderPairedComputerCodeStart?.() : undefined;
+    if (pairedComputerStart !== undefined) return pairedComputerStart;
     const recentThreads = draftRecentThreads(tab.mode, props);
     const draftProjectId = tab.projectId ?? props.draftProjectSelection?.[tab.mode];
     return (

@@ -607,6 +607,7 @@ import {
 } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { createPairedComputerFetch } from "./host/pairedComputerFetch";
+import { PairedComputerCodeSurface } from "./host/PairedComputerCodeSurface";
 import { NeedsYouProvider, OctantCommandProvider } from "./palette/CommandRegistry";
 import {
   buildOctantCommands,
@@ -2437,6 +2438,31 @@ function LaunchedShell(
     const remembered = rememberHealthyCreateHost(host);
     if (remembered !== undefined) setLastSelectedHealthyHostId(remembered);
   }
+  // When the Code picker names a paired computer whose session is ready, the
+  // start screen is that computer's own: its Projects, models and threads over
+  // its session. A computer that is not ready keeps the local draft, whose
+  // create refuses it with a reason.
+  const pairedComputerCodeSlot =
+    String(createHostId) === String(LOCAL_HOST_ID)
+      ? undefined
+      : hostFederationTransports?.get(createHostId);
+  const pairedComputerCodeBridge =
+    pairedComputerCodeSlot?.kind === "remote" && pairedComputerCodeSlot.state.kind === "ready"
+      ? pairedComputerCodeSlot.bridge
+      : undefined;
+  const renderPairedComputerCodeStart =
+    pairedComputerCodeBridge === undefined
+      ? undefined
+      : () => (
+          <PairedComputerCodeSurface
+            key={String(createHostId)}
+            bridge={pairedComputerCodeBridge}
+            hosts={hosts}
+            selectedHostId={createHostId}
+            onSelectHost={handleSelectCreateHost}
+            viewScope={createHostViewScope}
+          />
+        );
   function refuseUnlessCreatableDestination(input: {
     readonly action: string;
     readonly requiredCapability?: string;
@@ -8699,6 +8725,9 @@ function LaunchedShell(
                   crossContextOffer={controller.crossContextOffer}
                   createHostId={createHostId}
                   createHostViewScope={createHostViewScope}
+                  {...(renderPairedComputerCodeStart === undefined
+                    ? {}
+                    : { renderPairedComputerCodeStart })}
                   dockOpen={dockOpen}
                   {...(dockSurface === undefined
                     ? {}
