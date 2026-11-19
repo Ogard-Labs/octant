@@ -2818,10 +2818,11 @@ Status: Built. Since: —. Detail: [DESIGN.md: Accessibility](../../DESIGN.md#ac
 Quitting the desktop app is guarded so that open provider sessions are never dropped silently.
 
 - Ordinary Quit and Fully quit share one shutdown that confirms when provider sessions remain open or the desktop cannot tell what the host is running.
-- When a window can show the quit notice, the quit keyboard shortcut needs a second press within 1.5 seconds; that double-press guard is a setting, on by default (maintainer request, 2026-11-12). With no window able to show it, the first press enters guarded shutdown. Pointer quits, OS shutdown and updater restarts stay immediate.
+- Explicit Quit, including Quit from the macOS Dock, checks all open windows for unsaved Code Files edits before closing any. Cancel stops the quit. System shutdown, updater restarts and forced exits do not wait for the Files check.
+- When a window can show the quit notice, the quit keyboard shortcut needs a second press within 1.5 seconds; that double-press guard is a setting, on by default (maintainer request, 2026-11-12). With no window able to show it, the first press enters guarded shutdown. Pointer quits skip only the second-press guard.
 - Once confirmed, quitting never waits on a person; a fixed deadline ends the app.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Accessibility](../../DESIGN.md#accessibility).
+Status: Built. Since: —. Detail: [Workspace: Quitting](workspace.md#quitting), [DESIGN.md: Accessibility](../../DESIGN.md#accessibility).
 
 ### Window defaults, ground and drafts
 
@@ -2837,6 +2838,7 @@ A new window, its background and its drafts behave predictably.
 - A new-task composer keeps its identity while its Project changes. A refused binding keeps the prior authorized Project and the draft.
 - A new Chat's first-run composer stages attachments before the thread exists and sends them with the first message.
 - If first-turn startup fails after the task opens, the provisional prompt is withdrawn and its text returns to the composer with the refusal reason. _Here only._
+- Closing a Files tab, a main-area file tab, the Files tool, its Code thread, or the desktop window checks for affected unsaved Code Files edits, even when Files is hidden. Save must succeed to continue; Don't save discards the draft, and Cancel keeps the target open. Closing one view of a file that another view still shows does not ask. If the window cannot answer, only an explicit native confirmation permits closing without a check, and a window closed anyway stops taking input until the close or quit resolves. A window already asking about unsaved edits is brought forward and Quit stops until it is answered. See [Workspace: File editing](workspace.md#file-editing).
 
 Status: Built. Since: —. Detail: [Workspace: Right dock and bottom panel](workspace.md#right-dock-and-bottom-panel), [Application ground](application-ground.md), [DESIGN.md: Depth and material](../../DESIGN.md#depth-and-material), [Composer row](../../DESIGN.md#composer-row) and [Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).
 

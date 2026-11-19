@@ -956,6 +956,20 @@ with the full-row selected fill, take a hover fill on the others, and end a chan
 success for added) read from the host's Git observation; the incomplete-tree
 note is one muted line.
 
+Closing a Files tab, a file opened in the main area, the Files tool, or
+its Code thread asks about every affected unsaved file, even if Files is
+no longer visible. Closing one view of a file that is still open in
+another view does not ask: the buffer stays open there. **Save** uses the
+file's existing revision check; a failed save cannot close the file.
+**Don't save** drops that draft, and **Cancel** leaves the target open.
+Switching threads, hiding the dock and moving a tab do not ask. Desktop
+window close uses the same check for that window. See [Quitting](#quitting)
+for a quit across windows. If a window does not respond to the check, a
+native confirmation offers Cancel or Close anyway; a missing reply never
+approves a close on its own. A window closed anyway stops taking input
+until it closes or the close or quit is cancelled, so it cannot gain
+edits while another window asks.
+
 Unsaved text is kept locally on the client, separately from pane references,
 messages and the host journal. Code recovery keys include the endpoint, checkout
 and file identity; Work recovery uses the authorized host, Project and a stable
@@ -3926,6 +3940,13 @@ reach the shell.
 
 ### Quitting
 
+- Explicit Quit — from the app menu, the macOS Dock menu, or the quit
+  shortcut — checks unsaved edits in the Files tools of every open app
+  window before closing any window or starting shutdown. Cancel in any
+  window stops Quit. If a window is already asking about unsaved edits,
+  Quit brings it forward and stops there; the person answers it and quits
+  again. A file already saved stays saved. System shutdown, updater
+  restarts and forced exits do not wait for these decisions.
 - The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
   Fully quit share one guarded shutdown: refresh current host activity, ask for
   confirmation when provider sessions remain open or the desktop cannot confirm
@@ -3948,7 +3969,6 @@ reach the shell.
   first press quits nothing and shows a short "Press ⌘Q again to quit Octant"
   toast in the focused window; the second enters the guarded shutdown above
   unchanged, including its session confirmation. With no window open, the first
-  press quits directly. Choosing Quit with the pointer (app menu, Dock, status
-  menu's Fully quit), OS shutdown or logout, updater restarts and signals stay
-  immediate. A menu accelerator cannot tell a held key from a tap, so a
+  press quits directly. Choosing Quit with the pointer skips the second-press
+  guard, not the unsaved-edits check. A menu accelerator cannot tell a held key from a tap, so a
   double press stands in for hold-to-quit.

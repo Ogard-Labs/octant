@@ -36,6 +36,8 @@ import {
   PROVIDER_INSTANCE_ID_PATTERN,
   decodeCodeCheckoutOpenRequest,
   decodeCodeExternalEditorRequest,
+  decodeFilesCloseRequest,
+  type FilesCloseRequestPayload,
 } from "./ipcChannels";
 import type {
   AppUpdateInstallOutcome,
@@ -434,6 +436,23 @@ export interface OctantHostBridge {
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
   readonly subscribeQuitShortcutHint: (listener: () => void) => () => void;
+  /**
+   * The desktop's Files close check: a `check` asks whether this window's
+   * unsaved Files drafts allow it to close; a `release` frees an approval
+   * the close no longer needs. Every answer goes through `replyFilesClose`.
+   */
+  readonly subscribeFilesCloseRequest: (
+    listener: (request: FilesCloseRequestPayload) => void,
+  ) => () => void;
+  /**
+   * Resolves whether the desktop accepted the reply for its own request: a
+   * refused reply (`false`) means the answer never landed and nothing was
+   * approved by it.
+   */
+  readonly replyFilesClose: (
+    requestId: number,
+    answer: "checking" | "prompting" | "allow" | "cancel",
+  ) => Promise<boolean>;
   /** Reports the person's setting: whether the quit shortcut needs a second press. */
   readonly setQuitShortcutSecondPress: (needed: boolean) => void;
   /** Prepare to shut down… from the menu, or Move threads first… from the quit confirmation. */
@@ -1223,6 +1242,29 @@ export function createHostBridge(
       const receive: SettingsOpenListener = () => listener();
       ipc.on(IPC_CHANNELS.quitShortcutHint, receive);
       return () => ipc.removeListener(IPC_CHANNELS.quitShortcutHint, receive);
+    },
+    subscribeFilesCloseRequest: (listener: (request: FilesCloseRequestPayload) => void) => {
+      const receive: MaterialListener = (_event, value) => {
+        const request = decodeFilesCloseRequest(value);
+        if (request !== undefined) listener(request);
+      };
+      ipc.on(IPC_CHANNELS.filesCloseRequest, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.filesCloseRequest, receive);
+    },
+    replyFilesClose: async (
+      requestId: number,
+      answer: "checking" | "prompting" | "allow" | "cancel",
+    ) => {
+      if (
+        !Number.isSafeInteger(requestId) ||
+        requestId < 1 ||
+        (answer !== "checking" &&
+          answer !== "prompting" &&
+          answer !== "allow" &&
+          answer !== "cancel")
+      )
+        throw new TypeError("Invalid Files close reply.");
+      return (await ipc.invoke(IPC_CHANNELS.filesCloseReply, { requestId, answer })) === true;
     },
     setQuitShortcutSecondPress: (needed: boolean) => {
       void ipc

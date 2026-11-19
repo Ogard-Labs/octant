@@ -35,6 +35,8 @@ import type { SideChatSidecar } from "@octant/contracts";
 
 export interface ThreadUtilityDockSubject {
   readonly checkoutId?: CodeCheckoutId;
+  /** Where the thread runs, as workspace Code thread tabs carry it; absent means this computer. */
+  readonly hostId?: string;
   readonly mode: OctantMode;
   readonly projectId?: ProjectId;
   readonly threadId: string;

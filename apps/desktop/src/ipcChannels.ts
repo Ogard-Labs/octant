@@ -83,6 +83,8 @@ export const DESKTOP_IPC_CHANNELS = {
   shutdownMovesOffered: "octant:shutdown:moves-offered",
   shutdownProgress: "octant:shutdown:progress",
   requestQuit: "octant:app:request-quit",
+  filesCloseRequest: "octant:files-close:request",
+  filesCloseReply: "octant:files-close:reply",
   previewHandoff: "octant:preview:handoff",
   requestCodeOperationApproval: "octant:code:request-operation-approval",
   updateCodeOperationApprovalAnchor: "octant:code:update-operation-approval-anchor",
@@ -149,6 +151,50 @@ export const DESKTOP_IPC_CHANNELS = {
   remoteServerPageSigned: "octant:remote-server-page:signed",
   remoteServerPageForgetHost: "octant:remote-server-page:forget-host",
 } as const;
+
+/**
+ * The Files close exchange between a desktop window and its renderer. The
+ * request carries only a request id and a kind — a `check` asks the renderer
+ * whether its unsaved Files drafts allow closing; a `release` frees the lock
+ * an `allow` put on the document. Nothing about a file crosses the bridge.
+ */
+export interface FilesCloseRequestPayload {
+  readonly requestId: number;
+  readonly kind: "check" | "release";
+}
+
+export interface FilesCloseReplyPayload {
+  readonly requestId: number;
+  readonly answer: "checking" | "prompting" | "allow" | "cancel";
+}
+
+/** Decodes the Files close request at the boundary it enters; anything else is refused. */
+export function decodeFilesCloseRequest(value: unknown): FilesCloseRequestPayload | undefined {
+  if (!isRecord(value)) return undefined;
+  const { requestId, kind } = value;
+  if (
+    typeof requestId !== "number" ||
+    !Number.isSafeInteger(requestId) ||
+    requestId < 1 ||
+    (kind !== "check" && kind !== "release")
+  )
+    return undefined;
+  return { requestId, kind };
+}
+
+/** Decodes the renderer's Files close reply; anything else is ignored, never trusted. */
+export function decodeFilesCloseReply(value: unknown): FilesCloseReplyPayload | undefined {
+  if (!isRecord(value)) return undefined;
+  const { requestId, answer } = value;
+  if (
+    typeof requestId !== "number" ||
+    !Number.isSafeInteger(requestId) ||
+    requestId < 1 ||
+    (answer !== "checking" && answer !== "prompting" && answer !== "allow" && answer !== "cancel")
+  )
+    return undefined;
+  return { requestId, answer };
+}
 
 /** The most a renderer may hand the host as a provider credential. */
 export const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;

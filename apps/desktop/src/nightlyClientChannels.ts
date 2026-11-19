@@ -95,6 +95,8 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   shutdownMovesOffered: "octant-only",
   shutdownProgress: "octant-only",
   requestQuit: "octant-only",
+  filesCloseRequest: "local",
+  filesCloseReply: "local",
   previewHandoff: "local",
   requestCodeOperationApproval: "local",
   updateCodeOperationApprovalAnchor: "local",
@@ -174,6 +176,7 @@ const CLASS_BY_CHANNEL: ReadonlyMap<string, NightlyChannelClass> = new Map(
  * menu commands, Code links, the resolved sidebar material and a menu-bar task.
  */
 export const NIGHTLY_CLIENT_PUSH_CHANNELS: ReadonlySet<string> = new Set([
+  DESKTOP_IPC_CHANNELS.filesCloseRequest,
   DESKTOP_IPC_CHANNELS.menuBarTask,
   DESKTOP_IPC_CHANNELS.openSettings,
   DESKTOP_IPC_CHANNELS.quitShortcutHint,

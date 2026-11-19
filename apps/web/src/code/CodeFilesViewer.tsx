@@ -9,8 +9,7 @@ import { File, ListTree } from "../ui/icons";
 import { pathBasename } from "../lib/fileName";
 import type { CodeFileChange } from "./CodeFileExplorer";
 import { CodeFileExplorerPanel, type CodeFileExplorerPanelProps } from "./CodeFileExplorerPanel";
-import { registerFilesCloseGuard } from "./filesCloseGuard";
-import { UnsavedFileDialog, type UnsavedFileChoice } from "./UnsavedFileDialog";
+import { confirmFilesClose, modelUri } from "./filesCloseGuard";
 import { noticeTouches } from "./useCodeFileChangeWatch";
 import { useCodeEditorFile } from "./useCodeEditorFile";
 import type { CodeController } from "./useCodeController";
@@ -28,18 +27,17 @@ interface OpenFile {
   readonly preview: boolean;
 }
 
-/** The live editor's own Save and Discard, handed up for a tab that closes dirty. */
-interface EditorActions {
-  readonly save: () => Promise<boolean>;
-  readonly discard: () => void;
-}
-
 export interface CodeFilesViewerProps {
   readonly controller: Pick<
     CodeController,
     "client" | "conversation" | "editorDrafts" | "pendingDraft" | "setPendingDraft"
   >;
   readonly view: CodeThreadView | undefined;
+  /**
+   * The close-guard scope this thread's editors register under, so a closing
+   * file tab asks the shared coordinator about that file alone.
+   */
+  readonly filesCloseScope?: string;
   readonly hostBridge?: OctantHostBridge | undefined;
   /** The Files tool's own props for the tree: checkout, extra folders, transport. */
   readonly explorer: Omit<
@@ -94,14 +92,9 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
   activeRef.current = active;
   const dirtyPaths = useRef(new Set<string>());
   const [dirtyMarks, setDirtyMarks] = useState<ReadonlySet<string>>(new Set());
-  const actions = useRef<EditorActions | undefined>(undefined);
-  const [asking, setAsking] = useState<{
-    readonly name: string;
-    readonly answer: (choice: UnsavedFileChoice) => void;
-  }>();
-  const registerActions = useCallback((next: EditorActions | undefined) => {
-    actions.current = next;
-  }, []);
+  // Each editor's close-registry key, by tab path, so a closing tab asks the
+  // coordinator about that document alone.
+  const editorKeys = useRef(new Map<string, string>());
   const setDirty = useCallback((path: CodeRelativePath, dirty: boolean) => {
     if (dirtyPaths.current.has(String(path)) === dirty) return;
     if (dirty) dirtyPaths.current.add(String(path));
@@ -115,57 +108,25 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
     const remaining = current.filter((file) => file.path !== path);
     dirtyPaths.current.delete(String(path));
     setDirtyMarks(new Set(dirtyPaths.current));
+    editorKeys.current.delete(String(path));
     setFiles(remaining);
     if (activeRef.current === path)
       setActive(remaining[Math.min(index, remaining.length - 1)]?.path);
   }, []);
 
-  /**
-   * Whether a tab may close. A file with unsaved edits is brought forward (its
-   * editor owns Save), and the person chooses: Save closes on success and keeps
-   * the tab, with the editor's error, when saving fails; Don't save drops the
-   * edits; Cancel keeps everything.
-   */
-  const mayClose = useCallback(async (path: CodeRelativePath): Promise<boolean> => {
-    if (!dirtyPaths.current.has(String(path))) return true;
-    if (activeRef.current !== path) {
-      setActive(path);
-      for (let waited = 0; waited < 5000 && actions.current === undefined; waited += 25)
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      // A reopened editor starts clean and then restores its draft, so the
-      // file counts as clean only if it has not said "dirty" again by then.
-      for (let waited = 0; waited < 1000 && !dirtyPaths.current.has(String(path)); waited += 25)
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      if (!dirtyPaths.current.has(String(path))) return true;
-    }
-    const choice = await new Promise<UnsavedFileChoice>((answer) =>
-      setAsking({ name: pathBasename(path), answer }),
-    );
-    setAsking(undefined);
-    if (choice === "cancel") return false;
-    if (choice === "save") return (await actions.current?.save()) === true;
-    actions.current?.discard();
-    return true;
-  }, []);
-
+  const filesCloseScope = props.filesCloseScope;
   const close = useCallback(
     (path: CodeRelativePath) => {
-      void mayClose(path).then((ok) => {
+      const key = editorKeys.current.get(String(path));
+      if (filesCloseScope === undefined || key === undefined) {
+        removeTab(path);
+        return;
+      }
+      void confirmFilesClose(filesCloseScope, key).then((ok) => {
         if (ok) removeTab(path);
       });
     },
-    [mayClose, removeTab],
-  );
-
-  useEffect(
-    () =>
-      registerFilesCloseGuard(async () => {
-        for (const file of [...filesRef.current]) {
-          if (!(await mayClose(file.path))) return false;
-        }
-        return true;
-      }),
-    [mayClose],
+    [filesCloseScope, removeTab],
   );
 
   const keep = useCallback((path: CodeRelativePath) => open(path, true), [open]);
@@ -267,11 +228,12 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
             ) : (
               <ActiveFile
                 controller={props.controller}
+                {...(filesCloseScope === undefined ? {} : { filesCloseScope })}
                 hostBridge={props.hostBridge}
                 key={active}
                 onDirty={(dirty) => dirtyKeeps(active, dirty)}
+                onEditorKey={(key) => editorKeys.current.set(String(active), key)}
                 onOpen={(path) => open(path, false)}
-                onRegisterActions={registerActions}
                 onOpenInMainArea={() => props.onOpenInMainArea(active)}
                 path={active}
                 refreshRef={refreshActive}
@@ -292,19 +254,18 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
           />
         </aside>
       </div>
-      {asking === undefined ? null : (
-        <UnsavedFileDialog name={asking.name} onChoose={asking.answer} />
-      )}
     </div>
   );
 }
 
 function ActiveFile(props: {
   readonly controller: CodeFilesViewerProps["controller"];
+  readonly filesCloseScope?: string;
   readonly hostBridge: OctantHostBridge | undefined;
   readonly onDirty: (dirty: boolean) => void;
+  /** Reports the editor's close-registry key for this file once its identity is known. */
+  readonly onEditorKey: (key: string) => void;
   readonly onOpen: (path: CodeRelativePath) => void;
-  readonly onRegisterActions: (actions: EditorActions | undefined) => void;
   readonly onOpenInMainArea: () => void;
   readonly path: CodeRelativePath;
   readonly refreshRef: { current: (() => void) | undefined };
@@ -327,6 +288,13 @@ function ActiveFile(props: {
     };
   }, [props.refreshRef, refresh]);
   const file = editorFile.file;
+  const onEditorKey = props.onEditorKey;
+  const fileId = file?.fileId;
+  const fileCheckoutId = file?.checkoutId;
+  useEffect(() => {
+    if (fileId === undefined || fileCheckoutId === undefined) return;
+    onEditorKey(modelUri(fileCheckoutId, fileId));
+  }, [fileCheckoutId, fileId, onEditorKey]);
   const response = controller.conversation.findLast(
     (message) =>
       message.role === "assistant" &&
@@ -361,7 +329,7 @@ function ActiveFile(props: {
           )
         }
         onDirtyChange={props.onDirty}
-        onRegisterActions={props.onRegisterActions}
+        {...(props.filesCloseScope === undefined ? {} : { filesCloseScope: props.filesCloseScope })}
         onOpenFile={(path) => props.onOpen(path as CodeRelativePath)}
         onOpenInMainArea={props.onOpenInMainArea}
         onRequestRefresh={refresh}

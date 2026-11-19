@@ -1,5 +1,6 @@
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
+import { filesCloseTabScope } from "./filesCloseGuard";
 import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryProposalPrompt";
 import { CodeLocalReview } from "./CodeLocalReview";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
@@ -352,6 +353,11 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         <MonacoEditorPane
           debugProjectId={view.thread.projectId}
           client={props.client}
+          filesCloseScope={filesCloseTabScope(
+            props.tab.hostId === undefined ? undefined : String(props.tab.hostId),
+            String(props.tab.threadId),
+            String(props.tab.id),
+          )}
           checkoutLabel={
             view.checkout.head.kind === "branch"
               ? view.checkout.head.name

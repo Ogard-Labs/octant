@@ -372,6 +372,47 @@ describe("desktop preload bridge", () => {
     },
   );
 
+  it("delivers a Files close request to the listener and forwards only valid replies", async () => {
+    const listeners = new Map<string, (...args: unknown[]) => void>();
+    const invoke = vi.fn(async () => undefined);
+    const removed: string[] = [];
+    const ipc: IpcRendererPort = {
+      invoke,
+      on: vi.fn((channel: string, listener: (...args: unknown[]) => void) => {
+        listeners.set(channel, listener);
+      }),
+      removeListener: vi.fn((channel: string) => {
+        removed.push(channel);
+      }),
+    };
+    const bridge = createHostBridge(ipc, projectWindowCapability);
+    const seen: Array<{ requestId: number; kind: string }> = [];
+    const unsubscribe = bridge.subscribeFilesCloseRequest((request) => seen.push(request));
+    const receive = listeners.get(IPC_CHANNELS.filesCloseRequest);
+    expect(receive).toBeDefined();
+    receive?.({}, { requestId: 3, kind: "check" });
+    // Malformed payloads never reach the listener.
+    receive?.({}, { requestId: "3", kind: "check" });
+    receive?.({}, { requestId: 4, kind: "peek" });
+    expect(seen).toEqual([{ requestId: 3, kind: "check" }]);
+    unsubscribe();
+    expect(removed).toContain(IPC_CHANNELS.filesCloseRequest);
+
+    await bridge.replyFilesClose(3, "allow");
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.filesCloseReply, {
+      requestId: 3,
+      answer: "allow",
+    });
+    await bridge.replyFilesClose(3, "prompting");
+    expect(invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.filesCloseReply, {
+      requestId: 3,
+      answer: "prompting",
+    });
+    await expect(bridge.replyFilesClose(0, "allow")).rejects.toThrow(TypeError);
+    await expect(bridge.replyFilesClose(3.5, "allow")).rejects.toThrow(TypeError);
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
   it("gives Octant the Nightly row's requests with no arguments and gives Nightly none", async () => {
     const ipc: IpcRendererPort = {
       invoke: vi.fn().mockResolvedValue({ status: "installed" }),
@@ -806,6 +847,7 @@ describe("desktop preload bridge", () => {
       "renameProviderApiKey",
       "renameRemoteDevice",
       "replaceProviderApiKey",
+      "replyFilesClose",
       "reportShutdownMovesOffered",
       "reportShutdownProgress",
       "requestCaptureWindowPermission",
@@ -844,6 +886,7 @@ describe("desktop preload bridge", () => {
       "subscribeBrowserSurfaceState",
       "subscribeCanvasPrototypeEvents",
       "subscribeCodeDeepLinks",
+      "subscribeFilesCloseRequest",
       "subscribeMenuBarTask",
       "subscribeOpenSettings",
       "subscribePrepareToShutDown",

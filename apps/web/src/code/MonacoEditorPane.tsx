@@ -1,4 +1,6 @@
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
+import { pathBasename } from "../lib/fileName";
+import { modelUri, registerFilesCloseEntry, type FilesCloseEntry } from "./filesCloseGuard";
 import { CodeSelectionReview, selectionPrompt } from "./CodeSelectionReview";
 import type { MonacoTextSelection } from "./MonacoEditorAdapter";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
@@ -120,13 +122,12 @@ export interface MonacoEditorPaneProps {
   /** Reports whether the buffer holds unsaved edits, so a viewer can keep its tab. */
   readonly onDirtyChange?: (dirty: boolean) => void;
   /**
-   * Hands the viewer this buffer's own Save and Discard, so a tab that closes
-   * with unsaved edits can be saved or dropped through the same paths the
-   * buttons use. `save` answers whether the buffer is clean afterwards.
+   * The Files tool's close-guard scope (`filesCloseScope` of its thread and
+   * host): set only for a buffer the Files viewer shows, so closing its tab,
+   * the tool, or the thread's pane asks about this buffer's draft through the
+   * shared registry. Other editors do not register.
    */
-  readonly onRegisterActions?: (
-    actions: { readonly save: () => Promise<boolean>; readonly discard: () => void } | undefined,
-  ) => void;
+  readonly filesCloseScope?: string;
   /** Offers "Open in main area" in the file menu: the file as a workspace tab. */
   readonly onOpenInMainArea?: () => void;
   /** Language-service timing, for tests. */
@@ -144,6 +145,42 @@ type LoadState =
   | { readonly kind: "loading" }
   | { readonly kind: "ready"; readonly text: string }
   | { readonly kind: "unavailable"; readonly message: string };
+
+/**
+ * Views of one document share Monaco text but keep their own dirty
+ * references, so an authoritative save or discard in one view would leave a
+ * peer still answering dirty for a buffer it no longer holds. A notice makes
+ * the saved text and revision every registered peer's new baseline; a peer
+ * whose buffer moved meanwhile stays dirty against it, never cleared by a
+ * save it did not make.
+ */
+type EditorBaselineNotice =
+  | { readonly kind: "saved"; readonly text: string; readonly metadata: CodeFileMetadata }
+  | { readonly kind: "discarded" };
+
+const baselineListeners = new Map<string, Set<(notice: EditorBaselineNotice) => void>>();
+
+function publishEditorBaselineNotice(
+  key: string,
+  notice: EditorBaselineNotice,
+  except?: (notice: EditorBaselineNotice) => void,
+): void {
+  for (const listener of [...(baselineListeners.get(key) ?? [])])
+    if (listener !== except) listener(notice);
+}
+
+function subscribeEditorBaselineNotice(
+  key: string,
+  listener: (notice: EditorBaselineNotice) => void,
+): () => void {
+  const listeners = baselineListeners.get(key) ?? new Set();
+  listeners.add(listener);
+  baselineListeners.set(key, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) baselineListeners.delete(key);
+  };
+}
 
 export function MonacoEditorPane(props: MonacoEditorPaneProps) {
   if (props.file.state === "read-only") return <ReadOnlyFile file={props.file} />;
@@ -336,6 +373,13 @@ function AvailableEditor(
             props.draftStore?.clear(draftKey);
             props.draftStore?.clear(`${draftKey}:base`);
           }
+          // Every view of this document shares this new baseline: peers holding
+          // the saved text go clean, peers edited meanwhile stay dirty.
+          publishEditorBaselineNotice(draftKey, {
+            kind: "saved",
+            text: savedDraft,
+            metadata: result.metadata,
+          });
           setMessage(
             props.draftStore?.error?.() ??
               (nextDirty ? "Saved earlier changes. New edits remain unsaved." : "Saved"),
@@ -376,16 +420,141 @@ function AvailableEditor(
     props.onRequestRefresh?.();
   }, [draftKey, props.draftStore, props.onRequestRefresh]);
 
+  // This view's own listener, so a discard it already applied locally is not
+  // re-applied through its own subscription.
+  const baselineListenerRef = useRef<((notice: EditorBaselineNotice) => void) | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    const listener = (notice: EditorBaselineNotice) => {
+      if (!mounted.current) return;
+      if (notice.kind === "discarded") {
+        discardDraftAndReload();
+        return;
+      }
+      // A buffer already in conflict keeps it: a peer's save does not resolve
+      // the version this view is being asked to reconcile.
+      if (conflict !== undefined) return;
+      // The saved revision is the document's baseline even where an older
+      // load is still pending: superseding the generation drops its late
+      // resolve or reject, so stale bytes never land under the new metadata.
+      requestGeneration.current += 1;
+      metadataRef.current = notice.metadata;
+      if (currentDebugFileKey.current === debugFileKey)
+        debugLoadedFile.current = { key: debugFileKey, metadata: notice.metadata };
+      setLoadState({ kind: "ready", text: notice.text });
+      // Unsaved work — held in this buffer or retained for the document —
+      // still stands against the saved revision; a buffer holding only the
+      // old baseline adopts the saved text as its draft.
+      const retained = props.draftStore?.read(draftKey);
+      const nextDraft = dirtyRef.current ? draftRef.current : (retained ?? notice.text);
+      setDraft(nextDraft);
+      draftRef.current = nextDraft;
+      const nextDirty = nextDraft !== notice.text;
+      setDirty(nextDirty);
+      dirtyRef.current = nextDirty;
+      if (nextDirty) {
+        props.draftStore?.write(draftKey, nextDraft);
+        props.draftStore?.write(`${draftKey}:base`, editorFileRevision(notice.metadata));
+      } else {
+        props.draftStore?.clear(draftKey);
+        props.draftStore?.clear(`${draftKey}:base`);
+      }
+    };
+    baselineListenerRef.current = listener;
+    return subscribeEditorBaselineNotice(draftKey, listener);
+  }, [draftKey, discardDraftAndReload, debugFileKey, conflict, props.draftStore]);
+
   const saveAndReport = useRef<() => Promise<boolean>>(async () => true);
   saveAndReport.current = async () => {
     await (editorSave.current?.() ?? save());
     return !dirtyRef.current;
   };
-  const onRegisterActions = props.onRegisterActions;
+  // The Files tool registers this buffer for close decisions. While mounted,
+  // Save and Discard are the editor's own paths; after unmount the retained
+  // record still answers for the draft the store kept, saving through the
+  // same client call and the revision the draft was based on, and clearing
+  // the recovery keys only when they still hold what was sent.
+  const filesCloseScope = props.filesCloseScope;
+  const draftStore = props.draftStore;
   useEffect(() => {
-    onRegisterActions?.({ save: () => saveAndReport.current(), discard: discardDraftAndReload });
-    return () => onRegisterActions?.(undefined);
-  }, [onRegisterActions, discardDraftAndReload]);
+    if (filesCloseScope === undefined) return;
+    const client = props.client;
+    const file = props.file;
+    const entry: FilesCloseEntry = {
+      scope: filesCloseScope,
+      key: draftKey,
+      name: pathBasename(file.path),
+      // A draft still in the store counts as dirty even while this editor is
+      // mounted: it may be a retained draft whose restoration has not reached
+      // the editor yet, and reporting clean would hide it from a close.
+      isDirty: () =>
+        (mounted.current && dirtyRef.current) || draftStore?.read(draftKey) !== undefined,
+      save: async () => {
+        if (mounted.current && dirtyRef.current) {
+          if (!(await saveAndReport.current())) return false;
+        }
+        const text = draftStore?.read(draftKey);
+        if (text === undefined) return true;
+        // A draft the mounted editor has not restored yet — or one whose
+        // editor left — still lives in the store and saves through the same
+        // client call and the revision the draft was based on.
+        if (draftStore === undefined || !writable) return false;
+        const base = draftStore.read(`${draftKey}:base`);
+        const metadata = metadataRef.current;
+        // The draft's recorded base must still be the revision this editor
+        // held: saving an old draft against a newer disk identity would let it
+        // overwrite the newer version without a conflict ever being seen.
+        if (base === undefined || base !== editorFileRevision(metadata)) return false;
+        let result: CodeFileSaveResult;
+        try {
+          result = await client.save({
+            threadId: file.threadId,
+            checkoutId: file.checkoutId,
+            path: file.path,
+            expectedIdentity: metadata.identity,
+            expectedDigest: metadata.digest,
+            text,
+          });
+        } catch {
+          return false;
+        }
+        if (result.status !== "completed") return false;
+        // The draft that was sent must still be the draft that stands. A
+        // newer one written under the save is not covered by this consent:
+        // the close refuses so it can be asked about on its own.
+        if (draftStore.read(draftKey) !== text || draftStore.read(`${draftKey}:base`) !== base)
+          return false;
+        draftStore.clear(draftKey);
+        draftStore.clear(`${draftKey}:base`);
+        publishEditorBaselineNotice(draftKey, {
+          kind: "saved",
+          text,
+          metadata: result.metadata,
+        });
+        return true;
+      },
+      discard: () => {
+        if (mounted.current) discardDraftAndReload();
+        else {
+          draftStore?.clear(draftKey);
+          draftStore?.clear(`${draftKey}:base`);
+        }
+        // The shared document was discarded once here: every other view of it
+        // drops its own copy of the draft rather than asking again.
+        publishEditorBaselineNotice(draftKey, { kind: "discarded" }, baselineListenerRef.current);
+      },
+    };
+    return registerFilesCloseEntry(entry);
+  }, [
+    filesCloseScope,
+    discardDraftAndReload,
+    draftKey,
+    draftStore,
+    props.client,
+    props.file,
+    writable,
+  ]);
 
   const { checkoutId, path, threadId } = props.file;
   const onOpenFile = props.onOpenFile;
@@ -889,7 +1058,19 @@ function AvailableEditor(
               </OctantButton>
             </>
           )}
-          <OctantButton onClick={discardDraftAndReload} size="sm" type="button" variant="secondary">
+          <OctantButton
+            onClick={() => {
+              discardDraftAndReload();
+              publishEditorBaselineNotice(
+                draftKey,
+                { kind: "discarded" },
+                baselineListenerRef.current,
+              );
+            }}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
             Discard draft and reload
           </OctantButton>
         </OctantAlert>
@@ -1213,10 +1394,6 @@ function sameRevision(observed: CodeFileMetadata, opened: CodeFileMetadata): boo
     observed.identity.device === opened.identity.device &&
     observed.identity.inode === opened.identity.inode
   );
-}
-
-function modelUri(checkoutId: CodeCheckoutId, fileId: CodeFileId): string {
-  return `octant-code://${checkoutId}/${fileId}`;
 }
 
 function safeMessage(error: unknown, fallback: string): string {
