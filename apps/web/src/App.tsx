@@ -6325,6 +6325,21 @@ function LaunchedShell(
     focusedDockTool.get,
     focusedDockTool.get,
   );
+  // Only a Code Project's extra folders are listed by the Files tool; a Work
+  // Project's own Files listing already walks them. Hooks live above the
+  // status early returns, so this stays computed here and keeps a stable
+  // reference while the Project list and selection are unchanged.
+  const activeProjectExtraFolders = useMemo(() => {
+    const project = projectController.projects.find(
+      (candidate) =>
+        candidate.type === "code" &&
+        candidate.lifecycle === "active" &&
+        candidate.id === activeProjectId,
+    );
+    return project?.type === "code"
+      ? (project.extraFolders ?? []).map((folder) => folder.canonicalRoot)
+      : NO_PROJECT_EXTRA_FOLDERS;
+  }, [projectController.projects, activeProjectId]);
 
   if (controller.status === "loading") {
     return (
@@ -8300,15 +8315,6 @@ function LaunchedShell(
         ? undefined
         : { id: serverActionsProject.projectId, name: serverActionsProject.name }
       : { id: actionsProject.id, name: actionsProject.name };
-  // Only a Code Project's extra folders are listed by the Files tool; a Work
-  // Project's own Files listing already walks them.
-  const activeProjectExtraFolders = useMemo(
-    () =>
-      actionsProject?.type === "code"
-        ? (actionsProject.extraFolders ?? []).map((folder) => folder.canonicalRoot)
-        : NO_PROJECT_EXTRA_FOLDERS,
-    [actionsProject],
-  );
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
