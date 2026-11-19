@@ -2783,3 +2783,51 @@ describe("next-message suggestions setting", () => {
     expect(nextMessageSuggestionsOn(off, "chat")).toBe(false);
   });
 });
+
+describe("home card activity preservation", () => {
+  const activity: NonNullable<ShellSettings["homeCards"]["activity"]> = {
+    sharedRange: { kind: "last-month" },
+    source: "octant",
+    pins: [{ card: "runs", range: { kind: "today" } }],
+  };
+
+  it("keeps stored activity choices when an older client rewrites the document", () => {
+    const current: ShellSettings = {
+      ...defaultShellSettings(),
+      homeCards: { order: [], visibility: [], activity },
+    };
+    const replacement: ShellSettings = {
+      ...defaultShellSettings(),
+      homeCards: { order: ["activity-runs"], visibility: [] },
+    };
+    const next = replaceShellSettings(current, replacement);
+    expect(next.homeCards.order).toEqual(["activity-runs"]);
+    expect(next.homeCards.activity).toEqual(activity);
+  });
+
+  it("lets a newer client replace the activity choices", () => {
+    const current: ShellSettings = {
+      ...defaultShellSettings(),
+      homeCards: { order: [], visibility: [], activity },
+    };
+    const replacement: ShellSettings = {
+      ...defaultShellSettings(),
+      homeCards: {
+        order: [],
+        visibility: [],
+        activity: { sharedRange: { kind: "total" }, source: "github", pins: [] },
+      },
+    };
+    expect(replaceShellSettings(current, replacement).homeCards.activity).toEqual({
+      sharedRange: { kind: "total" },
+      source: "github",
+      pins: [],
+    });
+  });
+
+  it("leaves activity absent when neither side recorded it", () => {
+    const current = defaultShellSettings();
+    const replacement = defaultShellSettings();
+    expect(replaceShellSettings(current, replacement).homeCards.activity).toBeUndefined();
+  });
+});

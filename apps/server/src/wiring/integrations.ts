@@ -13,6 +13,7 @@ import {
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import { Effect } from "effect";
 import { GhAuthenticationPort } from "../github/ghAuthenticationPort";
+import { GhHomeActivityPort } from "../github/ghHomeActivityPort";
 import { GhRepositoryCataloguePort } from "../github/ghRepositoryCataloguePort";
 import { GithubCapabilityService } from "../github/githubCapabilityService";
 import { GithubCatalogueService } from "../github/githubCatalogueService";
@@ -35,8 +36,13 @@ import {
 } from "../integration/integrationCredentialVault";
 import { createFileConnectionStore } from "../integration/integrationConnectionStore";
 import { createAzureIntegration } from "../plugins/azure/azureIntegration";
+import { contributeGithubActivity } from "../plugins/github/githubActivityIntegration";
 import { IntegrationCredentialOperations } from "../integration/integrationCredentialOperations";
-import { createIntegrationHostPort } from "../integration/integrationHostPort";
+import {
+  createIntegrationHostPort,
+  integrationActivitySourceSlot,
+} from "../integration/integrationHostPort";
+import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { createLinearIntegrationService } from "../integration/integrationService";
 import { createIntegrationRouteHandler } from "../integrationRoutes";
 import { makeCredentialBrokerClient } from "../providers/credentialBrokerClient";
@@ -374,6 +380,37 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       catalogue: githubCatalogueService,
       isEffective: githubIntegrationIsEffective,
     });
+    // The bundled GitHub integration contributes its read-only activity
+    // source through the host port's registration slot. The host keeps the
+    // window's repository scope and repository selection; the source only
+    // answers account and per-repository record requests, and disabling the
+    // integration removes it from lookup before any observation. The adapter
+    // is created once; its registration is released with the server.
+    const githubActivitySlot = integrationActivitySourceSlot(githubIntegrationIsEffective);
+    const githubActivityPort =
+      options.ghExecutable === undefined
+        ? undefined
+        : new GhHomeActivityPort({
+            command: createGhCommandPort({ ghPath: options.ghExecutable }),
+            isEffective: githubIntegrationIsEffective,
+          });
+    const githubActivityRegistration = contributeGithubActivity(
+      createIntegrationHostPort({
+        registerActivitySource: githubActivitySlot.registerActivitySource,
+      }),
+      {
+        capabilitySnapshot: (signal) => githubCapabilityService.snapshot(signal),
+        effective: githubIntegrationIsEffective,
+        observe: githubActivityPort?.observe.bind(githubActivityPort),
+      },
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        if (githubActivityRegistration?.kind === "registered") {
+          githubActivityRegistration.release();
+        }
+      }),
+    );
     const integrationVault =
       options.integrationSecretVault ??
       (options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
@@ -508,6 +545,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       ),
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
+      repositoryActivitySource: githubActivitySlot.current,
       siblingThreadsService,
       terminalSessionImports,
       movedThreadHistory,

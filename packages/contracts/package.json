@@ -27,6 +27,7 @@
     "./workspace-presets": "./src/workspacePresets.ts",
     "./chat": "./src/chat.ts",
     "./code": "./src/code.ts",
+    "./code-home-activity": "./src/codeHomeActivity.ts",
     "./code-operations": "./src/codeOperations.ts",
     "./code-debug": "./src/codeDebug.ts",
     "./code-language": "./src/codeLanguage.ts",

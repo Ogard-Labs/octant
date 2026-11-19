@@ -5700,10 +5700,28 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return true;
   }
 
+  /**
+   * Journals that the person asked to stop this turn, so the `interrupted`
+   * that follows reads as their cancellation and not a cut-off. A lost marker
+   * must never hold back the Stop itself.
+   */
+  #journalTurnStopRequested(active: ActiveTurn, requestedBy: "person" | undefined): void {
+    if (requestedBy !== "person") return;
+    try {
+      const frame = this.#appendTurnEvent(active, {
+        event: { kind: "conversation-turn-stop-requested" },
+      });
+      active.cursor = frame.cursor;
+    } catch {
+      // Best effort only: the person's Stop still proceeds.
+    }
+  }
+
   async forceStop(input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
     readonly turnOperationId: CodeOperationId;
+    readonly stopRequestedBy?: "person";
   }) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (
@@ -5717,6 +5735,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         message:
           "Only this host's exact stopped attempt on a supported runtime can be force-stopped.",
       });
+    this.#journalTurnStopRequested(active, input.stopRequestedBy);
     const connection = active.connection;
     const kill = connection.forceStop;
     if (kill === undefined) return turnState("failed");
@@ -5759,6 +5778,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         category: "failed",
         message: "That turn has already ended, so Stop left the turn running now alone.",
       });
+    this.#journalTurnStopRequested(active, input.stopRequestedBy);
     const lostText = this.#flushBeforeStop(active);
     if (lostText !== undefined) {
       active.interruptMessage =

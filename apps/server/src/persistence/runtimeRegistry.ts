@@ -24,6 +24,10 @@ import {
   BrowserSessionResumed,
 } from "@octant/contracts/browser-session-grants";
 import {
+  ActivityDeliveryObserved,
+  CODE_HOME_DELIVERY_OBSERVED,
+} from "@octant/contracts/code-home-activity";
+import {
   CHILD_WORKTREE_SOURCE_UPDATED,
   ChildWorktreeSourceUpdated,
   CHILD_WORKTREE_SEED_UPDATED,
@@ -434,6 +438,7 @@ import {
   DIAGNOSTICS_FAILURE_INCIDENT_RECORDED_V1,
 } from "./diagnosticsExportProjection";
 import { AgentRunProjection } from "../agentRun/agentRunProjection";
+import { ActivityHistoryProjection } from "./activityHistoryProjection";
 import { AGENT_RESULT_STEERED } from "../agentRun/agentResultSteeredRecord";
 import {
   AGENT_RUN_REQUESTED,
@@ -655,6 +660,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       persistedSchema: PersistedCodeThreadFollowUpUpdated,
     })
     .register("code.operation-event-recorded@1", 1, CodeOperationEventFrame)
+    .register(CODE_HOME_DELIVERY_OBSERVED, 1, ActivityDeliveryObserved)
     .register("code.planner-designation-updated@1", 1, CodePlannerDesignationUpdated)
     .register("code.planner-proposal-updated@1", 1, CodePlannerProposalUpdated)
     .register(
@@ -974,6 +980,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ThreadNativeSetupProjection())
       .register(new RemoteAccessProjection())
       .register(new ThreadCheckpointProjection())
+      .register(new ActivityHistoryProjection())
       .register(new ProductFeedbackProjection())
       .register(new ProjectTerminalProjection())
       .register(new RemoteServerGrantProjection())
