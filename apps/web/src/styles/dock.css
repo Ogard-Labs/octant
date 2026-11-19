@@ -587,6 +587,13 @@
   border-top: 1px solid var(--octant-pane-line, var(--oct-border-soft));
 }
 
+.dock-utility-launcher__group-title {
+  padding: var(--oct-space-1) var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
 /* Scroll and padding come from .dock-body. */
 .right-utility-dock__content {
   min-width: 0;

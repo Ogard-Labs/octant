@@ -1129,6 +1129,10 @@ html[data-octant-native-host="true"] .sidebar__chrome {
   order: 2;
 }
 
+.sidebar__chrome-activity {
+  order: 1;
+}
+
 /* Space separates the navigation actions from the Project tree. A rule here
    reads as a third section boundary in a rail that already has section
    headings, and it is the only horizontal line in the sidebar. */
@@ -3015,6 +3019,24 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   color: var(--oct-accent-fg);
 }
 
+.draft-thread__eyebrow {
+  display: block;
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.draft-thread__description {
+  max-width: 58ch;
+  margin: 2px 0 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+  line-height: 1.5;
+}
+
 /* Recent work under the composer. These rows are the way back into open work
    from a start screen, so they stay quiet until pointed at and never compete
    with the prompt above them. The button recipe fixes its own height, which a
@@ -3043,10 +3065,48 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   line-height: 1.3;
 }
 
+.draft-thread__recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 /* The bare variant draws nothing, so these take the ghost hover fill themselves. */
 .thread-row-info-card__pr-github:hover,
 .draft-thread__recent-item:hover {
   background: var(--muted);
+}
+
+.draft-thread__recent-item:active {
+  background: var(--oct-wash-pressed);
+}
+
+.draft-thread__recent-item {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-radius: var(--oct-radius-md);
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+}
+
+.draft-thread__recent-name {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}
+
+.draft-thread__recent-detail {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
 }
 
 /* A New coordinator draft's settings, one quiet line under the composer:

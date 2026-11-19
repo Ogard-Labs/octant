@@ -1273,6 +1273,15 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   min-width: 0;
 }
 
+.github-onboarding__trigger {
+  max-width: 220px;
+  min-height: var(--oct-touch-min);
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
 .github-onboarding__body {
   display: flex;
   flex-direction: column;
@@ -1332,6 +1341,10 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   .github-onboarding__facts {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
+  }
+
+  .github-onboarding__trigger {
+    max-width: 140px;
   }
 }
 
@@ -2067,6 +2080,13 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   gap: var(--oct-space-1) var(--oct-space-3);
 }
 
+.code-project-thread__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
 /* Facts read as one quiet line: "Branch main · Blocked Not confirmed
    finished yet." Each label keeps a word space from its value. */
 .code-project-thread__facts {
@@ -2078,6 +2098,22 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   padding: 0;
   list-style: none;
   color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
+}
+
+.code-project-thread__facts li {
+  display: inline-flex;
+  min-width: 0;
+  gap: var(--oct-space-1);
+}
+
+.code-project-thread__fact-label {
+  color: var(--oct-meta);
+}
+
+.code-project-thread__posture {
+  color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   line-height: var(--oct-leading-snug);
 }
@@ -2124,6 +2160,11 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-overview__state svg {
   flex: none;
   margin-top: 2px;
+}
+
+.code-project-overview__quick-start-copy {
+  max-width: 72ch;
+  margin-bottom: var(--oct-space-1) !important;
 }
 
 .code-project-overview__quick-start .code-composer-adapter {
@@ -2179,6 +2220,16 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   flex-direction: column;
   color: var(--oct-fg);
   background: var(--oct-bg);
+}
+
+.code-thread-workspace__tool {
+  display: inline-flex;
+  height: auto;
+  min-height: var(--oct-control-height-sm);
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-3);
+  font-size: var(--oct-text-xs);
 }
 
 /* Kept for AgentRunHierarchy, which still reports its errors under this

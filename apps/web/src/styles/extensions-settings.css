@@ -45,6 +45,10 @@
   position: relative;
 }
 
+.extensions-settings__section--attention .extensions-settings__body {
+  color: var(--oct-warn-fg);
+}
+
 /* A section's body is the Settings kit card: the 16px card radius, one
    hairline, the raised fill. Installed packages and skills are rows inside it,
    divided by their own hairline at the card's inset. */
@@ -195,6 +199,10 @@
   border-radius: 0;
   font-size: var(--oct-text-detail);
   white-space: nowrap;
+}
+
+.extensions-settings__state-label {
+  color: var(--oct-muted);
 }
 
 /* One quiet status word per row; only its ink says whether it is fine. */
@@ -989,6 +997,13 @@
 .shield-servers__actions {
   display: flex;
   gap: var(--oct-space-2);
+}
+
+.shield-servers__heading {
+  margin: var(--oct-space-4) 0 var(--oct-space-1);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
 }
 
 .shield-servers__choice {

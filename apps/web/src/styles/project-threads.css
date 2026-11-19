@@ -107,6 +107,14 @@
   text-underline-offset: 3px;
 }
 
+.project-nav__activity-toggle {
+  color: var(--octant-text-muted);
+}
+
+.project-nav__activity-toggle[aria-pressed="true"] {
+  color: var(--octant-text-primary);
+}
+
 .project-dialog .code-project-views__choice {
   display: flex;
   align-items: center;
@@ -1488,6 +1496,18 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   background: transparent;
   border: 0;
   box-shadow: none;
+}
+
+.project-memory-inspector__project {
+  grid-area: project;
+  margin: 0;
+  padding: var(--oct-space-3) 12px;
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  border-bottom: 1px solid var(--octant-border);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-memory-inspector__header {

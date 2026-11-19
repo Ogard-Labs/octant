@@ -431,7 +431,9 @@ describe("ZenSurface", () => {
   });
 
   it("keeps the appearance dialog and every preset's name inside a narrow Zen surface", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles/zen.css"), "utf8");
+    const styles = ["zen.css", "zen-surface.css"]
+      .map((name) => readFileSync(resolve(process.cwd(), "src/styles", name), "utf8"))
+      .join("\n");
     expect(styles).toMatch(
       /\.zen-surface__manual-panel\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*calc\(100% - 32px\);/s,
     );

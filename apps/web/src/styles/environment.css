@@ -82,6 +82,14 @@
   margin: 0;
 }
 
+.environment-git-group__error {
+  margin: 0;
+  padding: 0 var(--environment-row-inset);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
+}
+
 /* The glyph every row leads with. The glyph is decoration; the row's title
    names it. No box, no fill. */
 .environment-tile {

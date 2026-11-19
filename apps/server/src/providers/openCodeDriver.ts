@@ -1403,7 +1403,8 @@ export function makeOfficialOpenCodeClient(
       }
     },
     providers: async () => {
-      if (!beta) return resultData(await (await client()).provider.list({}, { throwOnError: true }));
+      if (!beta)
+        return resultData(await (await client()).provider.list({}, { throwOnError: true }));
       // The 2.x server answers 200 with an empty catalogue until it finishes
       // loading providers. A single read at readiness is the empty result.
       const deadline = Date.now() + BETA_API_TIMEOUT_MS;
@@ -1422,10 +1423,14 @@ export function makeOfficialOpenCodeClient(
         : (await (await client()).event.subscribe({}, { throwOnError: true, signal })).stream,
     createSession: async ({ permission, model }) => {
       if (!beta)
-        return resultData(await (await client()).session.create({ permission }, { throwOnError: true }));
+        return resultData(
+          await (await client()).session.create({ permission }, { throwOnError: true }),
+        );
       return adaptBetaSession(
         resultData(
-          await (await client()).v2.session.create(
+          await (
+            await client()
+          ).v2.session.create(
             {
               location: { directory: projectRoot },
               ...(model === undefined
@@ -1441,13 +1446,19 @@ export function makeOfficialOpenCodeClient(
       beta
         ? adaptBetaSession(
             resultData(
-              await (await client()).v2.session.get({ sessionID: sessionId }, betaMutationOptions()),
+              await (
+                await client()
+              ).v2.session.get({ sessionID: sessionId }, betaMutationOptions()),
             ),
           )
-        : resultData(await (await client()).session.get({ sessionID: sessionId }, { throwOnError: true })),
+        : resultData(
+            await (await client()).session.get({ sessionID: sessionId }, { throwOnError: true }),
+          ),
     deleteSession: async (sessionId) => {
       if (!beta) {
-        await (await client()).session.delete(
+        await (
+          await client()
+        ).session.delete(
           { sessionID: sessionId, directory: projectRoot },
           { throwOnError: true, signal: AbortSignal.timeout(10_000) },
         );
@@ -1477,7 +1488,9 @@ export function makeOfficialOpenCodeClient(
     listSessions: async () => {
       if (!beta) {
         const listed = resultData(
-          await (await client()).session.list(
+          await (
+            await client()
+          ).session.list(
             { directory: projectRoot, limit: OPENCODE_LISTED_SESSIONS },
             { throwOnError: true },
           ),
@@ -1542,7 +1555,9 @@ export function makeOfficialOpenCodeClient(
     forkSession: async (sessionId, before) => {
       if (!beta)
         return resultData(
-          await (await client()).session.fork(
+          await (
+            await client()
+          ).session.fork(
             { sessionID: sessionId, ...(before === undefined ? {} : { messageID: before }) },
             { throwOnError: true },
           ),
@@ -1567,7 +1582,9 @@ export function makeOfficialOpenCodeClient(
     },
     prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [], permission }) => {
       if (beta) {
-        await (await client()).v2.session.switchModel(
+        await (
+          await client()
+        ).v2.session.switchModel(
           { sessionID: sessionId, model: { providerID: providerId, id: modelId } },
           betaMutationOptions(),
         );
@@ -1599,11 +1616,15 @@ export function makeOfficialOpenCodeClient(
         }
         return;
       }
-      await (await client()).session.update(
+      await (
+        await client()
+      ).session.update(
         { sessionID: sessionId, permission },
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
       );
-      await (await client()).session.promptAsync(
+      await (
+        await client()
+      ).session.promptAsync(
         {
           sessionID: sessionId,
           model: { providerID: providerId, modelID: modelId },
@@ -1617,7 +1638,9 @@ export function makeOfficialOpenCodeClient(
         await addBetaMcpServer(server, projectRoot, name, url);
         return;
       }
-      await (await client()).mcp.add(
+      await (
+        await client()
+      ).mcp.add(
         {
           directory: projectRoot,
           name,
@@ -1638,17 +1661,23 @@ export function makeOfficialOpenCodeClient(
         }
         return;
       }
-      await (await client()).mcp.disconnect(
+      await (
+        await client()
+      ).mcp.disconnect(
         { name, directory: projectRoot },
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
       );
     },
     abort: async (sessionId) => {
       if (beta) {
-        await (await client()).v2.session.interrupt({ sessionID: sessionId }, betaMutationOptions());
+        await (
+          await client()
+        ).v2.session.interrupt({ sessionID: sessionId }, betaMutationOptions());
         return;
       }
-      await (await client()).session.abort(
+      await (
+        await client()
+      ).session.abort(
         { sessionID: sessionId },
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
       );
@@ -1681,7 +1710,9 @@ export function makeOfficialOpenCodeClient(
       ? {
           commands: () => listBetaCommands(server, projectRoot),
           command: async ({ sessionId, providerId, modelId, ...command }) => {
-            await (await client()).v2.session.switchModel(
+            await (
+              await client()
+            ).v2.session.switchModel(
               { sessionID: sessionId, model: { providerID: providerId, id: modelId } },
               betaMutationOptions(),
             );
@@ -1714,7 +1745,9 @@ export function makeOfficialOpenCodeClient(
         }
         return;
       }
-      await (await client()).permission.reply({ requestID: requestId, reply }, { throwOnError: true });
+      await (
+        await client()
+      ).permission.reply({ requestID: requestId, reply }, { throwOnError: true });
     },
     replyQuestion: async (sessionId, requestId, answers) => {
       if (beta) {
@@ -1744,7 +1777,9 @@ export function makeOfficialOpenCodeClient(
         }
         return;
       }
-      await (await client()).question.reply(
+      await (
+        await client()
+      ).question.reply(
         { requestID: requestId, answers: answers.map((answer) => [answer]) },
         { throwOnError: true },
       );

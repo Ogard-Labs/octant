@@ -1234,6 +1234,11 @@ strong {
   gap: var(--oct-space-1);
 }
 
+.workspace-cross-context-banner__hint {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
 .workspace-root {
   display: grid;
   width: 100%;
@@ -1241,6 +1246,25 @@ strong {
   min-width: 0;
   min-height: 0;
   grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace__message {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  padding: 40px;
+  text-align: center;
+}
+
+.workspace__message h1,
+.workspace__message p {
+  margin: 0;
+}
+
+.workspace__message p {
+  max-width: 560px;
+  margin-top: var(--oct-space-2);
+  color: var(--octant-text-muted);
 }
 
 .workspace-split {
@@ -1828,6 +1852,18 @@ html[data-octant-native-host="true"]
   padding: var(--oct-menu-inset);
 }
 
+.workspace-tab-launcher {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.workspace-tab-launcher__disclosure {
+  top: calc(100% + 4px);
+  right: auto;
+  left: 0;
+}
+
 /* A menu row reads down a single left edge: one icon column, then the labels
    all starting at the same x. The button recipe centres its contents, and
    `text-align: left` does not undo that for a flex box — every row was
@@ -1997,6 +2033,21 @@ html[data-octant-native-host="true"]
   font-weight: var(--oct-weight-medium);
 }
 
+.shell-boundary__action:hover {
+  color: var(--oct-fg);
+  background: var(--oct-surface-warm);
+  border-color: var(--oct-fg);
+}
+
+.settings-view__section-heading {
+  margin: var(--oct-space-6) 0 var(--oct-space-2);
+  color: var(--oct-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: normal;
+}
+
 .settings-view__field,
 .settings-view__toggle {
   display: grid;
@@ -2033,6 +2084,11 @@ html[data-octant-native-host="true"]
   padding-top: 0;
 }
 
+.settings-view__toggle {
+  grid-template-columns: auto 1fr;
+  cursor: default;
+}
+
 .settings-view__text-input,
 .settings-view__select {
   width: auto;
@@ -2053,6 +2109,14 @@ html[data-octant-native-host="true"]
 /* No forced color-scheme: the root's declared scheme keeps the native
    popup matched to the active theme, which "dark" broke in light mode. */
 .settings-view__select {
+  cursor: default;
+}
+
+.settings-view__checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--octant-accent);
   cursor: default;
 }
 
@@ -4036,6 +4100,10 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   font-size: var(--oct-text-xs);
 }
 
+.environment-pull-requests__stale {
+  color: var(--oct-warning-text, var(--oct-muted));
+}
+
 .environment-pull-requests__meta {
   display: flex;
   flex-wrap: wrap;
@@ -4291,6 +4359,12 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
 }
 .local-servers__more:active {
   background: var(--oct-wash-pressed);
+}
+
+.local-servers__menu {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
 }
 
 .local-servers__details {
@@ -5217,6 +5291,10 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   background: var(--octant-destructive);
 }
 
+.composer-model-picker__rail-status--checking {
+  background: var(--octant-text-muted);
+}
+
 .provider-glyph {
   flex: 0 0 auto;
   display: inline-block;
@@ -6057,6 +6135,17 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   vertical-align: top;
 }
 
+.product-feedback__note-comment {
+  color: var(--octant-text-primary);
+}
+
+.product-feedback__note-element {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .thread-checkpoints {
   display: flex;
   align-items: center;
@@ -6717,6 +6806,12 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   gap: 0.75rem;
 }
 
+.federated-hosts-lifecycle__message {
+  margin: 0;
+  font-size: var(--oct-text-base);
+  color: var(--octant-text-secondary);
+}
+
 .federated-hosts-lifecycle__list {
   list-style: none;
   margin: 0;
@@ -6730,6 +6825,13 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   gap: 0.5rem;
   padding: 0.75rem 0;
   border-top: 1px solid color-mix(in srgb, var(--octant-border) 80%, transparent);
+}
+
+.federated-hosts-lifecycle__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
 }
 
 .federated-hosts-lifecycle__facts {
@@ -6774,6 +6876,76 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+.cross-host-continuation-dialog__eyebrow {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: var(--oct-text-detail);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--octant-text-muted);
+}
+
+.cross-host-continuation-dialog__scopes {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.cross-host-continuation-dialog__scopes dt {
+  font-size: var(--oct-text-detail);
+  color: var(--octant-text-muted);
+}
+
+.cross-host-continuation-dialog__host-select {
+  min-width: 12rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+}
+
+.cross-host-continuation-dialog__package,
+.cross-host-continuation-dialog__omissions,
+.cross-host-continuation-receipt {
+  margin: 1rem 0;
+}
+
+.cross-host-continuation-dialog__package ul,
+.cross-host-continuation-dialog__omissions ul {
+  display: grid;
+  gap: 0.35rem;
+  padding-left: 1rem;
+}
+
+.cross-host-continuation-dialog__meta {
+  margin-left: 0.5rem;
+  font-size: var(--oct-text-detail);
+  color: var(--octant-text-muted);
+}
+
+.cross-host-continuation-dialog__transfer-notice,
+.cross-host-continuation-dialog__loading,
+.cross-host-continuation-dialog__error {
+  margin: 0.75rem 0;
+  font-size: var(--oct-text-base);
+}
+
+.cross-host-continuation-dialog__error {
+  color: var(--octant-danger-text);
+}
+
+.cross-host-continuation-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.cross-host-continuation-receipt dl {
+  display: grid;
+  gap: 0.5rem;
 }
 
 /* ── Validation evidence ──────────────────────────────────────────────── */
@@ -7449,6 +7621,27 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .environment-filter__toggle:hover {
   color: var(--octant-text-primary);
+}
+
+.environment-filter__menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding: var(--oct-space-2);
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-surface-raised);
+}
+
+.environment-filter__row {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 2px 4px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  cursor: default;
 }
 
 .environment-filter__label {

@@ -18,7 +18,11 @@ const node = execFileSync(process.argv[4] ?? "node", ["-p", "process.execPath"],
 if (!Number.isInteger(count) || count < 1 || count > 30) {
   throw new Error("Usage: bun scripts/benchmark-server-start.ts [count 1-30] [dist] [node]");
 }
+const controller = new AbortController();
+const stop = () => controller.abort();
 const root = await mkdtemp(join(tmpdir(), "octant-server-start."));
+process.on("SIGINT", stop);
+process.on("SIGTERM", stop);
 try {
   console.log(
     JSON.stringify({
@@ -47,7 +51,12 @@ try {
   }
   console.log(JSON.stringify({ summary: { cold: summarize(cold), cached: summarize(cached) } }));
 } finally {
-  await rm(root, { recursive: true, force: true });
+  try {
+    await rm(root, { recursive: true, force: true });
+  } finally {
+    process.off("SIGINT", stop);
+    process.off("SIGTERM", stop);
+  }
 }
 
 interface Sample {
@@ -57,6 +66,7 @@ interface Sample {
 
 async function start(dataDirectory: string): Promise<Sample> {
   const port = await freePort();
+  controller.signal.throwIfAborted();
   const started = performance.now();
   const child = spawn(node, [join(dist, "main.mjs")], {
     env: {
@@ -72,17 +82,18 @@ async function start(dataDirectory: string): Promise<Sample> {
   child.stderr.on("data", (chunk: Buffer) => {
     output = (output + chunk.toString("utf8")).slice(-4_000);
   });
-  const exited = new Promise<void>((done) => {
-    child.once("exit", () => done());
-    child.once("error", () => done());
+  child.on("error", (error) => {
+    output = error.message;
   });
+  const exited = new Promise<void>((done) => child.once("close", () => done()));
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]);
   try {
-    const deadline = Date.now() + 30_000;
     for (;;) {
-      if (child.exitCode !== null || Date.now() > deadline) {
+      signal.throwIfAborted();
+      if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
         throw new Error(`The host did not become ready.\n${output}`);
       }
-      const body = await fetch(`http://127.0.0.1:${port}/health`)
+      const body = await fetch(`http://127.0.0.1:${port}/health`, { signal })
         .then((response) => (response.ok ? response.json() : undefined))
         .catch(() => undefined);
       if (
@@ -101,8 +112,13 @@ async function start(dataDirectory: string): Promise<Sample> {
     );
     return { readyMs, rssMiB: rssKiB / 1024 };
   } finally {
-    child.kill("SIGTERM");
-    await exited;
+    const forceStop = setTimeout(() => child.kill("SIGKILL"), 3_000);
+    try {
+      child.kill("SIGTERM");
+      await exited;
+    } finally {
+      clearTimeout(forceStop);
+    }
   }
 }
 

@@ -6,11 +6,8 @@ import {
 } from "../providers/providerLimitWindow";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import type { ProviderUsageReporting } from "@octant/contracts";
-import { matchKeybinding } from "@octant/domain";
 import { ChevronDown, ChevronRight } from "../ui/icons";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { isApplePlatform } from "../platform";
-import { useKeybindings } from "../keybindings/useKeybindings";
 import type { ContextCompactionExecutor } from "@octant/contracts/context";
 import { ContextInspector } from "./ContextInspector";
 import {
@@ -23,12 +20,10 @@ import {
 import { compactionOffer } from "./sessionCompactionPresentation";
 import {
   autoCompactRoom,
-  compactTokenCount,
   contextHealthLabel,
   contextWindowModel,
   contextAccuracyLabel,
   contextWindowUsedSourceLabel,
-  providerWindowModel,
   type ContextWindowSegment,
   type ProviderWindowCount,
   type ProviderWindowModel,

@@ -1,4 +1,4 @@
-import { MarkdownLinkActionsContext, type MarkdownLinkActions } from "./markdownLinkActions";
+import { MarkdownLinkActionsContext } from "./markdownLinkActions";
 import {
   Children,
   createContext,

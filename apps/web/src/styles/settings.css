@@ -713,6 +713,10 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   border-radius: var(--oct-radius-sm);
 }
 
+.settings-state--success {
+  color: var(--octant-success-text);
+}
+
 @media (max-width: 720px) {
   .settings-fact-list__row {
     grid-template-columns: minmax(0, 1fr);
@@ -892,6 +896,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   width: 100%;
   gap: 0;
   padding: 0;
+}
+
+.settings-view__field-group {
+  display: grid;
+  width: 100%;
+  gap: 0;
 }
 
 /* --- Search results panel --- */
@@ -1593,6 +1603,22 @@ textarea.settings-view__text-input {
   font-size: var(--oct-text-detail);
 }
 
+.settings-view__setting-copy {
+  display: grid;
+  gap: var(--oct-space-1);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+}
+
+.settings-view__setting-copy p {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: 400;
+  line-height: 1.4;
+}
+
 .settings-view__effective-note {
   display: block;
 }
@@ -1684,6 +1710,11 @@ textarea.settings-view__text-input {
   flex: 1 1 50%;
   gap: var(--oct-space-1);
   padding: var(--oct-space-3);
+}
+
+.settings-scheme__preview--light .settings-scheme__preview-pane--dark,
+.settings-scheme__preview--dark .settings-scheme__preview-pane--light {
+  display: none;
 }
 
 /* The pane colours are literals on purpose: each card depicts what Light or
@@ -1864,6 +1895,10 @@ textarea.settings-view__text-input {
   border: 1px solid var(--octant-border);
   border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-display);
+}
+
+.settings-theme-editor__draft-bar .settings-view__actions {
+  flex-wrap: nowrap;
 }
 
 .settings-view__preview-note,
