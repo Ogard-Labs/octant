@@ -9,6 +9,8 @@ import type {
 import {
   ANY_BROWSER_ORIGIN,
   BROWSER_RESIZE_BOUNDS,
+  DEFAULT_BROWSER_WAIT_MS,
+  MAX_BROWSER_WAIT_MS,
   sameToolActionAuthority,
 } from "@octant/contracts";
 
@@ -364,4 +366,30 @@ export function redactedBrowserUrl(value: string): string {
   } catch {
     return value;
   }
+}
+
+export type BrowserWaitLimitDecision =
+  | { readonly status: "admitted" }
+  | { readonly status: "refused"; readonly message: string };
+
+/**
+ * Whether a Browser `wait` call's duration is admitted. Outside Strict there
+ * is no wait limit; under Strict the Settings ceiling (default 10 minutes)
+ * holds. Absent `strict` reads as Strict.
+ */
+export function decideBrowserWaitLimit(input: {
+  readonly timeoutMs: number | undefined;
+  readonly strict?: boolean;
+  readonly limitMs?: number;
+}): BrowserWaitLimitDecision {
+  if (input.strict === false) return { status: "admitted" };
+  const limitMs = input.limitMs ?? MAX_BROWSER_WAIT_MS;
+  const requestedMs = input.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS;
+  if (requestedMs > limitMs) {
+    return {
+      status: "refused",
+      message: `A wait may last at most ${String(limitMs / 60_000)} minutes, the limit set in Settings.`,
+    };
+  }
+  return { status: "admitted" };
 }

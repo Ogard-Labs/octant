@@ -125,13 +125,18 @@ export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<ProvidersWiring, "localPluginImportReceipts" | "providerDataDirectory"> &
   Pick<
     FoundationsWiring,
-    "browserAuthority" | "codeEvidence" | "providerRuntimeRegistry" | "workThreadProjection"
+    | "browserAuthority"
+    | "codeEvidence"
+    | "providerRuntimeRegistry"
+    | "resolveThreadStrict"
+    | "workThreadProjection"
   >;
 
 export function wireBrowser(deps: BrowserDependencies) {
   const {
     browserAuthority,
     providerRuntimeRegistry,
+    resolveThreadStrict,
     contributeChildTools,
     agentRunInteractions,
     browserCaptures,
@@ -814,6 +819,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       waitLimitMs: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings())
           .browserWaitLimitMinutes * 60_000,
+      strict: resolveThreadStrict,
       downloads: createBrowserDownloadJournal({
         journal: persistence.journal,
         connection: persistence.connection,

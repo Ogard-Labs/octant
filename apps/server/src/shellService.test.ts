@@ -1763,6 +1763,93 @@ describe("ShellService", () => {
     );
   });
 
+  it("replays pre-existing settings without the messaging and Browser wait limits to their defaults and persists updates from a local window", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-shell-strict-limits-"));
+    try {
+      const connection = openSqlite(join(directory, "store.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const runtime = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: runtime.events,
+        projections: runtime.projections,
+        clock: () => now,
+      });
+      const system = { kind: "system" as const, actorId: OCTANT_LOCAL_ACTOR_ID };
+      const {
+        threadMessagesPerTurn: _asks,
+        siblingThreadReadsPerTurn: _reads,
+        siblingThreadWaitsPerTurn: _waits,
+        browserWaitLimitMinutes: _waitMinutes,
+        ...predatesLimits
+      } = defaultShellSettings();
+      journal.append({
+        aggregate: { aggregateType: "shell-settings", aggregateId: SHELL_SETTINGS_AGGREGATE_ID },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: "77777777-7777-4777-8777-000000000091",
+            eventName: "shell.settings-replaced",
+            eventVersion: 1,
+            correlationId: "88888888-8888-4888-8888-000000000091",
+            actor: system,
+            occurredAt: now,
+            payload: { settings: predatesLimits },
+          },
+        ],
+      });
+      const persistence = {
+        journal,
+        readShellSettings: () => readShellSettings(connection),
+        readEnvironmentPresentation: () => undefined,
+        readWindowWorkspace: () => undefined,
+        readWindowWorkspaces: () => [],
+        status: () => ({ state: "current", integrity: "ok" }),
+      } as unknown as PersistenceService;
+      const service = new ShellService({ persistence, uuid: uuidSequence(), clock: () => now });
+      const initial = service.readSettings();
+      expect(initial.version).toBe(1);
+      expect(initial.settings).toMatchObject({
+        threadMessagesPerTurn: 3,
+        siblingThreadReadsPerTurn: 8,
+        siblingThreadWaitsPerTurn: 4,
+        browserWaitLimitMinutes: 10,
+      });
+
+      service.bootstrap(ids.window);
+      const replaced = service.execute({
+        kind: "replace-settings",
+        windowId: ids.window,
+        expectedVersion: initial.version,
+        settings: decodeShellSettings({
+          ...initial.settings,
+          threadMessagesPerTurn: 6,
+          siblingThreadReadsPerTurn: 14,
+          siblingThreadWaitsPerTurn: 7,
+          browserWaitLimitMinutes: 25,
+        }),
+      });
+      expect(replaced).toMatchObject({
+        kind: "settings-replaced",
+        version: 2,
+        settings: {
+          threadMessagesPerTurn: 6,
+          siblingThreadReadsPerTurn: 14,
+          siblingThreadWaitsPerTurn: 7,
+          browserWaitLimitMinutes: 25,
+        },
+      });
+      expect(readShellSettings(connection)?.settings).toMatchObject({
+        threadMessagesPerTurn: 6,
+        siblingThreadReadsPerTurn: 14,
+        siblingThreadWaitsPerTurn: 7,
+        browserWaitLimitMinutes: 25,
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the paired-device length and every device deadline together when retiming fails part way, so setting it again applies it", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-shell-pairing-length-"));
     try {

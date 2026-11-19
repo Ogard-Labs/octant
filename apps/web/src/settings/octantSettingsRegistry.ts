@@ -1563,7 +1563,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("thread-messages-per-turn"),
           label: "Thread messages per turn",
           scope: "host",
-          keywords: "thread messages ask mentioned chat per turn limit coordination",
+          keywords: "thread messages ask mentioned chat per turn limit coordination strict",
+        },
+        {
+          id: settingId("sibling-thread-reads-per-turn"),
+          label: "Sibling thread reads per turn",
+          scope: "host",
+          keywords: "sibling thread reads per turn limit messaging project strict",
+        },
+        {
+          id: settingId("sibling-thread-waits-per-turn"),
+          label: "Sibling thread waits per turn",
+          scope: "host",
+          keywords: "sibling thread waits per turn limit messaging project strict",
         },
         {
           id: settingId("coordinators-per-project"),
@@ -1593,7 +1605,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("browser-wait-limit"),
           label: "Longest Browser wait",
           scope: "host",
-          keywords: "browser wait minutes limit timeout page agent",
+          keywords: "browser wait minutes limit timeout page agent strict",
         },
         {
           id: settingId("child-run-wait-limit"),

@@ -53,9 +53,17 @@ export const MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING = 100;
 export const CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS = 3;
 export const MAX_CODE_PROJECT_PULL_REQUEST_WATCH_DAYS_SETTING = 30;
 
-/** Thread messages one turn may send to other threads. */
+/** Thread messages one turn may send to other threads under Strict. */
 export const DEFAULT_THREAD_MESSAGES_PER_TURN = 3;
 export const MAX_THREAD_MESSAGES_PER_TURN_SETTING = 20;
+
+/** Sibling-thread `read` calls one turn may make under Strict. */
+export const DEFAULT_SIBLING_THREAD_READS_PER_TURN = 8;
+export const MAX_SIBLING_THREAD_READS_PER_TURN_SETTING = 64;
+
+/** Sibling-thread `wait` calls one turn may make under Strict. */
+export const DEFAULT_SIBLING_THREAD_WAITS_PER_TURN = 4;
+export const MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING = 32;
 
 /** A child run's `wait`, in seconds. */
 export const DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS = 120;

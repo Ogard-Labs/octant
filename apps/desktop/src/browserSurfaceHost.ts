@@ -119,7 +119,6 @@ import {
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
   MAX_BROWSER_RECORDING_EDGE,
   MAX_BROWSER_RECORDING_MS,
-  MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING,
   MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
   type BrowserActionRequest,
   type BrowserContextId,
@@ -5598,8 +5597,9 @@ async function guardDialogs(
 }
 
 /**
- * Check a wait's conditions until they hold or its time runs out, never more
- * than the hard limit the contract sets.
+ * Check a wait's conditions until they hold or its time runs out. Outside
+ * Strict there is no wait ceiling; Strict threads are bounded before reaching
+ * the surface host.
  */
 async function waitForConditions(
   view: BrowserSurfaceViewPort,
@@ -5608,10 +5608,7 @@ async function waitForConditions(
   signal: AbortSignal | undefined,
 ): Promise<void> {
   const conditions = browserPageConditions(waitFor);
-  const timeoutMs = Math.min(
-    waitFor.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS,
-    MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING * 60_000,
-  );
+  const timeoutMs = waitFor.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS;
   const deadline = Date.now() + timeoutMs;
   let met: ReadonlyArray<boolean> = conditions.map(() => false);
   while (true) {
@@ -5622,7 +5619,10 @@ async function waitForConditions(
       const checked = await Promise.race([
         checkConditions(view, policy, conditions),
         new Promise<undefined>((resolve) =>
-          setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())),
+          setTimeout(
+            () => resolve(undefined),
+            Math.min(2_147_483_647, Math.max(0, deadline - Date.now())),
+          ),
         ),
       ]);
       if (checked?.mode === "check") met = checked.met;

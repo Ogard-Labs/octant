@@ -116,6 +116,42 @@ describe("shell settings from a paired device", () => {
     );
   });
 
+  it("lets a person-paired device change Strict messaging and Browser wait limits and refuses hub-introduced and restricted devices", async () => {
+    const { handle, service } = setup();
+    const updateLimits = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expectedVersion: 4,
+        settings: {
+          ...settings,
+          threadMessagesPerTurn: 5,
+          siblingThreadReadsPerTurn: 12,
+          siblingThreadWaitsPerTurn: 6,
+          browserWaitLimitMinutes: 20,
+        },
+      }),
+    } satisfies RequestInit;
+    for (const admittedBy of ["hub-roster", undefined] as const) {
+      expect((await handle(deviceRequest(admittedBy, updateLimits)))?.status).toBe(403);
+    }
+    expect(service.replaceSettings).not.toHaveBeenCalled();
+
+    const admitted = await handle(deviceRequest("host-person", updateLimits));
+    expect(admitted?.status).toBe(200);
+    expect(service.replaceSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: { kind: "remote-device", actorId: deviceId, deviceId },
+        settings: expect.objectContaining({
+          threadMessagesPerTurn: 5,
+          siblingThreadReadsPerTurn: 12,
+          siblingThreadWaitsPerTurn: 6,
+          browserWaitLimitMinutes: 20,
+        }),
+      }),
+    );
+  });
+
   it("refuses a query, another method and a malformed replacement, and reports a stale version as a conflict", async () => {
     const { handle } = setup({
       category: "conflict",

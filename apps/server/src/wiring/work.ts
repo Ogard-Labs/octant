@@ -821,6 +821,13 @@ export function wireWork(deps: WorkDependencies) {
               profileDisplayName: "the bound profile",
               // Plan reads its siblings and sends them nothing.
               readPosture: () => runningLevel().posture,
+              strict: () => resolveThreadStrict(String(input.thread.id)),
+              readsPerTurn: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .siblingThreadReadsPerTurn,
+              waitsPerTurn: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .siblingThreadWaitsPerTurn,
             });
         const routineTools = !browserSupported ? undefined : routineToolsForWorkTurn(input);
         const agentsTools = !browserSupported

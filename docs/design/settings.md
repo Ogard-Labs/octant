@@ -99,11 +99,14 @@ switches, each row naming its default in its description
 ([Octant's own limits become settings](../architecture.md#security-and-authority)):
 **Wake-ups and messages** (Wake-ups waiting per thread, 8, up to 64; Message
 wakes per hour, 30; Rounds of replies that wake, 10; Thread messages per turn,
-3, up to 20; and the switch **Run missed wake-ups on return**, off),
+3, up to 20, under Strict only; Sibling thread reads per turn, 8, up to 64,
+under Strict only; Sibling thread waits per turn, 4, up to 32, under Strict
+only; and the switch **Run missed wake-ups on return**, off),
 **Coordinators** (Coordinators per Project, 4, up to 32), **Pull requests**
 (Wakes per pull-request watch, 10, up to 100; Days a pull-request watch lasts,
 3, up to 30; Auto-fix tries per failure, 3, up to 20), **Waiting** (Longest
-Browser wait, in minutes, 10, up to 60, whose description says a Claude Code
+Browser wait, in minutes, 10, up to 60, under Strict only, whose description
+says outside Strict there is no wait limit and a Claude Code
 thread still ends one tool call at eleven minutes; Longest wait for a helper,
 in seconds, 120, up to 3,600), then **Routines** with the switch **Start
 agent-created routines active at Full access**, off. Each change is the

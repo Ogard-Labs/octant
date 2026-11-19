@@ -12,6 +12,7 @@ import {
   composerThreadDropCandidate,
   composerThreadDropLocalRefusal,
   composerThreadDropMessage,
+  decideThreadDialogueAsk,
   formatThreadMentionChip,
   formatThreadMentionContext,
   parseThreadMentionToken,
@@ -289,5 +290,33 @@ describe("sideChatTitle", () => {
 
   it("falls back when the source title collapses to nothing", () => {
     expect(sideChatTitle("   ")).toBe("Side Chat about this thread");
+  });
+});
+
+describe("thread dialogue ask limit", () => {
+  it("imposes no per-turn ask cap outside Strict", () => {
+    expect(decideThreadDialogueAsk({ asksThisTurn: 3, strict: false })).toEqual({
+      status: "admitted",
+    });
+    expect(decideThreadDialogueAsk({ asksThisTurn: 50, strict: false, askLimit: 1 })).toEqual({
+      status: "admitted",
+    });
+  });
+
+  it("enforces the default three asks and custom limits under Strict", () => {
+    expect(decideThreadDialogueAsk({ asksThisTurn: 2, strict: true })).toEqual({
+      status: "admitted",
+    });
+    expect(decideThreadDialogueAsk({ asksThisTurn: 3, strict: true })).toEqual({
+      status: "refused",
+      message: "This turn reached its limit of 3 thread messages, set in Settings.",
+    });
+    expect(decideThreadDialogueAsk({ asksThisTurn: 4, strict: true, askLimit: 5 })).toEqual({
+      status: "admitted",
+    });
+    expect(decideThreadDialogueAsk({ asksThisTurn: 5, strict: true, askLimit: 5 })).toEqual({
+      status: "refused",
+      message: "This turn reached its limit of 5 thread messages, set in Settings.",
+    });
   });
 });

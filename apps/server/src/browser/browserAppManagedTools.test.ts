@@ -2161,24 +2161,30 @@ describe("how long octant_browser may wait", () => {
     parseBrowserToolInput(JSON.stringify(input), { allowProfile: true });
   const wait = (timeoutMs: number) => ({ operation: "wait", selector: "#done", timeoutMs });
 
-  it("reads a wait up to the most Settings may allow, an hour, and refuses a longer one", () => {
+  it("reads any positive integer wait so outside-Strict waits are not capped, and rejects non-positive values", () => {
     expect(parse(wait(3_600_000))).toMatchObject({
       operation: "wait",
       waitFor: { timeoutMs: 3_600_000 },
     });
-    expect(parse(wait(3_600_001))).toBeUndefined();
-    expect(BROWSER_TOOL_DEFINITION.inputSchema.properties.timeoutMs.maximum).toBe(3_600_000);
+    expect(parse(wait(5_400_000))).toMatchObject({
+      operation: "wait",
+      waitFor: { timeoutMs: 5_400_000 },
+    });
+    expect(parse(wait(0))).toBeUndefined();
+    expect(parse(wait(-1))).toBeUndefined();
+    expect(BROWSER_TOOL_DEFINITION.inputSchema.properties.timeoutMs).toEqual({
+      type: "integer",
+      minimum: 1,
+    });
     expect(BROWSER_TOOL_HELP[BROWSER_TOOL_DEFINITION.name]).toContain(
-      "timeoutMs up to the limit the person set in Settings (600000",
+      "outside Strict there is no wait limit",
     );
   });
 
-  it("refuses a batch whose waits together would outlast an hour", () => {
+  it("accepts a batch with long waits so outside-Strict batches are not capped", () => {
     const steps = (...waits: ReadonlyArray<object>) => ({ operation: "steps", steps: waits });
     expect(parse(steps(wait(1_800_000), wait(1_800_000)))?.operation).toBe("steps");
-    expect(parse(steps(wait(1_800_000), wait(1_800_001)))).toBeUndefined();
-    // A wait that names no limit counts as its ten-second default.
-    expect(parse(steps(wait(3_595_000), { operation: "wait", selector: "#done" }))).toBeUndefined();
+    expect(parse(steps(wait(1_800_000), wait(3_600_000)))?.operation).toBe("steps");
   });
 });
 

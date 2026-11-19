@@ -114,6 +114,8 @@ const settings = {
   pullRequestWatchDays: 3,
   autoFixAttemptsPerFailure: 3,
   threadMessagesPerTurn: 3,
+  siblingThreadReadsPerTurn: 8,
+  siblingThreadWaitsPerTurn: 4,
   browserWaitLimitMinutes: 10,
   childRunWaitLimitSeconds: 120,
   agentRoutinesStartActiveAtFullAccess: false,
@@ -1566,5 +1568,40 @@ describe("sidebar More row preference", () => {
     expect(decodeShellSettings({ ...settings, sidebarMoreEnabled: false }).sidebarMoreEnabled).toBe(
       false,
     );
+  });
+});
+
+describe("Strict-only messaging and Browser wait limits", () => {
+  it("decodes a store that predates the messaging and Browser wait limits to their defaults", () => {
+    const {
+      threadMessagesPerTurn: _asks,
+      siblingThreadReadsPerTurn: _reads,
+      siblingThreadWaitsPerTurn: _waits,
+      browserWaitLimitMinutes: _waitMinutes,
+      ...predatesLimits
+    } = settings;
+    const decoded = decodeShellSettings(predatesLimits);
+    expect(decoded.threadMessagesPerTurn).toBe(3);
+    expect(decoded.siblingThreadReadsPerTurn).toBe(8);
+    expect(decoded.siblingThreadWaitsPerTurn).toBe(4);
+    expect(decoded.browserWaitLimitMinutes).toBe(10);
+  });
+
+  it("keeps custom Strict limit values within bounds and rejects out-of-range values", () => {
+    const decoded = decodeShellSettings({
+      ...settings,
+      threadMessagesPerTurn: 5,
+      siblingThreadReadsPerTurn: 16,
+      siblingThreadWaitsPerTurn: 12,
+      browserWaitLimitMinutes: 25,
+    });
+    expect(decoded.threadMessagesPerTurn).toBe(5);
+    expect(decoded.siblingThreadReadsPerTurn).toBe(16);
+    expect(decoded.siblingThreadWaitsPerTurn).toBe(12);
+    expect(decoded.browserWaitLimitMinutes).toBe(25);
+    expect(() => decodeShellSettings({ ...settings, siblingThreadReadsPerTurn: 0 })).toThrow();
+    expect(() => decodeShellSettings({ ...settings, siblingThreadReadsPerTurn: 65 })).toThrow();
+    expect(() => decodeShellSettings({ ...settings, siblingThreadWaitsPerTurn: 0 })).toThrow();
+    expect(() => decodeShellSettings({ ...settings, siblingThreadWaitsPerTurn: 33 })).toThrow();
   });
 });

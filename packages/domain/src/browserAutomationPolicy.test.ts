@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateBrowserAction,
   canRecordBrowserObservation,
+  decideBrowserWaitLimit,
   isContextExpired,
   browserContextExpiresAt,
   shouldProtectCredentialField,
@@ -371,5 +372,39 @@ describe("originAllowed", () => {
     expect(originAllowed("https://evil-vg.no/", ["https://vg.no"])).toBe(false);
     expect(originAllowed("http://127.0.0.1:4321/", ["http://127.0.0.1:5173"])).toBe(false);
     expect(originAllowed("about:blank", ["https://vg.no"])).toBe(false);
+  });
+});
+
+describe("browser wait duration limit", () => {
+  it("imposes no wait cap outside Strict even past ten or sixty minutes", () => {
+    expect(decideBrowserWaitLimit({ timeoutMs: 600_001, strict: false })).toEqual({
+      status: "admitted",
+    });
+    expect(
+      decideBrowserWaitLimit({ timeoutMs: 5_400_000, strict: false, limitMs: 120_000 }),
+    ).toEqual({
+      status: "admitted",
+    });
+  });
+
+  it("enforces the default ten-minute limit and custom limits under Strict", () => {
+    expect(decideBrowserWaitLimit({ timeoutMs: 600_000, strict: true })).toEqual({
+      status: "admitted",
+    });
+    expect(decideBrowserWaitLimit({ timeoutMs: 600_001, strict: true })).toEqual({
+      status: "refused",
+      message: "A wait may last at most 10 minutes, the limit set in Settings.",
+    });
+    expect(
+      decideBrowserWaitLimit({ timeoutMs: 1_200_000, strict: true, limitMs: 1_200_000 }),
+    ).toEqual({
+      status: "admitted",
+    });
+    expect(
+      decideBrowserWaitLimit({ timeoutMs: 1_200_001, strict: true, limitMs: 1_200_000 }),
+    ).toEqual({
+      status: "refused",
+      message: "A wait may last at most 20 minutes, the limit set in Settings.",
+    });
   });
 });

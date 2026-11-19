@@ -863,6 +863,7 @@ export function startOctantServer(
     } = yield* wireBrowser({
       browserAuthority,
       providerRuntimeRegistry,
+      resolveThreadStrict,
       contributeChildTools,
       agentRunInteractions,
       codeSessionAuthority,

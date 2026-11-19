@@ -157,6 +157,8 @@ describe("octantSettingsRegistry", () => {
       "message-wakes-per-hour",
       "message-wake-rounds",
       "thread-messages-per-turn",
+      "sibling-thread-reads-per-turn",
+      "sibling-thread-waits-per-turn",
       "coordinators-per-project",
       "pull-request-watch-wakes",
       "pull-request-watch-days",

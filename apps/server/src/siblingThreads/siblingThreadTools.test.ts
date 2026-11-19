@@ -106,6 +106,9 @@ interface HarnessOptions {
   readonly mode?: "work" | "code";
   readonly planner?: CodePlannerToolPort;
   readonly coordinator?: CoordinatorToolPort;
+  readonly strict?: () => boolean;
+  readonly readsPerTurn?: () => number;
+  readonly waitsPerTurn?: () => number;
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -194,6 +197,9 @@ function harness(options: HarnessOptions = {}) {
       ...(options.coordinator === undefined ? {} : { coordinator: options.coordinator }),
       recordExternalContentIngestion: (input) => ingestion.record(input),
       uuid: randomUUID,
+      ...(options.strict === undefined ? {} : { strict: options.strict }),
+      ...(options.readsPerTurn === undefined ? {} : { readsPerTurn: options.readsPerTurn }),
+      ...(options.waitsPerTurn === undefined ? {} : { waitsPerTurn: options.waitsPerTurn }),
     });
   const tools = newTurn();
   const call = async (input: unknown, signal?: AbortSignal, turn = tools) =>
@@ -602,6 +608,57 @@ describe("the sibling threads tool", () => {
     expect((await call({ operation: "read", reference }, undefined, newTurn())).isError).toBe(
       false,
     );
+  });
+
+  it("imposes no read or wait cap outside Strict and enforces custom Settings limits under Strict", async () => {
+    const reference = referenceTo(ids.idle);
+    const open = harness({
+      strict: () => false,
+      readsPerTurn: () => 2,
+      waitsPerTurn: () => 1,
+    });
+    const openTurn = open.newTurn();
+    for (let index = 0; index < MAX_SIBLING_THREAD_READS_PER_TURN + 3; index += 1) {
+      expect((await open.call({ operation: "read", reference }, undefined, openTurn)).isError).toBe(
+        false,
+      );
+    }
+    for (let index = 0; index < MAX_SIBLING_THREAD_WAITS_PER_TURN + 3; index += 1) {
+      expect((await open.call({ operation: "wait", reference }, undefined, openTurn)).isError).toBe(
+        false,
+      );
+    }
+
+    const strictCustom = harness({
+      strict: () => true,
+      readsPerTurn: () => 10,
+      waitsPerTurn: () => 6,
+    });
+    const strictTurn = strictCustom.newTurn();
+    for (let index = 0; index < 10; index += 1) {
+      expect(
+        (await strictCustom.call({ operation: "read", reference }, undefined, strictTurn)).isError,
+      ).toBe(false);
+    }
+    expect(
+      (await strictCustom.call({ operation: "read", reference }, undefined, strictTurn)).result,
+    ).toEqual({
+      status: "refused",
+      reason: "rate-limited",
+      message: "This turn has already read 10 threads.",
+    });
+    for (let index = 0; index < 6; index += 1) {
+      expect(
+        (await strictCustom.call({ operation: "wait", reference }, undefined, strictTurn)).isError,
+      ).toBe(false);
+    }
+    expect(
+      (await strictCustom.call({ operation: "wait", reference }, undefined, strictTurn)).result,
+    ).toEqual({
+      status: "refused",
+      reason: "rate-limited",
+      message: "This turn has already waited 6 times.",
+    });
   });
 
   it("is offered in every posture and changes nothing outside the caller's own record", async () => {

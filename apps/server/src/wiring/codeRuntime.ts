@@ -1701,6 +1701,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             },
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
+            strict: () => resolveThreadStrict(String(thread.id)),
+            readsPerTurn: () =>
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                .siblingThreadReadsPerTurn,
+            waitsPerTurn: () =>
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                .siblingThreadWaitsPerTurn,
           }),
         isCoordinatorThread: (threadId) => coordinatorService.isCoordinator(threadId),
         coordinatorContext: (threadId) => coordinatorService.contextFor(threadId),

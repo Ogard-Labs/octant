@@ -59,7 +59,6 @@ import {
 import {
   DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_HELD_DOWNLOADS,
-  MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING,
   MAX_BROWSER_WAIT_MS,
   ANY_BROWSER_ORIGIN,
   MAX_BROWSER_TABS_PER_CONTEXT,
@@ -75,6 +74,7 @@ import {
   canRequestToolCancellation,
   browserProfileKey,
   browserContextExpiresAt,
+  decideBrowserWaitLimit,
   isContextExpired,
   evaluateBrowserAction,
   evaluateBrowserProfileUse,
@@ -214,8 +214,10 @@ export interface BrowserAutomationServiceOptions {
    * time. Absent, the defaults.
    */
   readonly transferLimits?: () => BrowserTransferLimits;
-  /** The longest one wait may last, in milliseconds, from Settings; absent is ten minutes. */
+  /** The longest one wait may last under Strict, in milliseconds, from Settings; absent is ten minutes. */
   readonly waitLimitMs?: () => number;
+  /** Whether Strict is on for the thread now; absent reads as Strict. */
+  readonly strict?: (threadId: string) => boolean;
   /** Where a saved, refused, or denied download is journaled. */
   readonly downloads?: BrowserDownloadRecorder;
   readonly uuid: () => string;
@@ -226,6 +228,8 @@ export interface BrowserAutomationServiceOptions {
 
 /** How long a picture of a page stays current before a preview may ask for another. */
 const PEEK_INTERVAL_MS = 1_500;
+/** Node timers clamp delays past 32-bit signed max to 1ms; re-schedule in chunks instead. */
+const MAX_SAFE_TIMER_MS = 2_147_483_647;
 // Like the tool's model-binding cache, retain only a bounded recovery hint,
 // never the expired page's observations, content, pictures, or evidence.
 const MAX_BROWSER_EXPIRY_RECEIPTS = 256;
@@ -444,6 +448,7 @@ export class BrowserAutomationService {
   readonly #agentDownloadsEnabled: () => boolean;
   readonly #transferLimits: () => BrowserTransferLimits;
   readonly #waitLimitMs: () => number;
+  readonly #strict: (threadId: string) => boolean;
   readonly #downloads: BrowserDownloadRecorder | undefined;
   readonly #uuid: () => string;
   readonly #clock: () => string;
@@ -499,6 +504,7 @@ export class BrowserAutomationService {
         maxHeldDownloads: MAX_BROWSER_HELD_DOWNLOADS,
       }));
     this.#waitLimitMs = options.waitLimitMs ?? (() => MAX_BROWSER_WAIT_MS);
+    this.#strict = options.strict ?? (() => true);
     this.#downloads = options.downloads;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
@@ -1502,19 +1508,19 @@ export class BrowserAutomationService {
       return this.#failure(owned, personUsedPageFailure, owned.status);
     }
     const inputsAtStart = owned.personInputs;
-    const waitLimitMs = this.#waitLimitMs();
-    if (
-      input.request.kind === "wait" &&
-      (input.request.waitFor?.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS) > waitLimitMs
-    ) {
-      return this.#failure(
-        owned,
-        {
-          category: "policy-denied",
-          message: `A wait may last at most ${String(waitLimitMs / 60_000)} minutes, the limit set in Settings.`,
-        },
-        "failed",
-      );
+    if (input.request.kind === "wait") {
+      const waitDecision = decideBrowserWaitLimit({
+        timeoutMs: input.request.waitFor?.timeoutMs,
+        strict: this.#strict(String(owned.threadId)),
+        limitMs: this.#waitLimitMs(),
+      });
+      if (waitDecision.status === "refused") {
+        return this.#failure(
+          owned,
+          { category: "policy-denied", message: waitDecision.message },
+          "failed",
+        );
+      }
     }
     const resolved = this.#resolveRef(owned, input.request);
     if (resolved.kind === "refused") return this.#failure(owned, resolved.failure, "failed");
@@ -3417,10 +3423,7 @@ export class BrowserAutomationService {
    */
   #keepThroughWait(owned: OwnedContext, request: BrowserActionRequest): void {
     if (request.kind !== "wait" || owned.waitingForPerson !== undefined) return;
-    const waitMs = Math.min(
-      request.waitFor?.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS,
-      MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING * 60_000,
-    );
+    const waitMs = request.waitFor?.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS;
     const until = this.#now() + waitMs + WAIT_KEEP_MARGIN_MS;
     if ((owned.keptUntil ?? 0) >= until) return;
     owned.keptUntil = until;
@@ -3701,10 +3704,13 @@ export class BrowserAutomationService {
       ...(owned.keptUntil === undefined ? {} : { keptUntil: owned.keptUntil }),
     });
     owned.cancelExpiry?.();
-    owned.cancelExpiry = this.#schedule(Math.max(0, deadline - this.#now()), () => {
-      if (this.#expired(owned)) void this.#expireContext(owned);
-      else this.#scheduleExpiry(owned);
-    });
+    owned.cancelExpiry = this.#schedule(
+      Math.min(MAX_SAFE_TIMER_MS, Math.max(0, deadline - this.#now())),
+      () => {
+        if (this.#expired(owned)) void this.#expireContext(owned);
+        else this.#scheduleExpiry(owned);
+      },
+    );
   }
 
   /** The profile a live context keeps its site data in, if the host knows the context. */

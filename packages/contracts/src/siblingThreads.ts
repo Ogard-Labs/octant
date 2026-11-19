@@ -1,6 +1,10 @@
 import { Schema } from "effect";
 import { AggregateId, CorrelationId, UtcTimestamp } from "./events";
 import {
+  DEFAULT_SIBLING_THREAD_READS_PER_TURN,
+  DEFAULT_SIBLING_THREAD_WAITS_PER_TURN,
+} from "./octantLimits";
+import {
   MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES,
   ThreadMentionTranscriptEntry,
 } from "./threadMention";
@@ -85,10 +89,10 @@ export type SiblingThreadReference = typeof SiblingThreadReference.Type;
 
 /** Rows one `list` returns, most recently changed first. */
 export const MAX_SIBLING_THREAD_LIST_ROWS = 32;
-/** `read` calls one turn may make before the tool refuses `rate-limited`. */
-export const MAX_SIBLING_THREAD_READS_PER_TURN = 8;
-/** `wait` calls one turn may make before the tool refuses `rate-limited`. */
-export const MAX_SIBLING_THREAD_WAITS_PER_TURN = 4;
+/** Default `read` calls one turn may make under Strict before the tool refuses `rate-limited`. */
+export const MAX_SIBLING_THREAD_READS_PER_TURN = DEFAULT_SIBLING_THREAD_READS_PER_TURN;
+/** Default `wait` calls one turn may make under Strict before the tool refuses `rate-limited`. */
+export const MAX_SIBLING_THREAD_WAITS_PER_TURN = DEFAULT_SIBLING_THREAD_WAITS_PER_TURN;
 /** How long `wait` blocks when the caller names no timeout; the child-run `wait` default. */
 export const DEFAULT_SIBLING_THREAD_WAIT_MS = 30_000;
 /** The longest one `wait` blocks: the same bound a child-run `wait` has. */

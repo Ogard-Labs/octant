@@ -887,6 +887,7 @@ export function wireChat(deps: ChatDependencies) {
     threadDialogueService = new ThreadDialogueService({
       messagesPerTurn: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).threadMessagesPerTurn,
+      strict: deps.resolveThreadStrict,
       resolveChatTargets: (windowId, threadIds) =>
         threadMentionService.chatDialogueTargets(windowId, threadIds),
       readChatThread: (threadId) => chatService.read(threadId),

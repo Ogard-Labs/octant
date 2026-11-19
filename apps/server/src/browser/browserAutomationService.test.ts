@@ -115,6 +115,7 @@ function harness(
     readonly agentDownloadsEnabled?: boolean;
     readonly transferLimits?: { readonly maxFileBytes: number; readonly maxHeldDownloads: number };
     readonly waitLimitMs?: number;
+    readonly strict?: (threadId: string) => boolean;
     readonly downloads?: ConstructorParameters<typeof BrowserAutomationService>[0]["downloads"];
     readonly observed?: Partial<Awaited<ReturnType<BrowserRuntimePort["act"]>>>;
     readonly unattended?: boolean;
@@ -206,6 +207,7 @@ function harness(
       ? {}
       : { transferLimits: () => options.transferLimits as never }),
     ...(options.waitLimitMs === undefined ? {} : { waitLimitMs: () => options.waitLimitMs ?? 0 }),
+    ...(options.strict === undefined ? {} : { strict: options.strict }),
     ...(options.downloads === undefined ? {} : { downloads: options.downloads }),
     ...(options.unattended === true ? { isUnattendedScope: () => true } : {}),
     ...(options.delegatedProfileIsCurrent === undefined
@@ -3126,6 +3128,44 @@ describe("BrowserAutomationService", () => {
       expect(f.runtime.act).not.toHaveBeenCalled();
       expect((await wait(120_000)).failure).toBeUndefined();
       expect(f.runtime.act).toHaveBeenCalledOnce();
+      await f.service.close();
+    });
+
+    it("imposes no wait limit outside Strict and keeps the page open for waits past ten and sixty minutes", async () => {
+      let finishWait = () => {};
+      const f = harness({
+        waitLimitMs: 120_000,
+        strict: () => false,
+        wrapRuntime: (runtime) => ({
+          ...runtime,
+          act: vi.fn(async (contextId, input, signal) => {
+            await new Promise<void>((resolve) => {
+              finishWait = resolve;
+            });
+            return runtime.act(contextId, input, signal);
+          }),
+        }),
+      });
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const longWait = f.service.act({
+        windowId,
+        capturedBy: "agent",
+        request: request({
+          kind: "wait",
+          waitFor: {
+            conditions: [{ kind: "text", text: "Deployed", present: true }],
+            match: "all",
+            timeoutMs: 5_400_000,
+          },
+        }),
+      });
+      await vi.waitFor(() => expect(f.runtime.act).toHaveBeenCalledOnce());
+      // Past both the ten-minute Strict default and sixty minutes, the page stays alive during the wait.
+      f.advance(4_500_000);
+      f.expire();
+      expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+      finishWait();
+      expect((await longWait).failure).toBeUndefined();
       await f.service.close();
     });
 

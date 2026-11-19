@@ -200,6 +200,104 @@ describe("ThreadDialogueService", () => {
     });
     expect(result?.isError).toBe(true);
   });
+
+  it("imposes no per-turn ask cap outside Strict", async () => {
+    const executeChat = vi.fn(async () => ({ kind: "turn-created", turn: { id: targetTurnId } }));
+    const service = new ThreadDialogueService({
+      resolveChatTargets: async () => [{ threadId: targetThreadId, title: "Target Chat" }],
+      readChatThread: () => targetView(),
+      isChatThread: (threadId) => threadId === String(targetChatThreadId),
+      executeChat,
+      messagesPerTurn: () => 2,
+      strict: () => false,
+    });
+    const tools = service.forThread({
+      windowId,
+      sourceThreadId,
+      sourceTitle: "Source Chat",
+      targetThreadIds: [targetThreadId],
+    });
+
+    for (let index = 0; index < 5; index += 1) {
+      const result = await tools?.execute({
+        name: THREAD_DIALOGUE_TOOL_NAME,
+        inputJson: JSON.stringify({ targetThreadId, message: `Question ${String(index + 1)}.` }),
+      });
+      expect(result?.isError).toBeUndefined();
+      expect(result?.result).toMatchObject({ status: "completed" });
+    }
+    expect(executeChat).toHaveBeenCalledTimes(5);
+  });
+
+  it("enforces the default three asks and custom configured asks under Strict", async () => {
+    const executeChat = vi.fn(async () => ({ kind: "turn-created", turn: { id: targetTurnId } }));
+    let limit: number | undefined;
+    const service = new ThreadDialogueService({
+      resolveChatTargets: async () => [{ threadId: targetThreadId, title: "Target Chat" }],
+      readChatThread: () => targetView(),
+      isChatThread: (threadId) => threadId === String(targetChatThreadId),
+      executeChat,
+      ...(limit === undefined ? {} : { messagesPerTurn: () => limit ?? 3 }),
+      strict: () => true,
+    });
+    const defaultTurn = service.forThread({
+      windowId,
+      sourceThreadId,
+      sourceTitle: "Source Chat",
+      targetThreadIds: [targetThreadId],
+    });
+    for (let index = 0; index < 3; index += 1) {
+      const result = await defaultTurn?.execute({
+        name: THREAD_DIALOGUE_TOOL_NAME,
+        inputJson: JSON.stringify({ targetThreadId, message: `Default ask ${String(index + 1)}.` }),
+      });
+      expect(result?.result).toMatchObject({ status: "completed" });
+    }
+    const fourth = await defaultTurn?.execute({
+      name: THREAD_DIALOGUE_TOOL_NAME,
+      inputJson: JSON.stringify({ targetThreadId, message: "Fourth ask." }),
+    });
+    expect(fourth).toMatchObject({
+      isError: true,
+      result: {
+        status: "failed",
+        message: "This turn reached its limit of 3 thread messages, set in Settings.",
+      },
+    });
+
+    const configuredService = new ThreadDialogueService({
+      resolveChatTargets: async () => [{ threadId: targetThreadId, title: "Target Chat" }],
+      readChatThread: () => targetView(),
+      isChatThread: (threadId) => threadId === String(targetChatThreadId),
+      executeChat,
+      messagesPerTurn: () => 5,
+      strict: () => true,
+    });
+    const configuredTurn = configuredService.forThread({
+      windowId,
+      sourceThreadId,
+      sourceTitle: "Source Chat",
+      targetThreadIds: [targetThreadId],
+    });
+    for (let index = 0; index < 5; index += 1) {
+      const result = await configuredTurn?.execute({
+        name: THREAD_DIALOGUE_TOOL_NAME,
+        inputJson: JSON.stringify({ targetThreadId, message: `Custom ask ${String(index + 1)}.` }),
+      });
+      expect(result?.result).toMatchObject({ status: "completed" });
+    }
+    const sixth = await configuredTurn?.execute({
+      name: THREAD_DIALOGUE_TOOL_NAME,
+      inputJson: JSON.stringify({ targetThreadId, message: "Sixth ask." }),
+    });
+    expect(sixth).toMatchObject({
+      isError: true,
+      result: {
+        status: "failed",
+        message: "This turn reached its limit of 5 thread messages, set in Settings.",
+      },
+    });
+  });
 });
 
 function targetView(): ChatThreadView {

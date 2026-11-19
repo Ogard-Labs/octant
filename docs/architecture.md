@@ -15128,11 +15128,17 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Strict, read as each turn starts (built).
   - **Pull requests.** A pull-request watch's end after ten started wakes or
     three days, and Auto-fix's three attempts per failure.
-  - **Agent messages and children.** A turn's three thread messages, and a
-    child run's `wait` limit (120 seconds by default, up to an hour).
-  - **Browser.** A wait's 10 minutes (up to an hour; the host refuses a wait
-    past the setting, and a Claude Code thread still ends one tool call at
-    eleven minutes).
+  - **Agent messages and children.** A turn's three thread messages
+    (`octant_ask_thread`), eight sibling-thread reads, and four sibling-thread
+    waits apply under Strict only (no limit outside Strict; under Strict they
+    are host settings with defaults 3, 8, and 4; maintainer decision,
+    2026-11-19; built), and a child run's `wait` limit (120 seconds by default,
+    up to an hour).
+  - **Browser.** A wait's 10 minutes applies under Strict only (no limit
+    outside Strict; under Strict it is a host setting with default 10 minutes,
+    up to an hour, and the host refuses a wait past the setting; a Claude Code
+    thread still ends one tool call at eleven minutes; maintainer decision,
+    2026-11-19; built).
   - **Routines.** A file routine's 64-run activity window can be cleared or
     raised, and a setting, off by default, **Start agent-created routines
     active at Full access** lets a routine an agent creates at Full access
