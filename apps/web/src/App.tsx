@@ -221,7 +221,6 @@ import "./styles/shell.css";
 import "./styles/dock.css";
 import "./styles/panels.css";
 import "./styles/environment.css";
-import { PrepareToShutDownHost } from "./environment/threadMove/PrepareToShutDownHost";
 import { threadMoveClientForBridge } from "./environment/threadMove/threadMoveClient";
 // The shared component/material layer loads last so its assignments win.
 import "./styles/components.css";
@@ -683,6 +682,11 @@ const NO_IMAGE_PROFILES: ReadonlyArray<never> = [];
 const NO_CODE_THREADS: ReadonlyArray<never> = [];
 const NO_CODE_CHECKOUTS: ReadonlyArray<never> = [];
 const NO_COMPUTER_SNAPSHOTS: ReadonlyArray<never> = [];
+const PrepareToShutDownHost = lazy(() =>
+  import("./environment/threadMove/PrepareToShutDownHost").then((module) => ({
+    default: module.PrepareToShutDownHost,
+  })),
+);
 const ReaderPagesContainer = lazy(() =>
   import("./app/ReaderPagesContainer").then(({ ReaderPagesContainer }) => ({
     default: ReaderPagesContainer,
@@ -9098,10 +9102,12 @@ function LaunchedShell(
           projectAnnouncementSequence={projectController.announcementSequence}
         />
       </ShellFrame>
-      <PrepareToShutDownHost
-        hostBridge={props.hostBridge}
-        onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
-      />
+      <Suspense fallback={null}>
+        <PrepareToShutDownHost
+          hostBridge={props.hostBridge}
+          onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
+        />
+      </Suspense>
       {(() => {
         const coordinator = codeController.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(coordinatorBoundsThreadId),

@@ -8,6 +8,9 @@ import { lazy, Suspense, useEffect, useRef } from "react";
 import type { FirstRunOnboardingProps } from "../onboarding/FirstRunOnboarding";
 
 // First run is shown once per install; its wizard stays out of the first bundle.
+const ThreadSearchOverlay = lazy(() =>
+  import("./ThreadSearchOverlay").then((module) => ({ default: module.ThreadSearchOverlay })),
+);
 const FirstRunOnboarding = lazy(() =>
   import("../onboarding/FirstRunOnboarding").then((module) => ({
     default: module.FirstRunOnboarding,
@@ -21,7 +24,7 @@ import {
 import { WhatsNewAfterUpdate } from "../settings/WhatsNewAfterUpdate";
 import type { WhatsNewController } from "../settings/useWhatsNewAfterUpdate";
 import type { OctantHostBridge } from "./hostBridge";
-import { ThreadSearchOverlay, type ThreadSearchListingStatus } from "./ThreadSearchOverlay";
+import type { ThreadSearchListingStatus } from "./ThreadSearchOverlay";
 import type {
   ThreadSearchContentHit,
   ThreadSearchHit,
@@ -121,40 +124,42 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
       </OctantDialogPresence>
       <OctantDialogPresence>
         {props.searchOpen ? (
-          <ThreadSearchOverlay
-            initialQuery={props.searchQuery}
-            mode={props.mode}
-            threads={props.searchThreads}
-            projects={props.searchProjects}
-            unfiledLabel="No Project"
-            listing={props.searchListing}
-            onQueryChange={props.onSearchQueryChange}
-            {...(props.mode === "chat" ? { archivedListing: props.searchArchivedListing } : {})}
-            {...(props.searchContentHits === undefined
-              ? {}
-              : { contentHits: props.searchContentHits })}
-            {...(props.searchContentListing === undefined
-              ? {}
-              : { contentListing: props.searchContentListing })}
-            {...(props.searchContentTruncated === undefined
-              ? {}
-              : { contentTruncated: props.searchContentTruncated })}
-            {...(props.searchScope === undefined ? {} : { scope: props.searchScope })}
-            {...(props.onSearchScopeChange === undefined
-              ? {}
-              : { onScopeChange: props.onSearchScopeChange })}
-            onClose={props.onCloseSearch}
-            {...(props.onNewSearchThread === undefined
-              ? {}
-              : { onNewThread: props.onNewSearchThread })}
-            {...(props.onNewSearchProject === undefined
-              ? {}
-              : { onNewProject: props.onNewSearchProject })}
-            {...(props.onOpenSearchSettings === undefined
-              ? {}
-              : { onOpenSettings: props.onOpenSearchSettings })}
-            onOpenThread={props.onOpenSearchHit}
-          />
+          <Suspense fallback={null}>
+            <ThreadSearchOverlay
+              initialQuery={props.searchQuery}
+              mode={props.mode}
+              threads={props.searchThreads}
+              projects={props.searchProjects}
+              unfiledLabel="No Project"
+              listing={props.searchListing}
+              onQueryChange={props.onSearchQueryChange}
+              {...(props.mode === "chat" ? { archivedListing: props.searchArchivedListing } : {})}
+              {...(props.searchContentHits === undefined
+                ? {}
+                : { contentHits: props.searchContentHits })}
+              {...(props.searchContentListing === undefined
+                ? {}
+                : { contentListing: props.searchContentListing })}
+              {...(props.searchContentTruncated === undefined
+                ? {}
+                : { contentTruncated: props.searchContentTruncated })}
+              {...(props.searchScope === undefined ? {} : { scope: props.searchScope })}
+              {...(props.onSearchScopeChange === undefined
+                ? {}
+                : { onScopeChange: props.onSearchScopeChange })}
+              onClose={props.onCloseSearch}
+              {...(props.onNewSearchThread === undefined
+                ? {}
+                : { onNewThread: props.onNewSearchThread })}
+              {...(props.onNewSearchProject === undefined
+                ? {}
+                : { onNewProject: props.onNewSearchProject })}
+              {...(props.onOpenSearchSettings === undefined
+                ? {}
+                : { onOpenSettings: props.onOpenSearchSettings })}
+              onOpenThread={props.onOpenSearchHit}
+            />
+          </Suspense>
         ) : null}
       </OctantDialogPresence>
       {/* One palette for the window. Zen is a deliberate full-surface focus
