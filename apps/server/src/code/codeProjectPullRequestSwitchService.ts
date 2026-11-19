@@ -26,6 +26,7 @@ import {
   type CodeProjectPullRequestSwitchesView,
   type CodeProjectPullRequestAutoFixPauseReason,
   type CodeThreadId,
+  type PullRequestSwitchKind,
   type WindowId,
 } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
@@ -42,6 +43,12 @@ import {
   type PullRequestSwitchFold,
   type PullRequestWatchObservation,
 } from "@octant/domain/code-pull-request-switch-policy";
+import {
+  buildDuplicatePullRequestSwitchNotices,
+  reconcileMergedPullRequestSwitches,
+  type PullRequestLinkSwitchSnapshot,
+} from "@octant/domain/pull-request-identity-policy";
+import type { PullRequestLinkSwitchReconciler } from "./pullRequestLinkService";
 import type { Journal } from "../persistence/journal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type {
@@ -154,7 +161,9 @@ export interface PullRequestAutoFixThreads {
  * what changed. Every change and every wake is journaled, and the state is
  * rebuilt from the journal on start.
  */
-export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort {
+export class CodeProjectPullRequestSwitchService
+  implements PullRequestWatchPort, PullRequestLinkSwitchReconciler
+{
   readonly #authority: PullRequestSwitchAuthority;
   readonly #forge: PullRequestSwitchForge;
   readonly #threads: PullRequestAutoFixThreads;
@@ -450,6 +459,111 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
   /** The person is composing in this thread; Auto-fix and a watch hold their wake back. */
   noteComposerActivity(threadId: CodeThreadId): void {
     this.#typedAt.set(String(threadId), Date.parse(this.#clock()));
+  }
+
+  /**
+   * Reconciles Merge when ready, Auto-fix, and pull-request watch when backfill
+   * merges a later duplicate link into the earlier surviving link: a switch
+   * stays ON only if it was ON in both links; otherwise it is turned OFF and
+   * every affected thread receives a notice naming the switch and why.
+   */
+  async reconcileDuplicateLinks(input: {
+    readonly survivingTarget: CodeProjectPullRequestSwitchTarget;
+    readonly mergedTarget: CodeProjectPullRequestSwitchTarget;
+    readonly allLinkedThreadIds: ReadonlyArray<CodeThreadId>;
+    readonly signal?: AbortSignal;
+  }): Promise<ReadonlyArray<PullRequestSwitchKind>> {
+    const survivingKey = pullRequestSwitchKey(input.survivingTarget);
+    const mergedKey = pullRequestSwitchKey(input.mergedTarget);
+    if (survivingKey === mergedKey) return [];
+
+    const survivingFold = this.#fold(input.survivingTarget);
+    const mergedFold = this.#fold(input.mergedTarget);
+    const surviving = switchSnapshotOf(survivingFold);
+    const merged = switchSnapshotOf(mergedFold);
+    const decision = reconcileMergedPullRequestSwitches(surviving, merged);
+
+    if (decision.mergeWhenReady === "turn-off") {
+      const activeTarget = surviving.mergeWhenReadyOn ? input.survivingTarget : input.mergedTarget;
+      await this.#forge
+        .disableAutoMerge(forgeRequest(activeTarget), input.signal ?? new AbortController().signal)
+        .catch(() => undefined);
+      this.#waitingOn.delete(pullRequestSwitchKey(activeTarget));
+      this.#recordMergeWhenReady(activeTarget, { kind: "disabled" }, systemActor());
+    } else if (decision.mergeWhenReady === "keep-on") {
+      // Same PR on GitHub: keep the surviving link's switch ON and retire only
+      // the duplicate merged target entry without calling disableAutoMerge.
+      this.#waitingOn.delete(mergedKey);
+      this.#recordMergeWhenReady(input.mergedTarget, { kind: "disabled" }, systemActor());
+    }
+
+    if (decision.autoFix === "turn-off") {
+      const activeTarget = surviving.autoFix.on ? input.survivingTarget : input.mergedTarget;
+      const activeThreadId = surviving.autoFix.on
+        ? surviving.autoFix.threadId
+        : merged.autoFix.threadId;
+      if (activeThreadId !== undefined) {
+        this.#paused.delete(pullRequestSwitchKey(activeTarget));
+        this.#recordAutoFix(
+          activeTarget,
+          decodeCodeThreadId(activeThreadId),
+          { kind: "disabled" },
+          systemActor(),
+        );
+      }
+    } else if (decision.autoFix === "keep-on" && merged.autoFix.threadId !== undefined) {
+      this.#paused.delete(mergedKey);
+      this.#recordAutoFix(
+        input.mergedTarget,
+        decodeCodeThreadId(merged.autoFix.threadId),
+        { kind: "disabled" },
+        systemActor(),
+      );
+    }
+
+    if (decision.watch === "turn-off") {
+      const activeTarget = surviving.watch.on ? input.survivingTarget : input.mergedTarget;
+      const activeThreadId = surviving.watch.on ? surviving.watch.threadId : merged.watch.threadId;
+      if (activeThreadId !== undefined) {
+        this.#recordWatch(
+          activeTarget,
+          decodeCodeThreadId(activeThreadId),
+          { kind: "disabled" },
+          systemActor(),
+        );
+      }
+    } else if (decision.watch === "keep-on" && merged.watch.threadId !== undefined) {
+      this.#recordWatch(
+        input.mergedTarget,
+        decodeCodeThreadId(merged.watch.threadId),
+        { kind: "disabled" },
+        systemActor(),
+      );
+    }
+
+    const mergedWindow = this.#vouchingWindows.get(mergedKey);
+    this.#vouchingWindows.delete(mergedKey);
+    if (
+      mergedWindow !== undefined &&
+      !this.#vouchingWindows.has(survivingKey) &&
+      (decision.autoFix === "keep-on" || decision.watch === "keep-on")
+    ) {
+      this.#vouchingWindows.set(survivingKey, mergedWindow);
+    }
+
+    const notices = buildDuplicatePullRequestSwitchNotices({
+      pullRequestNumber: input.survivingTarget.number,
+      decision,
+      surviving,
+      merged,
+      allLinkedThreadIds: input.allLinkedThreadIds.map((id) => String(id)),
+    });
+    for (const entry of notices) {
+      await this.#threads
+        .notifyPerson(decodeCodeThreadId(entry.threadId), entry.notice)
+        .catch(() => undefined);
+    }
+    return decision.disabledSwitches;
   }
 
   /**
@@ -919,6 +1033,15 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
       generatedAt: this.#clock(),
     });
   }
+}
+
+function switchSnapshotOf(fold: PullRequestSwitchFold): PullRequestLinkSwitchSnapshot {
+  return {
+    mergeWhenReadyOn: fold.mergeWhenReady.status === "on",
+    autoFix:
+      fold.autoFix.status === "on" ? { on: true, threadId: fold.autoFix.threadId } : { on: false },
+    watch: fold.watch.status === "on" ? { on: true, threadId: fold.watch.threadId } : { on: false },
+  };
 }
 
 function wakeSignature(

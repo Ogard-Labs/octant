@@ -8,6 +8,7 @@ import {
   createGhCommandPort,
   type GhCommandPort,
   type GhCommandResult,
+  type GhDeliveryTarget,
 } from "./ghPullRequestPort";
 
 const temporaryDirectories: string[] = [];
@@ -41,7 +42,7 @@ const pullRequest = {
 
 function fixture(
   results: readonly GhCommandResult[],
-  resolvedTarget: typeof target | undefined | null = target,
+  resolvedTarget: GhDeliveryTarget | undefined | null = target,
 ) {
   const queue = [...results];
   const command: GhCommandPort = {
@@ -69,9 +70,23 @@ function listResult(values: readonly unknown[], exitCode = 0): GhCommandResult {
   return { exitCode, stdout: JSON.stringify(values) };
 }
 
+function repoIdentityResult(
+  nodeId = "R_kgDOOctantBase",
+  owner = "octant",
+  name = "octant",
+): GhCommandResult {
+  return {
+    exitCode: 0,
+    stdout: JSON.stringify({ data: { repository: { id: nodeId, owner: { login: owner }, name } } }),
+  };
+}
+
 describe("GhPullRequestPort", () => {
   it("returns one exact existing PR without creating or exposing ambient tokens", async () => {
-    const { command, port } = fixture([listResult([pullRequest])]);
+    const { command, port } = fixture([
+      listResult([{ ...pullRequest, id: "PR_kwDO175" }]),
+      repoIdentityResult(),
+    ]);
 
     await expect(port.ensure(request, new AbortController().signal)).resolves.toEqual({
       status: "existing",
@@ -83,11 +98,14 @@ describe("GhPullRequestPort", () => {
         baseBranch: target.baseBranch,
         headOwner: "octocat",
         headBranch: "feature/phase-7",
+        pullRequestNodeId: "PR_kwDO175",
+        baseRepositoryNodeId: "R_kgDOOctantBase",
       },
     });
 
-    expect(command.run).toHaveBeenCalledOnce();
-    expect(command.run).toHaveBeenCalledWith(
+    expect(command.run).toHaveBeenCalledTimes(2);
+    expect(command.run).toHaveBeenNthCalledWith(
+      1,
       [
         "pr",
         "list",
@@ -100,7 +118,7 @@ describe("GhPullRequestPort", () => {
         "--limit",
         "2",
         "--json",
-        "number,url,state,baseRefName,headRefName,headRepositoryOwner",
+        "id,number,url,state,baseRefName,headRefName,headRepositoryOwner",
       ],
       expect.objectContaining({
         environment: expect.objectContaining({
@@ -184,6 +202,7 @@ describe("GhPullRequestPort", () => {
   it("edits and marks ready the open pull request found by the thread's own head", async () => {
     const { command, port } = fixture([
       listResult([pullRequest]),
+      repoIdentityResult(),
       { exitCode: 0, stdout: "" },
       { exitCode: 0, stdout: "" },
     ]);
@@ -195,7 +214,7 @@ describe("GhPullRequestPort", () => {
       ),
     ).resolves.toMatchObject({ status: "updated", draft: false, pullRequest: { number: 175 } });
     const calls = vi.mocked(command.run).mock.calls;
-    expect(calls[1]![0]).toEqual([
+    expect(calls[2]![0]).toEqual([
       "pr",
       "edit",
       "175",
@@ -206,17 +225,21 @@ describe("GhPullRequestPort", () => {
       "--body-file",
       "-",
     ]);
-    expect(calls[1]![1].stdin).toBe("Final notes.");
-    expect(calls[2]![0]).toEqual(["pr", "ready", "175", "--repo", target.baseRepository]);
+    expect(calls[2]![1].stdin).toBe("Final notes.");
+    expect(calls[3]![0]).toEqual(["pr", "ready", "175", "--repo", target.baseRepository]);
   });
 
   it("turns the open pull request back into a draft", async () => {
-    const { command, port } = fixture([listResult([pullRequest]), { exitCode: 0, stdout: "" }]);
+    const { command, port } = fixture([
+      listResult([pullRequest]),
+      repoIdentityResult(),
+      { exitCode: 0, stdout: "" },
+    ]);
 
     await expect(
       port.update({ threadId: request.threadId, draft: true }, new AbortController().signal),
     ).resolves.toMatchObject({ status: "updated", draft: true });
-    expect(vi.mocked(command.run).mock.calls[1]![0]).toEqual([
+    expect(vi.mocked(command.run).mock.calls[2]![0]).toEqual([
       "pr",
       "ready",
       "175",
@@ -236,7 +259,11 @@ describe("GhPullRequestPort", () => {
   });
 
   it("reports an edit GitHub refused as unavailable", async () => {
-    const { port } = fixture([listResult([pullRequest]), { exitCode: 1, stdout: "" }]);
+    const { port } = fixture([
+      listResult([pullRequest]),
+      repoIdentityResult(),
+      { exitCode: 1, stdout: "" },
+    ]);
 
     await expect(
       port.update({ threadId: request.threadId, title: "New" }, new AbortController().signal),
@@ -248,7 +275,9 @@ describe("GhPullRequestPort", () => {
       listResult([]),
       { exitCode: 0, stdout: `${pullRequest.url}\n` },
       listResult([pullRequest]),
+      repoIdentityResult(),
       listResult([pullRequest]),
+      repoIdentityResult(),
     ]);
     const signal = new AbortController().signal;
 
@@ -406,7 +435,8 @@ const diffText = "diff --git a/x b/x\n@@ -1 +1 @@\n-old\n+new\n";
 describe("GhPullRequestPort.observeReview", () => {
   it("observes every read-only section of the linked PR without mutating GitHub", async () => {
     const { command, port } = fixture([
-      listResult([pullRequest]),
+      listResult([{ ...pullRequest, id: "PR_kwDO175" }]),
+      repoIdentityResult(),
       { exitCode: 0, stdout: detailJson },
       { exitCode: 0, stdout: diffText },
     ]);
@@ -429,6 +459,8 @@ describe("GhPullRequestPort.observeReview", () => {
         author: "octocat",
         mergeability: "mergeable",
         matchesDeliveryBranch: true,
+        pullRequestNodeId: "PR_kwDO175",
+        baseRepositoryNodeId: "R_kgDOOctantBase",
       },
       description: "Verified implementation.",
       diff: diffText,
@@ -446,12 +478,13 @@ describe("GhPullRequestPort.observeReview", () => {
     const subcommands = vi
       .mocked(command.run)
       .mock.calls.map(([arguments_]) => `${arguments_[0]} ${arguments_[1]}`);
-    expect(subcommands).toEqual(["pr list", "pr view", "pr diff"]);
+    expect(subcommands).toEqual(["pr list", "api graphql", "pr view", "pr diff"]);
   });
 
   it("labels detail sections stale and stays ambiguous when gh pr view fails", async () => {
     const { port } = fixture([
       listResult([pullRequest]),
+      repoIdentityResult(),
       { exitCode: 1, stdout: "private failure" },
       { exitCode: 0, stdout: diffText },
     ]);
@@ -478,6 +511,7 @@ describe("GhPullRequestPort.observeReview", () => {
   it("labels only the diff stale when gh pr diff fails", async () => {
     const { port } = fixture([
       listResult([pullRequest]),
+      repoIdentityResult(),
       { exitCode: 0, stdout: detailJson },
       { exitCode: 1, stdout: "" },
     ]);
@@ -497,6 +531,7 @@ describe("GhPullRequestPort.observeReview", () => {
   it("truncates the diff to the exact byte budget", async () => {
     const { port } = fixture([
       listResult([pullRequest]),
+      repoIdentityResult(),
       { exitCode: 0, stdout: detailJson },
       { exitCode: 0, stdout: "0123456789" },
     ]);
@@ -530,8 +565,9 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
 
   it("observes every read-only section by repository identity without resolving a thread", async () => {
     const { command, port } = fixture([
-      { exitCode: 0, stdout: detailJson },
+      { exitCode: 0, stdout: JSON.stringify({ ...JSON.parse(detailJson), id: "PR_kwDO175" }) },
       { exitCode: 0, stdout: diffText },
+      repoIdentityResult(),
     ]);
 
     await expect(
@@ -555,6 +591,8 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
         mergeability: "mergeable",
         matchesDeliveryBranch: false,
         checkCounts: { passed: 1, total: 2 },
+        pullRequestNodeId: "PR_kwDO175",
+        baseRepositoryNodeId: "R_kgDOOctantBase",
       },
       description: "Verified implementation.",
       diff: diffText,
@@ -572,7 +610,7 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
     const subcommands = vi
       .mocked(command.run)
       .mock.calls.map(([arguments_]) => `${arguments_[0]} ${arguments_[1]}`);
-    expect(subcommands).toEqual(["pr view", "pr diff"]);
+    expect(subcommands).toEqual(["pr view", "pr diff", "api graphql"]);
   });
 
   it("reads line counts and auto-merge of one pull request by identity, and records them only for an open one", async () => {
@@ -808,7 +846,7 @@ describe("GhPullRequestPort active list", () => {
       "--limit",
       "100",
       "--json",
-      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests,additions,deletions,autoMergeRequest",
+      "id,number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests,additions,deletions,autoMergeRequest",
     ]);
     expect(vi.mocked(command.run).mock.calls.some(([args]) => args.includes("merge"))).toBe(false);
   });
@@ -1203,5 +1241,124 @@ describe("GhPullRequestPort issue closure", () => {
       "-F",
       "number=34",
     ]);
+  });
+});
+
+describe("GhPullRequestPort forge node IDs", () => {
+  it("records the PR node ID and base repository node ID for a fork PR while keeping headOwner as display", async () => {
+    const forkTarget = {
+      authorization: "confirmed-delivery-target",
+      baseRepository: "upstream-org/core",
+      baseBranch: "main",
+      head: "contributor-fork:feature/fork-change",
+    } as const;
+    const forkPr = {
+      id: "PR_kwDOFork99",
+      number: 99,
+      url: "https://github.com/upstream-org/core/pull/99",
+      state: "OPEN",
+      baseRefName: "main",
+      headRefName: "feature/fork-change",
+      headRepositoryOwner: { login: "contributor-fork" },
+    };
+    const { command, port } = fixture(
+      [listResult([forkPr]), repoIdentityResult("R_kgDOUpstreamBase", "upstream-org", "core")],
+      forkTarget,
+    );
+
+    await expect(port.ensure(request, new AbortController().signal)).resolves.toEqual({
+      status: "existing",
+      pullRequest: {
+        number: 99,
+        url: forkPr.url,
+        state: "open",
+        baseRepository: "upstream-org/core",
+        baseBranch: "main",
+        headOwner: "contributor-fork",
+        headBranch: "feature/fork-change",
+        pullRequestNodeId: "PR_kwDOFork99",
+        baseRepositoryNodeId: "R_kgDOUpstreamBase",
+      },
+    });
+    const graphqlArgs = vi.mocked(command.run).mock.calls[1]?.[0] ?? [];
+    expect(graphqlArgs).toContain("owner=upstream-org");
+    expect(graphqlArgs).toContain("name=core");
+  });
+
+  it("falls back cleanly without failing when PR or base repository node IDs are unavailable", async () => {
+    const { port } = fixture([
+      listResult([pullRequest]),
+      { exitCode: 1, stdout: "", stderr: "API rate limit exceeded" },
+    ]);
+
+    const result = await port.ensure(request, new AbortController().signal);
+    expect(result).toEqual({
+      status: "existing",
+      pullRequest: {
+        number: 175,
+        url: pullRequest.url,
+        state: "open",
+        baseRepository: target.baseRepository,
+        baseBranch: target.baseBranch,
+        headOwner: "octocat",
+        headBranch: "feature/phase-7",
+      },
+    });
+  });
+
+  it("exposes PR node ID, base repository node ID, and renamed canonical repository from listActive", async () => {
+    const { port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          {
+            id: "PR_kwDORename12",
+            number: 12,
+            title: "Renamed repo PR",
+            isDraft: false,
+            author: { login: "octocat" },
+            updatedAt: "2026-08-22T07:00:00Z",
+            url: "https://github.com/new-org/new-repo/pull/12",
+            baseRefName: "development",
+            headRefName: "feature/rename",
+            statusCheckRollup: [{ name: "ci", conclusion: "SUCCESS", status: "COMPLETED" }],
+            reviewDecision: "APPROVED",
+            state: "OPEN",
+            mergeable: "MERGEABLE",
+          },
+        ]),
+      },
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              id: "R_kgDORenamedBase",
+              owner: { login: "new-org" },
+              name: "new-repo",
+              pullRequests: {
+                nodes: [{ number: 12, id: "PR_kwDORename12", isInMergeQueue: false }],
+              },
+            },
+          },
+        }),
+      },
+    ]);
+
+    const listed = await port.listActive(
+      { owner: "old-org", name: "old-repo", limit: 100 },
+      new AbortController().signal,
+    );
+    expect(listed).toMatchObject({
+      status: "ok",
+      rows: [
+        {
+          number: 12,
+          pullRequestNodeId: "PR_kwDORename12",
+          baseRepositoryNodeId: "R_kgDORenamedBase",
+          baseRepository: "new-org/new-repo",
+        },
+      ],
+    });
   });
 });

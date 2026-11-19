@@ -262,5 +262,5 @@ export * from "./browserPageScriptPolicy";
 export * from "./ownerBrowserPolicy";
 export * from "./listenerKeyTransition";
 export * from "./routineSchedule";
-
 export * from "./turnActivityTiming";
+export * from "./pullRequestIdentityPolicy";

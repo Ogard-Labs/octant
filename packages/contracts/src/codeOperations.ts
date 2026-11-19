@@ -77,6 +77,8 @@ import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention"
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
+import { GithubRepositoryNodeId } from "./githubCatalogue";
+import { GithubPullRequestNodeId } from "./pullRequestIdentity";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 import { StrictKeptProtections } from "./strictNotice";
 
@@ -1461,6 +1463,10 @@ const PullRequestResult = Schema.Union(
     baseBranch: GitBranchName,
     /** Whether GitHub holds it as a draft, when the host knows. */
     draft: Schema.optional(Schema.Boolean),
+    /** GitHub GraphQL node ID of the pull request, when available. */
+    pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
+    /** GitHub GraphQL node ID of the base repository, when available. */
+    baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-request-state"),
@@ -1586,6 +1592,10 @@ const PullRequestReviewResult = Schema.Union(
     checks: boundedReviewArray(CodePullRequestReviewCheck),
     reviews: boundedReviewArray(CodePullRequestReviewOpinion),
     comments: boundedReviewArray(CodePullRequestReviewComment),
+    /** GitHub GraphQL node ID of the pull request, when available. */
+    pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
+    /** GitHub GraphQL node ID of the base repository, when available. */
+    baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-request-review"),

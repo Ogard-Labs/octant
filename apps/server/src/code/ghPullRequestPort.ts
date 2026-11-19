@@ -18,6 +18,7 @@ const MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_GH_TIMEOUT_MS = 30_000;
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const BRANCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+const NODE_ID_PATTERN = /^[A-Za-z0-9+/=_-]{1,128}$/;
 
 export interface GhCommandResult {
   readonly exitCode: number;
@@ -75,6 +76,10 @@ export interface GhPullRequestIdentity {
   readonly baseBranch: string;
   readonly headOwner: string;
   readonly headBranch: string;
+  /** GitHub GraphQL node ID of the pull request, when available. */
+  readonly pullRequestNodeId?: string;
+  /** GitHub GraphQL node ID of the base repository (never a fork's head repository), when available. */
+  readonly baseRepositoryNodeId?: string;
 }
 
 export type GhPullRequestResult =
@@ -139,6 +144,8 @@ export type GhPullRequestReviewResult =
         deletions?: number;
         checkCounts?: PullRequestCheckCounts;
         merging?: PullRequestMerging;
+        pullRequestNodeId?: string;
+        baseRepositoryNodeId?: string;
       }>;
       description: string;
       diff: string;
@@ -205,6 +212,12 @@ export interface GhActivePullRequestRow {
   readonly checkCounts?: PullRequestCheckCounts;
   /** Set only on an open pull request that is on its way in. */
   readonly merging?: PullRequestMerging;
+  /** GitHub GraphQL node ID of the pull request, when available. */
+  readonly pullRequestNodeId?: string;
+  /** GitHub GraphQL node ID of the base repository, when available. */
+  readonly baseRepositoryNodeId?: string;
+  /** Canonical base repository (`owner/name`) reported by GitHub, when available. */
+  readonly baseRepository?: string;
 }
 
 export type GhActivePullRequestListResult =
@@ -219,6 +232,7 @@ export type GhActivePullRequestListResult =
   | { readonly status: "unauthorized" };
 
 const ACTIVE_PR_LIST_FIELDS = [
+  "id",
   "number",
   "title",
   "isDraft",
@@ -239,12 +253,21 @@ const ACTIVE_PR_LIST_FIELDS = [
 ].join(",");
 
 /**
- * `gh pr list` has no merge-queue field, so one read-only GraphQL query per
- * listed repository names the open pull requests that sit in the queue. Its
- * failure leaves "queued" unrecorded and never fails the list.
+ * `gh pr list` has no merge-queue field and no base repository node ID, so one
+ * read-only GraphQL query per listed repository reads the base repository node
+ * ID, canonical owner/name, and open pull-request node IDs / merge-queue state.
+ * Its failure leaves those fields unrecorded and never fails the list.
  */
 const MERGE_QUEUE_QUERY =
-  "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number isInMergeQueue}}}}";
+  "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id owner{login} name pullRequests(states:OPEN,first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number id isInMergeQueue}}}}";
+
+/**
+ * Read-only lookup of the base repository's stable GitHub node ID and canonical
+ * owner/name (which follows renames and transfers). Its failure leaves the
+ * repository node ID unrecorded and never fails a pull-request observation.
+ */
+const BASE_REPOSITORY_IDENTITY_QUERY =
+  "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id owner{login} name}}";
 
 const ISSUE_CLOSURE_QUERY =
   "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number title timelineItems(last:25,itemTypes:[CLOSED_EVENT]){pageInfo{hasPreviousPage} nodes{... on ClosedEvent{createdAt closer{... on PullRequest{number repository{owner{login} name}}}}}}}}}";
@@ -254,6 +277,7 @@ const MAX_ISSUE_CLOSURE_EVENTS = 25;
 const MAX_PR_REVIEW_ITEMS = 500;
 const MAX_PR_DESCRIPTION_BYTES = 256 * 1024;
 const PR_VIEW_FIELDS = [
+  "id",
   "number",
   "title",
   "state",
@@ -561,6 +585,7 @@ export class GhPullRequestPort {
     }
     if (diff === undefined) staleSections.push("diff");
 
+    const pullRequestNodeId = identity.pullRequestNodeId ?? detail?.pullRequestNodeId;
     return {
       status: "observed",
       freshness: staleSections.length === 0 ? "fresh" : "stale",
@@ -586,6 +611,10 @@ export class GhPullRequestPort {
           ? {}
           : { closingIssueNumbers: detail.closingIssues }),
         matchesDeliveryBranch: true,
+        ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
+        ...(identity.baseRepositoryNodeId === undefined
+          ? {}
+          : { baseRepositoryNodeId: identity.baseRepositoryNodeId }),
       },
       description: detail?.description ?? "",
       diff: diff?.text ?? "",
@@ -635,6 +664,10 @@ export class GhPullRequestPort {
 
     const url =
       detail?.url ?? `https://github.com/${request.owner}/${request.name}/pull/${request.number}`;
+    const baseRepositoryIdentity =
+      detail === undefined ? undefined : await this.#observeBaseRepository(repository, signal);
+    const canonicalBaseRepository =
+      baseRepositoryIdentity?.repository ?? repositoryFromPullRequestUrl(url) ?? repository;
 
     return {
       status: "observed",
@@ -646,7 +679,7 @@ export class GhPullRequestPort {
         url,
         title: detail?.title ?? "",
         state: detail?.state ?? "open",
-        baseRepository: repository,
+        baseRepository: canonicalBaseRepository,
         baseBranch: detail?.baseBranch ?? "",
         headRepository: detail?.headRepository ?? "",
         headBranch: detail?.headBranch ?? "",
@@ -665,6 +698,12 @@ export class GhPullRequestPort {
         ...(detail?.deletions === undefined ? {} : { deletions: detail.deletions }),
         ...(detail?.checkCounts === undefined ? {} : { checkCounts: detail.checkCounts }),
         ...(detail?.merging === undefined ? {} : { merging: detail.merging }),
+        ...(detail?.pullRequestNodeId === undefined
+          ? {}
+          : { pullRequestNodeId: detail.pullRequestNodeId }),
+        ...(baseRepositoryIdentity?.nodeId === undefined
+          ? {}
+          : { baseRepositoryNodeId: baseRepositoryIdentity.nodeId }),
       },
       description: detail?.description ?? "",
       diff: diff?.text ?? "",
@@ -787,26 +826,57 @@ export class GhPullRequestPort {
     const rows = decodeActivePullRequests(result.stdout);
     if (rows === undefined) return { status: "malformed" };
     if (!rows.some((row) => row.state === "open")) return { status: "ok", rows };
-    const queued = await this.#queuedNumbers(request, signal);
-    if (queued.size === 0) return { status: "ok", rows };
+    const metadata = await this.#activeListMetadata(request, signal);
+    if (
+      metadata.queued.size === 0 &&
+      metadata.baseRepositoryNodeId === undefined &&
+      metadata.baseRepository === undefined &&
+      metadata.pullRequestNodeIds.size === 0
+    ) {
+      return { status: "ok", rows };
+    }
     return {
       status: "ok",
-      rows: rows.map((row) =>
-        row.state === "open" && queued.has(row.number) ? { ...row, merging: "queued" } : row,
-      ),
+      rows: rows.map((row) => {
+        const pullRequestNodeId =
+          row.pullRequestNodeId ?? metadata.pullRequestNodeIds.get(row.number);
+        const canonicalBaseRepository =
+          metadata.baseRepository ?? repositoryFromPullRequestUrl(row.url);
+        return {
+          ...row,
+          ...(row.state === "open" && metadata.queued.has(row.number)
+            ? { merging: "queued" as const }
+            : {}),
+          ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
+          ...(metadata.baseRepositoryNodeId === undefined
+            ? {}
+            : { baseRepositoryNodeId: metadata.baseRepositoryNodeId }),
+          ...(canonicalBaseRepository === undefined
+            ? {}
+            : { baseRepository: canonicalBaseRepository }),
+        };
+      }),
     };
   }
 
   /**
-   * Numbers of open pull requests in the repository's merge queue. Any failure
-   * (command, timeout, shape) answers an empty set: "queued" is then simply not
-   * recorded and the list read stands.
+   * Read-only GraphQL metadata for one listed repository: the base repository's
+   * node ID and canonical owner/name, plus open pull-request node IDs and
+   * merge-queue membership. Any failure answers empty metadata so the list
+   * read stands unchanged.
    */
-  async #queuedNumbers(
+  async #activeListMetadata(
     request: { readonly owner: string; readonly name: string },
     signal: AbortSignal,
-  ): Promise<ReadonlySet<number>> {
+  ): Promise<{
+    readonly queued: ReadonlySet<number>;
+    readonly pullRequestNodeIds: ReadonlyMap<number, string>;
+    readonly baseRepositoryNodeId?: string;
+    readonly baseRepository?: string;
+  }> {
     const queued = new Set<number>();
+    const pullRequestNodeIds = new Map<number, string>();
+    const empty = { queued, pullRequestNodeIds };
     let result: GhCommandResult;
     try {
       result = await this.#command.run(
@@ -826,26 +896,83 @@ export class GhPullRequestPort {
         signal,
       );
     } catch {
-      return queued;
+      return empty;
     }
-    if (result.timedOut === true || result.exitCode !== 0) return queued;
+    if (result.timedOut === true || result.exitCode !== 0) return empty;
     let value: unknown;
     try {
       value = JSON.parse(result.stdout);
     } catch {
-      return queued;
+      return empty;
     }
     const data = isRecord(value) ? value.data : undefined;
     const repository = isRecord(data) ? data.repository : undefined;
-    const pullRequests = isRecord(repository) ? repository.pullRequests : undefined;
+    if (!isRecord(repository)) return empty;
+    const baseRepositoryNodeId = validNodeId(repository.id);
+    const baseRepository = canonicalRepositoryFromGraphql(repository);
+    const pullRequests = isRecord(repository.pullRequests) ? repository.pullRequests : undefined;
     const nodes = isRecord(pullRequests) ? pullRequests.nodes : undefined;
-    if (!Array.isArray(nodes)) return queued;
-    for (const node of nodes) {
-      if (isRecord(node) && node.isInMergeQueue === true && typeof node.number === "number") {
-        queued.add(node.number);
+    if (Array.isArray(nodes)) {
+      for (const node of nodes) {
+        if (!isRecord(node) || typeof node.number !== "number") continue;
+        if (node.isInMergeQueue === true) queued.add(node.number);
+        const nodeId = validNodeId(node.id);
+        if (nodeId !== undefined) pullRequestNodeIds.set(node.number, nodeId);
       }
     }
-    return queued;
+    return {
+      queued,
+      pullRequestNodeIds,
+      ...(baseRepositoryNodeId === undefined ? {} : { baseRepositoryNodeId }),
+      ...(baseRepository === undefined ? {} : { baseRepository }),
+    };
+  }
+
+  /**
+   * Best-effort lookup of the base repository's GitHub node ID and canonical
+   * owner/name. Never fails a pull-request observation when offline or limited.
+   */
+  async #observeBaseRepository(
+    baseRepository: string,
+    signal: AbortSignal,
+  ): Promise<{ readonly nodeId: string; readonly repository?: string } | undefined> {
+    if (!validRepository(baseRepository)) return undefined;
+    const slash = baseRepository.indexOf("/");
+    const owner = baseRepository.slice(0, slash);
+    const name = baseRepository.slice(slash + 1);
+    let result: GhCommandResult;
+    try {
+      result = await this.#command.run(
+        [
+          "api",
+          "graphql",
+          "-f",
+          `query=${BASE_REPOSITORY_IDENTITY_QUERY}`,
+          "-f",
+          `owner=${owner}`,
+          "-f",
+          `name=${name}`,
+        ],
+        { environment: this.#environment, stdin: undefined },
+        signal,
+      );
+    } catch {
+      return undefined;
+    }
+    if (result.timedOut === true || result.exitCode !== 0) return undefined;
+    let value: unknown;
+    try {
+      value = JSON.parse(result.stdout);
+    } catch {
+      return undefined;
+    }
+    const data = isRecord(value) ? value.data : undefined;
+    const repository = isRecord(data) ? data.repository : undefined;
+    if (!isRecord(repository)) return undefined;
+    const nodeId = validNodeId(repository.id);
+    if (nodeId === undefined) return undefined;
+    const canonical = canonicalRepositoryFromGraphql(repository);
+    return { nodeId, ...(canonical === undefined ? {} : { repository: canonical }) };
   }
 
   /**
@@ -967,7 +1094,7 @@ export class GhPullRequestPort {
           "--limit",
           "2",
           "--json",
-          "number,url,state,baseRefName,headRefName,headRepositoryOwner",
+          "id,number,url,state,baseRefName,headRefName,headRepositoryOwner",
         ],
         { environment: this.#environment, stdin: undefined },
         signal,
@@ -979,9 +1106,28 @@ export class GhPullRequestPort {
       return { status: "unavailable", code: "pr-observation-unavailable" };
     }
     const decoded = decodePullRequests(result.stdout, request, target, state);
-    return decoded === undefined
-      ? { status: "unavailable", code: "pr-observation-unavailable" }
-      : { status: "observed", pullRequest: decoded ?? undefined };
+    if (decoded === undefined) {
+      return { status: "unavailable", code: "pr-observation-unavailable" };
+    }
+    if (decoded === null) return { status: "observed", pullRequest: undefined };
+    const baseRepositoryIdentity = await this.#observeBaseRepository(
+      request.baseRepository,
+      signal,
+    );
+    const canonicalBaseRepository =
+      baseRepositoryIdentity?.repository ??
+      repositoryFromPullRequestUrl(decoded.url) ??
+      decoded.baseRepository;
+    return {
+      status: "observed",
+      pullRequest: {
+        ...decoded,
+        baseRepository: canonicalBaseRepository,
+        ...(baseRepositoryIdentity === undefined
+          ? {}
+          : { baseRepositoryNodeId: baseRepositoryIdentity.nodeId }),
+      },
+    };
   }
 }
 
@@ -1083,17 +1229,15 @@ function decodePullRequests(
   if (!Array.isArray(value) || value.length > 1) return undefined;
   if (value.length === 0) return null;
   const item = value[0];
-  if (
-    !isRecord(item) ||
-    !exactKeys(item, [
-      "number",
-      "url",
-      "state",
-      "baseRefName",
-      "headRefName",
-      "headRepositoryOwner",
-    ])
-  )
+  const baseKeys = [
+    "number",
+    "url",
+    "state",
+    "baseRefName",
+    "headRefName",
+    "headRepositoryOwner",
+  ] as const;
+  if (!isRecord(item) || (!exactKeys(item, baseKeys) && !exactKeys(item, ["id", ...baseKeys])))
     return undefined;
   const owner = item.headRepositoryOwner;
   if (
@@ -1111,6 +1255,7 @@ function decodePullRequests(
   ) {
     return undefined;
   }
+  const pullRequestNodeId = validNodeId(item.id);
   return {
     number: item.number as number,
     url: item.url,
@@ -1121,10 +1266,12 @@ function decodePullRequests(
     baseBranch: item.baseRefName,
     headOwner: target.headOwner,
     headBranch: target.headBranch,
+    ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
   };
 }
 
 interface GhPullRequestReviewDetail {
+  readonly pullRequestNodeId?: string;
   readonly url: string;
   readonly title: string;
   readonly state: "open" | "merged" | "closed" | "draft";
@@ -1194,7 +1341,9 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
   if (url === "" || baseBranch === "" || headBranch === "" || state === undefined) {
     return undefined;
   }
+  const pullRequestNodeId = validNodeId(value.id);
   return {
+    ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
     url,
     title: clampBytes(value.title, 1_024),
     state,
@@ -1296,6 +1445,7 @@ function decodeActivePullRequests(
     ) {
       return undefined;
     }
+    const pullRequestNodeId = validNodeId(item.id);
     rows.push({
       number,
       title,
@@ -1313,6 +1463,7 @@ function decodeActivePullRequests(
       failingChecks: decodeFailingChecks(item.statusCheckRollup),
       crossRepository: item.isCrossRepository === true,
       ...optionalFacts(item, state),
+      ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
     });
   }
   return rows;
@@ -1696,6 +1847,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const keys = Object.keys(value);
   return keys.length === expected.length && keys.every((key) => expected.includes(key));
+}
+
+function validNodeId(value: unknown): string | undefined {
+  return typeof value === "string" && NODE_ID_PATTERN.test(value) ? value : undefined;
+}
+
+function canonicalRepositoryFromGraphql(repository: Record<string, unknown>): string | undefined {
+  const owner = isRecord(repository.owner) ? repository.owner.login : undefined;
+  const name = repository.name;
+  if (typeof owner !== "string" || typeof name !== "string") return undefined;
+  const full = `${owner}/${name}`;
+  return validRepository(full) ? full : undefined;
+}
+
+function repositoryFromPullRequestUrl(url: string): string | undefined {
+  const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/\d+(?:\/.*)?$/.exec(url);
+  if (match === null) return undefined;
+  const full = `${match[1]}/${match[2]}`;
+  return validRepository(full) ? full : undefined;
 }
 
 async function runGh(

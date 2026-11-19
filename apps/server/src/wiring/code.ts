@@ -72,6 +72,11 @@ import {
 } from "../code/codeProjectPullRequestActionService";
 import { GhPullRequestActionPort } from "../code/ghPullRequestActionPort";
 import { createGhCommandPort, GhPullRequestPort } from "../code/ghPullRequestPort";
+import {
+  PullRequestLinkService,
+  collectLegacyPullRequestLinks,
+  type PullRequestLinkSwitchReconciler,
+} from "../code/pullRequestLinkService";
 import { createFileHelperProcessTransport } from "../code/fileHelperProcessTransport";
 import { FileOperationPort } from "../code/fileOperationPort";
 import { createManagedWorktreeNodePorts } from "../code/managedWorktreeNodePorts";
@@ -1163,6 +1168,35 @@ export function wireCode(deps: CodeDependencies) {
     ): void => {
       pullRequestSnapshotListeners.push(listener);
     };
+    // The switch service is composed in `wireCodeRuntime` after this area; it
+    // binds here before any tick or refresh can reconcile duplicate links.
+    let pullRequestSwitchReconciler: PullRequestLinkSwitchReconciler | undefined;
+    const bindPullRequestSwitchReconciler = (reconciler: PullRequestLinkSwitchReconciler): void => {
+      pullRequestSwitchReconciler = reconciler;
+    };
+    const pullRequestLinkService = new PullRequestLinkService({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      switchReconciler: {
+        reconcileDuplicateLinks: (input) =>
+          pullRequestSwitchReconciler === undefined
+            ? Promise.resolve([])
+            : pullRequestSwitchReconciler.reconcileDuplicateLinks(input),
+      },
+      legacyLinks: () =>
+        collectLegacyPullRequestLinks({
+          journal: persistence.journal,
+          threads: persistence.readCodeThreads().map((thread) => {
+            const history = codeBoardEventStore.summaryForThread(thread.id);
+            return {
+              threadId: thread.id,
+              projectId: thread.projectId,
+              frames: history.status === "ok" ? history.frames : [],
+            };
+          }),
+        }),
+    });
     const projectPullRequestService = new CodeProjectPullRequestService({
       projects: projectService,
       // Only the remotes: the full observation also diffs the working tree
@@ -1218,6 +1252,7 @@ export function wireCode(deps: CodeDependencies) {
       snapshotStore: new CodeProjectPullRequestSnapshotStore(
         join(persistence.dataDirectory, "code", "pull-request-snapshot.json"),
       ),
+      pullRequestLinks: pullRequestLinkService,
       onSnapshotRefreshed: (rows) => {
         for (const listener of pullRequestSnapshotListeners) listener(rows);
       },
@@ -1295,6 +1330,8 @@ export function wireCode(deps: CodeDependencies) {
           canAccessCodeProject(windowId, repository.projectId),
         ),
       onPullRequestSnapshotRefreshed,
+      bindPullRequestSwitchReconciler,
+      pullRequestLinkService,
       projectPullRequestActionService,
       projectPullRequestCadence,
       projectPullRequestService,
