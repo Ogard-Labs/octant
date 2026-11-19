@@ -97,8 +97,6 @@ import {
 } from "../ui/icons";
 import {
   useCallback,
-  lazy,
-  Suspense,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -121,6 +119,7 @@ import {
   type ComposerProjectGithubSource,
   type ComposerProjectEntry,
 } from "../projects/ComposerProjectSelector";
+import { ProjectCreateDialog } from "../projects/ProjectCreateDialog";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -344,12 +343,6 @@ export interface DraftThreadWorkspaceProps {
  * rather than a label to finish; the card's second line says what the agent
  * will do, so nobody has to choose one to find out.
  */
-const ProjectCreateDialog = lazy(() =>
-  import("../projects/ProjectCreateDialog").then((module) => ({
-    default: module.ProjectCreateDialog,
-  })),
-);
-
 const CODE_SUGGESTIONS: ReadonlyArray<CodeComposerSuggestion> = [
   {
     id: "fix-failing-test",
@@ -952,34 +945,32 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   const addFolderDialog = (
     <OctantDialogPresence>
       {addFolderOpen && props.onCreateProject !== undefined ? (
-        <Suspense fallback={null}>
-          <ProjectCreateDialog
-            {...(props.folderBrowseClient === undefined
-              ? {}
-              : { folderBrowseClient: props.folderBrowseClient })}
-            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-            {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
-            {...(props.mode === "code" &&
-            props.githubClient !== undefined &&
-            props.githubCloneClient !== undefined &&
-            props.githubPluginEnabled !== false
-              ? {
-                  github: {
-                    client: props.githubClient,
-                    cloneClient: props.githubCloneClient,
-                    hostName: githubHostName,
-                  },
-                }
-              : {})}
-            mode={props.mode}
-            onClose={() => setAddFolderOpen(false)}
-            onCreate={props.onCreateProject}
-            onCreated={(projectId, _mode, name) => {
-              selectProject(projectId);
-              setSelectedProjectLabel(name);
-            }}
-          />
-        </Suspense>
+        <ProjectCreateDialog
+          {...(props.folderBrowseClient === undefined
+            ? {}
+            : { folderBrowseClient: props.folderBrowseClient })}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
+          {...(props.mode === "code" &&
+          props.githubClient !== undefined &&
+          props.githubCloneClient !== undefined &&
+          props.githubPluginEnabled !== false
+            ? {
+                github: {
+                  client: props.githubClient,
+                  cloneClient: props.githubCloneClient,
+                  hostName: githubHostName,
+                },
+              }
+            : {})}
+          mode={props.mode}
+          onClose={() => setAddFolderOpen(false)}
+          onCreate={props.onCreateProject}
+          onCreated={(projectId, _mode, name) => {
+            selectProject(projectId);
+            setSelectedProjectLabel(name);
+          }}
+        />
       ) : null}
     </OctantDialogPresence>
   );
