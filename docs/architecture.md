@@ -6727,7 +6727,8 @@ ls-remote` against the thread's remote and the GitHub reads they already
   said nothing to someone who did not. When the latest reply predicted the
   person's next message, or suggested a next message for this thread, the
   empty composer shows it instead and Tab takes it; the prediction leads,
-  and it is gone once the person sends anything. A start screen's composer asks "Ask anything…" in every mode, because a
+  and it is gone once the person sends anything. In a mode where Suggest my
+  next message is off, Tab offers neither. A start screen's composer asks "Ask anything…" in every mode, because a
   first-time person has not started a conversation to reply to. Neither
   changes while a response runs, and accessible input labels remain stable.
 
@@ -10885,13 +10886,20 @@ the model at another size.
 
 Follow-up suggestions are every provider's, not the harness's
 (`apps/server/src/followUps`). Every Chat, Work, and Code turn, on any
-provider, carries one fixed instructions block that lets the model end a reply
+provider, carries one fixed instructions block that has the model end a reply
 with an `octant-follow-ups` fenced block: up to three suggestions, and `next`,
 its prediction of the message the person will send next, in their words on
 one line (at most 280 characters; a longer or multi-line one is dropped
-whole). Every reply may carry a prediction, where most carry no suggestion, so
-the empty composer usually has something to offer at no extra request; an
-unreadable suggestion list leaves the prediction standing.
+whole). `next` is asked for as required, not offered: worded as optional,
+Haiku wrote no block on any of three ordinary prompts and Sonnet on one of
+three; worded as required, the two wrote one on seven of eight, the miss a
+conversation that had ended (measured 2026-11-18). So the empty composer
+usually has something to offer at no extra request; an unreadable suggestion
+list leaves the prediction standing. Settings › General › Composer's **Suggest
+my next message** (`nextMessageSuggestions` in shell settings: a switch and the
+modes it covers, absent meaning on in every mode) is read by the host on each
+turn: in a mode where it is off the turn carries a second fixed block that asks
+for suggestions only, and a prediction the reply still carries is not kept.
 `ThreadFollowUpSuggestionStore` journals the latest reply's set and prediction
 per thread (`thread-follow-up-suggestions`), retires them when a later reply
 suggests nothing, and replays sets a harness session journaled earlier. A turn

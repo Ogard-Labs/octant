@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseFollowUpSuggestions } from "./followUpSuggestionParsing";
+import { followUpSuggestionInstructionsFor } from "./followUpSuggestionInstructions";
 
 const turnId = "00000000-0000-4000-8000-000000000031" as never;
 const uuid = (() => {
@@ -78,5 +79,12 @@ describe("follow-up suggestions in a reply", () => {
         }),
       ).toEqual({ followUps: undefined, nextMessage: undefined });
     }
+  });
+
+  it("asks the model for a next message only where the person wants one", () => {
+    expect(followUpSuggestionInstructionsFor(true).text).toContain('"next"');
+    expect(followUpSuggestionInstructionsFor(false).text).not.toContain('"next"');
+    // Both still offer task suggestions in the same block.
+    expect(followUpSuggestionInstructionsFor(false).text).toContain("octant-follow-ups");
   });
 });

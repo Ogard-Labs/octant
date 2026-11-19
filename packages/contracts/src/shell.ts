@@ -713,6 +713,16 @@ export const RememberedBrowserTransfer = Schema.Struct({
   .pipe(Schema.filter((entry) => entry.profile === undefined || entry.privatePage !== true));
 export type RememberedBrowserTransfer = typeof RememberedBrowserTransfer.Type;
 
+/** The next-message suggestion switch and the modes it covers. */
+export const NextMessageSuggestionsSetting = Schema.Struct({
+  enabled: Schema.Boolean,
+  modes: Schema.Array(OctantMode).pipe(
+    Schema.maxItems(3),
+    Schema.filter((modes) => new Set(modes).size === modes.length),
+  ),
+}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
+export type NextMessageSuggestionsSetting = typeof NextMessageSuggestionsSetting.Type;
+
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
@@ -729,6 +739,11 @@ export const ShellSettings = Schema.Struct({
   defaultFolder: Schema.optional(DefaultFolder),
   /** Absent preserves streaming replies for existing installations. */
   streamReplies: Schema.optional(Schema.Boolean),
+  /**
+   * Whether a reply predicts the person's next message for the composer's Tab,
+   * and in which modes. Absent means on in every mode.
+   */
+  nextMessageSuggestions: Schema.optional(NextMessageSuggestionsSetting),
   sidebarWidth: SidebarWidth,
   contextSidebarWidth: ContextSidebarWidth,
   lastContextSurface: Schema.NullOr(ContextSurfaceId),
