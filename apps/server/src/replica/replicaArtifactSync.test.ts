@@ -34,6 +34,7 @@ import {
   registerCanvasChoiceAnswerEvents,
 } from "../canvas/canvasChoiceAnswerService";
 import { CanvasCommentService, registerCanvasCommentEvents } from "../canvas/canvasCommentService";
+import { MachineChangeFeed } from "../machineChangeFeed";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
@@ -2606,7 +2607,19 @@ describe("Canvas decision-form answers through the replica", () => {
       },
     ]);
     await studio.sync.drain();
+    const feed = new MachineChangeFeed();
+    const unsubscribe = laptop.journal.subscribeCommitted((append) =>
+      feed.publishCommitted(append),
+    );
+    const listening = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: listening.signal });
     await laptop.sync.pull();
+    await expect(stream.next()).resolves.toMatchObject({
+      done: false,
+      value: { kind: "changed", topics: ["canvas-choice-answers"] },
+    });
+    listening.abort();
+    unsubscribe();
 
     // Answers land on the aggregate even before the Canvas is open locally,
     // and appear as soon as the Canvas opens.
@@ -2980,5 +2993,127 @@ describe("Canvas decision-form answers through the replica", () => {
     });
     studio.artifactProjection.evict([String(ids.canvas)]);
     expect(eventsNamed(studio, REPLICA_ARTIFACT_EVENT_NAMES.choiceAnswerQueued)).toEqual([]);
+  });
+
+  it("retires a recovered local upload on pull so an earlier-clock causal reply wins and nothing is republished", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const studio = computer("Studio Mac", shared, { clock: () => "2026-10-08T10:10:00.000Z" });
+    const laptop = computer("MacBook Air", shared, { clock: () => "2026-10-08T10:09:00.000Z" });
+    await studio.turnSyncOn();
+    await laptop.turnSyncOn();
+    expectKind(
+      await studio.membership.execute({ kind: "create-replica", displayName: studio.name }),
+      "replica-created",
+    );
+    await joinThrough(laptop, studio);
+
+    const question = decisionQuestion();
+    const fp = canvasChoiceQuestionFingerprint(question);
+    const v1 = decisionVersion({ versionId: ids.v1, sequence: 1, question });
+    await studio.commit(v1);
+    await laptop.sync.pull();
+    bindOn(laptop, v1);
+
+    // Studio queues Monday at 10:10 and uploads both store files, then stops
+    // before journaling its `published` receipt.
+    const crashingStudio = computer("Studio Mac", shared, {
+      disk: studio.disk,
+      clock: () => "2026-10-08T10:10:00.000Z",
+      stopAfter: { eventName: REPLICA_ARTIFACT_EVENT_NAMES.choiceAnswerQueued, times: 1 },
+    });
+    bindOn(crashingStudio, v1);
+    crashingStudio.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: ["monday"],
+        note: "Initial answer",
+      },
+    ]);
+    await crashingStudio.sync.drain().catch(() => undefined);
+    expect(crashingStudio.artifactProjection.state().queue).toHaveLength(1);
+
+    // Laptop pulls Studio's landed upload and replies Tuesday with a slower clock (10:09).
+    await laptop.sync.pull();
+    expect(laptop.answersOf(ids.canvas).answers[0]?.selectedOptionIds).toEqual(["monday"]);
+    laptop.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: fp,
+        selectedOptionIds: ["tuesday"],
+        note: "Causal follow-up",
+      },
+    ]);
+    await laptop.sync.drain();
+
+    // Studio restarts, pulls both its own landed slot and Laptop's causal reply,
+    // settles to Tuesday, and drains without republishing Monday at a new slot.
+    const recoveredStudio = computer("Studio Mac", shared, {
+      disk: studio.disk,
+      clock: () => "2026-10-08T10:10:00.000Z",
+    });
+    bindOn(recoveredStudio, v1);
+    const publishedBefore = eventsNamed(
+      recoveredStudio,
+      REPLICA_ARTIFACT_EVENT_NAMES.published,
+    ).length;
+    await recoveredStudio.sync.sync();
+
+    expect(recoveredStudio.answersOf(ids.canvas).answers[0]).toMatchObject({
+      selectedOptionIds: ["tuesday"],
+      note: "Causal follow-up",
+    });
+    expect(recoveredStudio.artifactProjection.state().queue).toEqual([]);
+    expect(eventsNamed(recoveredStudio, REPLICA_ARTIFACT_EVENT_NAMES.published)).toHaveLength(
+      publishedBefore,
+    );
+
+    // Pulling again on Laptop keeps Tuesday.
+    await laptop.sync.pull();
+    expect(laptop.answersOf(ids.canvas).answers[0]).toMatchObject({
+      selectedOptionIds: ["tuesday"],
+      note: "Causal follow-up",
+    });
+  });
+
+  it("refuses to publish an answer whose question or option identifier carries a secret or path", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio } = await pair(shared);
+    const v1 = decisionVersion({ versionId: ids.v1, sequence: 1 });
+    await studio.commit(v1);
+
+    // Local revision with a secret-bearing option id is refused from replica
+    // publication, so selecting it on an already-synced Canvas must not leak it.
+    const secretQuestion = decisionQuestion("Which token?", [
+      { id: "/Users/alice/private/id_rsa", label: "Primary" },
+    ]);
+    const secretVersion = decisionVersion({
+      versionId: ids.v2a,
+      sequence: 2,
+      question: secretQuestion,
+    });
+    studio.canvases.set(String(ids.canvas), [v1, secretVersion]);
+    studio.answer(ids.canvas, [
+      {
+        kind: "set",
+        blockId: "decisions",
+        questionId: secretQuestion.id,
+        questionFingerprint: canvasChoiceQuestionFingerprint(secretQuestion),
+        selectedOptionIds: ["/Users/alice/private/id_rsa"],
+      },
+    ]);
+    expect(eventsNamed(studio, REPLICA_ARTIFACT_EVENT_NAMES.choiceAnswerQueued)).toEqual([]);
+    expect(eventsNamed(studio, REPLICA_ARTIFACT_EVENT_NAMES.publishRefused)).toContainEqual({
+      eventName: REPLICA_ARTIFACT_EVENT_NAMES.publishRefused,
+      payload: {
+        canvasId: ids.canvas,
+        kind: "canvas-choice-answer",
+        reason: "unsafe-content",
+      },
+    });
   });
 });

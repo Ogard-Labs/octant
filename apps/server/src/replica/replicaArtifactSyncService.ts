@@ -123,8 +123,16 @@ export function replicaCommentTextLeavesSafely(change: ReplicaCommentChange): bo
 
 /** Whether a decision-form answer or note may leave this host, or come into it. */
 export function replicaChoiceAnswerTextLeavesSafely(change: ReplicaChoiceAnswerChange): boolean {
-  if (change.kind === "clear") return true;
+  if (change.kind === "clear") {
+    return (
+      isCanvasShareSafeText(String(change.blockId)) && isCanvasShareSafeText(change.questionId)
+    );
+  }
   const { answer } = change;
+  if (!isCanvasShareSafeText(String(answer.blockId)) || !isCanvasShareSafeText(answer.questionId)) {
+    return false;
+  }
+  if (!answer.selectedOptionIds.every(isCanvasShareSafeText)) return false;
   if (answer.customAnswer !== undefined && !isCanvasShareSafeText(answer.customAnswer)) {
     return false;
   }

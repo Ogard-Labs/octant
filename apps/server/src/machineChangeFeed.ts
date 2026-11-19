@@ -16,6 +16,7 @@ import {
   type MachineChangeFrame,
   type MachineChangeTopic,
 } from "@octant/contracts/machine-changes";
+import { CANVAS_CHOICE_ANSWER_AGGREGATE_TYPE } from "./canvas/canvasChoiceAnswerService";
 
 interface Subscriber {
   readonly queue: MachineChangeFrame[];
@@ -264,6 +265,9 @@ function topicsForEvent(event: {
   if (aggregateType === "thread-message-queue") return ["thread-message-queue"];
   if (aggregateType === TODO_AGGREGATE_TYPE || aggregateType === TODO_LIST_HOST_AGGREGATE_TYPE) {
     return ["todos"];
+  }
+  if (aggregateType === CANVAS_CHOICE_ANSWER_AGGREGATE_TYPE) {
+    return ["canvas-choice-answers"];
   }
   // A thread's wake-ups sit with its other scheduled follow-ups.
   if (aggregateType === "thread-wakeup") return ["thread-follow-ups"];

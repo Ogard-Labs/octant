@@ -308,6 +308,7 @@ describe("MachineChangeFeed", () => {
         { aggregateType: "thread-follow-up-suggestions" },
         { aggregateType: "thread-message-queue" },
         { aggregateType: "todo" },
+        { aggregateType: "canvas-choice-answers" },
       ],
     });
 
@@ -315,7 +316,13 @@ describe("MachineChangeFeed", () => {
       value: {
         kind: "changed",
         sequence: 1,
-        topics: ["browser-captures", "thread-follow-ups", "thread-message-queue", "todos"],
+        topics: [
+          "browser-captures",
+          "thread-follow-ups",
+          "thread-message-queue",
+          "todos",
+          "canvas-choice-answers",
+        ],
       },
     });
     controller.abort();
@@ -421,6 +428,7 @@ describe("MachineChangeFeed", () => {
       "thread-follow-ups",
       "thread-message-queue",
       "todos",
+      "canvas-choice-answers",
     ]);
 
     await expect(stream.next()).resolves.toMatchObject({
@@ -440,6 +448,7 @@ describe("MachineChangeFeed", () => {
           "thread-follow-ups",
           "thread-message-queue",
           "todos",
+          "canvas-choice-answers",
         ],
       },
     });

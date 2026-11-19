@@ -13,7 +13,11 @@
  * revises it here, so it has no Canvas aggregate yet.
  */
 
-import { decodeReplicaArtifactEntry, decodeReplicaEntryText } from "@octant/contracts";
+import {
+  decodeReplicaArtifactEntry,
+  decodeReplicaEntryText,
+  replicaChoiceAnswerContentPreimage,
+} from "@octant/contracts";
 import type { ArtifactBundle } from "@octant/contracts/artifact-bundle";
 import type { CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
 import type {
@@ -60,7 +64,11 @@ import {
 import {
   REPLICA_MEMBERSHIP_AGGREGATE_TYPE,
   REPLICA_MEMBERSHIP_EVENT_NAMES,
+  ReplicaIdentityCreated,
 } from "./replicaMembershipProjection";
+import { Schema } from "effect";
+
+const decodeIdentityCreated = Schema.decodeUnknownSync(ReplicaIdentityCreated);
 
 /** The computer that wrote an entry, as the entry names it. */
 export interface ReplicaEntryProvenance {
@@ -185,6 +193,20 @@ function choiceAnswerKey(canvasId: CanvasId, blockId: string, questionId: string
   return `${String(canvasId)}\0${blockId}\0${questionId}`;
 }
 
+function sameSlotList(
+  left: ReadonlyArray<ReplicaSlotRef>,
+  right: ReadonlyArray<ReplicaSlotRef>,
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (slot, index) =>
+        String(slot.instanceId) === String(right[index]?.instanceId) &&
+        slot.sequence === right[index]?.sequence,
+    )
+  );
+}
+
 export class ReplicaArtifactProjection implements Projection {
   readonly name = "replica-artifacts";
   readonly dependencies: ReadonlyArray<string> = [];
@@ -200,6 +222,8 @@ export class ReplicaArtifactProjection implements Projection {
   readonly #choiceAnswers = new Map<string, Map<string, ReplicaSlotRef>>();
   /** By `(canvasId, blockId, questionId)`: every published or pulled choice-answer change. */
   readonly #choiceAnswerHistory = new Map<string, ReplicaChoiceAnswerRecord[]>();
+  /** This host's current replica identity, used to retire a recovered upload from `#queued`. */
+  #localInstanceId: ReplicaInstanceId | undefined;
   /** By identity; a restore id names which one a later event continues. */
   readonly #restores = new Map<string, ReplicaRestoreState & { readonly instanceId: string }>();
   readonly #backfills = new Map<
@@ -219,6 +243,7 @@ export class ReplicaArtifactProjection implements Projection {
     this.#comments.clear();
     this.#choiceAnswers.clear();
     this.#choiceAnswerHistory.clear();
+    this.#localInstanceId = undefined;
     this.#restores.clear();
     this.#backfills.clear();
     this.#state = undefined;
@@ -230,9 +255,14 @@ export class ReplicaArtifactProjection implements Projection {
     }
     const names = REPLICA_ARTIFACT_EVENT_NAMES;
     switch (event.eventName) {
+      case REPLICA_MEMBERSHIP_EVENT_NAMES.identityCreated: {
+        this.#localInstanceId = decodeIdentityCreated(event.payload).instanceId;
+        break;
+      }
       case REPLICA_MEMBERSHIP_EVENT_NAMES.left:
         // What was queued would publish under the identity that left, or
         // under the next one into another store. The versions stay here.
+        this.#localInstanceId = undefined;
         this.#queued.clear();
         this.#backfills.clear();
         break;
@@ -392,6 +422,12 @@ export class ReplicaArtifactProjection implements Projection {
           break;
         }
         if (entry.kind === "canvas-choice-answer") {
+          if (
+            this.#localInstanceId !== undefined &&
+            String(entry.origin.instanceId) === String(this.#localInstanceId)
+          ) {
+            this.#retireRecoveredChoiceAnswer(entry.artifact.canvasId, entry.after, entry.change);
+          }
           this.#keepChoiceAnswer(
             entry.artifact.canvasId,
             entry.origin.instanceId,
@@ -467,6 +503,29 @@ export class ReplicaArtifactProjection implements Projection {
       byWriter.set(String(instanceId), { instanceId, sequence });
     }
     this.#comments.set(String(canvasId), byWriter);
+  }
+
+  /**
+   * When an upload of this host's own choice-answer entry landed in the store
+   * before the host stopped (so no `published` receipt was journaled), pulling
+   * that slot back retires its pending duplicate from `#queued`. Leaving the
+   * unsequenced duplicate queued would let it outrank a causal reply with an
+   * earlier clock and cause the next drain to republish it at a new sequence.
+   */
+  #retireRecoveredChoiceAnswer(
+    canvasId: CanvasId,
+    after: ReadonlyArray<ReplicaSlotRef>,
+    change: ReplicaChoiceAnswerChange,
+  ): void {
+    const preimage = replicaChoiceAnswerContentPreimage(change);
+    for (const [queueId, queued] of this.#queued) {
+      if (queued.kind !== "canvas-choice-answer") continue;
+      if (String(queued.artifact.canvasId) !== String(canvasId)) continue;
+      if (!sameSlotList(queued.after, after)) continue;
+      if (replicaChoiceAnswerContentPreimage(queued.change) !== preimage) continue;
+      this.#queued.delete(queueId);
+      return;
+    }
   }
 
   #keepChoiceAnswer(

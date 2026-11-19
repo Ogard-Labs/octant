@@ -16,6 +16,7 @@ export interface MachineChangeRevisions {
   readonly threadFollowUps: number;
   readonly threadMessageQueue: number;
   readonly todos: number;
+  readonly canvasChoiceAnswers: number;
 }
 
 const INITIAL_REVISIONS: MachineChangeRevisions = {
@@ -31,6 +32,7 @@ const INITIAL_REVISIONS: MachineChangeRevisions = {
   threadFollowUps: 0,
   threadMessageQueue: 0,
   todos: 0,
+  canvasChoiceAnswers: 0,
 };
 
 /**
@@ -105,6 +107,7 @@ async function consumeMachineChanges(
                 "thread-follow-ups",
                 "thread-message-queue",
                 "todos",
+                "canvas-choice-answers",
               ]
             : frame.topics,
         );
@@ -145,5 +148,6 @@ function advanceRevisions(
     threadFollowUps: current.threadFollowUps + Number(changed.has("thread-follow-ups")),
     threadMessageQueue: current.threadMessageQueue + Number(changed.has("thread-message-queue")),
     todos: current.todos + Number(changed.has("todos")),
+    canvasChoiceAnswers: current.canvasChoiceAnswers + Number(changed.has("canvas-choice-answers")),
   };
 }
