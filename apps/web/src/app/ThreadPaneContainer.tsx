@@ -1020,6 +1020,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     const destinationHostId = refuseUnlessCreatableDestination({
                       action: "create-project",
                       requiredCapability: mode,
+                      onlyThisHost: true,
                       onRefuse: (reason) => setDraftError(reason),
                     });
                     if (destinationHostId === undefined) {
@@ -1037,6 +1038,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     const destinationHostId = refuseUnlessCreatableDestination({
                       action: "create-project",
                       requiredCapability: mode,
+                      onlyThisHost: true,
                       onRefuse: (reason) => setDraftError(reason),
                     });
                     if (destinationHostId === undefined) {
