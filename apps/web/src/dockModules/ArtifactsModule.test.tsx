@@ -86,12 +86,20 @@ it("lists the Project's artifacts in the library's table and thins its columns f
     />,
   );
   await screen.findByRole("button", { name: /Launch plan/ });
-  expect(container.querySelector(".artifact-table > .artifact-table__head")).not.toBeNull();
+  expect(
+    container.querySelector(".artifact-table.artifact-table--dock > .artifact-table__head"),
+  ).not.toBeNull();
   expect(container.querySelectorAll(".artifact-table-row")).toHaveLength(1);
 
-  // jsdom draws no layout, so the tiers are pinned in the stylesheet: the tags,
-  // share and edited columns go at 480px, the Export and Versions words at 360px.
+  // jsdom draws no layout, so the columns are pinned in the stylesheet: the
+  // dock keeps the name-first columns at any width, since a dock resized past
+  // 480px would otherwise take the page's tier and squeeze the name; a narrow
+  // page drops the tags, share and edited columns at 480px, and the Export and
+  // Versions words go at 360px.
   const css = readFileSync(resolve(import.meta.dirname, "../styles/artifacts.css"), "utf8");
+  expect(css).toMatch(
+    /^\.artifact-table--dock \.artifact-table__head,\s*\.artifact-table--dock \.artifact-table-row\s*\{\s*--artifact-columns: minmax\(0, 1fr\) auto;/m,
+  );
   expect(css).toMatch(
     /@container \(max-width: 480px\)[^@]*--artifact-columns: minmax\(0, 1fr\) auto;/,
   );

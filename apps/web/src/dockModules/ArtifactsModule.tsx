@@ -47,7 +47,7 @@ export function ArtifactDockList(props: {
   readonly onOpen: (entry: ArtifactLibraryEntry) => void;
 }) {
   return (
-    <div className="artifact-table">
+    <div className="artifact-table artifact-table--dock">
       <ArtifactTableHead />
       <ul className="artifact-table__rows">
         {props.entries.map((entry) => (

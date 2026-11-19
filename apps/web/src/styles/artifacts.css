@@ -247,10 +247,10 @@
   }
 }
 
-/* The dock's list is this table in a column 280px to 480px wide, so the name
-   keeps the width: below 480px the tags, the share mark and the edited time
-   give way (the open button's description still says the last two), leaving the
-   name and the sync mark with whatever controls the row carries. */
+/* Below 480px the name keeps the width: the tags, the share mark and the
+   edited time give way (the open button's description still says the last
+   two), leaving the name and the sync mark with whatever controls the row
+   carries. */
 @container (max-width: 480px) {
   .artifact-table__head,
   .artifact-table-row {
@@ -265,6 +265,23 @@
   .artifact-table-row__edited {
     display: none;
   }
+}
+
+/* The dock's list keeps those name-first columns at every width. Its rows carry
+   no Export or Versions controls, so the page's wider tiers would only reserve
+   empty columns: a dock resized to 500px left the name about 69px. */
+.artifact-table--dock .artifact-table__head,
+.artifact-table--dock .artifact-table-row {
+  --artifact-columns: minmax(0, 1fr) auto;
+}
+
+.artifact-table--dock .artifact-table__head > :nth-child(2),
+.artifact-table--dock .artifact-table__head > :nth-child(3),
+.artifact-table--dock .artifact-table__head > :nth-child(4),
+.artifact-table--dock .artifact-table-row__tags,
+.artifact-table--dock .artifact-table-row__share,
+.artifact-table--dock .artifact-table-row__edited {
+  display: none;
 }
 
 /* Below 360px the Export and Versions words go as well: the row's open action
