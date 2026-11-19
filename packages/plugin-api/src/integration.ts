@@ -4,6 +4,7 @@ import type {
   IntegrationCredentialRequestResult,
   IntegrationObservation,
 } from "@octant/contracts/integration";
+import type { ActivityKind, ActivityRecord } from "@octant/contracts/code-home-activity";
 
 /**
  * Typed server port for the Integration plugin kind.
@@ -79,6 +80,65 @@ export type IntegrationPkceRefreshResult =
 
 export type IntegrationRevokeResult = { readonly kind: "revoked" } | { readonly kind: "cleared" };
 
+/** The delivery cards a repository activity source answers; runs stay journal-local. */
+export type IntegrationActivityCard = Exclude<ActivityKind, "runs">;
+
+/**
+ * How a repository activity source reports its account: the connection it
+ * reads as, a labeled non-connection, or an honest refusal. A source never
+ * answers account availability it has not itself observed.
+ */
+export type IntegrationActivityAccount =
+  | { readonly status: "connected"; readonly account: string }
+  | { readonly status: "disconnected" | "insecure-storage" }
+  | {
+      readonly status: "unavailable";
+      readonly reason: "not-connected" | "not-checked" | "rate-limited" | "read-failed";
+    };
+
+/**
+ * One repository's activity for one card and range: validated records for the
+ * signed-in person's own deliveries, an access loss that invalidates earlier
+ * reads of that repository, or an honest refusal.
+ */
+export type IntegrationActivityObservation =
+  | {
+      readonly status: "ready";
+      readonly records: ReadonlyArray<Exclude<ActivityRecord, { kind: "runs" }>>;
+    }
+  | {
+      readonly status: "partial";
+      readonly reason: "incomplete" | "read-failed";
+      readonly records: ReadonlyArray<Exclude<ActivityRecord, { kind: "runs" }>>;
+    }
+  | { readonly status: "repository-missing" }
+  | {
+      readonly status: "unavailable";
+      readonly reason: "rate-limited" | "read-failed" | "not-checked" | "not-connected";
+    };
+
+/**
+ * A read-only repository history contribution. It holds no credential, shell,
+ * or filesystem handle: the host asks for account availability, then for one
+ * repository's records inside an established range as the already-reported
+ * account.
+ */
+export interface IntegrationActivitySource {
+  readonly account: (
+    card: IntegrationActivityCard,
+    signal: AbortSignal,
+  ) => Promise<IntegrationActivityAccount>;
+  readonly readRepository: (input: {
+    readonly owner: string;
+    readonly name: string;
+    readonly card: IntegrationActivityCard;
+    readonly since: string | undefined;
+    readonly until: string | undefined;
+    readonly account: string;
+    readonly signal: AbortSignal;
+  }) => Promise<IntegrationActivityObservation>;
+}
+
 /**
  * The host port passed to an Integration plugin. It exposes only the narrow
  * capabilities the plugin declared: outbound network requests as a configured
@@ -90,6 +150,10 @@ export interface IntegrationHostPort {
   /** Register a fixed one-use operation. Availability never grants consent. */
   readonly registerCredentialOperation?: (
     operation: CredentialOperation,
+  ) => { readonly kind: "registered"; readonly release: () => void } | { readonly kind: "refused" };
+  /** Register the integration's one read-only repository activity source. */
+  readonly registerActivitySource?: (
+    source: IntegrationActivitySource,
   ) => { readonly kind: "registered"; readonly release: () => void } | { readonly kind: "refused" };
   readonly fetch: (input: Request) => Promise<Response>;
   readonly requestCredential: (scope: string) => Promise<IntegrationCredentialRequestResult>;
