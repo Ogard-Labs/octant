@@ -4984,6 +4984,131 @@ describe("App", () => {
     expect(await screen.findByRole("dialog", { name: "Move to Project" })).toBeVisible();
   });
 
+  it("stops the exact operation a thread slot is running when Move to Project picks Stop and move now", async () => {
+    const user = userEvent.setup();
+    const codeApi = codes();
+    const now = "2026-07-21T12:00:00.000Z";
+    const startedOperations: string[] = [];
+    const cancelledTurnOperations: string[] = [];
+    // The busy marker rides the bootstrap's runtime sidecar, which the thread
+    // slot's controller shares with the window's.
+    const bootstrap = await codeApi.bootstrap();
+    const busyRuntime = [
+      {
+        threadId: codeThreadId,
+        executing: true,
+        turnStartedAt: "2026-07-21T11:00:00.000Z",
+      },
+    ];
+    vi.mocked(codeApi.bootstrap).mockResolvedValue({
+      ...bootstrap,
+      runtime: busyRuntime,
+    } as never);
+    // The navigation read owns the runtime sidecar on refresh, so the busy
+    // marker has to arrive there too or it is dropped from the sidebar.
+    const navigation = await codeApi.navigation();
+    vi.mocked(codeApi.navigation).mockResolvedValue({
+      ...navigation,
+      runtime: busyRuntime,
+    } as never);
+    vi.mocked(codeApi.executeOperation).mockImplementation(async (command) => {
+      if (command.kind === "start-provider-turn") {
+        startedOperations.push(String(command.operationId));
+        return {
+          kind: "provider-turn-state",
+          operationId: command.operationId,
+          state: "running",
+        } as never;
+      }
+      if (command.kind === "cancel-provider-turn") {
+        if ("turnOperationId" in command && command.turnOperationId !== undefined) {
+          cancelledTurnOperations.push(String(command.turnOperationId));
+        }
+        return {
+          kind: "provider-turn-state",
+          operationId: command.operationId,
+          state: "cancelled",
+        } as never;
+      }
+      return {
+        kind: "operation-failed",
+        operationId: command.operationId,
+        failure: { message: "no" },
+      } as never;
+    });
+    vi.mocked(codeApi.subscribeOperation).mockImplementation(((
+      _threadId: unknown,
+      operationId: unknown,
+    ) => {
+      async function* frames() {
+        yield {
+          threadId: codeThreadId,
+          operationId,
+          cursor: 1,
+          occurredAt: now,
+          event: {
+            kind: "operation-result",
+            result: { kind: "provider-turn-state", operationId, state: "running" },
+          },
+        };
+        // The turn never ends: a live subscription stays open, so the runner
+        // never resubscribes and the operation keeps running for the move.
+        await new Promise<never>(() => undefined);
+      }
+      return frames();
+    }) as never);
+    const base = projectBootstrap();
+    const second = { ...base.active[0]!, id: otherProjectId, name: "Octant mirror" };
+    const projectApi = projects({
+      ...base,
+      active: [base.active[0]!, second],
+      availability: base.availability.map((entry) => ({
+        ...entry,
+        status: "available" as const,
+      })),
+    });
+    vi.mocked(projectApi.environmentForThread).mockResolvedValue(readyEnvironment);
+    vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
+
+    render(
+      <App
+        codeClient={codeApi}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    // The follow-up goes out through the thread's own slot controller, which
+    // is the only controller that can name the operation it started.
+    const composer = await screen.findByRole(
+      "textbox",
+      { name: "Follow-up message" },
+      { timeout: 5_000 },
+    );
+    await user.type(composer, "keep working{Enter}");
+    await waitFor(() => expect(startedOperations).toHaveLength(1));
+
+    await showRightUtilityDock(user);
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    await openQuickDockTool(user, dock, "Environment");
+    await within(dock).findByRole("region", { name: "Environment details" });
+    await user.click(within(dock).getByRole("button", { name: /Octant/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Move to Project" });
+    await user.click(within(dialog).getByRole("radio", { name: "Stop and move now" }));
+    await user.click(within(dialog).getByRole("button", { name: /Octant mirror/ }));
+
+    // Routed through the slot: the stop names the operation that slot started.
+    // The window controller alone could not identify it and refused instead.
+    await waitFor(() => expect(cancelledTurnOperations).toEqual(startedOperations));
+    expect(
+      await within(dialog).findByText("The move is queued for when this turn finishes."),
+    ).toBeVisible();
+  });
+
   it("treats the native minimum width as compact desktop chrome", async () => {
     const originalMatchMedia = window.matchMedia;
     const addEventListener = vi.fn();

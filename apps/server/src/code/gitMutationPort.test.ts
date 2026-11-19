@@ -1042,6 +1042,158 @@ describe("GitMutationPort", () => {
     expect(gitOutput(repository, "stash", "list").trim()).toBe("");
     expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("edited\n");
   });
+
+  it("refuses the stash and the switch when admission lapsed before the first write", async () => {
+    const repository = createRepository(temporaryDirectory());
+    git(repository, "branch", "feature");
+    writeFileSync(join(repository, "README.md"), "edited\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    await expect(
+      port.switchBranch({
+        checkoutRoot: repository,
+        branch: "feature",
+        dirty: "stash",
+        current: () => false,
+      }),
+    ).resolves.toEqual({ status: "rejected", reason: "stale-state" });
+    expect(gitOutput(repository, "stash", "list").trim()).toBe("");
+    expect(gitOutput(repository, "branch", "--show-current").trim()).toBe("main");
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("edited\n");
+  });
+
+  it("keeps the stash and names it when admission lapses between the stash and the switch", async () => {
+    const repository = createRepository(temporaryDirectory());
+    git(repository, "branch", "feature");
+    writeFileSync(join(repository, "README.md"), "edited\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+    // Both stash-side checks admit, the switch check does not: the work
+    // already saved is not the person's to lose, so the stash stays and says
+    // so.
+    let checks = 0;
+    const outcome = await port.switchBranch({
+      checkoutRoot: repository,
+      branch: "feature",
+      dirty: "stash",
+      current: () => {
+        checks += 1;
+        return checks < 3;
+      },
+    });
+
+    expect(outcome.status).toBe("failed");
+    if (outcome.status !== "failed" || outcome.detail === undefined)
+      throw new Error("Expected a detail-carrying failure.");
+    expect(outcome.detail).toContain("stash");
+    expect(gitOutput(repository, "branch", "--show-current").trim()).toBe("main");
+    expect(gitOutput(repository, "stash", "list").trim()).toContain("stash@{0}");
+  });
+
+  it("refuses the stash when admission lapses while its commit identity resolves", async () => {
+    const repository = createRepository(temporaryDirectory());
+    git(repository, "branch", "feature");
+    writeFileSync(join(repository, "README.md"), "edited\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+    // The first admission check passes; resolving the stash's identity runs
+    // its own probes, and the answer may lapse during them — so the check
+    // runs once more immediately before the stash write.
+    let checks = 0;
+    await expect(
+      port.switchBranch({
+        checkoutRoot: repository,
+        branch: "feature",
+        dirty: "stash",
+        current: () => {
+          checks += 1;
+          return checks < 2;
+        },
+      }),
+    ).resolves.toEqual({ status: "rejected", reason: "stale-state" });
+    expect(gitOutput(repository, "stash", "list").trim()).toBe("");
+    expect(gitOutput(repository, "branch", "--show-current").trim()).toBe("main");
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("edited\n");
+  });
+
+  it("stashes with the host's configured identity when the checkout names none", async () => {
+    const repository = createRepository(temporaryDirectory());
+    git(repository, "config", "--unset", "user.name");
+    git(repository, "config", "--unset", "user.email");
+    git(repository, "branch", "feature");
+    writeFileSync(join(repository, "README.md"), "edited\n");
+    const port = new GitMutationPort(undefined, {
+      ...confinedOptions(),
+      commitIdentity: () => ({ name: "Octant Host", email: "host@octant.local" }),
+    });
+
+    await expect(
+      port.switchBranch({ checkoutRoot: repository, branch: "feature", dirty: "stash" }),
+    ).resolves.toMatchObject({ status: "applied" });
+    // A stash is a commit: the identity overlay the host supplied is the
+    // author recorded on it.
+    expect(gitOutput(repository, "show", "-s", "--format=%an <%ae>", "stash@{0}").trim()).toBe(
+      "Octant Host <host@octant.local>",
+    );
+  });
+
+  it("refuses the stash when no commit identity can be resolved", async () => {
+    const repository = createRepository(temporaryDirectory());
+    git(repository, "config", "--unset", "user.name");
+    git(repository, "config", "--unset", "user.email");
+    git(repository, "branch", "feature");
+    writeFileSync(join(repository, "README.md"), "edited\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    await expect(
+      port.switchBranch({ checkoutRoot: repository, branch: "feature", dirty: "stash" }),
+    ).resolves.toEqual({ status: "rejected", reason: "identity-missing" });
+    expect(gitOutput(repository, "stash", "list").trim()).toBe("");
+    expect(gitOutput(repository, "branch", "--show-current").trim()).toBe("main");
+  });
+
+  it("refuses to stash on a status manifest it cannot bound", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const writes: string[] = [];
+    const dependencies: GitMutationDependencies = {
+      execFile: async (_file, args) => {
+        // Confinement wraps the launch, so `-C` is not fixed at index 0.
+        const at = args.findIndex((arg) => arg === "-C");
+        const command = (at === -1 ? args : args.slice(at + 2)).join(" ");
+        if (
+          command.startsWith("stash") ||
+          command.startsWith("switch") ||
+          command.startsWith("-c ")
+        )
+          writes.push(command);
+        if (command === "rev-parse --path-format=absolute --git-path index.lock")
+          return { exitCode: 0, stdout: `${repository}/.git/index.lock\n`, stderr: "" };
+        if (command === "version")
+          return { exitCode: 0, stdout: "git version 2.39.0\n", stderr: "" };
+        if (command.startsWith("show-ref")) return { exitCode: 0, stdout: "", stderr: "" };
+        if (command === "branch --show-current")
+          return { exitCode: 0, stdout: "main\n", stderr: "" };
+        if (command === "worktree list --porcelain")
+          return {
+            exitCode: 0,
+            stdout: `worktree ${repository}\nHEAD ${"a".repeat(40)}\nbranch refs/heads/main\n\n`,
+            stderr: "",
+          };
+        if (command.startsWith("status --porcelain"))
+          return {
+            exitCode: 0,
+            stdout: `?? ${"nested/".repeat(80_000)}file\n`,
+            stderr: "",
+          };
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+      pathExists: async () => false,
+    };
+    const port = new GitMutationPort(dependencies, confinedOptions());
+
+    await expect(
+      port.switchBranch({ checkoutRoot: repository, branch: "feature", dirty: "stash" }),
+    ).resolves.toEqual({ status: "rejected", reason: "status-oversized" });
+    expect(writes).toEqual([]);
+  });
 });
 
 function createEmptyRepository(root: string): string {

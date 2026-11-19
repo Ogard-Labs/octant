@@ -3,7 +3,7 @@ import { isUtf8 } from "node:buffer";
 import { execFile as nodeExecFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
   createGitSeatbeltConfinement,
@@ -776,9 +776,12 @@ async function readWorktreeObjectIds(
   // `hash-object` fail for the whole batch, and those are common. Locally, only
   // paths that resolve to a regular file go to Git (it follows symlinks, so a
   // dangling link or one to a directory would fail the chunk); the rest get
-  // null, as the per-path call gave. On a server the checkout is not on this
-  // machine's disk, so nothing is read here: every path goes to the batch and
-  // the per-path fallback sorts out the failures.
+  // null, as the per-path call gave. The real path must also stay inside the
+  // checkout: `hash-object` reads the bytes, so a link — or a linked directory
+  // on the way — pointing outside would bind content the checkout does not own.
+  // On a server the checkout is not on this machine's disk, so nothing is read
+  // here: every path goes to the batch and the per-path fallback sorts out the
+  // failures.
   let hashable: string[] = [];
   if (checkoutRoot === undefined) hashable = [...paths];
   else {
@@ -786,8 +789,11 @@ async function readWorktreeObjectIds(
       try {
         const full = join(checkoutRoot, path);
         const stats = await lstat(full);
-        if (stats.isFile() || (stats.isSymbolicLink() && (await stat(full)).isFile()))
-          hashable.push(path);
+        if (stats.isFile() || (stats.isSymbolicLink() && (await stat(full)).isFile())) {
+          const resolved = await realpath(full);
+          if (resolved === checkoutRoot || resolved.startsWith(`${checkoutRoot}${sep}`))
+            hashable.push(path);
+        }
       } catch {
         // Missing, dangling or unreadable: no worktree id.
       }

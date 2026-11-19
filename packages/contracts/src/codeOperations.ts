@@ -538,6 +538,12 @@ const ObserveGit = Schema.Struct({
   maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
   /** Read the diff with Git's `-w`; only the diff text changes, never the checkout state. */
   ignoreWhitespace: Schema.optional(Schema.Boolean),
+  /**
+   * Read the porcelain listing with `--untracked-files=all`: every file under
+   * an untracked directory is its own status entry, so the state token a
+   * switch is consented against changes when one nested file is added.
+   */
+  untrackedFiles: Schema.optional(Schema.Literal("all")),
 }).annotations(strict);
 const PrepareGitHunks = Schema.Struct({
   kind: Schema.Literal("prepare-git-hunks"),

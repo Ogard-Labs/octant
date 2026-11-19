@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import { GitObservationPort, type GitObservation } from "./gitObservationPort";
@@ -635,6 +635,45 @@ describe("GitObservationPort", () => {
     },
   );
 
+  it("keeps bytes a link outside the checkout names out of the state token", async () => {
+    const repository = createRepository();
+    const outside = join(temporaryDirectory(), "outside.txt");
+    writeFileSync(outside, "first outside bytes\n");
+    symlinkSync(outside, join(repository, "escape.txt"));
+    const port = new GitObservationPort(confinedOptions());
+
+    const first = await port.observe(repository);
+    writeFileSync(outside, "second outside bytes\n");
+    const second = await port.observe(repository);
+
+    // The link is listed — the person sees it — but hashing it would read
+    // outside the checkout, so its changing bytes move nothing.
+    expect(first.status).toBe("ready");
+    expect(second.status).toBe("ready");
+    if (first.status !== "ready" || second.status !== "ready") return;
+    expect(first.changedPaths).toContain("escape.txt");
+    expect(first.stateToken).toBe(oracleStateToken(first));
+    expect(second.stateToken).toBe(first.stateToken);
+  });
+
+  it("changes the state token when a file appears inside an untracked directory", async () => {
+    const repository = createRepository();
+    mkdirSync(join(repository, "untracked-directory"));
+    writeFileSync(join(repository, "untracked-directory", "first.txt"), "one\n");
+    const port = new GitObservationPort(confinedOptions());
+
+    const before = await port.observe(repository, undefined, { untrackedFiles: "all" });
+    writeFileSync(join(repository, "untracked-directory", "nested.txt"), "two\n");
+    const after = await port.observe(repository, undefined, { untrackedFiles: "all" });
+
+    // The token a switch is consented against: a file nested in an untracked
+    // directory after the preview must make it stale.
+    expect(before.status).toBe("ready");
+    expect(after.status).toBe("ready");
+    if (before.status !== "ready" || after.status !== "ready") return;
+    expect(after.stateToken).not.toBe(before.stateToken);
+  });
+
   it("hashes a server checkout's changed paths through Git and never reads the local filesystem", async () => {
     const repository = createRepository();
     writeFileSync(join(repository, "edited.txt"), "one\n");
@@ -784,6 +823,21 @@ function recordingPort(
  */
 function oracleStateToken(observation: GitObservation): string {
   const objectId = (args: string[]): string | null => {
+    // `hash-object` reads the bytes a link names: the port refuses to hash a
+    // path resolving outside the checkout, so the oracle expects null there.
+    const hashed = args[0] === "hash-object" ? args[args.length - 1] : undefined;
+    if (hashed !== undefined) {
+      try {
+        const resolved = realpathSync(join(observation.checkoutRoot, hashed));
+        if (
+          resolved !== observation.checkoutRoot &&
+          !resolved.startsWith(`${observation.checkoutRoot}${sep}`)
+        )
+          return null;
+      } catch {
+        return null;
+      }
+    }
     try {
       const text = execFileSync("git", ["-C", observation.checkoutRoot, ...args], {
         encoding: "utf8",

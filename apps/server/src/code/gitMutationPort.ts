@@ -9,6 +9,14 @@ import { realpathSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { MAX_CODE_GIT_HUNK_PATCH_BYTES, type ProviderExecutionPolicy } from "@octant/contracts";
+
+/**
+ * The largest porcelain manifest a switch stashes on. `--untracked-files=all`
+ * expands every file, so an untracked forest can outgrow the one-megabyte run
+ * bound; the run cap already refuses those reads, and this bound refuses the
+ * stash plainly rather than claiming a complete snapshot it cannot vouch for.
+ */
+const MAX_SWITCH_MANIFEST_BYTES = 512 * 1024;
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
   createGitSeatbeltConfinement,
@@ -89,6 +97,7 @@ export type GitMutationResult =
         | "invalid-branch"
         | "branch-in-use"
         | "dirty-checkout"
+        | "status-oversized"
         | "unsupported-git";
     }
   | {
@@ -598,6 +607,12 @@ export class GitMutationPort {
       readonly checkoutRoot: string;
       readonly branch: string;
       readonly dirty: "refuse" | "stash";
+      /**
+       * Admission rechecked immediately before each write — the stash and
+       * the switch — because the answer that admitted this request may have
+       * lapsed while probes ran. Revocation after a stash keeps the stash.
+       */
+      readonly current?: () => boolean;
     } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<GitMutationResult> {
@@ -647,13 +662,31 @@ export class GitMutationPort {
       input.executionPolicy,
     );
     if (status.exitCode !== 0) return failedMutation(status.stderr);
+    // A manifest this large cannot be vouched for: stashing on a listing the
+    // port could not fully bound would claim a complete snapshot it is not.
+    if (Buffer.byteLength(status.stdout, "utf8") > MAX_SWITCH_MANIFEST_BYTES) {
+      return { status: "rejected", reason: "status-oversized" };
+    }
     let stashed = false;
     if (status.stdout.trim() !== "") {
       if (input.dirty === "refuse") return { status: "rejected", reason: "dirty-checkout" };
+      if (input.current?.() === false) return { status: "rejected", reason: "stale-state" };
+      // A stash is a commit: it needs the same identity fail-closed rule the
+      // commit path has, and the same host-identity overlays.
+      const identity = await this.#effectiveCommitIdentity(
+        input.checkoutRoot,
+        signal,
+        input.executionPolicy,
+      );
+      if (identity === undefined) return { status: "rejected", reason: "identity-missing" };
+      // Identity lookup ran its own probes: admission is checked once more
+      // immediately before the write it gates.
+      if (input.current?.() === false) return { status: "rejected", reason: "stale-state" };
       const stash = await this.#run(
         [
           "-C",
           input.checkoutRoot,
+          ...identity.config.flatMap((entry) => ["-c", entry] as const),
           "stash",
           "push",
           "--include-untracked",
@@ -683,6 +716,13 @@ export class GitMutationPort {
           `Changes were saved to the stash and stayed there, but the stash did not put all of them away. The branch was not switched.`,
         );
     }
+    if (input.current?.() === false)
+      return stashed
+        ? stashedFailure(
+            "",
+            `Changes were saved to the stash and stayed there, but the switch was no longer admitted. Look for "Octant: saved before switching" in \`git stash list\`.`,
+          )
+        : { status: "rejected", reason: "stale-state" };
     const switched = await this.#run(
       [
         "-C",

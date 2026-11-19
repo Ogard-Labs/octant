@@ -20,7 +20,7 @@ interface ObservationPort {
   observe(
     root: string,
     signal?: AbortSignal,
-    options?: GitDiffOptions,
+    options?: GitDiffOptions & { readonly untrackedFiles?: "all" },
   ): Promise<GitObservationResult>;
   observeRemotes?(
     root: string,
@@ -163,7 +163,7 @@ export class GitService {
   observe(
     root: string,
     signal?: AbortSignal,
-    options?: GitDiffOptions,
+    options?: GitDiffOptions & { readonly untrackedFiles?: "all" },
   ): Promise<GitObservationResult> {
     return this.#observation.observe(root, signal, options);
   }
@@ -701,7 +701,12 @@ export class GitService {
     signal?: AbortSignal,
   ): Promise<GitServiceResult> {
     return this.#serialized(input.checkoutId, async () => {
-      const current = await this.#ready(input.checkoutRoot, signal);
+      // The state token a switch is consented against is the full untracked
+      // listing: a file added inside an untracked directory after the preview
+      // must not pass this check.
+      const current = await this.#ready(input.checkoutRoot, signal, {
+        untrackedFiles: "all",
+      });
       if (!current) return { status: "unavailable" };
       if (current.stateToken !== input.expectedStateToken)
         return { status: "rejected", reason: "stale-state" };
@@ -714,6 +719,7 @@ export class GitService {
           checkoutRoot: current.checkoutRoot,
           branch: input.branch,
           dirty: input.dirty,
+          ...(input.current === undefined ? {} : { current: input.current }),
           ...mutationPolicy(input.executionPolicy),
         },
         signal,
@@ -781,8 +787,12 @@ export class GitService {
     });
   }
 
-  async #ready(root: string, signal?: AbortSignal): Promise<GitObservation | undefined> {
-    const result = await this.#observation.observe(root, signal);
+  async #ready(
+    root: string,
+    signal?: AbortSignal,
+    options?: { readonly untrackedFiles?: "all" },
+  ): Promise<GitObservation | undefined> {
+    const result = await this.#observation.observe(root, signal, options);
     return result.status === "ready" && result.checkoutRoot === root ? result : undefined;
   }
 

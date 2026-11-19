@@ -631,6 +631,7 @@ export interface CodeOperationGitPort {
     readonly checkoutRoot: string;
     readonly maxDiffBytes: number;
     readonly ignoreWhitespace?: boolean;
+    readonly untrackedFiles?: "all";
   }) => Promise<{
     readonly status: "ready" | "unavailable" | "failed";
     readonly head?: {
@@ -855,6 +856,7 @@ type GitMutationOutcome =
         | "invalid-branch"
         | "branch-in-use"
         | "dirty-checkout"
+        | "status-oversized"
         | "unsupported-git";
     }
   | { readonly status: "unavailable" }
@@ -5338,6 +5340,7 @@ export class CodeOperationService {
       checkoutRoot,
       maxDiffBytes: command.maxDiffBytes,
       ...(command.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
+      ...(command.untrackedFiles === "all" ? { untrackedFiles: "all" as const } : {}),
     });
     if (
       result.status !== "ready" ||

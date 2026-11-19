@@ -64,6 +64,19 @@ describe("switchCodeBranch approval routing", () => {
     expect(executeOperation).not.toHaveBeenCalled();
   });
 
+  it("answers refused, and sends no operation, when the approval request itself fails", async () => {
+    const { client, executeOperation } = host();
+    const outcome = await switchCodeBranch(client, uuids(), scope, request, {
+      executionPolicy: "approval-gated",
+      requestApproval: async () => {
+        throw new Error("the window went away");
+      },
+    });
+
+    expect(outcome).toEqual({ status: "refused", message: "The branch switch was not approved." });
+    expect(executeOperation).not.toHaveBeenCalled();
+  });
+
   it("runs without asking under full access", async () => {
     const { client, executeOperation } = host();
     const requestApproval = vi.fn(async () => "approval-1" as never);
@@ -96,7 +109,7 @@ describe("switchCodeBranch approval routing", () => {
 
 describe("observeCodeBranchState", () => {
   it("returns the token and the status entries the consent screen shows", async () => {
-    const { client } = host({
+    const { client, executeOperation } = host({
       kind: "git-observed",
       stateToken: "b".repeat(64),
       status: [
@@ -115,5 +128,10 @@ describe("observeCodeBranchState", () => {
         ],
       },
     });
+    // The preview asks for the full untracked listing so the token it
+    // consents against notices a file nested in an untracked directory.
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "observe-git", untrackedFiles: "all" }),
+    );
   });
 });

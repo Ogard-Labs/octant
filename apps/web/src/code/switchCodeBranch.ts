@@ -54,6 +54,10 @@ export async function observeCodeBranchState(
       operationId: nextUuid() as never,
       gitOperationId: nextUuid() as never,
       maxDiffBytes: 1,
+      // A switch stashes by this token: a file added inside an untracked
+      // directory after the preview must change it, which only a full
+      // untracked listing gives.
+      untrackedFiles: "all",
       ...scope,
     });
     if (observed !== undefined && observed.kind === "git-observed") {
@@ -122,7 +126,12 @@ export async function switchCodeBranch(
       return { status: "refused", message: "Plan mode is read-only; switching is unavailable." };
     }
     if (decidesCodeEffectsByApproval(authority.executionPolicy)) {
-      const approvalId = await authority.requestApproval?.(command);
+      let approvalId: CodeApprovalId | undefined;
+      try {
+        approvalId = await authority.requestApproval?.(command);
+      } catch {
+        approvalId = undefined;
+      }
       if (approvalId === undefined) {
         return { status: "refused", message: "The branch switch was not approved." };
       }

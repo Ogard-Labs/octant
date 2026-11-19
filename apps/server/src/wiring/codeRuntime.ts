@@ -348,6 +348,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "agentsManagedToolsFor"
     | "coordinatorWorkersHolder"
     | "externalContentIngestionStore"
+    | "managedWorktreeReceipts"
     | "nativeHarnessRoutingStore"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
@@ -883,9 +884,23 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
         // A branch switch moves the checkout's journaled head; the service
         // exists only after this runtime does, so the callback reads it lazily.
-        checkoutObserved: (checkoutId, head) => {
+        checkoutObserved: async (checkoutId, head) => {
           const service = builtCodeService;
           if (service instanceof CodeService) service.noteCheckoutHead(checkoutId, head);
+          // The only caller is a completed branch switch: a managed worktree
+          // records the verified branch the host just landed it on so cleanup
+          // still recognises the worktree it owns. Its `branchIntent` — the
+          // branch the receipt may delete — never moves with it.
+          if (head.kind === "branch") {
+            const checkout = persistence.readCodeCheckout(checkoutId);
+            if (checkout?.kind === "managed-worktree") {
+              await deps.managedWorktreeReceipts.recordVerifiedBranch(
+                String(checkout.ownershipReceiptId),
+                head.name,
+                head.oid,
+              );
+            }
+          }
         },
         verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
         prepareWorktree: async (thread, root, current) => {

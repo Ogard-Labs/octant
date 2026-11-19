@@ -535,7 +535,8 @@ describe("GitService", () => {
         branch: "feature",
       })),
     };
-    const service = new GitService({ observe: vi.fn(async () => observation) }, mutation);
+    const observe = vi.fn(async () => observation);
+    const service = new GitService({ observe }, mutation);
     const base = {
       checkoutId: "checkout-1",
       checkoutRoot: "/repo",
@@ -560,8 +561,25 @@ describe("GitService", () => {
       oid: "b".repeat(40),
       branch: "feature",
     });
+    // The token check reads the full untracked listing: the same setting the
+    // switch preview asked for, so a file added inside an untracked directory
+    // after the preview shows up as a changed token rather than stashed unseen.
+    expect(observe).toHaveBeenCalledWith("/repo", undefined, { untrackedFiles: "all" });
     expect(mutation.switchBranch).toHaveBeenCalledWith(
       { checkoutRoot: "/repo", branch: "feature", dirty: "refuse" },
+      undefined,
+    );
+
+    // Live admission is forwarded so the port rechecks it before each write,
+    // not just once at the queue's head.
+    const admission = () => true;
+    await expect(service.switchBranch({ ...base, current: admission })).resolves.toEqual({
+      status: "applied",
+      oid: "b".repeat(40),
+      branch: "feature",
+    });
+    expect(mutation.switchBranch).toHaveBeenLastCalledWith(
+      { checkoutRoot: "/repo", branch: "feature", dirty: "refuse", current: admission },
       undefined,
     );
   });

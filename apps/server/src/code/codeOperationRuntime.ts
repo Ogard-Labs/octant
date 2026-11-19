@@ -8090,12 +8090,17 @@ const decodeCodeGitOperationId = Schema.decodeUnknownSync(CodeGitOperationId);
 function codeOperationGitPort(git: GitService): CodeOperationGitPort {
   return {
     remoteHead: (input, signal) => git.remoteHead(input, signal),
-    observe: async ({ checkoutRoot, maxDiffBytes, ignoreWhitespace }) =>
+    observe: async ({ checkoutRoot, maxDiffBytes, ignoreWhitespace, untrackedFiles }) =>
       mapGitObservation(
         await git.observe(
           checkoutRoot,
           undefined,
-          ignoreWhitespace === true ? { ignoreWhitespace: true } : undefined,
+          ignoreWhitespace === true || untrackedFiles === "all"
+            ? {
+                ...(ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
+                ...(untrackedFiles === "all" ? { untrackedFiles: "all" as const } : {}),
+              }
+            : undefined,
         ),
         maxDiffBytes,
       ),

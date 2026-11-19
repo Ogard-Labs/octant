@@ -5730,7 +5730,16 @@ function LaunchedShell(
       markCodeFollowUp: codeController.markFollowUp,
       markCodeThreadRead: codeController.markThreadRead,
       mergeProjectPullRequest,
-      moveCodeThread: codeController.moveThread,
+      moveCodeThread: (threadId, projectId, options) => {
+        // A follow-up started through the thread's own slot is scoped in
+        // that slot's controller — only it names the exact running operation
+        // a Stop and move may end. The window controller stays the route for
+        // a first turn it owns; its own scoped-turn check refuses a stop it
+        // cannot name, so a successor or an unscoped turn is never cancelled
+        // by accident.
+        const slot = codeThreadControllers.get(threadId);
+        return (slot ?? codeController).moveThread(threadId, projectId, options);
+      },
       requestMoveToProject: setMoveRequest,
       moveProject: projectController.move,
       noteCanvasReferences,
