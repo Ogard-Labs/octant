@@ -7495,3 +7495,65 @@ describe("continuing a Work turn a restart cut off", () => {
     expect(continuations(host)).toHaveLength(0);
   });
 });
+
+describe("loop stops on a Work thread", () => {
+  it("journals work.turn-loop-stopped@1 under Strict and lets the thread accept the next message straight away", async () => {
+    let call = 0;
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          call += 1;
+          if (call === 1) {
+            input.onLoopStopped?.({
+              kind: "turn-loop-stopped",
+              toolName: "octant_read",
+              count: 6,
+              occurredAt: "2026-10-30T12:00:05.000Z" as never,
+            });
+            return { kind: "cancelled" };
+          }
+          return { kind: "completed", response: "Continuing cleanly." };
+        },
+      },
+    });
+
+    const first = await fixture.service.startFirstTurn(ids.window, startCommand());
+    expect(first.kind).toBe("accepted");
+    await fixture.waitForIdle();
+
+    const appendedNames = fixture.persistence.journal.append.mock.calls.flatMap((args) =>
+      (args[0] as { readonly events: ReadonlyArray<{ readonly eventName: string }> }).events.map(
+        (e) => e.eventName,
+      ),
+    );
+    expect(appendedNames).toContain("work.turn-loop-stopped@1");
+
+    const turnsAfterStop = fixture.projection.listForThread(ids.thread);
+    expect(turnsAfterStop[0]).toMatchObject({
+      status: "cancelled",
+      loopNotice: {
+        kind: "turn-loop-stopped",
+        toolName: "octant_read",
+        count: 6,
+      },
+    });
+
+    // Thread accepts a new message straight away.
+    const nextRequestId = decodeWorkTurnRequestId("84000000-0000-4000-8000-000000000098");
+    const second = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      requestId: nextRequestId,
+      turnId: "84000000-0000-4000-8000-000000000099",
+      prompt: "Try a different approach",
+    });
+    expect(second.kind).toBe("accepted");
+    await fixture.waitForIdle(nextRequestId);
+
+    const turnsAfterNext = fixture.projection.listForThread(ids.thread);
+    expect(turnsAfterNext).toHaveLength(2);
+    expect(turnsAfterNext[1]).toMatchObject({
+      status: "completed",
+      response: "Continuing cleanly.",
+    });
+  });
+});

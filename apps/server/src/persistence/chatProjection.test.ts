@@ -1477,6 +1477,129 @@ describe("ChatProjection", () => {
     connection.close();
   });
 
+  it("replays turn loop and stall notices onto the Chat attempt idempotently", () => {
+    const connection = openConnection();
+    const { projection } = chatRuntime();
+    const store = journal(connection);
+    const refA = { contentId: ids.content, digest: digest("a"), byteLength: 1 };
+
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 0,
+      events: [pending("chat.thread-created@1", { kind: "thread-created", thread: thread() })],
+    });
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 1,
+        events: [
+          pending("chat.turn-created@1", {
+            kind: "turn-created",
+            turn: {
+              id: ids.turn,
+              threadId: ids.thread,
+              sequence: 1,
+              userMessageRef: refA,
+              attachmentIds: [],
+              attempts: [
+                {
+                  id: ids.attempt,
+                  turnId: ids.turn,
+                  threadId: ids.thread,
+                  providerInstanceId: ids.provider,
+                  providerSessionId: ids.session,
+                  modelId: "model-a",
+                  contextManifestId: ids.manifest,
+                  outcome: "streaming",
+                  responseRefs: [],
+                  citationIds: [],
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              ],
+              createdAt: now,
+            },
+          }),
+        ],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: ids.content,
+            threadId: ids.thread,
+            role: "user",
+            body: "a",
+            digest: digest("a"),
+            byteLength: 1,
+          });
+        },
+      },
+    );
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 2,
+      events: [
+        pending("chat.turn-loop-noticed@1", {
+          kind: "turn-loop-noticed",
+          threadId: ids.thread,
+          turnId: ids.turn,
+          attemptId: ids.attempt,
+          toolName: "octant_lookup",
+          count: 6,
+          occurredAt: "2026-07-19T12:01:00.000Z",
+        }),
+      ],
+    });
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 3,
+      events: [
+        pending("chat.turn-stall-noticed@1", {
+          kind: "turn-stall-noticed",
+          threadId: ids.thread,
+          turnId: ids.turn,
+          attemptId: ids.attempt,
+          idleMs: 1_800_000,
+          occurredAt: "2026-07-19T12:31:00.000Z",
+        }),
+      ],
+    });
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 4,
+      events: [
+        pending("chat.turn-loop-stopped@1", {
+          kind: "turn-loop-stopped",
+          threadId: ids.thread,
+          turnId: ids.turn,
+          attemptId: ids.attempt,
+          toolName: "octant_lookup",
+          count: 6,
+          occurredAt: "2026-07-19T12:32:00.000Z",
+        }),
+      ],
+    });
+
+    const envelopes = store.replay({ afterSequence: 0, limit: 100 } as never);
+    projection.reset(connection);
+    for (const envelope of [...envelopes, ...envelopes]) projection.apply(connection, envelope);
+
+    const replayed = readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]
+      ?.attempts[0];
+    expect(replayed?.loopNotice).toEqual({
+      kind: "turn-loop-stopped",
+      toolName: "octant_lookup",
+      count: 6,
+      occurredAt: "2026-07-19T12:32:00.000Z",
+    });
+    expect(replayed?.stallNotice).toEqual({
+      kind: "turn-stall-noticed",
+      idleMs: 1_800_000,
+      occurredAt: "2026-07-19T12:31:00.000Z",
+    });
+    connection.close();
+  });
+
   it("replays the same appended event without duplicating its reference", () => {
     const connection = openConnection();
     const { projection } = chatRuntime();

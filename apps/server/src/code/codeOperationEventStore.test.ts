@@ -1738,6 +1738,44 @@ describe("what Octant Shield reads from a Code thread", () => {
       turns: [{ steps: [{ kind: "tool", state: "completed", outsideContent }] }],
     });
   });
+
+  it("replays loop and stall notices onto Code conversation turns", () => {
+    const { journal } = openJournal();
+    const store = createStore(journal);
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: turnStarted("89000000-0000-4000-8000-000000000040"),
+    });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: { kind: "turn-loop-noticed", toolName: "Read", count: 6 },
+    });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 2,
+      event: { kind: "turn-stall-noticed", idleMs: 1_800_000 },
+    });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 3,
+      event: { kind: "turn-loop-stopped", toolName: "Read", count: 6 },
+    });
+
+    expect(store.conversation({ threadId, afterCursor: 0, limit: 10 })).toMatchObject({
+      turns: [
+        {
+          loopNotice: { kind: "turn-loop-stopped", toolName: "Read", count: 6, occurredAt: now },
+          stallNotice: { kind: "turn-stall-noticed", idleMs: 1_800_000, occurredAt: now },
+        },
+      ],
+    });
+  });
 });
 
 function turnOperation(index: number): CodeOperationId {

@@ -3207,6 +3207,12 @@ export const ProviderRuntimeEvent = Schema.Union(
     part: Schema.Literal("input", "output"),
     text: Schema.NonEmptyString.pipe(Schema.maxLength(MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS)),
     truncated: Schema.optional(Schema.Boolean),
+    /**
+     * Set when the adapter intentionally omitted fields from the input (such
+     * as file contents on Edit/Write/NotebookEdit), so consumers know the text
+     * is not the tool's complete arguments.
+     */
+    partial: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

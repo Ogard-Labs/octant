@@ -113,4 +113,97 @@ describe("a Work turn's steered child results", () => {
       { delivery: steered.delivery, body: steered.body, steeredAt: now },
     ]);
   });
+
+  it("replays loop and stall notice events onto a Work turn and keeps them across settlement", () => {
+    const firstRow = rows[0];
+    if (firstRow === undefined) throw new Error("Expected accepted row");
+    const noticeRows = [
+      firstRow,
+      {
+        globalSequence: 2,
+        aggregateType: "work-turn",
+        eventName: "work.turn-loop-noticed@1",
+        eventVersion: 1,
+        payload: {
+          kind: "turn-loop-noticed",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          toolName: "octant_read",
+          count: 6,
+          occurredAt: "2026-10-30T12:01:00.000Z",
+        },
+      },
+      {
+        globalSequence: 3,
+        aggregateType: "work-turn",
+        eventName: "work.turn-stall-noticed@1",
+        eventVersion: 1,
+        payload: {
+          kind: "turn-stall-noticed",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          idleMs: 1_800_000,
+          occurredAt: "2026-10-30T12:31:00.000Z",
+        },
+      },
+      {
+        globalSequence: 4,
+        aggregateType: "work-turn",
+        eventName: "work.turn-loop-stopped@1",
+        eventVersion: 1,
+        payload: {
+          kind: "turn-loop-stopped",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          toolName: "octant_read",
+          count: 6,
+          occurredAt: "2026-10-30T12:32:00.000Z",
+        },
+      },
+      {
+        globalSequence: 5,
+        aggregateType: "work-turn",
+        eventName: "work.turn-updated@1",
+        eventVersion: 1,
+        payload: {
+          kind: "turn-updated",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          status: "cancelled",
+          updatedAt: "2026-10-30T12:32:01.000Z",
+        },
+      },
+    ];
+    const projection = new WorkTurnProjection();
+    expect(
+      hydrateWorkTurnProjectionFromJournal({
+        replay: (cursor) =>
+          noticeRows.filter(
+            (row) =>
+              row.globalSequence > cursor.afterSequence &&
+              (cursor.aggregateType === undefined || row.aggregateType === cursor.aggregateType),
+          ),
+        projection,
+      }),
+    ).toBe("ok");
+
+    const turn = projection.lookup(decodeWorkTurnRequestId(ids.request));
+    expect(turn?.status).toBe("cancelled");
+    expect(turn?.version).toBe(5);
+    expect(turn?.loopNotice).toEqual({
+      kind: "turn-loop-stopped",
+      toolName: "octant_read",
+      count: 6,
+      occurredAt: "2026-10-30T12:32:00.000Z",
+    });
+    expect(turn?.stallNotice).toEqual({
+      kind: "turn-stall-noticed",
+      idleMs: 1_800_000,
+      occurredAt: "2026-10-30T12:31:00.000Z",
+    });
+  });
 });

@@ -97,6 +97,47 @@ export function applyChatAttemptFrame(
     return { ...view, turns, lastSequence: frame.sequence };
   }
 
+  if (
+    event.kind === "turn-loop-noticed" ||
+    event.kind === "turn-loop-stopped" ||
+    event.kind === "turn-stall-noticed"
+  ) {
+    const turnIndex = view.turns.findIndex((turn) => String(turn.id) === String(event.turnId));
+    const turn = view.turns[turnIndex];
+    if (turn === undefined) return undefined;
+    const attemptIndex = turn.attempts.findIndex(
+      (candidate) => String(candidate.id) === String(event.attemptId),
+    );
+    const attempt = turn.attempts[attemptIndex];
+    if (attempt === undefined) return undefined;
+    if (frame.sequence <= view.lastSequence) return view;
+    const attempts = turn.attempts.slice();
+    attempts[attemptIndex] =
+      event.kind === "turn-stall-noticed"
+        ? {
+            ...attempt,
+            stallNotice: {
+              kind: "turn-stall-noticed",
+              idleMs: event.idleMs,
+              occurredAt: event.occurredAt,
+            },
+            updatedAt: event.occurredAt,
+          }
+        : {
+            ...attempt,
+            loopNotice: {
+              kind: event.kind,
+              toolName: event.toolName,
+              count: event.count,
+              occurredAt: event.occurredAt,
+            },
+            updatedAt: event.occurredAt,
+          };
+    const turns = view.turns.slice();
+    turns[turnIndex] = { ...turn, attempts };
+    return { ...view, turns, lastSequence: frame.sequence };
+  }
+
   if (event.kind !== "attempt-updated") return undefined;
   const attempt = event.attempt;
   if (attempt.outcome !== "queued" && attempt.outcome !== "streaming") return undefined;

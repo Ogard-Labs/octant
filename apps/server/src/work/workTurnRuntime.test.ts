@@ -2675,4 +2675,261 @@ describe("WorkTurnRuntime", () => {
       } else expect(result.kind).toBe("failed");
     },
   );
+
+  it("warns on the 3rd identical Octant tool call and notices a 6-call loop outside Strict without stopping", async () => {
+    const answered: Array<{
+      readonly requestId: string;
+      readonly resultJson: string;
+      readonly isError: boolean;
+    }> = [];
+    const loopNoticed: Array<{
+      readonly kind: string;
+      readonly toolName: string;
+      readonly count: number;
+    }> = [];
+    const interrupt = vi.fn(() => Effect.void);
+    const events: ProviderRuntimeEvent[] = [
+      ...Array.from({ length: 6 }, (_, index) => ({
+        instanceId: ids.provider,
+        sessionId: ids.session,
+        sequence: index + 1,
+        correlationId: "84000000-0000-4000-8000-000000000099",
+        occurredAt: "2026-11-19T12:00:00.000Z",
+        kind: "tool-request" as const,
+        requestId: `work-req-${index + 1}`,
+        toolName: "octant_read",
+        inputJson: index % 2 === 0 ? '{"a":1,"b":2}' : '{"b":2,"a":1}',
+      })),
+      {
+        instanceId: ids.provider,
+        sessionId: ids.session,
+        sequence: 7,
+        correlationId: "84000000-0000-4000-8000-000000000099",
+        occurredAt: "2026-11-19T12:00:01.000Z",
+        kind: "text-delta" as const,
+        text: "Done.",
+      },
+      {
+        instanceId: ids.provider,
+        sessionId: ids.session,
+        sequence: 8,
+        correlationId: "84000000-0000-4000-8000-000000000099",
+        occurredAt: "2026-11-19T12:00:02.000Z",
+        kind: "completed" as const,
+      },
+    ] as ProviderRuntimeEvent[];
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          subscribe: Effect.succeed(Stream.fromIterable(events)),
+          start: () => Effect.succeed({ sessionId: ids.session }),
+          send: () => Effect.void,
+          resume: () => Effect.void,
+          interrupt,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: (answer: {
+            readonly requestId: string;
+            readonly resultJson: string;
+            readonly isError: boolean;
+          }) =>
+            Effect.sync(() => {
+              answered.push(answer);
+            }),
+        } as never),
+    };
+    let runs = 0;
+    const outcome = await new WorkTurnRuntime().run({
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Check files",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      strict: false,
+      signal: new AbortController().signal,
+      appManagedTools: {
+        definitions: [{ name: "octant_read", description: "Read", inputSchema: {} }],
+        execute: async () => {
+          runs += 1;
+          return { result: { run: runs }, isError: false };
+        },
+      },
+      onLoopNoticed: (notice) => loopNoticed.push(notice),
+    });
+
+    expect(outcome.kind).toBe("completed");
+    expect(runs).toBe(6);
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(loopNoticed).toEqual([
+      expect.objectContaining({ kind: "turn-loop-noticed", toolName: "octant_read", count: 6 }),
+    ]);
+    expect(JSON.parse(answered[2]?.resultJson ?? "{}")).toEqual({
+      run: 3,
+      notice: "This tool has been called with the same input three times in a row.",
+    });
+  });
+
+  it("stops a Work turn on a 6-call loop under Strict and reports turn-loop-stopped", async () => {
+    const loopStopped: Array<{
+      readonly kind: string;
+      readonly toolName: string;
+      readonly count: number;
+    }> = [];
+    const interrupt = vi.fn(() => Effect.void);
+    const events: ProviderRuntimeEvent[] = Array.from({ length: 6 }, (_, index) => ({
+      instanceId: ids.provider,
+      sessionId: ids.session,
+      sequence: index + 1,
+      correlationId: "84000000-0000-4000-8000-000000000099",
+      occurredAt: "2026-11-19T12:00:00.000Z",
+      kind: "tool-request" as const,
+      requestId: `work-strict-${index + 1}`,
+      toolName: "octant_read",
+      inputJson: '{"path":"notes.md"}',
+    })) as ProviderRuntimeEvent[];
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          subscribe: Effect.succeed(Stream.fromIterable(events)),
+          start: () => Effect.succeed({ sessionId: ids.session }),
+          send: () => Effect.void,
+          resume: () => Effect.void,
+          interrupt,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        } as never),
+    };
+    let runs = 0;
+    const outcome = await new WorkTurnRuntime().run({
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Check files",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      strict: true,
+      signal: new AbortController().signal,
+      appManagedTools: {
+        definitions: [{ name: "octant_read", description: "Read", inputSchema: {} }],
+        execute: async () => {
+          runs += 1;
+          return { result: { run: runs }, isError: false };
+        },
+      },
+      onLoopStopped: (notice) => loopStopped.push(notice),
+    });
+
+    expect(outcome.kind).toBe("cancelled");
+    expect(runs).toBe(5);
+    expect(interrupt).toHaveBeenCalledWith(ids.session);
+    expect(loopStopped).toEqual([
+      expect.objectContaining({ kind: "turn-loop-stopped", toolName: "octant_read", count: 6 }),
+    ]);
+  });
+
+  it("notices provider silence past the stalled-turn limit outside Strict without stopping the Work turn", async () => {
+    const stallNoticed: Array<{ readonly kind: string; readonly idleMs: number }> = [];
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const interrupt = vi.fn(() => Effect.void);
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
+          start: () => Effect.succeed({ sessionId: ids.session }),
+          send: () =>
+            Effect.gen(function* () {
+              yield* Effect.sleep(50);
+              yield* Queue.offer(queue, {
+                instanceId: ids.provider,
+                sessionId: ids.session,
+                sequence: 1,
+                correlationId: "84000000-0000-4000-8000-000000000099",
+                occurredAt: "2026-11-19T12:00:01.000Z",
+                kind: "text-delta",
+                text: "Recovered.",
+              } as ProviderRuntimeEvent);
+              yield* Queue.offer(queue, {
+                instanceId: ids.provider,
+                sessionId: ids.session,
+                sequence: 2,
+                correlationId: "84000000-0000-4000-8000-000000000099",
+                occurredAt: "2026-11-19T12:00:02.000Z",
+                kind: "completed",
+              } as ProviderRuntimeEvent);
+            }),
+          resume: () => Effect.void,
+          interrupt,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        } as never),
+    };
+    const outcome = await new WorkTurnRuntime({ stalledTurnLimitMs: () => 15 }).run({
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Wait",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      strict: false,
+      signal: new AbortController().signal,
+      onStallNoticed: (notice) => stallNoticed.push(notice),
+    });
+
+    expect(outcome.kind).toBe("completed");
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(stallNoticed).toEqual([
+      expect.objectContaining({ kind: "turn-stall-noticed", idleMs: 15 }),
+    ]);
+  });
 });

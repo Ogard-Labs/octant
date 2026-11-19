@@ -78,6 +78,7 @@ export * from "./guardrailLowering";
 export * from "./providerTooling";
 export * from "./protectedFiles";
 export * from "./strictNotice";
+export * from "./turnLoopNotice";
 export * from "./archivedWorktrees";
 export * from "./diskCleanup";
 export * from "./computerUse";

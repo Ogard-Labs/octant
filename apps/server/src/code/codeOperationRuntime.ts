@@ -6577,6 +6577,34 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(active.onContextDelivered === undefined
             ? {}
             : { onPromptSent: active.onContextDelivered }),
+          onLoopNotice: (notice) =>
+            Effect.sync(() => {
+              const frame = this.#appendTurnEvent(active, {
+                event:
+                  notice.kind === "turn-loop-stopped"
+                    ? {
+                        kind: "turn-loop-stopped",
+                        toolName: notice.toolName,
+                        count: notice.count,
+                      }
+                    : {
+                        kind: "turn-loop-noticed",
+                        toolName: notice.toolName,
+                        count: notice.count,
+                      },
+              });
+              active.cursor = frame.cursor;
+            }),
+          onStallNotice: (notice) =>
+            Effect.sync(() => {
+              const frame = this.#appendTurnEvent(active, {
+                event: {
+                  kind: "turn-stall-noticed",
+                  idleMs: notice.idleMs,
+                },
+              });
+              active.cursor = frame.cursor;
+            }),
           persistEvent: (event) =>
             // The provider's own completion, interruption, or failure is
             // journaled as the turn's terminal state, ahead of the outcome

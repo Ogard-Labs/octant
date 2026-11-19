@@ -18,12 +18,19 @@ import {
   type ThreadPublishedPage,
   type ThreadRoutineReceipt,
   type ToolOutsideContentMark,
+  type TurnLoopNotice,
+  type TurnStallNotice,
   type TurnStopReason,
   type UsageCost,
+  UtcTimestamp,
 } from "@octant/contracts";
 import {
+  appendRepeatToolWarning,
+  decideTurnStallAction,
+  INITIAL_TURN_LOOP_STATE,
   ledgerUsageCost,
   observeTurnMetrics,
+  observeTurnRuntimeEvent,
   providerAvailabilityFromFailure,
   startTurnMetrics,
   turnRuntimeEventBudget,
@@ -34,7 +41,7 @@ import {
   refusesFullAccessSandbox,
 } from "@octant/domain/guardrail-policy";
 import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
-import { Effect, Fiber, Scope, Stream } from "effect";
+import { Effect, Fiber, Schema, Scope, Stream } from "effect";
 import type {
   ProviderAcquireInput,
   ProviderConnection,
@@ -69,6 +76,7 @@ import {
 } from "../providers/turnBudget";
 
 export const MAX_CODE_TURN_EVENT_BYTES = 64 * 1024;
+const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const MAX_CODE_TURN_INPUT_BYTES = MAX_CODE_TURN_EVENT_BYTES * 4;
 const MAX_CODE_TURN_FIELD_BYTES = 8 * 1024;
 const MAX_CODE_TURN_INPUT_ITEMS = 64;
@@ -232,6 +240,10 @@ export interface CodeTurnRunnerInput {
   readonly prompt: string;
   readonly resumeCursor?: ProviderResumeCursor;
   readonly onSessionReady?: (handle: ProviderSessionHandle) => Effect.Effect<void, CodeTurnFailure>;
+  /** Journals a repeated-tool loop notice or Strict stop on this turn. */
+  readonly onLoopNotice?: (notice: TurnLoopNotice) => Effect.Effect<void, CodeTurnFailure>;
+  /** Journals a silent-turn stall notice on this turn outside Strict. */
+  readonly onStallNotice?: (notice: TurnStallNotice) => Effect.Effect<void, CodeTurnFailure>;
   readonly provider: CodeProviderPort;
   /** The thread's runtime, for the sandbox-at-Full-access refusal; absent refuses a sandboxed thread. */
   readonly providerDriverKind?: ProviderDriverKind;
@@ -580,15 +592,57 @@ export class CodeTurnRunner {
         return yield* fail("interrupted", "Code turn was cancelled before provider send.");
       }
 
-      const idle = yield* makeIdleTimeout(
-        stalledTurnLimitMs({
-          fullAccess: input.thread.executionPolicy === "full-access",
-          strict: input.strict !== false,
-        }),
-        providerToolCallPauseLimitMs(),
-      );
+      const strict = input.strict !== false;
+      const idleLimitMs = stalledTurnLimitMs({
+        fullAccess: input.thread.executionPolicy === "full-access",
+        strict,
+      });
+      const stallAction = decideTurnStallAction({ strict });
+      const idle = yield* makeIdleTimeout(idleLimitMs, providerToolCallPauseLimitMs());
       const shareEventLoop = makeEventLoopShare();
       const compactions = new TurnCompactions();
+      let loopState = INITIAL_TURN_LOOP_STATE;
+      if (stallAction === "notice" && idleLimitMs !== null) {
+        const noticedIdleMs = idleLimitMs;
+        yield* Effect.forkScoped(
+          idle.expired.pipe(
+            Effect.flatMap(() =>
+              input.onStallNotice === undefined
+                ? Effect.void
+                : input
+                    .onStallNotice({
+                      kind: "turn-stall-noticed",
+                      idleMs: noticedIdleMs,
+                      occurredAt: decodeTimestamp(clock()),
+                    })
+                    .pipe(Effect.catchAll(() => Effect.void)),
+            ),
+          ),
+        );
+      }
+      const handleLoopOutcome = (loop: {
+        readonly kind: "notice" | "stop";
+        readonly toolName: string;
+        readonly count: number;
+      }) =>
+        Effect.gen(function* () {
+          const notice: TurnLoopNotice = {
+            kind: loop.kind === "stop" ? "turn-loop-stopped" : "turn-loop-noticed",
+            toolName: loop.toolName,
+            count: loop.count,
+            occurredAt: decodeTimestamp(clock()),
+          };
+          if (input.onLoopNotice !== undefined) {
+            yield* input.onLoopNotice(notice).pipe(Effect.catchAll(() => Effect.void));
+          }
+          if (loop.kind === "stop") {
+            yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
+            return yield* fail(
+              "interrupted",
+              `Stopped under Strict after ${loop.toolName} ran ${loop.count} times in a row with the same input.`,
+            );
+          }
+        });
       const collected = yield* subscribeThenSend({
         connection,
         consume: (runtimeEvents) =>
@@ -606,6 +660,13 @@ export class CodeTurnRunner {
                 yield* idle.observe(event);
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
+                if (event.kind !== "tool-request") {
+                  const loopCheck = observeTurnRuntimeEvent(loopState, event, { strict });
+                  loopState = loopCheck.next;
+                  if (loopCheck.loop !== undefined) {
+                    yield* handleLoopOutcome(loopCheck.loop);
+                  }
+                }
                 // A tool call's content is for a Chat or Work thread's record.
                 // Code keeps none, so it is dropped before it can be counted,
                 // sanitized, or journaled.
@@ -773,6 +834,20 @@ export class CodeTurnRunner {
                       return yield* fail("failed", "Provider event sanitization failed closed.");
                     }
                     if (!answeredToolRequests.answer(sanitizedEvent.requestId)) return;
+                    const loopCheck = observeTurnRuntimeEvent(
+                      loopState,
+                      {
+                        kind: "tool-request",
+                        requestId: sanitizedEvent.requestId,
+                        toolName: sanitizedEvent.toolName,
+                        inputJson: boundedEvent.inputJson,
+                      },
+                      { strict },
+                    );
+                    loopState = loopCheck.next;
+                    if (loopCheck.loop !== undefined) {
+                      yield* handleLoopOutcome(loopCheck.loop);
+                    }
                     const toolSet = recordedToolSet(
                       input.toolEffects,
                       input.appManagedTools,
@@ -834,7 +909,10 @@ export class CodeTurnRunner {
                       });
                       return;
                     }
-                    const answer = boundedToolAnswer(execution.result, execution.isError === true);
+                    const toolResult = loopCheck.earlyWarning
+                      ? appendRepeatToolWarning(execution.result)
+                      : execution.result;
+                    const answer = boundedToolAnswer(toolResult, execution.isError === true);
                     yield* connection.answerTool({
                       sessionId: input.sessionId,
                       requestId: sanitizedEvent.requestId,
@@ -953,12 +1031,17 @@ export class CodeTurnRunner {
               ),
               Effect.zipRight(fail("interrupted", "Code turn was cancelled.")),
             );
-      const waitForTimeout = idle.expired.pipe(
-        Effect.flatMap(() =>
-          connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void)),
-        ),
-        Effect.zipRight(fail("interrupted", "Code turn timed out after provider inactivity.")),
-      );
+      const waitForTimeout =
+        stallAction === "stop"
+          ? idle.expired.pipe(
+              Effect.flatMap(() =>
+                connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void)),
+              ),
+              Effect.zipRight(
+                fail("interrupted", "Code turn timed out after provider inactivity."),
+              ),
+            )
+          : Effect.never;
 
       yield* Effect.raceFirst(awaitCollection, Effect.raceFirst(waitForAbort, waitForTimeout));
       if (!providerCompleted && outcome === undefined) {

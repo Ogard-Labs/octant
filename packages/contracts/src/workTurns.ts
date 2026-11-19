@@ -38,6 +38,12 @@ import { ThreadWindowBoundsFields } from "./threadWindow";
 import { DescribedTurnImages } from "./imageDescription";
 import { WorkThreadId } from "./workThreads";
 import { StrictKeptProtections } from "./strictNotice";
+import {
+  TurnLoopNotice,
+  TurnLoopNoticeCount,
+  TurnLoopNoticeToolName,
+  TurnStallNotice,
+} from "./turnLoopNotice";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -290,6 +296,10 @@ export const WorkTurnState = Schema.Struct({
    * decided it at launch. Absent when the launch was not Strict.
    */
   strictKept: Schema.optional(StrictKeptProtections),
+  /** Repeated identical tool call notice or Strict stop recorded on this turn. */
+  loopNotice: Schema.optional(TurnLoopNotice),
+  /** Silent-turn notice recorded outside Strict when the stalled-turn limit elapsed. */
+  stallNotice: Schema.optional(TurnStallNotice),
   /** Present on a fork's copy of one of its source's turns. */
   carriedFrom: Schema.optional(WorkTurnCarriedFrom),
   status: WorkTurnLifecycleStatus,
@@ -540,6 +550,27 @@ export const WorkTurnStreamFrame = Schema.Union(
     compaction: ContextCompactionSettledRecord,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("turn-loop-noticed"),
+    sequence: Schema.Int.pipe(Schema.positive()),
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+    notice: TurnLoopNotice,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("turn-loop-stopped"),
+    sequence: Schema.Int.pipe(Schema.positive()),
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+    notice: TurnLoopNotice,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("turn-stall-noticed"),
+    sequence: Schema.Int.pipe(Schema.positive()),
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+    notice: TurnStallNotice,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("snapshot-required"),
     sequence: Schema.Int.pipe(Schema.nonNegative()),
     threadId: WorkThreadId,
@@ -651,9 +682,44 @@ export const WorkThreadRewindResult = Schema.Struct({
 }).annotations(strict);
 export type WorkThreadRewindResult = typeof WorkThreadRewindResult.Type;
 
+export const WorkTurnLoopNoticed = Schema.Struct({
+  kind: Schema.Literal("turn-loop-noticed"),
+  requestId: WorkTurnRequestId,
+  threadId: WorkThreadId,
+  turnId: WorkTurnId,
+  toolName: TurnLoopNoticeToolName,
+  count: TurnLoopNoticeCount,
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type WorkTurnLoopNoticed = typeof WorkTurnLoopNoticed.Type;
+
+export const WorkTurnLoopStopped = Schema.Struct({
+  kind: Schema.Literal("turn-loop-stopped"),
+  requestId: WorkTurnRequestId,
+  threadId: WorkThreadId,
+  turnId: WorkTurnId,
+  toolName: TurnLoopNoticeToolName,
+  count: TurnLoopNoticeCount,
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type WorkTurnLoopStopped = typeof WorkTurnLoopStopped.Type;
+
+export const WorkTurnStallNoticed = Schema.Struct({
+  kind: Schema.Literal("turn-stall-noticed"),
+  requestId: WorkTurnRequestId,
+  threadId: WorkThreadId,
+  turnId: WorkTurnId,
+  idleMs: Schema.Int.pipe(Schema.positive()),
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type WorkTurnStallNoticed = typeof WorkTurnStallNoticed.Type;
+
 export const WORK_TURN_EVENT_NAMES = [
   "work.turn-accepted@1",
   "work.turn-updated@1",
+  "work.turn-loop-noticed@1",
+  "work.turn-loop-stopped@1",
+  "work.turn-stall-noticed@1",
   "work.thread-rewound@1",
 ] as const;
 export type WorkTurnEventName = (typeof WORK_TURN_EVENT_NAMES)[number];
@@ -698,6 +764,9 @@ export const decodeWorkThreadTranscriptWindowRequest = Schema.decodeUnknownSync(
 export const decodeWorkTurnStreamFrame = Schema.decodeUnknownSync(WorkTurnStreamFrame);
 export const decodeWorkTurnAccepted = Schema.decodeUnknownSync(WorkTurnAccepted);
 export const decodeWorkTurnUpdated = Schema.decodeUnknownSync(WorkTurnUpdated);
+export const decodeWorkTurnLoopNoticed = Schema.decodeUnknownSync(WorkTurnLoopNoticed);
+export const decodeWorkTurnLoopStopped = Schema.decodeUnknownSync(WorkTurnLoopStopped);
+export const decodeWorkTurnStallNoticed = Schema.decodeUnknownSync(WorkTurnStallNoticed);
 export const decodeRewindWorkThreadCommand = Schema.decodeUnknownSync(RewindWorkThreadCommand);
 export const decodeWorkThreadRewound = Schema.decodeUnknownSync(WorkThreadRewound);
 export const decodeWorkThreadRewindResult = Schema.decodeUnknownSync(WorkThreadRewindResult);

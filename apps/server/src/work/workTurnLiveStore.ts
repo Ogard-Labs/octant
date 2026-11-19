@@ -3,6 +3,8 @@ import {
   type ContextCompactionSettledRecord,
   type ThreadTaskProgressList,
   type ThreadToolStep,
+  type TurnLoopNotice,
+  type TurnStallNotice,
   type WorkThreadId,
   type WorkTurnRequestId,
   type WorkTurnState,
@@ -165,6 +167,44 @@ export class WorkTurnLiveStore {
         requestId,
         ...(change.step === undefined ? {} : { toolStep: change.step }),
         toolStepsTruncated: change.truncated,
+      }),
+    );
+  }
+
+  appendLoopNotice(
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+    notice: TurnLoopNotice,
+  ): void {
+    if (this.#closed) return;
+    const state = this.#state(threadId);
+    this.#publish(
+      threadId,
+      decodeWorkTurnStreamFrame({
+        kind: notice.kind,
+        sequence: state.nextSequence,
+        threadId,
+        requestId,
+        notice,
+      }),
+    );
+  }
+
+  appendStallNotice(
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+    notice: TurnStallNotice,
+  ): void {
+    if (this.#closed) return;
+    const state = this.#state(threadId);
+    this.#publish(
+      threadId,
+      decodeWorkTurnStreamFrame({
+        kind: "turn-stall-noticed",
+        sequence: state.nextSequence,
+        threadId,
+        requestId,
+        notice,
       }),
     );
   }

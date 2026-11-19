@@ -78,6 +78,12 @@ import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 import { StrictKeptProtections } from "./strictNotice";
+import {
+  TurnLoopNotice,
+  TurnLoopNoticeCount,
+  TurnLoopNoticeToolName,
+  TurnStallNotice,
+} from "./turnLoopNotice";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -2090,6 +2096,36 @@ const ConversationTurnStopRequestedEvent = Schema.Struct({
   kind: Schema.Literal("conversation-turn-stop-requested"),
 }).annotations(strict);
 
+/**
+ * The turn called the same tool with the same canonical input repeatedly in a
+ * row outside Strict. The turn is not stopped; the thread shows one quiet line
+ * with a Stop button.
+ */
+const TurnLoopNoticedEvent = Schema.Struct({
+  kind: Schema.Literal("turn-loop-noticed"),
+  toolName: TurnLoopNoticeToolName,
+  count: TurnLoopNoticeCount,
+}).annotations(strict);
+
+/**
+ * The turn called the same tool with the same canonical input repeatedly in a
+ * row under Strict and was stopped by Octant.
+ */
+const TurnLoopStoppedEvent = Schema.Struct({
+  kind: Schema.Literal("turn-loop-stopped"),
+  toolName: TurnLoopNoticeToolName,
+  count: TurnLoopNoticeCount,
+}).annotations(strict);
+
+/**
+ * The turn stayed silent past the stalled-turn limit outside Strict. The turn
+ * is not stopped; the thread shows one quiet line with a Stop button.
+ */
+const TurnStallNoticedEvent = Schema.Struct({
+  kind: Schema.Literal("turn-stall-noticed"),
+  idleMs: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+
 const ProviderSessionReadyEvent = Schema.Struct({
   kind: Schema.Literal("provider-session-ready"),
   sessionId: ProviderSessionId,
@@ -2376,6 +2412,9 @@ export const CodeOperationEvent = Schema.Union(
   RuntimeTurnStartedEvent,
   NativeSessionAdoptedEvent,
   ConversationTurnStopRequestedEvent,
+  TurnLoopNoticedEvent,
+  TurnLoopStoppedEvent,
+  TurnStallNoticedEvent,
   ResultEvent,
 );
 export type CodeOperationEvent = typeof CodeOperationEvent.Type;
@@ -2533,6 +2572,10 @@ export const CodeConversationTurn = Schema.Struct({
    * the launch was not Strict or the host did not record it.
    */
   strictKept: Schema.optional(StrictKeptProtections),
+  /** Repeated identical tool call notice or Strict stop recorded on this turn. */
+  loopNotice: Schema.optional(TurnLoopNotice),
+  /** Silent-turn notice recorded outside Strict when the stalled-turn limit elapsed. */
+  stallNotice: Schema.optional(TurnStallNotice),
   /**
    * Forks of this thread whose conversation this turn carried because a
    * person merged it back, oldest first. Absent on every other turn.

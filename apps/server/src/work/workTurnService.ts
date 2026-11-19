@@ -3197,6 +3197,77 @@ export class WorkTurnService {
           if (harnessScope !== undefined) this.#nativeHarness?.clearRetry?.(harnessScope);
           this.#liveUpdates.clearRetry(input.command.threadId, input.command.requestId);
         },
+        onLoopNoticed: (notice) => {
+          const latest = this.#projection.lookup(input.command.requestId);
+          if (latest === undefined) return;
+          try {
+            this.#append(
+              latest.requestId,
+              latest.version,
+              "work.turn-loop-noticed@1",
+              {
+                kind: "turn-loop-noticed",
+                requestId: latest.requestId,
+                threadId: latest.threadId,
+                turnId: latest.turnId,
+                toolName: notice.toolName,
+                count: notice.count,
+                occurredAt: notice.occurredAt,
+              },
+              "system",
+            );
+            this.#liveUpdates.appendLoopNotice(latest.threadId, latest.requestId, notice);
+          } catch {
+            // A failed notice write does not interrupt a running turn.
+          }
+        },
+        onLoopStopped: (notice) => {
+          const latest = this.#projection.lookup(input.command.requestId);
+          if (latest === undefined) return;
+          try {
+            this.#append(
+              latest.requestId,
+              latest.version,
+              "work.turn-loop-stopped@1",
+              {
+                kind: "turn-loop-stopped",
+                requestId: latest.requestId,
+                threadId: latest.threadId,
+                turnId: latest.turnId,
+                toolName: notice.toolName,
+                count: notice.count,
+                occurredAt: notice.occurredAt,
+              },
+              "system",
+            );
+            this.#liveUpdates.appendLoopNotice(latest.threadId, latest.requestId, notice);
+          } catch {
+            // Settlement still runs below.
+          }
+        },
+        onStallNoticed: (notice) => {
+          const latest = this.#projection.lookup(input.command.requestId);
+          if (latest === undefined) return;
+          try {
+            this.#append(
+              latest.requestId,
+              latest.version,
+              "work.turn-stall-noticed@1",
+              {
+                kind: "turn-stall-noticed",
+                requestId: latest.requestId,
+                threadId: latest.threadId,
+                turnId: latest.turnId,
+                idleMs: notice.idleMs,
+                occurredAt: notice.occurredAt,
+              },
+              "system",
+            );
+            this.#liveUpdates.appendStallNotice(latest.threadId, latest.requestId, notice);
+          } catch {
+            // A failed notice write does not interrupt a running turn.
+          }
+        },
         ...(this.#onRequestSettled === undefined
           ? {}
           : { onRequestSettled: this.#onRequestSettled }),
@@ -3960,7 +4031,13 @@ export class WorkTurnService {
   #append(
     requestId: WorkTurnRequestId,
     expectedVersion: number,
-    eventName: "work.turn-accepted@1" | "work.turn-updated@1" | "work.thread-rewound@1",
+    eventName:
+      | "work.turn-accepted@1"
+      | "work.turn-updated@1"
+      | "work.turn-loop-noticed@1"
+      | "work.turn-loop-stopped@1"
+      | "work.turn-stall-noticed@1"
+      | "work.thread-rewound@1",
     payload: unknown,
     // A person's turn is theirs; a turn the host starts on its own (a routine,
     // a usage-limit resume) is the system's, so the journal tells them apart.

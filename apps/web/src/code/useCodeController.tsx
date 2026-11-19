@@ -1587,7 +1587,7 @@ export function useCodeController(options: CodeControllerOptions) {
                     );
                     noteActivity(operationId, event);
                     noteUsage(operationId, event);
-                    const updateReply = codeReplyMetadataUpdate(event);
+                    const updateReply = codeReplyMetadataUpdate(event, frame.occurredAt);
                     if (updateReply !== undefined) {
                       setConversation((current) =>
                         current.map((message) =>
@@ -3054,7 +3054,7 @@ export function useCodeController(options: CodeControllerOptions) {
               }
               // The host journals the change list just before the turn settles,
               // so the reply gains its files here rather than on the next reopen.
-              const updateReply = codeReplyMetadataUpdate(event);
+              const updateReply = codeReplyMetadataUpdate(event, frame.occurredAt);
               if (updateReply !== undefined) {
                 setConversation((current) =>
                   current.map((message) =>

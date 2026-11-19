@@ -23,6 +23,9 @@ import {
   decodeChatTurn,
   decodeChatTurnCreated,
   decodeChatTurnId,
+  decodeChatTurnLoopNoticed,
+  decodeChatTurnLoopStopped,
+  decodeChatTurnStallNoticed,
   decodeChatTurnRouteDecided,
   decodeChatTurnRouteDecision,
   decodeContextSubjectRef,
@@ -104,6 +107,9 @@ const chatEventNames = new Set([
   "chat.attempt-updated@1",
   "chat.attempt-response-appended@1",
   "chat.attempt-tool-step@1",
+  "chat.turn-loop-noticed@1",
+  "chat.turn-loop-stopped@1",
+  "chat.turn-stall-noticed@1",
   "chat.turn-route-decided@1",
   "chat.attachment-updated@1",
   "chat.citation-recorded@1",
@@ -164,6 +170,15 @@ export class ChatProjection implements Projection {
         return;
       case "chat.attempt-tool-step@1":
         this.#applyAttemptToolStep(connection, event);
+        return;
+      case "chat.turn-loop-noticed@1":
+        this.#applyTurnLoopNotice(connection, event, "noticed");
+        return;
+      case "chat.turn-loop-stopped@1":
+        this.#applyTurnLoopNotice(connection, event, "stopped");
+        return;
+      case "chat.turn-stall-noticed@1":
+        this.#applyTurnStallNotice(connection, event);
         return;
       case "chat.turn-route-decided@1":
         this.#applyTurnRouteDecided(connection, event);
@@ -474,6 +489,81 @@ export class ChatProjection implements Projection {
         ...(steps.length === 0 ? {} : { toolSteps: steps }),
         ...(changed.toolStepsTruncated === true ? { toolStepsTruncated: true } : {}),
         updatedAt: changed.updatedAt,
+      },
+      event,
+    );
+  }
+
+  #applyTurnLoopNotice(
+    connection: SqliteConnection,
+    event: EventEnvelope,
+    outcome: "noticed" | "stopped",
+  ): void {
+    assertEnvelope(event.aggregateType === "chat-thread");
+    const recorded = decodeProjection(() =>
+      outcome === "noticed"
+        ? decodeChatTurnLoopNoticed(event.payload)
+        : decodeChatTurnLoopStopped(event.payload),
+    );
+    assertEnvelope(String(recorded.threadId) === String(event.aggregateId));
+    const row = connection
+      .prepare(
+        "SELECT attempt_json, last_sequence FROM chat_attempt_projection WHERE attempt_id = ?",
+      )
+      .get(String(recorded.attemptId)) as
+      | { readonly attempt_json: string; readonly last_sequence: number }
+      | undefined;
+    assertEnvelope(row !== undefined);
+    if (row.last_sequence >= event.globalSequence) return;
+    const attempt = decodeProjection(() => decodeChatAttempt(JSON.parse(row.attempt_json)));
+    assertEnvelope(
+      String(attempt.turnId) === String(recorded.turnId) &&
+        String(attempt.threadId) === String(recorded.threadId),
+    );
+    this.#storeAttempt(
+      connection,
+      {
+        ...attempt,
+        loopNotice: {
+          kind: recorded.kind,
+          toolName: recorded.toolName,
+          count: recorded.count,
+          occurredAt: recorded.occurredAt,
+        },
+        updatedAt: recorded.occurredAt,
+      },
+      event,
+    );
+  }
+
+  #applyTurnStallNotice(connection: SqliteConnection, event: EventEnvelope): void {
+    assertEnvelope(event.aggregateType === "chat-thread");
+    const recorded = decodeProjection(() => decodeChatTurnStallNoticed(event.payload));
+    assertEnvelope(String(recorded.threadId) === String(event.aggregateId));
+    const row = connection
+      .prepare(
+        "SELECT attempt_json, last_sequence FROM chat_attempt_projection WHERE attempt_id = ?",
+      )
+      .get(String(recorded.attemptId)) as
+      | { readonly attempt_json: string; readonly last_sequence: number }
+      | undefined;
+    assertEnvelope(row !== undefined);
+    if (row.last_sequence >= event.globalSequence) return;
+    const attempt = decodeProjection(() => decodeChatAttempt(JSON.parse(row.attempt_json)));
+    assertEnvelope(
+      String(attempt.turnId) === String(recorded.turnId) &&
+        String(attempt.threadId) === String(recorded.threadId),
+    );
+    this.#storeAttempt(
+      connection,
+      {
+        ...attempt,
+        stallNotice: {
+          kind: "turn-stall-noticed",
+          idleMs: recorded.idleMs,
+          occurredAt: recorded.occurredAt,
+        },
+        updatedAt: recorded.occurredAt,
       },
       event,
     );

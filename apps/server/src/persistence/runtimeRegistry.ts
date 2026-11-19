@@ -67,6 +67,9 @@ import {
   ChatThreadRewound,
   ChatThreadUpdated,
   ChatTurnCreated,
+  ChatTurnLoopNoticed,
+  ChatTurnLoopStopped,
+  ChatTurnStallNoticed,
   ChatTurnRouteDecided,
   CodeProjectAccessChanged,
   CodeProjectNewThreadWorkspaceChanged,
@@ -124,6 +127,9 @@ import {
   WorkThreadCompletionConfirmed,
   WorkSettingsUpdated,
   WorkTurnAccepted,
+  WorkTurnLoopNoticed,
+  WorkTurnLoopStopped,
+  WorkTurnStallNoticed,
   WorkTurnUpdated,
   WorkThreadRewound,
   WorkPromotionFrame,
@@ -633,6 +639,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("chat.attempt-updated@1", 1, ChatAttemptUpdated)
     .register("chat.attempt-response-appended@1", 1, ChatAttemptResponseAppended)
     .register("chat.attempt-tool-step@1", 1, ChatAttemptToolStepChanged)
+    .register("chat.turn-loop-noticed@1", 1, ChatTurnLoopNoticed)
+    .register("chat.turn-loop-stopped@1", 1, ChatTurnLoopStopped)
+    .register("chat.turn-stall-noticed@1", 1, ChatTurnStallNoticed)
     .register("chat.turn-route-decided@1", 1, ChatTurnRouteDecided)
     .register("chat.attachment-updated@1", 1, ChatAttachmentUpdated)
     .register("chat.citation-recorded@1", 1, ChatCitationRecorded)
@@ -773,6 +782,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("work.settings-updated@1", 1, WorkSettingsUpdated)
     .register("work.turn-accepted@1", 1, WorkTurnAccepted)
     .register("work.turn-updated@1", 1, WorkTurnUpdated)
+    .register("work.turn-loop-noticed@1", 1, WorkTurnLoopNoticed)
+    .register("work.turn-loop-stopped@1", 1, WorkTurnLoopStopped)
+    .register("work.turn-stall-noticed@1", 1, WorkTurnStallNoticed)
     .register("work.thread-rewound@1", 1, WorkThreadRewound)
     .register("work.artifact-mutation-recorded@1", 1, WorkArtifactMutationFrame)
     .register("work.promotion-recorded@1", 1, WorkPromotionFrame)

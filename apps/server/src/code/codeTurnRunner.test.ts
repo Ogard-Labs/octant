@@ -2623,6 +2623,179 @@ describe("CodeTurnRunner", () => {
       ]);
     });
   });
+
+  describe("loop and stall notices", () => {
+    it("warns at the 3rd identical Octant tool call and notices a 6-call loop outside Strict without stopping", async () => {
+      const answered: Array<{
+        readonly requestId: string;
+        readonly resultJson: string;
+        readonly isError: boolean;
+      }> = [];
+      const loopNotices: Array<{
+        readonly kind: string;
+        readonly toolName: string;
+        readonly count: number;
+      }> = [];
+      const events: ProviderRuntimeEvent[] = [
+        ...Array.from({ length: 6 }, (_, index) =>
+          event({
+            kind: "tool-request",
+            sequence: index + 1,
+            requestId: `code-req-${index + 1}`,
+            toolName: "octant_inspect",
+            inputJson: index % 2 === 0 ? '{"a":1,"b":2}' : '{"b":2,"a":1}',
+          }),
+        ),
+        event({ kind: "text-delta", sequence: 7, text: "All done." }),
+        event({ kind: "completed", sequence: 8 }),
+      ];
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(Stream.fromIterable(events)),
+        answerTool: vi.fn((answer) =>
+          Effect.sync(() => {
+            answered.push(answer);
+          }),
+        ),
+      });
+      const outcomes: CodeTurnOutcome[] = [];
+      let runs = 0;
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              strict: false,
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+              onLoopNotice: (notice) => Effect.sync(() => loopNotices.push(notice)),
+              appManagedTools: {
+                definitions: [{ name: "octant_inspect", description: "Inspect", inputSchema: {} }],
+                execute: async () => {
+                  runs += 1;
+                  return { result: { run: runs }, isError: false };
+                },
+              },
+            }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Success");
+      expect(runs).toBe(6);
+      expect(connection.interrupt).not.toHaveBeenCalled();
+      expect(outcomes.at(-1)).toBe("completed");
+      expect(loopNotices).toEqual([
+        expect.objectContaining({
+          kind: "turn-loop-noticed",
+          toolName: "octant_inspect",
+          count: 6,
+        }),
+      ]);
+      expect(JSON.parse(answered[2]?.resultJson ?? "{}")).toEqual({
+        run: 3,
+        notice: "This tool has been called with the same input three times in a row.",
+      });
+    });
+
+    it("stops a Code turn under Strict on 6 consecutive identical provider tool calls with inputs", async () => {
+      const loopNotices: Array<{
+        readonly kind: string;
+        readonly toolName: string;
+        readonly count: number;
+      }> = [];
+      const events: ProviderRuntimeEvent[] = Array.from({ length: 6 }, (_, index) => [
+        event({
+          kind: "tool-start",
+          sequence: index * 3 + 1,
+          toolCallId: `read-${index + 1}`,
+          toolName: "Read",
+        }),
+        event({
+          kind: "tool-call-content",
+          sequence: index * 3 + 2,
+          toolCallId: `read-${index + 1}`,
+          part: "input",
+          text:
+            index % 2 === 0
+              ? '{"file_path":"src/index.ts","limit":50}'
+              : '{"limit":50,"file_path":"src/index.ts"}',
+        }),
+        event({
+          kind: "tool-success",
+          sequence: index * 3 + 3,
+          toolCallId: `read-${index + 1}`,
+          summary: "Read file.",
+        }),
+      ]).flat();
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(Stream.fromIterable(events)),
+      });
+      const outcomes: CodeTurnOutcome[] = [];
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              strict: true,
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+              onLoopNotice: (notice) => Effect.sync(() => loopNotices.push(notice)),
+            }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
+      expect(outcomes.at(-1)).toBe("interrupted");
+      expect(loopNotices).toEqual([
+        expect.objectContaining({
+          kind: "turn-loop-stopped",
+          toolName: "Read",
+          count: 6,
+        }),
+      ]);
+    });
+
+    it("notices provider silence past the stalled-turn limit outside Strict without stopping the Code turn", async () => {
+      const stallNotices: Array<{ readonly kind: string; readonly idleMs: number }> = [];
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        send: vi.fn(() =>
+          Effect.gen(function* () {
+            yield* Effect.sleep(60);
+            yield* Queue.offer(
+              queue,
+              event({ kind: "text-delta", sequence: 1, text: "Late reply." }),
+            );
+            yield* Queue.offer(queue, event({ kind: "completed", sequence: 2 }));
+          }),
+        ),
+      });
+      const outcomes: CodeTurnOutcome[] = [];
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner({ stalledTurnLimitMs: () => 20 }).run(
+            input({
+              strict: false,
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+              onStallNotice: (notice) => Effect.sync(() => stallNotices.push(notice)),
+            }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Success");
+      expect(connection.interrupt).not.toHaveBeenCalled();
+      expect(outcomes.at(-1)).toBe("completed");
+      expect(stallNotices).toEqual([
+        expect.objectContaining({ kind: "turn-stall-noticed", idleMs: 20 }),
+      ]);
+    });
+  });
 });
 
 function thread(overrides: Partial<CodeThread> = {}): CodeThread {

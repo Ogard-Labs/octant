@@ -1331,6 +1331,29 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     ),
                   })}
               busy={isSending || branchPending}
+              {...(activeAttempt === undefined
+                ? {}
+                : {
+                    stoppingTurn: stoppingAttemptId !== undefined,
+                    onStopTurn: () => {
+                      const stopping = String(activeAttempt.id);
+                      setStopRequestedFor(stopping);
+                      void props.controller
+                        .execute({
+                          kind: "interrupt-chat-turn",
+                          threadId: view.thread.id,
+                          expectedVersion: view.thread.version,
+                          turnId: activeAttempt.turnId,
+                          attemptId: activeAttempt.id,
+                        })
+                        .then((result) => {
+                          if (result === undefined)
+                            setStopRequestedFor((current) =>
+                              current === stopping ? undefined : current,
+                            );
+                        });
+                    },
+                  })}
               {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
               {...(props.onTurnRevealed === undefined
                 ? {}

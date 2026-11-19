@@ -15058,11 +15058,29 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     without the warning, confirmed or not (built).
   - **Stalled-turn limit.** At Full access the stalled-turn limit defaults
     to Off; below Full access it stays 30 minutes, and the person may set
-    either. Strict keeps 30 minutes at every level (built: Settings ›
-    Providers & Models › Stalled-turn limit at Full access,
+    either. Outside Strict, reaching the stalled-turn limit never stops the
+    turn: it journals `turn-stall-noticed` (`chat.turn-stall-noticed@1`,
+    `work.turn-stall-noticed@1`, or Code's `turn-stall-noticed` operation
+    event) and shows one quiet line in the thread with a **Stop** button
+    ([Thread view: Loop and stall notices](design/thread-view.md#loop-and-stall-notices)).
+    Strict keeps 30 minutes at every level and stops the turn as before
+    (built: Settings › Providers & Models › Stalled-turn limit at Full access,
     `fullAccessStalledTurnLimitMinutes`, Off by default; a Full access turn
     under Strict, and every turn below Full access, takes the stalled-turn
-    limit).
+    limit, noticing outside Strict and stopping only under Strict).
+  - **Loop detection.** Six consecutive identical tool calls in one turn —
+    same tool name and same canonical sorted-key JSON input, with no other
+    tool call in between — on providers whose runtime events carry tool inputs
+    ([Provider runtimes: Loop detection and provider tool inputs](design/provider-runtimes.md#loop-detection-and-provider-tool-inputs))
+    are handled without stopping outside Strict: at every level outside Strict,
+    Octant journals `turn-loop-noticed` (`chat.turn-loop-noticed@1`,
+    `work.turn-loop-noticed@1`, or Code's `turn-loop-noticed`) with the tool
+    name and count and shows one quiet line in the thread with a **Stop**
+    button; under Strict, Octant stops the turn, journals `turn-loop-stopped`,
+    and leaves the thread ready to accept a new message straight away. On
+    Octant's own tools, the 3rd identical consecutive call still runs and adds
+    one informational sentence to its real result noting the repetition (never
+    a refusal, no setting). Built.
   - **Opt-in extras.** A per-person list of provider tools to block, and in
     Strict a notice saying what Strict withheld. Built: Settings ›
     Permissions › Blocked tools holds the list, empty by default, per

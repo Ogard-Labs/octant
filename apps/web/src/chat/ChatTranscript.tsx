@@ -24,6 +24,7 @@ import { threadHandoffDisclosure } from "../providers/conversationHandoff";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnActions } from "../transcript/TurnActions";
 import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
+import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import {
   memo,
@@ -76,6 +77,9 @@ export interface ChatTranscriptProps {
    * completed one regenerates. The server decides what the attempt allows.
    */
   readonly onRetryAttempt?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
+  /** Stops the running attempt from an inline loop or stall notice. */
+  readonly onStopTurn?: () => void;
+  readonly stoppingTurn?: boolean;
   /**
    * Opts the named stopped attempt into the host-owned resume at its declared
    * reset. Absent when the surface cannot schedule one.
@@ -639,6 +643,8 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   onDismissQuestion={props.onDismissQuestion}
                   onQuoteSelection={props.onQuoteSelection}
                   onRetryAttempt={props.onRetryAttempt}
+                  onStopTurn={props.onStopTurn}
+                  stoppingTurn={props.stoppingTurn}
                   onScheduleUsageResume={props.onScheduleUsageResume}
                   onCancelUsageResume={props.onCancelUsageResume}
                   {...(props.view.thread.snooze === undefined &&
@@ -877,6 +883,8 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly onDismissQuestion: ChatTranscriptProps["onDismissQuestion"];
   readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
+  readonly onStopTurn: ChatTranscriptProps["onStopTurn"];
+  readonly stoppingTurn: ChatTranscriptProps["stoppingTurn"];
   readonly onScheduleUsageResume: ChatTranscriptProps["onScheduleUsageResume"];
   readonly onCancelUsageResume: ChatTranscriptProps["onCancelUsageResume"];
   readonly onSnoozeAtReset?: () => void;
@@ -978,6 +986,17 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           {...(workedFor === undefined || workedForInFold ? {} : { workedFor })}
           startedAt={props.attempt.createdAt}
           step={runningStepTitle(toolActivity)}
+        />
+        <TurnLoopStallNotice
+          {...(props.attempt.loopNotice === undefined
+            ? {}
+            : { loopNotice: props.attempt.loopNotice })}
+          {...(props.attempt.stallNotice === undefined
+            ? {}
+            : { stallNotice: props.attempt.stallNotice })}
+          running={props.attempt.outcome === "queued" || props.attempt.outcome === "streaming"}
+          {...(props.stoppingTurn === undefined ? {} : { stopping: props.stoppingTurn })}
+          {...(props.onStopTurn === undefined ? {} : { onStop: props.onStopTurn })}
         />
         <HarnessRetryStatus
           events={

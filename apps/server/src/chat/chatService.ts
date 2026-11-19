@@ -35,6 +35,8 @@ import {
   WEB_SEARCH_TOOL_DEFINITION,
   CONTEXT_COMPACTION_EVENT_NAMES,
   type ThreadToolStep,
+  type TurnLoopNotice,
+  type TurnStallNotice,
   CorrelationId,
   EventId,
   UtcTimestamp,
@@ -377,6 +379,9 @@ const CHAT_EVENT_NAMES = new Set([
   "chat.attempt-updated@1",
   "chat.attempt-response-appended@1",
   "chat.attempt-tool-step@1",
+  "chat.turn-loop-noticed@1",
+  "chat.turn-loop-stopped@1",
+  "chat.turn-stall-noticed@1",
   "chat.turn-route-decided@1",
   "chat.attachment-updated@1",
   "chat.citation-recorded@1",
@@ -6979,6 +6984,53 @@ export class ChatService {
         ],
       });
     };
+    const persistLoopNotice = async (attempt: ChatAttempt, notice: TurnLoopNotice) => {
+      journalAppendedBatch();
+      const eventName =
+        notice.kind === "turn-loop-stopped"
+          ? ("chat.turn-loop-stopped@1" as const)
+          : ("chat.turn-loop-noticed@1" as const);
+      this.#persistence.journal.append({
+        aggregate: { aggregateType: "chat-thread", aggregateId: input.thread.id },
+        expectedVersion: readAggregateVersion(
+          this.#persistence.connection,
+          "chat-thread",
+          input.thread.id,
+        ),
+        events: [
+          this.#pending(eventName, {
+            kind: notice.kind,
+            threadId: attempt.threadId,
+            turnId: attempt.turnId,
+            attemptId: attempt.id,
+            toolName: notice.toolName,
+            count: notice.count,
+            occurredAt: notice.occurredAt,
+          }),
+        ],
+      });
+    };
+    const persistStallNotice = async (attempt: ChatAttempt, notice: TurnStallNotice) => {
+      journalAppendedBatch();
+      this.#persistence.journal.append({
+        aggregate: { aggregateType: "chat-thread", aggregateId: input.thread.id },
+        expectedVersion: readAggregateVersion(
+          this.#persistence.connection,
+          "chat-thread",
+          input.thread.id,
+        ),
+        events: [
+          this.#pending("chat.turn-stall-noticed@1", {
+            kind: "turn-stall-noticed",
+            threadId: attempt.threadId,
+            turnId: attempt.turnId,
+            attemptId: attempt.id,
+            idleMs: notice.idleMs,
+            occurredAt: notice.occurredAt,
+          }),
+        ],
+      });
+    };
     const persistAppendedResponse = async (
       attempt: ChatAttempt,
       responseRef: ChatContentReference,
@@ -7152,6 +7204,24 @@ export class ChatService {
               persistToolStep: (attempt, step) =>
                 Effect.tryPromise({
                   try: () => persistToolStep(attempt, step),
+                  catch: () =>
+                    decodeChatFailure({
+                      category: "unavailable",
+                      message: "Chat attempt persistence failed.",
+                    }),
+                }),
+              persistLoopNotice: (attempt, notice) =>
+                Effect.tryPromise({
+                  try: () => persistLoopNotice(attempt, notice),
+                  catch: () =>
+                    decodeChatFailure({
+                      category: "unavailable",
+                      message: "Chat attempt persistence failed.",
+                    }),
+                }),
+              persistStallNotice: (attempt, notice) =>
+                Effect.tryPromise({
+                  try: () => persistStallNotice(attempt, notice),
                   catch: () =>
                     decodeChatFailure({
                       category: "unavailable",

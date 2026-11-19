@@ -1,13 +1,19 @@
 import {
   decodeWorkThreadRewound,
   decodeWorkTurnAccepted,
+  decodeWorkTurnLoopNoticed,
+  decodeWorkTurnLoopStopped,
   decodeWorkTurnRequestId,
+  decodeWorkTurnStallNoticed,
   decodeWorkTurnState,
   decodeWorkTurnUpdated,
   type WorkThreadId,
   type WorkThreadRewound,
   type WorkTurnAccepted,
+  type WorkTurnLoopNoticed,
+  type WorkTurnLoopStopped,
   type WorkTurnRequestId,
+  type WorkTurnStallNoticed,
   type WorkTurnState,
   type WorkTurnUpdated,
   type ProjectId,
@@ -48,7 +54,69 @@ export class WorkTurnProjection {
    */
   readonly #rewoundSinceLatest = new Set<string>();
 
-  apply(event: WorkTurnAccepted | WorkTurnUpdated | WorkThreadRewound): void {
+  apply(
+    event:
+      | WorkTurnAccepted
+      | WorkTurnUpdated
+      | WorkTurnLoopNoticed
+      | WorkTurnLoopStopped
+      | WorkTurnStallNoticed
+      | WorkThreadRewound,
+  ): void {
+    if (event.kind === "turn-loop-noticed" || event.kind === "turn-loop-stopped") {
+      const recorded =
+        event.kind === "turn-loop-noticed"
+          ? decodeWorkTurnLoopNoticed(event)
+          : decodeWorkTurnLoopStopped(event);
+      const current = this.#byRequest.get(recorded.requestId);
+      if (current === undefined) return;
+      if (
+        String(current.threadId) !== String(recorded.threadId) ||
+        String(current.turnId) !== String(recorded.turnId)
+      ) {
+        return;
+      }
+      this.#byRequest.set(
+        recorded.requestId,
+        decodeWorkTurnState({
+          ...current,
+          loopNotice: {
+            kind: recorded.kind,
+            toolName: recorded.toolName,
+            count: recorded.count,
+            occurredAt: recorded.occurredAt,
+          },
+          version: current.version + 1,
+          updatedAt: recorded.occurredAt,
+        }),
+      );
+      return;
+    }
+    if (event.kind === "turn-stall-noticed") {
+      const recorded = decodeWorkTurnStallNoticed(event);
+      const current = this.#byRequest.get(recorded.requestId);
+      if (current === undefined) return;
+      if (
+        String(current.threadId) !== String(recorded.threadId) ||
+        String(current.turnId) !== String(recorded.turnId)
+      ) {
+        return;
+      }
+      this.#byRequest.set(
+        recorded.requestId,
+        decodeWorkTurnState({
+          ...current,
+          stallNotice: {
+            kind: "turn-stall-noticed",
+            idleMs: recorded.idleMs,
+            occurredAt: recorded.occurredAt,
+          },
+          version: current.version + 1,
+          updatedAt: recorded.occurredAt,
+        }),
+      );
+      return;
+    }
     if (event.kind === "thread-rewound") {
       const rewound = decodeWorkThreadRewound(event);
       if (this.#rewinds.has(String(rewound.rewindId))) return;
@@ -351,6 +419,12 @@ export function hydrateWorkTurnProjectionFromJournal(input: {
         input.projection.apply(event.payload as WorkTurnAccepted);
       } else if (event.eventName === "work.turn-updated@1") {
         input.projection.apply(event.payload as WorkTurnUpdated);
+      } else if (event.eventName === "work.turn-loop-noticed@1") {
+        input.projection.apply(event.payload as WorkTurnLoopNoticed);
+      } else if (event.eventName === "work.turn-loop-stopped@1") {
+        input.projection.apply(event.payload as WorkTurnLoopStopped);
+      } else if (event.eventName === "work.turn-stall-noticed@1") {
+        input.projection.apply(event.payload as WorkTurnStallNoticed);
       } else if (event.eventName === "work.thread-rewound@1") {
         input.projection.apply(event.payload as WorkThreadRewound);
       }

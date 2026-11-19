@@ -4,10 +4,17 @@ import type { StalledTurnScope } from "../providers/turnBudget";
 import type {
   ProviderChildActivityEvent,
   ShieldWatcherLabel,
+  TurnLoopNotice,
+  TurnStallNotice,
   TurnStopReason,
 } from "@octant/contracts";
+import { UtcTimestamp } from "@octant/contracts";
 import {
+  appendRepeatToolWarning,
+  decideTurnStallAction,
+  INITIAL_TURN_LOOP_STATE,
   observeTurnMetrics,
+  observeTurnRuntimeEvent,
   FULL_ACCESS_SANDBOX_UNSUPPORTED,
   isNativeHarnessDriverKind,
   projectExtraFolderRoots,
@@ -57,7 +64,7 @@ import type {
   ProviderSessionHandle,
   ProviderWakeupSchedule,
 } from "@octant/provider-sdk/driver";
-import { Deferred, Effect, Fiber, Scope, Stream } from "effect";
+import { Deferred, Effect, Fiber, Schema, Scope, Stream } from "effect";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import { providerWebSearchAtSend, type AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -87,6 +94,7 @@ import {
 
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
 // How long a finished turn waits for its provider session to interrupt or stop.
+const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const CLEANUP_TIMEOUT_MS = 1_000;
 const RESPONSE_TRUNCATION_MARKER = "\n[Output truncated by Octant.]";
 const textEncoder = new TextEncoder();
@@ -192,6 +200,12 @@ export interface WorkTurnRuntimePort {
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
     /** The turn's tool calls, whole, whenever one starts, moves, or ends. */
     readonly onToolSteps?: (toolSteps: ThreadToolSteps) => void;
+    /** Repeated identical tool call noticed outside Strict. */
+    readonly onLoopNoticed?: (notice: TurnLoopNotice) => void;
+    /** Repeated identical tool call stopped the turn under Strict. */
+    readonly onLoopStopped?: (notice: TurnLoopNotice) => void;
+    /** Stalled-turn limit elapsed outside Strict without stopping the turn. */
+    readonly onStallNoticed?: (notice: TurnStallNotice) => void;
     /**
      * How many tool calls the turn keeps: the person's setting for the level
      * this turn runs at, or `"off"` for no limit. Absent reads as the default
@@ -388,32 +402,36 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
   async #runTurn(input: WorkTurnRunInput, meter: WorkTurnMeter): Promise<WorkTurnRuntimeOutcome> {
     try {
       if (input.signal.aborted) return { kind: "cancelled" };
+      const strict = input.strict !== false;
+      const idleLimitMs = this.#stalledTurnLimitMs({
+        fullAccess: input.access === "full-access",
+        strict,
+      });
+      const stallAction = decideTurnStallAction({ strict });
       const idle = await Effect.runPromise(
-        makeIdleTimeout(
-          this.#stalledTurnLimitMs({
-            fullAccess: input.access === "full-access",
-            strict: input.strict !== false,
-          }),
-          this.#providerToolCallPauseLimitMs(),
-        ),
+        makeIdleTimeout(idleLimitMs, this.#providerToolCallPauseLimitMs()),
       );
       const execution = Effect.scoped(
-        this.#execute(input, idle, meter).pipe(
+        this.#execute(input, idle, meter, { strict, idleLimitMs, stallAction }).pipe(
           Effect.catchAll((error) => Effect.succeed<WorkTurnRuntimeOutcome>(failureOutcome(error))),
         ),
       ).pipe(Effect.map((outcome): LifecycleResult => ({ kind: "outcome", outcome })));
-      const boundary = Effect.raceFirst(
-        abortEffect(input.signal).pipe(
-          Effect.flatMap(() => {
-            const owned = this.#forceStops.get(String(input.command.requestId));
-            return owned === undefined
-              ? Effect.void
-              : owned.interrupt().pipe(Effect.catchAll(() => Effect.void));
-          }),
-          Effect.as<LifecycleResult>({ kind: "cancelled" }),
-        ),
-        idle.expired.pipe(Effect.as<LifecycleResult>({ kind: "timeout" })),
+      const abortBoundary = abortEffect(input.signal).pipe(
+        Effect.flatMap(() => {
+          const owned = this.#forceStops.get(String(input.command.requestId));
+          return owned === undefined
+            ? Effect.void
+            : owned.interrupt().pipe(Effect.catchAll(() => Effect.void));
+        }),
+        Effect.as<LifecycleResult>({ kind: "cancelled" }),
       );
+      const boundary =
+        stallAction === "stop"
+          ? Effect.raceFirst(
+              abortBoundary,
+              idle.expired.pipe(Effect.as<LifecycleResult>({ kind: "timeout" })),
+            )
+          : abortBoundary;
       const result = await Effect.runPromise(Effect.raceFirst(execution, boundary));
       if (result.kind === "cancelled") return { kind: "cancelled" };
       if (result.kind === "timeout") {
@@ -436,6 +454,11 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     input: WorkTurnRunInput,
     idle: IdleTimeout,
     meter: WorkTurnMeter,
+    guard: {
+      readonly strict: boolean;
+      readonly idleLimitMs: number | null;
+      readonly stallAction: "notice" | "stop";
+    },
   ): Effect.Effect<WorkTurnRuntimeOutcome, ProviderFailure, Scope.Scope> {
     const cleanupTimeoutMs = this.#cleanupTimeoutMs;
     const shieldReviews = this.#shieldReviews;
@@ -450,6 +473,26 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       );
       let reachedTerminalEvent = false;
       const shareEventLoop = makeEventLoopShare();
+      const clock = input.clock ?? (() => new Date().toISOString());
+      let loopState = INITIAL_TURN_LOOP_STATE;
+      const loopStopped = yield* Deferred.make<void>();
+      if (guard.stallAction === "notice" && guard.idleLimitMs !== null) {
+        const noticedIdleMs = guard.idleLimitMs;
+        yield* Effect.forkScoped(
+          idle.expired.pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                input.onStallNoticed?.({
+                  kind: "turn-stall-noticed",
+                  idleMs: noticedIdleMs,
+                  occurredAt: decodeTimestamp(clock()),
+                });
+              }),
+            ),
+            Effect.catchAll(() => Effect.void),
+          ),
+        );
+      }
       const outsideContentMarks = input.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS;
       // An earlier turn's read that could not be marked is still in the
       // session this turn would resume.
@@ -737,6 +780,30 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 }
                 if (handledEvents > maxEvents) return;
                 input.toolCallRecords?.observe(event);
+                if (event.kind !== "tool-request") {
+                  const loopCheck = observeTurnRuntimeEvent(loopState, event, {
+                    strict: guard.strict,
+                  });
+                  loopState = loopCheck.next;
+                  if (loopCheck.loop !== undefined) {
+                    const notice: TurnLoopNotice = {
+                      kind:
+                        loopCheck.loop.kind === "stop" ? "turn-loop-stopped" : "turn-loop-noticed",
+                      toolName: loopCheck.loop.toolName,
+                      count: loopCheck.loop.count,
+                      occurredAt: decodeTimestamp(clock()),
+                    };
+                    if (loopCheck.loop.kind === "stop") {
+                      input.onLoopStopped?.(notice);
+                      yield* connection
+                        .interrupt(input.providerSessionId)
+                        .pipe(Effect.catchAll(() => Effect.void));
+                      yield* Deferred.succeed(loopStopped, undefined);
+                      return;
+                    }
+                    input.onLoopNoticed?.(notice);
+                  }
+                }
                 // Kept in the record above; never a step or a turn event.
                 if (event.kind === "tool-call-content") return;
                 if (event.kind === "usage") input.onUsage?.(event);
@@ -790,6 +857,28 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 }
                 if (event.kind === "tool-request") {
                   if (!answeredToolRequests.answer(event.requestId)) return;
+                  const loopCheck = observeTurnRuntimeEvent(loopState, event, {
+                    strict: guard.strict,
+                  });
+                  loopState = loopCheck.next;
+                  if (loopCheck.loop !== undefined) {
+                    const notice: TurnLoopNotice = {
+                      kind:
+                        loopCheck.loop.kind === "stop" ? "turn-loop-stopped" : "turn-loop-noticed",
+                      toolName: loopCheck.loop.toolName,
+                      count: loopCheck.loop.count,
+                      occurredAt: decodeTimestamp(clock()),
+                    };
+                    if (loopCheck.loop.kind === "stop") {
+                      input.onLoopStopped?.(notice);
+                      yield* connection
+                        .interrupt(input.providerSessionId)
+                        .pipe(Effect.catchAll(() => Effect.void));
+                      yield* Deferred.succeed(loopStopped, undefined);
+                      return;
+                    }
+                    input.onLoopNoticed?.(notice);
+                  }
                   const toolSet = recordedToolSet(
                     input.toolEffects,
                     input.appManagedTools,
@@ -872,7 +961,10 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                     }
                   }
                   showAppTool(execution.isError === true ? "failed" : "completed");
-                  const resultJson = boundedToolResultJson(execution.result);
+                  const toolResult = loopCheck.earlyWarning
+                    ? appendRepeatToolWarning(execution.result)
+                    : execution.result;
+                  const resultJson = boundedToolResultJson(toolResult);
                   input.toolCallRecords?.appTool({
                     toolCallId: event.requestId,
                     toolName: event.toolName,
@@ -980,9 +1072,18 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             .pipe(Effect.tap(() => Effect.sync(() => input.onPromptSent?.())));
         }),
       });
-      yield* Fiber.join(events);
+      const stoppedByLoop = yield* Effect.raceFirst(
+        Fiber.join(events).pipe(Effect.as(false)),
+        Deferred.await(loopStopped).pipe(Effect.as(true)),
+      );
+      if (stoppedByLoop) {
+        yield* Fiber.interrupt(events);
+      }
       for (const requestId of pendingRequestHolds.keys()) {
         releaseRequestHold(requestId);
+      }
+      if (stoppedByLoop) {
+        return { kind: "cancelled" };
       }
 
       if (handledEvents > maxEvents) {

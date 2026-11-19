@@ -1893,6 +1893,19 @@ function foldTurnFrame(
   } else if (frame.event.kind === "provider-session-ready") {
     if (frame.event.strictKept === undefined) delete builder.strictKept;
     else builder.strictKept = frame.event.strictKept;
+  } else if (frame.event.kind === "turn-loop-noticed" || frame.event.kind === "turn-loop-stopped") {
+    builder.loopNotice = {
+      kind: frame.event.kind,
+      toolName: frame.event.toolName,
+      count: frame.event.count,
+      occurredAt: frame.occurredAt,
+    };
+  } else if (frame.event.kind === "turn-stall-noticed") {
+    builder.stallNotice = {
+      kind: "turn-stall-noticed",
+      idleMs: frame.event.idleMs,
+      occurredAt: frame.occurredAt,
+    };
   } else if (frame.event.kind === "fork-context-delivered") {
     const { kind: _kind, mergeOperationId: _merge, ...mergeBack } = frame.event;
     if (builder.forkMergeBacks.length < MAX_CODE_FORK_MERGE_BACKS_PER_TURN)
@@ -2110,6 +2123,8 @@ type CodeConversationBuilder = {
   usage?: CodeConversationTurn["usage"];
   handoff?: CodeConversationTurn["handoff"];
   strictKept?: CodeConversationTurn["strictKept"];
+  loopNotice?: CodeConversationTurn["loopNotice"];
+  stallNotice?: CodeConversationTurn["stallNotice"];
   forkMergeBacks: Array<CodeForkMergeBack>;
   assistant: Array<CodeConversationTurn["assistant"][number]>;
   steps: Array<CodeConversationStep>;

@@ -158,6 +158,7 @@ import {
   turnWorkedFor,
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
+import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { SideTaskInline } from "../followUps/SideTaskCards";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
@@ -2228,6 +2229,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                     ),
                                   })}
                               {...(message.at === undefined ? {} : { at: message.at })}
+                            />
+                            <TurnLoopStallNotice
+                              {...(message.loopNotice === undefined
+                                ? {}
+                                : { loopNotice: message.loopNotice })}
+                              {...(message.stallNotice === undefined
+                                ? {}
+                                : { stallNotice: message.stallNotice })}
+                              running={
+                                message.status === "incomplete" &&
+                                props.controller.turnStatus === "running"
+                              }
+                              onStop={() => {
+                                forceStop.requestStop();
+                                void props.controller.cancelTurn();
+                              }}
                             />
                             {activity?.retrying === undefined ? null : (
                               <HarnessRetryStatus

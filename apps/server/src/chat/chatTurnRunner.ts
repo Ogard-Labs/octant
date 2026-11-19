@@ -34,6 +34,8 @@ import {
   type TurnStopReason,
   type TurnUsage,
   type ThreadTaskProgress,
+  type TurnLoopNotice,
+  type TurnStallNotice,
   DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   MAX_THREAD_TASKS_PER_TURN,
   restateThreadTaskList,
@@ -42,14 +44,19 @@ import {
 } from "@octant/contracts";
 import {
   accumulateTurnUsage,
+  appendRepeatToolWarning,
   changedThreadToolStep,
+  decideTurnStallAction,
+  INITIAL_TURN_LOOP_STATE,
   isNativeHarnessDriverKind,
   markThreadToolStepOutsideContent,
   observeTurnMetrics,
+  observeTurnRuntimeEvent,
   recordThreadAppToolStep,
   recordThreadToolStep,
   startTurnMetrics,
   type ThreadToolSteps,
+  type TurnLoopOutcome,
   turnRuntimeEventBudget,
 } from "@octant/domain";
 import { answerChatTurnQuestion, transitionChatAttempt } from "@octant/domain/chat-policy";
@@ -312,6 +319,16 @@ export interface ChatTurnRunnerInput {
   readonly persistToolStep?: (
     attempt: ChatAttempt,
     step: ThreadToolStep | undefined,
+  ) => Effect.Effect<void, ChatFailure>;
+  /** Journals a repeated-tool loop notice or Strict stop on this attempt. */
+  readonly persistLoopNotice?: (
+    attempt: ChatAttempt,
+    notice: TurnLoopNotice,
+  ) => Effect.Effect<void, ChatFailure>;
+  /** Journals a silent-turn stall notice on this attempt outside Strict. */
+  readonly persistStallNotice?: (
+    attempt: ChatAttempt,
+    notice: TurnStallNotice,
   ) => Effect.Effect<void, ChatFailure>;
   /**
    * How many tool calls the attempt keeps: the person's setting. Chat has no
@@ -1063,16 +1080,70 @@ export class ChatTurnRunner {
             );
 
       // Chat never runs at Full access.
-      const idle = yield* makeIdleTimeout(
-        stalledTurnLimitMs({ fullAccess: false, strict: input.strict !== false }),
-        providerToolCallPauseLimitMs(),
-      );
+      const strict = input.strict !== false;
+      const idleLimitMs = stalledTurnLimitMs({ fullAccess: false, strict });
+      const stallAction = decideTurnStallAction({ strict });
+      const idle = yield* makeIdleTimeout(idleLimitMs, providerToolCallPauseLimitMs());
       const shareEventLoop = makeEventLoopShare();
+      let loopState = INITIAL_TURN_LOOP_STATE;
+      const recordLoopNotice = (loop: TurnLoopOutcome) =>
+        Effect.gen(function* () {
+          const occurredAt = updatedAt();
+          const notice: TurnLoopNotice = {
+            kind: loop.kind === "stop" ? "turn-loop-stopped" : "turn-loop-noticed",
+            toolName: loop.toolName,
+            count: loop.count,
+            occurredAt,
+          };
+          currentAttempt = { ...currentAttempt, loopNotice: notice, updatedAt: occurredAt };
+          if (input.persistLoopNotice !== undefined) {
+            yield* input.persistLoopNotice(currentAttempt, notice);
+          } else {
+            yield* input.persistAttempt(currentAttempt);
+          }
+          if (loop.kind === "stop") {
+            yield* connection
+              .interrupt(input.attempt.providerSessionId)
+              .pipe(Effect.catchAll(() => Effect.void));
+            yield* persistOutcome("interrupted", {
+              code: decodeDiagnosticFailureCode("interrupted"),
+              message: `Stopped under Strict after ${loop.toolName} ran ${loop.count} times in a row with the same input.`,
+            });
+            terminalOutcome = "interrupted";
+            return yield* Effect.fail(
+              decodeChatFailure({
+                category: "interrupted",
+                message: `Stopped under Strict after ${loop.toolName} ran ${loop.count} times in a row with the same input.`,
+              }),
+            );
+          }
+        });
+      const recordStallNotice = (idleMs: number) =>
+        Effect.gen(function* () {
+          const occurredAt = updatedAt();
+          const notice: TurnStallNotice = {
+            kind: "turn-stall-noticed",
+            idleMs,
+            occurredAt,
+          };
+          currentAttempt = { ...currentAttempt, stallNotice: notice, updatedAt: occurredAt };
+          if (input.persistStallNotice !== undefined) {
+            yield* input.persistStallNotice(currentAttempt, notice);
+          } else {
+            yield* input.persistAttempt(currentAttempt);
+          }
+        });
       const timeoutWatcher = yield* Effect.forkScoped(
         idle.expired.pipe(
           Effect.flatMap(() =>
             Effect.gen(function* () {
               if (terminalOutcome !== undefined) return;
+              if (stallAction === "notice") {
+                if (idleLimitMs !== null) {
+                  yield* recordStallNotice(idleLimitMs).pipe(Effect.catchAll(() => Effect.void));
+                }
+                return yield* Effect.never;
+              }
               yield* connection
                 .interrupt(input.attempt.providerSessionId)
                 .pipe(Effect.catchAll(() => Effect.void));
@@ -1211,6 +1282,13 @@ export class ChatTurnRunner {
                   );
                 }
                 input.toolCallRecords?.observe(event);
+                if (event.kind !== "tool-request") {
+                  const loopCheck = observeTurnRuntimeEvent(loopState, event, { strict });
+                  loopState = loopCheck.next;
+                  if (loopCheck.loop !== undefined) {
+                    yield* recordLoopNotice(loopCheck.loop);
+                  }
+                }
                 // Kept in the record above; never a step or part of the attempt.
                 if (event.kind === "tool-call-content") return;
                 if (streamedOutput(event) === "exceeded") {
@@ -1300,6 +1378,11 @@ export class ChatTurnRunner {
                 }
                 if (event.kind === "tool-request") {
                   if (!answeredToolRequests.answer(event.requestId)) return;
+                  const loopCheck = observeTurnRuntimeEvent(loopState, event, { strict });
+                  loopState = loopCheck.next;
+                  if (loopCheck.loop !== undefined) {
+                    yield* recordLoopNotice(loopCheck.loop);
+                  }
                   const requestSignal = connection.toolRequestSignal?.({
                     sessionId: input.attempt.providerSessionId,
                     requestId: event.requestId,
@@ -1505,7 +1588,10 @@ export class ChatTurnRunner {
                     );
                   }
                   yield* showAppTool(event, execution.isError === true ? "failed" : "completed");
-                  const resultJson = boundedToolResultJson(execution.result);
+                  const toolResult = loopCheck.earlyWarning
+                    ? appendRepeatToolWarning(execution.result)
+                    : execution.result;
+                  const resultJson = boundedToolResultJson(toolResult);
                   input.toolCallRecords?.appTool({
                     toolCallId: event.requestId,
                     toolName: event.toolName,
