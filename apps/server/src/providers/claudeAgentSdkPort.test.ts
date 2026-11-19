@@ -3424,6 +3424,54 @@ describe("Claude's full built-in tool set", () => {
     });
   });
 
+  test("keeps the person's blocked tools out with disallowedTools in either tool set, and refuses a runtime that still holds one", async () => {
+    const blockedTools = ["WebFetch", "mcp__docs__search", "Glob"];
+    // A runtime that honoured the block lists none of them.
+    const honoured = { ...safeRuntimeInitialization, tools: ["Read", "Grep"] };
+    const full = makeHarness([honoured]);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* full.port.openQuery({ ...openInput, withheldTools, blockedTools });
+          return yield* Stream.runHead(query.messages);
+        }),
+      ),
+    );
+    expect(full.invocation?.options).toMatchObject({
+      disallowedTools: [...withheldTools, ...blockedTools],
+      allowedTools: ["Grep"],
+    });
+
+    const listed = makeHarness([honoured]);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* listed.port.openQuery({ ...openInput, blockedTools });
+          return yield* Stream.runHead(query.messages);
+        }),
+      ),
+    );
+    expect(listed.invocation?.options).toMatchObject({ disallowedTools: blockedTools });
+    expect(listed.invocation?.options.tools).not.toContain("Glob");
+
+    const widened = makeHarness([
+      { ...safeRuntimeInitialization, tools: [...safeRuntimeInitialization.tools, "WebFetch"] },
+    ]);
+    const failed = await failureOf(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* widened.port.openQuery({
+            ...openInput,
+            withheldTools,
+            blockedTools,
+          });
+          return yield* Stream.runDrain(query.messages);
+        }),
+      ),
+    );
+    expect(failed).toMatchObject({ category: "protocol" });
+  });
+
   test("refuses a runtime that holds a withheld tool", async () => {
     const harness = makeHarness([
       { ...safeRuntimeInitialization, tools: [...safeRuntimeInitialization.tools, "REPL"] },

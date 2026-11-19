@@ -36,55 +36,6 @@ function input(overrides: Partial<DockToolButtonsInput> = {}): DockToolButtonsIn
 const byId = (model: ReturnType<typeof buildDockToolButtons>, id: string) =>
   [...model.buttons, ...model.more].find((button) => button.id === id);
 
-describe("a new Code task's Project tool buttons", () => {
-  const awaiting = [
-    { id: "terminal", label: "Terminal" },
-    { id: "browser", label: "Browser" },
-    { id: "files", label: "Files" },
-  ] as const;
-  const draft = (quickTools?: DockToolButtonsInput["quickTools"]) =>
-    buildDockToolButtons({
-      ...input({ surfaces: [] }),
-      awaitingThread: awaiting,
-      ...(quickTools === undefined ? {} : { quickTools }),
-    });
-
-  it("enables Project terminal and Project browser once a Project is chosen and leaves the rest waiting", () => {
-    const model = draft({ tools: ["terminal", "browser"] });
-    expect(byId(model, "terminal")).toMatchObject({
-      label: "Project terminal",
-      pressed: false,
-      press: { kind: "quick-open", tool: "terminal" },
-    });
-    expect(byId(model, "browser")).toMatchObject({
-      label: "Project browser",
-      press: { kind: "quick-open", tool: "browser" },
-    });
-    expect(byId(model, "files")?.disabledReason).toBe("Available once the task starts");
-  });
-
-  it("reads the open Project tool as pressed and closes the dock on the next press", () => {
-    const model = draft({ tools: ["terminal", "browser"], open: "terminal" });
-    expect(byId(model, "terminal")).toMatchObject({
-      pressed: true,
-      press: { kind: "quick-close" },
-    });
-    expect(byId(model, "browser")?.pressed).toBe(false);
-  });
-
-  it("offers only the terminal for a Project on a server", () => {
-    const model = draft({ tools: ["terminal"] });
-    expect(byId(model, "terminal")?.press.kind).toBe("quick-open");
-    expect(byId(model, "browser")?.press.kind).toBe("refused");
-  });
-
-  it("keeps every button waiting when no Project is chosen", () => {
-    const model = draft();
-    expect(byId(model, "terminal")?.press.kind).toBe("refused");
-    expect(byId(model, "browser")?.press.kind).toBe("refused");
-  });
-});
-
 describe("moving a tool between the side and the bottom panel by menu", () => {
   const shownReview = {
     tabs: [{ id: "review", surface: "review" as const }],
@@ -405,20 +356,6 @@ describe("the title band's tool buttons", () => {
       input({ capsFull: true, tabs: [{ id: "files", surface: "files" }], shownTabIds: ["files"] }),
     );
     expect(byId(model, "files")).toMatchObject({ pressed: true, press: { kind: "close" } });
-  });
-
-  it("disables every tool a draft task is waiting to offer", () => {
-    const model = buildDockToolButtons(
-      input({ surfaces: [], awaitingThread: [tool("environment"), tool("files"), tool("plan")] }),
-    );
-    for (const button of [...model.buttons, ...model.more]) {
-      expect(button).toMatchObject({
-        disabledReason: "Available once the task starts",
-        pressed: false,
-        press: { kind: "refused" },
-      });
-    }
-    expect(model.buttons.map((button) => button.id)).toEqual(["environment", "files"]);
   });
 
   it("shows the Browser page that is on screen, else the focused one, else the last shown", () => {

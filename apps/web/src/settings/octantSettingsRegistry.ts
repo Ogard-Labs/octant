@@ -273,13 +273,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "reply detail transcript thinking reasoning tool calls expand collapse fold open verbose quiet low medium high",
         },
         {
-          id: settingId("usage-bars"),
-          label: "Usage bars",
-          scope: "app",
-          keywords:
-            "usage bars plan limits meters remaining left 5h week composer smooth pixelated pixel cells dither",
-        },
-        {
           id: settingId("app-background"),
           label: "Background",
           scope: "app",
@@ -1422,6 +1415,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Protect another path",
           scope: "host",
           keywords: "protected files add path folder secret deny agents",
+        },
+        {
+          id: settingId("blocked-tools"),
+          label: "Blocked tools",
+          scope: "host",
+          keywords:
+            "blocked tools block disallow deny provider tool claude code codex opencode pi mcp server webfetch shell bash",
+        },
+        {
+          id: settingId("blocked-tools-add"),
+          label: "Block a tool",
+          scope: "host",
+          keywords: "blocked tools block add provider tool deny disallowedTools",
         },
         {
           id: settingId("public-links"),

@@ -224,6 +224,31 @@ describe("WorkTurnService", () => {
     }
   });
 
+  it.each([true, false])(
+    "journals what Strict kept with the turn as it launches only when Strict is on (Strict: %s)",
+    async (strict) => {
+      const fixture = serviceFixture({ threadAccess: "ask-first", resolveStrict: () => strict });
+      vi.stubGlobal("process", Object.create(process, { platform: { value: "linux" } }));
+      try {
+        await fixture.service.startFirstTurn(ids.window, startCommand());
+        await vi.waitFor(() => expect(fixture.acquireInputs).toHaveLength(1));
+        const kept = vi
+          .mocked(fixture.persistence.journal.append)
+          .mock.calls.flatMap(([append]) => append.events)
+          .flatMap((event) => {
+            const payload = event.payload as { readonly strictKept?: ReadonlyArray<string> };
+            return payload.strictKept === undefined ? [] : [payload.strictKept];
+          });
+        if (strict) {
+          expect(kept).toHaveLength(1);
+          expect(kept[0]).toEqual(expect.arrayContaining(["octant-sandbox", "protected-files"]));
+        } else expect(kept).toEqual([]);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
   it("starts a Windows Work turn at Full access and reaches its provider", async () => {
     const fixture = serviceFixture({ threadAccess: "full-access", resolveStrict: () => false });
     vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));

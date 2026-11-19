@@ -256,6 +256,9 @@ export function makeProviderDriver(
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         process: options.codexProcess,
+        ...(options.sessionOwnership === undefined
+          ? {}
+          : { sessionOwnership: options.sessionOwnership }),
         runtimeRegistry: options.runtimeRegistry,
         permissionPersistence: options.permissionPersistence,
         environment: codexEnvironment,
