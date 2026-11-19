@@ -4053,6 +4053,26 @@ function installIpcHandlers(): void {
       threadId: request.threadId,
     });
   });
+  ipcMain.handle(IPC_CHANNELS.browserSurfaceTabIcons, (event, value: unknown) => {
+    const context = ownedTopLevelWindowContext(event);
+    const request = validateBrowserSurfaceTabIconsRequest(value);
+    // The tab strip's icons are person-only like the preview picture: they go
+    // to this window's renderer for display, never through the server, and the
+    // host checks that this window and thread own the context. A refusal is a
+    // clear outcome (null, not a rejection): the window lost the context or
+    // never owned it, and held icons should drop rather than linger.
+    try {
+      return (
+        browserSurfaceHost?.tabIcons(
+          request.contextId,
+          { windowId: context.windowId, threadId: request.threadId },
+          request.known,
+        ) ?? null
+      );
+    } catch {
+      return null;
+    }
+  });
   ipcMain.handle(IPC_CHANNELS.browserSurfaceCommand, async (event, value: unknown) => {
     const context = ownedTopLevelWindowContext(event);
     const request = validateBrowserSurfaceCommand(value);
@@ -4494,6 +4514,37 @@ function validateBrowserSurfaceIdentity(value: unknown): BrowserSurfaceIdentityR
     throw new Error("Octant rejected an invalid Browser surface request.");
   }
   return { contextId: String(value.contextId), threadId: String(value.threadId) };
+}
+
+function validateBrowserSurfaceTabIconsRequest(value: unknown): BrowserSurfaceIdentityRequest & {
+  readonly known: ReadonlyArray<{ readonly tabId: string; readonly revision: number }>;
+} {
+  if (!isStrictRecord(value, ["contextId", "known", "threadId"])) {
+    throw new Error("Octant rejected an invalid Browser surface request.");
+  }
+  const identity = validateBrowserSurfaceIdentity({
+    contextId: value.contextId,
+    threadId: value.threadId,
+  });
+  if (!Array.isArray(value.known) || value.known.length > 128) {
+    throw new Error("Octant rejected invalid Browser tab icon memory.");
+  }
+  const known: Array<{ readonly tabId: string; readonly revision: number }> = [];
+  for (const entry of value.known) {
+    if (
+      !isStrictRecord(entry, ["tabId", "revision"]) ||
+      typeof entry.tabId !== "string" ||
+      entry.tabId.length === 0 ||
+      entry.tabId.length > 128 ||
+      typeof entry.revision !== "number" ||
+      !Number.isSafeInteger(entry.revision) ||
+      entry.revision < 0
+    ) {
+      throw new Error("Octant rejected invalid Browser tab icon memory.");
+    }
+    known.push({ tabId: entry.tabId, revision: entry.revision });
+  }
+  return { ...identity, known };
 }
 
 function validateBrowserSurfaceRequest(value: unknown): BrowserSurfaceRequest {

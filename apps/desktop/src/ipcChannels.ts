@@ -24,6 +24,7 @@ export const DESKTOP_IPC_CHANNELS = {
   browserSurfacePoint: "octant:browser-surface:point",
   browserSurfaceDetach: "octant:browser-surface:detach",
   browserSurfacePreview: "octant:browser-surface:preview",
+  browserSurfaceTabIcons: "octant:browser-surface:tab-icons",
   browserSurfaceOpenExternal: "octant:browser-surface:open-external",
   browserSurfaceState: "octant:browser-surface:state",
   browserAppShortcut: "octant:browser-surface:app-shortcut",

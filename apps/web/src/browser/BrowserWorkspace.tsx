@@ -1,6 +1,10 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useBrowserAccountProfiles } from "./useBrowserAccountProfiles";
-import { browserProfileFromChoice, formatBrowserElementSnapshot } from "@octant/domain";
+import {
+  browserProfileFromChoice,
+  browserProfileKey,
+  formatBrowserElementSnapshot,
+} from "@octant/domain";
 import { browserProfileLabel } from "./browserProfileCopy";
 import { livePageOf, publishBrowserTabPage } from "./browserTabPages";
 import type { BrowserAgentAvailability } from "@octant/contracts";
@@ -600,10 +604,24 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     publishBrowserTabPage(reportThreadId, props.dockTabId, { title: liveTitle, url: liveAddress });
   }, [liveAddress, liveTitle, props.dockTabId, reportThreadId]);
   const shownFavicon = snapshot?.observation?.faviconDataUrl;
+  const faviconContextProfile = storedProfileOf(snapshot?.context?.policy.profile);
+  // A private context's partition is its own: two private contexts must never
+  // lend one another's icons, and a context without an identity neither
+  // writes nor reads the cache.
+  const faviconProfile =
+    faviconContextProfile !== undefined
+      ? browserProfileKey(faviconContextProfile)
+      : snapshot?.context?.contextId === undefined
+        ? undefined
+        : `private:${String(snapshot.context.contextId)}`;
   useEffect(() => {
-    if (committedAddress !== undefined && shownFavicon !== undefined)
-      rememberPageFavicon(committedAddress, shownFavicon);
-  }, [committedAddress, shownFavicon]);
+    if (
+      faviconProfile !== undefined &&
+      committedAddress !== undefined &&
+      shownFavicon !== undefined
+    )
+      rememberPageFavicon(faviconProfile, committedAddress, shownFavicon);
+  }, [committedAddress, faviconProfile, shownFavicon]);
   const secureAddress = committedAddress?.toLocaleLowerCase().startsWith("https:") === true;
   const addressSecurityLabel =
     committedAddress === undefined ? "Address" : secureAddress ? "Secure HTTPS" : "Not secure HTTP";
@@ -2131,7 +2149,11 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
                                 size={14}
                               />
                             }
-                            src={recallPageFavicon(page.url)}
+                            src={
+                              faviconProfile === undefined
+                                ? undefined
+                                : recallPageFavicon(faviconProfile, page.url)
+                            }
                           />
                           <span className="browser-workspace__server-text">
                             <span className="browser-workspace__server-name">{host}</span>

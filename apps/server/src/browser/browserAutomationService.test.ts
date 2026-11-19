@@ -1140,6 +1140,24 @@ describe("BrowserAutomationService", () => {
     ).toBeUndefined();
   });
 
+  it("keeps a page's icon out of an action's result even when the runtime offers one", async () => {
+    const { runtime, service } = harness();
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    vi.mocked(runtime.act).mockResolvedValueOnce({
+      url: "https://example.com/driven",
+      faviconDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+    });
+    const result = await service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+    });
+    expect(result.observation).toBeDefined();
+    expect(result.observation && "faviconDataUrl" in result.observation).toBe(false);
+    await service.close();
+  });
+
   it("takes a picture of a native page only when its minimised card asks, never for the pane that shows it", async () => {
     const { advance, contexts, runtime, service } = harness();
     vi.mocked(runtime.createContext).mockImplementationOnce(async (contextId) => {

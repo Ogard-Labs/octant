@@ -215,6 +215,47 @@ describe("ACP event normalization", () => {
     ]);
   });
 
+  it("names a title-less tool call by its kind rather than its provider call ID", () => {
+    const ctx = context();
+    const started = mapAcpNotification(ctx, {
+      kind: "notification",
+      method: "session/update",
+      params: {
+        sessionId: "acp-session-1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "provider-tool-1",
+          kind: "execute",
+          status: "in_progress",
+        },
+      },
+    });
+    expect(event(started)).toMatchObject({
+      kind: "tool-start",
+      toolCallId: "tool-1",
+      toolName: "execute",
+    });
+    // And a call that carries neither title nor kind falls back to a plain
+    // word, never to the provider's raw ID.
+    const unnamed = mapAcpNotification(ctx, {
+      kind: "notification",
+      method: "session/update",
+      params: {
+        sessionId: "acp-session-1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "provider-tool-2",
+          status: "in_progress",
+        },
+      },
+    });
+    expect(event(unnamed)).toMatchObject({
+      kind: "tool-start",
+      toolCallId: "tool-2",
+      toolName: "Tool",
+    });
+  });
+
   it("marks the thread once for a fetch-kind tool or a query-only search, whenever the agent names the kind", () => {
     const update = (value: Record<string, unknown>) =>
       mapAcpNotification(ctx, {

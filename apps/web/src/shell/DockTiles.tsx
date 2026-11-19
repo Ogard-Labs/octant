@@ -1,6 +1,8 @@
 import { PictureInPicture2, X } from "../ui/icons";
 import {
+  useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -16,7 +18,7 @@ import {
   signalNativeSurfaceLayoutChange,
 } from "../browser/useNativeBrowserSurface";
 import { DockBarRow, TILE_CONTROLS, TILE_MINIMISE_CONTROL, useFoldedControls } from "./DockBarRow";
-import { DockBarContext, useDockBarSlot } from "./dockBarControls";
+import { DockBarContext, FocusedDockToolContext, useDockBarSlot } from "./dockBarControls";
 import {
   cancelDockToolDrag,
   pressDockToolDrag,
@@ -679,13 +681,19 @@ function Tile(props: {
   const element = useRef<HTMLElement | null>(null);
   const onFocusTile = useRef(props.onFocusTile);
   onFocusTile.current = props.onFocusTile;
+  // Re-set on pointer/focus even when already the focused tile: the bottom
+  // panel's own publication may have taken the palette's slot since.
+  const republish = useRef<() => void>(() => undefined);
   // Native listeners: a tool can portal part of its panel into its tile, and
   // React's synthetic events from a portal bubble through the React tree (the
   // thread pane that rendered it), never through the tile. The DOM sees both.
   useEffect(() => {
     const node = element.current;
     if (node === null) return;
-    const focus = () => onFocusTile.current();
+    const focus = () => {
+      onFocusTile.current();
+      republish.current();
+    };
     node.addEventListener("pointerdown", focus, true);
     node.addEventListener("focusin", focus, true);
     return () => {
@@ -694,6 +702,35 @@ function Tile(props: {
     };
   }, []);
   const { host: barHost, items: barItems, leadRef } = useDockBarSlot("tiled");
+  // The focused pane's controls are the palette's tool commands: publishing
+  // them here keeps the palette invoking the bar's own registered callbacks.
+  const focusedDockTool = useContext(FocusedDockToolContext);
+  const commandOwner = useId();
+  // Content updates publish without promoting: a background tile's fresh
+  // controls cannot steal the palette from the owner the person is in.
+  useEffect(() => {
+    if (focusedDockTool === undefined) return;
+    // A tool that drops its controls publishes an empty source, not silence:
+    // while it is the addressed owner its former commands leave the palette.
+    focusedDockTool.set(commandOwner, {
+      toolLabel: props.content.label,
+      items: barItems ?? [],
+    });
+  }, [commandOwner, focusedDockTool, barItems, props.content.label]);
+  // Becoming the focused tile promotes this owner; only unmount clears the
+  // publication, so a control refresh never re-asserts it.
+  useEffect(() => {
+    if (focusedDockTool === undefined || !props.focused) return;
+    focusedDockTool.focus(commandOwner);
+  }, [commandOwner, focusedDockTool, props.focused]);
+  useEffect(() => {
+    if (focusedDockTool === undefined) return;
+    republish.current = () => focusedDockTool.focus(commandOwner);
+    return () => {
+      republish.current = () => undefined;
+      focusedDockTool.set(commandOwner, undefined);
+    };
+  }, [commandOwner, focusedDockTool]);
   const bar = useRef<HTMLDivElement>(null);
   // Every pane has the one bar, alone or among tiles: the same height, insets
   // and controls, so nothing in a pane moves when a neighbour opens or closes.

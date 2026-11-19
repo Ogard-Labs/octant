@@ -314,7 +314,18 @@ function ActiveFile(props: {
       Opening {pathBasename(props.path)}…
     </p>
   );
-  if (file === undefined) return placeholder;
+  if (file === undefined) {
+    // A refused or failed open says so in place of the loading line, which
+    // would otherwise read as an open that never finishes.
+    return editorFile.openError === undefined ? (
+      placeholder
+    ) : (
+      /* ui-boundary-exception: compact-status */
+      <p className="code-files-viewer__empty" role="alert">
+        {editorFile.openError}
+      </p>
+    );
+  }
   return (
     <Suspense fallback={placeholder}>
       <MonacoEditorPane
@@ -334,6 +345,7 @@ function ActiveFile(props: {
         onOpenInMainArea={props.onOpenInMainArea}
         onRequestRefresh={refresh}
         {...(response === undefined ? {} : { agentResponse: response.text })}
+        {...(editorFile.openError === undefined ? {} : { openError: editorFile.openError })}
         {...(openExternal === undefined || view.checkout.kind === "remote-root"
           ? {}
           : {

@@ -729,6 +729,46 @@ describe("CodeTurnRunner", () => {
     );
   });
 
+  it("carries each call's name onto its own progress frames, across overlapping calls", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "tool-start", toolCallId: "call-1", toolName: "Bash" }),
+          event({ kind: "tool-start", toolCallId: "call-2", toolName: "Read" }),
+          event({ kind: "tool-progress", toolCallId: "call-1", message: "running" }),
+          event({ kind: "tool-progress", toolCallId: "call-2", message: "reading" }),
+          event({ kind: "tool-progress", toolCallId: "call-unseen", message: "working" }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+    const observed: CodeTurnEvent[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(outcomes).toEqual(["completed"]);
+    const progress = observed.filter((entry) => entry.providerKind === "tool-progress");
+    // Each interleaved frame is attributed to its own call, never to a bare
+    // "provider-tool", and a call the turn never saw starts goes unnamed.
+    expect(progress).toEqual([
+      expect.objectContaining({ toolCallId: "call-1", toolName: "Bash" }),
+      expect.objectContaining({ toolCallId: "call-2", toolName: "Read" }),
+      expect.objectContaining({ toolCallId: "call-unseen" }),
+    ]);
+    expect(progress[2]?.toolName).toBeUndefined();
+  });
+
   it("finishes a turn the runtime compacted midway without recording the compaction as a turn event", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(

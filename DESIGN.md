@@ -1511,8 +1511,13 @@ the menu key, or Shift+F10 on any control of the bar). The bar is a Tab stop
 where there is something to arrange, and Enter or Space on it opens that menu. At most one 32px secondary row
 holds content (a filter, a status line) on the bar's insets, and a pane's
 content starts on the same 12px. When the controls do not fit, word switches
-fold to a named control, then actions into one More menu; status text and
-must-read cues never fold. A tool alone used to have a 36px tab row inset 8px,
+fold to a named control, then every named control — word buttons, view
+switches, icon actions and menu buttons — folds into the one More menu before
+any state the tool reports about itself does. Status text and must-read cues
+fold last, into that menu's first rows and whole, and the More button then
+carries a badge in the worst tone any folded state reports; the tool's name is
+cut after state folds, and only then may a control the tool draws itself take
+the one secondary row under the bar, which nothing else may share. A tool alone used to have a 36px tab row inset 8px,
 a 32px control row or no bar, and a tiled one a 32px bar inset 12px, so a
 second tool moved every tab and control of the first (measured 2026-11-15).
 The bottom panel's toolbar is the same bar: the same height, its tabs 28px and

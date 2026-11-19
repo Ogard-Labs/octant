@@ -2669,6 +2669,13 @@ html[data-octant-increased-contrast="true"] .turn-actions {
   box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
 }
 
+.pane-bar__lead {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
 .pane-bar__title {
   min-width: 0;
   margin: 0;

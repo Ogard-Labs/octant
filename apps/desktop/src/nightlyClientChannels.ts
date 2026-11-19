@@ -32,6 +32,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   browserSurfaceDetach: "replaced",
   // Nightly has no native page view to capture; its card keeps the host's picture.
   browserSurfacePreview: "replaced",
+  browserSurfaceTabIcons: "replaced",
   browserSurfaceOpenExternal: "local",
   browserSurfaceState: "replaced",
   // Nightly presents pages in its own renderer, so app shortcuts reach it directly.

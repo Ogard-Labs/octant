@@ -30,6 +30,8 @@ import type {
   BrowserSurfaceRequest,
   BrowserSurfaceState,
   BrowserSurfaceTabCommand,
+  BrowserSurfaceTabIcon,
+  BrowserSurfaceTabIconsRequest,
   BundledWhatsNew,
   BundledWhatsNewAnnouncement,
   CanvasPrototypeOpenRequest,
@@ -78,6 +80,8 @@ export type {
   BrowserSurfaceRequest,
   BrowserSurfaceState,
   BrowserSurfaceTabCommand,
+  BrowserSurfaceTabIcon,
+  BrowserSurfaceTabIconsRequest,
   BrowserSurfaceTabState,
   BundledWhatsNew,
   BundledWhatsNewAnnouncement,
@@ -496,6 +500,16 @@ export interface OctantHostBridge
   readonly captureBrowserSurfacePreview?: (
     request: Omit<BrowserSurfaceRequest, "bounds">,
   ) => Promise<string | undefined>;
+  /**
+   * Every tab's icon for this window's own Browser tab strip, as a delta
+   * against the revisions the window already holds. Person-only like the
+   * preview picture: the desktop host checks this window and thread own the
+   * context, and the rows never join an observation or a tool result. Absent
+   * outside the desktop app.
+   */
+  readonly readBrowserSurfaceTabIcons?: (
+    request: BrowserSurfaceTabIconsRequest,
+  ) => Promise<ReadonlyArray<BrowserSurfaceTabIcon> | undefined>;
   /** Shows an extension's popup or options page beside the Browser toolbar's extensions button. */
   readonly openBrowserExtensionPopup?: (request: {
     readonly profile:

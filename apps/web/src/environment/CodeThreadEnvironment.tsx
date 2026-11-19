@@ -853,7 +853,10 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
       </ThreadEnvironmentPanel>
       <div className="code-thread-environment__content">
         <CodeCheckoutProvider
-          {...(readyObservation === undefined ? {} : { observation: readyObservation })}
+          {...(observed === undefined ? {} : { observation: observed })}
+          {...(controller.errorMessage === undefined
+            ? {}
+            : { errorMessage: controller.errorMessage })}
         >
           {props.children}
         </CodeCheckoutProvider>

@@ -216,6 +216,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import "./styles.css";
@@ -228,6 +229,7 @@ import { threadMoveClientForBridge } from "./environment/threadMove/threadMoveCl
 // The shared component/material layer loads last so its assignments win.
 import "./styles/components.css";
 import { countSidebarTiles } from "./shell/sidebarTileCounts";
+import { createFocusedDockTool } from "./shell/dockBarControls";
 import { WorkKindChoiceContext, type WorkKindChoice } from "./shell/WorkKindSwitch";
 import {
   enabledWorkKinds,
@@ -6318,6 +6320,30 @@ function LaunchedShell(
     return controller.activateContentTab(place.paneId, place.tabId);
   }
 
+  // The focused pane publishes its bar's controls here so the palette's tool
+  // commands invoke the same registered callbacks the bar itself does.
+  const focusedDockTool = useMemo(() => createFocusedDockTool(), []);
+  const focusedToolSource = useSyncExternalStore(
+    focusedDockTool.subscribe,
+    focusedDockTool.get,
+    focusedDockTool.get,
+  );
+  // Only a Code Project's extra folders are listed by the Files tool; a Work
+  // Project's own Files listing already walks them. Hooks live above the
+  // status early returns, so this stays computed here and keeps a stable
+  // reference while the Project list and selection are unchanged.
+  const activeProjectExtraFolders = useMemo(() => {
+    const project = projectController.projects.find(
+      (candidate) =>
+        candidate.type === "code" &&
+        candidate.lifecycle === "active" &&
+        candidate.id === activeProjectId,
+    );
+    return project?.type === "code"
+      ? (project.extraFolders ?? []).map((folder) => folder.canonicalRoot)
+      : NO_PROJECT_EXTRA_FOLDERS;
+  }, [projectController.projects, activeProjectId]);
+
   if (controller.status === "loading") {
     return (
       <main className="shell-boundary">
@@ -8313,12 +8339,6 @@ function LaunchedShell(
         ? undefined
         : { id: serverActionsProject.projectId, name: serverActionsProject.name }
       : { id: actionsProject.id, name: actionsProject.name };
-  // Only a Code Project's extra folders are listed by the Files tool; a Work
-  // Project's own Files listing already walks them.
-  const activeProjectExtraFolders =
-    actionsProject?.type === "code"
-      ? (actionsProject.extraFolders ?? []).map((folder) => folder.canonicalRoot)
-      : NO_PROJECT_EXTRA_FOLDERS;
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
@@ -8356,6 +8376,7 @@ function LaunchedShell(
           true,
         ) === undefined,
     ),
+    ...(focusedToolSource === undefined ? {} : { focusedToolCommands: focusedToolSource }),
     onOpenDockTool: (tool) => {
       const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === tool.id);
       if (surface !== undefined) openDockTab(surface.id);
@@ -8881,6 +8902,7 @@ function LaunchedShell(
               />
               <TabActivationProvider registry={dockTabActivation}>
                 <DockContainer
+                  focusedTool={focusedDockTool}
                   actions={actions}
                   splitPrimaryMinimum={dockSplitPrimaryMinimum}
                   {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
@@ -8934,6 +8956,8 @@ function LaunchedShell(
                     ? {}
                     : { overviewThread: dockOverviewThread })}
                   projectNames={workingNowProjectNames}
+                  projectClient={projectController.client}
+                  projects={projectController.allProjects}
                   projectPullRequestReviewOpen={projectPullRequestReviewOpen}
                   {...(toolsPresented ? { providerController } : {})}
                   {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}

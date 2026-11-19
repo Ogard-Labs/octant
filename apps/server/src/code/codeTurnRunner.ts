@@ -1062,9 +1062,16 @@ function claimsMutation(event: ProviderRuntimeEvent): boolean {
  * closes the tool row it opened instead of leaving it forever "started".
  */
 function withToolName(toolNames: Map<string, string>, event: CodeTurnEvent): CodeTurnEvent {
-  if (event.toolCallId === undefined) return event;
-  if (event.category === "tool" && event.status === "started" && event.toolName !== undefined) {
-    toolNames.set(event.toolCallId, event.toolName);
+  // An app-managed request names its tool against a requestId; the frames it
+  // leads to carry that same id as the call's.
+  const callId = event.toolCallId ?? event.requestId;
+  if (callId === undefined) return event;
+  if (
+    event.category === "tool" &&
+    (event.status === "started" || event.status === "app-managed-request") &&
+    event.toolName !== undefined
+  ) {
+    toolNames.set(callId, event.toolName);
     // A turn with no event budget has no end to its calls; the oldest
     // call's name is forgotten past the bound, and its outcome then goes
     // without one, as an outcome for an unseen call does.
@@ -1074,8 +1081,11 @@ function withToolName(toolNames: Map<string, string>, event: CodeTurnEvent): Cod
     }
     return event;
   }
-  if (event.category !== "observation" || event.toolName !== undefined) return event;
-  const toolName = toolNames.get(event.toolCallId);
+  // Progress frames and outcomes arrive without the name the start carried:
+  // without this they would each be re-displayed as a bare "provider-tool".
+  if (event.toolName !== undefined) return event;
+  if (event.category !== "observation" && event.category !== "tool") return event;
+  const toolName = toolNames.get(callId);
   return toolName === undefined ? event : { ...event, toolName };
 }
 

@@ -35,16 +35,11 @@
 }
 
 /* ─── toolbar ──────────────────────────────────────────────────────── */
+/* The standalone bar is a shared .pane-bar; this class only keeps its grid
+   row and lets the row shrink inside the pane's minmax column. */
 .device-toolbar {
   grid-row: 1;
-  display: flex;
-  align-items: center;
-  gap: 2px;
   min-width: 0;
-  height: 40px;
-  padding: 0 var(--oct-space-1) 0 var(--oct-space-2);
-  border-bottom: 1px solid var(--oct-border);
-  background: var(--oct-bg);
 }
 
 .device-toolbar__device {
@@ -131,11 +126,6 @@
   .device-toolbar__os {
     display: inline;
   }
-}
-
-.device-toolbar__spacer {
-  flex: 1 1 auto;
-  min-width: var(--oct-space-1);
 }
 
 .device-toolbar__more {

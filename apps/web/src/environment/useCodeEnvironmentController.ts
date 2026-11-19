@@ -37,14 +37,18 @@ export function useCodeEnvironmentController(
   options: CodeEnvironmentControllerOptions,
 ): CodeEnvironmentController {
   const fallbackClient = useMemo(
+    // No client is needed while disabled: requiring authority fields then
+    // would fail panes that never observe (a standalone terminal tile).
     () =>
       options.client ??
-      createProjectClient({
-        baseUrl: required(options.serverUrl),
-        fetch: globalThis.fetch,
-        windowCapability: required(options.windowCapability),
-      }),
-    [options.client, options.serverUrl, options.windowCapability],
+      (options.enabled
+        ? createProjectClient({
+            baseUrl: required(options.serverUrl),
+            fetch: globalThis.fetch,
+            windowCapability: required(options.windowCapability),
+          })
+        : undefined),
+    [options.client, options.enabled, options.serverUrl, options.windowCapability],
   );
   const [status, setStatus] = useState<CodeEnvironmentControllerStatus>("idle");
   const [observation, setObservation] = useState<CodeEnvironmentObservation>();
@@ -57,7 +61,7 @@ export function useCodeEnvironmentController(
   const load = useCallback(
     async (fresh = false, keepObservation = false): Promise<void> => {
       const project = options.project;
-      if (!options.enabled || project?.type !== "code") {
+      if (!options.enabled || project?.type !== "code" || fallbackClient === undefined) {
         activeRequest.current?.abort();
         activeRequest.current = undefined;
         generation.current += 1;

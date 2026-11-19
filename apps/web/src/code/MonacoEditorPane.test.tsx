@@ -974,6 +974,23 @@ describe("MonacoEditorPane", () => {
     expect(fixture.loadRuntime).not.toHaveBeenCalled();
   });
 
+  it("shows an open error over the mounted editor, as a failed refresh reports it", async () => {
+    const fixture = runtime();
+    const code = client();
+    render(
+      <MonacoEditorPane
+        client={code}
+        file={textFile()}
+        loadRuntime={fixture.loadRuntime}
+        openError="The file could not be opened. Reconnect and retry."
+      />,
+    );
+    await screen.findByRole("region", { name: "Editor for src/index.ts" });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The file could not be opened. Reconnect and retry.",
+    );
+  });
+
   it("keeps the header's actions on one line beside the file name in a narrow pane", () => {
     const narrow = /@container workspace \(max-width: 520px\) \{([\s\S]*?)\n\}/.exec(
       codeStyles,

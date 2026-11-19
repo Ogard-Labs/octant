@@ -1,6 +1,8 @@
 import type { CodeClient, CodeFileOpenResult } from "@octant/client-runtime/code-client";
+import { CodeClientFailure } from "@octant/client-runtime/code-client";
 import type { CodeRelativePath, CodeThread } from "@octant/contracts/code";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import type { CodeController } from "./useCodeController";
 
@@ -23,8 +25,14 @@ import type { CodeController } from "./useCodeController";
  * the reopened file would then look like the draft's own origin and Save would
  * overwrite the external change. Only a change of file or checkout blanks the
  * projection, so the pane can never show one file's content under another's
- * name. Every run still cancels the answer of the run it replaced, and a run
- * that fails leaves the workspace saying the file is unavailable.
+ * name. Every run still cancels the answer of the run it replaced.
+ *
+ * A run that fails is reported on `openError` instead of vanishing into a
+ * loading state that never ends: a refusal or a typed host failure gives its
+ * own safe sentence, anything else a plain one. A refresh that fails while a
+ * projection is mounted keeps that projection — the mounted editor's unsaved
+ * draft outlives a transient re-open failure — so `openError` and `file` can
+ * both be set; only a scope change clears both.
  */
 export function useCodeEditorFile(options: {
   readonly client: CodeClient;
@@ -35,9 +43,12 @@ export function useCodeEditorFile(options: {
   readonly executionPolicy?: CodeThread["executionPolicy"];
 }): {
   readonly file: CodeEditorFileProjection | undefined;
+  /** Why the open or last refresh was refused or failed; unset while opening. */
+  readonly openError: string | undefined;
   readonly refresh: () => void;
 } {
   const [file, setFile] = useState<CodeEditorFileProjection>();
+  const [openError, setOpenError] = useState<string>();
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   const openedScope = useRef<string | undefined>(undefined);
   const { client, enabled, relativePath, threadId, checkoutId, executionPolicy } = options;
@@ -53,6 +64,7 @@ export function useCodeEditorFile(options: {
     ) {
       openedScope.current = undefined;
       setFile(undefined);
+      setOpenError(undefined);
       return;
     }
     let active = true;
@@ -62,24 +74,40 @@ export function useCodeEditorFile(options: {
     // rather than a silent overwrite; dropping the projection here would throw
     // the anchor away and let Save carry the new revision's digest.
     const scope = `${threadId}/${checkoutId}/${relativePath}`;
-    if (openedScope.current !== scope) {
+    const scopeChanged = openedScope.current !== scope;
+    if (scopeChanged) {
       openedScope.current = scope;
       setFile(undefined);
+      setOpenError(undefined);
     }
     void client
       .openFile(threadId, checkoutId, relativePath)
       .then((result) => {
-        if (active) {
-          setFile(
-            editorFileProjection(
-              { checkoutId, executionPolicy, path: relativePath, threadId },
-              result,
-            ),
+        if (!active) return;
+        // A refused open answers inside the envelope: it is a reason for the
+        // reader, and a refresh that draws one keeps the mounted file so the
+        // pane's unsaved draft is not taken with it.
+        if (result.status === "failed" || result.status === "interrupted") {
+          setOpenError(
+            result.status === "failed"
+              ? editorFileFailureText(result.failure.code)
+              : "Opening the file was interrupted. Try again.",
           );
+          if (scopeChanged) setFile(undefined);
+          return;
         }
+        setOpenError(undefined);
+        setFile(
+          editorFileProjection(
+            { checkoutId, executionPolicy, path: relativePath, threadId },
+            result,
+          ),
+        );
       })
-      .catch(() => {
-        if (active) setFile(undefined);
+      .catch((error: unknown) => {
+        if (!active) return;
+        setOpenError(editorFileOpenError(error));
+        if (scopeChanged) setFile(undefined);
       });
     return () => void (active = false);
   }, [checkoutId, client, enabled, executionPolicy, refreshGeneration, relativePath, threadId]);
@@ -93,7 +121,55 @@ export function useCodeEditorFile(options: {
     [executionPolicy, file],
   );
 
-  return { file: posture, refresh };
+  return { file: posture, openError, refresh };
+}
+
+/**
+ * The one sentence a refused or failed open is allowed to show. A typed host
+ * failure keeps its own bounded message; anything else — a dropped connection,
+ * a malformed answer — gets a plain one rather than the transport's wording.
+ */
+function editorFileOpenError(error: unknown): string {
+  if (error instanceof CodeClientFailure) return checkoutUnreadableReason(error.message);
+  return "Code file is unavailable. Reconnect and retry.";
+}
+
+/**
+ * The bounded failure code an open result carries, in words for the person.
+ * The codes are the file port's vocabulary (`FILE_OPERATION_FAILURE_CODES`),
+ * not the reader's, so each distinct cause gets a sentence and anything
+ * unlisted gets a plain one rather than the raw code.
+ */
+function editorFileFailureText(code: string): string {
+  switch (code) {
+    case "not-found":
+    case "missing":
+      return "The file is no longer there. It may have been moved, renamed or deleted.";
+    case "not-regular":
+      return "That is not a regular file, so it cannot be opened.";
+    case "symlink":
+    case "hardlink":
+      return "The file is a link. Only real files inside the checkout can be opened.";
+    case "escaped":
+      return "That path leaves the checkout.";
+    case "interrupted":
+      return "Opening the file was interrupted. Try again.";
+    case "raced":
+    case "device-mismatch":
+    case "identity-mismatch":
+    case "digest-mismatch":
+    case "stale":
+    case "eof":
+      return "The file changed while it was being opened. Try again.";
+    case "malformed":
+      return "The host's answer could not be read. Reconnect and retry.";
+    case "oversized":
+      return "The host's answer was too large to read. Reconnect and retry.";
+    default:
+      return code.startsWith("content-")
+        ? "The file's content is unavailable. Reconnect and retry."
+        : "The file could not be opened. Reconnect and retry.";
+  }
 }
 
 export function editorFileProjection(
