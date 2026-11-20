@@ -72,6 +72,7 @@ import {
   makeTurnTextParagraphs,
   MAX_REMEMBERED_ANSWERED_REQUESTS,
   MAX_TURN_STREAMED_OUTPUT_BYTES,
+  sanitizeLoopNoticeToolName,
   STREAMED_OUTPUT_TRUNCATION_MARKER,
 } from "../providers/turnBudget";
 
@@ -626,9 +627,10 @@ export class CodeTurnRunner {
         readonly count: number;
       }) =>
         Effect.gen(function* () {
+          const toolName = sanitizeLoopNoticeToolName(loop.toolName);
           const notice: TurnLoopNotice = {
             kind: loop.kind === "stop" ? "turn-loop-stopped" : "turn-loop-noticed",
-            toolName: loop.toolName,
+            toolName,
             count: loop.count,
             occurredAt: decodeTimestamp(clock()),
           };
@@ -639,7 +641,7 @@ export class CodeTurnRunner {
             yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
             return yield* fail(
               "interrupted",
-              `Stopped under Strict after ${loop.toolName} ran ${loop.count} times in a row with the same input.`,
+              `Stopped under Strict after ${toolName} ran ${loop.count} times in a row with the same input.`,
             );
           }
         });

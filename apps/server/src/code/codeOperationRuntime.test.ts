@@ -13603,7 +13603,25 @@ describe("the threads tool on Code turns", () => {
         prompt: fixture.prompt,
       });
       await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
-      await ask([...Array<"read">(9).fill("read"), ...Array<"wait">(5).fill("wait")], "first");
+      await ask(
+        [
+          "read",
+          "read",
+          "wait",
+          "read",
+          "read",
+          "wait",
+          "read",
+          "read",
+          "wait",
+          "read",
+          "read",
+          "wait",
+          "read",
+          "wait",
+        ],
+        "first",
+      );
       await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalledTimes(14));
       expect(answers().filter((entry) => entry.reason === "rate-limited")).toHaveLength(2);
       expect(answer).toHaveBeenCalledTimes(12);
@@ -13631,6 +13649,67 @@ describe("the threads tool on Code turns", () => {
           .map((entry) => entry.reason),
       ).toEqual([undefined, undefined]);
       expect(answer).toHaveBeenCalledTimes(14);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("sanitizes checkout paths and secrets in provider tool names before journaling a loop notice", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const secretCheckout = "/private/exact-secret-repo";
+    const fixture = runtimeFixture({
+      checkoutRoot: secretCheckout,
+      provider: providerDriver(connection),
+      resolveStrict: () => false,
+    });
+    const rawToolName = `mcp__${secretCheckout}/sk-ant-api03-1234567890abcdefghijklmnop`;
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1214),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
+      for (let i = 1; i <= 6; i += 1) {
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "tool-start",
+              sequence: i * 2 - 1,
+              toolCallId: `tool-${i}`,
+              toolName: rawToolName,
+            }),
+          ),
+        );
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "tool-call-content",
+              sequence: i * 2,
+              toolCallId: `tool-${i}`,
+              part: "input",
+              text: '{"q":"same"}',
+            }),
+          ),
+        );
+      }
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
+
+      const conversation = fixture.conversation();
+      const loopNotice = conversation.turns[0]?.loopNotice;
+      expect(loopNotice).toBeDefined();
+      expect(loopNotice?.kind).toBe("turn-loop-noticed");
+      expect(loopNotice?.toolName).toContain("[CHECKOUT]");
+      expect(loopNotice?.toolName).not.toContain(secretCheckout);
+      expect(loopNotice?.toolName).not.toContain("sk-ant-api03-1234567890abcdefghijklmnop");
     } finally {
       await fixture.runtime.close();
       fixture.close();

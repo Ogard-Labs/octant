@@ -9,6 +9,7 @@ import {
   makeIdleTimeout,
   makeTurnTextParagraphs,
   providerToolCallPauseLimitMs,
+  sanitizeLoopNoticeToolName,
   stalledTurnLimitMs,
 } from "./turnBudget";
 
@@ -334,5 +335,16 @@ describe("turn budget", () => {
       120 * 60_000,
     );
     expect(providerToolCallPauseLimitMs({ providerToolCallPauseLimitMinutes: null })).toBeNull();
+  });
+
+  it("redacts secrets and applies mode sanitization to repeated tool names before journaling", () => {
+    const raw = "mcp__/private/repo/sk-ant-api03-1234567890abcdefghijklmnop";
+    const sanitized = sanitizeLoopNoticeToolName(raw, (value) =>
+      value.replaceAll("/private/repo", "[CHECKOUT]"),
+    );
+    expect(sanitized).not.toContain("/private/repo");
+    expect(sanitized).not.toContain("sk-ant-api03-1234567890abcdefghijklmnop");
+    expect(sanitized).toContain("[CHECKOUT]");
+    expect(sanitizeLoopNoticeToolName("   ")).toBe("tool");
   });
 });

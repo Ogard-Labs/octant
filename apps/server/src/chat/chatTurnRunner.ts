@@ -93,6 +93,7 @@ import {
   makeStreamedOutputBudget,
   makeTurnTextParagraphs,
   MAX_TURN_STREAMED_OUTPUT_BYTES,
+  sanitizeLoopNoticeToolName,
   STREAMED_OUTPUT_BUDGET_CODE,
   STREAMED_OUTPUT_TRUNCATION_MARKER,
 } from "../providers/turnBudget";
@@ -1089,9 +1090,10 @@ export class ChatTurnRunner {
       const recordLoopNotice = (loop: TurnLoopOutcome) =>
         Effect.gen(function* () {
           const occurredAt = updatedAt();
+          const toolName = sanitizeLoopNoticeToolName(loop.toolName);
           const notice: TurnLoopNotice = {
             kind: loop.kind === "stop" ? "turn-loop-stopped" : "turn-loop-noticed",
-            toolName: loop.toolName,
+            toolName,
             count: loop.count,
             occurredAt,
           };
@@ -1107,13 +1109,13 @@ export class ChatTurnRunner {
               .pipe(Effect.catchAll(() => Effect.void));
             yield* persistOutcome("interrupted", {
               code: decodeDiagnosticFailureCode("interrupted"),
-              message: `Stopped under Strict after ${loop.toolName} ran ${loop.count} times in a row with the same input.`,
+              message: `Stopped under Strict after ${toolName} ran ${loop.count} times in a row with the same input.`,
             });
             terminalOutcome = "interrupted";
             return yield* Effect.fail(
               decodeChatFailure({
                 category: "interrupted",
-                message: `Stopped under Strict after ${loop.toolName} ran ${loop.count} times in a row with the same input.`,
+                message: `Stopped under Strict after ${toolName} ran ${loop.count} times in a row with the same input.`,
               }),
             );
           }

@@ -89,6 +89,7 @@ import {
   makeEventLoopShare,
   makeIdleTimeout,
   makeTurnTextParagraphs,
+  sanitizeLoopNoticeToolName,
   type IdleTimeout,
 } from "../providers/turnBudget";
 
@@ -789,7 +790,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                     const notice: TurnLoopNotice = {
                       kind:
                         loopCheck.loop.kind === "stop" ? "turn-loop-stopped" : "turn-loop-noticed",
-                      toolName: loopCheck.loop.toolName,
+                      toolName: sanitizeLoopNoticeToolName(loopCheck.loop.toolName),
                       count: loopCheck.loop.count,
                       occurredAt: decodeTimestamp(clock()),
                     };
@@ -865,7 +866,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                     const notice: TurnLoopNotice = {
                       kind:
                         loopCheck.loop.kind === "stop" ? "turn-loop-stopped" : "turn-loop-noticed",
-                      toolName: loopCheck.loop.toolName,
+                      toolName: sanitizeLoopNoticeToolName(loopCheck.loop.toolName),
                       count: loopCheck.loop.count,
                       occurredAt: decodeTimestamp(clock()),
                     };

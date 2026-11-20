@@ -329,6 +329,59 @@ describe("turn loop and stall policy", () => {
     expect(sixthRead.loop).toBeUndefined();
   });
 
+  it("resets the consecutive streak when Claude task or question events intervene", () => {
+    for (const intervening of [
+      { kind: "task-progress" as const },
+      { kind: "task-list" as const },
+      { kind: "user-input-request" as const },
+    ]) {
+      let state = INITIAL_TURN_LOOP_STATE;
+      for (let i = 1; i <= 5; i += 1) {
+        state = observeTurnRuntimeEvent(
+          state,
+          { kind: "tool-start", toolCallId: `read-${i}`, toolName: "Read" },
+          { strict: true },
+        ).next;
+        state = observeTurnRuntimeEvent(
+          state,
+          {
+            kind: "tool-call-content",
+            toolCallId: `read-${i}`,
+            part: "input",
+            text: '{"file_path":"a.ts"}',
+          },
+          { strict: true },
+        ).next;
+        state = observeTurnRuntimeEvent(
+          state,
+          { kind: "tool-success", toolCallId: `read-${i}` },
+          { strict: true },
+        ).next;
+      }
+
+      // Claude's TodoWrite / task tools / AskUserQuestion emit task or question events without tool-start.
+      state = observeTurnRuntimeEvent(state, intervening, { strict: true }).next;
+
+      state = observeTurnRuntimeEvent(
+        state,
+        { kind: "tool-start", toolCallId: "read-6", toolName: "Read" },
+        { strict: true },
+      ).next;
+      const sixth = observeTurnRuntimeEvent(
+        state,
+        {
+          kind: "tool-call-content",
+          toolCallId: "read-6",
+          part: "input",
+          text: '{"file_path":"a.ts"}',
+        },
+        { strict: true },
+      );
+      expect(sixth.count).toBe(1);
+      expect(sixth.loop).toBeUndefined();
+    }
+  });
+
   it("appends one informational sentence to an Octant tool result without discarding the result", () => {
     expect(appendRepeatToolWarning({ ok: true, value: 42 })).toEqual({
       ok: true,

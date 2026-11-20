@@ -1,6 +1,6 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
 import { strictKeptForLaunch } from "../strictResolution";
-import type { StalledTurnScope } from "../providers/turnBudget";
+import { sanitizeLoopNoticeToolName, type StalledTurnScope } from "../providers/turnBudget";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
@@ -6579,17 +6579,20 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             : { onPromptSent: active.onContextDelivered }),
           onLoopNotice: (notice) =>
             Effect.sync(() => {
+              const toolName = sanitizeLoopNoticeToolName(notice.toolName, (value) =>
+                sanitizeProviderText(value, active.checkoutRoot, active.secrets),
+              );
               const frame = this.#appendTurnEvent(active, {
                 event:
                   notice.kind === "turn-loop-stopped"
                     ? {
                         kind: "turn-loop-stopped",
-                        toolName: notice.toolName,
+                        toolName,
                         count: notice.count,
                       }
                     : {
                         kind: "turn-loop-noticed",
-                        toolName: notice.toolName,
+                        toolName,
                         count: notice.count,
                       },
               });

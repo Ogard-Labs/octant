@@ -103,6 +103,9 @@ export type TurnLoopRuntimeEvent =
       readonly toolCallId: string;
     }
   | {
+      readonly kind: "task-progress" | "task-list" | "user-input-request";
+    }
+  | {
       readonly kind: string;
     };
 
@@ -418,6 +421,18 @@ export function observeTurnRuntimeEvent(
         loop: undefined,
       };
     }
+    // Claude's task/checklist and AskUserQuestion tools suppress `tool-start`
+    // and emit task or question events instead; treat them as an intervening
+    // tool call so they break any preceding consecutive streak.
+    case "task-progress":
+    case "task-list":
+    case "user-input-request":
+      return {
+        next: resetTurnLoopStreak(state),
+        count: 0,
+        earlyWarning: false,
+        loop: undefined,
+      };
     default:
       return {
         next: state,

@@ -5,6 +5,26 @@ import {
   type ShellSettings,
 } from "@octant/contracts";
 import { Clock, Effect } from "effect";
+import { redactHostSecrets } from "../process/secretRedaction";
+
+const MAX_LOOP_NOTICE_TOOL_NAME_LENGTH = 256;
+
+/**
+ * Redacts host secrets and applies any mode-specific sanitizer (such as Code's
+ * checkout-path and thread-secret scrubber) to a provider tool name before a
+ * loop notice is journaled or rendered.
+ */
+export function sanitizeLoopNoticeToolName(
+  toolName: string,
+  sanitize?: (text: string) => string,
+): string {
+  const scrubbed = redactHostSecrets(sanitize === undefined ? toolName : sanitize(toolName)).trim();
+  if (scrubbed.length === 0) return "tool";
+  const chars = Array.from(scrubbed);
+  return chars.length <= MAX_LOOP_NOTICE_TOOL_NAME_LENGTH
+    ? scrubbed
+    : chars.slice(0, MAX_LOOP_NOTICE_TOOL_NAME_LENGTH).join("").trim() || "tool";
+}
 
 /**
  * Streaming deltas and progress ticks are unbounded by nature (one per token

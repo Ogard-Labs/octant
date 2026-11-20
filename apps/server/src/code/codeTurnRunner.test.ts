@@ -2757,6 +2757,78 @@ describe("CodeTurnRunner", () => {
       ]);
     });
 
+    it("does not stop a Strict Code turn when a Claude task-list update runs between five Reads and a sixth Read", async () => {
+      const loopNotices: Array<{
+        readonly kind: string;
+        readonly toolName: string;
+        readonly count: number;
+      }> = [];
+      const readCall = (
+        index: number,
+        sequenceStart: number,
+      ): ReadonlyArray<ProviderRuntimeEvent> => [
+        event({
+          kind: "tool-start",
+          sequence: sequenceStart,
+          toolCallId: `read-${index}`,
+          toolName: "Read",
+        }),
+        event({
+          kind: "tool-call-content",
+          sequence: sequenceStart + 1,
+          toolCallId: `read-${index}`,
+          part: "input",
+          text: '{"file_path":"src/index.ts"}',
+        }),
+        event({
+          kind: "tool-success",
+          sequence: sequenceStart + 2,
+          toolCallId: `read-${index}`,
+          summary: "Read file.",
+        }),
+      ];
+      const events: ProviderRuntimeEvent[] = [
+        ...Array.from({ length: 5 }, (_, index) => readCall(index + 1, index * 3 + 1)).flat(),
+        event({
+          kind: "task-progress",
+          sequence: 16,
+          taskId: "task-1",
+          status: "in-progress",
+          summary: "Check index.ts",
+        }),
+        event({
+          kind: "task-list",
+          sequence: 17,
+          taskIds: ["task-1"],
+        }),
+        ...readCall(6, 18),
+        event({ kind: "text-delta", sequence: 21, text: "Checked." }),
+        event({ kind: "completed", sequence: 22 }),
+      ];
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(Stream.fromIterable(events)),
+      });
+      const outcomes: CodeTurnOutcome[] = [];
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              strict: true,
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+              onLoopNotice: (notice) => Effect.sync(() => loopNotices.push(notice)),
+            }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Success");
+      expect(connection.interrupt).not.toHaveBeenCalled();
+      expect(outcomes.at(-1)).toBe("completed");
+      expect(loopNotices).toEqual([]);
+    });
+
     it("notices provider silence past the stalled-turn limit outside Strict without stopping the Code turn", async () => {
       const stallNotices: Array<{ readonly kind: string; readonly idleMs: number }> = [];
       const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
