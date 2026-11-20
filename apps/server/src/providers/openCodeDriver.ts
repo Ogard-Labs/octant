@@ -252,6 +252,8 @@ export interface OpenCodeDriverOptions {
    */
   readonly protectedPaths?: () => OpenCodeProtectedPaths;
   readonly idleLeaseMs?: number;
+  /** The host's platform; defaults to the running one. */
+  readonly platform?: NodeJS.Platform;
   readonly clock?: () => string;
   readonly correlationId?: () => string;
   /**
@@ -568,6 +570,12 @@ function openCodeInputModalities(model: Provider["models"][string]): ProviderInp
 export interface OpenCodeToolProof {
   readonly accepted: boolean;
   readonly exclusive: boolean;
+  /**
+   * True when a Windows outside-Strict probe ran a verified release with
+   * Octant's private configuration (no Project config loaded), admitting
+   * app-managed tools without claiming OS confinement.
+   */
+  readonly windowsPrivateConfiguration?: boolean;
 }
 
 function openCodeChatCapabilities(
@@ -581,7 +589,10 @@ function openCodeChatCapabilities(
     )
       ? "supported"
       : "unsupported",
-    appManagedTools: tools.accepted && tools.exclusive ? "supported" : "unsupported",
+    appManagedTools:
+      tools.accepted && (tools.exclusive || tools.windowsPrivateConfiguration === true)
+        ? "supported"
+        : "unsupported",
     // Full access launches this runtime outside the sandbox the exclusivity
     // proof rests on, so even a proved release is mixed there. Reported only
     // when the runtime accepted the declaration: a runtime that rejects it
@@ -599,6 +610,15 @@ function openCodeChatCapabilities(
  * file change is held to the grants the person gave (`failClosedBetaEvent`),
  * so file changes are claimed from the first release read for the event.
  */
+/**
+ * Whether OpenCode 2 can run Chat and Plan turns on this host: macOS and Linux
+ * admit the git stand-in inside their Chat/Plan jails, and Windows runs both
+ * unconfined outside Strict with OpenCode's own permission rules.
+ */
+function openCodeChatPlanAdmitted(platform: NodeJS.Platform): boolean {
+  return openCodeChatPlanJailStartsProcesses(platform) || platform === "win32";
+}
+
 function openCodeBetaCapabilities(
   reported: ProviderCapabilities,
   version: string | undefined,
@@ -621,7 +641,7 @@ function openCodeBetaCapabilities(
     appManagedTools: reported.appManagedTools,
     // On a host whose Chat and Plan jail starts no process the launch refuses
     // both (`openCodeRefusesTurnHere`).
-    ...(openCodeChatPlanJailStartsProcesses(platform)
+    ...(openCodeChatPlanAdmitted(platform)
       ? {}
       : {
           turnModes: {
@@ -1756,6 +1776,7 @@ function keepsFullAccessSandbox(input: {
 
 export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriver {
   const clientFactory = options.clientFactory ?? makeOfficialOpenCodeClient;
+  const platform = options.platform ?? process.platform;
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const resumeToolCatalogs = new Map<string, ReadonlyArray<ProviderToolDefinition>>();
@@ -1776,7 +1797,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
   // forking OpenCode's own sessions there: the readiness check's launch,
   // leased per folder so its confinement binds that folder.
   const withSessionClient: OpenCodeSessionClient = async (projectRoot, use) => {
-    const probesTurnJail = !openCodeChatPlanJailStartsProcesses(process.platform);
+    const probesTurnJail = !openCodeChatPlanAdmitted(platform);
     const result = await Effect.runPromise(
       Effect.either(
         Effect.scoped(
@@ -1826,7 +1847,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             // model prompt and its bridge is closed before the probe scope
             // returns. It runs wherever the launch can reach the bridge (macOS,
             // Linux, and Windows, whose launches have no Octant sandbox).
-            const bridge = appToolBridgeReachesLaunchOn(process.platform)
+            const bridge = appToolBridgeReachesLaunchOn(platform)
               ? yield* Effect.acquireRelease(
                   Effect.tryPromise({
                     try: () =>
@@ -1840,14 +1861,13 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                 )
               : undefined;
             // Probe under the Chat/Plan jail, not the Code jail, wherever
-            // that jail can start the git stand-in (macOS's single exec,
-            // Linux's read-only capsule that admits processes): it is what
-            // makes a 2.x runtime serve a Git work tree in Chat and Plan, and
-            // attesting under Code confinement would pass even without it.
-            // Elsewhere a 2.x Chat or Plan launch is refused, so the probe
-            // attests the jail turns do run in there: Work and Code at Ask
-            // first, which allows a process.
-            const probesTurnJail = !openCodeChatPlanJailStartsProcesses(process.platform);
+            // Chat and Plan are admitted (macOS's single exec, Linux's
+            // read-only capsule, Windows unconfined): it is what makes a 2.x
+            // runtime serve a Git work tree in Chat and Plan, and attesting
+            // under Code confinement would pass even without it. Elsewhere a
+            // 2.x Chat or Plan launch is refused, so the probe attests the
+            // jail turns do run in there: Work and Code at Ask first.
+            const probesTurnJail = !openCodeChatPlanAdmitted(platform);
             const runtime = yield* acquireRuntime(
               options,
               projectRoot,
@@ -1878,6 +1898,9 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             const normalized = normalizeOpenCodeProbe(instanceId, health, providers, clock(), {
               accepted: mcpAccepted,
               exclusive: runtime.isolatedConfiguration === true,
+              ...(platform === "win32" && runtime.windowsPrivateConfiguration === true
+                ? { windowsPrivateConfiguration: true }
+                : {}),
             });
             if (runtime.runtime === "beta" && normalized.models.length > 0) {
               // A launch that reports no scratch directory cannot be attested.
@@ -1936,12 +1959,12 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                 capabilities: openCodeBetaCapabilities(
                   normalized.capabilities,
                   health.version,
-                  process.platform,
+                  platform,
                 ),
               };
             }
             if (
-              !appToolBridgeReachesLaunchOn(process.platform) &&
+              !appToolBridgeReachesLaunchOn(platform) &&
               normalized.models.length > 0 &&
               normalized.capabilities.appManagedTools === "unsupported"
             ) {
@@ -2009,6 +2032,8 @@ function acquireRuntime(
     false,
     NO_OWN_PERMISSIONS,
     options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
+    [],
+    options.platform ?? process.platform,
   );
   return options.runtimeRegistry.acquireRuntime(options.instanceId, {
     ...(lease === undefined ? {} : { lease }),
@@ -2099,6 +2124,8 @@ function makeConnection(
   readOnlyFolders: ReadonlyArray<string> = [],
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
+    const platform = options.platform ?? process.platform;
+    const windowsChatDenyAll = mode === "chat" && platform === "win32";
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const sessionsBySource = new Map<string, SessionState>();
     /**
@@ -2174,9 +2201,22 @@ function makeConnection(
     let runtimeKind: "legacy" | "beta" | undefined;
     let runtimeVersion: string | undefined;
     let runtimeIsolated = false;
+    // The running Windows outside-Strict launch uses a verified release with
+    // Octant's private configuration (no Project config loaded), admitting
+    // app-managed tools without claiming OS confinement.
+    let runtimeWindowsPrivateConfig = false;
     // The running launch loads a trusted Project's own OpenCode configuration.
     let runtimeProjectConfig = false;
     let runtimeLoopbackPorts: ReadonlyArray<number> = [];
+
+    const runtimeAdmitsAppTools = (
+      executionPolicy: ProviderExecutionPolicy,
+      strict: boolean,
+    ): boolean =>
+      runtimeIsolated ||
+      (platform === "win32" && !strict && runtimeWindowsPrivateConfig) ||
+      runtimeProjectConfig ||
+      executionPolicy === "full-access";
 
     const offer = (event: ProviderRuntimeEvent) => {
       Effect.runFork(PubSub.publish(events, event));
@@ -2247,6 +2287,7 @@ function makeConnection(
         ? undefined
         : {
             mode,
+            platform,
             projectRoot,
             extraFolders,
             readOnlyFolders,
@@ -2423,6 +2464,7 @@ function makeConnection(
       runtimeBlockedToolsKey = "[]";
       runtimeVersion = undefined;
       runtimeIsolated = false;
+      runtimeWindowsPrivateConfig = false;
       runtimeProjectConfig = false;
       runtimeLoopbackPorts = [];
       subscriptionReady = undefined;
@@ -2482,13 +2524,18 @@ function makeConnection(
                   executionPolicy,
                   ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
                   ...(strict ? {} : { strict: false }),
-                  ...(ownSkills ? { ownSkills: true as const } : {}),
-                  ...(ownSetup === undefined ||
+                  ...(!windowsChatDenyAll && ownSkills ? { ownSkills: true as const } : {}),
+                  ...(windowsChatDenyAll ||
+                  ownSetup === undefined ||
                   (!ownSetup.toolServers && ownSetup.planServers.length === 0)
                     ? {}
                     : { ownToolServers: ownSetup.mcp }),
-                  ...(ownSetup?.projectConfig === true ? { projectConfig: true as const } : {}),
-                  ...(ownSetup === undefined ? {} : { runsAsItself: true as const }),
+                  ...(!windowsChatDenyAll && ownSetup?.projectConfig === true
+                    ? { projectConfig: true as const }
+                    : {}),
+                  ...(!windowsChatDenyAll && ownSetup !== undefined
+                    ? { runsAsItself: true as const }
+                    : {}),
                   betaPermissions: betaSessionPermissionRules(
                     executionPolicy,
                     mode,
@@ -2501,6 +2548,7 @@ function makeConnection(
                       strict,
                     ),
                     readOnlyFolders,
+                    platform,
                   ),
                   ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
@@ -2529,6 +2577,7 @@ function makeConnection(
             runtimeKind = started.runtime ?? "legacy";
             runtimeVersion = started.version;
             runtimeIsolated = started.isolatedConfiguration === true;
+            runtimeWindowsPrivateConfig = started.windowsPrivateConfiguration === true;
             runtimeProjectConfig = ownSetup?.projectConfig === true;
             runtimeLoopbackPorts = loopbackPorts;
             client = nextClient;
@@ -2891,14 +2940,14 @@ function makeConnection(
             ),
             Effect.flatMap((runtimeClient) => {
               // Below Full access the tools reach only a runtime that proved
-              // nothing else can enter it. At Full access, and in a trusted
-              // Project whose own OpenCode configuration the launch loads,
-              // they are offered beside whatever the runtime inherited.
+              // nothing else can enter it, or on Windows outside Strict a
+              // verified release using Octant's private configuration. At Full
+              // access, and in a trusted Project whose own OpenCode
+              // configuration the launch loads, they are offered beside
+              // whatever the runtime inherited.
               if (
                 state.managedTools !== undefined &&
-                !runtimeIsolated &&
-                !runtimeProjectConfig &&
-                input.executionPolicy !== "full-access"
+                !runtimeAdmitsAppTools(input.executionPolicy, input.strict !== false)
               ) {
                 return Effect.promise(() => releaseManagedTools(state)).pipe(
                   Effect.zipRight(
@@ -2932,6 +2981,7 @@ function makeConnection(
                         state.own,
                         state.protectedPaths,
                         readOnlyFolders,
+                        platform,
                       ),
                       model: splitModelId(input.modelId),
                     }),
@@ -3186,16 +3236,16 @@ function makeConnection(
             const reportedCapabilities = {
               ...(observed?.capabilities ?? capabilities),
               // This gates the turn's own tool offer, so a mixed Full access
+              // session or a Windows outside-Strict verified private-config
               // session carries tools here; the probe is what reports mixed.
-              appManagedTools:
-                runtimeIsolated || runtimeProjectConfig || state.executionPolicy === "full-access"
-                  ? ("supported" as const)
-                  : ("unsupported" as const),
+              appManagedTools: runtimeAdmitsAppTools(state.executionPolicy, runtimeStrict)
+                ? ("supported" as const)
+                : ("unsupported" as const),
             };
             const rejected = validateChatTurnInput(
               input,
               runtimeKind === "beta"
-                ? openCodeBetaCapabilities(reportedCapabilities, runtimeVersion, process.platform)
+                ? openCodeBetaCapabilities(reportedCapabilities, runtimeVersion, platform)
                 : reportedCapabilities,
               model,
             );
@@ -3298,6 +3348,7 @@ function makeConnection(
                                 state.own,
                                 state.protectedPaths,
                                 readOnlyFolders,
+                                platform,
                               ),
                             }),
                           );
@@ -3692,6 +3743,7 @@ function failClosedBetaEvent(
   mode: "chat" | "work" | "code",
   projectRoot: string,
   fromQuestionForm: boolean,
+  platform: NodeJS.Platform = process.platform,
 ): ProviderRuntimeEvent {
   // 2.0.22 answers questions only through a form's reply route, so a question
   // that came any other way could never be answered.
@@ -3709,15 +3761,19 @@ function failClosedBetaEvent(
   if (event.kind !== "file-change") {
     return event;
   }
-  const edit = betaPermissionEffect(betaAgentPermissionRules(state.executionPolicy, mode), "edit");
+  const edit = betaPermissionEffect(
+    betaAgentPermissionRules(state.executionPolicy, mode, [], [], NO_PROTECTED_PATHS, platform),
+    "edit",
+  );
   // An edit the posture allows, or one the user already approved, may be
   // reported. Any other file change ran without a grant, so the turn fails.
   if (edit === "allow") return event;
   const file = resolve(projectRoot, event.path);
   // An edit the person's own rules allow for this file ran without asking,
-  // as in OpenCode itself. Plan never takes it: its denial is Octant's.
+  // as in OpenCode itself. Plan and Windows Chat never take it.
   if (
     state.executionPolicy !== "plan" &&
+    !(mode === "chat" && platform === "win32") &&
     openCodeOwnRulesAllow(state.own.rules, "edit", [event.path, file])
   ) {
     return event;
@@ -3750,6 +3806,7 @@ function mapAndOffer(
   retire: (state: SessionState) => void,
   beta?: {
     readonly mode: "chat" | "work" | "code";
+    readonly platform: NodeJS.Platform;
     readonly projectRoot: string;
     readonly extraFolders: ReadonlyArray<string>;
     readonly readOnlyFolders: ReadonlyArray<string>;
@@ -3839,6 +3896,7 @@ function mapAndOffer(
               },
               state.protectedPaths,
               beta.readOnlyFolders,
+              beta.platform,
             ),
             action,
           );
@@ -3954,6 +4012,7 @@ function mapAndOffer(
         beta.mode,
         beta.projectRoot,
         questionForm !== undefined,
+        beta.platform,
       );
     // OpenCode settles usage once per model step. Consumers keep the latest
     // report as the logical turn's figure, so make each report cumulative
@@ -4136,14 +4195,28 @@ export function openCodeProtectedReadRefusals(
 
 export function permissionRules(
   policy: ProviderExecutionPolicy,
-  _mode: "chat" | "work" | "code",
+  mode: "chat" | "work" | "code",
   managedToolServerName?: string,
   extraFolders: ReadonlyArray<string> = [],
   ownSkills = false,
   own: OwnPermissions = NO_OWN_PERMISSIONS,
   protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
   readOnlyFolders: ReadonlyArray<string> = [],
+  platform: NodeJS.Platform = process.platform,
 ): PermissionRuleset {
+  if (mode === "chat" && platform === "win32") {
+    // On Windows outside Strict, OpenCode runs unconfined in Chat with a
+    // deny-everything permission ruleset of its own, keeping only Octant's
+    // session tool bridge open (still subject to blocked tools).
+    const chatRules: PermissionRuleset = [{ permission: "*", pattern: "*", action: "deny" }];
+    if (managedToolServerName !== undefined) {
+      chatRules.push({ permission: `${managedToolServerName}_*`, pattern: "*", action: "allow" });
+    }
+    for (const rule of blockedToolDenials(own)) {
+      chatRules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
+    }
+    return chatRules;
+  }
   let rules: PermissionRuleset;
   if (policy === "full-access") {
     // Full access reaches folders outside the Project, as OpenCode does on
@@ -4268,11 +4341,15 @@ const BETA_SHELL_AND_SUBAGENT_DENY: PermissionV2Ruleset = [
  */
 export function betaAgentPermissionRules(
   policy: ProviderExecutionPolicy,
-  _mode: "chat" | "work" | "code",
+  mode: "chat" | "work" | "code",
   extraFolders: ReadonlyArray<string> = [],
   ownRules: ReadonlyArray<PermissionV2Rule> = [],
   protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
+  platform: NodeJS.Platform = process.platform,
 ): PermissionV2Ruleset {
+  if (mode === "chat" && platform === "win32") {
+    return [{ action: "*", resource: "*", effect: "deny" }];
+  }
   let rules: PermissionV2Ruleset;
   if (policy === "full-access") {
     // Outside folders too, at Full access (maintainer decision, 2026-11-14).
@@ -4403,9 +4480,21 @@ export function betaSessionPermissionRules(
   own: OwnPermissions = NO_OWN_PERMISSIONS,
   protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
   readOnlyFolders: ReadonlyArray<string> = [],
+  platform: NodeJS.Platform = process.platform,
 ): PermissionV2Ruleset {
+  if (mode === "chat" && platform === "win32") {
+    const chatRules: PermissionV2Ruleset = [
+      { action: "*", resource: "*", effect: "deny" },
+      { action: "question", resource: "*", effect: "allow" },
+    ];
+    if (managedToolServerName !== undefined) {
+      chatRules.push({ action: `${managedToolServerName}_*`, resource: "*", effect: "allow" });
+    }
+    chatRules.push(...blockedToolDenials(own));
+    return chatRules;
+  }
   const rules: PermissionV2Ruleset = [
-    ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths),
+    ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths, platform),
     ...(own.toolServers
       ? []
       : [
