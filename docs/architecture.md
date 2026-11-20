@@ -3269,6 +3269,23 @@ mark. Marking a Work or Code thread Done while a fresh receipt stands attaches
 that receipt (`completionReceiptId`) as the thread's completion evidence, and
 Reopen clears it. Reporting finished never marks a thread Done.
 
+Each recorded `thread.finished-receipt-recorded@1` receipt also feeds a
+rebuildable projection of replayable run cases (maintainer decision,
+2026-11-19): the thread's initial request, Project (id and latest name), mode
+(`work` or `code`), provider and model that produced the finished report,
+host-built receipt, and observed changed-file count (omitted when diff counts
+were unavailable). The projection keeps at most the newest 200 eligible cases,
+evicting the oldest in FIFO order. Threads marked Leave no trace never produce
+a case — neither when marked before the report nor when marked afterwards — and
+a purged thread's case disappears on rebuild because thread purge deletes
+`thread-finished-receipt` with the thread's other journal aggregates. A
+maintainer-only script (`scripts/replay-run-cases.ts`, invoked explicitly via
+`bun run replay:run-cases` and never run in `bun run test` or CI) replays
+stored cases through the maintainer's own running host and provider account
+(or summarizes stored baselines under `--dry-run`) and reports the share of
+cases whose receipt was all `proven` (at least one item, every item `proven`,
+and not stale).
+
 The Work mark locks the thread on the host until the person reopens it
 (archiving and reactivating the thread clears it too); a lock only in the window let a queued message,
 a routine, or a child's result start a turn anyway. Work turn admission, the
