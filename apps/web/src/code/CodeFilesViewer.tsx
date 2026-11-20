@@ -377,6 +377,15 @@ function ActiveFile(props: {
                   line: 1,
                   column: 1,
                 }),
+              onOpenInDefaultApp: () =>
+                openExternal({
+                  threadId: file.threadId,
+                  checkoutId: file.checkoutId,
+                  fileId: file.fileId,
+                  line: 1,
+                  column: 1,
+                  defaultApplication: true,
+                }),
             })}
       />
     </Suspense>

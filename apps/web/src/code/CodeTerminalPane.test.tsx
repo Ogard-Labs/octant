@@ -161,6 +161,30 @@ describe("CodeTerminalPane", () => {
     expect(client.executeOperation).not.toHaveBeenCalled();
   });
 
+  it("offers Change mode beside the Plan-mode notice and opens the mode menu without changing mode", async () => {
+    const client = codeClient({ evidence: "older output" });
+    const runtime = xtermRuntime();
+    const onOpenModeMenu = vi.fn();
+    render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="plan"
+        loadRuntime={runtime.loadRuntime}
+        onOpenModeMenu={onOpenModeMenu}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    expect(await screen.findByText("Plan mode keeps terminal replay read-only.")).toBeVisible();
+    const changeMode = screen.getByRole("button", { name: "Change mode" });
+    expect(changeMode).toBeVisible();
+    fireEvent.click(changeMode);
+    expect(onOpenModeMenu).toHaveBeenCalledOnce();
+    expect(client.executeOperation).not.toHaveBeenCalled();
+  });
+
   it("keeps a running terminal interactive for input and resize", async () => {
     const client = codeClient({ evidence: "ready" });
     const runtime = xtermRuntime();

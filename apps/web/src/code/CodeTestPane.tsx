@@ -37,6 +37,7 @@ export interface CodeTestPaneProps {
   readonly createTestRunId: () => CodeTestRunId;
   readonly definitions: ReadonlyArray<CodeRepositoryTestDefinition>;
   readonly executionPolicy: ProviderExecutionPolicy;
+  readonly onOpenModeMenu?: () => void;
   readonly requestApproval?: (input: {
     readonly command: Parameters<CodeClient["executeOperation"]>[0];
   }) => Promise<boolean>;
@@ -229,7 +230,19 @@ export function CodeTestPane(props: CodeTestPaneProps) {
             </span>
           ))}
           {props.executionPolicy === "plan" ? (
-            <p>Plan mode is read-only.</p>
+            <div className="code-test-pane__plan-notice">
+              <p>Plan mode is read-only.</p>
+              {props.onOpenModeMenu === undefined ? null : (
+                <OctantButton
+                  onClick={props.onOpenModeMenu}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Change mode
+                </OctantButton>
+              )}
+            </div>
           ) : activeRun?.state === "approval" ? (
             <OctantButton disabled size="sm" type="button" variant="secondary">
               Starting…

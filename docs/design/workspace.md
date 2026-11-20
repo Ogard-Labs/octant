@@ -946,7 +946,12 @@ line, Outline, Send selection to agent, Editor settings, Find references in
 checkout, Preview rename, Find quick fixes and **Open in main area** are items of
 one **File actions** menu there, with Monaco's own shortcuts unchanged. Open in
 main area is the only way to open a file as a workspace Code file tab, which
-draws the same actions in a slim header of its own. Tree rows are 28px, 13px
+draws the same actions in a slim header of its own. Binary files and files
+larger than 5 MiB open as a read-only metadata notice; on a local desktop window
+for a local checkout that notice offers **Open in default app** through the
+existing desktop file-open bridge (without requiring a configured external code
+editor), while a paired browser or remote session keeps the plain notice with no
+desktop-open button. Tree rows are 28px, 13px
 text at weight 500 in the primary ink, with 12px of indent per level. A folder is
 a 12px muted chevron (rotated when open) and its name, with no folder icon; a
 file is a 16px glyph by type (code, document, image, file) and its name.
@@ -1177,7 +1182,11 @@ confirmation does not bypass ordinary approvals. Plan may inspect these
 comparisons but cannot mutate. Unsupported binary, rename, conflict or
 unavailable bytes are explicit. After applying, Review rereads the index and
 working tree. Stale selections require a new comparison; captured run and Git
-History views do not offer mutations. The authority, native preflight and writer
+History views do not offer mutations. When a Code thread is in Plan mode, its
+read-only Git, Pull request, Terminal, and Tests panes offer a **Change mode**
+button beside the Plan-mode notice that opens the composer's mode menu so the
+person can choose a mode themselves; nothing switches automatically. The
+authority, native preflight and writer
 rules are in [Architecture: Code](../architecture.md#modes-chat-work-and-code).
 
 Thread utilities live in the Right Utility Dock outside the split tree. The dock

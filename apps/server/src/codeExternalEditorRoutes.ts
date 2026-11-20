@@ -9,6 +9,7 @@ interface TargetRequest {
   readonly threadId: string;
   readonly checkoutId: string;
   readonly fileId: string;
+  readonly defaultApplication?: boolean;
 }
 
 interface CheckoutTargetRequest {
@@ -57,7 +58,10 @@ export function createCodeExternalEditorRouteHandler(options: {
   readonly resolve: (input: TargetRequest) => Promise<
     | {
         readonly file: string;
-        readonly editor: { readonly executable: string; readonly arguments: ReadonlyArray<string> };
+        readonly editor?: {
+          readonly executable: string;
+          readonly arguments: ReadonlyArray<string>;
+        };
       }
     | undefined
   >;
@@ -88,8 +92,20 @@ export function createCodeExternalEditorRouteHandler(options: {
     }
     if (
       !record(body) ||
-      !exact(body, ["windowId", "threadId", "checkoutId", "fileId", "line", "column"])
+      (!exact(body, ["windowId", "threadId", "checkoutId", "fileId", "line", "column"]) &&
+        !exact(body, [
+          "windowId",
+          "threadId",
+          "checkoutId",
+          "fileId",
+          "line",
+          "column",
+          "defaultApplication",
+        ]))
     ) {
+      return failure("invalid", 400);
+    }
+    if ("defaultApplication" in body && typeof body.defaultApplication !== "boolean") {
       return failure("invalid", 400);
     }
     for (const key of ["windowId", "threadId", "checkoutId", "fileId"] as const) {
@@ -98,10 +114,12 @@ export function createCodeExternalEditorRouteHandler(options: {
     if (!admitsWindow(admission, body.windowId)) return failure("unauthorized", 401);
     if (!positive(body.line) || !positive(body.column)) return failure("invalid", 400);
 
+    const defaultApplication =
+      "defaultApplication" in body ? (body.defaultApplication as boolean) : undefined;
     let target:
       | {
           readonly file: string;
-          readonly editor: {
+          readonly editor?: {
             readonly executable: string;
             readonly arguments: ReadonlyArray<string>;
           };
@@ -113,12 +131,23 @@ export function createCodeExternalEditorRouteHandler(options: {
         threadId: body.threadId as string,
         checkoutId: body.checkoutId as string,
         fileId: body.fileId as string,
+        ...(defaultApplication === undefined ? {} : { defaultApplication }),
       });
     } catch {
       return failure("unavailable", 503);
     }
     if (target === undefined) return failure("unavailable", 404);
-    return Response.json({ ...target, line: body.line, column: body.column });
+    if (defaultApplication !== true && target.editor === undefined) {
+      return failure("unavailable", 404);
+    }
+    return Response.json({
+      file: target.file,
+      ...(defaultApplication === true || target.editor === undefined
+        ? {}
+        : { editor: target.editor }),
+      line: body.line,
+      column: body.column,
+    });
   };
 }
 

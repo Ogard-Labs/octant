@@ -9,6 +9,7 @@ import type {
 } from "@octant/contracts";
 import { useEffect, useState } from "react";
 import { CodeTerminalPane } from "../code/CodeTerminalPane";
+import { composerModeMenu, useHasComposerModeMenu } from "../code/composerModeMenu";
 
 type TerminalResult = Extract<CodeOperationResult, { readonly kind: "terminal-state" }>;
 
@@ -55,6 +56,7 @@ export function ZenTerminalCard(props: ZenTerminalCardProps) {
   // new operation in the thread's journal: one pinned card wrote 19,026 of
   // them in three hours, and opening the thread then replayed them all.
   const { checkoutId, threadId } = props.scope;
+  const hasComposerModeMenu = useHasComposerModeMenu(String(threadId));
 
   useEffect(() => {
     if (!props.live) return;
@@ -117,6 +119,9 @@ export function ZenTerminalCard(props: ZenTerminalCardProps) {
       client={props.client}
       createOperationId={props.createOperationId}
       executionPolicy={props.executionPolicy}
+      {...(hasComposerModeMenu
+        ? { onOpenModeMenu: () => void composerModeMenu.open(String(threadId)) }
+        : {})}
       result={terminal}
       scope={props.scope}
     />

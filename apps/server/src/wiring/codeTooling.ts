@@ -1141,8 +1141,11 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       desktopBridgeSecret: options.desktopBridgeSecret,
       windowAuthorityStore,
       resolve: async (input) => {
-        const editor = persistence.readCodeSettings()?.settings.externalEditor;
-        if (editor === undefined) return undefined;
+        const editor =
+          input.defaultApplication === true
+            ? undefined
+            : persistence.readCodeSettings()?.settings.externalEditor;
+        if (input.defaultApplication !== true && editor === undefined) return undefined;
         const windowId = decodeWindowId(input.windowId);
         const thread = persistence.readCodeThread(decodeCodeThreadId(input.threadId));
         const checkout = persistence.readCodeCheckout(decodeCodeCheckoutId(input.checkoutId));
@@ -1162,7 +1165,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
           if (root === undefined || root.fileId !== reference.id) return undefined;
           const file = await realpath(resolve(root.rootPath, relativePath));
           if (!pathIsProjectConfined(root.rootPath, file)) return undefined;
-          return { file, editor };
+          return editor === undefined ? { file } : { file, editor };
         } catch {
           return undefined;
         }

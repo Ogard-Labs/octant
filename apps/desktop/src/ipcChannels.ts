@@ -209,12 +209,30 @@ function requireBridgePositiveInteger(value: unknown): number {
  * here keeps a malformed renderer payload from crossing the bridge at all.
  */
 export function decodeCodeExternalEditorRequest(value: unknown): CodeExternalEditorRequest {
-  if (
-    !isRecord(value) ||
-    Object.keys(value).sort().join("\0") !==
-      ["threadId", "checkoutId", "fileId", "line", "column"].sort().join("\0")
-  ) {
+  if (!isRecord(value)) {
     throw new TypeError("Invalid Code external editor request.");
+  }
+  const keys = Object.keys(value).sort().join("\0");
+  const baseKeys = ["threadId", "checkoutId", "fileId", "line", "column"].sort().join("\0");
+  const defaultAppKeys = [
+    "threadId",
+    "checkoutId",
+    "fileId",
+    "line",
+    "column",
+    "defaultApplication",
+  ]
+    .sort()
+    .join("\0");
+  if (keys !== baseKeys && keys !== defaultAppKeys) {
+    throw new TypeError("Invalid Code external editor request.");
+  }
+  let defaultApplication: boolean | undefined;
+  if ("defaultApplication" in value) {
+    if (typeof value.defaultApplication !== "boolean") {
+      throw new TypeError("Invalid Code external editor request.");
+    }
+    defaultApplication = value.defaultApplication;
   }
   return {
     threadId: requireBridgeUuid(value.threadId),
@@ -222,6 +240,7 @@ export function decodeCodeExternalEditorRequest(value: unknown): CodeExternalEdi
     fileId: requireBridgeUuid(value.fileId),
     line: requireBridgePositiveInteger(value.line),
     column: requireBridgePositiveInteger(value.column),
+    ...(defaultApplication === undefined ? {} : { defaultApplication }),
   };
 }
 

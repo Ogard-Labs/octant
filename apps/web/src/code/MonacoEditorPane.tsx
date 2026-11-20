@@ -113,6 +113,12 @@ export interface MonacoEditorPaneProps {
   readonly onRequestRefresh?: () => void;
   readonly onOpenExternalEditor?: () => Promise<void>;
   /**
+   * Opens a binary or oversized file in the desktop's default application.
+   * Provided only on a local desktop window; absent on paired browsers and
+   * remote sessions, which keep the read-only notice with no open action.
+   */
+  readonly onOpenInDefaultApp?: () => Promise<void>;
+  /**
    * Opens another file of this thread's checkout as a Code file tab: the
    * ordinary file-open path a definition elsewhere goes through.
    */
@@ -146,7 +152,15 @@ type LoadState =
   | { readonly kind: "unavailable"; readonly message: string };
 
 export function MonacoEditorPane(props: MonacoEditorPaneProps) {
-  if (props.file.state === "read-only") return <ReadOnlyFile file={props.file} />;
+  if (props.file.state === "read-only")
+    return (
+      <ReadOnlyFile
+        file={props.file}
+        {...(props.onOpenInDefaultApp === undefined
+          ? {}
+          : { onOpenInDefaultApp: props.onOpenInDefaultApp })}
+      />
+    );
   if (props.file.state === "unavailable") return <UnavailableFile file={props.file} />;
   return (
     <AvailableEditor
@@ -1177,16 +1191,53 @@ function breakpointLimitText(outcome: BreakpointToggle): string | undefined {
 
 function ReadOnlyFile(props: {
   readonly file: Extract<CodeEditorFileProjection, { readonly state: "read-only" }>;
+  readonly onOpenInDefaultApp?: () => Promise<void>;
 }) {
+  const [opening, setOpening] = useState(false);
+  const [failure, setFailure] = useState<string>();
+
+  const openInDefaultApp = async () => {
+    if (props.onOpenInDefaultApp === undefined || opening) return;
+    setFailure(undefined);
+    setOpening(true);
+    try {
+      await props.onOpenInDefaultApp();
+    } catch {
+      setFailure("Octant could not open this file in its default app.");
+    } finally {
+      setOpening(false);
+    }
+  };
+
   return (
     <section aria-label={`Read-only file ${props.file.path}`} className="code-editor-pane">
-      <h1>{props.file.path}</h1>
-      <p>
-        {props.file.reason === "binary"
-          ? "Binary files are read-only."
-          : "Files larger than 5 MiB are read-only."}
-      </p>
-      <p>{props.file.metadata.byteLength.toLocaleString("en")} bytes</p>
+      <div className="code-editor-pane__readonly">
+        <h1>{props.file.path}</h1>
+        <p>
+          {props.file.reason === "binary"
+            ? "Binary files are read-only."
+            : "Files larger than 5 MiB are read-only."}
+        </p>
+        <p>{props.file.metadata.byteLength.toLocaleString("en")} bytes</p>
+        {props.onOpenInDefaultApp === undefined ? null : (
+          <div className="code-editor-pane__readonly-actions">
+            <OctantButton
+              disabled={opening}
+              onClick={() => void openInDefaultApp()}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              {opening ? "Opening…" : "Open in default app"}
+            </OctantButton>
+          </div>
+        )}
+        {failure === undefined ? null : (
+          <OctantAlert layout="row" tone="warning">
+            {failure}
+          </OctantAlert>
+        )}
+      </div>
     </section>
   );
 }

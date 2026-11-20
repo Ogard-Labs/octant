@@ -47,6 +47,7 @@ import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -192,6 +193,7 @@ import {
   runningTurnKeepsNarrowerMode,
   threadKeepsFullAccessSandbox,
 } from "./PermissionModePicker";
+import { useRegisterComposerModeMenu } from "./composerModeMenu";
 import { ThreadGuardrailLevel } from "./GuardrailLevelIndicator";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
@@ -657,6 +659,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const [queuePreparing, setQueuePreparing] = useState(false);
   const queuePreparingRef = useRef(false);
+  const [modeMenuOpener, setModeMenuOpener] = useState<(() => void) | undefined>();
+  const registerModeMenuOpener = useCallback((open: (() => void) | undefined) => {
+    setModeMenuOpener(() => open);
+  }, []);
+  useRegisterComposerModeMenu(String(props.threadId), modeMenuOpener);
 
   const composerReady = view !== undefined && props.controller.status !== "disconnected";
   useLayoutEffect(() => {
@@ -2992,6 +2999,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   autoReview={props.autoReview}
                   disabled={accessChanging}
                   onChange={(next) => void changeMode(next)}
+                  onRegisterOpener={registerModeMenuOpener}
                   {...(profileName === undefined ? {} : { profileName })}
                   warningScope={{ projectId: String(thread.projectId) }}
                   value={permissionModeOf(thread)}

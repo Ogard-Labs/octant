@@ -28,6 +28,7 @@ interface OpaqueEditorRequest {
   readonly fileId: string;
   readonly line: number;
   readonly column: number;
+  readonly defaultApplication?: boolean;
 }
 
 export async function openCodeExternalEditorFromServer(options: {
@@ -38,7 +39,9 @@ export async function openCodeExternalEditorFromServer(options: {
   readonly request: OpaqueEditorRequest;
   readonly fetch: typeof globalThis.fetch;
   readonly spawn: SpawnEditor;
+  readonly openDefaultApplication?: (file: string) => Promise<void>;
 }): Promise<void> {
+  const defaultApp = options.request.defaultApplication === true;
   try {
     const response = await options.fetch(
       new URL("/api/desktop/code-external-editor-target", options.serverUrl).toString(),
@@ -52,10 +55,21 @@ export async function openCodeExternalEditorFromServer(options: {
       },
     );
     if (!response.ok) throw new Error("unavailable");
-    const target = decodeTarget(await response.json());
+    const payload: unknown = await response.json();
+    if (defaultApp) {
+      if (options.openDefaultApplication === undefined) throw new Error("unavailable");
+      const target = decodeDefaultApplicationTarget(payload);
+      await options.openDefaultApplication(target.file);
+      return;
+    }
+    const target = decodeTarget(payload);
     await launchCodeExternalEditor({ editor: target.editor, target, spawn: options.spawn });
   } catch {
-    throw new Error("Octant could not open the configured external editor.");
+    throw new Error(
+      defaultApp
+        ? "Octant could not open this file in its default app."
+        : "Octant could not open the configured external editor.",
+    );
   }
 }
 
@@ -140,5 +154,30 @@ function decodeTarget(value: unknown): CodeExternalEditorTarget & {
     line: target.line,
     column: target.column,
     editor: { executable: record.executable, arguments: record.arguments as string[] },
+  };
+}
+
+function decodeDefaultApplicationTarget(value: unknown): CodeExternalEditorTarget {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new Error("invalid");
+  const target = value as Record<string, unknown>;
+  if (
+    Object.keys(target).sort().join("\0") !== ["file", "line", "column"].sort().join("\0") ||
+    typeof target.file !== "string" ||
+    !isAbsolute(target.file) ||
+    target.file.includes("\0") ||
+    typeof target.line !== "number" ||
+    !Number.isSafeInteger(target.line) ||
+    target.line < 1 ||
+    typeof target.column !== "number" ||
+    !Number.isSafeInteger(target.column) ||
+    target.column < 1
+  ) {
+    throw new Error("invalid");
+  }
+  return {
+    file: target.file,
+    line: target.line,
+    column: target.column,
   };
 }

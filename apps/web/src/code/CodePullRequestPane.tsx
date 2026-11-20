@@ -80,6 +80,7 @@ export interface CodePullRequestPaneProps {
   readonly review?: CodePullRequestReview;
   readonly onNavigateThread?: () => void;
   readonly onNavigateWorktree?: () => void;
+  readonly onOpenModeMenu?: () => void;
   readonly onRefresh?: () => void;
   /**
    * Where this thread's Browser proof can be read. Absent on a host that keeps
@@ -598,9 +599,14 @@ function CreatePullRequest(
         </div>
       ) : null}
       {props.executionPolicy === "plan" ? (
-        <p className="code-delivery-pane__notice">
-          Plan mode is read-only. Pull request creation is unavailable.
-        </p>
+        <div className="code-delivery-pane__notice code-delivery-pane__notice--row">
+          <p>Plan mode is read-only. Pull request creation is unavailable.</p>
+          {props.onOpenModeMenu === undefined ? null : (
+            <OctantButton onClick={props.onOpenModeMenu} size="sm" type="button" variant="outline">
+              Change mode
+            </OctantButton>
+          )}
+        </div>
       ) : (
         <div className="code-pr-pane__form">
           <label className="code-delivery-pane__field">

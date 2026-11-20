@@ -445,4 +445,28 @@ describe("CodeGitPane", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(/stage requested.*refresh/i);
     expect(screen.queryByText(/stage completed/i)).not.toBeInTheDocument();
   });
+
+  it("offers Change mode beside the Plan-mode notice and opens the mode menu without changing mode", () => {
+    const client = codeClient();
+    const onOpenModeMenu = vi.fn();
+    render(
+      <CodeGitPane
+        client={client}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="plan"
+        observation={gitObservation}
+        onOpenModeMenu={onOpenModeMenu}
+        scope={scope}
+      />,
+    );
+
+    expect(screen.getByText("Plan mode is read-only. Git mutation is unavailable.")).toBeVisible();
+    const changeMode = screen.getByRole("button", { name: "Change mode" });
+    expect(changeMode).toBeVisible();
+    fireEvent.click(changeMode);
+    expect(onOpenModeMenu).toHaveBeenCalledOnce();
+    expect(client.executeOperation).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /stage|commit|push/i })).not.toBeInTheDocument();
+  });
 });

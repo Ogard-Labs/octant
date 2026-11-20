@@ -37,6 +37,7 @@ export interface CodeGitPaneProps {
   readonly createOperationId: () => CodeOperationId;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly observation: GitObservation;
+  readonly onOpenModeMenu?: () => void;
   readonly onReviewPullRequest?: () => void;
   readonly requestApproval?: (
     command: Parameters<CodeClient["executeOperation"]>[0],
@@ -214,9 +215,14 @@ export function CodeGitPane(props: CodeGitPaneProps) {
         ))}
       </ul>
       {props.executionPolicy === "plan" ? (
-        <p className="code-delivery-pane__notice">
-          Plan mode is read-only. Git mutation is unavailable.
-        </p>
+        <div className="code-delivery-pane__notice code-delivery-pane__notice--row">
+          <p>Plan mode is read-only. Git mutation is unavailable.</p>
+          {props.onOpenModeMenu === undefined ? null : (
+            <OctantButton onClick={props.onOpenModeMenu} size="sm" type="button" variant="outline">
+              Change mode
+            </OctantButton>
+          )}
+        </div>
       ) : (
         <div className="code-git-pane__actions">
           <OctantButton

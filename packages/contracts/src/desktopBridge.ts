@@ -112,6 +112,8 @@ export interface CodeExternalEditorRequest {
   readonly fileId: string;
   readonly line: number;
   readonly column: number;
+  /** Opens the resolved file in the desktop's default application instead of a configured external editor. */
+  readonly defaultApplication?: boolean;
 }
 
 export interface OpenInApplicationDescriptor {

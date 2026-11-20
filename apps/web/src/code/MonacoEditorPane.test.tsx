@@ -559,8 +559,38 @@ describe("MonacoEditorPane", () => {
     );
     expect(screen.getByRole("heading", { name: "src/index.ts" })).toBeVisible();
     expect(screen.getByText(message)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Open in default app" })).not.toBeInTheDocument();
     expect(code.content).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["binary", "Binary files are read-only."],
+    ["oversized", "Files larger than 5 MiB are read-only."],
+  ] as const)(
+    "offers Open in default app for %s files on the desktop and invokes the open callback",
+    async (reason, message) => {
+      const code = client();
+      const onOpenInDefaultApp = vi.fn(async () => undefined);
+      render(
+        <MonacoEditorPane
+          client={code}
+          file={{
+            ...commonFile(),
+            state: "read-only",
+            reason,
+            metadata,
+          }}
+          onOpenInDefaultApp={onOpenInDefaultApp}
+        />,
+      );
+
+      expect(screen.getByText(message)).toBeVisible();
+      const openButton = screen.getByRole("button", { name: "Open in default app" });
+      expect(openButton).toBeVisible();
+      fireEvent.click(openButton);
+      await waitFor(() => expect(onOpenInDefaultApp).toHaveBeenCalledOnce());
+    },
+  );
 
   it("renders unavailable files without mounting Monaco", () => {
     const code = client();
