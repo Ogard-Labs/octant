@@ -972,6 +972,33 @@ design left a choice open.
   yet known asks the agent to try again. `starting`, `crashed`, `timed-out`, `too-large`,
   `unsaved-edits`, and each refusal come back as a tool error with one
   sentence saying what to do next. Slice 7 adds no journal events.
+- **Errors returned with Octant's own edits (maintainer decision, 2026-11-19).**
+  After Octant Harness's `write`, `edit`, or `editFiles` writes a file in a
+  Code thread (`apps/server/src/code/codeEditDiagnostics.ts`,
+  `packages/domain/src/editDiagnosticsPolicy.ts`), the host queries the
+  language server for the edited file through `CodeLanguageService.readForAgent`:
+  using a server already running for that language in that checkout, or
+  starting one when the thread's posture allows it (`static` servers at every
+  level, and `repo-tooling` servers without approval at Full access). Below
+  Full access, an unapproved or stopped `repo-tooling` server is never started
+  and never blocks for approval; the edit returns immediately with nothing
+  extra. The check waits at most 3.5 seconds (one shared 3.5-second budget
+  across every file in an `editFiles` call, supporting both pulled and pushed
+  diagnostics), reports errors only (excluding warnings, information, and
+  hints), lists the first 5 as `path:line:col message` with one-based
+  positions and each message truncated to 200 characters followed by `and N more`
+  when more than 5 errors exist, and returns `No errors in <file>` when a
+  server responds in time with zero errors. When no server is available or
+  eligible, the file has unsaved editor edits, or the 3.5-second deadline
+  expires, nothing extra is added and the edit succeeds cleanly. Diagnostics
+  from a `repo-tooling` server follow the same outside-content rule: journaled
+  under `octant_code`, passed through Octant Shield's Watcher, and withheld if
+  recording fails without turning the succeeded edit into an error.
+- **Limit for providers that edit with their own tools.** Claude Code and
+  Codex edit files with their own tools, so Octant cannot add diagnostics to
+  their edit results and adds no delay or wrapper to them. Those providers can
+  ask `octant_code` for a saved file's diagnostics directly (to be noted in
+  the shared tool guide once that guide exists across providers).
 
 ### Data lifecycle and privacy
 

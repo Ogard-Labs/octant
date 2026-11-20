@@ -199,6 +199,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "threadAwaitsHarnessQuestion"
     | "nativeHarnessApprovals"
     | "nativeHarnessSessions"
+    | "serverAttachmentCleanup"
     | "serverConnection"
     | "serverProjectStore"
   > &
@@ -339,6 +340,7 @@ export function wireWork(deps: WorkDependencies) {
     managedWorktreeReceipts,
     terminalSessionImports,
     nativeHarnessComposition,
+    serverAttachmentCleanup,
     serverConnection,
     serverProjectStore,
     shieldServerStore,
@@ -674,6 +676,7 @@ export function wireWork(deps: WorkDependencies) {
               connection: serverConnection,
               composition: nativeHarnessComposition,
               record: (record) => shieldServerStore.recordServerCommand(record),
+              guardTransfer: serverAttachmentCleanup.guardTransfer,
             },
             { thread },
           );
@@ -832,6 +835,13 @@ export function wireWork(deps: WorkDependencies) {
               profileDisplayName: "the bound profile",
               // Plan reads its siblings and sends them nothing.
               readPosture: () => runningLevel().posture,
+              strict: () => resolveThreadStrict(String(input.thread.id)),
+              readsPerTurn: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .siblingThreadReadsPerTurn,
+              waitsPerTurn: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .siblingThreadWaitsPerTurn,
             });
         const routineTools = !browserSupported ? undefined : routineToolsForWorkTurn(input);
         const agentsTools = !browserSupported
@@ -2030,17 +2040,21 @@ export function wireWork(deps: WorkDependencies) {
     const workSessionRoutes = createWorkSessionRouteHandler({
       windowAuthorityStore,
       canOpenThread: (windowId, threadId) => {
-        if (isPairedDeviceScope(windowId)) return false;
+        const device = isPairedDeviceScope(windowId);
+        if (device && isRestrictedDeviceScope(windowId)) return false;
         try {
           const thread = workThreadProjection.read(threadId);
-          return thread !== undefined && windowHoldsProject(windowId, thread.projectId, "work");
+          if (thread === undefined) return false;
+          return device
+            ? persistence.readProject(thread.projectId)?.type === "work"
+            : windowHoldsProject(windowId, thread.projectId, "work");
         } catch {
           return false;
         }
       },
       liveTasks: (threadId) => outlivingWorkSessions.liveTasks(workSessionKey(threadId)),
       stopLiveTasks: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
-      isPerson: (windowId) => !isRoutineHostScope(windowId),
+      isPerson: (windowId) => !isRoutineHostScope(windowId) && !isRestrictedDeviceScope(windowId),
       nativeSessions: (windowId, threadId) => workTurnService.nativeSessions(windowId, threadId),
       adoptNativeSession: (windowId, threadId, nativeSessionId) =>
         workTurnService.adoptNativeSession(windowId, threadId, nativeSessionId),

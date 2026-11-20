@@ -214,6 +214,7 @@ import {
   turnWorkedFor,
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
+import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { HarnessRetryStatus, type HarnessRetryStreamEvent } from "../transcript/HarnessRetryStatus";
 import {
   pendingThreadHandoffNotice,
@@ -391,6 +392,7 @@ function WorkTurnHeader(props: {
   readonly turn: WorkTurnState;
   /** What Strict kept for the turn before this one, so the notice shows once per change. */
   readonly previousStrictKept?: StrictKeptProtections | undefined;
+  readonly onStopTurn?: () => void;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   /** Puts the stopped turn's prompt back in the composer to send again. */
   readonly onRestorePrompt?: (prompt: string) => void;
@@ -450,6 +452,12 @@ function WorkTurnHeader(props: {
           )}
         </p>
       )}
+      <TurnLoopStallNotice
+        {...(props.turn.loopNotice === undefined ? {} : { loopNotice: props.turn.loopNotice })}
+        {...(props.turn.stallNotice === undefined ? {} : { stallNotice: props.turn.stallNotice })}
+        running={props.turn.status === "accepted" || props.turn.status === "running"}
+        {...(props.onStopTurn === undefined ? {} : { onStop: props.onStopTurn })}
+      />
       {usageLimit === undefined ? null : (
         <UsageLimitNotice
           limit={usageLimit}
@@ -754,6 +762,22 @@ function applyWorkTurnStreamFrame(
       ...(frame.toolStepsTruncated ? { toolStepsTruncated: true } : {}),
       ...(frame.reasoningMs === undefined ? {} : { reasoningMs: frame.reasoningMs }),
     };
+    return next;
+  }
+  if (frame.kind === "turn-loop-noticed" || frame.kind === "turn-loop-stopped") {
+    if (index === -1) return turns;
+    const current = turns[index];
+    if (current === undefined) return turns;
+    const next = turns.slice();
+    next[index] = { ...current, loopNotice: frame.notice };
+    return next;
+  }
+  if (frame.kind === "turn-stall-noticed") {
+    if (index === -1) return turns;
+    const current = turns[index];
+    if (current === undefined) return turns;
+    const next = turns.slice();
+    next[index] = { ...current, stallNotice: frame.notice };
     return next;
   }
   if (frame.kind === "provider-retry" || frame.kind === "provider-retry-cleared") return turns;
@@ -2771,6 +2795,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                               : {})}
                             turn={row.head}
                             previousStrictKept={previousStrictKeptOf(row.head)}
+                            {...(props.turnClient === undefined ||
+                            stoppableTurn === undefined ||
+                            String(stoppableTurn.requestId) !== String(row.head.requestId)
+                              ? {}
+                              : { onStopTurn: () => void onStop() })}
                             {...(thread?.usageResume === undefined ||
                             String(thread.usageResume.record.turnId) !== String(row.head.turnId)
                               ? {}
@@ -2820,6 +2849,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         : {})}
                       turn={row.turn}
                       previousStrictKept={previousStrictKeptOf(row.turn)}
+                      {...(props.turnClient === undefined ||
+                      stoppableTurn === undefined ||
+                      String(stoppableTurn.requestId) !== String(row.turn.requestId)
+                        ? {}
+                        : { onStopTurn: () => void onStop() })}
                       {...(thread?.usageResume === undefined ||
                       String(thread.usageResume.record.turnId) !== String(row.turn.turnId)
                         ? {}

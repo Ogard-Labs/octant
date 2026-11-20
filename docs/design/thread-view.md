@@ -35,6 +35,20 @@ rather than on every turn; a launch outside Strict shows nothing. It is the
 same meta-ink note as a provider handoff's (`role="note"`), not a page banner
 or a card. `strictKeptSentence` in `@octant/domain` is the one wording.
 
+## Loop and stall notices
+
+Outside Strict, neither a repeated-tool loop (6 identical consecutive calls)
+nor silence past the stalled-turn limit stops the turn. Instead, the host
+journals `turn-loop-noticed` (tool name and count) or `turn-stall-noticed`,
+and the turn shows one quiet meta-ink line (`role="note"`,
+`TurnLoopStallNotice` in `apps/web/src/transcript/`, styled like
+`OutputLimitNote` with no card or banner) with an inline **Stop** button while
+the turn runs. Once the turn settles, **Stop** disappears and the quiet line
+stays as the record. Under Strict, a 6-call loop stops the turn, journals
+`turn-loop-stopped`, shows one quiet line without **Stop**, and leaves the
+thread ready to accept the next message straight away. `turnLoopNoticeSentence`
+and `turnStallNoticeSentence` in `@octant/domain` are the shared wordings.
+
 ## Reply actions
 
 A finished reply (completed, failed, interrupted or cancelled) ends with one

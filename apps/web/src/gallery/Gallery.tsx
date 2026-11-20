@@ -38,7 +38,6 @@ import "../styles/artifacts.css";
 import "../styles/code-overview.css";
 import "../styles/chat-project-overview.css";
 import "../styles/project-memory.css";
-import "../styles/validation-evidence.css";
 import "../styles/work-overview.css";
 import "../styles/project-overview.css";
 import "../styles/board.css";

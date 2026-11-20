@@ -1186,6 +1186,8 @@ function ActiveSectionContent({
         <>
           <ComputerUseSettingsView
             settings={props.settings.computerUse}
+            rememberedApps={props.settings.rememberedComputerUseApps}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             onSettingsChange={props.onSettingsChange}
             {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
           />
@@ -1242,7 +1244,7 @@ function ActiveSectionContent({
             <SettingsSection title="Stalled turns">
               <div className="setgroup">
                 <SettingRow
-                  description="Ends a turn when its provider sends nothing for this long, from the next turn; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
+                  description="Notices a turn when its provider sends nothing for this long, from the next turn, and ends it under Strict; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
                   focused={focusedSetting === settingId("stalled-turn-limit")}
                   label="Stalled-turn limit"
                   scope="host"
@@ -2535,6 +2537,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
         <HostResourceSettings
           client={props.agentRunSettingsClient}
           focusedSetting={String(focusedSetting ?? "")}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         />
       )}
       <SettingsSection

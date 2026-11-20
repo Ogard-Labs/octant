@@ -1178,13 +1178,24 @@ export function setAddedAcpAgentTrust(
   provider: AddedAcpAgentProviderInstance,
   trusted: boolean,
   updatedAt: UtcTimestamp,
+  options?: { readonly installScriptsCompleted?: boolean },
 ): AddedAcpAgentProviderInstance {
   if (trusted && provider.configuration.install === undefined) {
     reject("invalid-configuration", "Install this agent before trusting it.");
   }
+  const install =
+    provider.configuration.install === undefined
+      ? undefined
+      : options?.installScriptsCompleted === true
+        ? { ...provider.configuration.install, installScriptsCompleted: true }
+        : provider.configuration.install;
   return {
     ...provider,
-    configuration: { ...provider.configuration, trusted },
+    configuration: {
+      ...provider.configuration,
+      ...(install === undefined ? {} : { install }),
+      trusted,
+    },
     version: nextVersion(provider.version),
     updatedAt,
   };

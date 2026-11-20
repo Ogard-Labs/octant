@@ -1654,6 +1654,49 @@ describe("a Linux Chat or Plan capsule that admits processes", () => {
     expect(existsSync(join(boundRoot, "new-file"))).toBe(false);
     expect(existsSync("/tmp/octant-plan-probe")).toBe(false);
   });
+
+  it("omits a redundant read-only bind over a symlink inside a read-only parent while keeping sibling symlink binds and canonical targets", () => {
+    const f = fixture();
+    const home = join(f.root, "home");
+    const awsDir = join(home, ".aws");
+    const dotfiles = join(f.root, "dotfiles");
+    const realNestedConfig = join(dotfiles, "nested-aws-config");
+    const realSiblingConfig = join(dotfiles, "sibling-aws-config");
+    const nestedLink = join(awsDir, "config");
+    const siblingLink = join(home, "custom-aws-config");
+    mkdirSync(awsDir, { recursive: true });
+    mkdirSync(dotfiles, { recursive: true });
+    writeFileSync(realNestedConfig, "[profile nested]\n");
+    writeFileSync(realSiblingConfig, "[profile sibling]\n");
+    symlinkSync(realNestedConfig, nestedLink);
+    symlinkSync(realSiblingConfig, siblingLink);
+
+    const launch = buildBubblewrapLaunch(
+      {
+        executable: "/bin/sh",
+        args: ["-c", "true"],
+        boundRoot: f.boundRoot,
+        temporaryDirectory: f.temporaryDirectory,
+        readRoots: [awsDir, nestedLink, realNestedConfig, siblingLink, realSiblingConfig],
+        privateHomeAllowPaths: [
+          awsDir,
+          nestedLink,
+          realNestedConfig,
+          siblingLink,
+          realSiblingConfig,
+        ],
+        protectedFiles: "provider-sign-ins",
+        networkEgress: "allow",
+      },
+      { bwrapPath: f.bwrapPath },
+    );
+
+    const roBinds = boundPairs(launch.args, "--ro-bind");
+    expect(roBinds).toContainEqual([awsDir, awsDir]);
+    expect(roBinds).toContainEqual([realNestedConfig, realNestedConfig]);
+    expect(roBinds).toContainEqual([realSiblingConfig, siblingLink]);
+    expect(roBinds.some(([, target]) => target === nestedLink)).toBe(false);
+  });
 });
 
 function hasFlagValue(args: ReadonlyArray<string>, flag: string, value: string): boolean {

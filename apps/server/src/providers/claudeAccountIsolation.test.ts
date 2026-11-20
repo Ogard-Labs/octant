@@ -1,10 +1,20 @@
-import { mkdtemp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { buildBubblewrapLaunch } from "../process/linuxConfinement";
 import {
   ISOLATED_CLAUDE_LAUNCH_GUARDS,
   OPEN_CLAUDE_LAUNCH_GUARDS,
@@ -14,6 +24,7 @@ import {
   ensureClaudeAccountConfigDirectory,
   isolatedClaudeAccountEnvironment,
 } from "./claudeAccountIsolation";
+import { awsProfileReadPaths } from "./providerHostEnvironment";
 
 const isolationSourcePath = fileURLToPath(new URL("./claudeAccountIsolation.ts", import.meta.url));
 const isolationDir = dirname(isolationSourcePath);
@@ -88,6 +99,132 @@ describe("isolatedClaudeAccountEnvironment", () => {
     expect(JSON.stringify(environment)).not.toMatch(
       /ambient-|other-account|other-secure|other-provider-key|octant-secret/,
     );
+  });
+
+  it("preserves the person's AWS Bedrock variables outside Strict without resolving or replacing them, and exposes existing AWS profile paths for open launches", async () => {
+    const fakeHome = await realpath(await mkdtemp(join(tmpdir(), "octant-claude-aws-")));
+    await mkdir(join(fakeHome, ".aws"), { recursive: true });
+    const customConfig = join(fakeHome, "custom-aws-config");
+    const customCredentials = join(fakeHome, "custom-aws-credentials");
+    const webToken = join(fakeHome, "web-identity-token");
+    const containerTokenFile = join(fakeHome, "container-auth-token");
+    await writeFile(customConfig, "[profile bedrock]\n");
+    await writeFile(customCredentials, "[bedrock]\n");
+    await writeFile(webToken, "jwt-token");
+    await writeFile(containerTokenFile, "ecs-token");
+
+    const bedrockVars = {
+      AWS_PROFILE: "bedrock-mfa",
+      AWS_REGION: "us-west-2",
+      AWS_DEFAULT_REGION: "us-east-1",
+      AWS_CONFIG_FILE: customConfig,
+      AWS_SHARED_CREDENTIALS_FILE: customCredentials,
+      AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/BedrockInvoke",
+      AWS_WEB_IDENTITY_TOKEN_FILE: webToken,
+      AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/task",
+      AWS_CONTAINER_CREDENTIALS_FULL_URI: "http://127.0.0.1:18080/creds",
+      AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE: containerTokenFile,
+      CLAUDE_CODE_USE_BEDROCK: "1",
+    };
+    const openEnv = isolatedClaudeAccountEnvironment({
+      hostEnvironment: {
+        ...hostileHostEnvironment,
+        HOME: fakeHome,
+        ...bedrockVars,
+      },
+      configDirectory: join(fakeHome, ".claude-accounts", "bedrock"),
+      authentication: "subscription",
+      strict: false,
+    });
+    expect(openEnv).toMatchObject(bedrockVars);
+    expect(awsProfileReadPaths(openEnv)).toEqual([
+      join(fakeHome, ".aws"),
+      customConfig,
+      customCredentials,
+      webToken,
+      containerTokenFile,
+    ]);
+
+    const strictEnv = isolatedClaudeAccountEnvironment({
+      hostEnvironment: {
+        ...hostileHostEnvironment,
+        HOME: fakeHome,
+        ...bedrockVars,
+      },
+      configDirectory: join(fakeHome, ".claude-accounts", "bedrock"),
+      authentication: "subscription",
+      strict: true,
+    });
+    for (const key of Object.keys(bedrockVars)) {
+      expect(strictEnv).not.toHaveProperty(key);
+    }
+  });
+
+  it("preserves literal symlinked ~/.aws and sibling AWS files while omitting redundant binds for symlinks inside ~/.aws", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-aws-symlink-")));
+    const fakeHome = join(root, "home");
+    const dotfiles = join(root, "dotfiles");
+    const realAwsDir = join(dotfiles, "aws");
+    const realSiblingConfig = join(dotfiles, "shared-aws-config");
+    const realNestedCreds = join(dotfiles, "nested-aws-creds");
+    const symlinkAwsDir = join(fakeHome, ".aws");
+    const symlinkSiblingConfig = join(fakeHome, "aws-config");
+    const symlinkNestedCreds = join(symlinkAwsDir, "credentials");
+    const projectRoot = join(root, "project");
+    const tempDir = join(root, "tmp");
+    const bwrapPath = join(root, "bwrap");
+    await mkdir(fakeHome, { recursive: true });
+    await mkdir(realAwsDir, { recursive: true });
+    await mkdir(projectRoot, { recursive: true });
+    await mkdir(tempDir, { recursive: true });
+    await writeFile(join(realAwsDir, "config"), "[profile work]\n");
+    await writeFile(realSiblingConfig, "[profile custom]\n");
+    await writeFile(realNestedCreds, "[work]\n");
+    await symlink(realAwsDir, symlinkAwsDir);
+    await symlink(realSiblingConfig, symlinkSiblingConfig);
+    await symlink(realNestedCreds, join(realAwsDir, "credentials"));
+    await writeFile(bwrapPath, '#!/bin/sh\nexec "$@"\n');
+    await chmod(bwrapPath, 0o700);
+
+    const readPaths = awsProfileReadPaths({
+      HOME: fakeHome,
+      AWS_CONFIG_FILE: symlinkSiblingConfig,
+      AWS_SHARED_CREDENTIALS_FILE: symlinkNestedCreds,
+    });
+    expect(readPaths).toEqual([
+      symlinkAwsDir,
+      realAwsDir,
+      symlinkSiblingConfig,
+      realSiblingConfig,
+      realNestedCreds,
+    ]);
+    expect(readPaths).not.toContain(symlinkNestedCreds);
+
+    const launch = buildBubblewrapLaunch(
+      {
+        executable: "/bin/sh",
+        args: ["-c", "true"],
+        boundRoot: projectRoot,
+        temporaryDirectory: tempDir,
+        readRoots: readPaths,
+        privateHomeAllowPaths: readPaths,
+        protectedFiles: "provider-sign-ins",
+        networkEgress: "allow",
+      },
+      { bwrapPath },
+    );
+
+    const roBinds: Array<readonly [string, string]> = [];
+    for (let i = 0; i < launch.args.length; i += 1) {
+      if (launch.args[i] === "--ro-bind") {
+        roBinds.push([launch.args[i + 1] ?? "", launch.args[i + 2] ?? ""]);
+      }
+    }
+    expect(roBinds).toContainEqual([realAwsDir, symlinkAwsDir]);
+    expect(roBinds).toContainEqual([realSiblingConfig, symlinkSiblingConfig]);
+    expect(roBinds).toContainEqual([realNestedCreds, realNestedCreds]);
+    // Bubblewrap must never try to bind over a symlink already exposed inside read-only ~/.aws.
+    expect(roBinds.some(([, target]) => target === symlinkNestedCreds)).toBe(false);
   });
 
   it("under Strict keeps the fixed list and every channel off", () => {

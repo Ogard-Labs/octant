@@ -4,6 +4,7 @@ import {
   decodeCodeRelativePath,
   decodeAgentProfile,
   decodeProviderObservedState,
+  decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
   decodeCodeCommandResult,
   decodeBindingRevisionId,
@@ -38,10 +39,28 @@ import { DeviceId, StableHostId, RemoteSessionId } from "@octant/contracts/remot
 import { CodeProjectAccess } from "../codeProjectAccess";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { lstat } from "node:fs/promises";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import {
+  createCodeExternalEditorRouteHandler,
+  resolveConfinedDesktopFilePath,
+} from "../codeExternalEditorRoutes";
+import { withCodeBoard, withCodeOperationRuntime } from "../wiring/codeRuntime";
+import { pathIsProjectConfined } from "../wiring/providers";
+import { CodeFileListingService } from "./codeFileListingService";
+import { withProjectExtraFolders } from "./codeProjectFolderRoot";
+import { deriveCodeFileId } from "./codeFileIdentity";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { CodeContentStore, type CodeContentStoreOptions } from "./codeContentStore";
@@ -5350,6 +5369,278 @@ describe("CodeService.readFile", () => {
     } finally {
       rmSync(parent, { recursive: true, force: true });
     }
+  });
+});
+
+describe("desktop default-app target resolution for browsed Code files", () => {
+  const secret = "desktop-bridge-secret";
+  const metadata = {
+    identity: { device: "7", inode: "8" },
+    byteLength: 8,
+    modifiedNanoseconds: "0",
+    digest: "c".repeat(64),
+  };
+
+  function defaultAppRequest(body: {
+    readonly windowId: string;
+    readonly threadId: string;
+    readonly checkoutId: string;
+    readonly fileId: string;
+  }): Request {
+    return new Request("http://127.0.0.1:13773/api/desktop/code-external-editor-target", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-desktop-secret": secret,
+      },
+      body: JSON.stringify({ ...body, line: 1, column: 1, defaultApplication: true }),
+    });
+  }
+
+  it("lists and opens an untouched binary file and resolves its default-app target across checkout and extra folders while failing closed on escapes", async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), "octant-code-default-app-")));
+    try {
+      const checkoutRoot = join(parent, "repo");
+      const extraFolder = join(parent, "extra-assets");
+      const outsideDir = join(parent, "outside");
+      mkdirSync(join(checkoutRoot, "assets"), { recursive: true });
+      mkdirSync(extraFolder, { recursive: true });
+      mkdirSync(outsideDir, { recursive: true });
+      const binaryBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x00, 0x00, 0x0d]);
+      const checkoutBinary = join(checkoutRoot, "assets", "logo.png");
+      const extraBinary = join(extraFolder, "diagram.png");
+      const outsideBinary = join(outsideDir, "secret.png");
+      writeFileSync(checkoutBinary, binaryBytes);
+      writeFileSync(extraBinary, binaryBytes);
+      writeFileSync(outsideBinary, binaryBytes);
+
+      let approvedExtraFolders: ReadonlyArray<string> = [extraFolder];
+      let windowAuthorized = true;
+      const listingService = new CodeFileListingService();
+      const fixture = serviceFixture();
+      fixture.access.canAccessProject.mockImplementation(() => windowAuthorized);
+      Object.assign(fixture.files, {
+        list: (request: Parameters<CodeFileListingService["list"]>[0]) =>
+          listingService.list(request),
+      });
+      fixture.files.open.mockResolvedValue({
+        status: "read-only",
+        reason: "binary",
+        metadata,
+      });
+      const resolveWithExtraFolders = withProjectExtraFolders({
+        resolve: async (_scopeId, thread, activeCheckout, relativePath) => ({
+          rootPath: checkoutRoot,
+          rootIdentity: { device: "7", inode: "8" },
+          fileId: deriveCodeFileId(String(thread.id), String(activeCheckout.id), relativePath),
+        }),
+        extraFolders: () => approvedExtraFolders,
+        probePath: decodeCodeRelativePath(".octant-probe"),
+        fileId: (threadId, checkoutId, path) => deriveCodeFileId(threadId, checkoutId, path),
+        statIdentity: async (path) => {
+          const stat = await lstat(path, { bigint: true });
+          if (stat.isSymbolicLink() || !stat.isDirectory()) {
+            throw new Error("Project folder is unavailable.");
+          }
+          return { device: stat.dev.toString(10), inode: stat.ino.toString(10) };
+        },
+      });
+      fixture.roots.resolve = vi.fn(
+        (
+          scopeId: Parameters<typeof resolveWithExtraFolders>[0],
+          activeThread: Parameters<typeof resolveWithExtraFolders>[1],
+          activeCheckout: Parameters<typeof resolveWithExtraFolders>[2],
+          relativePath: Parameters<typeof resolveWithExtraFolders>[3],
+        ) => resolveWithExtraFolders(scopeId, activeThread, activeCheckout, relativePath),
+      ) as unknown as typeof fixture.roots.resolve;
+
+      const decoratedService = withCodeBoard(
+        withCodeOperationRuntime(fixture.service, {} as never),
+        vi.fn() as never,
+      );
+      const handleDesktopTarget = createCodeExternalEditorRouteHandler({
+        desktopBridgeSecret: secret,
+        resolve: async (input) => {
+          const target = await decoratedService.resolveDesktopFileTarget?.(
+            decodeWindowId(input.windowId),
+            {
+              threadId: decodeCodeThreadId(input.threadId),
+              checkoutId: decodeCodeCheckoutId(input.checkoutId),
+              fileId: decodeCodeFileId(input.fileId),
+            },
+          );
+          if (target === undefined) return undefined;
+          const file = await resolveConfinedDesktopFilePath({
+            rootPath: target.rootPath,
+            relativePath: target.relativePath,
+            isConfined: pathIsProjectConfined,
+          });
+          return file === undefined ? undefined : { file };
+        },
+      });
+
+      // 1. List and open an untouched binary file in the checkout (no journaled reference exists),
+      // exercising the production decorator chain (withCodeOperationRuntime + withCodeBoard).
+      expect(decoratedService.listFiles).toBeDefined();
+      if (decoratedService.listFiles === undefined) throw new Error("expected listFiles");
+      const listed = await decoratedService.listFiles(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+      });
+      expect(listed.status).toBe("listed");
+      if (listed.status !== "listed") throw new Error("expected listing");
+      const binaryEntry = listed.listing.entries.find(
+        (entry) => entry.kind === "file" && entry.path === "assets/logo.png",
+      );
+      expect(binaryEntry).toBeDefined();
+      if (binaryEntry?.kind !== "file") throw new Error("expected binary file entry");
+      expect(binaryEntry.availability).toMatchObject({ status: "available" });
+
+      const opened = await decoratedService.openFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: binaryEntry.path,
+      });
+      expect(opened.result).toMatchObject({
+        status: "read-only",
+        reason: "binary",
+        fileId: binaryEntry.fileId,
+      });
+      expect(fixture.persistence.readCodeFileReference()).toBeUndefined();
+
+      const checkoutResponse = await handleDesktopTarget(
+        defaultAppRequest({
+          windowId: String(ids.window),
+          threadId: String(ids.thread),
+          checkoutId: String(checkout.id),
+          fileId: String(opened.result.fileId),
+        }),
+      );
+      expect(checkoutResponse?.status).toBe(200);
+      expect(await checkoutResponse?.json()).toEqual({
+        file: realpathSync(checkoutBinary),
+        line: 1,
+        column: 1,
+      });
+
+      // 2. Unauthorized window is refused even for an already-opened file id.
+      windowAuthorized = false;
+      const unauthorizedResponse = await handleDesktopTarget(
+        defaultAppRequest({
+          windowId: String(ids.window),
+          threadId: String(ids.thread),
+          checkoutId: String(checkout.id),
+          fileId: String(opened.result.fileId),
+        }),
+      );
+      expect(unauthorizedResponse?.status).toBe(404);
+      windowAuthorized = true;
+
+      // 3. Approved extra-folder binary file resolves while approved and fails closed once removed.
+      const extraOpened = await fixture.service.openFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: extraBinary as never,
+      });
+      expect(extraOpened.result).toMatchObject({ status: "read-only", reason: "binary" });
+      const extraResponse = await handleDesktopTarget(
+        defaultAppRequest({
+          windowId: String(ids.window),
+          threadId: String(ids.thread),
+          checkoutId: String(checkout.id),
+          fileId: String(extraOpened.result.fileId),
+        }),
+      );
+      expect(extraResponse?.status).toBe(200);
+      expect(await extraResponse?.json()).toEqual({
+        file: realpathSync(extraBinary),
+        line: 1,
+        column: 1,
+      });
+
+      approvedExtraFolders = [];
+      const revokedExtraResponse = await handleDesktopTarget(
+        defaultAppRequest({
+          windowId: String(ids.window),
+          threadId: String(ids.thread),
+          checkoutId: String(checkout.id),
+          fileId: String(extraOpened.result.fileId),
+        }),
+      );
+      expect(revokedExtraResponse?.status).toBe(404);
+
+      // 4. Out-of-root symlink substitution after open is refused by canonical confinement.
+      unlinkSync(checkoutBinary);
+      symlinkSync(outsideBinary, checkoutBinary);
+      const escapedResponse = await handleDesktopTarget(
+        defaultAppRequest({
+          windowId: String(ids.window),
+          threadId: String(ids.thread),
+          checkoutId: String(checkout.id),
+          fileId: String(opened.result.fileId),
+        }),
+      );
+      expect(escapedResponse?.status).toBe(404);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses default-app resolution for a remote-root checkout", async () => {
+    const serverCheckout = decodeCodeCheckoutIdentity({
+      id: ids.checkout,
+      repositoryId,
+      kind: "remote-root",
+      availability: "available",
+      head: { kind: "none" },
+      observedAt: now,
+    });
+    const server = {
+      list: vi.fn(),
+      open: vi.fn(async () => ({
+        status: "read-only" as const,
+        reason: "binary" as const,
+        metadata,
+      })),
+      read: vi.fn(),
+      save: vi.fn(),
+      discoverTests: vi.fn(),
+    };
+    const fixture = serviceFixture({
+      checkout: serverCheckout,
+      serverCheckout: () => server as never,
+    });
+    const opened = await fixture.service.openFile(ids.window, {
+      threadId: ids.thread,
+      checkoutId: serverCheckout.id,
+      relativePath: decodeCodeRelativePath("assets/logo.png"),
+    });
+    expect(opened.result).toMatchObject({ status: "read-only", reason: "binary" });
+    expect(
+      await fixture.service.resolveDesktopFileTarget(ids.window, {
+        threadId: ids.thread,
+        checkoutId: serverCheckout.id,
+        fileId: opened.result.fileId,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("preserves optional resolveDesktopFileTarget omission through production decorators", () => {
+    const minimalService = {
+      bootstrap: vi.fn(),
+      navigation: vi.fn(),
+      read: vi.fn(),
+      execute: vi.fn(),
+      subscribe: vi.fn(),
+      readContent: vi.fn(),
+      saveFile: vi.fn(),
+      openFile: vi.fn(),
+    } as never;
+    const decorated = withCodeBoard(
+      withCodeOperationRuntime(minimalService, {} as never),
+      vi.fn() as never,
+    );
+    expect(decorated.resolveDesktopFileTarget).toBeUndefined();
   });
 });
 

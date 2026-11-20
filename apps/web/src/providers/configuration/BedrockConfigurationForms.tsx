@@ -345,9 +345,15 @@ function connectRefusal(reason: string | undefined): string {
     case "aws-process-failed":
       return "The profile's credential_process did not print credentials.";
     case "aws-unsupported":
-      return "That profile names a source Octant does not read, such as instance or container metadata, or its role settings are incomplete or chain into a loop. Use a profile with keys, single sign-on, credential_process or a role from one of those.";
+      return "That profile names a source Octant does not read, or its role settings are incomplete or chain into a loop. Use a profile with keys, single sign-on, credential_process, or a role from one of those.";
     case "aws-mfa-required":
-      return "That profile's role asks for an MFA code, which Octant has no place to enter. Use a profile whose role needs no MFA code, or one with single sign-on.";
+      return "This profile's role requires an MFA code. Enter the 6-digit code from your authenticator device.";
+    case "aws-mfa-invalid":
+      return "Enter the 6-digit MFA code from your authenticator device.";
+    case "aws-mfa-refused":
+      return "AWS rejected the MFA code or refused to assume the role. Check your 6-digit code and try again.";
+    case "aws-metadata-unreachable":
+      return "This profile reads credentials from EC2/ECS metadata, which this computer can't reach.";
     case "aws-role-refused":
       return "AWS refused to let that profile's source credentials assume its role. Check the role's trust policy, external_id and duration_seconds.";
     case "aws-not-authorized":
@@ -372,14 +378,22 @@ function PersonAwsCredentials(props: {
   readonly onConnected: () => void;
 }) {
   const [profile, setProfile] = useState("");
+  const [mfaRequiredForProfile, setMfaRequiredForProfile] = useState<string | undefined>();
+  const [mfaCode, setMfaCode] = useState("");
   const [keyId, setKeyId] = useState("");
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
   const { descriptorId } = AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN;
+  const trimmedProfile = profile.trim();
+  const needsMfa = mfaRequiredForProfile !== undefined && mfaRequiredForProfile === trimmedProfile;
   const connect = async (
     command:
-      | { readonly kind: "connect-aws-profile"; readonly awsProfile: string }
+      | {
+          readonly kind: "connect-aws-profile";
+          readonly awsProfile: string;
+          readonly mfaCode?: string;
+        }
       | {
           readonly kind: "connect-access-keys";
           readonly accessKeys: { readonly accessKeyId: string; readonly secretAccessKey: string };
@@ -393,8 +407,19 @@ function PersonAwsCredentials(props: {
     setBusy(false);
     if (result?.kind === "signed-in") {
       setSecret("");
+      setMfaCode("");
+      setMfaRequiredForProfile(undefined);
       props.onConnected();
       return;
+    }
+    if (
+      command.kind === "connect-aws-profile" &&
+      (result?.reason === "aws-mfa-required" ||
+        result?.reason === "aws-mfa-invalid" ||
+        result?.reason === "aws-mfa-refused")
+    ) {
+      setMfaRequiredForProfile(command.awsProfile);
+      if (result.reason === "aws-mfa-refused") setMfaCode("");
     }
     setMessage(
       result?.kind === "signed-out" && result.termsRequired === true
@@ -412,13 +437,48 @@ function PersonAwsCredentials(props: {
         className="input"
         disabled={disabled}
         id={`${props.instanceId}-aws-profile`}
-        onChange={(event) => setProfile(event.target.value)}
+        onChange={(event) => {
+          const next = event.target.value;
+          setProfile(next);
+          if (mfaRequiredForProfile !== undefined && next.trim() !== mfaRequiredForProfile) {
+            setMfaRequiredForProfile(undefined);
+            setMfaCode("");
+          }
+        }}
         placeholder="default"
         value={profile}
       />
+      {needsMfa ? (
+        <>
+          <label htmlFor={`${props.instanceId}-aws-mfa-code`}>MFA code</label>
+          <OctantInput
+            autoComplete="one-time-code"
+            className="input"
+            disabled={disabled}
+            id={`${props.instanceId}-aws-mfa-code`}
+            inputMode="numeric"
+            maxLength={6}
+            onChange={(event) => setMfaCode(event.target.value)}
+            placeholder="123456"
+            value={mfaCode}
+          />
+          <p className="provider-settings__field-guidance">
+            Temporary MFA session credentials stay in memory only until the role session expires and
+            are never saved to the Keychain or journal.
+          </p>
+        </>
+      ) : null}
       <OctantButton
-        disabled={disabled || profile.trim().length === 0}
-        onClick={() => void connect({ kind: "connect-aws-profile", awsProfile: profile.trim() })}
+        disabled={
+          disabled || trimmedProfile.length === 0 || (needsMfa && mfaCode.trim().length === 0)
+        }
+        onClick={() =>
+          void connect({
+            kind: "connect-aws-profile",
+            awsProfile: trimmedProfile,
+            ...(needsMfa ? { mfaCode: mfaCode.trim() } : {}),
+          })
+        }
         size="sm"
         type="button"
         variant="secondary"

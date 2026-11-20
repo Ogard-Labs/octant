@@ -17,7 +17,13 @@ import { bindGeneratedMcpSignInPolicy } from "../extensions/generatedMcpSignInPo
 import { lstatSync, realpathSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { acpRegistryAgent } from "@octant/plugin-host/acp-agents";
-import { installAcpAgent, makeAcpAgentInstallPorts } from "../providers/acpAgentInstall";
+import {
+  hasPendingAcpAgentInstallScripts,
+  installAcpAgent,
+  makeAcpAgentInstallPorts,
+  runAcpAgentInstallScripts,
+} from "../providers/acpAgentInstall";
+import { makeProcessConfinementLive } from "../process/seatbeltProfile";
 import { homedir, tmpdir } from "node:os";
 import {
   makeAccountSessionCarrier,
@@ -274,6 +280,9 @@ export interface ConfiguredProviderDriverOptions {
   readonly codexProcess: CodexProcessPort;
   readonly acpProcess?: AcpProcessPort;
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
+  readonly hasPendingAcpInstallScripts?: (
+    instance: Extract<ProviderInstance, { readonly driverKind: "acp-agent" }>,
+  ) => Promise<boolean>;
   readonly piProcess?: PiProcessPort;
   readonly piHome?: (instanceId: ProviderInstance["id"]) => string;
   readonly ohMyPiProcess?: OhMyPiProcessPort;
@@ -296,6 +305,8 @@ export interface ConfiguredProviderDriverOptions {
   readonly planMcpServers?: (provider: McpPlanServerProvider) => ReadonlyArray<string>;
   /** The tools the person blocked for a provider in Settings, read at each launch. */
   readonly blockedTools?: (provider: BlockableToolProvider) => ReadonlyArray<string>;
+  /** Whether the host enforces Strict; read on Claude probes so Bedrock/custom routing works outside Strict. */
+  readonly hostStrict?: () => boolean;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
@@ -461,6 +472,9 @@ export function makeConfiguredProviderDriver(
       permissionPersistence: options.permissionPersistence,
       ...(options.acpProcess === undefined ? {} : { acpProcess: options.acpProcess }),
       ...(options.acpHome === undefined ? {} : { acpHome: options.acpHome }),
+      ...(options.hasPendingAcpInstallScripts === undefined
+        ? {}
+        : { hasPendingAcpInstallScripts: options.hasPendingAcpInstallScripts }),
       ...(options.piProcess === undefined ? {} : { piProcess: options.piProcess }),
       ...(options.piHome === undefined ? {} : { piHome: options.piHome }),
       ...(options.ohMyPiProcess === undefined ? {} : { ohMyPiProcess: options.ohMyPiProcess }),
@@ -487,6 +501,7 @@ export function makeConfiguredProviderDriver(
         : { isProjectConfinedPath: options.isProjectConfinedPath }),
       ...(options.protectedPaths === undefined ? {} : { protectedPaths: options.protectedPaths }),
       ...(options.planMcpServers === undefined ? {} : { planMcpServers: options.planMcpServers }),
+      ...(options.hostStrict === undefined ? {} : { hostStrict: options.hostStrict }),
       ...(options.claudeInstances === undefined
         ? {}
         : { claudeInstances: options.claudeInstances }),
@@ -1944,8 +1959,19 @@ export function wireProviders(deps: ProvidersDependencies) {
       }
       await credentialResolver.delete(instanceId);
     };
+    const acpAgentRoot = (instanceId: ProviderInstanceId): string =>
+      join(providerDataDirectory, "acp-agent-installs", instanceId);
+    const hasPendingAcpInstallScripts = (
+      instance: Extract<ProviderInstance, { readonly driverKind: "acp-agent" }>,
+    ): Promise<boolean> =>
+      hasPendingAcpAgentInstallScripts({
+        configuration: instance.configuration,
+        root: acpAgentRoot(instance.id),
+      });
     const acpAgentInstallPorts = makeAcpAgentInstallPorts({
       fetchesAllowed: isMarketplaceFetchAllowed,
+      confinement: makeProcessConfinementLive(),
+      clock: () => new Date().toISOString(),
     });
     const providerService = new ProviderService({
       latestNpmVersion: createProviderLatestVersionCheck({ isAllowed: isMarketplaceFetchAllowed }),
@@ -1958,12 +1984,22 @@ export function wireProviders(deps: ProvidersDependencies) {
                 instance.configuration.source.kind === "registry"
                   ? acpRegistryAgent(instance.configuration.source.registryId)
                   : undefined,
-              root: join(providerDataDirectory, "acp-agent-installs", instance.id),
+              root: acpAgentRoot(instance.id),
             },
             acpAgentInstallPorts,
           ),
+        runInstallScripts: (instance) =>
+          runAcpAgentInstallScripts(
+            {
+              configuration: instance.configuration,
+              root: acpAgentRoot(instance.id),
+              strict: deps.resolveHostStrict(),
+            },
+            acpAgentInstallPorts,
+          ),
+        hasPendingInstallScripts: hasPendingAcpInstallScripts,
         remove: (instanceId) =>
-          rm(join(providerDataDirectory, "acp-agent-installs", instanceId), {
+          rm(acpAgentRoot(instanceId), {
             recursive: true,
             force: true,
           }),
@@ -1995,10 +2031,12 @@ export function wireProviders(deps: ProvidersDependencies) {
       driver: (instance) =>
         attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, {
+            hostStrict: () => deps.resolveHostStrict(),
             openCodeProcess,
             codexProcess,
             acpProcess,
             acpHome,
+            hasPendingAcpInstallScripts,
             piProcess,
             piHome,
             ohMyPiProcess,
@@ -2266,6 +2304,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       codexProcess,
       acpProcess,
       acpHome,
+      hasPendingAcpInstallScripts,
       piProcess,
       piHome,
       ohMyPiProcess,

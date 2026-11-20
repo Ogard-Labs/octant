@@ -7,12 +7,16 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   applyPullRequestLinkEvent,
+  areSamePullRequestRepositoryInProject,
   buildDuplicatePullRequestSwitchNotices,
+  canonicalPullRequestRepositoryInProject,
   emptyPullRequestLinkRegistryState,
+  listPullRequestDisplayAliases,
   missingPullRequestForgeIds,
   pullRequestDisplayFieldsChanged,
   reconcileMergedPullRequestSwitches,
   resolveCanonicalPullRequestLink,
+  resolvePullRequestLink,
   selectSurvivingPullRequestLink,
 } from "./pullRequestIdentityPolicy";
 
@@ -223,5 +227,475 @@ describe("pull request identity policy", () => {
           "Merge when ready was turned off on pull request #19 because two duplicate links for the same pull request were merged and it was only on in one of them. You can turn it back on.",
       },
     ]);
+  });
+
+  it("resolves renamed and merged historical display coordinates to the canonical link and refuses conflicting forge node IDs", () => {
+    let state = emptyPullRequestLinkRegistryState();
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkEarly,
+          projectId,
+          threadIds: [threadA],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "old-repo",
+          number: 42,
+          pullRequestNodeId: "PR_kwDO42",
+          baseRepositoryNodeId: "R_kgDO1",
+          linkedAt: "2026-11-01T10:00:00.000Z",
+        }),
+      },
+      1,
+    );
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "display-updated",
+        payload: {
+          linkId: linkEarly,
+          repositoryOwner: "new-org",
+          repositoryName: "new-repo",
+          number: 42,
+          url: "https://github.com/new-org/new-repo/pull/42",
+        },
+      },
+      2,
+    );
+
+    expect(
+      resolvePullRequestLink(state, {
+        projectId,
+        repositoryOwner: "acme",
+        repositoryName: "old-repo",
+        number: 42,
+      })?.linkId,
+    ).toBe(linkEarly);
+    expect(
+      resolvePullRequestLink(state, {
+        projectId,
+        repositoryOwner: "acme",
+        repositoryName: "old-repo",
+        number: 42,
+        pullRequestNodeId: "PR_kwDOother99",
+      }),
+    ).toBeUndefined();
+    expect(
+      resolvePullRequestLink(state, {
+        projectId,
+        repositoryOwner: "acme",
+        repositoryName: "old-repo",
+        number: 42,
+        baseRepositoryNodeId: "R_kgDOdifferent99",
+      }),
+    ).toBeUndefined();
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "old-repo" },
+        { owner: "new-org", name: "new-repo" },
+      ),
+    ).toBe(true);
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "old-repo" },
+        { owner: "other", name: "unrelated" },
+      ),
+    ).toBe(false);
+    expect(
+      canonicalPullRequestRepositoryInProject(state, projectId, {
+        owner: "acme",
+        name: "old-repo",
+      }),
+    ).toEqual({
+      owner: "new-org",
+      name: "new-repo",
+      baseRepositoryNodeId: "R_kgDO1",
+    });
+    expect(listPullRequestDisplayAliases(state, linkEarly)).toHaveLength(2);
+  });
+
+  it("never bridges two distinct base repository node IDs through a reused repository name", () => {
+    let state = emptyPullRequestLinkRegistryState();
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkEarly,
+          projectId,
+          threadIds: [threadA],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "reused",
+          number: 42,
+          pullRequestNodeId: "PR_kwDOold42",
+          baseRepositoryNodeId: "R_kgDOoldrepo1",
+          linkedAt: "2026-11-01T10:00:00.000Z",
+        }),
+      },
+      1,
+    );
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "display-updated",
+        payload: {
+          linkId: linkEarly,
+          repositoryOwner: "acme",
+          repositoryName: "original-renamed",
+          number: 42,
+          url: "https://github.com/acme/original-renamed/pull/42",
+        },
+      },
+      2,
+    );
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkLate,
+          projectId,
+          threadIds: [threadB],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "reused",
+          number: 42,
+          pullRequestNodeId: "PR_kwDOnew42",
+          baseRepositoryNodeId: "R_kgDOnewrepo2",
+          linkedAt: "2026-11-02T10:00:00.000Z",
+        }),
+      },
+      3,
+    );
+
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "reused" },
+        { owner: "acme", name: "original-renamed" },
+      ),
+    ).toBe(false);
+    expect(
+      canonicalPullRequestRepositoryInProject(state, projectId, {
+        owner: "acme",
+        name: "reused",
+      }),
+    ).toEqual({
+      owner: "acme",
+      name: "reused",
+      baseRepositoryNodeId: "R_kgDOnewrepo2",
+    });
+    expect(
+      canonicalPullRequestRepositoryInProject(state, projectId, {
+        owner: "acme",
+        name: "original-renamed",
+      }),
+    ).toEqual({
+      owner: "acme",
+      name: "original-renamed",
+      baseRepositoryNodeId: "R_kgDOoldrepo1",
+    });
+
+    // If the newer repository also renames away, the reused historical name is
+    // ambiguous between two distinct repository node IDs and must fail closed.
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "display-updated",
+        payload: {
+          linkId: linkLate,
+          repositoryOwner: "acme",
+          repositoryName: "new-renamed",
+          number: 42,
+          url: "https://github.com/acme/new-renamed/pull/42",
+        },
+      },
+      4,
+    );
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "reused" },
+        { owner: "acme", name: "original-renamed" },
+      ),
+    ).toBe(false);
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "reused" },
+        { owner: "acme", name: "new-renamed" },
+      ),
+    ).toBe(false);
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "original-renamed" },
+        { owner: "acme", name: "new-renamed" },
+      ),
+    ).toBe(false);
+    expect(
+      canonicalPullRequestRepositoryInProject(state, projectId, {
+        owner: "acme",
+        name: "reused",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("keeps rename equivalence for a partially backfilled link without a repository node ID alongside a fully backfilled link at the new name, while still refusing distinct known repository node IDs", () => {
+    const linkThird = decodePullRequestLinkId("50000000-0000-4000-8000-000000000003");
+    let state = emptyPullRequestLinkRegistryState();
+    // PR #41: has PR node ID and recorded rename acme/old -> acme/new, but
+    // baseRepositoryNodeId was unavailable (partial backfill).
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkEarly,
+          projectId,
+          threadIds: [threadA],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "old",
+          number: 41,
+          pullRequestNodeId: "PR_kwDO41",
+          linkedAt: "2026-11-01T10:00:00.000Z",
+        }),
+      },
+      1,
+    );
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "display-updated",
+        payload: {
+          linkId: linkEarly,
+          repositoryOwner: "acme",
+          repositoryName: "new",
+          number: 41,
+          url: "https://github.com/acme/new/pull/41",
+        },
+      },
+      2,
+    );
+    // PR #42: later created at acme/new with full forge IDs including R_kgDO123.
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkLate,
+          projectId,
+          threadIds: [threadB],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "new",
+          number: 42,
+          pullRequestNodeId: "PR_kwDO42",
+          baseRepositoryNodeId: "R_kgDO123",
+          linkedAt: "2026-11-02T10:00:00.000Z",
+        }),
+      },
+      3,
+    );
+
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "old" },
+        { owner: "acme", name: "new" },
+      ),
+    ).toBe(true);
+    expect(
+      canonicalPullRequestRepositoryInProject(state, projectId, {
+        owner: "acme",
+        name: "old",
+      }),
+    ).toEqual({
+      owner: "acme",
+      name: "new",
+    });
+    expect(
+      canonicalPullRequestRepositoryInProject(state, projectId, {
+        owner: "acme",
+        name: "new",
+      }),
+    ).toEqual({
+      owner: "acme",
+      name: "new",
+      baseRepositoryNodeId: "R_kgDO123",
+    });
+
+    // Once a third link proves acme/old is now owned by a distinct known
+    // repository node ID (R_kgDO456), acme/old and acme/new must no longer bridge.
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkThird,
+          projectId,
+          threadIds: [],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "old",
+          number: 43,
+          pullRequestNodeId: "PR_kwDO43",
+          baseRepositoryNodeId: "R_kgDO456",
+          linkedAt: "2026-11-03T10:00:00.000Z",
+        }),
+      },
+      4,
+    );
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "old" },
+        { owner: "acme", name: "new" },
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses to let an unbackfilled rename group bridge a reused current name with a historically renamed distinct repository node ID", () => {
+    const linkThird = decodePullRequestLinkId("50000000-0000-4000-8000-000000000003");
+    let state = emptyPullRequestLinkRegistryState();
+    // 1. Unbackfilled link records acme/old -> acme/new without baseRepositoryNodeId.
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkEarly,
+          projectId,
+          threadIds: [threadA],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "old",
+          number: 41,
+          pullRequestNodeId: "PR_kwDO41",
+          linkedAt: "2026-11-01T10:00:00.000Z",
+        }),
+      },
+      1,
+    );
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "display-updated",
+        payload: {
+          linkId: linkEarly,
+          repositoryOwner: "acme",
+          repositoryName: "new",
+          number: 41,
+          url: "https://github.com/acme/new/pull/41",
+        },
+      },
+      2,
+    );
+    // 2. Repository R1 lived at acme/new and then renamed again to acme/final
+    //    (so acme/new is now only a historical alias of R1).
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkLate,
+          projectId,
+          threadIds: [threadB],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "new",
+          number: 42,
+          pullRequestNodeId: "PR_kwDO42",
+          baseRepositoryNodeId: "R_kgDOR1",
+          linkedAt: "2026-11-02T10:00:00.000Z",
+        }),
+      },
+      3,
+    );
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "display-updated",
+        payload: {
+          linkId: linkLate,
+          repositoryOwner: "acme",
+          repositoryName: "final",
+          number: 42,
+          url: "https://github.com/acme/final/pull/42",
+        },
+      },
+      4,
+    );
+    // Before R2 reuses acme/old, only R1 is associated with {old, new}, so
+    // single-ID partial backfill still keeps old <-> new equivalence.
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "old" },
+        { owner: "acme", name: "new" },
+      ),
+    ).toBe(true);
+
+    // 3. Distinct repository R2 now reuses acme/old. The unbackfilled group
+    //    now spans R2 (current owner of old) and R1 (historical owner of new),
+    //    so old and new must NOT bridge.
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkThird,
+          projectId,
+          threadIds: [],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "old",
+          number: 43,
+          pullRequestNodeId: "PR_kwDO43",
+          baseRepositoryNodeId: "R_kgDOR2",
+          linkedAt: "2026-11-03T10:00:00.000Z",
+        }),
+      },
+      5,
+    );
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "old" },
+        { owner: "acme", name: "new" },
+      ),
+    ).toBe(false);
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "old" },
+        { owner: "acme", name: "final" },
+      ),
+    ).toBe(false);
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "new" },
+        { owner: "acme", name: "final" },
+      ),
+    ).toBe(true);
   });
 });

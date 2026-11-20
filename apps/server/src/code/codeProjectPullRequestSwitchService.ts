@@ -6,11 +6,14 @@ import {
   CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS,
   CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
   CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
+  CODE_PULL_REQUEST_LINK_AGGREGATE,
   decodeCodeProjectPullRequestAutoFixRecorded,
   decodeCodeProjectPullRequestMergeWhenReadyRecorded,
   decodeCodeProjectPullRequestSwitchesView,
   decodeCodeProjectPullRequestWatchRecorded,
   decodeEventActor,
+  GithubRepositoryName,
+  GithubRepositoryOwner,
   type CodeProjectPullRequestAutoFixCommand,
   type CodeProjectPullRequestWatchRecorded,
   type CodeProjectPullRequestWatchSignal,
@@ -44,14 +47,28 @@ import {
   type PullRequestWatchObservation,
 } from "@octant/domain/code-pull-request-switch-policy";
 import {
+  applyPullRequestLinkEvent,
   buildDuplicatePullRequestSwitchNotices,
+  emptyPullRequestLinkRegistryState,
   reconcileMergedPullRequestSwitches,
+  resolveCanonicalPullRequestLink,
+  resolvePullRequestLink,
+  type PullRequestLinkRecord,
+  type PullRequestLinkRegistryState,
   type PullRequestLinkSwitchSnapshot,
 } from "@octant/domain/pull-request-identity-policy";
-import type {
-  PullRequestLinkSwitchReconciler,
-  PullRequestLinkSwitchReconciliationResult,
+import { Schema } from "effect";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
+import {
+  decodePullRequestLinkEnvelopeEvent,
+  splitRepositoryName,
+  type PullRequestLinkOwner,
+  type PullRequestLinkSwitchReconciler,
+  type PullRequestLinkSwitchReconciliationResult,
 } from "./pullRequestLinkService";
+
+const decodeRepositoryOwner = Schema.decodeUnknownSync(GithubRepositoryOwner);
+const decodeRepositoryName = Schema.decodeUnknownSync(GithubRepositoryName);
 import type { Journal } from "../persistence/journal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type {
@@ -92,7 +109,12 @@ export interface PullRequestSwitchAuthority {
     windowId: WindowId,
     target: CodeProjectPullRequestSwitchTarget,
   ): Promise<
-    | { readonly status: "authorized"; readonly linkedThreadIds: ReadonlyArray<string> }
+    | {
+        readonly status: "authorized";
+        readonly linkedThreadIds: ReadonlyArray<string>;
+        readonly canonicalTarget?: CodeProjectPullRequestSwitchTarget;
+        readonly pullRequestNodeId?: string;
+      }
     | { readonly status: "not-authorized" }
     | { readonly status: "disconnected" }
   >;
@@ -116,6 +138,7 @@ export interface PullRequestSwitchForge {
     request: GhPullRequestSwitchRequest & {
       readonly method: CodeProjectPullRequestMergeMethod;
       readonly headSha: string;
+      readonly expectedPullRequestNodeId?: string;
     },
     signal: AbortSignal,
   ): Promise<GhAutoMergeResult>;
@@ -171,6 +194,7 @@ export class CodeProjectPullRequestSwitchService
   readonly #forge: PullRequestSwitchForge;
   readonly #threads: PullRequestAutoFixThreads;
   readonly #journal: Pick<Journal, "append"> & Partial<Pick<Journal, "transaction">>;
+  readonly #pullRequestLinks: PullRequestLinkOwner | undefined;
   readonly #clock: () => string;
   readonly #uuid: () => string;
   readonly #folds = new Map<string, PullRequestSwitchFold>();
@@ -194,6 +218,7 @@ export class CodeProjectPullRequestSwitchService
     readonly threads: PullRequestAutoFixThreads;
     readonly journal: Pick<Journal, "append" | "replayAggregateType"> &
       Partial<Pick<Journal, "transaction">>;
+    readonly pullRequestLinks?: PullRequestLinkOwner;
     readonly clock?: () => string;
     readonly uuid: () => string;
     /**
@@ -214,6 +239,7 @@ export class CodeProjectPullRequestSwitchService
     this.#forge = options.forge;
     this.#threads = options.threads;
     this.#journal = options.journal;
+    this.#pullRequestLinks = options.pullRequestLinks;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#uuid = options.uuid;
     this.#replay(options.journal);
@@ -241,9 +267,10 @@ export class CodeProjectPullRequestSwitchService
     if (authority.status !== "authorized") {
       return this.#view(emptyPullRequestSwitchFold(target));
     }
-    const fold = this.#fold(target);
+    const resolved = this.#resolveIdentity(authority.canonicalTarget ?? target);
+    const fold = this.#fold(resolved.target);
     if (fold.autoFix.status === "on" || fold.watch.status === "on") {
-      this.#vouchingWindows.set(pullRequestSwitchKey(target), windowId);
+      this.#vouchingWindows.set(resolved.key, windowId);
     }
     return this.#view(fold);
   }
@@ -264,14 +291,22 @@ export class CodeProjectPullRequestSwitchService
     if (caller === "remote-device" && command.kind === "enable" && command.confirmed !== true) {
       return { status: "refused", reason: "not-authorized" };
     }
-    const refused = await this.#authorize(windowId, command.target);
-    if (refused !== undefined) return refused;
-    const request = forgeRequest(command.target);
+    const authority = await this.#authority.authorizePullRequest(windowId, command.target);
+    if (authority.status === "not-authorized") {
+      return { status: "refused", reason: "not-authorized" };
+    }
+    if (authority.status === "disconnected") {
+      return { status: "unavailable", reason: "disconnected" };
+    }
+    const resolved = this.#resolveIdentity(authority.canonicalTarget ?? command.target);
+    const canonicalTarget = resolved.target;
+    const expectedPullRequestNodeId = resolved.pullRequestNodeId ?? authority.pullRequestNodeId;
+    const request = forgeRequest(canonicalTarget);
     if (command.kind === "disable") {
       const result = await this.#forge.disableAutoMerge(request, signal);
       if (result.status !== "disabled") return switchFailure(result);
-      this.#recordMergeWhenReady(command.target, { kind: "disabled" }, actor);
-      return { status: "applied", view: this.#view(this.#fold(command.target)) };
+      this.#recordMergeWhenReady(canonicalTarget, { kind: "disabled" }, actor);
+      return { status: "applied", view: this.#view(this.#fold(canonicalTarget)) };
     }
     // The forge's own setting decides; the host never stands in for a
     // repository that does not allow auto-merge.
@@ -288,12 +323,17 @@ export class CodeProjectPullRequestSwitchService
       return { status: "refused", reason: "method-not-allowed" };
     }
     const result = await this.#forge.enableAutoMerge(
-      { ...request, method, headSha: command.headSha },
+      {
+        ...request,
+        method,
+        headSha: command.headSha,
+        ...(expectedPullRequestNodeId === undefined ? {} : { expectedPullRequestNodeId }),
+      },
       signal,
     );
     if (result.status !== "enabled") return switchFailure(result);
     this.#recordMergeWhenReady(
-      command.target,
+      canonicalTarget,
       {
         kind: "enabled",
         method,
@@ -302,7 +342,7 @@ export class CodeProjectPullRequestSwitchService
       },
       actor,
     );
-    return { status: "applied", view: this.#view(this.#fold(command.target)) };
+    return { status: "applied", view: this.#view(this.#fold(canonicalTarget)) };
   }
 
   async setAutoFix(
@@ -319,17 +359,19 @@ export class CodeProjectPullRequestSwitchService
     if (authority.status === "disconnected") {
       return { status: "unavailable", reason: "disconnected" };
     }
-    const fold = this.#fold(command.target);
+    const resolved = this.#resolveIdentity(authority.canonicalTarget ?? command.target);
+    const canonicalTarget = resolved.target;
+    const fold = this.#fold(canonicalTarget);
     if (command.kind === "disable") {
       if (fold.autoFix.status !== "off") {
         this.#recordAutoFix(
-          command.target,
+          canonicalTarget,
           decodeCodeThreadId(fold.autoFix.threadId),
           { kind: "disabled" },
           actor,
         );
       }
-      return { status: "applied", view: this.#view(this.#fold(command.target)) };
+      return { status: "applied", view: this.#view(this.#fold(canonicalTarget)) };
     }
     if (!authority.linkedThreadIds.includes(String(command.threadId))) {
       return { status: "refused", reason: "thread-not-linked" };
@@ -337,9 +379,9 @@ export class CodeProjectPullRequestSwitchService
     if (this.#threads.inspect(command.threadId).status !== "available") {
       return { status: "refused", reason: "thread-not-linked" };
     }
-    this.#recordAutoFix(command.target, command.threadId, { kind: "enabled" }, actor);
-    this.#vouchingWindows.set(pullRequestSwitchKey(command.target), windowId);
-    return { status: "applied", view: this.#view(this.#fold(command.target)) };
+    this.#recordAutoFix(canonicalTarget, command.threadId, { kind: "enabled" }, actor);
+    this.#vouchingWindows.set(resolved.key, windowId);
+    return { status: "applied", view: this.#view(this.#fold(canonicalTarget)) };
   }
 
   /**
@@ -361,30 +403,47 @@ export class CodeProjectPullRequestSwitchService
     if (others.length > 0) return { status: "refused", reason: "ambiguous-pull-request" };
     const admitted = await this.#admitWatch(input.windowId, input.threadId, target);
     if (admitted.status !== "admitted") return admitted.outcome;
+    const resolved = this.#resolveIdentity(admitted.canonicalTarget);
+    const canonicalTarget = resolved.target;
     if (admitted.alreadyWatching) {
       // Asking again from a window that may act renews the vouch a restart lost.
-      this.#vouchingWindows.set(pullRequestSwitchKey(target), input.windowId);
-      return this.#watchingOutcome(target, true);
+      this.#vouchingWindows.set(resolved.key, input.windowId);
+      return this.#watchingOutcome(canonicalTarget, true);
     }
-    const observation = await this.#forge.observe(forgeRequest(target), input.signal, {
+    const observation = await this.#forge.observe(forgeRequest(canonicalTarget), input.signal, {
       failures: false,
       activity: true,
     });
     if (observation.status !== "observed" || observation.activity === undefined) {
       return { status: "unavailable", reason: "unavailable" };
     }
+    const expectedPullRequestNodeId = resolved.pullRequestNodeId ?? admitted.pullRequestNodeId;
+    if (
+      expectedPullRequestNodeId !== undefined &&
+      observation.pullRequestNodeId !== undefined &&
+      observation.pullRequestNodeId !== expectedPullRequestNodeId
+    ) {
+      return { status: "unavailable", reason: "unavailable" };
+    }
+    await this.#recordSwitchObservation(
+      canonicalTarget,
+      observation,
+      [input.threadId],
+      input.signal,
+    );
+    const latestTarget = this.#resolveIdentity(canonicalTarget).target;
     if (observation.state !== "open") return { status: "refused", reason: "not-open" };
     // Another linked thread asking at the same time may have recorded its
     // watch during the forge read; checking here, with no await before the
     // record, keeps the first watcher instead of silently replacing it.
-    const settled = this.#fold(target).watch;
+    const settled = this.#fold(latestTarget).watch;
     if (settled.status === "on") {
       return settled.threadId === String(input.threadId)
-        ? this.#watchingOutcome(target, true)
+        ? this.#watchingOutcome(latestTarget, true)
         : { status: "refused", reason: "watched-by-another-thread" };
     }
     this.#recordWatch(
-      target,
+      latestTarget,
       input.threadId,
       {
         kind: "enabled",
@@ -392,8 +451,8 @@ export class CodeProjectPullRequestSwitchService
       },
       agentActor(input.threadId, input.providerInstanceId, this.#uuid),
     );
-    this.#vouchingWindows.set(pullRequestSwitchKey(target), input.windowId);
-    return this.#watchingOutcome(target, false);
+    this.#vouchingWindows.set(this.#resolveIdentity(latestTarget).key, input.windowId);
+    return this.#watchingOutcome(latestTarget, false);
   }
 
   /**
@@ -404,15 +463,17 @@ export class CodeProjectPullRequestSwitchService
     readonly threadId: CodeThreadId;
     readonly providerInstanceId: string;
   }): Promise<PullRequestWatchOutcome> {
+    this.#canonicalizeFolds();
     for (const fold of this.#folds.values()) {
       if (fold.watch.status !== "on" || fold.watch.threadId !== String(input.threadId)) continue;
+      const canonicalTarget = this.#resolveIdentity(fold.target).target;
       this.#recordWatch(
-        fold.target,
+        canonicalTarget,
         input.threadId,
         { kind: "disabled" },
         agentActor(input.threadId, input.providerInstanceId, this.#uuid),
       );
-      return { status: "unwatched", target: fold.target };
+      return { status: "unwatched", target: canonicalTarget };
     }
     return { status: "not-watching" };
   }
@@ -422,7 +483,12 @@ export class CodeProjectPullRequestSwitchService
     threadId: CodeThreadId,
     target: CodeProjectPullRequestSwitchTarget,
   ): Promise<
-    | { readonly status: "admitted"; readonly alreadyWatching: boolean }
+    | {
+        readonly status: "admitted";
+        readonly alreadyWatching: boolean;
+        readonly canonicalTarget: CodeProjectPullRequestSwitchTarget;
+        readonly pullRequestNodeId?: string;
+      }
     | { readonly status: "refused"; readonly outcome: PullRequestWatchOutcome }
   > {
     const refused = (outcome: PullRequestWatchOutcome) => ({ status: "refused" as const, outcome });
@@ -439,11 +505,19 @@ export class CodeProjectPullRequestSwitchService
     if (this.#threads.inspect(threadId).status !== "available") {
       return refused({ status: "refused", reason: "thread-unavailable" });
     }
-    const watch = this.#fold(target).watch;
+    const canonicalTarget = this.#resolveIdentity(authority.canonicalTarget ?? target).target;
+    const watch = this.#fold(canonicalTarget).watch;
     if (watch.status === "on" && watch.threadId !== String(threadId)) {
       return refused({ status: "refused", reason: "watched-by-another-thread" });
     }
-    return { status: "admitted", alreadyWatching: watch.status === "on" };
+    return {
+      status: "admitted",
+      alreadyWatching: watch.status === "on",
+      canonicalTarget,
+      ...(authority.pullRequestNodeId === undefined
+        ? {}
+        : { pullRequestNodeId: authority.pullRequestNodeId }),
+    };
   }
 
   #watchingOutcome(
@@ -478,21 +552,25 @@ export class CodeProjectPullRequestSwitchService
     readonly commitMerge?: (disabledSwitches: ReadonlyArray<PullRequestSwitchKind>) => void;
     readonly signal?: AbortSignal;
   }): Promise<PullRequestLinkSwitchReconciliationResult> {
-    const survivingKey = pullRequestSwitchKey(input.survivingTarget);
-    const mergedKey = pullRequestSwitchKey(input.mergedTarget);
+    const survivingResolved = this.#resolveIdentity(input.survivingTarget);
+    const mergedResolved = this.#resolveIdentity(input.mergedTarget);
+    const survivingKey = survivingResolved.key;
+    const mergedKey = mergedResolved.key;
     if (survivingKey === mergedKey) {
       input.commitMerge?.([]);
       return { status: "reconciled", disabledSwitches: [] };
     }
 
-    const survivingFold = this.#fold(input.survivingTarget);
-    const mergedFold = this.#fold(input.mergedTarget);
+    const survivingFold = this.#fold(survivingResolved.target);
+    const mergedFold = this.#fold(mergedResolved.target);
     const surviving = switchSnapshotOf(survivingFold);
     const merged = switchSnapshotOf(mergedFold);
     const decision = reconcileMergedPullRequestSwitches(surviving, merged);
 
     if (decision.mergeWhenReady === "turn-off") {
-      const activeTarget = surviving.mergeWhenReadyOn ? input.survivingTarget : input.mergedTarget;
+      const activeTarget = surviving.mergeWhenReadyOn
+        ? survivingResolved.target
+        : mergedResolved.target;
       let forgeDisabled = false;
       try {
         const result = await this.#forge.disableAutoMerge(
@@ -532,9 +610,25 @@ export class CodeProjectPullRequestSwitchService
     const waitingOnKeysToClear: string[] = [];
     const pausedKeysToClear: string[] = [];
 
+    // Once `merged-into` is committed, the identity owner collapses both links
+    // onto `survivingKey`; record disables only on switches that must turn off
+    // (or on the duplicate target when running standalone without a link
+    // identity owner), and drop the stale duplicate bucket in memory after the
+    // atomic journal transaction commits.
+    const canonicalized = this.#pullRequestLinks !== undefined;
+
     if (decision.mergeWhenReady === "turn-off") {
-      const activeTarget = surviving.mergeWhenReadyOn ? input.survivingTarget : input.mergedTarget;
-      waitingOnKeysToClear.push(pullRequestSwitchKey(activeTarget));
+      const activeTarget = canonicalized
+        ? survivingResolved.target
+        : surviving.mergeWhenReadyOn
+          ? survivingResolved.target
+          : mergedResolved.target;
+      const activeKey = canonicalized
+        ? survivingKey
+        : surviving.mergeWhenReadyOn
+          ? survivingKey
+          : mergedKey;
+      waitingOnKeysToClear.push(activeKey);
       pendingWrites.push({
         kind: "merge-when-ready",
         eventName: CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
@@ -543,27 +637,36 @@ export class CodeProjectPullRequestSwitchService
           change: { kind: "disabled" },
         }),
       });
-    } else if (decision.mergeWhenReady === "keep-on") {
-      // Same PR on GitHub: keep the surviving link's switch ON and retire only
-      // the duplicate merged target entry without calling disableAutoMerge.
+    } else if (!canonicalized && decision.mergeWhenReady === "keep-on") {
+      // Standalone mode without link identity owner: keep the surviving key ON
+      // and retire only the duplicate target entry without calling disableAutoMerge.
       waitingOnKeysToClear.push(mergedKey);
       pendingWrites.push({
         kind: "merge-when-ready",
         eventName: CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
         record: decodeCodeProjectPullRequestMergeWhenReadyRecorded({
-          target: input.mergedTarget,
+          target: mergedResolved.target,
           change: { kind: "disabled" },
         }),
       });
     }
 
     if (decision.autoFix === "turn-off") {
-      const activeTarget = surviving.autoFix.on ? input.survivingTarget : input.mergedTarget;
+      const activeTarget = canonicalized
+        ? survivingResolved.target
+        : surviving.autoFix.on
+          ? survivingResolved.target
+          : mergedResolved.target;
+      const activeKey = canonicalized
+        ? survivingKey
+        : surviving.autoFix.on
+          ? survivingKey
+          : mergedKey;
       const activeThreadId = surviving.autoFix.on
         ? surviving.autoFix.threadId
         : merged.autoFix.threadId;
       if (activeThreadId !== undefined) {
-        pausedKeysToClear.push(pullRequestSwitchKey(activeTarget));
+        pausedKeysToClear.push(activeKey);
         pendingWrites.push({
           kind: "auto-fix",
           eventName: CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
@@ -574,13 +677,17 @@ export class CodeProjectPullRequestSwitchService
           }),
         });
       }
-    } else if (decision.autoFix === "keep-on" && merged.autoFix.threadId !== undefined) {
+    } else if (
+      !canonicalized &&
+      decision.autoFix === "keep-on" &&
+      merged.autoFix.threadId !== undefined
+    ) {
       pausedKeysToClear.push(mergedKey);
       pendingWrites.push({
         kind: "auto-fix",
         eventName: CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
         record: decodeCodeProjectPullRequestAutoFixRecorded({
-          target: input.mergedTarget,
+          target: mergedResolved.target,
           threadId: decodeCodeThreadId(merged.autoFix.threadId),
           change: { kind: "disabled" },
         }),
@@ -588,7 +695,11 @@ export class CodeProjectPullRequestSwitchService
     }
 
     if (decision.watch === "turn-off") {
-      const activeTarget = surviving.watch.on ? input.survivingTarget : input.mergedTarget;
+      const activeTarget = canonicalized
+        ? survivingResolved.target
+        : surviving.watch.on
+          ? survivingResolved.target
+          : mergedResolved.target;
       const activeThreadId = surviving.watch.on ? surviving.watch.threadId : merged.watch.threadId;
       if (activeThreadId !== undefined) {
         pendingWrites.push({
@@ -601,12 +712,16 @@ export class CodeProjectPullRequestSwitchService
           }),
         });
       }
-    } else if (decision.watch === "keep-on" && merged.watch.threadId !== undefined) {
+    } else if (
+      !canonicalized &&
+      decision.watch === "keep-on" &&
+      merged.watch.threadId !== undefined
+    ) {
       pendingWrites.push({
         kind: "watch",
         eventName: CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
         record: decodeCodeProjectPullRequestWatchRecorded({
-          target: input.mergedTarget,
+          target: mergedResolved.target,
           threadId: decodeCodeThreadId(merged.watch.threadId),
           change: { kind: "disabled" },
         }),
@@ -636,6 +751,11 @@ export class CodeProjectPullRequestSwitchService
       return events;
     });
 
+    if (canonicalized) {
+      this.#folds.delete(mergedKey);
+      this.#waitingOn.delete(mergedKey);
+      this.#paused.delete(mergedKey);
+    }
     for (const key of waitingOnKeysToClear) this.#waitingOn.delete(key);
     for (const key of pausedKeysToClear) this.#paused.delete(key);
     for (const event of committedEvents) this.#apply(event);
@@ -651,7 +771,7 @@ export class CodeProjectPullRequestSwitchService
     }
 
     const notices = buildDuplicatePullRequestSwitchNotices({
-      pullRequestNumber: input.survivingTarget.number,
+      pullRequestNumber: survivingResolved.target.number,
       decision,
       surviving,
       merged,
@@ -675,14 +795,16 @@ export class CodeProjectPullRequestSwitchService
     this.#ticking = true;
     try {
       this.#forgetOldTyping();
-      for (const fold of this.#folds.values()) {
+      this.#canonicalizeFolds();
+      for (const fold of Array.from(this.#folds.values())) {
         if (signal.aborted) return;
+        const resolved = this.#resolveIdentity(fold.target);
         // A watch's lifetime runs out on the clock, whether or not anything
         // vouches for it now.
         if (pullRequestWatchExpired(fold.watch, this.#clock(), this.#limits().watchDays * DAY_MS)) {
-          await this.#stopWatch(fold.target, "expired");
+          await this.#stopWatch(resolved.target, "expired");
         }
-        const current = this.#fold(fold.target);
+        const current = this.#fold(resolved.target);
         if (
           current.mergeWhenReady.status !== "on" &&
           current.autoFix.status !== "on" &&
@@ -690,18 +812,32 @@ export class CodeProjectPullRequestSwitchService
         ) {
           continue;
         }
-        const mayAct = await this.#threadSwitchesMayAct(current);
+        const mayAct = await this.#threadSwitchesMayAct(current, resolved.key);
         const failures = current.mergeWhenReady.status === "on" || mayAct.autoFix;
         if (!failures && !mayAct.watch) continue;
-        const observation = await this.#forge.observe(forgeRequest(current.target), signal, {
+        const queryTarget = mayAct.canonicalTarget ?? resolved.target;
+        const expectedPullRequestNodeId = resolved.pullRequestNodeId ?? mayAct.pullRequestNodeId;
+        const observation = await this.#forge.observe(forgeRequest(queryTarget), signal, {
           failures,
           activity: mayAct.watch,
         });
         if (observation.status !== "observed") continue;
-        this.#observeMergeWhenReady(current.target, observation);
-        if (mayAct.autoFix) await this.#observeAutoFix(current.target, observation);
+        if (
+          expectedPullRequestNodeId !== undefined &&
+          observation.pullRequestNodeId !== undefined &&
+          observation.pullRequestNodeId !== expectedPullRequestNodeId
+        ) {
+          // Observation belongs to a different pull request node ID (for
+          // example an old repository name reused by a new repo): never update
+          // Merge when ready or wake Auto-fix / watch against another PR's row.
+          continue;
+        }
+        await this.#recordSwitchObservation(queryTarget, observation, [], signal);
+        const effectiveTarget = this.#resolveIdentity(queryTarget).target;
+        this.#observeMergeWhenReady(effectiveTarget, observation);
+        if (mayAct.autoFix) await this.#observeAutoFix(effectiveTarget, observation);
         // After Auto-fix: a turn it just started holds the watch's wake.
-        if (mayAct.watch) await this.#observeWatch(current.target, observation);
+        if (mayAct.watch) await this.#observeWatch(effectiveTarget, observation);
       }
     } finally {
       this.#ticking = false;
@@ -717,10 +853,15 @@ export class CodeProjectPullRequestSwitchService
    */
   async #threadSwitchesMayAct(
     fold: PullRequestSwitchFold,
-  ): Promise<{ readonly autoFix: boolean; readonly watch: boolean }> {
+    key: string,
+  ): Promise<{
+    readonly autoFix: boolean;
+    readonly watch: boolean;
+    readonly canonicalTarget?: CodeProjectPullRequestSwitchTarget;
+    readonly pullRequestNodeId?: string;
+  }> {
     const quiet = { autoFix: false, watch: false };
     if (fold.autoFix.status !== "on" && fold.watch.status !== "on") return quiet;
-    const key = pullRequestSwitchKey(fold.target);
     const windowId = this.#vouchingWindows.get(key);
     if (windowId === undefined) return quiet;
     const authority = await this.#authority.authorizePullRequest(windowId, fold.target);
@@ -737,6 +878,12 @@ export class CodeProjectPullRequestSwitchService
       autoFix:
         fold.autoFix.status === "on" && authority.linkedThreadIds.includes(fold.autoFix.threadId),
       watch: fold.watch.status === "on" && authority.linkedThreadIds.includes(fold.watch.threadId),
+      ...(authority.canonicalTarget === undefined
+        ? {}
+        : { canonicalTarget: authority.canonicalTarget }),
+      ...(authority.pullRequestNodeId === undefined
+        ? {}
+        : { pullRequestNodeId: authority.pullRequestNodeId }),
     };
   }
 
@@ -744,16 +891,20 @@ export class CodeProjectPullRequestSwitchService
     target: CodeProjectPullRequestSwitchTarget,
     observation: Extract<GhPullRequestSwitchObservation, { status: "observed" }>,
   ): void {
-    const key = pullRequestSwitchKey(target);
-    if (this.#fold(target).mergeWhenReady.status !== "on") return;
+    const { key, target: canonicalTarget } = this.#resolveIdentity(target);
+    if (this.#fold(canonicalTarget).mergeWhenReady.status !== "on") return;
     if (observation.state === "merged") {
       this.#waitingOn.delete(key);
-      this.#recordMergeWhenReady(target, { kind: "merged" }, localActor("system"));
+      this.#recordMergeWhenReady(canonicalTarget, { kind: "merged" }, localActor("system"));
       return;
     }
     if (observation.state === "closed" || !observation.autoMergeEnabled) {
       this.#waitingOn.delete(key);
-      this.#recordMergeWhenReady(target, { kind: "turned-off-by-forge" }, localActor("system"));
+      this.#recordMergeWhenReady(
+        canonicalTarget,
+        { kind: "turned-off-by-forge" },
+        localActor("system"),
+      );
       return;
     }
     this.#waitingOn.set(key, observation.waitingOn);
@@ -763,13 +914,13 @@ export class CodeProjectPullRequestSwitchService
     target: CodeProjectPullRequestSwitchTarget,
     observation: Extract<GhPullRequestSwitchObservation, { status: "observed" }>,
   ): Promise<void> {
-    const key = pullRequestSwitchKey(target);
-    const fold = this.#fold(target).autoFix;
+    const { key, target: canonicalTarget } = this.#resolveIdentity(target);
+    const fold = this.#fold(canonicalTarget).autoFix;
     if (fold.status !== "on") return;
     const threadId = decodeCodeThreadId(fold.threadId);
     const thread = this.#threads.inspect(threadId);
     if (thread.status === "gone") {
-      this.#stopAutoFix(target, threadId, "thread-unavailable");
+      this.#stopAutoFix(canonicalTarget, threadId, "thread-unavailable");
       return;
     }
     const decision = decidePullRequestAutoFix({
@@ -790,12 +941,12 @@ export class CodeProjectPullRequestSwitchService
     this.#paused.delete(key);
     if (decision.kind === "idle") return;
     if (decision.kind === "stop") {
-      this.#stopAutoFix(target, threadId, decision.reason);
+      this.#stopAutoFix(canonicalTarget, threadId, decision.reason);
       if (decision.reason === "attempt-limit") {
         await this.#threads
           .notifyPerson(
             threadId,
-            `Auto-fix stopped on pull request #${target.number} after ${this.#limits().autoFixAttempts} attempts on the same failure.`,
+            `Auto-fix stopped on pull request #${canonicalTarget.number} after ${this.#limits().autoFixAttempts} attempts on the same failure.`,
           )
           .catch(() => undefined);
       }
@@ -816,7 +967,7 @@ export class CodeProjectPullRequestSwitchService
     let result: "started" | "refused" | "unmarked" = "unmarked";
     if (marked) {
       const text = autoFixTurnText(
-        target,
+        canonicalTarget,
         observation,
         wakeFailures,
         decision.attempt,
@@ -838,7 +989,7 @@ export class CodeProjectPullRequestSwitchService
       return;
     }
     this.#recordAutoFix(
-      target,
+      canonicalTarget,
       threadId,
       {
         kind: "woke",
@@ -948,8 +1099,14 @@ export class CodeProjectPullRequestSwitchService
     threadId: CodeThreadId,
     reason: Extract<CodeProjectPullRequestAutoFixRecorded["change"], { kind: "stopped" }>["reason"],
   ): void {
-    this.#paused.delete(pullRequestSwitchKey(target));
-    this.#recordAutoFix(target, threadId, { kind: "stopped", reason }, localActor("system"));
+    const resolved = this.#resolveIdentity(target);
+    this.#paused.delete(resolved.key);
+    this.#recordAutoFix(
+      resolved.target,
+      threadId,
+      { kind: "stopped", reason },
+      localActor("system"),
+    );
   }
 
   #personTyping(threadId: CodeThreadId): boolean {
@@ -964,61 +1121,424 @@ export class CodeProjectPullRequestSwitchService
     }
   }
 
-  async #authorize(
-    windowId: WindowId,
+  async #recordSwitchObservation(
     target: CodeProjectPullRequestSwitchTarget,
-  ): Promise<CodeProjectPullRequestSwitchOutcome | undefined> {
-    const authority = await this.#authority.authorizePullRequest(windowId, target);
-    if (authority.status === "not-authorized") {
-      return { status: "refused", reason: "not-authorized" };
+    observation: Extract<GhPullRequestSwitchObservation, { status: "observed" }>,
+    threadIds: ReadonlyArray<CodeThreadId>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (this.#pullRequestLinks === undefined) return;
+    if (observation.pullRequestNodeId === undefined && observation.baseRepository === undefined) {
+      return;
     }
-    if (authority.status === "disconnected") {
-      return { status: "unavailable", reason: "disconnected" };
+    const canonical =
+      observation.baseRepository === undefined
+        ? undefined
+        : splitRepositoryName(observation.baseRepository);
+    const repositoryOwner = canonical?.owner ?? target.repositoryOwner;
+    const repositoryName = canonical?.name ?? target.repositoryName;
+    const renamed =
+      repositoryOwner.toLowerCase() !== target.repositoryOwner.toLowerCase() ||
+      repositoryName.toLowerCase() !== target.repositoryName.toLowerCase();
+    await this.#pullRequestLinks
+      .recordObservation(
+        {
+          projectId: target.projectId,
+          repositoryOwner,
+          repositoryName,
+          ...(renamed
+            ? {
+                lookupRepositoryOwner: target.repositoryOwner,
+                lookupRepositoryName: target.repositoryName,
+              }
+            : {}),
+          number: target.number,
+          ...(observation.baseBranch === "" ? {} : { baseBranch: observation.baseBranch }),
+          ...(observation.headBranch === "" ? {} : { headBranch: observation.headBranch }),
+          ...(observation.pullRequestNodeId === undefined
+            ? {}
+            : { pullRequestNodeId: observation.pullRequestNodeId }),
+          ...(threadIds.length === 0 ? {} : { threadIds }),
+          onlyIfKnown: threadIds.length === 0,
+        },
+        signal,
+      )
+      .catch(() => undefined);
+  }
+
+  #resolveIdentity(target: CodeProjectPullRequestSwitchTarget): {
+    readonly key: string;
+    readonly target: CodeProjectPullRequestSwitchTarget;
+    readonly pullRequestNodeId?: string;
+  } {
+    const link = this.#pullRequestLinks?.resolveLink({
+      projectId: target.projectId,
+      repositoryOwner: target.repositoryOwner,
+      repositoryName: target.repositoryName,
+      number: target.number,
+    });
+    if (link === undefined) {
+      return { key: pullRequestSwitchKey(target), target };
     }
-    return undefined;
+    const canonicalKey = `link:${String(link.linkId)}`;
+    const canonicalTarget: CodeProjectPullRequestSwitchTarget = {
+      projectId: link.projectId,
+      repositoryOwner: decodeRepositoryOwner(link.repositoryOwner),
+      repositoryName: decodeRepositoryName(link.repositoryName),
+      number: link.number,
+    };
+    this.#adoptLegacyFold(canonicalKey, canonicalTarget, target, link.linkId);
+    const existing = this.#folds.get(canonicalKey);
+    if (
+      existing !== undefined &&
+      (existing.target.repositoryOwner !== canonicalTarget.repositoryOwner ||
+        existing.target.repositoryName !== canonicalTarget.repositoryName ||
+        existing.target.number !== canonicalTarget.number)
+    ) {
+      this.#folds.set(canonicalKey, { ...existing, target: canonicalTarget });
+    }
+    return {
+      key: canonicalKey,
+      target: canonicalTarget,
+      ...(link.pullRequestNodeId === undefined
+        ? {}
+        : { pullRequestNodeId: link.pullRequestNodeId }),
+    };
+  }
+
+  #adoptLegacyFold(
+    canonicalKey: string,
+    canonicalTarget: CodeProjectPullRequestSwitchTarget,
+    requestedTarget: CodeProjectPullRequestSwitchTarget,
+    linkId: Parameters<PullRequestLinkOwner["displayAliasesForLink"]>[0],
+  ): void {
+    const candidateKeys = new Set<string>([
+      pullRequestSwitchKey(requestedTarget),
+      pullRequestSwitchKey(canonicalTarget),
+    ]);
+    for (const alias of this.#pullRequestLinks?.displayAliasesForLink(linkId) ?? []) {
+      candidateKeys.add(
+        pullRequestSwitchKey({
+          projectId: canonicalTarget.projectId,
+          repositoryOwner: decodeRepositoryOwner(alias.repositoryOwner),
+          repositoryName: decodeRepositoryName(alias.repositoryName),
+          number: alias.number,
+        }),
+      );
+    }
+    for (const legacyKey of candidateKeys) {
+      if (legacyKey === canonicalKey) continue;
+      const legacyFold = this.#folds.get(legacyKey);
+      if (legacyFold !== undefined) {
+        if (!this.#folds.has(canonicalKey)) {
+          this.#folds.set(canonicalKey, { ...legacyFold, target: canonicalTarget });
+        }
+        this.#folds.delete(legacyKey);
+      }
+      const waitingOn = this.#waitingOn.get(legacyKey);
+      if (waitingOn !== undefined) {
+        if (!this.#waitingOn.has(canonicalKey)) this.#waitingOn.set(canonicalKey, waitingOn);
+        this.#waitingOn.delete(legacyKey);
+      }
+      const paused = this.#paused.get(legacyKey);
+      if (paused !== undefined) {
+        if (!this.#paused.has(canonicalKey)) this.#paused.set(canonicalKey, paused);
+        this.#paused.delete(legacyKey);
+      }
+      const vouching = this.#vouchingWindows.get(legacyKey);
+      if (vouching !== undefined) {
+        if (!this.#vouchingWindows.has(canonicalKey)) {
+          this.#vouchingWindows.set(canonicalKey, vouching);
+        }
+        this.#vouchingWindows.delete(legacyKey);
+      }
+    }
+  }
+
+  #canonicalizeFolds(): void {
+    if (this.#pullRequestLinks === undefined) return;
+    for (const fold of Array.from(this.#folds.values())) {
+      this.#resolveIdentity(fold.target);
+    }
   }
 
   #fold(target: CodeProjectPullRequestSwitchTarget): PullRequestSwitchFold {
-    return this.#folds.get(pullRequestSwitchKey(target)) ?? emptyPullRequestSwitchFold(target);
+    const resolved = this.#resolveIdentity(target);
+    return this.#folds.get(resolved.key) ?? emptyPullRequestSwitchFold(resolved.target);
   }
 
   #apply(event: PullRequestSwitchEvent): void {
-    const key = pullRequestSwitchKey(event.record.target);
-    this.#folds.set(key, applyPullRequestSwitchEvent(this.#fold(event.record.target), event));
+    const resolved = this.#resolveIdentity(event.record.target);
+    const current = this.#folds.get(resolved.key) ?? emptyPullRequestSwitchFold(resolved.target);
+    this.#folds.set(resolved.key, {
+      ...applyPullRequestSwitchEvent(current, event),
+      target: resolved.target,
+    });
   }
 
   #replay(journal: Pick<Journal, "replayAggregateType">): void {
-    let afterSequence = 0;
-    for (;;) {
-      const page = journal.replayAggregateType({
-        aggregateType: CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE,
-        afterSequence,
-        limit: 1_000,
+    if (this.#pullRequestLinks === undefined) {
+      let afterSequence = 0;
+      for (;;) {
+        const page = journal.replayAggregateType({
+          aggregateType: CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE,
+          afterSequence,
+          limit: 1_000,
+        });
+        for (const envelope of page) {
+          afterSequence = envelope.globalSequence;
+          const switchEvent = decodeSwitchEnvelopeEvent(
+            envelope.eventName,
+            envelope.occurredAt,
+            envelope.payload,
+          );
+          if (switchEvent !== undefined) this.#apply(switchEvent);
+        }
+        if (page.length < 1_000) return;
+      }
+    }
+
+    // Replay pull-request link events and switch events together in journal
+    // order so duplicate links keep separate switch histories until their
+    // `merged-into` event, preserving the surviving link's switch owners and
+    // ignoring legacy duplicate-bucket retirement disables written right after
+    // `merged-into` for switches that stayed ON.
+    let linkState: PullRequestLinkRegistryState = emptyPullRequestLinkRegistryState();
+    let pendingReconciliation:
+      | {
+          nextExpectedSequence: number;
+          readonly survivingTargetKey: string;
+          readonly mergedTargetKey: string;
+          readonly expectedRetirements: Set<PullRequestSwitchKind>;
+          readonly expectedTurnOffs: Set<PullRequestSwitchKind>;
+        }
+      | undefined;
+
+    const canonicalTargetOf = (
+      link: PullRequestLinkRecord,
+    ): CodeProjectPullRequestSwitchTarget => ({
+      projectId: link.projectId,
+      repositoryOwner: decodeRepositoryOwner(link.repositoryOwner),
+      repositoryName: decodeRepositoryName(link.repositoryName),
+      number: link.number,
+    });
+
+    const adoptFoldKey = (
+      fromKey: string,
+      toKey: string,
+      target: CodeProjectPullRequestSwitchTarget,
+    ): void => {
+      if (fromKey === toKey) return;
+      const legacyFold = this.#folds.get(fromKey);
+      if (legacyFold !== undefined) {
+        if (!this.#folds.has(toKey)) {
+          this.#folds.set(toKey, { ...legacyFold, target });
+        }
+        this.#folds.delete(fromKey);
+      }
+    };
+
+    const resolveReplayIdentity = (
+      target: CodeProjectPullRequestSwitchTarget,
+    ): { readonly key: string; readonly target: CodeProjectPullRequestSwitchTarget } => {
+      const link = resolvePullRequestLink(linkState, {
+        projectId: target.projectId,
+        repositoryOwner: target.repositoryOwner,
+        repositoryName: target.repositoryName,
+        number: target.number,
       });
-      for (const envelope of page) {
-        afterSequence = envelope.globalSequence;
-        if (envelope.eventName === CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED) {
-          this.#apply({
-            kind: "merge-when-ready",
-            occurredAt: envelope.occurredAt,
-            record: decodeCodeProjectPullRequestMergeWhenReadyRecorded(envelope.payload),
-          });
-        } else if (envelope.eventName === CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED) {
-          this.#apply({
-            kind: "auto-fix",
-            occurredAt: envelope.occurredAt,
-            record: decodeCodeProjectPullRequestAutoFixRecorded(envelope.payload),
-          });
-        } else if (envelope.eventName === CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED) {
-          this.#apply({
-            kind: "watch",
-            occurredAt: envelope.occurredAt,
-            record: decodeCodeProjectPullRequestWatchRecorded(envelope.payload),
-          });
+      if (link === undefined) {
+        return { key: pullRequestSwitchKey(target), target };
+      }
+      const canonicalKey = `link:${String(link.linkId)}`;
+      const canonicalTarget = canonicalTargetOf(link);
+      adoptFoldKey(pullRequestSwitchKey(target), canonicalKey, canonicalTarget);
+      return { key: canonicalKey, target: canonicalTarget };
+    };
+
+    for (const envelope of replayAggregateTypesInOrder(journal, [
+      CODE_PULL_REQUEST_LINK_AGGREGATE,
+      CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE,
+    ])) {
+      if (envelope.aggregateType === CODE_PULL_REQUEST_LINK_AGGREGATE) {
+        pendingReconciliation = undefined;
+        const decoded = decodePullRequestLinkEnvelopeEvent(envelope.eventName, envelope.payload);
+        if (decoded === undefined) continue;
+        if (decoded.kind === "created") {
+          linkState = applyPullRequestLinkEvent(linkState, decoded, envelope.globalSequence);
+          const created = linkState.byId.get(String(decoded.payload.linkId));
+          if (created !== undefined) {
+            const target = canonicalTargetOf(created);
+            adoptFoldKey(pullRequestSwitchKey(target), `link:${String(created.linkId)}`, target);
+          }
+          continue;
+        }
+        if (decoded.kind === "display-updated") {
+          linkState = applyPullRequestLinkEvent(linkState, decoded, envelope.globalSequence);
+          const updated = linkState.byId.get(String(decoded.payload.linkId));
+          if (updated !== undefined) {
+            const canonicalKey = `link:${String(updated.linkId)}`;
+            const target = canonicalTargetOf(updated);
+            adoptFoldKey(pullRequestSwitchKey(target), canonicalKey, target);
+            const existing = this.#folds.get(canonicalKey);
+            if (existing !== undefined) {
+              this.#folds.set(canonicalKey, { ...existing, target });
+            }
+          }
+          continue;
+        }
+        if (decoded.kind === "merged-into") {
+          const survivingBefore = resolveCanonicalPullRequestLink(
+            linkState,
+            decoded.payload.survivingLinkId,
+          );
+          const mergedBefore = linkState.byId.get(String(decoded.payload.linkId));
+          linkState = applyPullRequestLinkEvent(linkState, decoded, envelope.globalSequence);
+          if (survivingBefore === undefined || mergedBefore === undefined) continue;
+          const survivingKey = `link:${String(survivingBefore.linkId)}`;
+          const mergedKey = `link:${String(mergedBefore.linkId)}`;
+          const survivingTarget = canonicalTargetOf(survivingBefore);
+          const mergedTarget = canonicalTargetOf(mergedBefore);
+          adoptFoldKey(pullRequestSwitchKey(survivingTarget), survivingKey, survivingTarget);
+          adoptFoldKey(pullRequestSwitchKey(mergedTarget), mergedKey, mergedTarget);
+          const survivingHadFold = this.#folds.has(survivingKey);
+          let survivingFold =
+            this.#folds.get(survivingKey) ?? emptyPullRequestSwitchFold(survivingTarget);
+          const mergedFold = this.#folds.get(mergedKey) ?? emptyPullRequestSwitchFold(mergedTarget);
+          const decision = reconcileMergedPullRequestSwitches(
+            switchSnapshotOf(survivingFold),
+            switchSnapshotOf(mergedFold),
+          );
+          const recordedDisabled = new Set<PullRequestSwitchKind>(decoded.payload.disabledSwitches);
+          const turnOffSet = new Set<PullRequestSwitchKind>([
+            ...decoded.payload.disabledSwitches,
+            ...decision.disabledSwitches,
+          ]);
+          if (turnOffSet.has("merge-when-ready") && survivingFold.mergeWhenReady.status === "on") {
+            survivingFold = applyPullRequestSwitchEvent(survivingFold, {
+              kind: "merge-when-ready",
+              occurredAt: envelope.occurredAt,
+              record: decodeCodeProjectPullRequestMergeWhenReadyRecorded({
+                target: survivingTarget,
+                change: { kind: "disabled" },
+              }),
+            });
+          }
+          if (turnOffSet.has("auto-fix") && survivingFold.autoFix.status === "on") {
+            survivingFold = applyPullRequestSwitchEvent(survivingFold, {
+              kind: "auto-fix",
+              occurredAt: envelope.occurredAt,
+              record: decodeCodeProjectPullRequestAutoFixRecorded({
+                target: survivingTarget,
+                threadId: decodeCodeThreadId(survivingFold.autoFix.threadId),
+                change: { kind: "disabled" },
+              }),
+            });
+          }
+          if (turnOffSet.has("watch") && survivingFold.watch.status === "on") {
+            survivingFold = applyPullRequestSwitchEvent(survivingFold, {
+              kind: "watch",
+              occurredAt: envelope.occurredAt,
+              record: decodeCodeProjectPullRequestWatchRecorded({
+                target: survivingTarget,
+                threadId: decodeCodeThreadId(survivingFold.watch.threadId),
+                change: { kind: "disabled" },
+              }),
+            });
+          }
+          if (survivingHadFold) {
+            this.#folds.set(survivingKey, { ...survivingFold, target: survivingTarget });
+          }
+          this.#folds.delete(mergedKey);
+
+          const expectedRetirements = new Set<PullRequestSwitchKind>();
+          if (decision.mergeWhenReady === "keep-on" && !recordedDisabled.has("merge-when-ready")) {
+            expectedRetirements.add("merge-when-ready");
+          }
+          if (decision.autoFix === "keep-on" && !recordedDisabled.has("auto-fix")) {
+            expectedRetirements.add("auto-fix");
+          }
+          if (decision.watch === "keep-on" && !recordedDisabled.has("watch")) {
+            expectedRetirements.add("watch");
+          }
+          if (expectedRetirements.size > 0 || turnOffSet.size > 0) {
+            pendingReconciliation = {
+              nextExpectedSequence: envelope.globalSequence + 1,
+              survivingTargetKey: pullRequestSwitchKey(survivingTarget),
+              mergedTargetKey: pullRequestSwitchKey(mergedTarget),
+              expectedRetirements,
+              expectedTurnOffs: turnOffSet,
+            };
+          }
+          continue;
+        }
+        linkState = applyPullRequestLinkEvent(linkState, decoded, envelope.globalSequence);
+        continue;
+      }
+
+      if (envelope.aggregateType !== CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE) {
+        continue;
+      }
+      const switchEvent = decodeSwitchEnvelopeEvent(
+        envelope.eventName,
+        envelope.occurredAt,
+        envelope.payload,
+      );
+      if (switchEvent === undefined) continue;
+
+      if (pendingReconciliation !== undefined) {
+        const targetKey = pullRequestSwitchKey(switchEvent.record.target);
+        const matchesContiguousSystemDisable =
+          envelope.globalSequence === pendingReconciliation.nextExpectedSequence &&
+          envelope.actor.kind === "system" &&
+          switchEvent.record.change.kind === "disabled";
+        if (
+          matchesContiguousSystemDisable &&
+          pendingReconciliation.expectedRetirements.has(switchEvent.kind) &&
+          targetKey === pendingReconciliation.mergedTargetKey
+        ) {
+          pendingReconciliation.expectedRetirements.delete(switchEvent.kind);
+          pendingReconciliation.nextExpectedSequence += 1;
+          if (
+            pendingReconciliation.expectedRetirements.size === 0 &&
+            pendingReconciliation.expectedTurnOffs.size === 0
+          ) {
+            pendingReconciliation = undefined;
+          }
+          continue;
+        }
+        if (
+          matchesContiguousSystemDisable &&
+          pendingReconciliation.expectedTurnOffs.has(switchEvent.kind) &&
+          (targetKey === pendingReconciliation.survivingTargetKey ||
+            targetKey === pendingReconciliation.mergedTargetKey)
+        ) {
+          pendingReconciliation.expectedTurnOffs.delete(switchEvent.kind);
+          pendingReconciliation.nextExpectedSequence += 1;
+          if (
+            pendingReconciliation.expectedRetirements.size === 0 &&
+            pendingReconciliation.expectedTurnOffs.size === 0
+          ) {
+            pendingReconciliation = undefined;
+          }
+          // Fall through so the recorded turn-off `disabled` event applies onto
+          // the surviving link, replacing any prior terminal state (such as
+          // `stopped` or `turned-off-by-forge`) with `off` just like live
+          // duplicate reconciliation.
+        } else {
+          pendingReconciliation = undefined;
         }
       }
-      if (page.length < 1_000) return;
+
+      const resolved = resolveReplayIdentity(switchEvent.record.target);
+      const current = this.#folds.get(resolved.key) ?? emptyPullRequestSwitchFold(resolved.target);
+      this.#folds.set(resolved.key, {
+        ...applyPullRequestSwitchEvent(current, switchEvent),
+        target: resolved.target,
+      });
     }
+
+    this.#canonicalizeFolds();
   }
 
   #recordMergeWhenReady(
@@ -1086,7 +1606,8 @@ export class CodeProjectPullRequestSwitchService
   }
 
   #view(fold: PullRequestSwitchFold): CodeProjectPullRequestSwitchesView {
-    const key = pullRequestSwitchKey(fold.target);
+    const resolved = this.#resolveIdentity(fold.target);
+    const key = resolved.key;
     const mergeWhenReady =
       fold.mergeWhenReady.status === "on"
         ? {
@@ -1295,4 +1816,33 @@ export function autoFixTurnText(
     sections.join("\n\n"),
     "--- outside content ends ---",
   ].join("\n");
+}
+
+function decodeSwitchEnvelopeEvent(
+  eventName: string,
+  occurredAt: string,
+  payload: unknown,
+): PullRequestSwitchEvent | undefined {
+  if (eventName === CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED) {
+    return {
+      kind: "merge-when-ready",
+      occurredAt,
+      record: decodeCodeProjectPullRequestMergeWhenReadyRecorded(payload),
+    };
+  }
+  if (eventName === CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED) {
+    return {
+      kind: "auto-fix",
+      occurredAt,
+      record: decodeCodeProjectPullRequestAutoFixRecorded(payload),
+    };
+  }
+  if (eventName === CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED) {
+    return {
+      kind: "watch",
+      occurredAt,
+      record: decodeCodeProjectPullRequestWatchRecorded(payload),
+    };
+  }
+  return undefined;
 }

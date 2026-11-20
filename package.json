@@ -66,6 +66,7 @@
     "smoke:packaged-claude": "bun scripts/smoke-packaged-claude.ts",
     "smoke:packaged-opencode": "bun scripts/smoke-packaged-opencode.ts",
     "bench:harness": "bun scripts/harness-benchmark.ts",
+    "replay:run-cases": "bun scripts/replay-run-cases.ts",
     "seed:canvas-fixtures": "bun scripts/seed-canvas-fixtures.ts",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",

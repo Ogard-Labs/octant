@@ -29,7 +29,7 @@ import {
   type AcpProviderProfile,
   type AcpSessionMode,
 } from "./acpProfiles";
-import { providerHostEnvironment } from "./providerHostEnvironment";
+import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
@@ -724,6 +724,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 managedHome,
                 ...hostAuthentication.readPaths,
                 ...hostReadPaths,
+                ...(input.strict === false &&
+                input.fullAccessSandbox !== true &&
+                input.sandboxPolicy === undefined
+                  ? awsProfileReadPaths(input.environment)
+                  : []),
                 binaryDirectory,
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
@@ -736,6 +741,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 managedHome,
                 ...hostAuthentication.readPaths,
                 ...hostReadPaths,
+                ...(input.strict === false &&
+                input.fullAccessSandbox !== true &&
+                input.sandboxPolicy === undefined
+                  ? awsProfileReadPaths(input.environment)
+                  : []),
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),

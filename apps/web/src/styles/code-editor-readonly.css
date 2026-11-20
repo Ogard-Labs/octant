@@ -1,0 +1,19 @@
+.code-editor-pane__readonly {
+  display: grid;
+  justify-items: start;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-4);
+}
+
+.code-editor-pane__readonly > h1,
+.code-editor-pane__readonly > p {
+  margin: 0;
+}
+
+.code-editor-pane__readonly > p {
+  color: var(--oct-muted);
+}
+
+.code-editor-pane__readonly-actions {
+  margin-top: var(--oct-space-1);
+}

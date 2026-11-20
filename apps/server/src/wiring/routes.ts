@@ -45,11 +45,7 @@ export type RoutesDependencies = {
   > &
   Pick<
     UsageWiring,
-    | "diagnosticsExportRoutes"
-    | "spendCeilingRoutes"
-    | "usageDashboardRoutes"
-    | "usageRoutes"
-    | "validationEvidenceRoutes"
+    "diagnosticsExportRoutes" | "spendCeilingRoutes" | "usageDashboardRoutes" | "usageRoutes"
   > &
   Pick<
     ComputerUseWiring,
@@ -160,7 +156,13 @@ export type RoutesDependencies = {
     | "threadSearchRoutes"
     | "workThreadRoutes"
   > &
-  Pick<ReplicaWiring, "replicaSyncStatusRoutes" | "syncedArtifactRoutes"> &
+  Pick<
+    ReplicaWiring,
+    | "replicaMembershipRoutes"
+    | "replicaStoreSettingsRoutes"
+    | "replicaSyncStatusRoutes"
+    | "syncedArtifactRoutes"
+  > &
   Pick<
     AuthorityWiring,
     | "personMemoryRoutes"
@@ -249,6 +251,8 @@ export function wireRoutes(deps: RoutesDependencies) {
     providerRoutes,
     providerUsageLimitsRoutes,
     remoteServerGrantLocalRoutes,
+    replicaMembershipRoutes,
+    replicaStoreSettingsRoutes,
     replicaSyncStatusRoutes,
     scaffoldRoutes,
     replyDetailRoutes,
@@ -271,7 +275,6 @@ export function wireRoutes(deps: RoutesDependencies) {
     workSessionRoutes,
     usageDashboardRoutes,
     usageRoutes,
-    validationEvidenceRoutes,
     workFileListingRoutes,
     workMutationRoutes,
     workOverviewRoutes,
@@ -307,6 +310,8 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await nativeBrowserPresentationRoutes(request)) ??
     (await hostResourceRoutes(request)) ??
     (await conversationInputRoutes(request)) ??
+    (await replicaStoreSettingsRoutes(request)) ??
+    (await replicaMembershipRoutes(request)) ??
     (await replicaSyncStatusRoutes(request)) ??
     (await projectBindingRoutes(request)) ??
     (await launchSessionRoutes(request)) ??
@@ -400,7 +405,6 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await threadExportRoutes(request)) ??
     (await threadHandOffRoutes(request)) ??
     (await computerUseRoutes(request)) ??
-    (await validationEvidenceRoutes(request)) ??
     (await extensionRoutes(request)) ??
     (await providerToolingRoutes(request)) ??
     (await browserAutomationRoutes(request)) ??

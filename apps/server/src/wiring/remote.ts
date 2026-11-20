@@ -97,7 +97,6 @@ import { HostMemoryLimitsService } from "../hostMemoryLimitsService";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
 import { createAgentRemoteDelegation } from "../hub/agentRemoteDelegation";
-import { createDelegationAdministrationRouteHandler } from "../hub/delegationAdministrationRoutes";
 import { createDelegationJournal } from "../hub/delegationJournal";
 import { createDelegationStateStore } from "../hub/delegationStateStore";
 import { DelegatingSpokeService } from "../hub/delegatingSpokeService";
@@ -263,7 +262,7 @@ export type RemoteDependencies = {
     | "remoteDelegationHolder"
     | "threadStandingAnswers"
   > &
-  Pick<HarnessStateWiring, "nativeHarnessSessions"> &
+  Pick<HarnessStateWiring, "nativeHarnessSessions" | "serverAttachmentCleanup"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
   Pick<CodeWiring, "codeAttachments" | "codeProjectAccess" | "workAttachments"> &
@@ -370,6 +369,7 @@ export function wireRemote(deps: RemoteDependencies) {
     hubPushHandoffSlot,
     pairedMergeUnlockSlot,
     nativeHarnessSessions,
+    serverAttachmentCleanup,
     remoteDelegationHolder,
     threadStandingAnswers,
     canvasNetworkAccess,
@@ -1057,18 +1057,6 @@ export function wireRemote(deps: RemoteDependencies) {
   // a Code request is refused by the target.
   onWorkTurnCancelled((threadId) => {
     void delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
-  });
-  const delegationAdministrationRoutes = createDelegationAdministrationRouteHandler({
-    desktopBridgeSecret: options.desktopBridgeSecret,
-    windowAuthorityStore,
-    delegation: delegatingSpoke,
-    authorizeParent: ({ threadId, windowId }) =>
-      authorizeAgentRunParentThread({
-        persistence,
-        workThreadProjection,
-        parentThreadId: decodeAgentRunParentThreadId(threadId),
-        windowId,
-      }),
   });
   // A host with no credential broker has no sign-in to copy from or to.
   const ownerCredentialCopy = new OwnerCredentialCopyService({
@@ -2390,6 +2378,9 @@ export function wireRemote(deps: RemoteDependencies) {
         purgeChatAttachments: (id) => chatAttachmentStore.purgeThread(decodeChatThreadId(id)),
         purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),
         purgeCodeAttachments: (id) => codeAttachments.purgeThread(decodeCodeThreadId(id)),
+        purgeServerAttachments: async (scope) => {
+          await serverAttachmentCleanup.removeForThreadScope(scope);
+        },
         purgeGeneratedImages: async (id) => {
           try {
             await generatedImageStore.purgeScope(decodeImageGenerationScopeId(id));
@@ -2583,7 +2574,6 @@ export function wireRemote(deps: RemoteDependencies) {
   return {
     ownerBrowserControlService,
     composeHostDiagnostics,
-    delegationAdministrationRoutes,
     threadMoveAdministrationRoutes,
     externalContentRoutes,
     hostControlRoutes,

@@ -559,16 +559,65 @@ describe("Browser profile cookie import", () => {
     }
   });
 
-  it("refuses a paired device before it reads anything", async () => {
+  it("admits a person-paired device for list, create-account, and clear while keeping Keychain import local-only", async () => {
+    const deviceId = "a0000000-0000-4000-8000-0000000000d9";
+    const device = decodeEventActor({ kind: "remote-device", actorId: deviceId, deviceId });
+    const f = harness();
+
+    expect(await f.service.execute("person-paired-device", { kind: "list" }, device)).toMatchObject(
+      {
+        kind: "browser-profiles",
+      },
+    );
+    expect(
+      await f.service.execute(
+        "person-paired-device",
+        { kind: "create-account", label: "Paired account" },
+        device,
+      ),
+    ).toMatchObject({
+      kind: "browser-account-profile-created",
+      label: "Paired account",
+    });
+    expect(
+      await f.service.execute(
+        "person-paired-device",
+        { kind: "clear", profile: { kind: "personal" }, scope: "all" },
+        device,
+      ),
+    ).toMatchObject({ kind: "browser-profile-cleared" });
+    expect(
+      f.journal.replayAggregateType({
+        aggregateType: BROWSER_PROFILE_AGGREGATE,
+        afterSequence: 0,
+        limit: 10,
+      })[0]?.actor,
+    ).toEqual(device);
+
+    for (const command of [
+      { kind: "list" } as const,
+      { kind: "create-account", label: "Blocked" } as const,
+      { kind: "clear", profile: { kind: "personal" }, scope: "all" } as const,
+    ]) {
+      expect(await f.service.execute("remote-device", command, device)).toMatchObject({
+        kind: "browser-profiles-refused",
+        reason: "profile-not-local",
+      });
+    }
+  });
+
+  it("refuses any remote device, including a person-paired device, before reading Keychain cookies", async () => {
     const { service, read } = importHarness();
 
-    expect(await service.execute("remote-device", importCommand)).toMatchObject({
-      kind: "browser-profiles-refused",
-      reason: "profile-not-local",
-    });
-    expect(await service.execute("remote-device", { kind: "import-sources" })).toMatchObject({
-      reason: "profile-not-local",
-    });
+    for (const caller of ["remote-device", "person-paired-device"] as const) {
+      expect(await service.execute(caller, importCommand)).toMatchObject({
+        kind: "browser-profiles-refused",
+        reason: "profile-not-local",
+      });
+      expect(await service.execute(caller, { kind: "import-sources" })).toMatchObject({
+        reason: "profile-not-local",
+      });
+    }
     expect(read).not.toHaveBeenCalled();
   });
 

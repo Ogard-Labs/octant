@@ -48,7 +48,6 @@ import {
   MAX_BROWSER_RECORDING_EDGE,
   MAX_BROWSER_RECORDING_MS,
   MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
-  MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING,
 } from "@octant/contracts/browser-automation";
 import {
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
@@ -1930,8 +1929,9 @@ async function settle(page: PlaywrightPagePort): Promise<void> {
 }
 
 /**
- * Check a wait's conditions until they hold or its time runs out. The time is
- * the wait's own, never more than the hard limit the contract sets.
+ * Check a wait's conditions until they hold or its time runs out. Outside
+ * Strict there is no wait ceiling; Strict threads are bounded before reaching
+ * the runtime.
  */
 async function waitForConditions(
   page: PlaywrightPagePort,
@@ -1940,10 +1940,7 @@ async function waitForConditions(
   allowedOrigins: ReadonlyArray<string>,
 ): Promise<void> {
   const conditions = browserPageConditions(waitFor);
-  const timeoutMs = Math.min(
-    waitFor.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS,
-    MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING * 60_000,
-  );
+  const timeoutMs = waitFor.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS;
   const deadline = Date.now() + timeoutMs;
   let met: ReadonlyArray<boolean> = conditions.map(() => false);
   while (true) {
@@ -1954,7 +1951,10 @@ async function waitForConditions(
       const checked = await Promise.race([
         checkConditions(page, conditions, allowedOrigins),
         new Promise<undefined>((resolve) =>
-          setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())),
+          setTimeout(
+            () => resolve(undefined),
+            Math.min(2_147_483_647, Math.max(0, deadline - Date.now())),
+          ),
         ),
       ]);
       if (checked?.mode === "check") met = checked.met;

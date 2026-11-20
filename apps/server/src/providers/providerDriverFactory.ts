@@ -65,6 +65,9 @@ export interface ProviderDriverFactoryOptions {
   /** Shared runtime port for ACP-speaking agents, including the OpenCode 2 preview. */
   readonly acpProcess?: AcpProcessPort;
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
+  readonly hasPendingAcpInstallScripts?: (
+    instance: Extract<ProviderInstance, { readonly driverKind: "acp-agent" }>,
+  ) => Promise<boolean>;
   readonly ohMyPiProcess?: import("./ohMyPiProcess").OhMyPiProcessPort;
   readonly ohMyPiHome?: (instanceId: ProviderInstance["id"]) => string;
   readonly piProcess?: PiProcessPort;
@@ -103,6 +106,8 @@ export interface ProviderDriverFactoryOptions {
   readonly planMcpServers?: (provider: McpPlanServerProvider) => ReadonlyArray<string>;
   /** Host Claude env from the snapshot gate. Omit to use the last gated copy. */
   readonly claudeHostEnvironment?: NodeJS.ProcessEnv;
+  /** Whether the host enforces Strict; read on Claude probes so Bedrock/custom routing works outside Strict. */
+  readonly hostStrict?: () => boolean;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexHostEnvironment?: NodeJS.ProcessEnv;
 }
@@ -169,6 +174,7 @@ export function makeProviderDriver(
         install === undefined ? `Install ${instance.displayName} before starting it.` : undefined,
       );
     }
+    const hasPending = options.hasPendingAcpInstallScripts;
     return withAddedAcpAgentLaunch(
       makeAcpDriver({
         profile: addedAcpAgentProfile(instance),
@@ -179,6 +185,11 @@ export function makeProviderDriver(
         runtimeRegistry: options.runtimeRegistry,
       }),
       instance,
+      hasPending === undefined
+        ? undefined
+        : {
+            hasPendingInstallScripts: () => hasPending(instance),
+          },
     );
   }
   const readPlanMcpServers = options.planMcpServers;
@@ -336,6 +347,7 @@ export function makeProviderDriver(
       const readArtifactDelivery = options.claudeArtifactDelivery;
       const readClaudeOwnMemory = options.providerOwnMemory;
       const claudeDriver = makeClaudeDriver({
+        ...(options.hostStrict === undefined ? {} : { hostStrict: options.hostStrict }),
         ...(readPlanMcpServers === undefined
           ? {}
           : { planMcpServers: () => readPlanMcpServers("claude") }),

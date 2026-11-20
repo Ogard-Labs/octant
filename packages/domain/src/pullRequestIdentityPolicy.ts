@@ -32,6 +32,8 @@ export interface PullRequestLinkRecord {
   readonly linkedAt: string;
   /** Monotonic creation order from replay sequence, used to break equal-timestamp ties. */
   readonly createdOrder: number;
+  /** Monotonic sequence of the most recent display-setting event (`created` or `display-updated`). */
+  readonly displayOrder: number;
 }
 
 export type PullRequestLinkJournalEvent =
@@ -44,12 +46,41 @@ export type PullRequestLinkJournalEvent =
   | { readonly kind: "display-updated"; readonly payload: CodePullRequestLinkDisplayUpdated }
   | { readonly kind: "merged-into"; readonly payload: CodePullRequestLinkMergedInto };
 
+export interface PullRequestDisplayCoordinate {
+  readonly repositoryOwner: string;
+  readonly repositoryName: string;
+  readonly number: number;
+}
+
+export interface PullRequestHistoricalDisplay extends PullRequestDisplayCoordinate {
+  readonly linkId: PullRequestLinkId;
+  readonly projectId: ProjectId;
+}
+
 export interface PullRequestLinkRegistryState {
   readonly byId: ReadonlyMap<string, PullRequestLinkRecord>;
+  /**
+   * Every historical `(projectId, owner/name, number)` display key recorded by
+   * `created` and `display-updated` events, mapped to the links that have owned
+   * it (most recent first) so reusing a repository name never erases an earlier
+   * link's historical alias. `resolveCanonicalPullRequestLink` follows any
+   * `merged-into` chain to the active surviving link.
+   */
+  readonly historicalDisplayByKey: ReadonlyMap<string, ReadonlyArray<PullRequestHistoricalDisplay>>;
+}
+
+function recordHistoricalDisplay(
+  historicalDisplayByKey: Map<string, ReadonlyArray<PullRequestHistoricalDisplay>>,
+  key: string,
+  entry: PullRequestHistoricalDisplay,
+): void {
+  const existing = historicalDisplayByKey.get(key) ?? [];
+  const filtered = existing.filter((item) => String(item.linkId) !== String(entry.linkId));
+  historicalDisplayByKey.set(key, [entry, ...filtered]);
 }
 
 export function emptyPullRequestLinkRegistryState(): PullRequestLinkRegistryState {
-  return { byId: new Map() };
+  return { byId: new Map(), historicalDisplayByKey: new Map() };
 }
 
 /** Case-insensitive owner/name lookup key used while a link has no forge node ID yet. */
@@ -80,6 +111,7 @@ export function applyPullRequestLinkEvent(
   sequence: number,
 ): PullRequestLinkRegistryState {
   const byId = new Map(state.byId);
+  const historicalDisplayByKey = new Map(state.historicalDisplayByKey);
   switch (event.kind) {
     case "created": {
       const p = event.payload;
@@ -102,8 +134,20 @@ export function applyPullRequestLinkEvent(
         threadIds: [...p.threadIds],
         linkedAt: p.linkedAt,
         createdOrder: sequence,
+        displayOrder: sequence,
       });
-      return { byId };
+      recordHistoricalDisplay(
+        historicalDisplayByKey,
+        pullRequestDisplayLookupKey(p.projectId, p.repositoryOwner, p.repositoryName, p.number),
+        {
+          linkId: p.linkId,
+          projectId: p.projectId,
+          repositoryOwner: p.repositoryOwner,
+          repositoryName: p.repositoryName,
+          number: p.number,
+        },
+      );
+      return { byId, historicalDisplayByKey };
     }
     case "thread-attached": {
       const existing = byId.get(String(event.payload.linkId));
@@ -116,7 +160,7 @@ export function applyPullRequestLinkEvent(
         ...existing,
         threadIds: [...existing.threadIds, event.payload.threadId],
       });
-      return { byId };
+      return { byId, historicalDisplayByKey };
     }
     case "forge-ids-backfilled": {
       const existing = byId.get(String(event.payload.linkId));
@@ -129,7 +173,7 @@ export function applyPullRequestLinkEvent(
         ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
         ...(baseRepositoryNodeId === undefined ? {} : { baseRepositoryNodeId }),
       });
-      return { byId };
+      return { byId, historicalDisplayByKey };
     }
     case "display-updated": {
       const existing = byId.get(String(event.payload.linkId));
@@ -148,8 +192,25 @@ export function applyPullRequestLinkEvent(
         ...(baseBranch === undefined ? {} : { baseBranch }),
         ...(headOwner === undefined ? {} : { headOwner }),
         ...(headBranch === undefined ? {} : { headBranch }),
+        displayOrder: sequence,
       });
-      return { byId };
+      recordHistoricalDisplay(
+        historicalDisplayByKey,
+        pullRequestDisplayLookupKey(
+          existing.projectId,
+          p.repositoryOwner,
+          p.repositoryName,
+          p.number,
+        ),
+        {
+          linkId: existing.linkId,
+          projectId: existing.projectId,
+          repositoryOwner: p.repositoryOwner,
+          repositoryName: p.repositoryName,
+          number: p.number,
+        },
+      );
+      return { byId, historicalDisplayByKey };
     }
     case "merged-into": {
       const p = event.payload;
@@ -177,7 +238,7 @@ export function applyPullRequestLinkEvent(
           ...(baseRepositoryNodeId === undefined ? {} : { baseRepositoryNodeId }),
         });
       }
-      return { byId };
+      return { byId, historicalDisplayByKey };
     }
   }
 }
@@ -196,6 +257,335 @@ export function resolveCanonicalPullRequestLink(
     current = state.byId.get(String(current.mergedIntoLinkId));
   }
   return current;
+}
+
+function forgeIdCompatible(
+  link: PullRequestLinkRecord,
+  pullRequestNodeId: string | undefined,
+  baseRepositoryNodeId: string | undefined,
+): boolean {
+  if (
+    pullRequestNodeId !== undefined &&
+    link.pullRequestNodeId !== undefined &&
+    link.pullRequestNodeId !== pullRequestNodeId
+  ) {
+    return false;
+  }
+  if (
+    baseRepositoryNodeId !== undefined &&
+    link.baseRepositoryNodeId !== undefined &&
+    link.baseRepositoryNodeId !== baseRepositoryNodeId
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Resolves a pull request to its single active canonical link in `projectId`:
+ * forge node ID first, then active display coordinates, then historical display
+ * aliases (for renamed or transferred repositories and merged duplicate links).
+ * Never matches a link whose recorded forge node ID or base repository node ID
+ * differs from a supplied one.
+ */
+export function resolvePullRequestLink(
+  state: PullRequestLinkRegistryState,
+  query: {
+    readonly projectId: ProjectId | string;
+    readonly repositoryOwner?: string;
+    readonly repositoryName?: string;
+    readonly number?: number;
+    readonly pullRequestNodeId?: string;
+    readonly baseRepositoryNodeId?: string;
+  },
+): PullRequestLinkRecord | undefined {
+  const projectKey = String(query.projectId);
+  if (query.pullRequestNodeId !== undefined) {
+    for (const link of state.byId.values()) {
+      if (
+        link.status === "active" &&
+        String(link.projectId) === projectKey &&
+        link.pullRequestNodeId === query.pullRequestNodeId &&
+        forgeIdCompatible(link, query.pullRequestNodeId, query.baseRepositoryNodeId)
+      ) {
+        return link;
+      }
+    }
+  }
+  if (
+    query.repositoryOwner === undefined ||
+    query.repositoryName === undefined ||
+    query.number === undefined
+  ) {
+    return undefined;
+  }
+  const wanted = pullRequestDisplayLookupKey(
+    query.projectId,
+    query.repositoryOwner,
+    query.repositoryName,
+    query.number,
+  );
+  for (const link of state.byId.values()) {
+    if (
+      link.status === "active" &&
+      pullRequestDisplayLookupKey(
+        link.projectId,
+        link.repositoryOwner,
+        link.repositoryName,
+        link.number,
+      ) === wanted &&
+      forgeIdCompatible(link, query.pullRequestNodeId, query.baseRepositoryNodeId)
+    ) {
+      return link;
+    }
+  }
+  const historicalEntries = state.historicalDisplayByKey.get(wanted);
+  if (historicalEntries === undefined) return undefined;
+  for (const historical of historicalEntries) {
+    const canonical = resolveCanonicalPullRequestLink(state, historical.linkId);
+    if (
+      canonical !== undefined &&
+      canonical.status === "active" &&
+      String(canonical.projectId) === projectKey &&
+      forgeIdCompatible(canonical, query.pullRequestNodeId, query.baseRepositoryNodeId)
+    ) {
+      return canonical;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Every `(owner, name, number)` coordinate — current and historical, including
+ * merged duplicate links — that resolves to `linkId`.
+ */
+export function listPullRequestDisplayAliases(
+  state: PullRequestLinkRegistryState,
+  linkId: PullRequestLinkId,
+): ReadonlyArray<PullRequestDisplayCoordinate> {
+  const canonical = resolveCanonicalPullRequestLink(state, linkId);
+  if (canonical === undefined) return [];
+  const canonicalId = String(canonical.linkId);
+  const byKey = new Map<string, PullRequestDisplayCoordinate>();
+  const add = (coord: PullRequestDisplayCoordinate) => {
+    const key = `${coord.repositoryOwner.toLowerCase()}/${coord.repositoryName.toLowerCase()}#${coord.number}`;
+    if (!byKey.has(key)) byKey.set(key, coord);
+  };
+  add({
+    repositoryOwner: canonical.repositoryOwner,
+    repositoryName: canonical.repositoryName,
+    number: canonical.number,
+  });
+  for (const entries of state.historicalDisplayByKey.values()) {
+    for (const entry of entries) {
+      const resolved = resolveCanonicalPullRequestLink(state, entry.linkId);
+      if (resolved !== undefined && String(resolved.linkId) === canonicalId) {
+        add({
+          repositoryOwner: entry.repositoryOwner,
+          repositoryName: entry.repositoryName,
+          number: entry.number,
+        });
+      }
+    }
+  }
+  return [...byKey.values()];
+}
+
+interface RepositoryEquivalenceGroup {
+  readonly baseRepositoryNodeId?: GithubRepositoryNodeId;
+  readonly names: Set<string>;
+  canonical: { readonly owner: string; readonly name: string; readonly order: number };
+}
+
+function projectRepositoryGroups(
+  state: PullRequestLinkRegistryState,
+  projectId: ProjectId | string,
+): ReadonlyArray<RepositoryEquivalenceGroup> {
+  const projectKey = String(projectId);
+  const byCanonicalLinkId = new Map<string, Set<string>>();
+  for (const link of state.byId.values()) {
+    if (link.status !== "active" || String(link.projectId) !== projectKey) continue;
+    const names = new Set<string>([
+      `${link.repositoryOwner.toLowerCase()}/${link.repositoryName.toLowerCase()}`,
+    ]);
+    byCanonicalLinkId.set(String(link.linkId), names);
+  }
+  for (const entries of state.historicalDisplayByKey.values()) {
+    for (const entry of entries) {
+      if (String(entry.projectId) !== projectKey) continue;
+      const resolved = resolveCanonicalPullRequestLink(state, entry.linkId);
+      if (resolved === undefined || resolved.status !== "active") continue;
+      const names = byCanonicalLinkId.get(String(resolved.linkId));
+      names?.add(`${entry.repositoryOwner.toLowerCase()}/${entry.repositoryName.toLowerCase()}`);
+    }
+  }
+
+  const groups: RepositoryEquivalenceGroup[] = [];
+  const byNodeId = new Map<string, RepositoryEquivalenceGroup>();
+  const currentNodeIdsByName = new Map<string, Set<string>>();
+  for (const link of state.byId.values()) {
+    if (link.status !== "active" || String(link.projectId) !== projectKey) continue;
+    const currentName = `${link.repositoryOwner.toLowerCase()}/${link.repositoryName.toLowerCase()}`;
+    if (link.baseRepositoryNodeId !== undefined) {
+      let currentOwners = currentNodeIdsByName.get(currentName);
+      if (currentOwners === undefined) {
+        currentOwners = new Set<string>();
+        currentNodeIdsByName.set(currentName, currentOwners);
+      }
+      currentOwners.add(String(link.baseRepositoryNodeId));
+    }
+    const names = byCanonicalLinkId.get(String(link.linkId)) ?? new Set<string>();
+    const existing =
+      link.baseRepositoryNodeId === undefined
+        ? undefined
+        : byNodeId.get(String(link.baseRepositoryNodeId));
+    if (existing !== undefined) {
+      for (const name of names) existing.names.add(name);
+      if (link.displayOrder >= existing.canonical.order) {
+        existing.canonical = {
+          owner: link.repositoryOwner,
+          name: link.repositoryName,
+          order: link.displayOrder,
+        };
+      }
+      continue;
+    }
+    const group: RepositoryEquivalenceGroup = {
+      ...(link.baseRepositoryNodeId === undefined
+        ? {}
+        : { baseRepositoryNodeId: link.baseRepositoryNodeId }),
+      names: new Set(names),
+      canonical: {
+        owner: link.repositoryOwner,
+        name: link.repositoryName,
+        order: link.displayOrder,
+      },
+    };
+    groups.push(group);
+    if (link.baseRepositoryNodeId !== undefined) {
+      byNodeId.set(String(link.baseRepositoryNodeId), group);
+    }
+  }
+
+  // Never let a reused repository name bridge two distinct baseRepositoryNodeIds:
+  // - If multiple active repository node IDs currently claim a name, strip it
+  //   from every group so it cannot alias to another name.
+  // - If one active repository node ID currently owns a name, strip that name
+  //   from any group with a KNOWN different baseRepositoryNodeId. Keep it on an
+  //   unbackfilled group (`baseRepositoryNodeId === undefined`) unless that
+  //   group's names span two distinct known current repository node IDs.
+  // - If a purely historical name was used by multiple distinct repository node
+  //   IDs, strip it from every group so equivalence fails closed.
+  const allNodeIdsByName = new Map<string, Set<string>>();
+  for (const group of groups) {
+    if (group.baseRepositoryNodeId === undefined) continue;
+    for (const name of group.names) {
+      let owners = allNodeIdsByName.get(name);
+      if (owners === undefined) {
+        owners = new Set<string>();
+        allNodeIdsByName.set(name, owners);
+      }
+      owners.add(String(group.baseRepositoryNodeId));
+    }
+  }
+  for (const group of groups) {
+    if (group.baseRepositoryNodeId === undefined) {
+      const effectiveOwners = new Set<string>();
+      for (const name of group.names) {
+        const owners = currentNodeIdsByName.get(name) ?? allNodeIdsByName.get(name);
+        if (owners !== undefined) {
+          for (const owner of owners) effectiveOwners.add(owner);
+        }
+      }
+      if (effectiveOwners.size > 1) {
+        group.names.clear();
+        continue;
+      }
+    }
+    for (const name of Array.from(group.names)) {
+      const currentOwners = currentNodeIdsByName.get(name);
+      if (currentOwners !== undefined && currentOwners.size > 1) {
+        group.names.delete(name);
+        continue;
+      }
+      if (currentOwners !== undefined && currentOwners.size === 1) {
+        const [soleOwner] = currentOwners;
+        if (
+          soleOwner !== undefined &&
+          group.baseRepositoryNodeId !== undefined &&
+          String(group.baseRepositoryNodeId) !== soleOwner
+        ) {
+          group.names.delete(name);
+        }
+        continue;
+      }
+      const historicalOwners = allNodeIdsByName.get(name);
+      if (historicalOwners !== undefined && historicalOwners.size > 1) {
+        group.names.delete(name);
+      }
+    }
+  }
+  return groups;
+}
+
+/**
+ * Whether two `owner/name` repository names refer to the same base repository
+ * in `projectId`, either directly (case-insensitive) or because one renamed or
+ * transferred into the other on a recorded pull-request link or shared base
+ * repository node ID.
+ */
+export function areSamePullRequestRepositoryInProject(
+  state: PullRequestLinkRegistryState,
+  projectId: ProjectId | string,
+  left: { readonly owner: string; readonly name: string },
+  right: { readonly owner: string; readonly name: string },
+): boolean {
+  const leftKey = `${left.owner.toLowerCase()}/${left.name.toLowerCase()}`;
+  const rightKey = `${right.owner.toLowerCase()}/${right.name.toLowerCase()}`;
+  if (leftKey === rightKey) return true;
+  for (const group of projectRepositoryGroups(state, projectId)) {
+    if (group.names.has(leftKey) && group.names.has(rightKey)) return true;
+  }
+  return false;
+}
+
+/**
+ * Canonical current display `(owner, name)` for a repository in `projectId` if
+ * any recorded pull-request link knows `candidate` (either currently or as a
+ * pre-rename historical alias).
+ */
+export function canonicalPullRequestRepositoryInProject(
+  state: PullRequestLinkRegistryState,
+  projectId: ProjectId | string,
+  candidate: { readonly owner: string; readonly name: string },
+):
+  | {
+      readonly owner: string;
+      readonly name: string;
+      readonly baseRepositoryNodeId?: GithubRepositoryNodeId;
+    }
+  | undefined {
+  const key = `${candidate.owner.toLowerCase()}/${candidate.name.toLowerCase()}`;
+  let best: RepositoryEquivalenceGroup | undefined;
+  for (const group of projectRepositoryGroups(state, projectId)) {
+    if (!group.names.has(key)) continue;
+    if (
+      best === undefined ||
+      (best.baseRepositoryNodeId === undefined && group.baseRepositoryNodeId !== undefined) ||
+      (Boolean(best.baseRepositoryNodeId) === Boolean(group.baseRepositoryNodeId) &&
+        group.canonical.order > best.canonical.order)
+    ) {
+      best = group;
+    }
+  }
+  if (best === undefined) return undefined;
+  return {
+    owner: best.canonical.owner,
+    name: best.canonical.name,
+    ...(best.baseRepositoryNodeId === undefined
+      ? {}
+      : { baseRepositoryNodeId: best.baseRepositoryNodeId }),
+  };
 }
 
 /**
