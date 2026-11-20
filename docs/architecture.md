@@ -18817,7 +18817,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   holds it to the pinned key, since the window's page policy reaches loopback
   only; see Desktop pairing above), and opens its servers only live (below),
   never as one of its own Browser tabs; while that computer is not connected
-  the card reads nothing and says so, never this computer's rows.
+  the card reads nothing and says so, never this computer's rows. A thread on
+  a paired computer that the window follows (the Code start screen for that
+  computer) lists the thread's own servers that computer can open, and opens
+  one the same way, live in Octant's own window or the default browser,
+  through a grant for that thread's listing (`local-servers` source), so the
+  host re-observes the row and the thread's authority there decides
+  (maintainer decision, 2026-11-20: a remote page stays out of this window's
+  Browser tabs, which belong to threads on this computer).
 - **Proxy sessions and server grants.** A paired device asks for a grant to
   open one dev server from its own computer, under a proxy session that is
   separate from its product session. The rules in force:

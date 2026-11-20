@@ -11,7 +11,7 @@ import { decodeWorkspaceTabId } from "@octant/contracts/shell";
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { WorkThread } from "@octant/contracts/work-threads";
 import { buildModelPickerGroups, type PickerGroup } from "@octant/domain";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChatWorkspace } from "../chat/ChatWorkspace";
 import { CanvasWorkspaceTab } from "../canvas/CanvasWorkspaceTab";
 import { useChatController } from "../chat/useChatController";
@@ -444,6 +444,8 @@ export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "client
    * address names a thread on this computer, never on the other one.
    */
   readonly followsContinuationLink?: boolean;
+  /** What the open thread shows above its conversation, such as its servers on that computer. */
+  readonly renderThreadExtras?: (thread: CodeThread) => ReactNode;
 }
 
 /**
@@ -500,6 +502,7 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
     >
       {activeThreadId === undefined ? null : (
         <>
+          {activeThread === undefined ? null : props.renderThreadExtras?.(activeThread)}
           {activeThread === undefined ? null : (
             <RemoteCoordinatorProposals
               actsAsHostPerson={props.actsAsHostPerson}

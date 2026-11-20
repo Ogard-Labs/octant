@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { RunningService } from "@octant/contracts";
+import type { RemoteServerGrantSource } from "@octant/contracts";
 import { LocalServerClientFailure, type LocalServerClient } from "@octant/client-runtime";
 import type { RemoteSessionFacts } from "@octant/client-runtime";
 import {
@@ -39,9 +39,14 @@ export interface RemoteServerLiveHost {
 }
 
 export interface RemoteServerLiveOpener {
+  /**
+   * Asks the host for a grant to one server it lists, by the listing the row
+   * came from (the start screen's Running services, or a thread's Local
+   * servers), and shows it.
+   */
   readonly openLive: (
     host: RemoteServerLiveHost,
-    service: RunningService,
+    source: RemoteServerGrantSource,
     mode: RemoteOpenMode,
   ) => Promise<RemoteOpenOutcome>;
   /** Stops signing for the pages this window opened. */
@@ -67,7 +72,7 @@ export function createRemoteServerLiveOpener(
     return client.signRelayRequest(request);
   });
   return {
-    openLive: async (host, service, mode) => {
+    openLive: async (host, source, mode) => {
       let client = clients.get(host.hostId);
       if (client === undefined) {
         client = createRemoteServerProxyClient({
@@ -79,10 +84,7 @@ export function createRemoteServerLiveOpener(
         });
         clients.set(host.hostId, client);
       }
-      const opening = await client.openGrant({
-        surface: "running-services",
-        listenerId: service.listenerId,
-      });
+      const opening = await client.openGrant(source);
       if (opening.status === "refused") return { kind: "refused", message: opening.message };
       const shown = await bridge.openRemoteServerPage({
         hostId: host.hostId,
