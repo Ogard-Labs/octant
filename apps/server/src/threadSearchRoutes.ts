@@ -172,6 +172,7 @@ async function searchAcrossModes(
       lifecycle: thread.lifecycle === "archived" ? "archived" : "active",
       ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
       updatedAt: thread.updatedAt,
+      ...(match.imported === true ? { imported: true } : {}),
       snippet: match.snippet,
       ...(match.matchRanges.length === 0 ? {} : { matchRanges: match.matchRanges }),
     });

@@ -1419,6 +1419,47 @@ resumed again, and the thread's next turn starts a fresh one, as a Code thread
 rewound to its first message does. Its picker and details row
 are Code's, above the Work composer.
 
+#### Imported history
+
+A thread started from a session begun outside Octant shows that session's
+earlier conversation in its own history (maintainer decision, 2026-11-20;
+built): the person's messages and the agent's replies, each tool call named
+rather than replayed. The driver reads it through the provider SDK's optional
+`nativeSessions.history`, from what its runtime already stores, read-only,
+after `adopt` claims the session and before the commit checks, which do not
+yield. The host bounds it (`nativeSessionHistory.ts`): the newest 200
+messages within 256 KiB of text, each message clipped to 8 KiB and marked
+when clipped, at most 16 tool names a message; the earlier messages it leaves
+out are counted (`omittedMessages`) and the thread says how many. The read
+never refuses an adoption: a driver without the read imports none as
+`unsupported`, a session with no messages as `empty`, and a read that fails,
+dies, or runs past 30 seconds as `unreadable`, and the thread says which.
+
+The host journals what it keeps once, in the same unit as the adoption
+(Code's two operation events; Work's `work.thread-updated@1`), as
+`native-session.history-imported@1` under an aggregate of its own,
+`native-session-history`, keyed by the thread id. No turn, handoff, fork,
+compaction, or usage read folds that aggregate, so the imported messages are
+the thread's record only: the provider already holds them and is never sent
+them again, they cost nothing, and a provider-switch handoff or a fork does
+not carry them (a recorded gap). Replay reads the journaled record: the
+thread's native-session read (`adopted.history`) answers it after the same
+access checks as the session id, and the thread shows it above the composer
+in the details row as "Imported from the provider's session", collapsed, each
+message marked by speaker. Thread search indexes it as the thread's prompt,
+reply, and tool text under a turn of its own with no anchor, so a hit opens
+the thread and is marked Imported; it is journaled before any turn, so a
+rewind never removes it, and a thread purge erases it with the thread's other
+records (its payload names the thread).
+
+| Runtime                                           | What the history read uses                                                                                                                                                                                                                          |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code                                       | The session transcript the resume record names, through the Agent SDK's `getSessionMessages` under the account's configuration folder; tool results and subagent messages left out                                                                  |
+| Codex                                             | `thread/read` with `includeTurns` on a catalog app-server, which reads the stored rollout without loading the thread; a server that returns no turns imports none as `unsupported`                                                                  |
+| OpenCode                                          | The session's messages (`session.messages`) on the folder's catalog server; OpenCode 2's message shape is not one Octant reads, so it imports none as `unsupported`                                                                                 |
+| Pi                                                | The person's own JSONL that adopting copied, the current branch from its last entry back to the root; tool results left out                                                                                                                         |
+| ACP agents that list sessions (`importsSessions`) | `session/load` in a readiness-check process of its own, collecting the replayed `user_message_chunk`, `agent_message_chunk`, and `tool_call` updates, then closing it; an agent that does not advertise `loadSession` imports none as `unsupported` |
+
 #### Wake-ups the model schedules
 
 `ScheduleWakeup` (a delay, held to one minute to one hour), `CronCreate` (a
@@ -2779,7 +2820,10 @@ with the person's token. The CLI talks to Google itself.
   launch unpacks the CLI again before it answers. A thread may start from
   one of the CLI's own sessions for its folder, listed through `session/list`
   when `initialize` advertises it, leaving out any an Octant thread holds
-  (`importsSessions`).
+  (`importsSessions`). Its earlier conversation is imported by loading it
+  once in a separate readiness-check process over `agy acp`, which replays
+  it, and closing that process
+  ([Imported history](#imported-history)).
 - **Usage and limits.** The `session/prompt` reply's `usage` is that turn's
   own, read as [any ACP agent's](#usage-an-acp-agent-reports); a reply
   without `totalTokens` is read by the reviewed rule that its `inputTokens`

@@ -106,6 +106,7 @@ export function threadSearchAnswer(read: ThreadSearchRead): TranscriptSearchAnsw
         field: hit.field,
         ...(hit.canvasId === undefined ? {} : { canvasId: String(hit.canvasId) }),
         ...(hit.canvasTitle === undefined ? {} : { canvasTitle: hit.canvasTitle }),
+        ...(hit.imported === true ? { imported: true } : {}),
         snippet: hit.snippet,
         updatedAt: hit.updatedAt,
         ...(hit.matchRanges === undefined || hit.matchRanges.length === 0

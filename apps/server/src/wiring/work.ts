@@ -38,6 +38,7 @@ import {
 } from "@octant/contracts";
 import { Effect } from "effect";
 import { OutlivingSessions, type RuntimeTurnStarter } from "../providers/outlivingSessions";
+import { readJournaledSessionHistory } from "../providers/nativeSessionHistory";
 import { createWorkSessionRouteHandler } from "../work/workSessionRoutes";
 import { stopKeptSessionsOfChangedWorkThreads } from "../work/workKeptSessions";
 import { codeThreadTurns } from "../code/codeForkPoint";
@@ -603,8 +604,10 @@ export function wireWork(deps: WorkDependencies) {
         agentMessageService.confirmDelivered(messageIds),
       // A Work thread started from a provider session begun outside Octant
       // is journaled on the thread, marked as carrying outside content first.
-      recordAdoptedSession: (thread, adopted) =>
-        workThreadService.recordAdoptedSession(thread, adopted),
+      recordAdoptedSession: (thread, adopted, history) =>
+        workThreadService.recordAdoptedSession(thread, adopted, history),
+      readImportedSessionHistory: (threadId) =>
+        readJournaledSessionHistory(persistence.journal, String(threadId), "work"),
       // A compaction stops the session kept past the thread's last turn.
       stopKeptSession: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
       turnRuntime: new WorkTurnRuntime({

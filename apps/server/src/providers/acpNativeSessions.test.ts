@@ -7,6 +7,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   acpListedSessions,
+  acpReplayedMessages,
   makeAcpNativeSessions,
   type AcpListedSession,
 } from "./acpNativeSessions";
@@ -89,5 +90,40 @@ describe("an ACP agent's own sessions", () => {
       }),
     ).toEqual([{ sessionId: "a", title: "A", cwd: "/x" }]);
     expect(acpListedSessions({})).toBeUndefined();
+  });
+});
+
+describe("an ACP agent's session history", () => {
+  it("joins replayed message chunks into messages and names tool calls, leaving thoughts out", () => {
+    expect(
+      acpReplayedMessages([
+        { sessionUpdate: "user_message_chunk", content: { type: "text", text: "Find the " } },
+        { sessionUpdate: "user_message_chunk", content: { type: "text", text: "flaky test" } },
+        { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "hm" } },
+        { sessionUpdate: "tool_call", toolCallId: "t1", title: "Run tests", kind: "execute" },
+        { sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed" },
+        { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "It is " } },
+        { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "timing out." } },
+      ]),
+    ).toEqual([
+      { role: "person", text: "Find the flaky test" },
+      { role: "agent", text: "It is timing out.", tools: ["Run tests"] },
+    ]);
+  });
+
+  it("imports none from an agent that cannot load its sessions", async () => {
+    const sessions = makeAcpNativeSessions({
+      instanceId,
+      driverKind: "antigravity",
+      displayName: "Antigravity",
+      heldSessions: () => new Set(),
+      listSessions: async () => [],
+      readHistory: async () => "unsupported",
+    });
+    const history = sessions.history;
+    if (history === undefined) throw new Error("A reader was given");
+    expect(
+      await Effect.runPromise(history({ instanceId, projectRoot: "/work", nativeSessionId: "s1" })),
+    ).toEqual({ status: "unsupported" });
   });
 });

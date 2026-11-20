@@ -313,6 +313,9 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
                       </span>
                     )}
                   </span>
+                  {hit.imported === true ? (
+                    <span className="thread-search__result-state">Imported</span>
+                  ) : null}
                   {hit.field === "tool" || hit.field === "canvas" ? (
                     <span className="thread-search__result-state">
                       {hit.field === "tool" ? "Tool output" : "Canvas"}

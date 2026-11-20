@@ -278,6 +278,11 @@ import {
 } from "../canvas/canvasDeliveryInstructions";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import { appToolHostLines } from "../providers/appToolHostLines";
+import {
+  nativeSessionHistoryAppend,
+  readImportedSessionHistory,
+  readJournaledSessionHistory,
+} from "../providers/nativeSessionHistory";
 import { STOP_CONFIRMATION_MS } from "../stopConfirmation";
 
 type Awaitable<T> = T | Promise<T>;
@@ -1781,6 +1786,17 @@ export function createCodeOperationRuntime(
    * synchronously so a caller can act on the answer before another turn is
    * admitted.
    */
+  const adoptedWithHistory = (threadId: CodeThreadId, nativeSessionId: string) => {
+    const history = readJournaledSessionHistory(
+      options.persistence.journal,
+      String(threadId),
+      "code",
+    );
+    return {
+      nativeSessionId: decodeCodeNativeSessionId(nativeSessionId),
+      ...(history === undefined ? {} : { history }),
+    };
+  };
   const conversationRefusal = (
     thread: CodeThread,
   ): { readonly message: string; readonly adopted?: string } | undefined => {
@@ -2442,7 +2458,7 @@ export function createCodeOperationRuntime(
             unavailable: target.message,
             ...(target.adopted === undefined
               ? {}
-              : { adopted: { nativeSessionId: target.adopted } }),
+              : { adopted: adoptedWithHistory(threadId, target.adopted) }),
           };
         const listed = await Effect.runPromise(
           Effect.either(
@@ -2506,6 +2522,14 @@ export function createCodeOperationRuntime(
           // back, or the session could never be offered or adopted again.
           let committed = false;
           try {
+            // Read before the commit checks below, which must not yield. The
+            // read never fails the adoption: a runtime without readable
+            // history, or a read that fails, imports none and says why.
+            const history = await readImportedSessionHistory(target.nativeSessions, {
+              instanceId: target.thread.providerInstanceId,
+              projectRoot: target.projectRoot,
+              nativeSessionId,
+            });
             // The thread must still be empty when the adoption commits. Nothing
             // yields from here to the journal appends, so no turn slips in.
             const occupied = conversationRefusal(target.thread);
@@ -2573,6 +2597,21 @@ export function createCodeOperationRuntime(
                   resumeCursor: cursor,
                 },
               });
+              // The session's earlier conversation, as the thread's own record:
+              // never prompt context, since the provider already holds it.
+              options.persistence.journal.append(
+                nativeSessionHistoryAppend({
+                  threadId: String(thread.id),
+                  mode: "code",
+                  providerInstanceId: thread.providerInstanceId,
+                  nativeSessionId,
+                  history,
+                  eventId: options.uuid(),
+                  correlationId: options.uuid(),
+                  actor: options.actor,
+                  occurredAt: options.clock(),
+                }),
+              );
             });
             committed = true;
             return { kind: "code-native-session-adopted", threadId, nativeSessionId };

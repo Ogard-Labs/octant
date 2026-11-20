@@ -79,6 +79,8 @@ import {
   type ProviderResumeCursor,
   type ProviderRuntimeEvent,
   type WindowId,
+  NATIVE_SESSION_HISTORY_IMPORTED_EVENT,
+  NativeSessionHistoryImported,
 } from "@octant/contracts";
 import { Deferred, Effect, Queue, Schema, Stream } from "effect";
 import type {
@@ -6884,6 +6886,97 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("journals the adopted session's earlier conversation as imported history the thread replays without sending it to the provider", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const outside = decodeCodeNativeSessionId("outside-session-history");
+    const history = vi.fn(() =>
+      Effect.succeed({
+        status: "read" as const,
+        messages: [
+          { role: "person" as const, text: "Rename the login handler" },
+          { role: "agent" as const, text: "Renamed it to signIn.", tools: ["Edit"] },
+        ],
+      }),
+    );
+    const provider: ProviderDriver = {
+      ...providerDriver(connection),
+      nativeSessions: {
+        list: () => Effect.succeed([]),
+        adopt: () => Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: outside }),
+        history,
+      },
+    };
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: [] },
+    }));
+    const fixture = runtimeFixture({ provider, recordExternalContentIngestion });
+    try {
+      const sessions = fixture.runtime.nativeSessions!;
+      expect(await sessions.adopt(windowId, threadId, outside)).toMatchObject({
+        kind: "code-native-session-adopted",
+      });
+      expect(history).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: outside }));
+      // Read back from the journal, as a reopened thread or a restart reads it.
+      expect(await sessions.list(windowId, threadId)).toMatchObject({
+        adopted: {
+          nativeSessionId: outside,
+          history: {
+            status: "imported",
+            messages: [
+              { role: "person", text: "Rename the login handler" },
+              { role: "agent", text: "Renamed it to signIn.", tools: ["Edit"] },
+            ],
+          },
+        },
+      });
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1386),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+      // The provider already holds the session: nothing imported rides along.
+      const sent = JSON.stringify([
+        vi.mocked(connection.resume).mock.calls,
+        vi.mocked(connection.send).mock.calls,
+      ]);
+      expect(sent).not.toContain("Rename the login handler");
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("imports no history from a provider that keeps none it can read, and says so", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const outside = decodeCodeNativeSessionId("outside-session-silent");
+    const provider: ProviderDriver = {
+      ...providerDriver(providerConnection(queue)),
+      nativeSessions: {
+        list: () => Effect.succeed([]),
+        adopt: () => Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: outside }),
+      },
+    };
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: [] },
+    }));
+    const fixture = runtimeFixture({ provider, recordExternalContentIngestion });
+    try {
+      const sessions = fixture.runtime.nativeSessions!;
+      await sessions.adopt(windowId, threadId, outside);
+      expect(await sessions.list(windowId, threadId)).toMatchObject({
+        adopted: { nativeSessionId: outside, history: { status: "none", reason: "unsupported" } },
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("refuses an adoption whose thread was rebound to another checkout while it ran, and gives the claim back", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const outside = decodeCodeNativeSessionId("outside-session-1");
@@ -13214,6 +13307,7 @@ function runtimeFixture(options: {
       .register("code.review-finding-updated@1", 1, CodeReviewFindingUpdated)
       .register("feedback.note-captured@1", 1, ProductFeedbackCaptured)
       .register("feedback.note-delivered@1", 1, ProductFeedbackDelivered)
+      .register(NATIVE_SESSION_HISTORY_IMPORTED_EVENT, 1, NativeSessionHistoryImported)
       .register("feedback.note-updated@1", 1, ProductFeedbackUpdated),
     projections: new ProjectionRegistry()
       .register(new AggregateHeadsProjection())

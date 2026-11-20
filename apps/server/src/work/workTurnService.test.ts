@@ -94,6 +94,7 @@ import {
   type AgentRun,
   type Project,
   type WorkThreadAdoptedSession,
+  type ImportedSessionHistory,
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
 import { Effect, Queue, Schema, Stream } from "effect";
@@ -2422,6 +2423,54 @@ describe("WorkTurnService", () => {
       expect(seen).toEqual([
         { sessionId: String(adopted?.providerSessionId), cursor: "outside-cursor" },
       ]);
+    });
+
+    it("records the adopted session's earlier conversation with the adoption, shows it back, and never sends it to the provider", async () => {
+      let adopted: WorkThreadAdoptedSession | undefined;
+      let imported: ImportedSessionHistory | undefined;
+      const prompts: string[] = [];
+      const fixture = serviceFixture({
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          nativeSessions: {
+            list: () => Effect.succeed([]),
+            adopt: () => Effect.succeed(cursor),
+            history: () =>
+              Effect.succeed({
+                status: "read" as const,
+                messages: [{ role: "person" as const, text: "Collect the vendor quotes" }],
+              }),
+          },
+        }),
+        recordAdoptedSession: (_thread, record, history) => {
+          adopted = record;
+          imported = history;
+          return { status: "recorded" };
+        },
+        readImportedSessionHistory: () => imported,
+        adoptedSession: () => adopted,
+        turnRuntime: {
+          run: async (input) => {
+            prompts.push(JSON.stringify(input));
+            return { kind: "completed", response: "Done" };
+          },
+        },
+      });
+
+      await fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1");
+
+      expect(imported).toEqual({
+        status: "imported",
+        messages: [{ role: "person", text: "Collect the vendor quotes" }],
+      });
+      expect((await fixture.service.nativeSessions(ids.window, ids.thread)).adopted).toEqual({
+        nativeSessionId: "outside-1",
+        history: imported,
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]).not.toContain("Collect the vendor quotes");
     });
 
     it("refuses a message sent while the thread takes up a session, and an adoption once it has a turn", async () => {
@@ -6643,6 +6692,7 @@ function serviceFixture(
     /** Read on every admission and rewind, so a test can freeze the thread for a move. */
     readonly moveHold?: (threadId: string) => boolean;
     readonly recordAdoptedSession?: WorkTurnServiceDependencies["recordAdoptedSession"];
+    readonly readImportedSessionHistory?: WorkTurnServiceDependencies["readImportedSessionHistory"];
     readonly stopKeptSession?: WorkTurnServiceDependencies["stopKeptSession"];
     /** Read on every thread read, so a test can adopt a session between reads. */
     readonly adoptedSession?: () => WorkThreadAdoptedSession | undefined;
@@ -6874,6 +6924,9 @@ function serviceFixture(
     ...(options.recordAdoptedSession === undefined
       ? {}
       : { recordAdoptedSession: options.recordAdoptedSession }),
+    ...(options.readImportedSessionHistory === undefined
+      ? {}
+      : { readImportedSessionHistory: options.readImportedSessionHistory }),
     ...(options.stopKeptSession === undefined ? {} : { stopKeptSession: options.stopKeptSession }),
     ...(options.onTurnCancelled === undefined ? {} : { onTurnCancelled: options.onTurnCancelled }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
