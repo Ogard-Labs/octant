@@ -11,6 +11,7 @@ export interface ComputerUseLifecycleController {
   readonly errorMessage?: string;
   readonly busy: boolean;
   readonly approve: () => Promise<void>;
+  readonly approveForProject: () => Promise<void>;
   readonly deny: () => Promise<void>;
   readonly stop: () => Promise<void>;
   readonly retry: () => void;
@@ -96,7 +97,7 @@ export function useComputerUseLifecycle(options: {
   }, [attempt, enabled, fail, options.client, scopeKey, sessionId]);
 
   const decide = useCallback(
-    async (decision: "approved" | "denied") => {
+    async (decision: "approved" | "denied", rememberForProject?: boolean) => {
       const pending = view?.pendingApproval;
       if (pending === undefined || busy) return;
       setBusy(true);
@@ -107,6 +108,7 @@ export function useComputerUseLifecycle(options: {
           actionId: pending.actionId,
           approvalId: pending.approvalId,
           decision,
+          ...(rememberForProject === true ? { rememberForProject: true } : {}),
         });
         setView(next);
         setStatus("ready");
@@ -140,6 +142,7 @@ export function useComputerUseLifecycle(options: {
     ...(errorMessage === undefined ? {} : { errorMessage }),
     busy,
     approve: () => decide("approved"),
+    approveForProject: () => decide("approved", true),
     deny: () => decide("denied"),
     stop,
     retry,

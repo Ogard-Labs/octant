@@ -219,6 +219,8 @@ export interface CloudIamRuntime {
     readonly scope: CloudIamScope;
     readonly actorId: string;
     readonly termsAcknowledgedAt: string;
+    /** One-time 6-digit MFA code for a profile role with `mfa_serial`; never persisted. */
+    readonly mfaCode?: string;
   }) => Promise<CloudIamConnectResult>;
   readonly sign: (input: {
     readonly credentialRef: string;
@@ -266,7 +268,13 @@ interface StoredProfileGrant {
   readonly version: 1;
   readonly source: CloudIamProfileSource;
   readonly scope: CloudIamScope;
-  /** The last credentials the profile yielded; absent until the first renewal for a profile. */
+  /**
+   * True when the profile assumed a role with `mfa_serial`. Temporary session
+   * credentials live in broker memory only (`ephemeralProfileCredentials`) and
+   * are never written to the credential store or journal.
+   */
+  readonly mfaSession?: true;
+  /** The last credentials the profile yielded; absent for access keys and MFA sessions. */
   readonly credentials?: AwsCredentials;
 }
 
@@ -315,6 +323,9 @@ export function createCloudIamRuntime(options: {
   const sleep = options.sleep ?? defaultSleep;
   const attempts = new Map<string, Attempt>();
   const renewals = new Map<string, Promise<RenewOutcome>>();
+  // Assumed temporary session credentials for MFA role profiles: memory only,
+  // never written to the credential store (Keychain) or journal.
+  const ephemeralProfileCredentials = new Map<string, AwsCredentials>();
   let closed = false;
 
   const publish = (attemptId: string, status: CloudIamPublicState): void => {
@@ -625,8 +636,13 @@ export function createCloudIamRuntime(options: {
 
   const resolveProfile = async (
     source: CloudIamProfileSource,
+    mfaCode?: string,
   ): Promise<
-    | { readonly kind: "credentials"; readonly credentials: AwsCredentials }
+    | {
+        readonly kind: "credentials";
+        readonly credentials: AwsCredentials;
+        readonly mfaSession?: true;
+      }
     | { readonly kind: "refused"; readonly reason: AwsProfileRefusal }
   > => {
     if (source.kind === "access-keys") {
@@ -642,25 +658,30 @@ export function createCloudIamRuntime(options: {
     }
     const ports = options.profiles;
     if (ports === undefined) return { kind: "refused", reason: "unavailable" };
-    return resolveAwsProfileCredentials(source.profileName, {
-      ...ports,
-      now,
-      mintSsoRoleCredentials: async (sso) => {
-        const minted = await mintRoleCredentials(
-          fetchImpl,
-          {
-            startUrl: "",
-            ssoRegion: sso.ssoRegion,
-            accountId: sso.accountId,
-            roleName: sso.roleName,
-          },
-          sso.accessToken,
-        );
-        return minted;
+    return resolveAwsProfileCredentials(
+      source.profileName,
+      {
+        ...ports,
+        fetchMetadata: ports.fetchMetadata ?? fetchImpl,
+        now,
+        mintSsoRoleCredentials: async (sso) => {
+          const minted = await mintRoleCredentials(
+            fetchImpl,
+            {
+              startUrl: "",
+              ssoRegion: sso.ssoRegion,
+              accountId: sso.accountId,
+              roleName: sso.roleName,
+            },
+            sso.accessToken,
+          );
+          return minted;
+        },
+        assumeRole: (role) => stsAssumeRole(fetchImpl, now(), role),
+        assumeRoleWithWebIdentity: (role) => stsAssumeRoleWithWebIdentity(fetchImpl, role),
       },
-      assumeRole: (role) => stsAssumeRole(fetchImpl, now(), role),
-      assumeRoleWithWebIdentity: (role) => stsAssumeRoleWithWebIdentity(fetchImpl, role),
-    });
+      mfaCode === undefined ? undefined : { mfaCode },
+    );
   };
 
   const connect: CloudIamRuntime["connect"] = async (input) => {
@@ -673,29 +694,38 @@ export function createCloudIamRuntime(options: {
     if (
       source === undefined ||
       scope === undefined ||
-      !DESCRIPTOR_ID_PATTERN.test(input.descriptorId)
+      !DESCRIPTOR_ID_PATTERN.test(input.descriptorId) ||
+      (input.mfaCode !== undefined && source.kind !== "aws-profile")
     )
       return { kind: "refused", reason: "invalid" };
-    const resolved = await resolveProfile(source);
+    const resolved = await resolveProfile(source, input.mfaCode);
     if (resolved.kind === "refused") {
       return {
         kind: "refused",
         reason: resolved.reason === "unavailable" ? "unavailable" : resolved.reason,
       };
     }
+    const mfaSession = resolved.mfaSession === true;
     const grant: StoredProfileGrant = {
       kind: PROFILE_GRANT_KIND,
       version: 1,
       source,
       scope,
-      // A key pair's keys are its source; a profile's are cached until they near expiry.
-      ...(source.kind === "aws-profile" ? { credentials: resolved.credentials } : {}),
+      ...(mfaSession ? { mfaSession: true as const } : {}),
+      // MFA role sessions stay in broker memory only — never persisted in the
+      // credential store. Non-MFA profiles cache credentials until near expiry.
+      ...(source.kind === "aws-profile" && !mfaSession
+        ? { credentials: resolved.credentials }
+        : {}),
     };
     const credentialRef = randomUUID();
     try {
       await options.store.set(credentialRef, JSON.stringify(grant));
     } catch {
       return { kind: "refused", reason: "unavailable" };
+    }
+    if (mfaSession) {
+      ephemeralProfileCredentials.set(credentialRef, resolved.credentials);
     }
     return { kind: "signed-in", credentialRef };
   };
@@ -708,31 +738,54 @@ export function createCloudIamRuntime(options: {
     renewCredentials: boolean,
   ): Promise<CloudIamSignResult> => {
     if (!withinScope(request, grant.scope)) return { kind: "outside-scope" };
-    let credentials = grant.credentials;
+    let credentials: AwsCredentials | undefined;
     if (grant.source.kind === "access-keys") {
       credentials = {
         accessKeyId: grant.source.accessKeyId,
         secretAccessKey: grant.source.secretAccessKey,
       };
-    } else if (
-      renewCredentials ||
-      credentials === undefined ||
-      (credentials.expiresAt !== undefined && credentials.expiresAt - ROLE_RENEW_SKEW_MS <= now())
-    ) {
-      const resolved = await resolveProfile(grant.source);
-      if (resolved.kind === "refused") {
-        if (resolved.reason === "not-authorized" || resolved.reason === "role-refused")
-          return { kind: "not-authorized" };
-        // The person signs in again with the AWS CLI; the grant itself stays.
-        if (resolved.reason === "sso-sign-in-needed" || resolved.reason === "profile-missing")
-          return { kind: "sign-in-again", reason: "expired" };
-        return { kind: "unavailable" };
+    } else if (grant.mfaSession === true) {
+      // MFA temporary credentials live only in memory for the role session's
+      // duration. Once expired, rejected, or lost on restart, the person must
+      // supply a fresh MFA code in the sign-in dialog.
+      const cached = ephemeralProfileCredentials.get(credentialRef);
+      if (
+        renewCredentials ||
+        cached === undefined ||
+        (cached.expiresAt !== undefined && cached.expiresAt <= now())
+      ) {
+        ephemeralProfileCredentials.delete(credentialRef);
+        return { kind: "sign-in-again", reason: "expired" };
       }
-      credentials = resolved.credentials;
-      try {
-        await options.store.set(credentialRef, JSON.stringify({ ...grant, credentials }));
-      } catch {
-        // Signing with fresh credentials does not depend on caching them.
+      credentials = cached;
+    } else {
+      credentials = grant.credentials;
+      if (
+        renewCredentials ||
+        credentials === undefined ||
+        (credentials.expiresAt !== undefined && credentials.expiresAt - ROLE_RENEW_SKEW_MS <= now())
+      ) {
+        const resolved = await resolveProfile(grant.source);
+        if (resolved.kind === "refused") {
+          if (resolved.reason === "not-authorized" || resolved.reason === "role-refused")
+            return { kind: "not-authorized" };
+          // The person signs in again with the AWS CLI or supplies an MFA code; the grant stays.
+          if (
+            resolved.reason === "sso-sign-in-needed" ||
+            resolved.reason === "profile-missing" ||
+            resolved.reason === "mfa-required"
+          )
+            return { kind: "sign-in-again", reason: "expired" };
+          return { kind: "unavailable" };
+        }
+        credentials = resolved.credentials;
+        if (resolved.mfaSession !== true) {
+          try {
+            await options.store.set(credentialRef, JSON.stringify({ ...grant, credentials }));
+          } catch {
+            // Signing with fresh credentials does not depend on caching them.
+          }
+        }
       }
     }
     const signed = signSigV4({
@@ -802,6 +855,7 @@ export function createCloudIamRuntime(options: {
 
   const revoke: CloudIamRuntime["revoke"] = async (credentialRef) => {
     if (!UUID_PATTERN.test(credentialRef)) return { kind: "unavailable" };
+    ephemeralProfileCredentials.delete(credentialRef);
     const read = await readGrant(credentialRef);
     if (read.kind === "missing") return { kind: "revoked" };
     if (read.kind === "unavailable") return { kind: "unavailable" };
@@ -837,6 +891,7 @@ export function createCloudIamRuntime(options: {
     revoke,
     close: async () => {
       closed = true;
+      ephemeralProfileCredentials.clear();
       for (const attempt of attempts.values()) attempt.closed = true;
     },
   });
@@ -1259,12 +1314,14 @@ async function readProfileGrant(
   const source = readProfileSource(parsed.source);
   const scope = readScope(parsed.scope);
   if (source === undefined || scope === undefined) return undefined;
-  const credentials = readAwsCredentials(parsed.credentials);
+  const mfaSession = parsed.mfaSession === true;
+  const credentials = mfaSession ? undefined : readAwsCredentials(parsed.credentials);
   return {
     kind: PROFILE_GRANT_KIND,
     version: 1,
     source,
     scope,
+    ...(mfaSession ? { mfaSession: true as const } : {}),
     ...(credentials === undefined ? {} : { credentials }),
   };
 }
@@ -1420,10 +1477,20 @@ export async function handleCloudIamBrokerRoute(
   }
   if (pathname === "/v1/cloud-iam/connect") {
     // The person's own profile or key pair: a source and a signing scope, and
-    // nothing comes back but a reference.
-    if (!hasExactKeys(value, ["descriptorId", "source", "scope", "actorId", "termsAcknowledgedAt"]))
+    // nothing comes back but a reference. An optional one-time MFA code is
+    // accepted only for `aws-profile` and never stored.
+    const allowedConnectKeys = new Set([
+      "descriptorId",
+      "source",
+      "scope",
+      "actorId",
+      "termsAcknowledgedAt",
+      "mfaCode",
+    ]);
+    if (!Object.keys(value).every((key) => allowedConnectKeys.has(key))) {
       return failure("invalid-request", 400);
-    const { descriptorId, source, scope, actorId, termsAcknowledgedAt } = value;
+    }
+    const { descriptorId, source, scope, actorId, termsAcknowledgedAt, mfaCode } = value;
     const profileSource = readProfileSource(source);
     const signingScope = readScope(scope);
     if (
@@ -1431,7 +1498,11 @@ export async function handleCloudIamBrokerRoute(
       typeof actorId !== "string" ||
       typeof termsAcknowledgedAt !== "string" ||
       profileSource === undefined ||
-      signingScope === undefined
+      signingScope === undefined ||
+      (mfaCode !== undefined &&
+        (typeof mfaCode !== "string" ||
+          mfaCode.length > 32 ||
+          profileSource.kind !== "aws-profile"))
     )
       return failure("invalid-request", 400);
     return answer(
@@ -1441,6 +1512,7 @@ export async function handleCloudIamBrokerRoute(
         scope: signingScope,
         actorId,
         termsAcknowledgedAt,
+        ...(mfaCode === undefined ? {} : { mfaCode }),
       }),
     );
   }

@@ -453,6 +453,7 @@ export function startOctantServer(
       desktopPaneRoutes,
       desktopLeases,
       installDesktopPreviewRequest,
+      installRememberComputerUseApp,
       desktopRecipeKeys,
       launchSessionRoutes,
       machineChangeRoutes,
@@ -535,6 +536,7 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    installRememberComputerUseApp(shellService);
     const {
       runningWorkTurnAccess,
       runningWorkTurnSandbox,
@@ -599,6 +601,7 @@ export function startOctantServer(
       resolveThreadStrict,
       resolveHostStrict,
       hostResourceBudget,
+      serverProjectStore,
       serverRegistry,
       providerRuntimeNetwork,
       providerRuntimeRegistry,
@@ -922,6 +925,7 @@ export function startOctantServer(
       appleToolchainRoutes,
       baseRouteCodeService,
       codeSessionRoutes,
+      pullRequestReviewRoutes,
       codeCompletedThreadSource,
       codeOperationRuntime,
       codeService,
@@ -941,6 +945,7 @@ export function startOctantServer(
       isRestrictedDeviceScope,
       windowAuthorityStore,
       threadWakeups,
+      turnMetrics,
       hostResourceBudget,
       managedWorktreeReceipts,
       providerAvailabilityMarks,
@@ -1897,6 +1902,7 @@ export function startOctantServer(
       agentRunSettingsRoutes,
       androidToolchainRoutes,
       codeSessionRoutes,
+      pullRequestReviewRoutes,
       appleToolchainRoutes,
       artifactLibraryRoutes,
       artifactMirrorRoutes,

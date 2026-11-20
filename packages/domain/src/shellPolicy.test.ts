@@ -267,6 +267,7 @@ describe("shell settings policy", () => {
       browserHeldDownloadLimit: 5,
       browserUploadFileCountLimit: 5,
       rememberedBrowserTransfers: [],
+      rememberedComputerUseApps: [],
       persistentBrowserOwner: false,
       pairedDeviceLifetime: "30-days",
     });
@@ -289,6 +290,7 @@ describe("shell settings policy", () => {
       browserHeldDownloadLimit: 5,
       browserUploadFileCountLimit: 5,
       rememberedBrowserTransfers: [],
+      rememberedComputerUseApps: [],
       persistentBrowserOwner: false,
     });
     expect(current.chatEnabled).toBe(true);
@@ -365,6 +367,34 @@ describe("shell settings policy", () => {
     const { profile: _profile, ...anyPage } = entry;
     expect(() =>
       replaceShellSettings(current, { ...current, rememberedBrowserTransfers: [anyPage] }),
+    ).toThrow();
+  });
+
+  it("lets Settings forget a remembered Computer use app and refuses adding or altering one", () => {
+    const settings = defaultShellSettings();
+    const entry = {
+      projectId: "30000000-0000-4000-8000-000000000001" as never,
+      appId: "com.apple.Preview",
+      grantedBy: {
+        kind: "local-user" as const,
+        actorId: "00000000-0000-4000-8000-000000000002" as never,
+      },
+      grantedAt: "2026-11-19T12:00:00.000Z" as never,
+    };
+    const current: ShellSettings = { ...settings, rememberedComputerUseApps: [entry] };
+
+    expect(
+      replaceShellSettings(current, { ...current, rememberedComputerUseApps: [] })
+        .rememberedComputerUseApps,
+    ).toEqual([]);
+    expect(() =>
+      replaceShellSettings(settings, { ...settings, rememberedComputerUseApps: [entry] }),
+    ).toThrow();
+    expect(() =>
+      replaceShellSettings(current, {
+        ...current,
+        rememberedComputerUseApps: [{ ...entry, appId: "com.apple.Mail" }],
+      }),
     ).toThrow();
   });
 

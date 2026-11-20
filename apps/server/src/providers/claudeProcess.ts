@@ -69,6 +69,7 @@ import {
 } from "../process/threadEgressPolicy";
 import { canonicalClaudeAccountDirectory } from "./claudeAccountIsolation";
 import { REQUIRED_GUARDS, sanitizeClaudeEnvironment } from "./claudeEnvironment";
+import { awsProfileReadPaths } from "./providerHostEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
@@ -1381,6 +1382,8 @@ function confineClaudeLaunch(
         );
       }
     }
+    const openProfile = confinement.strict === false && confinement.sandboxPolicy === undefined;
+    const awsReadPaths = openProfile ? awsProfileReadPaths(spawnOptions.env) : [];
     const launch = options.confinement.prepare({
       sandboxProviderChannel: true,
       executable: spawnOptions.command,
@@ -1397,6 +1400,7 @@ function confineClaudeLaunch(
         temporaryDirectory,
         ...stateRoots.readRoots,
         ...readOnlyFolders,
+        ...awsReadPaths,
         ...(shellFolder === undefined ? [] : [shellFolder]),
       ],
       privateHomeAllowPaths: [
@@ -1405,8 +1409,10 @@ function confineClaudeLaunch(
         temporaryDirectory,
         ...stateRoots.readRoots,
         ...readOnlyFolders,
+        ...awsReadPaths,
         ...(shellFolder === undefined ? [] : [shellFolder]),
       ],
+      ...(openProfile ? { protectedFiles: "provider-sign-ins" as const } : {}),
       // The runtime calls its own control plane, so it resolves the runtime
       // egress policy rather than the thread default. This driver
       // carries Code threads, and the policy no longer reads the mode.

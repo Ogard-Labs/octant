@@ -759,6 +759,9 @@ describe("Codex driver probe and runtime lifecycle", () => {
         userQuestions: "supported",
         nativeChildAgents: "unsupported",
         harnessAutoReview: "supported",
+        // A rewind continues Codex's own `thread/fork` copy cut at the last
+        // kept turn's anchor from 0.143.0 onward.
+        sessionRollback: "supported",
       },
       models: [
         {
@@ -6012,9 +6015,10 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
     expect(f.startCount()).toBe(1);
     expect(f.closeCount()).toBe(1);
 
-    // Another folder or mode, or a Codex whose fork cannot cut at a turn, goes back as the text handoff.
+    // Another folder or mode, a blank anchor, or a Codex whose fork cannot cut at a turn goes back as the text handoff.
     expect(await fork({ projectRoot: "/tmp/another-project" })).toBeUndefined();
     expect(await fork({ mode: "work" })).toBeUndefined();
+    expect(await fork({ anchor: "   " })).toBeUndefined();
     const older = fixture({
       version: "0.142.5",
       threadFork: async () => {
@@ -6035,6 +6039,47 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
       ),
     ).toBeUndefined();
     expect(older.calls.some((call) => call.method === "thread/fork")).toBe(false);
+
+    // A copy that fails closes its short-lived process and surfaces the failure so the caller falls back to text handoff.
+    const failing = fixture({
+      version: "0.170.0",
+      threadFork: async () => {
+        throw new Error("fork failed");
+      },
+    });
+    const failed = await Effect.runPromise(
+      Effect.exit(
+        makeCodexDriver(failing.options()).forkSession?.({
+          instanceId,
+          sessionId: secondSessionId,
+          source,
+          anchor: "turn-2",
+          projectRoot,
+          mode: "code",
+          modelId: decodeProviderModelId("gpt-5.4"),
+        }) ?? Effect.succeed(undefined),
+      ),
+    );
+    expect(failed._tag).toBe("Failure");
+    expect(failing.startCount()).toBe(1);
+    expect(failing.closeCount()).toBe(1);
+  });
+
+  it("reports session rollback supported only from Codex 0.143.0 onward", async () => {
+    for (const version of ["0.143.0", "0.144.4", "0.170.0"]) {
+      const f = fixture({ version });
+      const probe = await Effect.runPromise(
+        Effect.scoped(makeCodexDriver(f.options()).probe({ instanceId })),
+      );
+      expect(probe.capabilities.sessionRollback).toBe("supported");
+    }
+    for (const version of ["0.142.5", "0.143.0-alpha.1"]) {
+      const f = fixture({ version });
+      const probe = await Effect.runPromise(
+        Effect.scoped(makeCodexDriver(f.options()).probe({ instanceId })),
+      );
+      expect(probe.capabilities.sessionRollback).toBe("unsupported");
+    }
   });
 
   it("makes each of two concurrent copies on its own process, so neither copy is still held when it is returned", async () => {
@@ -6097,6 +6142,28 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
     );
     // A Project's skill is not the account's, and is not offered here.
     expect(result.mentions).toEqual([
+      { kind: "skill", name: "tidy", description: "Tidy the code" },
+      { kind: "plugin", name: "docs", description: "Search the docs" },
+    ]);
+
+    // For a thread folder whose launch loads Project skills, `skills/list` returns them marked project.
+    const driver = fakeCodexDriver(target);
+    const threadMentions = await Effect.runPromise(
+      driver.listMentions?.({
+        instanceId,
+        projectRoot,
+        nativeSetup: {
+          subagents: true,
+          webTools: true,
+          skills: true,
+          toolServers: true,
+          hooks: true,
+          projectCode: true,
+        },
+      }) ?? Effect.succeed([]),
+    );
+    expect(threadMentions).toEqual([
+      { kind: "skill", name: "local", scope: "project", description: "A Project skill" },
       { kind: "skill", name: "tidy", description: "Tidy the code" },
       { kind: "plugin", name: "docs", description: "Search the docs" },
     ]);
@@ -6164,5 +6231,188 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
     ]);
     // A Chat thread has its plugins switched off, so it names none.
     expect(await turnInput("chat", "Ask @docs.")).toEqual([{ type: "text", text: "Ask @docs." }]);
+  });
+
+  it("lists Project Codex skills marked project alongside account skills only when nativeSetup.skills is on", async () => {
+    const f = fixture({
+      skillsList: async (input) => ({
+        data: [
+          {
+            skills: [
+              {
+                name: "tidy",
+                description: "Tidy the code",
+                path: "/home/person/.codex/skills/tidy/SKILL.md",
+                scope: "user",
+                enabled: true,
+              },
+              ...(input.cwds.length === 1
+                ? [
+                    {
+                      name: "local",
+                      description: "Deploy this Project",
+                      path: `${input.cwds[0]}/.agents/skills/local/SKILL.md`,
+                      scope: "repo",
+                      enabled: true,
+                    },
+                    {
+                      name: "disabled-local",
+                      description: "Disabled Project skill",
+                      path: `${input.cwds[0]}/.agents/skills/disabled-local/SKILL.md`,
+                      scope: "repo",
+                      enabled: false,
+                    },
+                  ]
+                : []),
+            ],
+            errors: [],
+          },
+        ],
+      }),
+      pluginInstalled: async () => ({
+        marketplaces: [
+          {
+            plugins: [
+              {
+                id: "docs@local",
+                name: "docs",
+                installed: true,
+                enabled: true,
+                interface: { shortDescription: "Search the docs" },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    const driver = makeCodexDriver(f.options());
+    const nativeOn = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: true,
+    } as const;
+
+    const withProject = await Effect.runPromise(
+      driver.listMentions?.({ instanceId, projectRoot, nativeSetup: nativeOn }) ??
+        Effect.succeed([]),
+    );
+    expect(withProject).toEqual([
+      { kind: "skill", name: "local", scope: "project", description: "Deploy this Project" },
+      { kind: "skill", name: "tidy", description: "Tidy the code" },
+      { kind: "plugin", name: "docs", description: "Search the docs" },
+    ]);
+    expect(f.calls.filter(({ method }) => method === "skills/list")).toEqual([
+      { method: "skills/list", input: { cwds: [projectRoot], forceReload: true } },
+    ]);
+    // Listing Project skills grants the short-lived runtime read-only access to the folder and closes it right after.
+    expect(f.authorities()).toEqual([{ kind: "catalog", readOnlyFolders: [projectRoot] }]);
+    expect(f.closeCount()).toBe(1);
+
+    f.calls.length = 0;
+    const withProjectOff = await Effect.runPromise(
+      driver.listMentions?.({
+        instanceId,
+        projectRoot,
+        nativeSetup: { ...nativeOn, skills: false },
+      }) ?? Effect.succeed([]),
+    );
+    expect(withProjectOff).toEqual([
+      { kind: "skill", name: "tidy", description: "Tidy the code" },
+      { kind: "plugin", name: "docs", description: "Search the docs" },
+    ]);
+    expect(f.calls.filter(({ method }) => method === "skills/list")).toEqual([
+      { method: "skills/list", input: { cwds: [] } },
+    ]);
+    expect(f.authorities()).toEqual([
+      { kind: "catalog", readOnlyFolders: [projectRoot] },
+      { kind: "catalog" },
+    ]);
+
+    f.calls.length = 0;
+    const withoutSetup = await Effect.runPromise(
+      driver.listMentions?.({ instanceId, projectRoot }) ?? Effect.succeed([]),
+    );
+    expect(withoutSetup).toEqual([
+      { kind: "skill", name: "tidy", description: "Tidy the code" },
+      { kind: "plugin", name: "docs", description: "Search the docs" },
+    ]);
+    expect(f.calls.filter(({ method }) => method === "skills/list")).toEqual([
+      { method: "skills/list", input: { cwds: [] } },
+    ]);
+  });
+
+  it("prefers a Project skill over an account skill of the same name and omits Project skills when there is no folder", async () => {
+    const f = fixture({
+      skillsList: async () => ({
+        data: [
+          {
+            skills: [
+              // Account skill returned before the Project skill of the same name.
+              {
+                name: "deploy",
+                description: "Account deploy",
+                path: "/home/person/.codex/skills/deploy/SKILL.md",
+                scope: "user",
+                enabled: true,
+              },
+              {
+                name: "deploy",
+                description: "Project deploy",
+                path: `${projectRoot}/.agents/skills/deploy/SKILL.md`,
+                scope: "repo",
+                enabled: true,
+              },
+            ],
+            errors: [],
+          },
+        ],
+      }),
+      pluginInstalled: async () => ({
+        marketplaces: [
+          {
+            plugins: [
+              // Same name as the skill, different kind: plugin stays listed beside the skill.
+              {
+                id: "deploy@local",
+                name: "deploy",
+                installed: true,
+                enabled: true,
+                interface: { shortDescription: "Deploy plugin" },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    const driver = makeCodexDriver(f.options());
+    const nativeOn = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: true,
+    } as const;
+
+    const withFolder = await Effect.runPromise(
+      driver.listMentions?.({ instanceId, projectRoot, nativeSetup: nativeOn }) ??
+        Effect.succeed([]),
+    );
+    expect(withFolder).toEqual([
+      { kind: "skill", name: "deploy", scope: "project", description: "Project deploy" },
+      { kind: "plugin", name: "deploy", description: "Deploy plugin" },
+    ]);
+
+    // Without a folder (for example, Chat), Project skills are never returned even if skills is on.
+    const withoutFolder = await Effect.runPromise(
+      driver.listMentions?.({ instanceId, nativeSetup: nativeOn }) ?? Effect.succeed([]),
+    );
+    expect(withoutFolder).toEqual([
+      { kind: "skill", name: "deploy", description: "Account deploy" },
+      { kind: "plugin", name: "deploy", description: "Deploy plugin" },
+    ]);
   });
 });
