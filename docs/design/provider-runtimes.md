@@ -2517,7 +2517,7 @@ distribution.
 | `mistral-vibe`            | Mistral Vibe       | `vibe-acp` (binary)                                    | Shipped (`mistral-vibe`)                                                                            |
 | `qwen-code`               | Qwen Code          | `npx @qwen-code/qwen-code --acp --experimental-skills` | Shipped (`qwen`; Octant does not pass `--experimental-skills`)                                      |
 | `opencode`, `opencode-v2` | OpenCode           | `opencode acp` (binary)                                | Shipped as the native OpenCode driver, not an ACP profile                                           |
-| `antigravity-acp`         | Google Antigravity | `agy_acp_server.par` (binary)                          | Listed for adding as any ACP agent; profile needs the probe                                         |
+| `antigravity-acp`         | Google Antigravity | `agy_acp_server.par` (binary)                          | Shipped as `antigravity` on the official `agy` CLI; the registry server stays listed for adding     |
 | `junie`                   | Junie              | `junie --acp=true` (binary inside `junie.app`)         | Listed for adding as any ACP agent; profile needs the probe                                         |
 | `amp-acp`                 | Amp                | `amp-acp` (binary)                                     | Listed for adding as any ACP agent; profile needs the probe                                         |
 | `auggie`                  | Auggie CLI         | `npx @augmentcode/auggie --acp`                        | Listed for adding as any ACP agent; profile needs the probe                                         |
@@ -2549,7 +2549,8 @@ distribution.
 | `qoder`                   | Qoder CLI          | `npx @qoder-ai/qodercli --acp`                         | Blocked: registry quarantine (initialize fails)                                                     |
 | `vtcode`                  | VT Code            | `vtcode acp` (binary)                                  | Blocked: registry quarantine (missing Windows builds) until it is lifted                            |
 
-Decided (maintainer decision, 2026-11-16; designed, not built): the probe
+Decided (maintainer decision, 2026-11-16; Google Antigravity built, the
+rest designed, not built): the probe
 next agents Google Antigravity, Factory Droid, Junie, Amp and Auggie, and
 Kiro, Trae and Muse (not in the snapshot above), are to become first-class
 profiles, each through the probe below; Cursor's block is to be rechecked
@@ -2557,7 +2558,7 @@ against the current release and lifted if its reason no longer holds. Every
 other agent can be added as [any ACP agent](#any-acp-agent).
 
 Rechecked against the registry's source at commit `131167e` (2026-11-16):
-none of these has a profile yet, because none has the signed-in probe below
+apart from Google Antigravity (below), none of these has a profile yet, because none has the signed-in probe below
 on record and the registry entry gives only a command, not the
 `agentInfo.name`, modes, sign-in folder or Project entries a profile pins.
 They are listed for adding as any ACP agent instead (`ACP_REGISTRY_AGENTS`),
@@ -2595,6 +2596,68 @@ secret. `WITHHELD_BUNDLED_PROVIDER_DRIVERS` in
 `packages/plugin-host/src/bundledProviderDrivers.ts` holds no driver; an entry
 there keeps a driver out of the activation ladder while stored instances and
 threads stay.
+
+### Google Antigravity
+
+Built (maintainer decision, 2026-11-20): Google Antigravity is a shipped ACP
+profile, `antigravity`, on Google's official CLI, `agy`, run unmodified as
+`agy acp --disable-telemetry` with `AGY_CLI_DISABLE_AUTO_UPDATE=1`. Discovery
+finds `agy` on the PATH; releases before 1.5.0 are refused. It speaks
+standard ACP over stdio, and Octant does nothing to the CLI's identity or
+sign-in: no spoofed `clientInfo`, no faked environment that moves where the
+CLI keeps its sign-in, and no call to Google's internal endpoints with the
+person's token. The CLI talks to Google itself.
+
+- **Sign-in.** The person runs `agy` in a terminal and signs in with their
+  own Google account; Octant reuses that sign-in as the CLI reads it, for one
+  person using it interactively. On macOS the CLI keeps the sign-in in the
+  login keychain and reads it by running `/usr/bin/security`, so the profile
+  sets `readsLoginKeychain`. A sandboxed macOS launch below Full access then
+  gets the grant Claude Code's runtime measured as the least that reads a
+  keychain sign-in: exec of `/usr/bin/security`, the `com.apple.SecurityServer`
+  and `com.apple.securityd.xpc` lookups, a literal read of
+  `~/Library/Keychains/login.keychain-db`, and process-fork, which Chat and
+  Plan otherwise deny. The rules follow the built-in secret-file denials, so a
+  path the person protects in Settings still wins; nothing grants a Keychain
+  write, no other file in that folder is readable, and no other profile gets
+  the grant. Octant never reads the keychain item itself. Unlike Claude
+  Code's, the grant is not held to the runtime alone: commands the agent
+  runs in-process share its sandbox. Rationale: the
+  alternatives were Full access only (the person's own sign-in unreadable at
+  every lower level) or an Octant-owned token file, which the 1.5.x CLI keeps
+  in the keychain anyway unless its environment is faked. Cost: commands the
+  agent runs inside that sandbox may also run `security`, which returns any
+  Keychain item that trusts that tool; in Guarded each such command still
+  needs the person's approval.
+- **Folders.** The CLI keeps its settings, conversations and skills under
+  `~/.gemini`, which the launch may read and write (`GEMINI_HOME` names it).
+  The person's own `AGENTS.md`, `GEMINI.md`, `skills` and `config/skills` there
+  are denied until their own setup carries them; a Project's `.agents/skills`
+  and `.gemini/skills` are denied until the Project is trusted for the agent.
+- **Modes.** The CLI offers `default`, `auto_edit`, `yolo` and, for some
+  accounts, `auto`, and refuses `auto_edit` and `yolo` from an ACP client. The
+  profile selects no mode (`selectsNoMode`): the session keeps `default`,
+  which asks before every edit and command, and Octant's approvals and sandbox
+  hold the thread's level, Full access included.
+- **Sessions.** A follow-up reattaches with `session/resume`, because
+  `session/load` replays the whole history; no `session/close` is sent, since
+  `initialize` does not advertise it. `initialize` may report protocol version
+  1 or 2 (1.1.1 reported 2 with version 1 shapes); every other profile
+  accepts exactly 1. `agentInfo.name` must be `Antigravity ACP Server`.
+- **Network.** Below Full access the runtime reaches Google's sign-in and
+  model service (`cloudcode-pa.googleapis.com`,
+  `daily-cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`,
+  `www.googleapis.com`, `accounts.google.com`, `antigravity.google`).
+
+Not built yet, each pending the signed-in probe on a Mac with a personal
+subscription: the exact `agy --version` output (the version contract accepts
+any non-numeric prefix on one line), whether reading the keychain under the
+sandbox signs in as measured for Claude Code, the model and thinking option
+ids, usage and limit reporting (the CLI's own `agy -p /usage --output-format
+json` is the candidate source; nothing is reported until then), questions,
+which arrive as permission requests whose tool call id starts with
+`interaction_` and are shown as approvals, and a pinned usage or compaction
+release.
 
 ### Any ACP agent
 
@@ -2832,9 +2895,8 @@ Nothing is inferred from the registry entry alone.
    integration reports tools unavailable. Where resume is advertised, a
    follow-up reopens the agent's session.
 
-For the shortlist the probe must also settle: for Google Antigravity, how
-`agy_acp_server` authenticates outside its IDE extension and whether it runs
-without the IDE (the registry's Linux entry passes `--uid=`); for Junie,
+For the shortlist the probe must also settle: for Google Antigravity, the
+signed-in items listed under [Google Antigravity](#google-antigravity); for Junie,
 whether the executable inside `junie.app` launches under Seatbelt from its
 bundle path, and which JetBrains account state it reads.
 

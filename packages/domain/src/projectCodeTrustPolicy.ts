@@ -141,6 +141,10 @@ export const PROJECT_CODE_ENTRIES: Readonly<
     { path: ".agents", kind: "skills" },
     { path: ".claude/skills", kind: "skills" },
   ],
+  antigravity: [
+    { path: ".agents/skills", kind: "skills" },
+    { path: ".gemini/skills", kind: "skills" },
+  ],
 };
 
 /** The entries to look for at the Project root; none for a provider that is not a key provider. */

@@ -67,6 +67,7 @@ describe("bundled provider-driver plugins", () => {
       "cline",
       "qwen",
       "fx",
+      "antigravity",
       "acp-agent",
     ]);
   });

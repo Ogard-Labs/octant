@@ -15,6 +15,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type {
   ProviderExecutionPolicy,
@@ -47,6 +48,7 @@ import {
   ProcessConfinementError,
   seatbeltAllowLiteralReadRule,
   seatbeltDenyRule,
+  seatbeltExecRule,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import {
@@ -71,6 +73,32 @@ export type { AcpSessionMode } from "./acpProfiles";
 
 /** See {@link AcpProviderProfile} `process.readsSystemKeychain`. */
 const SYSTEM_KEYCHAIN_PATH = "/Library/Keychains/System.keychain";
+
+/**
+ * See {@link AcpProviderProfile} `process.readsLoginKeychain`. The same grant
+ * Claude Code's runtime measured as the least that reads a keychain sign-in
+ * (exec of `security`, the two security-server lookups, and the one file);
+ * caller rules follow the secret-file denials, so a path the person protects
+ * in Settings still wins, and nothing grants a write.
+ */
+function loginKeychainSeatbeltRules(): ReadonlyArray<string> {
+  return [
+    seatbeltExecRule("/usr/bin/security"),
+    '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+    '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+    seatbeltAllowLiteralReadRule(loginKeychainPath()),
+  ];
+}
+
+function loginKeychainPath(): string {
+  let home = homedir();
+  try {
+    home = realpathSync(home);
+  } catch {
+    // A home that cannot be resolved names no file the profile could open.
+  }
+  return join(home, "Library", "Keychains", "login.keychain-db");
+}
 
 export interface AcpLaunchSpec {
   readonly command: string;
@@ -658,6 +686,8 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // callers deny paths that must stay hidden even if created later.
         const confinedDenyPaths =
           platform === "linux" ? denyPaths.filter((path) => pathExists(path)) : denyPaths;
+        const readsLoginKeychain =
+          platform === "darwin" && profile.process.readsLoginKeychain === true;
         const extraRules = [
           ...loopbackRules,
           ...(platform === "darwin" ? serverAccessSeatbeltRules(input.servers) : []),
@@ -673,6 +703,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           ...(platform === "darwin" && profile.process.readsSystemKeychain === true
             ? [seatbeltAllowLiteralReadRule(SYSTEM_KEYCHAIN_PATH)]
             : []),
+          ...(readsLoginKeychain ? loginKeychainSeatbeltRules() : []),
         ];
         const launch = yield* Effect.try({
           try: () =>
@@ -713,9 +744,12 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               // exec literals and binds already permit, and fork without a
               // second exec target cannot reach a shell. Chat and Plan never
               // get here — such profiles are refused above.
+              // Reading the keychain sign-in forks `/usr/bin/security`, the
+              // one program the keychain rules let it exec in Chat and Plan.
               allowProcessFork:
                 !(input.executionPolicy === "plan" || input.mode === "chat") ||
-                profile.process.requiresChildServer === true,
+                profile.process.requiresChildServer === true ||
+                readsLoginKeychain,
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
               additionalDenyReadPaths: confinedDenyPaths,
               additionalDenyWritePaths: confinedDenyPaths,
@@ -900,7 +934,8 @@ export function acpNegotiationAccepted(
   const identityMatches = profile.process.verifyAgentInfo
     ? profile.process.verifyAgentInfo(initialized)
     : initialized.agentInfo?.name === profile.process.agentName;
-  return initialized.protocolVersion === 1 && identityMatches;
+  const protocolVersions = profile.process.protocolVersions ?? [1];
+  return protocolVersions.includes(initialized.protocolVersion) && identityMatches;
 }
 
 function resolveNpmPackageVersion(
