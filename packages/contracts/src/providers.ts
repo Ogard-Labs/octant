@@ -478,6 +478,10 @@ export const AddedAcpAgentConfiguration = Schema.Struct({
     Schema.Struct({
       executable: AbsoluteBinaryPath.pipe(Schema.maxLength(4_096)),
       integrity: AcpAgentInstallIntegrity,
+      /** Whether an installed package declares install scripts (e.g. npm lifecycle scripts). */
+      hasInstallScripts: Schema.optional(Schema.Boolean),
+      /** True once this install's package install scripts completed when trusted. */
+      installScriptsCompleted: Schema.optional(Schema.Boolean),
     }).annotations(strict),
   ),
   trusted: Schema.Boolean,
@@ -490,7 +494,9 @@ export const AddedAcpAgentConfiguration = Schema.Struct({
           configuration.environment === undefined &&
           (configuration.install === undefined ||
             (configuration.install.integrity === "local-command" &&
-              configuration.install.executable === configuration.source.command))
+              configuration.install.executable === configuration.source.command &&
+              configuration.install.hasInstallScripts === undefined &&
+              configuration.install.installScriptsCompleted === undefined))
         );
       }
       return configuration.install?.integrity !== "local-command";
@@ -1477,6 +1483,44 @@ export const ProviderDefaultsUpdated = Schema.Struct({ defaults: ProviderDefault
   strict,
 );
 export type ProviderDefaultsUpdated = typeof ProviderDefaultsUpdated.Type;
+
+export const AcpAgentInstallScriptsFailureReason = Schema.Literal(
+  "package-manager-missing",
+  "sandbox-unavailable",
+  "script-failed",
+  "timed-out",
+  "executable-missing",
+  "invalid-install-folder",
+);
+export type AcpAgentInstallScriptsFailureReason = typeof AcpAgentInstallScriptsFailureReason.Type;
+
+export const PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN =
+  "provider.acp-agent-install-scripts-ran@1" as const;
+
+/**
+ * Journaled record of running an added ACP package agent's install scripts
+ * when the person clicks Trust. Actor and occurredAt live on the event
+ * envelope; `sandboxed` records whether Octant confined the run under Strict.
+ */
+export const ProviderAcpAgentInstallScriptsRan = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  registryId: AcpRegistryAgentId,
+  version: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  distribution: Schema.Literal("npx", "uvx"),
+  outcome: Schema.Literal("succeeded", "failed"),
+  sandboxed: Schema.Boolean,
+  completedAt: UtcTimestamp,
+  reason: Schema.optional(AcpAgentInstallScriptsFailureReason),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (record) =>
+        (record.outcome === "succeeded" && record.reason === undefined) ||
+        (record.outcome === "failed" && record.reason !== undefined),
+    ),
+  );
+export type ProviderAcpAgentInstallScriptsRan = typeof ProviderAcpAgentInstallScriptsRan.Type;
 
 /**
  * Whether a model can read image input, as a driver-reported fact.
@@ -3595,6 +3639,9 @@ export const decodeProviderInstanceRemoved = Schema.decodeUnknownSync(ProviderIn
 export const decodeProviderDefaultsUpdated = Schema.decodeUnknownSync(ProviderDefaultsUpdated);
 export const decodeProviderCatalogSnapshot = Schema.decodeUnknownSync(ProviderCatalogSnapshot);
 export const decodeProviderCatalogUpdated = Schema.decodeUnknownSync(ProviderCatalogUpdated);
+export const decodeProviderAcpAgentInstallScriptsRan = Schema.decodeUnknownSync(
+  ProviderAcpAgentInstallScriptsRan,
+);
 export const decodeProviderModelOption = Schema.decodeUnknownSync(ProviderModelOption);
 export const decodeProviderModelOptionValues = Schema.decodeUnknownSync(ProviderModelOptionValues);
 export const decodeProviderModel = Schema.decodeUnknownSync(ProviderModel);

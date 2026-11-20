@@ -99,3 +99,19 @@ it("authenticates a single cancellable read-only setup probe without retrying", 
     }),
   );
 });
+it("preserves a removal notice when removing a server Project whose server was unreachable", async () => {
+  const notice =
+    "Removed Website, but web1 could not be reached to delete attached files left in ~/.octant/thread-attachments/thread-1/.";
+  const client = createServerProjectsClient({
+    baseUrl: "http://127.0.0.1:1234",
+    windowCapability: "private-window-token",
+    fetch: async () =>
+      Response.json({ kind: "server-projects-updated", view: { projects: [] }, notice }),
+  });
+  const command = decodeServerProjectsCommand({ kind: "remove-server-project", projectId });
+  expect(await client.command(command)).toEqual({
+    kind: "server-projects-updated",
+    view: { projects: [] },
+    notice,
+  });
+});

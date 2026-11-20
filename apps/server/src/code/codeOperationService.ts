@@ -131,7 +131,11 @@ import type {
 } from "./ghPullRequestActionPort";
 import { pullRequestCommentDigest } from "./codeRuntimeWorkRecorder";
 import type { GhPullRequestMergeResult } from "./ghPullRequestPort";
-import { splitRepositoryName, type PullRequestLinkRecorder } from "./pullRequestLinkService";
+import {
+  splitRepositoryName,
+  type PullRequestLinkReader,
+  type PullRequestLinkRecorder,
+} from "./pullRequestLinkService";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
 import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
@@ -1375,11 +1379,10 @@ export interface CodeOperationServiceOptions {
   >;
   readonly pullRequests: CodeOperationPullRequestPort;
   /**
-   * Authoritative pull-request link identity registry. Receives every created
-   * or observed PR so forge node IDs are recorded and backfilled in the
-   * journal without changing existing readers.
+   * Authoritative pull-request link identity registry. Records every created
+   * or observed PR and resolves canonical identity across repository renames.
    */
-  readonly pullRequestLinks?: PullRequestLinkRecorder;
+  readonly pullRequestLinks?: PullRequestLinkRecorder & Partial<PullRequestLinkReader>;
   /**
    * The thread's push and pull request steps whose outcome the host never
    * learned (`ambiguous`), and how to settle one. Observing the checkout or the
@@ -1472,6 +1475,7 @@ export interface CodeOperationServiceOptions {
   readonly supportsSessionRollback?: (
     thread: CodeThread,
     lastKeptTurn: CodeOperationId | undefined,
+    providerRoot?: string,
   ) => Awaitable<boolean>;
   readonly events: CodeOperationEventPort;
   /**
@@ -4536,7 +4540,13 @@ export class CodeOperationService {
         return switched;
       }
       case "preview-code-rewind":
-        return await this.#previewRewind(command, thread, checkout, root.checkoutRoot);
+        return await this.#previewRewind(
+          command,
+          thread,
+          checkout,
+          root.checkoutRoot,
+          thread.workingFolderId === undefined ? undefined : root.workingDirectory,
+        );
       case "rewind-code-thread":
         return await this.#rewind(command, thread, checkout, root.checkoutRoot);
       case "create-pull-request":
@@ -5845,6 +5855,7 @@ export class CodeOperationService {
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
     checkoutRoot: string,
+    providerRoot?: string,
   ): Promise<CodeOperationResult> {
     const turns = this.#rewindTurns(command.operationId, thread, command.fromOperationId);
     if (turns.status === "refused") return turns.result;
@@ -5852,7 +5863,11 @@ export class CodeOperationService {
     const native =
       checkout.kind !== "remote-root" &&
       (await Promise.resolve(
-        this.#options.supportsSessionRollback?.(thread, turns.kept.at(-1)?.operationId),
+        this.#options.supportsSessionRollback?.(
+          thread,
+          turns.kept.at(-1)?.operationId,
+          providerRoot ?? checkoutRoot,
+        ),
       ).catch(() => false)) === true;
     const point = this.#rewindFilePoint(thread, checkout, turns.all, command.fromOperationId);
     let files: Extract<CodeOperationResult, { kind: "rewind-preview" }>["files"];
@@ -6141,7 +6156,7 @@ export class CodeOperationService {
     const located = await this.#locatePullRequest(command.threadId, "open");
     if (located.status !== "found") return located.result(command.operationId);
     await this.#recordPullRequestLink(thread, located.pullRequest);
-    const already = await this.#settleEarlierComment(command, located.target);
+    const already = await this.#settleEarlierComment(command, thread, located.target);
     if (already.status === "posted")
       return pullRequestState(command.operationId, "existing", located.pullRequest, undefined);
     if (already.status === "unknown")
@@ -6192,6 +6207,7 @@ export class CodeOperationService {
    */
   async #settleEarlierComment(
     command: Extract<CodeOperationCommand, { readonly kind: "comment-pull-request" }>,
+    thread: CodeThread,
     target: GhPullRequestIdentityRequest,
   ): Promise<
     | { readonly status: "posted" }
@@ -6209,7 +6225,7 @@ export class CodeOperationService {
         step.commentDigest === digest &&
         step.reviewThreadId === command.reviewThreadId &&
         step.pullRequest !== undefined &&
-        samePullRequest(step.pullRequest, target) &&
+        this.#samePullRequest(thread.projectId, step.pullRequest, target) &&
         step.priorMatches !== undefined
         ? [{ work, priorMatches: step.priorMatches }]
         : [];
@@ -6260,6 +6276,19 @@ export class CodeOperationService {
     const actions = this.#options.pullRequests.actions;
     const located = await this.#locatePullRequest(command.threadId, "open");
     if (located.status !== "found") return located.result(command.operationId);
+    const knownLink = this.#options.pullRequestLinks?.resolveLink?.({
+      projectId: thread.projectId,
+      repositoryOwner: located.target.owner,
+      repositoryName: located.target.name,
+      number: located.target.number,
+    });
+    if (
+      knownLink?.pullRequestNodeId !== undefined &&
+      located.pullRequest.pullRequestNodeId !== undefined &&
+      knownLink.pullRequestNodeId !== located.pullRequest.pullRequestNodeId
+    ) {
+      return this.#pullRequestUnavailable(command.operationId, "sha-mismatch");
+    }
     await this.#recordPullRequestLink(thread, located.pullRequest);
     if (actions === undefined) return this.#pullRequestUnavailable(command.operationId);
     const signal = new AbortController().signal;
@@ -6474,6 +6503,33 @@ export class CodeOperationService {
         ? {}
         : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
     });
+  }
+
+  #samePullRequest(
+    projectId: CodeThread["projectId"],
+    left: GhPullRequestIdentityRequest,
+    right: GhPullRequestIdentityRequest,
+  ): boolean {
+    if (samePullRequest(left, right)) return true;
+    const links = this.#options.pullRequestLinks;
+    if (links?.resolveLink === undefined) return false;
+    const leftLink = links.resolveLink({
+      projectId,
+      repositoryOwner: left.owner,
+      repositoryName: left.name,
+      number: left.number,
+    });
+    const rightLink = links.resolveLink({
+      projectId,
+      repositoryOwner: right.owner,
+      repositoryName: right.name,
+      number: right.number,
+    });
+    return (
+      leftLink !== undefined &&
+      rightLink !== undefined &&
+      String(leftLink.linkId) === String(rightLink.linkId)
+    );
   }
 
   async #recordPullRequestLink(

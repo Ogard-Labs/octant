@@ -31,7 +31,10 @@ import {
   LOCAL_TOOL_HOST_ID,
   THREAD_RETENTION_EVENT_NAMES,
   type CodeOperationId,
+  type CodeThread,
+  type WindowId,
 } from "@octant/contracts";
+import type { NativeHarnessEditDiagnosticsPort } from "../harness/nativeHarnessTools";
 import { Effect } from "effect";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
@@ -47,6 +50,7 @@ import {
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
 import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequestSwitchService";
+import { PullRequestReviewerRegistry } from "../pullRequestReviewers/pullRequestReviewerRegistry";
 import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
@@ -330,7 +334,10 @@ import { serverPullRequestRepository } from "../serverProjects/serverWorktrees";
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
-} & Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
+} & Pick<
+    HarnessStateWiring,
+    "serverAttachmentCleanup" | "serverConnection" | "serverProjectStore"
+  > &
   Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,
@@ -561,6 +568,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     selectCodeConversation,
     codeSessionConversation,
     siblingThreadsService,
+    serverAttachmentCleanup,
     serverConnection,
     serverProjectStore,
     shieldServerStore,
@@ -648,6 +656,24 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       contributor: NonNullable<CodeOperationRuntimeOptions["contributedTools"]>,
     ): void => {
       codeToolContributors.push(contributor);
+    };
+    let codeEditDiagnosticsFactory:
+      | ((input: {
+          readonly windowId: WindowId;
+          readonly thread: CodeThread;
+          readonly harnessRoot: string;
+          readonly mainCheckoutRoot: string;
+        }) => NativeHarnessEditDiagnosticsPort | undefined)
+      | undefined;
+    const registerCodeEditDiagnostics = (
+      factory: (input: {
+        readonly windowId: WindowId;
+        readonly thread: CodeThread;
+        readonly harnessRoot: string;
+        readonly mainCheckoutRoot: string;
+      }) => NativeHarnessEditDiagnosticsPort | undefined,
+    ): void => {
+      codeEditDiagnosticsFactory = factory;
     };
     // The few sets a server Project's turn is offered beside its server
     // tools: each acts only on this host's records, never on a folder here.
@@ -1153,7 +1179,18 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             projectId: input.thread.projectId,
             ...(input.ask === undefined ? {} : { ask: input.ask }),
           }),
-        nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
+        nativeHarnessTools: (input) => {
+          const editDiagnostics = codeEditDiagnosticsFactory?.({
+            windowId: input.windowId,
+            thread: input.thread,
+            harnessRoot: input.checkoutRoot,
+            mainCheckoutRoot: input.mainCheckoutRoot ?? input.checkoutRoot,
+          });
+          return nativeHarnessComposition.forCode({
+            ...input,
+            ...(editDiagnostics === undefined ? {} : { editDiagnostics }),
+          });
+        },
         holdsServerThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
         transferServerAttachments: (thread, files) => {
           const place = serverThreadOf(serverProjectStore, thread);
@@ -1166,6 +1203,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             server: address?.kind === "address" ? address.server : undefined,
             threadId: String(thread.id),
             files,
+            guard: serverAttachmentCleanup.guardTransfer,
           });
         },
         serverTerminalLogin: (thread) => {
@@ -1879,11 +1917,21 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         resolvePullRequestTarget: async (threadId) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return undefined;
-          const baseRepository = await serverPullRequestRepository(
-            { store: serverProjectStore, connection: serverConnection },
-            thread,
-          );
-          const owner = baseRepository.split("/")[0];
+          const threadLinks = pullRequestLinkService.listForThread(threadId);
+          const matchingLink =
+            threadLinks.find(
+              (link) =>
+                link.headBranch !== undefined &&
+                link.headBranch === thread.deliveryTarget.branchIntent,
+            ) ?? (threadLinks.length === 1 ? threadLinks[0] : undefined);
+          const baseRepository =
+            matchingLink !== undefined
+              ? `${matchingLink.repositoryOwner}/${matchingLink.repositoryName}`
+              : await serverPullRequestRepository(
+                  { store: serverProjectStore, connection: serverConnection },
+                  thread,
+                );
+          const owner = matchingLink?.headOwner ?? baseRepository.split("/")[0];
           if (owner === undefined || owner.length === 0) return undefined;
           return {
             authorization: "confirmed-delivery-target",
@@ -2017,6 +2065,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       history: {
         read: (threadId) => codeBoardEventStore.summaryForThread(threadId),
       },
+      pullRequestLinks: pullRequestLinkService,
     });
     // Persistent Code follow-up. Follow-up is a durable user
     // obligation independent of unread and runtime status; it reuses the
@@ -2481,6 +2530,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         };
       },
       authority: projectPullRequestService,
+      pullRequestLinks: pullRequestLinkService,
       forge: pullRequestSwitchForge ?? {
         readAutoMergeSettings: async () => ({ status: "unavailable", reason: "unavailable" }),
         enableAutoMerge: async () => ({ status: "unavailable", reason: "unavailable" }),
@@ -2668,6 +2718,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         !isRoutineHostScope(windowId) && !deps.isRestrictedDeviceScope(windowId),
       nativeSessions: () => codeOperationRuntime?.nativeSessions,
     });
+    const pullRequestReviewers = new PullRequestReviewerRegistry();
     return {
       androidToolchainRoutes,
       appleToolchainRoutes,
@@ -2678,10 +2729,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeService,
       codeTurnDecisions,
       contributeCodeTools,
+      registerCodeEditDiagnostics,
       contributeServerCodeTools,
       coordinatorService,
       coordinatorWakes,
       codeThreadWakeupPort,
+      pullRequestReviewers,
       routeCodeService,
       terminalProcessPort,
     };

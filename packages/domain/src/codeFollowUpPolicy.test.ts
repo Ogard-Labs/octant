@@ -276,6 +276,21 @@ describe("failing checks follow-up trigger derivation", () => {
     });
     expect(failingAgain.triggers).toHaveLength(0);
   });
+
+  it("keeps the failing-checks edge stable across a repository rename when linkId is present", () => {
+    const linkId = "50000000-0000-4000-8000-000000000042";
+    const first = deriveFailingChecksFollowUpTriggers({
+      rows: [checksRow({ repositoryOwner: "acme", repositoryName: "old-repo", linkId })],
+      lastDefinitiveChecks: emptyState,
+    });
+    expect(first.triggers).toHaveLength(1);
+
+    const renamed = deriveFailingChecksFollowUpTriggers({
+      rows: [checksRow({ repositoryOwner: "acme", repositoryName: "new-repo", linkId })],
+      lastDefinitiveChecks: first.lastDefinitiveChecks,
+    });
+    expect(renamed.triggers).toHaveLength(0);
+  });
 });
 
 describe("a CI failure draft", () => {

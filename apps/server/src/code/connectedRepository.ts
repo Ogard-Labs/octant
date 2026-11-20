@@ -2,6 +2,36 @@ import type { ConnectedGitHubRepository } from "@octant/contracts/projects";
 import { parseGithubRemote } from "@octant/domain/github-remote-identity";
 
 /**
+ * Parse every observed Git remote into its unique GitHub repository identities,
+ * failing closed (`undefined`) if any remote is credentialed, non-GitHub,
+ * malformed, or has mismatched fetch/push identities.
+ */
+export function parseConnectedGitHubRemotes(
+  remotes: ReadonlyArray<{
+    readonly name: string;
+    readonly fetchUrl: string;
+    readonly pushUrl: string;
+    readonly credentialed?: boolean;
+  }>,
+): ReadonlyArray<ConnectedGitHubRepository> | undefined {
+  const candidates: ConnectedGitHubRepository[] = [];
+  for (const remote of remotes) {
+    const fetch = parseGitHubRemote(remote.fetchUrl);
+    const push = parseGitHubRemote(remote.pushUrl);
+    if (
+      remote.credentialed === true ||
+      fetch === undefined ||
+      push === undefined ||
+      !sameIdentity(fetch, push)
+    ) {
+      return undefined;
+    }
+    candidates.push(fetch);
+  }
+  return uniqueIdentities(candidates);
+}
+
+/**
  * Resolve one safe GitHub identity from a checkout's observed remotes.
  *
  * The caller supplies only Git's already-observed fetch/push URLs. This
@@ -17,22 +47,8 @@ export function resolveConnectedGitHubRepository(
     readonly credentialed?: boolean;
   }>,
 ): ConnectedGitHubRepository | undefined {
-  const candidates: ConnectedGitHubRepository[] = [];
-  for (const remote of remotes) {
-    const fetch = parseGitHubRemote(remote.fetchUrl);
-    const push = parseGitHubRemote(remote.pushUrl);
-    if (
-      remote.credentialed === true ||
-      fetch === undefined ||
-      push === undefined ||
-      !sameIdentity(fetch, push)
-    ) {
-      return undefined;
-    }
-    candidates.push(fetch);
-  }
-  const identities = uniqueIdentities(candidates);
-  return identities.length === 1 ? identities[0] : undefined;
+  const identities = parseConnectedGitHubRemotes(remotes);
+  return identities !== undefined && identities.length === 1 ? identities[0] : undefined;
 }
 
 type ParsedIdentity = ConnectedGitHubRepository;

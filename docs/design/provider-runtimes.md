@@ -1710,24 +1710,29 @@ no rule about an Octant tool reaches its model. A session still open in the
 person's own Codex keeps its writer there, and the resume reports that
 another Codex process is using the thread until it closes.
 
-**Codex fork and rewind** (maintainer request, 2026-11-18; built for fork).
-A Code fork continues a copy of Codex's own thread rather than a text
-handoff where it can, as Claude Code's does ([Fork and rewind](#fork-and-rewind)).
-Each completed turn journals its Codex turn id as its native anchor, and the
-driver's `forkSession` calls `thread/fork` with `lastTurnId` set to it,
-`cwd` set to the Project's folder and `excludeTurns`. The copy keeps the
-source's app tools (measured with codex-cli 0.170.0), so its cursor carries
-the source's tool record and `adopted` mark. Codex leaves the copy loaded in
-the app-server that made it, and another app-server's resume refuses a
-loaded thread, so the copy is made on a short-lived catalog process of its
-own that closes as soon as the copy exists; the fork's first turn then
-resumes it on its own lease, and the journal holds the copy from then on.
-Each copy has a process of its own, so two forks at once never leave one
-copy loaded while the other is made. A copy is made only into the source's own folder and
-mode, and only by a release whose fork cuts at a turn (`lastTurnId`, from
-codex-cli 0.143.0); a fork onto its own worktree, a turn with no anchor, an
-older Codex and a failed copy go back with the text handoff. Codex still
-reports `sessionRollback` unsupported, so a rewind keeps the text handoff.
+**Codex fork and rewind** (maintainer request, 2026-11-18; built for fork and
+rewind, maintainer decision 2026-11-19). A Code fork or rewind continues a copy
+of Codex's own thread rather than a text handoff where it can, as Claude Code's
+does ([Fork and rewind](#fork-and-rewind)). Each completed turn journals its
+Codex turn id as its native anchor, and the driver's `forkSession` calls
+`thread/fork` with `lastTurnId` set to it, `cwd` set to the Project's folder
+and `excludeTurns`. The copy keeps the source's app tools (measured with
+codex-cli 0.170.0), so its cursor carries the source's tool record and
+`adopted` mark. Codex leaves the copy loaded in the app-server that made it,
+and another app-server's resume refuses a loaded thread, so the copy is made on
+a short-lived catalog process of its own that closes as soon as the copy
+exists; the fork's first turn or the rewound thread's next turn then resumes it
+on its own lease, leaving the source thread untouched, and the journal holds
+the copy from then on. Each copy has a process of its own, so two concurrent
+copies never leave one loaded while the other is made. Codex reports
+`sessionRollback` supported from `0.143.0` (the first release whose
+`thread/fork` cuts at `lastTurnId`) and `unsupported` on older releases; the
+rewind preview promises a native copy only when Codex is `0.143.0` or later,
+the folder and mode match the kept turn's session binding, and the last kept
+turn journaled its Codex turn anchor. A fork onto its own worktree, a different
+folder or mode, a turn with no anchor, a Codex release older than `0.143.0`, or
+a failed copy goes back cleanly with the text handoff. Files come back only
+through Octant's checkpoints.
 
 **Codex skills and plugins in `@`** (maintainer request, 2026-11-18; built).
 The composer's `@` menu lists Codex's own skills and plugins after Octant's,
@@ -2622,7 +2627,20 @@ The host decides every step:
   run. See the rationale below for how each distribution is checked.
 - **Trust.** Shows what trusting grants and how the install vouched for the
   bytes; an unverified download is said plainly. Trust is refused before an
-  install, and a reinstall drops it.
+  install, and a reinstall drops it. When an installed npm package declares
+  deferred install scripts (`preinstall`, `install`, `postinstall`, or
+  `binding.gyp`) that have not yet completed for that install, clicking
+  **Trust** runs them (`npm rebuild --prefix <folder> --ignore-scripts=false`)
+  with no further prompt (maintainer decision, 2026-11-19): natively outside
+  Strict, and inside Octant's sandbox with writes limited to the agent's own
+  install folder under Strict. Each run is journaled as
+  `provider.acp-agent-install-scripts-ran@1` with its outcome, actor, timestamp
+  and whether it was sandboxed. A failed script journals the failure, returns a
+  clear failure value and leaves the agent untrusted so the person can retry or
+  reinstall; non-package agents and packages with no install script stay clean
+  no-ops. Before Trust, if Connection Check fails because a package's install
+  script has not run yet, Octant reports: `"This package needs its install
+script, which runs when you trust it."`
 - **Enable.** Refused until the agent is installed and trusted
   (`acpAgentEnableRefusal`). Stopping trust later leaves the agent on; its
   next launch is held as an untrusted one.
@@ -2661,14 +2679,18 @@ level, and the Full access "unverified" rule has nothing to offer it. An
 agent whose session lists no model has nothing to select and cannot start a
 thread.
 
-Rationale (lead decision, 2026-11-18), install integrity: an `npx` or
-`uvx` distribution installs the exact pinned release with the package
-manager into Octant's managed folder for that agent
-(`<data>/acp-agent-installs/<instance>`), relying on the package manager's
-own lockfile and integrity checks; npm runs with `--ignore-scripts` and uv
-with `--no-build`, so no package code runs at install time. A package that
-needs its install script to fetch its real binary then fails its
-Connection Check instead. A binary distribution downloads only over HTTPS
+Rationale (lead decision, 2026-11-18; Trust install-script rule, maintainer
+decision, 2026-11-19), install integrity: an `npx` or `uvx` distribution
+installs the exact pinned release with the package manager into Octant's
+managed folder for that agent (`<data>/acp-agent-installs/<instance>`), relying
+on the package manager's own lockfile and integrity checks; npm runs with
+`--ignore-scripts` and uv with `--no-build`, so no package code runs at install
+time. Before Trust, a package that needs its install script to fetch its real
+binary fails Connection Check with `"This package needs its install script,
+which runs when you trust it."` Clicking **Trust** then runs its install
+scripts with no further prompt (natively outside Strict, and inside Octant's
+sandbox with writes limited to the agent's install folder under Strict) and
+journals the run. A binary distribution downloads only over HTTPS
 (a redirect included) from the URL the listing names, capped at 1 GiB. The
 registry schema's `sha256` is optional: an archive that carries one is
 checked and refused on a mismatch, leaving nothing on disk; one without is

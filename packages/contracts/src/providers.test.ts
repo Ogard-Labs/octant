@@ -1773,6 +1773,38 @@ describe("provider registry contracts", () => {
     ).toThrow();
   });
 
+  it("decodes journaled ACP install-script run records and rejects mismatched outcome reasons", () => {
+    const succeeded = {
+      instanceId: ids.instance,
+      registryId: "factory-droid",
+      version: "1.12.1",
+      distribution: "npx",
+      outcome: "succeeded",
+      sandboxed: true,
+      completedAt: occurredAt,
+    } as const;
+    const failed = {
+      ...succeeded,
+      outcome: "failed",
+      sandboxed: false,
+      reason: "script-failed",
+    } as const;
+    expect(providerContracts.decodeProviderAcpAgentInstallScriptsRan(succeeded)).toEqual(succeeded);
+    expect(providerContracts.decodeProviderAcpAgentInstallScriptsRan(failed)).toEqual(failed);
+    expect(() =>
+      providerContracts.decodeProviderAcpAgentInstallScriptsRan({
+        ...succeeded,
+        reason: "script-failed",
+      }),
+    ).toThrow();
+    expect(() =>
+      providerContracts.decodeProviderAcpAgentInstallScriptsRan({
+        ...succeeded,
+        outcome: "failed",
+      }),
+    ).toThrow();
+  });
+
   it("decodes an outside driver instance only with the exact package it binds", () => {
     const outside = {
       id: ids.instance,

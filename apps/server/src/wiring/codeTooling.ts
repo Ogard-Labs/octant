@@ -51,6 +51,7 @@ import {
 } from "../activityHistory/codeHomeForgeRead";
 import { activityHistoryHeld, readActivityFacts } from "../persistence/activityHistoryProjection";
 import { createPairedMergeUnlockSlot } from "../hub/pairedMergeUnlock";
+import { createCodeEditDiagnostics } from "../code/codeEditDiagnostics";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
 import {
   createCodeDebugAgentSessionApprovals,
@@ -146,7 +147,11 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<
     CodeRuntimeWiring,
-    "codeOperationRuntime" | "contributeCodeTools" | "routeCodeService" | "terminalProcessPort"
+    | "codeOperationRuntime"
+    | "contributeCodeTools"
+    | "registerCodeEditDiagnostics"
+    | "routeCodeService"
+    | "terminalProcessPort"
   > &
   Pick<
     FoundationsWiring,
@@ -186,6 +191,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     resolveChildWorktree,
     codeSessionAuthority,
     contributeCodeTools,
+    registerCodeEditDiagnostics,
     codeWorkingDirectoryProbePath,
     extensionLifecycleService,
     extensionPackageStore,
@@ -857,6 +863,20 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             .externalContentIngested,
         recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
         language: languageService,
+        uuid: randomUUID,
+      }),
+    );
+    // Octant Harness `write`, `edit`, and `editFiles` return language-server
+    // errors for edited files within the 3.5 s budget under the same authority
+    // and launch rules (docs/design/language-services.md).
+    registerCodeEditDiagnostics(({ windowId, thread, harnessRoot, mainCheckoutRoot }) =>
+      createCodeEditDiagnostics({
+        windowId,
+        thread,
+        harnessRoot,
+        mainCheckoutRoot,
+        language: languageService,
+        recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
         uuid: randomUUID,
       }),
     );
