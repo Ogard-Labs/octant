@@ -282,6 +282,7 @@ export class ProjectTerminalService {
     {
       readonly windowId: WindowId;
       readonly projectId: ProjectId;
+      readonly deviceBinding?: ProjectTerminalDeviceBinding;
       readonly current: () => boolean;
       cancelled: boolean;
     }
@@ -396,7 +397,8 @@ export class ProjectTerminalService {
       if (starting !== undefined && command.kind === "stop") {
         if (
           String(starting.windowId) !== String(windowId) ||
-          String(starting.projectId) !== String(command.projectId)
+          String(starting.projectId) !== String(command.projectId) ||
+          !deviceBindingMatches(starting.deviceBinding, deviceBinding)
         )
           return refused("unauthorized", "This terminal belongs to another window or Project.");
         starting.cancelled = true;
@@ -425,7 +427,8 @@ export class ProjectTerminalService {
     }
     if (
       String(owner.windowId) !== String(windowId) ||
-      String(owner.projectId) !== String(command.projectId)
+      String(owner.projectId) !== String(command.projectId) ||
+      !deviceBindingMatches(owner.device?.binding, deviceBinding)
     ) {
       return refused("unauthorized", "This terminal belongs to another window or Project.");
     }
@@ -888,17 +891,26 @@ export class ProjectTerminalService {
         "This action cannot run in the terminal shell Settings › Code names. Choose Windows PowerShell, PowerShell 7 or Command Prompt.",
       );
     if (action !== undefined) {
+      if (device !== undefined && !this.#deviceOwnerCurrent(windowId, device.binding)) {
+        return refused("authority-revoked", "This device session is no longer current.");
+      }
       try {
-        this.#append(command.terminalId, 0, PROJECT_TERMINAL_EVENT_NAMES.started, {
-          kind: "project-terminal-started",
-          projectId: command.projectId,
-          terminalId: command.terminalId,
-          windowId,
-          bindingRevisionId: authority.bindingRevisionId,
-          posture,
-          startedAt: this.#options.clock(),
-          action: placed?.receipt,
-        });
+        this.#append(
+          command.terminalId,
+          0,
+          PROJECT_TERMINAL_EVENT_NAMES.started,
+          {
+            kind: "project-terminal-started",
+            projectId: command.projectId,
+            terminalId: command.terminalId,
+            windowId,
+            bindingRevisionId: authority.bindingRevisionId,
+            posture,
+            startedAt: this.#options.clock(),
+            action: placed?.receipt,
+          },
+          device?.actor,
+        );
       } catch {
         return refused(
           "unavailable",
@@ -923,19 +935,28 @@ export class ProjectTerminalService {
       );
       if (prepared.status === "refused") {
         if (action !== undefined)
-          this.#safeJournalEnded(command.projectId, command.terminalId, "stopped", undefined);
+          this.#safeJournalEnded(
+            command.projectId,
+            command.terminalId,
+            "stopped",
+            undefined,
+            device?.actor,
+          );
         return refused("unavailable", prepared.message);
       }
       protections = prepared;
+      const deviceStillCurrent = () =>
+        device === undefined || this.#deviceOwnerCurrent(windowId, device.binding);
       await this.#options.terminals.launch({
         terminalId: String(command.terminalId),
         ...(action === undefined
-          ? workThread === undefined
+          ? workThread === undefined && device === undefined
             ? {}
-            : { admit: () => workThread.current() }
+            : { admit: () => deviceStillCurrent() && workThread?.current() !== false }
           : {
               command: actionCommand ?? "",
               admit: () => {
+                if (!deviceStillCurrent()) return false;
                 const current = this.#authority(windowId, command.projectId);
                 return (
                   current.kind === "allowed" &&
@@ -983,6 +1004,7 @@ export class ProjectTerminalService {
           ? {
               onClosed: prepared.end,
               admit: () =>
+                deviceStillCurrent() &&
                 prepared.current() &&
                 workThread?.current() !== false &&
                 (() => {
@@ -1006,7 +1028,13 @@ export class ProjectTerminalService {
     } catch (error) {
       await protections?.end();
       if (action !== undefined)
-        this.#safeJournalEnded(command.projectId, command.terminalId, "stopped", undefined);
+        this.#safeJournalEnded(
+          command.projectId,
+          command.terminalId,
+          "stopped",
+          undefined,
+          device?.actor,
+        );
       console.warn(
         `Octant Project terminal could not start: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -1059,7 +1087,10 @@ export class ProjectTerminalService {
     if (this.#startingServerWork.has(String(command.terminalId)))
       return refused("unavailable", "This terminal is already starting.");
     let cancelled = false;
+    const deviceStillCurrent = () =>
+      device === undefined || this.#deviceOwnerCurrent(windowId, device.binding);
     const current = () => {
+      if (!deviceStillCurrent()) return false;
       const fresh = this.#authority(windowId, command.projectId);
       return (
         !cancelled &&
@@ -1071,6 +1102,8 @@ export class ProjectTerminalService {
         String(fresh.bindingRevisionId) === String(authority.bindingRevisionId)
       );
     };
+    if (!deviceStillCurrent())
+      return refused("authority-revoked", "This device session is no longer current.");
     if (work && !current())
       return refused("authority-revoked", "This Work Project's server or window binding changed.");
     const login = authority.server.login();
@@ -1085,6 +1118,7 @@ export class ProjectTerminalService {
       this.#startingServerWork.set(String(command.terminalId), {
         windowId,
         projectId: command.projectId,
+        ...(device?.binding === undefined ? {} : { deviceBinding: device.binding }),
         current,
         cancelled: false,
       });
@@ -1099,7 +1133,7 @@ export class ProjectTerminalService {
         rows: command.rows,
         credentialReferences: [],
         server: login,
-        ...(work ? { admit: current } : {}),
+        ...(work ? { admit: current } : device !== undefined ? { admit: deviceStillCurrent } : {}),
       });
       return await this.#own(
         windowId,
@@ -1127,10 +1161,13 @@ export class ProjectTerminalService {
     device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
   ): Promise<ProjectTerminalResult> {
     const server = placed.receipt.server;
+    const deviceCurrent = () =>
+      device === undefined || this.#deviceOwnerCurrent(windowId, device.binding);
     if (
       server === undefined ||
       command.projectVersion !== placed.projectVersion ||
       command.placementRevision !== server.placementRevision ||
+      !deviceCurrent() ||
       !placed.current()
     )
       return refused(
@@ -1140,6 +1177,7 @@ export class ProjectTerminalService {
     if (this.#owners.has(String(command.terminalId)))
       return refused("unavailable", "This terminal id is already in use.");
     const current = () => {
+      if (!deviceCurrent()) return false;
       const authority = this.#authority(windowId, command.projectId);
       return (
         placed.current() &&
@@ -1517,6 +1555,19 @@ function isDirectory(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+function deviceBindingMatches(
+  owner: ProjectTerminalDeviceBinding | undefined,
+  incoming: ProjectTerminalDeviceBinding | undefined,
+): boolean {
+  if (owner === undefined) return true;
+  if (incoming === undefined) return false;
+  return (
+    owner.deviceId === incoming.deviceId &&
+    owner.sessionId === incoming.sessionId &&
+    owner.credentialGeneration === incoming.credentialGeneration
+  );
 }
 
 function refused(

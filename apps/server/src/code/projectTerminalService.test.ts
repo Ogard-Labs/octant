@@ -214,6 +214,9 @@ function harness(
     readonly serverProject?: ConstructorParameters<
       typeof ProjectTerminalService
     >[0]["serverProject"];
+    readonly placeServerAction?: ConstructorParameters<
+      typeof ProjectTerminalService
+    >[0]["placeServerAction"];
     readonly personPairedDevice?: (scope: string) => boolean;
     readonly isPersonPairedDeviceCurrent?: ConstructorParameters<
       typeof ProjectTerminalService
@@ -221,6 +224,7 @@ function harness(
     readonly deviceQuietMs?: number;
     readonly strict?: boolean;
     readonly shell?: string;
+    readonly launchThrows?: boolean;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-project-terminal-"));
@@ -236,6 +240,12 @@ function harness(
   });
   const projects = options.projects ?? new Map([[ids.project, project()]]);
   const terminals = new FakeTerminals();
+  if (options.launchThrows === true) {
+    terminals.launch = async (request: TerminalLaunchRequest) => {
+      terminals.launches.push(request);
+      throw new Error("simulated launch failure");
+    };
+  }
   let sequence = 0;
   const service = new ProjectTerminalService({
     terminals,
@@ -259,6 +269,9 @@ function harness(
     uuid: () => `91000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
     clock: () => now,
     ...(options.serverProject === undefined ? {} : { serverProject: options.serverProject }),
+    ...(options.placeServerAction === undefined
+      ? {}
+      : { placeServerAction: options.placeServerAction }),
     ...(options.personPairedDevice === undefined
       ? {}
       : {
@@ -1001,6 +1014,386 @@ describe("Project terminals", () => {
       });
       expect(refusal(after)).toBe("authority-revoked");
       expect(revoked.terminals.terminated).toEqual([ids.terminal]);
+    });
+
+    it("refuses to launch a server saved action when the device session ends while SSH placement is pending", async () => {
+      let deviceLive = true;
+      const login = { command: "ssh", args: ["web"], environment: {} };
+      const serverRev = decodeBindingRevisionId("00000000-0000-4000-8000-000000000078");
+      const placementRevision = `sha256:${"a".repeat(64)}`;
+      const { service, terminals, journal } = harness({
+        projects: new Map(),
+        access: () => true,
+        personPairedDevice: (scope) => scope === deviceId,
+        isPersonPairedDeviceCurrent: () => deviceLive,
+        serverProject: () => ({
+          mode: "work",
+          interactiveAllowed: true,
+          bindingRevisionId: serverRev,
+          login: () => login,
+        }),
+        placeServerAction: async () => {
+          // Device signs out or renews its credential while SSH placement is in flight.
+          deviceLive = false;
+          return {
+            kind: "placed-on-server",
+            projectVersion: 1 as never,
+            bindingRevisionId: serverRev,
+            action: {
+              id: "92000000-0000-4000-8000-000000000001" as never,
+              name: "Deploy",
+              command: "make deploy",
+              directory: ".",
+            },
+            login,
+            current: () => true,
+            receipt: {
+              actionId: "92000000-0000-4000-8000-000000000001" as never,
+              name: "Deploy",
+              folder: "/srv/app",
+              server: {
+                serverId: "92000000-0000-4000-8000-000000000002" as never,
+                alias: "web",
+                user: "deploy",
+                profile: "operate",
+                placementRevision,
+                confinement: "none",
+              },
+            },
+          };
+        },
+      });
+      const binding = { deviceId, sessionId: "sess-1", credentialGeneration: 2 };
+      const result = await service.execute(
+        deviceScope,
+        "local-window",
+        {
+          kind: "start-action",
+          projectId,
+          terminalId,
+          actionId: "92000000-0000-4000-8000-000000000001" as never,
+          projectVersion: 1 as never,
+          placementRevision,
+          columns: 100,
+          rows: 30,
+        },
+        deviceActor,
+        binding,
+      );
+      expect(refusal(result)).toBe("authority-revoked");
+      expect(terminals.launches).toEqual([]);
+      expect(actors(journal)).toEqual([]);
+    });
+
+    it("keeps a device's server Code action running when settleAuthorities runs outside CodeProjectAccess.run, and ends it on device revoke", async () => {
+      const { CodeProjectAccess } = await import("../codeProjectAccess");
+      let deviceLive = true;
+      const login = { command: "ssh", args: ["web"], environment: {} };
+      const serverRev = decodeBindingRevisionId("00000000-0000-4000-8000-000000000079");
+      const placementRevision = `sha256:${"b".repeat(64)}`;
+      const codeProjectAccess = new CodeProjectAccess({
+        readWorkspace: () => undefined,
+        hasActiveCodeProject: (id) => String(id) === ids.project,
+        isWindowLive: () => false,
+        isPairedDevice: (scope) => deviceLive && String(scope) === deviceId,
+      });
+      const personPairedDevice = (scope: string) => deviceLive && scope === deviceId;
+      const standingCodeAccess = (scope: WindowId, id: ProjectId) =>
+        personPairedDevice(String(scope))
+          ? codeProjectAccess.hasActiveCodeProject(id)
+          : codeProjectAccess.canAccessProject(scope, id);
+      const { service, terminals } = harness({
+        projects: new Map(),
+        access: (scope, id) => standingCodeAccess(decodeWindowId(scope), decodeProjectId(id)),
+        personPairedDevice,
+        isPersonPairedDeviceCurrent: () => deviceLive,
+        serverProject: () => ({
+          mode: "code",
+          bindingRevisionId: serverRev,
+          login: () => login,
+        }),
+        placeServerAction: async () => ({
+          kind: "placed-on-server",
+          projectVersion: 1 as never,
+          bindingRevisionId: serverRev,
+          action: {
+            id: "92000000-0000-4000-8000-000000000001" as never,
+            name: "Build",
+            command: "make build",
+            directory: ".",
+          },
+          login,
+          current: () => standingCodeAccess(deviceScope, projectId),
+          receipt: {
+            actionId: "92000000-0000-4000-8000-000000000001" as never,
+            name: "Build",
+            folder: "/srv/app",
+            server: {
+              serverId: "92000000-0000-4000-8000-000000000002" as never,
+              alias: "web",
+              user: "deploy",
+              profile: "operate",
+              placementRevision,
+              confinement: "none",
+            },
+          },
+        }),
+      });
+      const binding = { deviceId, sessionId: "sess-1", credentialGeneration: 2 };
+      // Start the device action inside an authenticated CodeProjectAccess.run request scope.
+      const started = await codeProjectAccess.run(
+        {
+          scopeId: deviceScope,
+          principal: {
+            kind: "remote-device",
+            deviceId,
+            credentialGeneration: 2,
+            admittedBy: "host-person",
+          } as never,
+        },
+        () =>
+          service.execute(
+            deviceScope,
+            "local-window",
+            {
+              kind: "start-action",
+              projectId,
+              terminalId,
+              actionId: "92000000-0000-4000-8000-000000000001" as never,
+              projectVersion: 1 as never,
+              placementRevision,
+              columns: 100,
+              rows: 30,
+            },
+            deviceActor,
+            binding,
+          ),
+      );
+      expect(started).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+      // Outside the request (e.g. an unrelated local window closes -> settleAuthorities),
+      // CodeProjectAccess.canAccessProject would fall back to persisted window workspaces and return false,
+      // but standing device authorization keeps the device's running action alive.
+      expect(codeProjectAccess.canAccessProject(deviceScope, projectId)).toBe(false);
+      await service.settleAuthorities();
+      expect(terminals.terminated).toEqual([]);
+      // Revoking the device terminates the server Code action.
+      deviceLive = false;
+      await service.settleAuthorities();
+      expect(terminals.terminated).toEqual([ids.terminal]);
+    });
+
+    it("journals the device actor for both successful and failed local saved action starts", async () => {
+      const actionId = "92000000-0000-4000-8000-000000000001";
+      const withAction = new Map([
+        [
+          ids.project,
+          project({
+            actions: [{ id: actionId, name: "Test", command: "bun test", directory: "." }],
+          }),
+        ],
+      ]);
+      const ok = harness({
+        projects: withAction,
+        access: () => true,
+        personPairedDevice: (scope) => scope === deviceId,
+        strict: false,
+      });
+      const started = await ok.service.execute(
+        deviceScope,
+        "local-window",
+        {
+          kind: "start-action",
+          projectId,
+          terminalId,
+          actionId: actionId as never,
+          columns: 100,
+          rows: 30,
+        },
+        deviceActor,
+        { deviceId, sessionId: "sess-1", credentialGeneration: 2 },
+      );
+      expect(started).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+      ok.terminals.exit(ids.terminal, 0);
+      expect(actors(ok.journal)).toEqual([
+        { name: "code.project-terminal-started@1", actor: deviceActor },
+        { name: "code.project-terminal-ended@1", actor: deviceActor },
+      ]);
+
+      const failed = harness({
+        projects: withAction,
+        access: () => true,
+        personPairedDevice: (scope) => scope === deviceId,
+        strict: false,
+        launchThrows: true,
+      });
+      const refusedStart = await failed.service.execute(
+        deviceScope,
+        "local-window",
+        {
+          kind: "start-action",
+          projectId,
+          terminalId,
+          actionId: actionId as never,
+          columns: 100,
+          rows: 30,
+        },
+        deviceActor,
+        { deviceId, sessionId: "sess-1", credentialGeneration: 2 },
+      );
+      expect(refusal(refusedStart)).toBe("unavailable");
+      expect(actors(failed.journal)).toEqual([
+        { name: "code.project-terminal-started@1", actor: deviceActor },
+        { name: "code.project-terminal-ended@1", actor: deviceActor },
+      ]);
+    });
+
+    it("admits local Work task preview-action and start-action for a person-paired device without a window workspace", async () => {
+      const actionId = "92000000-0000-4000-8000-000000000001";
+      const workThreadId = "92000000-0000-4000-8000-000000000055" as never;
+      const workProject = project({
+        type: "work",
+        actions: [{ id: actionId, name: "Build", command: "make docs", directory: "." }],
+      });
+      let deviceLive = true;
+      const { service, terminals } = harness({
+        projects: new Map([[ids.project, workProject]]),
+        access: (scope) => deviceLive && scope === deviceId,
+        personPairedDevice: (scope) => deviceLive && scope === deviceId,
+        isPersonPairedDeviceCurrent: () => deviceLive,
+        strict: false,
+        resolveActionWorkThread: async (scope) =>
+          scope === deviceScope
+            ? {
+                root,
+                executionPolicy: "full-access",
+                current: () => deviceLive,
+                active: () => deviceLive,
+              }
+            : undefined,
+      });
+      const binding = { deviceId, sessionId: "sess-work", credentialGeneration: 2 };
+      const preview = await service.execute(
+        deviceScope,
+        "local-window",
+        {
+          kind: "preview-action",
+          projectId,
+          actionId: actionId as never,
+          workThreadId,
+        },
+        deviceActor,
+        binding,
+      );
+      expect(preview).toMatchObject({ kind: "project-action-preview" });
+      const started = await service.execute(
+        deviceScope,
+        "local-window",
+        {
+          kind: "start-action",
+          projectId,
+          terminalId,
+          actionId: actionId as never,
+          workThreadId,
+          columns: 100,
+          rows: 30,
+        },
+        deviceActor,
+        binding,
+      );
+      expect(started).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+      expect(terminals.launches).toHaveLength(1);
+    });
+
+    it("refuses another active session of the same paired device from reading, typing into, resizing, or stopping the first session's terminal", async () => {
+      const { service, terminals } = harness({
+        access: () => true,
+        personPairedDevice: (scope) => scope === deviceId,
+        isPersonPairedDeviceCurrent: () => true,
+      });
+      const sessionA = { deviceId, sessionId: "sess-a", credentialGeneration: 2 };
+      const sessionB = { deviceId, sessionId: "sess-b", credentialGeneration: 2 };
+      const rotatedA = { deviceId, sessionId: "sess-a", credentialGeneration: 3 };
+
+      const started = await service.execute(
+        deviceScope,
+        "local-window",
+        start(),
+        deviceActor,
+        sessionA,
+      );
+      expect(started).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+
+      for (const other of [sessionB, rotatedA, undefined]) {
+        expect(
+          refusal(
+            await service.execute(
+              deviceScope,
+              "local-window",
+              { kind: "attach", projectId, terminalId },
+              deviceActor,
+              other,
+            ),
+          ),
+        ).toBe("unauthorized");
+        expect(
+          refusal(
+            await service.execute(
+              deviceScope,
+              "local-window",
+              { kind: "read-output", projectId, terminalId, afterCharacters: 0 },
+              deviceActor,
+              other,
+            ),
+          ),
+        ).toBe("unauthorized");
+        expect(
+          refusal(
+            await service.execute(
+              deviceScope,
+              "local-window",
+              { kind: "write", projectId, terminalId, data: "evil\r" },
+              deviceActor,
+              other,
+            ),
+          ),
+        ).toBe("unauthorized");
+        expect(
+          refusal(
+            await service.execute(
+              deviceScope,
+              "local-window",
+              { kind: "resize", projectId, terminalId, columns: 80, rows: 24 },
+              deviceActor,
+              other,
+            ),
+          ),
+        ).toBe("unauthorized");
+        expect(
+          refusal(
+            await service.execute(
+              deviceScope,
+              "local-window",
+              { kind: "stop", projectId, terminalId },
+              deviceActor,
+              other,
+            ),
+          ),
+        ).toBe("unauthorized");
+      }
+      expect(terminals.writes).toEqual([]);
+      expect(terminals.terminated).toEqual([]);
+
+      // Session A still owns and controls its terminal.
+      expect(
+        await service.execute(
+          deviceScope,
+          "local-window",
+          { kind: "write", projectId, terminalId, data: "ok\r" },
+          deviceActor,
+          sessionA,
+        ),
+      ).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+      expect(terminals.writes).toEqual(["ok\r"]);
     });
   });
 

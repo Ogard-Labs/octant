@@ -8,6 +8,13 @@ import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 export function ServerProjectPreviewTunnel(props: {
   readonly project: ServerProject;
   readonly client: Pick<ServerProjectsClient, "previewRead" | "previewCommand">;
+  /** Opens a host-relayed preview through the paired desktop app's signed forwarder. */
+  readonly onOpenRelayedPreview?: (
+    view: ServerPreviewView,
+  ) => Promise<
+    | { readonly kind: "opened"; readonly notice?: string }
+    | { readonly kind: "refused"; readonly message: string }
+  >;
 }) {
   const { project, client } = props;
   const id = useId();
@@ -119,10 +126,12 @@ export function ServerProjectPreviewTunnel(props: {
       <div role="status" aria-live="polite">
         {view === null ? (
           "No preview owned by this window."
-        ) : view.localPort === 0 && view.endpoint.startsWith("/api/server-proxy/") ? (
+        ) : view.localPort === 0 && view.grantId !== undefined ? (
           <p className="shield-servers__note">
             {view.status === "listening"
-              ? "Relayed through this host's private listener. The remote connection is checked when opened."
+              ? props.onOpenRelayedPreview !== undefined
+                ? "Relayed through this host's private listener. The remote connection is checked when opened."
+                : "Relayed through this host's private listener. Open this preview from Octant's desktop app, which signs each proxied request on an isolated origin."
               : `Preview ${view.status}.`}{" "}
             Remote 127.0.0.1:{view.remotePort}. Relay {view.endpoint}.
           </p>
@@ -137,9 +146,33 @@ export function ServerProjectPreviewTunnel(props: {
         {problem === undefined ? null : <p>{problem}</p>}
       </div>
       {view?.status === "listening" ? (
-        <a href={view.endpoint} target="_blank" rel="noreferrer">
-          Open preview
-        </a>
+        view.localPort === 0 && view.grantId !== undefined ? (
+          props.onOpenRelayedPreview !== undefined ? (
+            <OctantButton
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                setProblem(undefined);
+                void props
+                  .onOpenRelayedPreview?.(view)
+                  .then((outcome) => {
+                    if (outcome?.kind === "refused") setProblem(outcome.message);
+                    else if (outcome?.notice !== undefined) setProblem(outcome.notice);
+                  })
+                  .catch(() => setProblem("The relayed preview could not be opened."))
+                  .finally(() => setBusy(false));
+              }}
+              type="button"
+              size="sm"
+            >
+              Open preview
+            </OctantButton>
+          ) : null
+        ) : (
+          <a href={view.endpoint} target="_blank" rel="noreferrer">
+            Open preview
+          </a>
+        )
       ) : null}
       {running ? (
         <>

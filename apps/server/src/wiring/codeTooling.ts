@@ -233,6 +233,50 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     const sharedTerminals = codeOperationRuntime?.terminals;
     const personPairedDevice = (scopeId: WindowId): boolean =>
       deps.isPairedDeviceScope(scopeId) && !deps.isRestrictedDeviceScope(scopeId);
+    // A person-paired device has no persisted window workspace on this host.
+    // Retained authorization checks run outside any active HTTP request (for
+    // example when an unrelated local window closes and settles authorities),
+    // so check the device's live pairing plus active Project directly rather
+    // than falling through to a local window workspace check.
+    const hasActiveTerminalCodeProject = (
+      projectId: Parameters<typeof persistence.readProject>[0],
+    ): boolean => {
+      const local = persistence.readProject(projectId);
+      if (local !== undefined) return local.type === "code" && local.lifecycle === "active";
+      const onServer = serverProjectStore.project(String(projectId));
+      return onServer !== undefined && (onServer.mode ?? "code") === "code";
+    };
+    const canAccessTerminalCodeProject = (
+      scopeId: WindowId,
+      projectId: Parameters<typeof persistence.readProject>[0],
+    ): boolean =>
+      personPairedDevice(scopeId)
+        ? hasActiveTerminalCodeProject(projectId)
+        : canAccessCodeProject(scopeId, projectId);
+    const canAccessTerminalWorkProject = (
+      scopeId: WindowId,
+      projectId: Parameters<typeof persistence.readProject>[0],
+    ): boolean => {
+      if (
+        !enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+          "work",
+        )
+      )
+        return false;
+      const project = persistence.readProject(projectId);
+      const serverWork = serverProjectStore.workProject(String(projectId));
+      const activeWork =
+        (project?.type === "work" && project.lifecycle === "active") || serverWork !== undefined;
+      if (!activeWork) return false;
+      if (personPairedDevice(scopeId)) return true;
+      return (
+        windowAuthorityStore.listWindowIds().some((id) => String(id) === String(scopeId)) &&
+        windowCanAccessWorkProject({
+          workspace: persistence.readWindowWorkspace(scopeId)?.workspace,
+          projectId,
+        })
+      );
+    };
     const serverActions = createServerProjectActions({
       store: serverProjectStore,
       connection: serverConnection,
@@ -288,7 +332,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
               checkout.availability === "available" &&
               placed?.folder === place.folder &&
               String(fresh.checkoutId) === String(view.checkout.id) &&
-              canAccessCodeProject(windowId, projectId) &&
+              canAccessTerminalCodeProject(windowId, projectId) &&
               authorityOf(codeSessionAuthority.effectiveThread(windowId, fresh)) ===
                 authorityRevision
             );
@@ -321,31 +365,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
               const project = persistence.readProject(projectId);
               const serverWork = serverProjectStore.workProject(String(projectId));
               if (project?.type !== "work" && serverWork === undefined)
-                return canAccessCodeProject(scopeId, projectId);
-              // A device the host's own person paired has no workspace here; it
-              // reaches every active local or server Work Project while Work is
-              // on, as it does when it opens a thread there.
-              if (personPairedDevice(scopeId))
-                return (
-                  ((project?.type === "work" && project.lifecycle === "active") ||
-                    serverWork !== undefined) &&
-                  enabledModes(
-                    persistence.readShellSettings()?.settings ?? defaultShellSettings(),
-                  ).includes("work")
-                );
-              // A Work window reaches the Work Project its own persisted
-              // workspace binds, while it is live, as a Code window does.
-              return (
-                (project === undefined || project.lifecycle === "active") &&
-                enabledModes(
-                  persistence.readShellSettings()?.settings ?? defaultShellSettings(),
-                ).includes("work") &&
-                windowAuthorityStore.listWindowIds().some((id) => String(id) === String(scopeId)) &&
-                windowCanAccessWorkProject({
-                  workspace: persistence.readWindowWorkspace(scopeId)?.workspace,
-                  projectId,
-                })
-              );
+                return canAccessTerminalCodeProject(scopeId, projectId);
+              return canAccessTerminalWorkProject(scopeId, projectId);
             },
             resolveRoot: async (project) => {
               try {
@@ -370,10 +391,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                 project?.type !== "work" ||
                 thread.projectId !== projectId ||
                 thread.lifecycle !== "active" ||
-                !windowCanAccessWorkProject({
-                  workspace: persistence.readWindowWorkspace(windowId)?.workspace,
-                  projectId,
-                })
+                !canAccessTerminalWorkProject(windowId, projectId)
               )
                 return undefined;
               const selected = approvedWorkingFolderRoot(project, thread.workingFolderId);
@@ -390,10 +408,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                   latest?.type === "work" &&
                   approvedWorkingFolderRoot(latest, thread.workingFolderId) === selected &&
                   JSON.stringify(workThreadProjection.read(threadId)) === JSON.stringify(thread) &&
-                  windowCanAccessWorkProject({
-                    workspace: persistence.readWindowWorkspace(windowId)?.workspace,
-                    projectId,
-                  })
+                  canAccessTerminalWorkProject(windowId, projectId)
                 );
               };
               return {
@@ -445,7 +460,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                 const present = persistence.readCodeCheckout(checkout.id);
                 return (
                   active() &&
-                  canAccessCodeProject(windowId, projectId) &&
+                  canAccessTerminalCodeProject(windowId, projectId) &&
                   present !== undefined &&
                   (present.head.kind === "none" || present.head.oid === head)
                 );

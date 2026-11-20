@@ -44,32 +44,47 @@ it("shows the exact endpoint and offers deliberate reconnect after a lost connec
   expect(screen.queryByRole("link", { name: "Open preview" })).not.toBeInTheDocument();
 });
 
-it("offers the host-relayed preview link when serving a paired device with no loopback port", async () => {
+it("opens a host-relayed preview through the signed forwarder callback and never renders an unsigned raw link", async () => {
   const grantId = `rsg_${"a".repeat(64)}`;
+  const relayedView: Extract<ServerPreviewResult, { kind: "tunnel" }>["view"] = {
+    projectId: String(project.id),
+    localPort: 0,
+    remotePort: 5173,
+    endpoint: `/api/server-proxy/${grantId}/`,
+    grantId: grantId as NonNullable<
+      Extract<ServerPreviewResult, { kind: "tunnel" }>["view"]["grantId"]
+    >,
+    status: "listening",
+  };
   const previewCommand = vi.fn(
     async (): Promise<ServerPreviewResult> => ({
       kind: "tunnel",
-      view: {
-        projectId: String(project.id),
-        localPort: 0,
-        remotePort: 5173,
-        endpoint: `/api/server-proxy/${grantId}/`,
-        grantId: grantId as NonNullable<
-          Extract<ServerPreviewResult, { kind: "tunnel" }>["view"]["grantId"]
-        >,
-        status: "listening",
-      },
+      view: relayedView,
     }),
   );
-  render(
+  const onOpenRelayedPreview = vi.fn(async () => ({ kind: "opened" as const }));
+  const { rerender } = render(
     <ServerProjectPreviewTunnel
       project={project}
       client={{ previewRead: async () => null, previewCommand }}
+      onOpenRelayedPreview={onOpenRelayedPreview}
     />,
   );
   const user = userEvent.setup();
   await user.click(screen.getByText("Dev server preview"));
   await user.click(screen.getByRole("button", { name: "Start preview" }));
-  const link = await screen.findByRole("link", { name: "Open preview" });
-  expect(link).toHaveAttribute("href", `/api/server-proxy/${grantId}/`);
+  expect(screen.queryByRole("link", { name: "Open preview" })).not.toBeInTheDocument();
+  await user.click(await screen.findByRole("button", { name: "Open preview" }));
+  expect(onOpenRelayedPreview).toHaveBeenCalledWith(relayedView);
+
+  // Without a desktop forwarder opener (plain browser tab), no broken unsigned link is rendered.
+  rerender(
+    <ServerProjectPreviewTunnel
+      project={project}
+      client={{ previewRead: async () => relayedView, previewCommand }}
+    />,
+  );
+  expect(screen.queryByRole("link", { name: "Open preview" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Open preview" })).not.toBeInTheDocument();
+  expect(screen.getByText(/Octant's desktop app/i)).toBeInTheDocument();
 });

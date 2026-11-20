@@ -501,9 +501,7 @@ export class RemoteServerGrantService {
     const last = this.#lastCheck(grant, input);
     if (last !== undefined) return last;
     const key = String(grant.grantId);
-    const onDevice = [...this.#grants.values()]
-      .filter((candidate) => candidate.deviceId === grant.deviceId)
-      .reduce((sum, candidate) => sum + (this.#sockets.get(String(candidate.grantId)) ?? 0), 0);
+    const onDevice = this.#deviceSocketCount(grant.deviceId);
     if (
       (this.#sockets.get(key) ?? 0) >= this.#socketLimits.perGrant ||
       onDevice >= this.#socketLimits.perDevice
@@ -696,6 +694,21 @@ export class RemoteServerGrantService {
     }
   }
 
+  #deviceSocketCount(deviceId: string): number {
+    let total = 0;
+    for (const candidate of this.#grants.values()) {
+      if (candidate.deviceId === deviceId) {
+        total += this.#sockets.get(String(candidate.grantId)) ?? 0;
+      }
+    }
+    for (const active of this.#previewRelays) {
+      if (active.isSocket && active.deviceId === deviceId) {
+        total += 1;
+      }
+    }
+    return total;
+  }
+
   async #relayServerProjectPreviewUpgrade(
     input: RemoteServerUpgradeRequestInput,
   ): Promise<RemoteServerUpgradeOutcome> {
@@ -704,14 +717,10 @@ export class RemoteServerGrantService {
     if (!input.stillAuthorized()) return { kind: "session-ended" };
     if (input.principal.admittedBy !== "host-person") return closedGrant();
     let perGrant = 0;
-    let onDevice = [...this.#grants.values()]
-      .filter((candidate) => candidate.deviceId === input.principal.deviceId)
-      .reduce((sum, candidate) => sum + (this.#sockets.get(String(candidate.grantId)) ?? 0), 0);
     for (const active of this.#previewRelays) {
-      if (!active.isSocket) continue;
-      if (active.grantId === input.grantId) perGrant += 1;
-      if (active.deviceId === input.principal.deviceId) onDevice += 1;
+      if (active.isSocket && active.grantId === input.grantId) perGrant += 1;
     }
+    const onDevice = this.#deviceSocketCount(input.principal.deviceId);
     if (perGrant >= this.#socketLimits.perGrant || onDevice >= this.#socketLimits.perDevice) {
       return { kind: "busy" };
     }

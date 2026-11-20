@@ -1070,13 +1070,20 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           }
           return jsonResponse(
             decodeProjectTerminalResult(
-              await dependencies.projectTerminals.execute(
-                authenticatedWindowId,
-                callerAuthority,
-                command,
-                callerActor,
-                projectTerminalDeviceBinding,
-              ),
+              projectTerminalDeviceBinding === undefined
+                ? await dependencies.projectTerminals.execute(
+                    authenticatedWindowId,
+                    callerAuthority,
+                    command,
+                    callerActor,
+                  )
+                : await dependencies.projectTerminals.execute(
+                    authenticatedWindowId,
+                    callerAuthority,
+                    command,
+                    callerActor,
+                    projectTerminalDeviceBinding,
+                  ),
             ),
             200,
             origin,

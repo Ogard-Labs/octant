@@ -99,7 +99,6 @@ describe("a paired browser's Project tools", () => {
               },
             ],
           }),
-          command: vi.fn(),
         }}
       />,
     );
