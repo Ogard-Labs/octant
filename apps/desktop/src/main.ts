@@ -3836,6 +3836,14 @@ function installIpcHandlers(): void {
     applyAttentionBadge();
   });
   ipcMain.handle(IPC_CHANNELS.minimize, (event) => ownedWindow(event).minimize());
+  const activePreviewHandoffs = new Map<string, AbortController>();
+  const previewHandoffExecutor = createNativePreviewHandoffExecutor({
+    shell,
+    platform: process.platform,
+    ...(process.env.PATH === undefined ? {} : { pathEnv: process.env.PATH }),
+    exists: existsSync,
+    spawn: (command, args) => spawn(command, [...args], { shell: false, stdio: "ignore" }),
+  });
   ipcMain.handle(IPC_CHANNELS.openCodeExternalEditor, async (event, request: unknown) => {
     const context = ownedWindowContext(event);
     if (activeServerUrl === undefined) {
@@ -3854,6 +3862,7 @@ function installIpcHandlers(): void {
       request: editorRequest,
       fetch: globalThis.fetch,
       spawn: (executable, arguments_, options) => spawn(executable, [...arguments_], options),
+      openDefaultApplication: previewHandoffExecutor.openExternal,
     });
   });
   ipcMain.handle(IPC_CHANNELS.listOpenInApplications, () =>
@@ -3893,14 +3902,6 @@ function installIpcHandlers(): void {
           spawn: (executable, arguments_, options) => spawn(executable, [...arguments_], options),
         }),
     });
-  });
-  const activePreviewHandoffs = new Map<string, AbortController>();
-  const previewHandoffExecutor = createNativePreviewHandoffExecutor({
-    shell,
-    platform: process.platform,
-    ...(process.env.PATH === undefined ? {} : { pathEnv: process.env.PATH }),
-    exists: existsSync,
-    spawn: (command, args) => spawn(command, [...args], { shell: false, stdio: "ignore" }),
   });
   ipcMain.handle(IPC_CHANNELS.previewHandoff, async (event, request: unknown) => {
     const context = ownedWindowContext(event);
