@@ -690,7 +690,7 @@ describe("server attachment cleanup", () => {
     const handler = createServerProjectRouteHandler({
       windowAuthorityStore: windows,
       store,
-      prepareProjectRemoval: (input) => cleanup.prepareProjectRemoval(input),
+      stageProjectRemoval: (input) => cleanup.stageProjectRemoval(input),
       removeProjectAttachments: (input) => cleanup.removeForProject(input),
       now: () => 1,
     });
@@ -1037,7 +1037,7 @@ describe("server attachment cleanup", () => {
     const handler = createServerProjectRouteHandler({
       windowAuthorityStore: windows,
       store,
-      prepareProjectRemoval: (input) => cleanup.prepareProjectRemoval(input),
+      stageProjectRemoval: (input) => cleanup.stageProjectRemoval(input),
       removeProjectAttachments: (input) => cleanup.removeForProject(input),
       now: () => 1,
     });
@@ -1123,6 +1123,224 @@ describe("server attachment cleanup", () => {
     await restarted.whenIdle();
     expect(restarted.pending()).toEqual([]);
     restarted.close();
+  });
+
+  it("rolls back staged cleanup intents when Project removal fails to persist so live attachments are never deleted", async () => {
+    const directory = scratch();
+    const { journal } = openHarness(directory);
+    const fake = controllableConnection();
+    let failProjectRemove = false;
+    const wrappedJournal: ConstructorParameters<typeof ServerProjectStore>[0]["journal"] &
+      ConstructorParameters<typeof ServerAttachmentCleanup>[0]["journal"] = {
+      append: (request) => {
+        const events =
+          typeof request === "object" &&
+          request !== null &&
+          "events" in request &&
+          Array.isArray(request.events)
+            ? request.events
+            : [];
+        if (
+          failProjectRemove &&
+          events.some(
+            (event) =>
+              typeof event === "object" &&
+              event !== null &&
+              "eventName" in event &&
+              event.eventName === "server-projects.removed@1",
+          )
+        ) {
+          throw new Error("Simulated catalog removal failure");
+        }
+        return journal.append(request);
+      },
+      transaction: (body) => journal.transaction(body),
+      replayAggregateType: (input) => journal.replayAggregateType(input),
+      aggregateVersions: (aggregateType) => journal.aggregateVersions(aggregateType),
+      subscribeCommitted: (listener) => journal.subscribeCommitted(listener),
+    };
+    const store = new ServerProjectStore({
+      journal: wrappedJournal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => NOW,
+      servers: () => [WEB],
+      connection: fake.connection,
+    });
+    store.load();
+    const bound = await store.bind({
+      name: "LiveProject",
+      serverId: String(WEB.serverId),
+      folder: "/srv/live",
+      principal: "local-window",
+    });
+    if (bound.kind !== "changed" || bound.project === undefined) {
+      throw new Error("Expected server Project to bind.");
+    }
+    const project = bound.project;
+    const threadId = "5e7e9999-0000-4000-8000-000000000001";
+    const cleanup = new ServerAttachmentCleanup({
+      journal: wrappedJournal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => NOW,
+      connection: fake.connection,
+      store,
+      serverProjectForThread: () => project,
+      listThreadsForProject: (projectId) => (projectId === String(project.id) ? [threadId] : []),
+    });
+    cleanup.load();
+
+    const windowId = decodeWindowId("00000000-0000-4000-8000-000000000472");
+    const capability = "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDA";
+    const windows = new WindowAuthorityStore();
+    windows.register({ windowId, capability, now: 0 });
+    const handler = createServerProjectRouteHandler({
+      windowAuthorityStore: windows,
+      store,
+      stageProjectRemoval: (input) => cleanup.stageProjectRemoval(input),
+      removeProjectAttachments: (input) => cleanup.removeForProject(input),
+      now: () => 1,
+    });
+
+    // Fail `server-projects.removed@1` AFTER `stageProjectRemoval` appends `pending@1`.
+    failProjectRemove = true;
+    fake.calls.length = 0;
+    const response = await handler(
+      new Request("http://127.0.0.1/api/server-projects", {
+        method: "POST",
+        body: JSON.stringify({ kind: "remove-server-project", projectId: project.id }),
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+    expect(response?.status).toBe(409);
+    expect(await response?.json()).toMatchObject({
+      kind: "server-projects-refused",
+      reason: "unavailable",
+    });
+
+    // Project remains bound, no pending entries exist in memory or in SQLite.
+    expect(store.project(String(project.id))).toBeDefined();
+    expect(cleanup.pending()).toEqual([]);
+    expect(
+      journal.replayAggregateType({
+        aggregateType: SERVER_ATTACHMENT_CLEANUP_AGGREGATE,
+        afterSequence: 0,
+        limit: 20,
+      }),
+    ).toEqual([]);
+    expect(fake.calls).toEqual([]);
+
+    // Reconnecting SSH must NOT delete attachments of the still-live Project (even after restart).
+    await fake.connection.run(
+      { alias: WEB.alias, user: WEB.user },
+      { script: "true", timeoutMs: 5_000, maxOutputBytes: 256 },
+    );
+    await cleanup.whenIdle();
+    expect(fake.calls).toHaveLength(1);
+    cleanup.close();
+
+    const restarted = makeCleanup({
+      journal,
+      store,
+      connection: fake.connection,
+      serverProjectForThread: () => project,
+    });
+    expect(restarted.pending()).toEqual([]);
+    restarted.close();
+  });
+
+  it("still attempts SSH and never falsely reports removed when pending intent fails to persist", async () => {
+    const directory = scratch();
+    const { journal } = openHarness(directory);
+    const fake = controllableConnection();
+    const store = new ServerProjectStore({
+      journal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => NOW,
+      servers: () => [WEB],
+      connection: fake.connection,
+    });
+    store.load();
+    const bound = await store.bind({
+      name: "App",
+      serverId: String(WEB.serverId),
+      folder: "/srv/app",
+      principal: "local-window",
+    });
+    if (bound.kind !== "changed" || bound.project === undefined) {
+      throw new Error("Expected server Project to bind.");
+    }
+    const project = bound.project;
+    const threadA = "5e7eaaaa-0000-4000-8000-000000000001";
+    const threadB = "5e7eaaaa-0000-4000-8000-000000000002";
+
+    const failingPendingJournal: ConstructorParameters<
+      typeof ServerAttachmentCleanup
+    >[0]["journal"] = {
+      append: (request) => {
+        const events =
+          typeof request === "object" &&
+          request !== null &&
+          "events" in request &&
+          Array.isArray(request.events)
+            ? request.events
+            : [];
+        if (
+          events.some(
+            (event) =>
+              typeof event === "object" &&
+              event !== null &&
+              "eventName" in event &&
+              event.eventName === SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending,
+          )
+        ) {
+          throw new Error("Journal append unavailable");
+        }
+        return journal.append(request);
+      },
+      replayAggregateType: (input) => journal.replayAggregateType(input),
+      aggregateVersions: (aggregateType) => journal.aggregateVersions(aggregateType),
+      subscribeCommitted: (listener) => journal.subscribeCommitted(listener),
+    };
+    const cleanup = new ServerAttachmentCleanup({
+      journal: failingPendingJournal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => NOW,
+      connection: fake.connection,
+      store,
+      serverProjectForThread: () => project,
+      listThreadsForProject: () => [],
+    });
+    cleanup.load();
+
+    // Pending append fails while SSH is reachable -> must still run SSH removal!
+    fake.calls.length = 0;
+    fake.setResponder(() => ({
+      status: "ran",
+      exitCode: 0,
+      output: Buffer.alloc(0),
+      truncated: false,
+      errorOutput: "",
+    }));
+    expect(await cleanup.removeForThread({ project, threadId: threadA })).toEqual({
+      status: "removed",
+    });
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0]?.args).toEqual([threadA]);
+
+    // Pending append fails while SSH is unreachable -> must NOT falsely return `removed` or `pending`.
+    fake.calls.length = 0;
+    fake.setResponder(() => ({ status: "unreachable", message: "Offline" }));
+    expect(await cleanup.removeForThread({ project, threadId: threadB })).toEqual({
+      status: "unpersisted",
+    });
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0]?.args).toEqual([threadB]);
+    expect(cleanup.pending()).toEqual([]);
+    cleanup.close();
   });
 });
 

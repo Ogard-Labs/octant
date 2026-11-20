@@ -344,7 +344,7 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: serverProjectStore,
     cloudMachineOf: (projectId) => cloudMachines.machineForProject(projectId),
-    prepareProjectRemoval: (input) => serverAttachmentCleanup.prepareProjectRemoval(input),
+    stageProjectRemoval: (input) => serverAttachmentCleanup.stageProjectRemoval(input),
     removeProjectAttachments: (input) => serverAttachmentCleanup.removeForProject(input),
   });
   const serverResourceReaders = new Map<string, () => Promise<ServerResourceRead>>();

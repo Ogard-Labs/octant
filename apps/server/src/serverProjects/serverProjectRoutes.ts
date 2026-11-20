@@ -40,13 +40,14 @@ export interface ServerProjectRouteDependencies {
   /** The cloud machine behind a Project, when Octant created one for it. */
   readonly cloudMachineOf?: (projectId: string) => ServerProjectCloudMachine | undefined;
   /**
-   * Durably journals pending attachment removal intent for a Project's threads
-   * before the catalog entry is removed, so a crash mid-removal survives restart.
+   * Appends pending attachment removal intent inside the same journal
+   * transaction as `server-projects.removed@1`, returning a callback that
+   * publishes the in-memory pending entries only once the transaction commits.
    */
-  readonly prepareProjectRemoval?: (input: {
+  readonly stageProjectRemoval?: (input: {
     readonly project: ServerProject;
     readonly server: ServerAddress | undefined;
-  }) => void;
+  }) => () => void;
   /**
    * Removes remote attachment folders for a server Project that was just
    * removed. Returns a notice naming the folder left on the server when the
@@ -148,10 +149,14 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
       const existing = dependencies.store.project(projectId);
       const address = existing === undefined ? undefined : dependencies.store.addressOf(projectId);
       const server = address?.kind === "address" ? address.server : undefined;
-      if (principal === "local-window" && existing !== undefined) {
-        dependencies.prepareProjectRemoval?.({ project: existing, server });
-      }
-      change = dependencies.store.remove({ projectId, principal });
+      const stage = dependencies.stageProjectRemoval;
+      change = dependencies.store.remove({
+        projectId,
+        principal,
+        ...(stage === undefined
+          ? {}
+          : { withinTransaction: (project) => stage({ project, server }) }),
+      });
       if (change.kind === "changed" && existing !== undefined) {
         notice = await dependencies.removeProjectAttachments?.({
           project: existing,

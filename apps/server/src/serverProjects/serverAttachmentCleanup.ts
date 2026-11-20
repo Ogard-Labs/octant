@@ -68,6 +68,7 @@ const DEFAULT_DRAIN_TIMEOUT_MS = 15_000;
 export type ServerAttachmentThreadCleanupOutcome =
   | { readonly status: "removed" }
   | { readonly status: "pending" }
+  | { readonly status: "unpersisted" }
   | { readonly status: "skipped" }
   | { readonly status: "refused" };
 
@@ -292,21 +293,50 @@ export class ServerAttachmentCleanup {
   }
 
   /**
-   * Durably journals cleanup intent for all threads of a server Project before
-   * the Project is removed from the catalog, so a host crash between catalog
-   * removal and SSH completion never loses track of remote folders.
+   * Appends `server-attachment-cleanup.pending@1` for every thread of
+   * `project` inside the caller's active `Journal.transaction`, without
+   * mutating in-memory pending state until the returned callback runs after
+   * commit. Throws if any append fails so the enclosing transaction rolls back
+   * atomically alongside `server-projects.removed@1`.
    */
-  prepareProjectRemoval(input: {
+  stageProjectRemoval(input: {
     readonly project: ServerProject;
     readonly server: ServerAddress | undefined;
-  }): ReadonlyArray<string> {
+  }): () => void {
     const threadIds = this.#projectThreadIds(String(input.project.id));
-    if (input.server !== undefined) {
-      for (const threadId of threadIds) {
-        this.#recordPending(input.project, input.server, threadId);
-      }
+    if (input.server === undefined) return () => undefined;
+    const staged: Array<{
+      readonly aggregateId: string;
+      readonly payload: ServerAttachmentCleanupPendingPayload;
+      readonly nextVersion: number;
+    }> = [];
+    for (const threadId of threadIds) {
+      if (!isSafeServerAttachmentThreadId(threadId)) continue;
+      const aggregateId = pendingAggregateId(String(input.project.serverId), threadId);
+      if (this.#pending.has(aggregateId)) continue;
+      const payload = decodeServerAttachmentCleanupPendingPayload({
+        serverId: input.project.serverId,
+        alias: input.server.alias,
+        user: input.server.user,
+        projectId: input.project.id,
+        threadId: decodeServerAttachmentThreadId(threadId),
+        queuedAt: decodeTimestamp(this.#options.clock()),
+      });
+      const expectedVersion = this.#versions.get(aggregateId) ?? 0;
+      this.#appendRaw(
+        aggregateId,
+        expectedVersion,
+        SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending,
+        payload,
+      );
+      staged.push({ aggregateId, payload, nextVersion: expectedVersion + 1 });
     }
-    return threadIds;
+    return () => {
+      for (const entry of staged) {
+        this.#versions.set(entry.aggregateId, entry.nextVersion);
+        this.#pending.set(entry.aggregateId, entry.payload);
+      }
+    };
   }
 
   /**
@@ -318,9 +348,15 @@ export class ServerAttachmentCleanup {
     readonly project: ServerProject;
     readonly server: ServerAddress | undefined;
   }): Promise<string | undefined> {
-    const threadIds = this.prepareProjectRemoval(input);
+    const threadIds = this.#projectThreadIds(String(input.project.id));
     if (input.server === undefined) {
       return formatLeftBehindNotice(input.project.name, undefined, threadIds);
+    }
+    // Idempotent when `stageProjectRemoval` already committed atomically with
+    // `server-projects.removed@1`; ensures standalone callers still record
+    // intent before SSH.
+    for (const threadId of threadIds) {
+      this.#recordPending(input.project, input.server, threadId);
     }
     if (this.#closed || this.#options.connection.refusal?.(input.server) !== undefined) {
       return formatLeftBehindNotice(input.project.name, input.server.alias, threadIds);
@@ -367,14 +403,21 @@ export class ServerAttachmentCleanup {
     const address = this.#options.store.addressOf(String(project.id));
     if (address.kind !== "address") return { status: "skipped" };
     // Journal intent before starting SSH so a crash mid-call survives restart.
-    this.#recordPending(project, address.server, threadId);
+    const intentPersisted = this.#recordPending(project, address.server, threadId);
     if (this.#closed || this.#options.connection.refusal?.(address.server) !== undefined) {
-      return { status: "pending" };
+      return intentPersisted ? { status: "pending" } : { status: "unpersisted" };
     }
     const key = threadTransferKey(address.server, threadId);
     return this.#serializeThread(key, async () => {
-      if (this.#closed) return { status: "pending" };
-      if (!this.#pending.has(aggregateId)) return { status: "removed" };
+      if (this.#closed) {
+        return intentPersisted ? { status: "pending" } : { status: "unpersisted" };
+      }
+      // Only treat an absent `#pending` entry as already removed when we
+      // actually had a durable pending entry that another operation settled
+      // while we waited in the per-thread queue.
+      if (intentPersisted && !this.#pending.has(aggregateId)) {
+        return { status: "removed" };
+      }
       this.#claimed.add(aggregateId);
       try {
         const outcome = await removeServerThreadAttachments({
@@ -385,13 +428,19 @@ export class ServerAttachmentCleanup {
           signal: this.#closeController.signal,
         });
         if (outcome.status === "removed") {
+          if (!intentPersisted) return { status: "removed" };
           if (this.#closed) return { status: "pending" };
           return this.#settlePendingById(aggregateId)
             ? { status: "removed" }
             : { status: "pending" };
         }
         if (outcome.status === "refused") return { status: "refused" };
-        return { status: "pending" };
+        if (!intentPersisted && !this.#closed) {
+          return this.#recordPending(project, address.server, threadId)
+            ? { status: "pending" }
+            : { status: "unpersisted" };
+        }
+        return intentPersisted ? { status: "pending" } : { status: "unpersisted" };
       } finally {
         this.#claimed.delete(aggregateId);
       }
@@ -536,29 +585,38 @@ export class ServerAttachmentCleanup {
   #append(aggregateId: string, eventName: string, payload: unknown): boolean {
     const expectedVersion = this.#versions.get(aggregateId) ?? 0;
     try {
-      this.#options.journal.append({
-        aggregate: {
-          aggregateType: SERVER_ATTACHMENT_CLEANUP_AGGREGATE,
-          aggregateId: decodeAggregateId(aggregateId),
-        },
-        expectedVersion: decodeAggregateVersion(expectedVersion),
-        events: [
-          {
-            eventId: decodeEventId(this.#options.uuid()),
-            eventName: decodeEventName(eventName),
-            eventVersion: 1,
-            correlationId: decodeCorrelationId(this.#options.uuid()),
-            actor: this.#personActor,
-            occurredAt: decodeTimestamp(this.#options.clock()),
-            payload,
-          },
-        ],
-      });
+      this.#appendRaw(aggregateId, expectedVersion, eventName, payload);
     } catch {
       return false;
     }
     this.#versions.set(aggregateId, expectedVersion + 1);
     return true;
+  }
+
+  #appendRaw(
+    aggregateId: string,
+    expectedVersion: number,
+    eventName: string,
+    payload: unknown,
+  ): void {
+    this.#options.journal.append({
+      aggregate: {
+        aggregateType: SERVER_ATTACHMENT_CLEANUP_AGGREGATE,
+        aggregateId: decodeAggregateId(aggregateId),
+      },
+      expectedVersion: decodeAggregateVersion(expectedVersion),
+      events: [
+        {
+          eventId: decodeEventId(this.#options.uuid()),
+          eventName: decodeEventName(eventName),
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#options.uuid()),
+          actor: this.#personActor,
+          occurredAt: decodeTimestamp(this.#options.clock()),
+          payload,
+        },
+      ],
+    });
   }
 
   #serializeThread<T>(key: string, work: () => Promise<T>): Promise<T> {
