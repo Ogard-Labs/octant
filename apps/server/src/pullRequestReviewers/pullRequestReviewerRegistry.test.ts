@@ -1309,4 +1309,94 @@ describe("pull request reviewer registry and host port", () => {
     ).toEqual({ status: "refused", reason: "not-effective" });
     expect(delegateCallsAfterSettlement).toBe(0);
   });
+
+  it("releases in-flight comment and hand-back reservations when a delegate rejects so caught retries can succeed", async () => {
+    const registry = new PullRequestReviewerRegistry();
+    let commentAttempts = 0;
+    let handBackAttempts = 0;
+
+    const fake = fakePullRequestReviewer(async (_request, host) => {
+      const recorded = await host.recordFindings({
+        findings: [
+          {
+            path: APP_PATH,
+            location: { kind: "line", line: 10 },
+            severity: "error",
+            summary: "Blocking defect.",
+          },
+        ],
+      });
+      if (recorded.status !== "recorded") return { status: "failed", detail: "record failed" };
+      const findingIds = recorded.findings.map((finding) => finding.id);
+
+      // First comment attempt rejects before posting; reviewer catches and retries.
+      await expect(host.postSummaryComment({ body: "Summary" })).rejects.toThrow("transient error");
+      expect(await host.postSummaryComment({ body: "Summary" })).toEqual({
+        status: "posted",
+        commentId: "comment-retry-1",
+      });
+      // Once posted, a third attempt is still refused as already-posted.
+      expect(await host.postSummaryComment({ body: "Duplicate" })).toEqual({
+        status: "refused",
+        reason: "already-posted",
+      });
+
+      // First hand-back attempt rejects before waking; reviewer catches and retries.
+      await expect(host.handBackBlockingFindings({ findingIds })).rejects.toThrow("transient wake");
+      expect(await host.handBackBlockingFindings({ findingIds })).toEqual({
+        status: "handed-back",
+        attempt: 1,
+      });
+      // Once handed back, a third attempt is still refused as already-handed-back.
+      expect(await host.handBackBlockingFindings({ findingIds })).toEqual({
+        status: "refused",
+        reason: "already-handed-back",
+      });
+
+      return { status: "completed", findingIds };
+    });
+
+    registry.register({
+      reviewerId: REVIEWER_ID,
+      displayName: "Example",
+      activation: () => ({ installed: true, trusted: true, enabled: true }),
+      reviewer: fake.reviewer,
+    });
+
+    const outcome = await registry.run({
+      reviewerId: REVIEWER_ID,
+      request: makeRequest({
+        optIns: { postSummaryComment: true, sendBlockingFindingsToWorker: true },
+      }),
+      signal: new AbortController().signal,
+      delegates: {
+        readCurrentHeadSha: async () => HEAD_SHA,
+        recordFindings: async () => ({
+          status: "recorded",
+          findings: [makeRecordedFinding(FINDING_ID_1, "error", "Blocking defect.")],
+        }),
+        isPostSummaryCommentEnabled: () => true,
+        postSummaryComment: async () => {
+          commentAttempts += 1;
+          if (commentAttempts === 1) throw new Error("transient error");
+          return { status: "posted", commentId: "comment-retry-1" };
+        },
+        isSendBlockingFindingsEnabled: () => true,
+        handBackBlockingFindings: async () => {
+          handBackAttempts += 1;
+          if (handBackAttempts === 1) throw new Error("transient wake");
+          return { status: "handed-back", attempt: 1 };
+        },
+      },
+    });
+
+    expect(commentAttempts).toBe(2);
+    expect(handBackAttempts).toBe(2);
+    expect(outcome).toEqual({
+      status: "completed",
+      findingIds: [FINDING_ID_1],
+      summaryCommentPosted: true,
+      handedBackToWorker: true,
+    });
+  });
 });

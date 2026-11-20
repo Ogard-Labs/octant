@@ -375,43 +375,35 @@ export function createPullRequestReviewHostPort(options: {
       }
 
       // Reserve the single summary-comment slot synchronously before any await
-      // so concurrent calls cannot race into posting twice.
+      // so concurrent calls cannot race into posting twice. Release the
+      // in-flight lock in `finally` so a rejected delegate never wedges retries
+      // while `summaryCommentPosted` permanently guards after a real post.
       summaryCommentInFlight = true;
-      const before = await checkHead(signal);
-      if (!checkEffective()) {
-        summaryCommentInFlight = false;
-        return { status: "refused", reason: "not-effective" };
-      }
-      if (signal.aborted) {
-        summaryCommentInFlight = false;
-        return { status: "unavailable", reason: "unavailable" };
-      }
-      if (!before.current) {
-        summaryCommentInFlight = false;
-        return staleAnswer(before.currentHeadSha);
-      }
-      if (delegates.isPostSummaryCommentEnabled?.() !== true) {
-        summaryCommentInFlight = false;
-        return { status: "disabled" };
-      }
-      if (delegates.postSummaryComment === undefined) {
-        summaryCommentInFlight = false;
-        return { status: "unavailable", reason: "unavailable" };
-      }
+      try {
+        const before = await checkHead(signal);
+        if (!checkEffective()) return { status: "refused", reason: "not-effective" };
+        if (signal.aborted) return { status: "unavailable", reason: "unavailable" };
+        if (!before.current) return staleAnswer(before.currentHeadSha);
+        if (delegates.isPostSummaryCommentEnabled?.() !== true) {
+          return { status: "disabled" };
+        }
+        if (delegates.postSummaryComment === undefined) {
+          return { status: "unavailable", reason: "unavailable" };
+        }
 
-      const result = await delegates.postSummaryComment({ body: input.body }, signal);
-      if (result.status === "posted") {
-        summaryCommentPosted = true;
-        summaryCommentInFlight = false;
+        const result = await delegates.postSummaryComment({ body: input.body }, signal);
+        if (result.status === "posted") {
+          summaryCommentPosted = true;
+          return result;
+        }
+        if (result.status === "stale") {
+          markStale(result.currentHeadSha);
+          return staleAnswer(staleHeadSha);
+        }
         return result;
-      }
-      if (result.status === "stale") {
-        markStale(result.currentHeadSha);
+      } finally {
         summaryCommentInFlight = false;
-        return staleAnswer(staleHeadSha);
       }
-      summaryCommentInFlight = false;
-      return result;
     },
 
     handBackBlockingFindings: async (input, callSignal) => {
@@ -445,42 +437,34 @@ export function createPullRequestReviewHostPort(options: {
 
       // Reserve the single hand-back slot synchronously before any await so
       // concurrent calls cannot wake the worker more than once per review run.
+      // Release the in-flight lock in `finally` so a rejected delegate never
+      // wedges retries while `handedBackToWorker` guards after a real hand-back.
       handBackInFlight = true;
-      const before = await checkHead(signal);
-      if (!checkEffective()) {
-        handBackInFlight = false;
-        return { status: "refused", reason: "not-effective" };
-      }
-      if (signal.aborted) {
-        handBackInFlight = false;
-        return { status: "refused", reason: "turn-refused" };
-      }
-      if (!before.current) {
-        handBackInFlight = false;
-        return staleAnswer(before.currentHeadSha);
-      }
-      if (delegates.isSendBlockingFindingsEnabled?.() !== true) {
-        handBackInFlight = false;
-        return { status: "disabled" };
-      }
-      if (delegates.handBackBlockingFindings === undefined) {
-        handBackInFlight = false;
-        return { status: "disabled" };
-      }
+      try {
+        const before = await checkHead(signal);
+        if (!checkEffective()) return { status: "refused", reason: "not-effective" };
+        if (signal.aborted) return { status: "refused", reason: "turn-refused" };
+        if (!before.current) return staleAnswer(before.currentHeadSha);
+        if (delegates.isSendBlockingFindingsEnabled?.() !== true) {
+          return { status: "disabled" };
+        }
+        if (delegates.handBackBlockingFindings === undefined) {
+          return { status: "disabled" };
+        }
 
-      const result = await delegates.handBackBlockingFindings({ findings: blocking }, signal);
-      if (result.status === "handed-back") {
-        handedBackToWorker = true;
-        handBackInFlight = false;
+        const result = await delegates.handBackBlockingFindings({ findings: blocking }, signal);
+        if (result.status === "handed-back") {
+          handedBackToWorker = true;
+          return result;
+        }
+        if (result.status === "stale") {
+          markStale(result.currentHeadSha);
+          return staleAnswer(staleHeadSha);
+        }
         return result;
-      }
-      if (result.status === "stale") {
-        markStale(result.currentHeadSha);
+      } finally {
         handBackInFlight = false;
-        return staleAnswer(staleHeadSha);
       }
-      handBackInFlight = false;
-      return result;
     },
   };
 
