@@ -87,6 +87,16 @@ import {
   CodeProjectPullRequestAutoFixRecorded,
   CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
   CodeProjectPullRequestWatchRecorded,
+  CODE_PULL_REQUEST_LINK_CREATED,
+  CodePullRequestLinkCreated,
+  CODE_PULL_REQUEST_LINK_THREAD_ATTACHED,
+  CodePullRequestLinkThreadAttached,
+  CODE_PULL_REQUEST_LINK_FORGE_IDS_BACKFILLED,
+  CodePullRequestLinkForgeIdsBackfilled,
+  CODE_PULL_REQUEST_LINK_DISPLAY_UPDATED,
+  CodePullRequestLinkDisplayUpdated,
+  CODE_PULL_REQUEST_LINK_MERGED_INTO,
+  CodePullRequestLinkMergedInto,
   WorkProjectStatusFileChanged,
   ProjectAgentMemoryWritesChanged,
   ProjectImageGenerationChoiceChanged,
@@ -467,6 +477,7 @@ import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerToolEffectEvents } from "../toolEffects/toolEffectLedger";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
+import { registerFinishedReceiptEvents } from "../finishedReceipts/finishedReceiptStore";
 import { registerThreadNoteEvents } from "../threadNotes/threadNotes";
 import { registerShipEvents } from "../ship/shipEventStore";
 import { registerCanvasChoiceAnswerEvents } from "../canvas/canvasChoiceAnswerService";
@@ -575,6 +586,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     )
     .register(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED, 1, CodeProjectPullRequestAutoFixRecorded)
     .register(CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED, 1, CodeProjectPullRequestWatchRecorded)
+    .register(CODE_PULL_REQUEST_LINK_CREATED, 1, CodePullRequestLinkCreated)
+    .register(CODE_PULL_REQUEST_LINK_THREAD_ATTACHED, 1, CodePullRequestLinkThreadAttached)
+    .register(CODE_PULL_REQUEST_LINK_FORGE_IDS_BACKFILLED, 1, CodePullRequestLinkForgeIdsBackfilled)
+    .register(CODE_PULL_REQUEST_LINK_DISPLAY_UPDATED, 1, CodePullRequestLinkDisplayUpdated)
+    .register(CODE_PULL_REQUEST_LINK_MERGED_INTO, 1, CodePullRequestLinkMergedInto)
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
     .register("project.native-providers-changed@1", 1, ProjectNativeProvidersChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
@@ -917,6 +933,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerThreadMoveEvents(events);
   registerMovedHistoryEvents(events);
   registerSideTaskEvents(events);
+  registerFinishedReceiptEvents(events);
   registerThreadNoteEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);

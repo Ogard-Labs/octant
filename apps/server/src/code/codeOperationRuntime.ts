@@ -118,6 +118,7 @@ import type {
 import type { Journal } from "../persistence/journal";
 import type { OutlivingSessions } from "../providers/outlivingSessions";
 import { createGhPullRequestPort } from "./ghPullRequestActionPort";
+import type { PullRequestLinkRecorder } from "./pullRequestLinkService";
 import { createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
 import {
@@ -526,6 +527,7 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<Pick<ProviderProbeResult, "readiness" | "models">>;
   readonly ghExecutable?: string;
   readonly pullRequestPort?: CodeOperationPullRequestPort;
+  readonly pullRequestLinks?: PullRequestLinkRecorder;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
   readonly terminalProcessPort?: Pick<TerminalProcessPort, "start"> & {
     readonly reconcile?: () => Promise<void>;
@@ -708,6 +710,7 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly readThread: () => CodeThread | undefined;
     readonly folders: ReadonlyArray<string>;
+    readonly operationId?: string;
     /** The routine run this turn was started for, from the dispatcher only. */
     readonly routineRun?: AutomationRunReference;
     /**
@@ -1668,6 +1671,9 @@ export function createCodeOperationRuntime(
             );
           },
         }),
+    ...(options.pullRequestLinks === undefined
+      ? {}
+      : { pullRequestLinks: options.pullRequestLinks }),
     events,
     ...(options.resolveSideChatReturns === undefined
       ? {}
@@ -6140,6 +6146,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           thread: active.thread,
           readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
           folders: [active.providerRoot, ...active.extraFolders],
+          operationId: String(active.operationId),
           ...(active.routineRun === undefined ? {} : { routineRun: active.routineRun }),
           askPerson: (summary, signal) => {
             const bounded = boundProviderSummary(summary);

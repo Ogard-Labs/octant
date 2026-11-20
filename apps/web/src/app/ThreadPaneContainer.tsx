@@ -521,6 +521,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     planClient,
     previewClient,
     sideTaskClient,
+    finishedReceiptClient,
     spendCeilingClient,
     usageDashboardClient,
     workMutationClient,
@@ -624,6 +625,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   followUpSuggestions={{
                     client: followUpSuggestionClient,
                     sideTaskClient,
+                    finishedReceiptClient,
                     onCreated: openCreatedFollowUp,
                   }}
                   draftResetRevisions={draftResetRevisions}

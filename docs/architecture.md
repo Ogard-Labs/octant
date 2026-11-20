@@ -760,8 +760,7 @@ local window approves it for a checkout or the Code Project (a journaled
 `POST /api/code/language/approvals`, which a device the host's own person
 paired also answers and is journaled for; maintainer decision, 2026-11-12),
 with no approval at Full access, read from the level the turn runs at
-([the Full access rule](#security-and-authority); not built yet: today the
-approval is asked at every level), never in Plan or for any other
+([the Full access rule](#security-and-authority); built), never in Plan or for any other
 device session,
 may then write the checkout and run programs as a terminal does, and reaches
 the network through its own `proxied` egress proxy under the Project's rules,
@@ -779,13 +778,14 @@ Agents read the same servers through one read-only app-managed tool,
 `octant_code` (`code-language` in the closed catalog), whose `diagnostics`,
 `definition`, and `references` operations are allowed in Plan and ask nothing.
 It is offered on a Code turn whose provider carries Octant's tools only when a
-server an agent may start (`static` and effective, so the Settings switch is
-honoured) covers a file a bounded scan finds in the turn's checkout or extra
-folders, or a server that runs repository tooling is already running there
-for a turn outside Plan. It reads the saved file, never an editor's draft,
-returns at most 200 references, never starts a server that runs
-repository tooling, and reads through one only while it is already approved
-and running, outside Plan, marking that answer as outside content
+server an agent may start (`static` and effective, or `repo-tooling` at Full
+access, so the Settings switch is honoured) covers a file a bounded scan finds
+in the turn's checkout or extra folders, or an approved server that runs
+repository tooling is already running there for a turn outside Plan. It reads
+the saved file, never an editor's draft, returns at most 200 references, starts
+a `repo-tooling` server with no approval at Full access, and below Full access
+never starts one and reads through one only while it is already approved and
+running, outside Plan, marking that answer as outside content
 (maintainer request, 2026-11-12)
 ([agent read rules](design/language-services.md#agent-read-rules)).
 The debugger's seam and session host are built: the `debug-adapter`
@@ -2071,9 +2071,9 @@ except where a bullet says otherwise.
 - **Written instructions.** Instructions the person writes for Octant itself,
   per person, per Project, and for coordinator threads, travel beside each
   provider's own instruction files as standing blocks placed before person
-  memory. Unlike person memory they reach every turn, including the turns the
-  host starts as itself; orchestration reaches only coordinator threads and
-  a Project's designated planner
+  memory. Unlike person memory they reach every turn even in Projects kept out
+  of memory or threads marked Leave no trace; orchestration reaches only
+  coordinator threads and a Project's designated planner
   ([Octant instructions](design/octant-instructions.md)).
 - **Searching past threads.** `octant_past_threads` is a read-only host tool,
   offered in Chat (not a Side Chat), Work, and Code beside the thread's other
@@ -2106,20 +2106,34 @@ except where a bullet says otherwise.
   setting. Entries were redacted before storage, so the export adds nothing
   beyond what Settings › Memory shows.
 - **Who may read it.**
-  - A local window or a paired device: read and change everything in Settings ›
-    Memory, and a turn either sends gets the block and the tool (maintainer
-    decision, 2026-11-12). Not built yet: today the memory routes refuse a
-    paired device, and a turn it sends gets no block and no tool.
-  - A turn the host starts as itself (a routine's run, a delivered child
-    result, a turn resumed after a usage limit): no block and no tool, since
-    no person is at the window. A provider session that held the block is
-    sent its standing context again once without it.
-  - A subagent (child run): neither; it receives only what its lead passes it.
+  - A local window or a paired device the host's own person approved: read and
+    change everything in Settings › Memory, and a turn either sends gets the
+    block and `octant_past_threads` under the thread's own participation rules
+    (memory on, Project not kept out, thread not Leave no trace). A device known
+    only through a hub's roster (and any subagent it spawns), a peer-delegated
+    Work turn (and any subagent it spawns), and a turn with no scope (such as a
+    benchmark runner's Chat turn) get neither.
+  - A routine's run or another turn the host starts as itself (a delivered child
+    result, a turn resumed after a usage limit, a goal round): gets the block
+    and `octant_past_threads` under the thread's own participation rules, so a
+    provider session keeps a stable standing-context prefix across person and
+    host-started turns.
+  - A subagent (child run): inherits its originating turn's scope restriction
+    and gets its lead thread's person-memory block once on start (never
+    duplicated on a continuation that already holds it) and
+    `octant_past_threads` scoped to its lead thread when its clamped authority
+    allows tools and its provider carries Octant's tools, so a child sees what
+    its lead sees and never more. A child whose originating scope is absent or
+    restricted, or whose lead is peer-delegated, in a kept-out Project, or in a
+    Leave no trace thread, gets neither.
+  - Only turns with the person's own message can write person memory (through
+    distillation of ended threads); routines, host-started turns, and subagents
+    read it without writing to it, and all caps stay unchanged.
   - A hub, spoke, or peer host: person memory stays on the host that wrote
     it and is never synced or relayed.
-  - A provider: sees memory only in a thread on that provider that uses it.
-    Memory learned in a thread on one provider can reach a thread on another,
-    and Settings › Memory says so in those words.
+  - A provider: sees memory only in a thread (or its subagent) on that provider
+    that uses it. Memory learned in a thread on one provider can reach a thread
+    on another, and Settings › Memory says so in those words.
 - **First run.** The first-run flow explains memory across threads and links
   to Settings › Memory without assuming that the host's current setting is on.
   The optional [Your first task capability card](design/start-screen.md#optional-capability-card-in-your-first-task)
@@ -3200,6 +3214,30 @@ callers are refused when they try to reopen a thread a person marked. An optiona
 kept as the thread's completion evidence; without one the thread carries no
 evidence record.
 
+A Work or Code lead outside Plan may call `octant_report_finished` to say a
+thread is finished with proof built by the host (maintainer decision,
+2026-11-19). The tool is never offered in Chat, in Plan, or to a child run.
+It accepts a summary (at most 1,000 characters) and up to 12 check commands
+(each at most 200 characters). The host runs each named check and any goal
+criterion check once in the thread's checkout or folder under the thread's
+guardrail level (no prompt at Full access, normal approval rules below it),
+marks goal criteria without a check `claimed`, and records the observed diff
+file and line counts (or `unavailable` when no folder exists). If any check
+fails, nothing is recorded as finished and each failed check returns with the
+last 2,000 characters of its output in the same turn so the agent can fix and
+report again; outside Strict Octant adds no retry cap and never starts a new
+turn on its own. When no check fails, the host journals
+`thread.finished-receipt-recorded@1` (`thread-finished-receipt` aggregate).
+The receipt renders as a "Finished, with proof" card at the end of the turn
+and above the last reply on the Review page (whose Send back prefills any
+failed or claimed items), and places a compact "Finished" mark with the proven
+check count on the board card without changing its column and without adding
+Work threads to To review. Any later file-change journal event marks the
+receipt `stale` (ordered strictly by journal sequence) and clears the board
+mark. Marking a Work or Code thread Done while a fresh receipt stands attaches
+that receipt (`completionReceiptId`) as the thread's completion evidence, and
+Reopen clears it. Reporting finished never marks a thread Done.
+
 The Work mark locks the thread on the host until the person reopens it
 (archiving and reactivating the thread clears it too); a lock only in the window let a queued message,
 a routine, or a child's result start a turn anyway. Work turn admission, the
@@ -3312,6 +3350,27 @@ hold for every action in it:
   [Merge when ready and Auto-fix](#modes-chat-work-and-code) below.
 - **Record.** Each action journals the actor, the repository, the number, and
   the head SHA, as Octant's own record beside the forge's history.
+- **Forge identity.** A linked `github.com` pull request's stable identity is
+  its GitHub GraphQL node ID (`pullRequestNodeId`) together with the **base**
+  repository's node ID (`baseRepositoryNodeId`; for a fork pull request, the
+  head owner remains a display field only). Owner/name and number stay mutable
+  display and lookup fields. Built (first layer): `GhPullRequestPort` reads both
+  node IDs (falling back cleanly when offline, rate-limited, or unavailable,
+  never refusing an action for a missing ID); operation results carry them as
+  optional fields so pre-existing journals replay identically; and the
+  journal-backed `code-pull-request-link` stream records links on creation or
+  first observation, backfills missing forge IDs idempotently once, updates
+  display fields via `code.pull-request-link-display-updated@1` when an
+  observation reports a renamed owner/name while preserving the link, threads,
+  watches, and switches, and reconciles duplicate pre-backfill links resolving
+  to the same PR node ID within a Project by keeping the earliest link,
+  appending `code.pull-request-link-merged-into@1` to the later link without
+  deleting journal history, moving its linked threads to the survivor, keeping
+  Merge when ready, Auto-fix, and pull-request watch ON only when ON in both
+  links, turning mixed switches OFF, and notifying affected threads naming each
+  disabled switch and why. Not built yet (second layer): moving every existing
+  board, list, detail, and switch reader onto the `code-pull-request-link`
+  identity owner.
 - **Credential.** Octant stores no forge token, as under the merge rules
   below.
 - **Approval shows the whole text.** Below Full access, a title or body change

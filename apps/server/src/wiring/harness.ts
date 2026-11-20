@@ -73,6 +73,7 @@ import {
   type FollowUpSuggestionActionDependencies,
 } from "../followUps/followUpSuggestionRoutes";
 import { createSideTaskRouteHandler } from "../sideTasks/sideTaskRoutes";
+import { createFinishedReceiptRouteHandler } from "../finishedReceipts/finishedReceiptRoutes";
 import type { SideTaskStartDependencies } from "../sideTasks/sideTaskStart";
 import {
   createNativeHarnessSessionRouteHandler,
@@ -148,6 +149,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "contributeChildTools"
     | "externalContentIngestionStore"
     | "sideTasks"
+    | "finishedReceipts"
     | "threadFollowUpSuggestions"
     | "turnMetrics"
   > &
@@ -227,6 +229,7 @@ export function wireHarness(deps: HarnessDependencies) {
     runningWorkTurnAccess,
     runningWorkTurnSandbox,
     sideTasks,
+    finishedReceipts,
     threadFollowUpSuggestions,
     toolEgressRules,
     turnMetrics,
@@ -666,6 +669,11 @@ export function wireHarness(deps: HarnessDependencies) {
       sideTaskHost.current?.continueHere(input) ??
       Promise.resolve({ kind: "refused", message: "This thread cannot take a message now." }),
     clock: () => new Date().toISOString(),
+  });
+  const finishedReceiptRoutes = createFinishedReceiptRouteHandler({
+    store: finishedReceipts,
+    windowAuthorityStore,
+    authorizeThread: authorizeFollowUpThread,
   });
   const nativeHarnessEgressRoutes = createNativeHarnessEgressRouteHandler({
     windowAuthorityStore,
@@ -1344,6 +1352,7 @@ export function wireHarness(deps: HarnessDependencies) {
     webSearchSettings,
     sideTaskHost,
     sideTaskRoutes,
+    finishedReceiptRoutes,
     hostShield,
     threadWork,
   };

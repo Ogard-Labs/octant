@@ -72,6 +72,11 @@ import {
 } from "../code/codeProjectPullRequestActionService";
 import { GhPullRequestActionPort } from "../code/ghPullRequestActionPort";
 import { createGhCommandPort, GhPullRequestPort } from "../code/ghPullRequestPort";
+import {
+  PullRequestLinkService,
+  collectLegacyPullRequestLinks,
+  type PullRequestLinkSwitchReconciler,
+} from "../code/pullRequestLinkService";
 import { createFileHelperProcessTransport } from "../code/fileHelperProcessTransport";
 import { FileOperationPort } from "../code/fileOperationPort";
 import { createManagedWorktreeNodePorts } from "../code/managedWorktreeNodePorts";
@@ -606,7 +611,10 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
   > &
   Pick<
     AgentRunsWiring,
-    "externalContentIngestionStore" | "managedWorktreeReceipts" | "threadAwaitsHarnessApproval"
+    | "externalContentIngestionStore"
+    | "finishedReceipts"
+    | "managedWorktreeReceipts"
+    | "threadAwaitsHarnessApproval"
   > &
   Pick<
     IntegrationsWiring,
@@ -653,6 +661,7 @@ export function wireCode(deps: CodeDependencies) {
     codeEvidence,
     codeSessionAuthority,
     externalContentIngestionStore,
+    finishedReceipts,
     gitEnvironmentPort,
     githubIssueContextService,
     gitObservationPort,
@@ -922,6 +931,7 @@ export function wireCode(deps: CodeDependencies) {
           moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
           liveTurns,
           awaitsHarnessApproval: threadAwaitsHarnessApproval,
+          readLatestFinishedReceipt: (threadId) => finishedReceipts.latest(threadId),
           gitHistory: new GitHistoryPort(),
           serverGitHistory: (thread) => {
             const project = serverProjectOf(serverProjectStore, thread);
@@ -1163,6 +1173,43 @@ export function wireCode(deps: CodeDependencies) {
     ): void => {
       pullRequestSnapshotListeners.push(listener);
     };
+    // The switch service is composed in `wireCodeRuntime` after this area; it
+    // binds here before any tick or refresh can reconcile duplicate links.
+    let pullRequestSwitchReconciler: PullRequestLinkSwitchReconciler | undefined;
+    const bindPullRequestSwitchReconciler = (reconciler: PullRequestLinkSwitchReconciler): void => {
+      pullRequestSwitchReconciler = reconciler;
+    };
+    const pullRequestLinkService = new PullRequestLinkService({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      switchReconciler: {
+        reconcileDuplicateLinks: (input) => {
+          if (pullRequestSwitchReconciler === undefined) {
+            input.commitMerge?.([]);
+            return Promise.resolve({ status: "reconciled" as const, disabledSwitches: [] });
+          }
+          return pullRequestSwitchReconciler.reconcileDuplicateLinks(input);
+        },
+      },
+      legacyLinks: (projectId) =>
+        collectLegacyPullRequestLinks({
+          journal: persistence.journal,
+          threads: persistence
+            .readCodeThreads()
+            .filter((thread) => String(thread.projectId) === String(projectId))
+            .map((thread) => {
+              // Use full history rather than summary so superseded PR results
+              // keep the earliest linkedAt timestamp for survivor selection.
+              const history = codeBoardEventStore.historyForThread(thread.id);
+              return {
+                threadId: thread.id,
+                projectId: thread.projectId,
+                frames: history.status === "ok" ? history.frames : [],
+              };
+            }),
+        }),
+    });
     const projectPullRequestService = new CodeProjectPullRequestService({
       projects: projectService,
       // Only the remotes: the full observation also diffs the working tree
@@ -1218,6 +1265,7 @@ export function wireCode(deps: CodeDependencies) {
       snapshotStore: new CodeProjectPullRequestSnapshotStore(
         join(persistence.dataDirectory, "code", "pull-request-snapshot.json"),
       ),
+      pullRequestLinks: pullRequestLinkService,
       onSnapshotRefreshed: (rows) => {
         for (const listener of pullRequestSnapshotListeners) listener(rows);
       },
@@ -1295,6 +1343,8 @@ export function wireCode(deps: CodeDependencies) {
           canAccessCodeProject(windowId, repository.projectId),
         ),
       onPullRequestSnapshotRefreshed,
+      bindPullRequestSwitchReconciler,
+      pullRequestLinkService,
       projectPullRequestActionService,
       projectPullRequestCadence,
       projectPullRequestService,

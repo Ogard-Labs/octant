@@ -107,6 +107,7 @@ export * from "./workTurnPolicy";
 export * from "./dataLifecyclePolicy";
 export * from "./threadRetentionPolicy";
 export * from "./threadCompletionPolicy";
+export * from "./finishedReceiptPolicy";
 export * from "./threadProjectMovePolicy";
 export * from "./threadExportPolicy";
 export * from "./threadHandOffPolicy";
@@ -262,5 +263,5 @@ export * from "./browserPageScriptPolicy";
 export * from "./ownerBrowserPolicy";
 export * from "./listenerKeyTransition";
 export * from "./routineSchedule";
-
 export * from "./turnActivityTiming";
+export * from "./pullRequestIdentityPolicy";

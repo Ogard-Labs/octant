@@ -1174,12 +1174,16 @@ it has not read.
 
 ### What leaves the computer
 
-Answers and notes are the person's own and stay on this computer. A share, a
-public link, and the Markdown and HTML export carry the questions, options, and
-sections (share version 17, naming blocks up to Canvas version 29) and never an
-answer or note. Artifact sync does not carry answers in this design; carrying
-them is a follow-up to [Artifact replica sync](artifact-replica-sync.md), as the
-comments' path is.
+Answers and notes are the person's own. A share, a public link, and the
+Markdown and HTML export carry the questions, options, and sections (share
+version 17, naming blocks up to Canvas version 29) and never an answer or note.
+For a Canvas the person's own replica carries, artifact sync carries saved
+answers, notes, and clears between that person's own computers as
+`canvas-choice-answer` entries under the share filter and the same ordering
+rules as comments ([Artifact replica sync](artifact-replica-sync.md)); an
+answer whose question fingerprint no longer matches the Canvas head is still
+carried and reads as stale, never as an answer to the revised question. Writing
+answers stays host-window only.
 
 ### Rejected and deferred
 

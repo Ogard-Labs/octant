@@ -517,4 +517,58 @@ describe("ReviewPage", () => {
 
     expect(await screen.findByText("The checkout is not available right now.")).toBeVisible();
   });
+
+  it("shows the finished receipt above the last reply and prefills send-back with claimed or failed items", async () => {
+    const user = userEvent.setup();
+    const source = makeSource({
+      loadFinishedReceipt: vi.fn(async () => ({
+        receipt: {
+          receiptId: "11111111-1111-4111-8111-111111111111" as never,
+          threadId: "22222222-2222-4222-8222-222222222222",
+          mode: "code" as const,
+          projectId: "33333333-3333-4333-8333-333333333333" as never,
+          summary: "Fixed the sidebar clip and ran tests.",
+          items: [
+            {
+              kind: "check" as const,
+              label: "bun run test sidebar",
+              command: "bun run test sidebar",
+              status: "proven" as const,
+              exitCode: 0,
+            },
+            {
+              kind: "goal-criterion" as const,
+              criterionId: "c1" as never,
+              label: "Confirm visual spacing in dark mode",
+              status: "claimed" as const,
+            },
+          ],
+          diff: { status: "observed" as const, changedFiles: 2, insertions: 14, deletions: 3 },
+          recordedAt: "2026-10-06T11:30:00.000Z" as never,
+        },
+        status: "proven" as const,
+        stale: false,
+        provenCount: 1,
+        claimedCount: 1,
+        failedCount: 0,
+        unavailableCount: 0,
+      })),
+    });
+    render(<ReviewPage {...props({ source })} />);
+
+    const receiptSection = await screen.findByRole("region", { name: "Finished, with proof" });
+    const replySection = screen.getByRole("region", { name: "Last reply" });
+    expect(
+      Boolean(
+        receiptSection.compareDocumentPosition(replySection) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+    expect(within(receiptSection).getByText("Fixed the sidebar clip and ran tests.")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /Send back/ }));
+    const input = screen.getByRole("textbox", { name: /Follow-up for/ });
+    expect(input).toHaveValue(
+      "Please address before finishing: Confirm visual spacing in dark mode (unverified)",
+    );
+  });
 });

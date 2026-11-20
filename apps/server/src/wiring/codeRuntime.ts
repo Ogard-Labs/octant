@@ -104,6 +104,10 @@ import {
 } from "../context/externalContentTaintProjection";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
+import {
+  createReportFinishedTool,
+  observeFolderFinishedDiff,
+} from "../finishedReceipts/finishedReceiptTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
 import {
   clampTurnAccessPosture,
@@ -351,6 +355,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "nativeHarnessRoutingStore"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
+    | "finishedReceipts"
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
   > &
@@ -367,7 +372,12 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools" | "threadDesktopDestination"> &
   Pick<
     WorkspaceWiring,
-    "codeBoardPlanProgressSource" | "contextHarness" | "keptImageChoices" | "projectService"
+    | "codeBoardPlanProgressSource"
+    | "contextHarness"
+    | "gitObservationPort"
+    | "goalService"
+    | "keptImageChoices"
+    | "projectService"
   > &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<HarnessStateWiring, "onHarnessQuestionAsked" | "onHarnessQuestionSettled"> &
@@ -387,6 +397,8 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeTestDiscovery"
     | "isCodeProviderModelAllowed"
     | "onPullRequestSnapshotRefreshed"
+    | "bindPullRequestSwitchReconciler"
+    | "pullRequestLinkService"
     | "projectPullRequestActionService"
     | "projectPullRequestCadence"
     | "projectPullRequestService"
@@ -515,6 +527,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     onHarnessQuestionSettled,
     onHarnessRecoveryLifted,
     onPullRequestSnapshotRefreshed,
+    bindPullRequestSwitchReconciler,
+    pullRequestLinkService,
     onThreadArchived,
     onWindowRevoked,
     nativeHarnessTranscripts,
@@ -544,6 +558,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     serverProjectStore,
     shieldServerStore,
     sideTasks,
+    finishedReceipts,
+    gitObservationPort,
+    goalService,
     simulatorInputGrants,
     spendCeiling,
     threadMentionService,
@@ -737,6 +754,38 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         windowId,
       }),
     );
+    contributeCodeTools(({ windowId, thread, readThread, folders, operationId, askPerson }) => {
+      const readPosture = () =>
+        clampTurnAccessPosture({
+          requested: readThread()?.executionPolicy ?? thread.executionPolicy,
+          thread: persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
+        });
+      const folder = folders[0];
+      const shell = nativeHarnessComposition.shellForCode({
+        windowId: String(windowId),
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+      });
+      return createReportFinishedTool({
+        mode: "code",
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+        ...(operationId === undefined ? {} : { turnId: operationId }),
+        readPosture,
+        toolConstraints: thread.toolConstraints,
+        profileDisplayName: thread.profileDisplayName,
+        ...(folder === undefined ? {} : { folder }),
+        ...(folders.length > 1 ? { extraFolders: folders.slice(1) } : {}),
+        ...(shell === undefined ? {} : { shell }),
+        askPerson,
+        readGoal: () => goalService.read(String(thread.id)).goal ?? undefined,
+        observeDiff: (signal) =>
+          observeFolderFinishedDiff({ folder, git: gitObservationPort, signal }),
+        store: finishedReceipts,
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      });
+    });
     const {
       androidToolchainRoutes,
       appleToolchainRoutes,
@@ -864,6 +913,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        pullRequestLinks: pullRequestLinkService,
         stalledTurnLimitMs: (turn) =>
           stalledTurnLimitMs(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -2374,6 +2424,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
           },
           planProgress: codeBoardPlanProgressSource,
+          finishedReceipts: {
+            read: (threadId) => finishedReceipts.boardMark(String(threadId)),
+          },
           outsideContent: {
             read: (threadId) => {
               if (
@@ -2501,6 +2554,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       uuid: randomUUID,
     });
     pullRequestWatchService = pullRequestSwitchService;
+    bindPullRequestSwitchReconciler(pullRequestSwitchService);
     // Host-local and idle-free: the forge is read only while a switch or a watch is on.
     const pullRequestSwitchAbort = new AbortController();
     const pullRequestSwitchTimer = setInterval(() => {

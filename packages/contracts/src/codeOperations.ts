@@ -17,6 +17,7 @@ import { ProviderNativeSessionId } from "./providerNativeSession";
 import { ThreadPublishedPage } from "./threadToolSteps";
 import { ThreadCallTiming } from "./threadToolStepList";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
+import { ThreadBoardFinishedMark } from "./finishedReceipt";
 import { DescribedImageName, DescribedTurnImages, ImageDescribedBy } from "./imageDescription";
 import { Schema } from "effect";
 import {
@@ -77,6 +78,8 @@ import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention"
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
+import { GithubRepositoryNodeId } from "./githubCatalogue";
+import { GithubPullRequestNodeId } from "./pullRequestIdentity";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 import { StrictKeptProtections } from "./strictNotice";
 
@@ -1461,6 +1464,10 @@ const PullRequestResult = Schema.Union(
     baseBranch: GitBranchName,
     /** Whether GitHub holds it as a draft, when the host knows. */
     draft: Schema.optional(Schema.Boolean),
+    /** GitHub GraphQL node ID of the pull request, when available. */
+    pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
+    /** GitHub GraphQL node ID of the base repository, when available. */
+    baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-request-state"),
@@ -1586,6 +1593,10 @@ const PullRequestReviewResult = Schema.Union(
     checks: boundedReviewArray(CodePullRequestReviewCheck),
     reviews: boundedReviewArray(CodePullRequestReviewOpinion),
     comments: boundedReviewArray(CodePullRequestReviewComment),
+    /** GitHub GraphQL node ID of the pull request, when available. */
+    pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
+    /** GitHub GraphQL node ID of the base repository, when available. */
+    baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-request-review"),
@@ -3181,6 +3192,8 @@ export const CodeBoardCard = Schema.Struct({
    * is never a card.
    */
   coordinatorThreadId: Schema.optional(CodeThreadId),
+  /** Fresh finished-with-proof mark; absent when none exists or when stale. Never moves the column. */
+  finishedReceipt: Schema.optional(ThreadBoardFinishedMark),
 }).annotations(strict);
 export type CodeBoardCard = typeof CodeBoardCard.Type;
 

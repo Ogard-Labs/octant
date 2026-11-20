@@ -16,6 +16,7 @@ import { CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
 import {
   ReplicaArtifactKeptOutcome,
   ReplicaArtifactOrigin,
+  ReplicaChoiceAnswerChange,
   ReplicaCommentChange,
   ReplicaContentHash,
   ReplicaDisplayName,
@@ -38,6 +39,7 @@ export const REPLICA_ARTIFACT_EVENT_NAMES = {
   reconciled: "replica.artifact-reconciled@2",
   slotErased: "replica.artifact-slot-erased@2",
   commentQueued: "replica.comment-queued@2",
+  choiceAnswerQueued: "replica.choice-answer-queued@2",
   restoreStarted: "replica.restore-started@2",
   restoreProgress: "replica.restore-progress@2",
   restoreStopped: "replica.restore-stopped@2",
@@ -102,6 +104,21 @@ export const ReplicaCommentQueued = Schema.Struct({
 export type ReplicaCommentQueued = typeof ReplicaCommentQueued.Type;
 
 /**
+ * A change to a Canvas decision form's saved answers this host will publish,
+ * in the same queue and order as its versions and comments. `after` is what
+ * the writer had seen of other computers' choice-answer entries on that Canvas
+ * when the change was made.
+ */
+export const ReplicaChoiceAnswerQueued = Schema.Struct({
+  queueId: Schema.UUID,
+  kind: Schema.Literal("canvas-choice-answer"),
+  artifact: ReplicaArtifactOrigin,
+  after: Schema.Array(ReplicaSlotRef).pipe(Schema.maxItems(64)),
+  change: ReplicaChoiceAnswerChange,
+}).annotations(strict);
+export type ReplicaChoiceAnswerQueued = typeof ReplicaChoiceAnswerQueued.Type;
+
+/**
  * A restore of this identity's whole library began: the store listed `total`
  * slots this computer had not read.
  */
@@ -143,6 +160,12 @@ export const ReplicaArtifactPublishRefused = Schema.Union(
   Schema.Struct({
     canvasId: CanvasId,
     kind: Schema.Literal("canvas-comment"),
+    reason: Schema.Literal("unsafe-content"),
+  }).annotations(strict),
+  /** A decision-form answer or note whose text the share filter would not let leave. */
+  Schema.Struct({
+    canvasId: CanvasId,
+    kind: Schema.Literal("canvas-choice-answer"),
     reason: Schema.Literal("unsafe-content"),
   }).annotations(strict),
 );
@@ -233,6 +256,7 @@ export function registerReplicaArtifactEvents(registry: EventRegistry): EventReg
     .register(names.reconciled, 1, ReplicaArtifactReconciledEvent)
     .register(names.slotErased, 1, ReplicaArtifactSlotErased)
     .register(names.commentQueued, 1, ReplicaCommentQueued)
+    .register(names.choiceAnswerQueued, 1, ReplicaChoiceAnswerQueued)
     .register(names.restoreStarted, 1, ReplicaRestoreStarted)
     .register(names.restoreProgress, 1, ReplicaRestoreProgressed)
     .register(names.restoreStopped, 1, ReplicaRestoreMarked)
@@ -254,6 +278,7 @@ export const decodeReplicaArtifactReconciled = Schema.decodeUnknownSync(
 );
 export const decodeReplicaArtifactSlotErased = Schema.decodeUnknownSync(ReplicaArtifactSlotErased);
 export const decodeReplicaCommentQueued = Schema.decodeUnknownSync(ReplicaCommentQueued);
+export const decodeReplicaChoiceAnswerQueued = Schema.decodeUnknownSync(ReplicaChoiceAnswerQueued);
 export const decodeReplicaRestoreStarted = Schema.decodeUnknownSync(ReplicaRestoreStarted);
 export const decodeReplicaRestoreProgressed = Schema.decodeUnknownSync(ReplicaRestoreProgressed);
 export const decodeReplicaRestoreMarked = Schema.decodeUnknownSync(ReplicaRestoreMarked);

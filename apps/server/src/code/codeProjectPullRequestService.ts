@@ -64,6 +64,7 @@ import type {
   CodeProjectPullRequestSnapshotStore,
   StoredCodeProjectPullRequestSnapshot,
 } from "./codeProjectPullRequestSnapshotStore";
+import { splitRepositoryName, type PullRequestLinkRecorder } from "./pullRequestLinkService";
 
 const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 const GITHUB_READ_CONCURRENCY = 4;
@@ -272,6 +273,7 @@ export class CodeProjectPullRequestService {
   readonly #clock: () => string;
   readonly #cacheStats: CacheStatsRecorder | undefined;
   readonly #snapshotStore: CodeProjectPullRequestSnapshotStore | undefined;
+  readonly #pullRequestLinks: PullRequestLinkRecorder | undefined;
   readonly #onSnapshotRefreshed:
     | ((rows: ReadonlyArray<CodeProjectPullRequestRow>) => void)
     | undefined;
@@ -341,6 +343,12 @@ export class CodeProjectPullRequestService {
     readonly cacheStats?: CacheStatsRecorder;
     readonly snapshotStore?: CodeProjectPullRequestSnapshotStore;
     /**
+     * Authoritative pull-request link identity registry. Receives every
+     * observed pull request so forge node IDs are recorded and backfilled in
+     * the journal without altering existing snapshot readers.
+     */
+    readonly pullRequestLinks?: PullRequestLinkRecorder;
+    /**
      * Observes every replacement of the row snapshot, however a refresh was
      * initiated. This is the seam that turns snapshot facts (for example a
      * linked pull request's checks turning red) into thread obligations
@@ -364,6 +372,7 @@ export class CodeProjectPullRequestService {
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#cacheStats = options.cacheStats;
     this.#snapshotStore = options.snapshotStore;
+    this.#pullRequestLinks = options.pullRequestLinks;
     this.#onSnapshotRefreshed = options.onSnapshotRefreshed;
     const restored = this.#snapshotStore?.load();
     if (restored !== undefined) this.#restoreSnapshot(restored);
@@ -540,6 +549,7 @@ export class CodeProjectPullRequestService {
     this.#detailFreshness.set(key, { status: "fresh", lastSuccessfulRefreshAt: now });
     const threads = await this.#threads.list();
     const linkedThreads = this.#linkedThreads(authorized, detail, threads);
+    await this.#recordObservedLink(authorized, observed, linkedThreads, signal);
     await this.#recordObservedDelivery(authorized, observed, linkedThreads, signal);
     return this.#detailView({
       query: command,
@@ -731,6 +741,7 @@ export class CodeProjectPullRequestService {
             threadId: decodeCodeThreadId(thread.threadId),
             title: thread.title,
           }));
+        await this.#recordObservedLink(authorized, observed, linkedThreads, signal);
         await this.#recordObservedDelivery(authorized, observed, linkedThreads, signal);
       }
       return {
@@ -951,7 +962,11 @@ export class CodeProjectPullRequestService {
         String(repository.projectId),
         new Set(usable.map((row) => row.number)),
       );
-      for (const row of usable) collected.push(this.#row(repository, row, threads));
+      for (const row of usable) {
+        const built = this.#row(repository, row, threads);
+        collected.push(built);
+        await this.#recordActiveRowLink(repository, row, built.linkedThreads, signal);
+      }
     }
 
     // Closed/merged identities are recovered from the journal after the
@@ -1024,6 +1039,7 @@ export class CodeProjectPullRequestService {
           threads,
           knownRow.updatedAt,
         );
+        await this.#recordObservedLink(repository, observed, observedRow.linkedThreads, signal);
         await this.#recordObservedDelivery(repository, observed, observedRow.linkedThreads, signal);
         collected.push(observedRow);
       } else {
@@ -1623,6 +1639,97 @@ export class CodeProjectPullRequestService {
    * is a fact the journal already watched; recording is best-effort so a
    * failed append never fails the refresh that surfaced it.
    */
+  async #recordActiveRowLink(
+    repository: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>,
+    row: GhActivePullRequestRow,
+    linkedThreads: ReadonlyArray<{ readonly threadId: CodeThreadId; readonly title: string }>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (this.#pullRequestLinks === undefined) return;
+    const canonical =
+      row.baseRepository === undefined ? undefined : splitRepositoryName(row.baseRepository);
+    const repositoryOwner = canonical?.owner ?? repository.repositoryOwner;
+    const repositoryName = canonical?.name ?? repository.repositoryName;
+    const renamed =
+      repositoryOwner.toLowerCase() !== repository.repositoryOwner.toLowerCase() ||
+      repositoryName.toLowerCase() !== repository.repositoryName.toLowerCase();
+    await this.#pullRequestLinks
+      .recordObservation(
+        {
+          projectId: repository.projectId,
+          repositoryOwner,
+          repositoryName,
+          ...(renamed
+            ? {
+                lookupRepositoryOwner: repository.repositoryOwner,
+                lookupRepositoryName: repository.repositoryName,
+              }
+            : {}),
+          number: row.number,
+          url: row.url,
+          baseBranch: row.baseBranch,
+          headBranch: row.headBranch,
+          ...(row.pullRequestNodeId === undefined
+            ? {}
+            : { pullRequestNodeId: row.pullRequestNodeId }),
+          ...(row.baseRepositoryNodeId === undefined
+            ? {}
+            : { baseRepositoryNodeId: row.baseRepositoryNodeId }),
+          threadIds: linkedThreads.map((thread) => thread.threadId),
+          onlyIfKnown: linkedThreads.length === 0,
+        },
+        signal,
+      )
+      .catch(() => undefined);
+  }
+
+  async #recordObservedLink(
+    repository: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>,
+    observed: Extract<GhPullRequestReviewResult, { status: "observed" }>,
+    linkedThreads: ReadonlyArray<{ readonly threadId: CodeThreadId; readonly title: string }>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (this.#pullRequestLinks === undefined) return;
+    const pullRequest = observed.pullRequest;
+    const canonical = splitRepositoryName(
+      pullRequest.canonicalBaseRepository ?? pullRequest.baseRepository,
+    );
+    const repositoryOwner = canonical?.owner ?? repository.repositoryOwner;
+    const repositoryName = canonical?.name ?? repository.repositoryName;
+    const renamed =
+      repositoryOwner.toLowerCase() !== repository.repositoryOwner.toLowerCase() ||
+      repositoryName.toLowerCase() !== repository.repositoryName.toLowerCase();
+    await this.#pullRequestLinks
+      .recordObservation(
+        {
+          projectId: repository.projectId,
+          repositoryOwner,
+          repositoryName,
+          ...(renamed
+            ? {
+                lookupRepositoryOwner: repository.repositoryOwner,
+                lookupRepositoryName: repository.repositoryName,
+              }
+            : {}),
+          number: pullRequest.number,
+          url: pullRequest.url,
+          baseBranch: pullRequest.baseBranch,
+          ...(pullRequest.headRepository === "" ? {} : { headOwner: pullRequest.headRepository }),
+          headBranch: pullRequest.headBranch,
+          ...(pullRequest.pullRequestNodeId === undefined
+            ? {}
+            : { pullRequestNodeId: pullRequest.pullRequestNodeId }),
+          ...(pullRequest.baseRepositoryNodeId === undefined
+            ? {}
+            : { baseRepositoryNodeId: pullRequest.baseRepositoryNodeId }),
+          threadIds: linkedThreads.map((thread) => thread.threadId),
+          onlyIfKnown: linkedThreads.length === 0,
+        },
+        signal,
+      )
+      .catch(() => undefined);
+  }
+
   async #recordObservedDelivery(
     repository: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>,
     observed: Extract<GhPullRequestReviewResult, { status: "observed" }>,

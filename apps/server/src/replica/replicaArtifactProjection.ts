@@ -13,11 +13,16 @@
  * revises it here, so it has no Canvas aggregate yet.
  */
 
-import { decodeReplicaArtifactEntry, decodeReplicaEntryText } from "@octant/contracts";
+import {
+  decodeReplicaArtifactEntry,
+  decodeReplicaEntryText,
+  replicaChoiceAnswerContentPreimage,
+} from "@octant/contracts";
 import type { ArtifactBundle } from "@octant/contracts/artifact-bundle";
 import type { CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
 import type {
   ReplicaArtifactEntry,
+  ReplicaChoiceAnswerChange,
   ReplicaDisplayName,
   ReplicaInstanceId,
   ReplicaReadRefusalReason,
@@ -28,6 +33,7 @@ import type { EventEnvelope } from "@octant/contracts";
 import type {
   ReplicaAppliedEntry,
   ReplicaArtifactRecord,
+  ReplicaChoiceAnswerRecord,
   ReplicaKnownTombstone,
   ReplicaKnownVersion,
 } from "@octant/domain/replica-entry-policy";
@@ -44,6 +50,7 @@ import {
   type ReplicaBackfillRestoring,
   decodeReplicaBackfillMarked,
   decodeReplicaBackfillQueued,
+  decodeReplicaChoiceAnswerQueued,
   decodeReplicaCommentQueued,
   decodeReplicaRestoreMarked,
   decodeReplicaRestoreProgressed,
@@ -51,12 +58,17 @@ import {
   type ReplicaArtifactPublishFailure,
   type ReplicaArtifactQueued,
   type ReplicaBackfillStarted,
+  type ReplicaChoiceAnswerQueued,
   type ReplicaCommentQueued,
 } from "./replicaArtifactEvents";
 import {
   REPLICA_MEMBERSHIP_AGGREGATE_TYPE,
   REPLICA_MEMBERSHIP_EVENT_NAMES,
+  ReplicaIdentityCreated,
 } from "./replicaMembershipProjection";
+import { Schema } from "effect";
+
+const decodeIdentityCreated = Schema.decodeUnknownSync(ReplicaIdentityCreated);
 
 /** The computer that wrote an entry, as the entry names it. */
 export interface ReplicaEntryProvenance {
@@ -95,7 +107,15 @@ export interface ReplicaQueuedComment extends ReplicaCommentQueued {
   readonly lastFailure: ReplicaArtifactPublishFailure | undefined;
 }
 
-export type ReplicaQueuedEntry = ReplicaQueuedArtifact | ReplicaQueuedComment;
+export interface ReplicaQueuedChoiceAnswer extends ReplicaChoiceAnswerQueued {
+  /** Why the last publish attempt did not land, if one did not. */
+  readonly lastFailure: ReplicaArtifactPublishFailure | undefined;
+}
+
+export type ReplicaQueuedEntry =
+  | ReplicaQueuedArtifact
+  | ReplicaQueuedComment
+  | ReplicaQueuedChoiceAnswer;
 
 /** A restore of one identity's library, with the id its events share. */
 export interface ReplicaRestoreState extends ReplicaRestoreProgress {
@@ -128,6 +148,22 @@ export interface ReplicaArtifactState {
    * published or pulled: what a comment written now has seen.
    */
   readonly commentsSeen: (canvasId: CanvasId) => ReadonlyArray<ReplicaSlotRef>;
+  /**
+   * For each computer, the newest choice-answer entry on this Canvas held
+   * here, published or pulled: what an answer written now has seen.
+   */
+  readonly choiceAnswersSeen: (canvasId: CanvasId) => ReadonlyArray<ReplicaSlotRef>;
+  /**
+   * Every choice-answer change held for one question `(canvasId, blockId, questionId)`,
+   * published, pulled, and — when `localInstanceId` is given — still waiting in
+   * this computer's local queue.
+   */
+  readonly choiceAnswerRecords: (
+    canvasId: CanvasId,
+    blockId: string,
+    questionId: string,
+    localInstanceId?: ReplicaInstanceId,
+  ) => ReadonlyArray<ReplicaChoiceAnswerRecord>;
   /** The restore of this identity, once one started. */
   readonly restore: (instanceId: ReplicaInstanceId) => ReplicaRestoreState | undefined;
 }
@@ -144,6 +180,33 @@ function slotKey(instanceId: ReplicaInstanceId, sequence: number): string {
   return `${String(instanceId)}/${String(sequence)}`;
 }
 
+function choiceAnswerTarget(change: ReplicaChoiceAnswerChange): {
+  readonly blockId: string;
+  readonly questionId: string;
+} {
+  return change.kind === "set"
+    ? { blockId: String(change.answer.blockId), questionId: change.answer.questionId }
+    : { blockId: String(change.blockId), questionId: change.questionId };
+}
+
+function choiceAnswerKey(canvasId: CanvasId, blockId: string, questionId: string): string {
+  return `${String(canvasId)}\0${blockId}\0${questionId}`;
+}
+
+function sameSlotList(
+  left: ReadonlyArray<ReplicaSlotRef>,
+  right: ReadonlyArray<ReplicaSlotRef>,
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (slot, index) =>
+        String(slot.instanceId) === String(right[index]?.instanceId) &&
+        slot.sequence === right[index]?.sequence,
+    )
+  );
+}
+
 export class ReplicaArtifactProjection implements Projection {
   readonly name = "replica-artifacts";
   readonly dependencies: ReadonlyArray<string> = [];
@@ -155,6 +218,12 @@ export class ReplicaArtifactProjection implements Projection {
   readonly #refusals = new Set<string>();
   /** By Canvas, then by writer: the newest comment entry held here. */
   readonly #comments = new Map<string, Map<string, ReplicaSlotRef>>();
+  /** By Canvas, then by writer: the newest choice-answer entry held here. */
+  readonly #choiceAnswers = new Map<string, Map<string, ReplicaSlotRef>>();
+  /** By `(canvasId, blockId, questionId)`: every published or pulled choice-answer change. */
+  readonly #choiceAnswerHistory = new Map<string, ReplicaChoiceAnswerRecord[]>();
+  /** This host's current replica identity, used to retire a recovered upload from `#queued`. */
+  #localInstanceId: ReplicaInstanceId | undefined;
   /** By identity; a restore id names which one a later event continues. */
   readonly #restores = new Map<string, ReplicaRestoreState & { readonly instanceId: string }>();
   readonly #backfills = new Map<
@@ -172,6 +241,9 @@ export class ReplicaArtifactProjection implements Projection {
     this.#applied.clear();
     this.#refusals.clear();
     this.#comments.clear();
+    this.#choiceAnswers.clear();
+    this.#choiceAnswerHistory.clear();
+    this.#localInstanceId = undefined;
     this.#restores.clear();
     this.#backfills.clear();
     this.#state = undefined;
@@ -183,9 +255,14 @@ export class ReplicaArtifactProjection implements Projection {
     }
     const names = REPLICA_ARTIFACT_EVENT_NAMES;
     switch (event.eventName) {
+      case REPLICA_MEMBERSHIP_EVENT_NAMES.identityCreated: {
+        this.#localInstanceId = decodeIdentityCreated(event.payload).instanceId;
+        break;
+      }
       case REPLICA_MEMBERSHIP_EVENT_NAMES.left:
         // What was queued would publish under the identity that left, or
         // under the next one into another store. The versions stay here.
+        this.#localInstanceId = undefined;
         this.#queued.clear();
         this.#backfills.clear();
         break;
@@ -225,6 +302,13 @@ export class ReplicaArtifactProjection implements Projection {
       }
       case names.commentQueued: {
         const queued = decodeReplicaCommentQueued(event.payload);
+        if (!this.#queued.has(queued.queueId)) {
+          this.#queued.set(queued.queueId, { ...queued, lastFailure: undefined });
+        }
+        break;
+      }
+      case names.choiceAnswerQueued: {
+        const queued = decodeReplicaChoiceAnswerQueued(event.payload);
         if (!this.#queued.has(queued.queueId)) {
           this.#queued.set(queued.queueId, { ...queued, lastFailure: undefined });
         }
@@ -291,6 +375,17 @@ export class ReplicaArtifactProjection implements Projection {
           );
           break;
         }
+        if (queued.kind === "canvas-choice-answer") {
+          this.#keepChoiceAnswer(
+            queued.artifact.canvasId,
+            published.instanceId,
+            published.sequence,
+            published.contentHash,
+            queued.after,
+            queued.change,
+          );
+          break;
+        }
         this.#keep(
           {
             kind: queued.kind,
@@ -326,6 +421,23 @@ export class ReplicaArtifactProjection implements Projection {
           );
           break;
         }
+        if (entry.kind === "canvas-choice-answer") {
+          if (
+            this.#localInstanceId !== undefined &&
+            String(entry.origin.instanceId) === String(this.#localInstanceId)
+          ) {
+            this.#retireRecoveredChoiceAnswer(entry.artifact.canvasId, entry.after, entry.change);
+          }
+          this.#keepChoiceAnswer(
+            entry.artifact.canvasId,
+            entry.origin.instanceId,
+            entry.origin.sequence,
+            entry.contentHash,
+            entry.after,
+            entry.change,
+          );
+          break;
+        }
         if (entry.kind !== "artifact-version" && entry.kind !== "artifact-tombstone") return;
         const artifactEntry = decodeReplicaArtifactEntry(entry);
         this.#keep(artifactEntry, artifactEntry.origin, false);
@@ -351,6 +463,11 @@ export class ReplicaArtifactProjection implements Projection {
     for (const id of evicted) {
       this.#artifacts.delete(id);
       this.#comments.delete(id);
+      this.#choiceAnswers.delete(id);
+    }
+    for (const key of this.#choiceAnswerHistory.keys()) {
+      const canvasId = key.slice(0, key.indexOf("\0"));
+      if (evicted.has(canvasId)) this.#choiceAnswerHistory.delete(key);
     }
     for (const [queueId, queued] of this.#queued) {
       if (evicted.has(String(queued.artifact.canvasId))) this.#queued.delete(queueId);
@@ -386,6 +503,53 @@ export class ReplicaArtifactProjection implements Projection {
       byWriter.set(String(instanceId), { instanceId, sequence });
     }
     this.#comments.set(String(canvasId), byWriter);
+  }
+
+  /**
+   * When an upload of this host's own choice-answer entry landed in the store
+   * before the host stopped (so no `published` receipt was journaled), pulling
+   * that slot back retires its pending duplicate from `#queued`. Leaving the
+   * unsequenced duplicate queued would let it outrank a causal reply with an
+   * earlier clock and cause the next drain to republish it at a new sequence.
+   */
+  #retireRecoveredChoiceAnswer(
+    canvasId: CanvasId,
+    after: ReadonlyArray<ReplicaSlotRef>,
+    change: ReplicaChoiceAnswerChange,
+  ): void {
+    const preimage = replicaChoiceAnswerContentPreimage(change);
+    for (const [queueId, queued] of this.#queued) {
+      if (queued.kind !== "canvas-choice-answer") continue;
+      if (String(queued.artifact.canvasId) !== String(canvasId)) continue;
+      if (!sameSlotList(queued.after, after)) continue;
+      if (replicaChoiceAnswerContentPreimage(queued.change) !== preimage) continue;
+      this.#queued.delete(queueId);
+      return;
+    }
+  }
+
+  #keepChoiceAnswer(
+    canvasId: CanvasId,
+    instanceId: ReplicaInstanceId,
+    sequence: number,
+    contentHash: ReplicaAppliedEntry["contentHash"],
+    after: ReadonlyArray<ReplicaSlotRef>,
+    change: ReplicaChoiceAnswerChange,
+  ): void {
+    const key = slotKey(instanceId, sequence);
+    if (this.#applied.has(key)) return;
+    this.#applied.set(key, { instanceId, sequence, kind: "canvas-choice-answer", contentHash });
+    const byWriter = this.#choiceAnswers.get(String(canvasId)) ?? new Map<string, ReplicaSlotRef>();
+    const newest = byWriter.get(String(instanceId));
+    if (newest === undefined || newest.sequence < sequence) {
+      byWriter.set(String(instanceId), { instanceId, sequence });
+    }
+    this.#choiceAnswers.set(String(canvasId), byWriter);
+    const target = choiceAnswerTarget(change);
+    const historyKey = choiceAnswerKey(canvasId, target.blockId, target.questionId);
+    const list = this.#choiceAnswerHistory.get(historyKey) ?? [];
+    list.push({ instanceId, sequence, after, change });
+    this.#choiceAnswerHistory.set(historyKey, list);
   }
 
   #keep(
@@ -463,6 +627,17 @@ export class ReplicaArtifactProjection implements Projection {
         ),
       ]),
     );
+    const choiceAnswers = new Map(
+      [...this.#choiceAnswers].map(([canvasId, byWriter]) => [
+        canvasId,
+        [...byWriter.values()].sort((left, right) =>
+          String(left.instanceId).localeCompare(String(right.instanceId)),
+        ),
+      ]),
+    );
+    const choiceAnswerHistory = new Map(
+      [...this.#choiceAnswerHistory].map(([key, records]) => [key, [...records]]),
+    );
     const restores = new Map(
       [...this.#restores].map(([instanceId, { instanceId: _instance, ...restore }]) => [
         instanceId,
@@ -473,9 +648,31 @@ export class ReplicaArtifactProjection implements Projection {
       backfills: [...this.#backfills.values()],
       queue,
       outbox: queue.filter(
-        (entry): entry is ReplicaQueuedArtifact => entry.kind !== "canvas-comment",
+        (entry): entry is ReplicaQueuedArtifact =>
+          entry.kind === "artifact-version" || entry.kind === "artifact-tombstone",
       ),
       commentsSeen: (canvasId) => comments.get(String(canvasId)) ?? [],
+      choiceAnswersSeen: (canvasId) => choiceAnswers.get(String(canvasId)) ?? [],
+      choiceAnswerRecords: (canvasId, blockId, questionId, localInstanceId) => {
+        const held = choiceAnswerHistory.get(choiceAnswerKey(canvasId, blockId, questionId)) ?? [];
+        if (localInstanceId === undefined) return held;
+        const queued: ReplicaChoiceAnswerRecord[] = [];
+        let localOrder = 0;
+        for (const entry of queue) {
+          if (entry.kind !== "canvas-choice-answer") continue;
+          if (String(entry.artifact.canvasId) !== String(canvasId)) continue;
+          const target = choiceAnswerTarget(entry.change);
+          if (target.blockId !== blockId || target.questionId !== questionId) continue;
+          queued.push({
+            instanceId: localInstanceId,
+            localOrder,
+            after: entry.after,
+            change: entry.change,
+          });
+          localOrder += 1;
+        }
+        return queued.length === 0 ? held : [...held, ...queued];
+      },
       restore: (instanceId) => restores.get(String(instanceId)),
       artifacts,
       artifact: (canvasId) => byId.get(String(canvasId)),
