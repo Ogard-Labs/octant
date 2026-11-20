@@ -375,6 +375,12 @@ export const ChatAttempt = Schema.Struct({
   toolStepsTruncated: Schema.optional(Schema.Boolean),
   childObservations: Schema.optional(ProviderChildObservationState),
   /**
+   * The attempt's cumulative time in private reasoning, measured from the
+   * provider's own event stamps and restated as the running total. A re-read
+   * never sees reasoning text — only the number.
+   */
+  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /**
    * A question the provider asked mid-turn and is blocked on, journaled so the
    * transcript can show it again after a reload. Present only while the turn
    * waits for the person's answer; answering removes it.
@@ -1379,6 +1385,11 @@ export const ChatAttemptToolStepChanged = Schema.Struct({
   attemptId: ChatAttemptId,
   toolStep: Schema.optional(ThreadToolStep),
   toolStepsTruncated: Schema.optional(Schema.Literal(true)),
+  /**
+   * The attempt's cumulative reasoning total, restated; absent when the
+   * frame carries a step change only. Never reasoning text.
+   */
+  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   updatedAt: UtcTimestamp,
 }).annotations(strict);
 export type ChatAttemptToolStepChanged = typeof ChatAttemptToolStepChanged.Type;

@@ -1,5 +1,6 @@
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
+import { filesCloseTabScope } from "./filesCloseGuard";
 import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryProposalPrompt";
 import { CodeLocalReview } from "./CodeLocalReview";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
@@ -92,6 +93,8 @@ type TestResult = Extract<CodeOperationResult, { readonly kind: "repository-test
 
 export interface CodeWorkspaceProjections {
   readonly file?: CodeEditorFileProjection;
+  /** Why the host refused or failed the file's last open, when it answered. */
+  readonly fileOpenError?: string;
   readonly findings?: ReadonlyArray<CodeReviewFinding>;
   readonly reviewTarget?: CodeReviewTarget;
   readonly terminal?: TerminalResult;
@@ -196,6 +199,13 @@ export interface CodeWorkspaceProps {
    * Starts a new Code thread in the same Project — the recovery when the
    * provider refuses to resume this thread's session.
    */
+  /**
+   * Why the host says this checkout cannot be read — the environment
+   * observation's own `reason` (or its refused-read sentence), so a surface
+   * shows the real cause rather than a generic line. Undefined when the cause
+   * is not yet known; never invented.
+   */
+  readonly checkoutUnavailableReason?: string;
   /** A coordinator thread's proposed workers, shown above its composer. */
   readonly coordinatorProposals?: ReactNode;
   /** A coordinator thread's workers' pending requests, as rows at the end of its transcript. */
@@ -374,6 +384,11 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         <MonacoEditorPane
           debugProjectId={view.thread.projectId}
           client={props.client}
+          filesCloseScope={filesCloseTabScope(
+            props.tab.hostId === undefined ? undefined : String(props.tab.hostId),
+            String(props.tab.threadId),
+            String(props.tab.id),
+          )}
           checkoutLabel={
             view.checkout.head.kind === "branch"
               ? view.checkout.head.name
@@ -401,6 +416,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
             return response === undefined ? {} : { agentResponse: response.text };
           })()}
           file={file}
+          {...(props.projections?.fileOpenError === undefined
+            ? {}
+            : { openError: props.projections.fileOpenError })}
           {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
           {...(props.onRequestFileRefresh === undefined
             ? {}
@@ -429,7 +447,10 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         />
       ) : (
         <UnavailableProjection
-          message="Reload this tab when the authoritative file projection is available. Your workspace layout remains preserved."
+          message={
+            props.projections?.fileOpenError ??
+            "Reload this tab when the authoritative file projection is available. Your workspace layout remains preserved."
+          }
           title={`${props.tab.relativePath} is unavailable`}
         />
       );
@@ -1536,7 +1557,9 @@ function TerminalWorkspaceSurface(
         // The same state, in the same words, as Files draws for this checkout:
         // the paragraph that used to stand here ran past the bottom panel's
         // short height and was cut off. The action says what the way back is.
-        message={rebindRefusal ?? "Code checkout is unavailable."}
+        message={
+          rebindRefusal ?? props.checkoutUnavailableReason ?? "Code checkout is unavailable."
+        }
         role="alert"
         state="warning"
         title="This checkout can't be read"

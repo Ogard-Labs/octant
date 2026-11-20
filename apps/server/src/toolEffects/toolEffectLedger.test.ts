@@ -16,8 +16,10 @@ import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
+  executingToolCallId,
   registerToolEffectEvents,
   ToolEffectLedger,
+  whileApprovalWaited,
   whileAwaitingToolApproval,
 } from "./toolEffectLedger";
 
@@ -45,18 +47,18 @@ function openConnection(): SqliteConnection {
 
 let counter = 0;
 
-function hostOn(connection: SqliteConnection) {
+function hostOn(connection: SqliteConnection, clock: () => string = () => now) {
   const journal = new Journal({
     connection,
     registry: registerToolEffectEvents(new EventRegistry()),
     projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
-    clock: () => now,
+    clock,
   });
   const ledger = new ToolEffectLedger({
     journal,
     uuid: () => `aaaaaaaa-aaaa-4aaa-8aaa-${(++counter).toString(16).padStart(12, "0")}`,
     actor,
-    clock: () => now,
+    clock,
   });
   const journaled = () =>
     journal
@@ -127,6 +129,20 @@ describe("tool effect ledger", () => {
       outcome: "succeeded",
     });
     expect(host.ledger.certainty(turnId)).toEqual({ kind: "settled" });
+  });
+
+  it("names the executing call to asks it raises while it runs", async () => {
+    const host = hostOn(openConnection());
+    let ambient: string | undefined;
+    const tools = host.ledger.forTurn({ threadId, turnId }).tools(
+      toolSet(["shell"], async () => {
+        ambient = executingToolCallId();
+        return { result: { ok: true } };
+      }),
+    );
+    await tools.execute({ name: "shell", inputJson: "{}", toolCallId: "call-9" });
+    expect(ambient).toBe("call-9");
+    expect(executingToolCallId()).toBeUndefined();
   });
 
   it("records the tool's name and never its arguments", async () => {
@@ -357,6 +373,35 @@ describe("tool effect ledger", () => {
     );
 
     expect(host.journaled()).toEqual([]);
+  });
+
+  it("bills a host ask's wait to the recorded call without touching its record", async () => {
+    let clockNow = now;
+    const host = hostOn(openConnection(), () => clockNow);
+    const waits: number[] = [];
+    const tools = host.ledger.forTurn({ threadId, turnId }).tools(
+      toolSet(["shell"], async () => {
+        const answer = await whileApprovalWaited(async () => {
+          clockNow = "2026-11-12T12:04:00.000Z";
+          return "approved";
+        });
+        return { result: { answer } };
+      }),
+    );
+
+    await tools.execute({
+      name: "shell",
+      inputJson: "{}",
+      toolCallId: "call-1",
+      onApprovalWait: (waitMs) => waits.push(waitMs),
+    });
+
+    // The wait is measured, not run time; the record carries only what ran.
+    expect(waits).toEqual([240_000]);
+    expect(host.journaled().map((entry) => entry.eventName)).toEqual([
+      "tool-effect-intended@1",
+      "tool-effect-settled@1",
+    ]);
   });
 
   it("never holds a turn for a read-only host tool its runtime also reports starting", async () => {

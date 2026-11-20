@@ -476,9 +476,27 @@ by sniffing the bytes (the declared type and the address are not trusted), and
 keeps the result as a `data:` URL in memory for the tab, refetched only when the
 icon address changes. Any failure leaves no icon, which the renderer draws as
 the globe. The icon is never written to disk, its address is never logged, and
-it rides only the person's preview read (the `faviconDataUrl` of the Browser
-observation, at most 90,000 characters, validated by the server before it is
-kept); it is never part of an agent's tool result.
+it rides only the person's own reads: the preview read (the `faviconDataUrl`
+of the Browser observation, at most 90,000 characters, validated by the server
+before it is kept) and, for every tab of a context rather than only the front
+one, the desktop's own tab-icons IPC. The strip's read is narrower than the
+observation's: the preload and the in-memory Recent list keep only the raster
+types (PNG, ICO, JPEG, GIF, WebP) under the same 90,000-character bound — a
+page's SVG markup never becomes a tab-strip or Recent image. That read is
+person-only in the same way as the preview picture — the window and thread
+must own the context, a context an agent owns answers nobody, and no owner of
+agent kind ever reads any context's images — and it answers as a delta against
+the icon revisions the window already holds, so an unchanged icon never crosses
+the bridge twice and a tab the read no longer lists is forgotten. It is a
+memory read only: it never wakes a hibernated context, never fetches an icon
+to answer, and a row it returns for a sleeping tab carries the retained icon
+marked `sleeping` so the strip draws it dimmed. Today that mark has no reader:
+only execution-owned contexts hibernate, and they have no window to own them,
+so the read refuses them before the sleeping rows are reached — the flag is
+contract-ready for an authorized person presentation of an agent's context
+rather than evidence such a read exists. A top-level navigation, including one
+inside the same site, clears the old icon until the new document declares its
+own. None of it is ever part of an agent's tool result.
 
 Accepted quit is terminal for host start and restart admission, including
 queued work. A start already in progress must close a late desktop-owned
@@ -1634,7 +1652,16 @@ while the thread had no Project no longer matches its new scope and is refused
 until it is selected again.
 
 A Work or Code thread can be filed into another Project of its own mode from its
-row menu (**Move to Project…**). The server's `move-work-thread` and
+row menu (**Move to Project…**) or, for Code, from its Environment's Project
+row — both open the same dialog, and the row acts only while another active
+Code Project bound to the same repository folder could take the thread. When
+the thread's turn is still running the
+dialog offers Move after this turn, which queues an intent scoped to that
+thread and that turn and dispatches the move once when it settles (dismissing
+the dialog drops it; a newer turn ending it reports a refusal), or an explicit
+Stop and move now, which interrupts only the turn the window itself started
+and refuses — rather than stopping whichever turn happens to run — when that
+identity is not this window's. The server's `move-work-thread` and
 `move-code-thread` commands keep the thread's kind, history, and guardrail
 level, and add no filesystem reach: the pure `decideThreadMove` policy admits
 only an active Project of the same mode whose bound folder is the thread's

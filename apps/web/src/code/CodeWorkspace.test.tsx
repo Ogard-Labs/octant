@@ -1,6 +1,7 @@
 import type { ProjectId } from "@octant/contracts/projects";
 import type { WorkspaceTab, WorkspaceTabId } from "@octant/contracts/shell";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { appendTerminalSelection, CodeWorkspace } from "./CodeWorkspace";
@@ -279,6 +280,49 @@ describe("CodeWorkspace", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(notice);
     expect(screen.queryByText("Code operation failed.")).not.toBeInTheDocument();
+  });
+
+  it("shows the observation's own reason when the checkout can't be read, and the rebind refusal's when it refuses", async () => {
+    const client = codeClient();
+    const rebindThreadCheckout = vi.fn(async () => ({
+      status: "refused",
+      reason: "checkout-unavailable",
+    }));
+    render(
+      activated(
+        <CodeWorkspace
+          checkoutUnavailableReason="The thread's folder can't be opened. It may have been moved, renamed or deleted."
+          client={client}
+          controller={controller("full-access", "unavailable", rebindThreadCheckout)}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />,
+      ),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The thread's folder can't be opened");
+    expect(alert).not.toHaveTextContent("Code checkout is unavailable.");
+    await userEvent.click(screen.getByRole("button", { name: "Use the Project's checkout" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Octant could not read the Project's repository",
+    );
+    // Nothing about the checkout is fetched just to write this line.
+    expect(client.executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("keeps the plain wording when no checkout reason is known", async () => {
+    render(
+      activated(
+        <CodeWorkspace
+          client={codeClient()}
+          controller={controller("full-access", "unavailable")}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />,
+      ),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("Code checkout is unavailable.");
   });
 
   it("replaces a terminal id owned by another thread before starting", async () => {

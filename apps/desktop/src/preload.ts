@@ -36,6 +36,8 @@ import {
   PROVIDER_INSTANCE_ID_PATTERN,
   decodeCodeCheckoutOpenRequest,
   decodeCodeExternalEditorRequest,
+  decodeFilesCloseRequest,
+  type FilesCloseRequestPayload,
 } from "./ipcChannels";
 import type {
   AppUpdateInstallOutcome,
@@ -44,6 +46,8 @@ import type {
   BrowserSurfaceRequest,
   BrowserSurfaceState,
   BrowserSurfaceTabCommand,
+  BrowserSurfaceTabIcon,
+  BrowserSurfaceTabIconsRequest,
   BrowserSurfaceTabState,
   BundledWhatsNew,
   BundledWhatsNewAnnouncement,
@@ -266,6 +270,14 @@ export interface OctantHostBridge {
   readonly captureBrowserSurfacePreview: (
     request: Omit<BrowserSurfaceRequest, "bounds">,
   ) => Promise<string | undefined>;
+  /**
+   * Every tab's icon for this window's own Browser tab strip, as a delta
+   * against the revisions the window already holds. Display-only, never an
+   * observation or a tool result.
+   */
+  readonly readBrowserSurfaceTabIcons: (
+    request: BrowserSurfaceTabIconsRequest,
+  ) => Promise<ReadonlyArray<BrowserSurfaceTabIcon> | undefined>;
   readonly commandBrowserSurface: (
     request: Omit<BrowserSurfaceRequest, "bounds"> & {
       readonly command: "back" | "forward" | "reload" | "stop";
@@ -434,6 +446,23 @@ export interface OctantHostBridge {
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
   readonly subscribeQuitShortcutHint: (listener: () => void) => () => void;
+  /**
+   * The desktop's Files close check: a `check` asks whether this window's
+   * unsaved Files drafts allow it to close; a `release` frees an approval
+   * the close no longer needs. Every answer goes through `replyFilesClose`.
+   */
+  readonly subscribeFilesCloseRequest: (
+    listener: (request: FilesCloseRequestPayload) => void,
+  ) => () => void;
+  /**
+   * Resolves whether the desktop accepted the reply for its own request: a
+   * refused reply (`false`) means the answer never landed and nothing was
+   * approved by it.
+   */
+  readonly replyFilesClose: (
+    requestId: number,
+    answer: "checking" | "prompting" | "allow" | "cancel",
+  ) => Promise<boolean>;
   /** Reports the person's setting: whether the quit shortcut needs a second press. */
   readonly setQuitShortcutSecondPress: (needed: boolean) => void;
   /** Prepare to shut down… from the menu, or Move threads first… from the quit confirmation. */
@@ -680,6 +709,57 @@ export function createHostBridge(
       return typeof picture === "string" && picture.startsWith("data:image/jpeg;base64,")
         ? picture
         : undefined;
+    },
+    readBrowserSurfaceTabIcons: async (request: BrowserSurfaceTabIconsRequest) => {
+      validateBrowserSurfaceIdentity(request);
+      if (
+        !Array.isArray(request.known) ||
+        request.known.length > 128 ||
+        request.known.some(
+          (entry) =>
+            !isRecord(entry) ||
+            typeof entry.tabId !== "string" ||
+            entry.tabId.length === 0 ||
+            entry.tabId.length > 128 ||
+            typeof entry.revision !== "number" ||
+            !Number.isSafeInteger(entry.revision) ||
+            entry.revision < 0,
+        )
+      ) {
+        return Promise.reject(new TypeError("Invalid Browser tab icon request."));
+      }
+      const rows: unknown = await ipc.invoke(IPC_CHANNELS.browserSurfaceTabIcons, request);
+      // null is the host's clear refusal: this window does not own the
+      // context. Anything else that is not an array is ignored.
+      if (rows === null) return undefined;
+      if (!Array.isArray(rows)) return [];
+      const icons: BrowserSurfaceTabIcon[] = [];
+      for (const row of rows) {
+        if (
+          !isRecord(row) ||
+          typeof row.tabId !== "string" ||
+          typeof row.revision !== "number" ||
+          !Number.isSafeInteger(row.revision) ||
+          typeof row.active !== "boolean"
+        ) {
+          continue;
+        }
+        // A tab that names an unacceptable image still exists: its row keeps
+        // the revision so the host acknowledges it once and never resends the
+        // rejected bytes, while the icon itself simply falls back to the globe.
+        const dataUrl =
+          typeof row.dataUrl === "string" && isSurfaceFaviconDataUrl(row.dataUrl)
+            ? row.dataUrl
+            : undefined;
+        icons.push({
+          tabId: row.tabId,
+          revision: row.revision,
+          active: row.active,
+          ...(dataUrl === undefined ? {} : { dataUrl }),
+          ...(row.sleeping === true ? { sleeping: true } : {}),
+        });
+      }
+      return icons;
     },
     commandBrowserSurface: (
       request: Omit<BrowserSurfaceRequest, "bounds"> & {
@@ -1223,6 +1303,29 @@ export function createHostBridge(
       const receive: SettingsOpenListener = () => listener();
       ipc.on(IPC_CHANNELS.quitShortcutHint, receive);
       return () => ipc.removeListener(IPC_CHANNELS.quitShortcutHint, receive);
+    },
+    subscribeFilesCloseRequest: (listener: (request: FilesCloseRequestPayload) => void) => {
+      const receive: MaterialListener = (_event, value) => {
+        const request = decodeFilesCloseRequest(value);
+        if (request !== undefined) listener(request);
+      };
+      ipc.on(IPC_CHANNELS.filesCloseRequest, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.filesCloseRequest, receive);
+    },
+    replyFilesClose: async (
+      requestId: number,
+      answer: "checking" | "prompting" | "allow" | "cancel",
+    ) => {
+      if (
+        !Number.isSafeInteger(requestId) ||
+        requestId < 1 ||
+        (answer !== "checking" &&
+          answer !== "prompting" &&
+          answer !== "allow" &&
+          answer !== "cancel")
+      )
+        throw new TypeError("Invalid Files close reply.");
+      return (await ipc.invoke(IPC_CHANNELS.filesCloseReply, { requestId, answer })) === true;
     },
     setQuitShortcutSecondPress: (needed: boolean) => {
       void ipc
@@ -3007,6 +3110,16 @@ function decodePrivateListenerStatus(value: unknown): PrivateListenerPublicStatu
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// The raster-only icon bound, mirrored from the shared
+// `isBrowserSurfaceFaviconDataUrl` — the sandboxed preload may not import a
+// runtime package, so the rule is restated here.
+const SURFACE_FAVICON_MAX_CHARS = 90_000;
+const SURFACE_FAVICON_DATA_URL =
+  /^data:image\/(?:png|x-icon|vnd\.microsoft\.icon|jpeg|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
+function isSurfaceFaviconDataUrl(value: string): boolean {
+  return value.length <= SURFACE_FAVICON_MAX_CHARS && SURFACE_FAVICON_DATA_URL.test(value);
 }
 
 export function decodeWindowIdArgument(argv: readonly string[]): string {

@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
 import { ManagedRootGrantStore } from "./managedRootGrantStore";
 import type {
   CreateManagedWorktreeReceiptInput,
@@ -47,7 +48,9 @@ function repositoryObservation(
     readonly root?: string;
     readonly target?: "ready" | "detached" | "locked" | "prunable" | "duplicate" | "wrong-branch";
     readonly targetHead?: string;
+    readonly targetBranch?: string;
     readonly unrelatedDetached?: boolean;
+    readonly anotherHolding?: string;
   } = {},
 ): Extract<RepositoryIdentityObservation, { status: "available" }> {
   const root = options.root ?? repositoryRoot;
@@ -67,7 +70,9 @@ function repositoryObservation(
     ...(options.target === "detached"
       ? { detached: true as const }
       : {
-          branch: options.target === "wrong-branch" ? "refs/heads/other" : branchRef,
+          branch:
+            options.targetBranch ??
+            (options.target === "wrong-branch" ? "refs/heads/other" : branchRef),
           detached: false as const,
         }),
     ...(options.target === "locked" ? { locked: "editor active" } : {}),
@@ -80,6 +85,14 @@ function repositoryObservation(
     head,
     detached: true as const,
   };
+  const anotherHolding = {
+    status: "present" as const,
+    reportedPath: "/workspace/other-cell",
+    canonicalPath: "/workspace/other-cell",
+    head,
+    branch: options.anotherHolding ?? "refs/heads/held",
+    detached: false as const,
+  };
   return {
     status: "available" as const,
     repositoryId: String(options.repository ?? repositoryId) as `repo_${string}`,
@@ -90,6 +103,7 @@ function repositoryObservation(
     worktrees: [
       checkout,
       ...(options.unrelatedDetached ? [unrelatedDetached] : []),
+      ...(options.anotherHolding === undefined ? [] : [anotherHolding]),
       ...(options.target === undefined
         ? []
         : options.target === "duplicate"
@@ -711,6 +725,220 @@ describe("ManagedWorktreeService", () => {
       expect.any(AbortSignal),
     );
     expect(git.deleteBranch).toBeUndefined();
+  });
+
+  it("cleans up a worktree a host-authorized switch moved to a verified branch", async () => {
+    const switchedHead = "b".repeat(40);
+    const { service, receipts, git } = harness({
+      observations: [
+        repositoryObservation({
+          target: "ready",
+          targetHead: switchedHead,
+          targetBranch: "refs/heads/octant/switched",
+        }),
+      ],
+    });
+    const receipt = await receipts.create({
+      repositoryId,
+      threadId,
+      checkoutId,
+      canonicalRepositoryPath: repositoryRoot,
+      canonicalWorktreePath: targetPath,
+      branchIntent,
+      refIntent: branchRef,
+      expectedHead: head,
+    });
+    await receipts.transition(receipt.receiptId, "ready");
+    // What a host-authorized switch records: the branch it verified, the
+    // owned intent left exactly as it was minted.
+    const stored = receipts.records.get(receipt.receiptId);
+    if (stored === undefined) throw new Error("missing receipt");
+    receipts.records.set(receipt.receiptId, {
+      ...stored,
+      currentBranch: "octant/switched",
+      currentHead: switchedHead,
+    });
+
+    await expect(
+      service.cleanup(
+        { receiptId: receipt.receiptId, confirmedByLocalUser: true },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: "removed" });
+    expect(git.removeWorktree).toHaveBeenCalledWith(
+      { repositoryRoot, targetPath },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("checks delivery of the verified switched-to branch for an archived thread's cleanup", async () => {
+    const switchedHead = "b".repeat(40);
+    const { service, receipts, git } = harness({
+      observations: [
+        repositoryObservation({
+          target: "ready",
+          targetHead: switchedHead,
+          targetBranch: "refs/heads/octant/switched",
+        }),
+      ],
+      delivered: true,
+    });
+    const receipt = await receipts.create({
+      repositoryId,
+      threadId,
+      checkoutId,
+      canonicalRepositoryPath: repositoryRoot,
+      canonicalWorktreePath: targetPath,
+      branchIntent,
+      refIntent: branchRef,
+      expectedHead: head,
+    });
+    await receipts.transition(receipt.receiptId, "ready");
+    const switched = receipts.records.get(receipt.receiptId);
+    if (switched === undefined) throw new Error("missing receipt");
+    receipts.records.set(receipt.receiptId, {
+      ...switched,
+      currentBranch: "octant/switched",
+      currentHead: switchedHead,
+    });
+
+    await expect(
+      service.cleanup(
+        { receiptId: receipt.receiptId, confirmedByLocalUser: false, onArchive: true },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: "removed" });
+    expect(git.isDelivered).toHaveBeenCalledWith(
+      { targetPath, branch: "octant/switched" },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("refuses cleanup when the checkout was switched outside the host after a verified switch", async () => {
+    const { service, receipts, git } = harness({
+      observations: [
+        repositoryObservation({
+          target: "ready",
+          targetBranch: "refs/heads/outside/switch",
+        }),
+      ],
+    });
+    const receipt = await receipts.create({
+      repositoryId,
+      threadId,
+      checkoutId,
+      canonicalRepositoryPath: repositoryRoot,
+      canonicalWorktreePath: targetPath,
+      branchIntent,
+      refIntent: branchRef,
+      expectedHead: head,
+    });
+    await receipts.transition(receipt.receiptId, "ready");
+    const recorded = receipts.records.get(receipt.receiptId);
+    if (recorded === undefined) throw new Error("missing receipt");
+    receipts.records.set(receipt.receiptId, {
+      ...recorded,
+      currentBranch: "octant/switched",
+    });
+
+    await expect(
+      service.cleanup(
+        { receiptId: receipt.receiptId, confirmedByLocalUser: true },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: "refused", reason: "mismatched" });
+    expect(git.removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("never deletes the switched-to branch when a discard cleanup is refused", async () => {
+    const benchmarkBranch = "benchmark/aaaaaaaa/bbbbbbbbbbbb";
+    const { service, receipts, git } = harness({
+      observations: [
+        repositoryObservation({
+          target: "ready",
+          targetBranch: "refs/heads/octant/switched",
+        }),
+      ],
+    });
+    const receipt = await receipts.create({
+      repositoryId,
+      threadId,
+      checkoutId: deriveManagedWorktreeCheckoutId({ repositoryId, threadId }),
+      canonicalRepositoryPath: repositoryRoot,
+      canonicalWorktreePath: targetPath,
+      branchIntent: benchmarkBranch,
+      refIntent: `refs/heads/${benchmarkBranch}`,
+      expectedHead: head,
+    });
+    await receipts.transition(receipt.receiptId, "ready");
+    const recorded = receipts.records.get(receipt.receiptId);
+    if (recorded === undefined) throw new Error("missing receipt");
+    receipts.records.set(receipt.receiptId, {
+      ...recorded,
+      currentBranch: "octant/switched",
+    });
+    git.deleteBranch = vi.fn(async () => ({ status: "deleted" as const }));
+
+    await expect(
+      service.cleanup(
+        {
+          receiptId: receipt.receiptId,
+          confirmedByLocalUser: true,
+          discardChanges: { branch: benchmarkBranch },
+        },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: "refused" });
+    // The discard asks for the cell's branch, never the branch the worktree
+    // was switched onto — and a refusal deletes nothing at all.
+    expect(git.deleteBranch).not.toHaveBeenCalled();
+    expect(git.removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("refuses a discard cleanup after a switch even when another worktree holds the original branch", async () => {
+    const benchmarkBranch = "benchmark/aaaaaaaa/bbbbbbbbbbbb";
+    const { service, receipts, git } = harness({
+      observations: [
+        repositoryObservation({
+          target: "ready",
+          targetBranch: "refs/heads/octant/switched",
+          // A second cell holds the branch the discard names, so the holder
+          // count alone cannot be the guard: this worktree no longer does.
+          anotherHolding: `refs/heads/${benchmarkBranch}`,
+        }),
+      ],
+    });
+    const receipt = await receipts.create({
+      repositoryId,
+      threadId,
+      checkoutId: deriveManagedWorktreeCheckoutId({ repositoryId, threadId }),
+      canonicalRepositoryPath: repositoryRoot,
+      canonicalWorktreePath: targetPath,
+      branchIntent: benchmarkBranch,
+      refIntent: `refs/heads/${benchmarkBranch}`,
+      expectedHead: head,
+    });
+    await receipts.transition(receipt.receiptId, "ready");
+    const recorded = receipts.records.get(receipt.receiptId);
+    if (recorded === undefined) throw new Error("missing receipt");
+    receipts.records.set(receipt.receiptId, {
+      ...recorded,
+      currentBranch: "octant/switched",
+    });
+    git.deleteBranch = vi.fn(async () => ({ status: "deleted" as const }));
+
+    await expect(
+      service.cleanup(
+        {
+          receiptId: receipt.receiptId,
+          confirmedByLocalUser: true,
+          discardChanges: { branch: benchmarkBranch },
+        },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: "refused" });
+    expect(git.deleteBranch).not.toHaveBeenCalled();
+    expect(git.removeWorktree).not.toHaveBeenCalled();
   });
 
   it("retires the checkout's checkpoint anchors once, and only after it is really gone", async () => {

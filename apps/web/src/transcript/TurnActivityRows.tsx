@@ -35,7 +35,7 @@ import {
 } from "react";
 import { thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
 import {
-  callDurationLabel,
+  callTimingLabel,
   countToolKinds,
   thinkingDurationLabel,
   toolCallsAccessibleName,
@@ -272,9 +272,12 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const settled = props.settled === true;
   const hasRows = activity.rows.length > 0;
   const hasReasoning = activity.reasoning.trim().length > 0;
+  // A host that counts reasoning without returning its text still draws the
+  // measured row; the total is all the transcript may show.
+  const hasReasoningTiming = !hasReasoning && activity.reasoningMs !== undefined;
   // A turn whose subagents left no tool row (a provider's own child seen only
   // through its observations) still lists them.
-  if (!hasRows && !hasReasoning) {
+  if (!hasRows && !hasReasoning && !hasReasoningTiming) {
     return props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />;
   }
 
@@ -407,6 +410,15 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         {thinkingOpen ? <ChatRichText body={activity.reasoning} /> : activity.reasoning}
       </div>
     </details>
+  ) : hasReasoningTiming ? (
+    // The measured total with no body: a plain row, never an empty disclosure
+    // the person could open onto nothing.
+    <div className="turn-activity__disclosure turn-activity__disclosure--thinking">
+      <div className="turn-activity__thinking-timing">
+        <Brain aria-hidden="true" className="turn-activity__kind-icon" size={14} />
+        <span className="turn-activity__name">{thinkingLabel}</span>
+      </div>
+    </div>
   ) : null;
 
   // Live turns keep every row in one stable list so a tool finishing does not
@@ -683,7 +695,9 @@ function ActivityDisclosure(props: {
           <OutsideContentTag mark={row.outsideContent} />
         ) : null}
         {row.kind === "tool" && row.durationMs !== undefined ? (
-          <span className="turn-activity__duration">{callDurationLabel(row.durationMs)}</span>
+          <span className="turn-activity__duration">
+            {callTimingLabel(row.durationMs, row.waitedMs)}
+          </span>
         ) : null}
         {/* One reserved slot, so a row that finishes changes its mark and
             nothing beside it moves. The word is for assistive technology. */}

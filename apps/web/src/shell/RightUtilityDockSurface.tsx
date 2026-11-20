@@ -6,7 +6,7 @@ import { DockTiles, type DockTileContent } from "./DockTiles";
 import { DockToolButtons, type DockToolButtonsProps } from "./DockToolButtons";
 import { registerDockDropTarget, useDraggedDockTool, type DockDragPoint } from "./dockToolDrag";
 import { DockToolIcon } from "./dockToolIcons";
-import { PageFavicon } from "./PageFavicon";
+import { PageFavicon, type PageIconState } from "./PageFavicon";
 import { PanelTab, PanelTabStrip } from "./PanelTabs";
 import { IconButton } from "./IconButton";
 import {
@@ -111,8 +111,8 @@ export interface RightUtilityDockSurfaceProps {
   readonly onClose?: () => void;
   readonly onCloseTab: (tabId: string) => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
-  /** A Browser page's favicon as a `data:` URL, when the page has declared one. */
-  readonly pageIcon?: (tabId: string) => string | undefined;
+  /** A Browser page's icon, and whether it is the dimmed icon a sleeping tab kept. */
+  readonly pageIcon?: (tabId: string) => PageIconState | undefined;
   /** What a Browser page shows: its title, else its host; absent before a page loads. */
   readonly pageTitle?: (tabId: string) => string | undefined;
   readonly onSelectSurface: (tabId: string) => void;
@@ -361,7 +361,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               closeLabel={`Close ${label}`}
               icon={
                 surface === "browser" ? (
-                  <PageFavicon src={favicon} />
+                  <PageFavicon {...(favicon ?? {})} />
                 ) : (
                   <DockToolIcon surface={surface} />
                 )

@@ -22,9 +22,13 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { AutomationClient } from "@octant/client-runtime";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
-import type { ImageGenerationProfileView } from "@octant/contracts";
+import type { ImageGenerationProfileView, ProjectSummary } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
+import type { ProjectClient } from "@octant/client-runtime/project-client";
+import { useCodeCheckoutObservation } from "../environment/CodeCheckoutContext";
+import { useCodeEnvironmentController } from "../environment/useCodeEnvironmentController";
+import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
 
 type CodeWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
@@ -79,12 +83,41 @@ export default function CodeWorkspaceTab(props: {
   /** Reaches the host's `#thread` mention surface from the Code composer. */
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  /** The thread's Project, when the window has resolved it. */
+  readonly project?: ProjectSummary;
+  readonly projectClient?: ProjectClient;
 }) {
   const deferredAdapter = deferredCodeAdapterFor(props.tab.kind);
   const preloadDeferredAdapter = () => {
     if (deferredAdapter !== undefined) void deferredAdapter.load().catch(() => undefined);
   };
   const view = props.controller.activeView;
+  // Why the checkout cannot be read, when an observation already knows: the
+  // Environment's reading reaches a pane under it through the context, and a
+  // pane without it (a standalone terminal tile) asks the same endpoint — but
+  // only once the checkout is actually broken, so no read runs just for text
+  // while the checkout is healthy.
+  const contextCheckout = useCodeCheckoutObservation();
+  const checkoutEnvironment = useCodeEnvironmentController({
+    ...(props.projectClient === undefined ? {} : { client: props.projectClient }),
+    enabled:
+      contextCheckout === undefined &&
+      view !== undefined &&
+      view.checkout.availability === "unavailable" &&
+      props.project?.type === "code",
+    project: props.project,
+    threadId: view?.thread.id,
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
+  const checkoutUnavailableReason = useMemo(() => {
+    const observation = contextCheckout?.observation ?? checkoutEnvironment.observation;
+    const raw =
+      observation !== undefined && observation.status !== "ready"
+        ? observation.reason
+        : (contextCheckout?.errorMessage ?? checkoutEnvironment.errorMessage);
+    return raw === undefined ? undefined : checkoutUnreadableReason(raw);
+  }, [contextCheckout, checkoutEnvironment.observation, checkoutEnvironment.errorMessage]);
   const approvals = useMemo(
     () => nativeCodeWorkspaceApprovals(props.hostBridge, view),
     [props.hostBridge, view?.thread.id, view?.thread.projectId],
@@ -130,6 +163,7 @@ export default function CodeWorkspaceTab(props: {
   });
   const projections = {
     ...(editorFile.file === undefined ? {} : { file: editorFile.file }),
+    ...(editorFile.openError === undefined ? {} : { fileOpenError: editorFile.openError }),
     ...(definitions === undefined
       ? {}
       : {
@@ -177,6 +211,7 @@ export default function CodeWorkspaceTab(props: {
           : { coordinatorWorkers: props.coordinatorWorkers })}
         client={props.controller.client}
         controller={props.controller}
+        {...(checkoutUnavailableReason === undefined ? {} : { checkoutUnavailableReason })}
         {...(props.holdAccessNotice === undefined
           ? {}
           : { holdAccessNotice: props.holdAccessNotice })}

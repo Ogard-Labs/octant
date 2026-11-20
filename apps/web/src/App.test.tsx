@@ -38,6 +38,11 @@ import {
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { OctantHostBridge } from "./shell/hostBridge";
 import { App } from "./App";
+import {
+  filesClosePromptSnapshot,
+  filesCloseScope,
+  registerFilesCloseEntry,
+} from "./code/filesCloseGuard";
 import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import {
   threadUtilityDockKey,
@@ -4936,6 +4941,174 @@ describe("App", () => {
     );
   });
 
+  it("opens the shared Move to Project dialog from the Environment's Project row with the sidebar hidden", async () => {
+    const user = userEvent.setup();
+    const base = projectBootstrap();
+    const second = {
+      ...base.active[0]!,
+      id: otherProjectId,
+      name: "Octant mirror",
+    };
+    const projectApi = projects({
+      ...base,
+      active: [base.active[0]!, second],
+      availability: base.availability.map((entry) => ({
+        ...entry,
+        status: "available" as const,
+      })),
+    });
+    vi.mocked(projectApi.environmentForThread).mockResolvedValue(readyEnvironment);
+    vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
+
+    render(
+      <App
+        codeClient={codes()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await showRightUtilityDock(user);
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    await openQuickDockTool(user, dock, "Environment");
+    await within(dock).findByRole("region", { name: "Environment details" });
+    // The dialog used to live inside the sidebar's own tree, so hiding the
+    // sidebar took the move choice with it.
+    await user.click(screen.getByRole("button", { name: "Hide sidebar" }));
+    expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).not.toBeInTheDocument();
+    await user.click(within(dock).getByRole("button", { name: /Octant/ }));
+    expect(await screen.findByRole("dialog", { name: "Move to Project" })).toBeVisible();
+  });
+
+  it("stops the exact operation a thread slot is running when Move to Project picks Stop and move now", async () => {
+    const user = userEvent.setup();
+    const codeApi = codes();
+    const now = "2026-07-21T12:00:00.000Z";
+    const startedOperations: string[] = [];
+    const cancelledTurnOperations: string[] = [];
+    // The busy marker rides the bootstrap's runtime sidecar, which the thread
+    // slot's controller shares with the window's.
+    const bootstrap = await codeApi.bootstrap();
+    const busyRuntime = [
+      {
+        threadId: codeThreadId,
+        executing: true,
+        turnStartedAt: "2026-07-21T11:00:00.000Z",
+      },
+    ];
+    vi.mocked(codeApi.bootstrap).mockResolvedValue({
+      ...bootstrap,
+      runtime: busyRuntime,
+    } as never);
+    // The navigation read owns the runtime sidecar on refresh, so the busy
+    // marker has to arrive there too or it is dropped from the sidebar.
+    const navigation = await codeApi.navigation();
+    vi.mocked(codeApi.navigation).mockResolvedValue({
+      ...navigation,
+      runtime: busyRuntime,
+    } as never);
+    vi.mocked(codeApi.executeOperation).mockImplementation(async (command) => {
+      if (command.kind === "start-provider-turn") {
+        startedOperations.push(String(command.operationId));
+        return {
+          kind: "provider-turn-state",
+          operationId: command.operationId,
+          state: "running",
+        } as never;
+      }
+      if (command.kind === "cancel-provider-turn") {
+        if ("turnOperationId" in command && command.turnOperationId !== undefined) {
+          cancelledTurnOperations.push(String(command.turnOperationId));
+        }
+        return {
+          kind: "provider-turn-state",
+          operationId: command.operationId,
+          state: "cancelled",
+        } as never;
+      }
+      return {
+        kind: "operation-failed",
+        operationId: command.operationId,
+        failure: { message: "no" },
+      } as never;
+    });
+    vi.mocked(codeApi.subscribeOperation).mockImplementation(((
+      _threadId: unknown,
+      operationId: unknown,
+    ) => {
+      async function* frames() {
+        yield {
+          threadId: codeThreadId,
+          operationId,
+          cursor: 1,
+          occurredAt: now,
+          event: {
+            kind: "operation-result",
+            result: { kind: "provider-turn-state", operationId, state: "running" },
+          },
+        };
+        // The turn never ends: a live subscription stays open, so the runner
+        // never resubscribes and the operation keeps running for the move.
+        await new Promise<never>(() => undefined);
+      }
+      return frames();
+    }) as never);
+    const base = projectBootstrap();
+    const second = { ...base.active[0]!, id: otherProjectId, name: "Octant mirror" };
+    const projectApi = projects({
+      ...base,
+      active: [base.active[0]!, second],
+      availability: base.availability.map((entry) => ({
+        ...entry,
+        status: "available" as const,
+      })),
+    });
+    vi.mocked(projectApi.environmentForThread).mockResolvedValue(readyEnvironment);
+    vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
+
+    render(
+      <App
+        codeClient={codeApi}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    // The follow-up goes out through the thread's own slot controller, which
+    // is the only controller that can name the operation it started.
+    const composer = await screen.findByRole(
+      "textbox",
+      { name: "Follow-up message" },
+      { timeout: 5_000 },
+    );
+    await user.type(composer, "keep working{Enter}");
+    await waitFor(() => expect(startedOperations).toHaveLength(1));
+
+    await showRightUtilityDock(user);
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    await openQuickDockTool(user, dock, "Environment");
+    await within(dock).findByRole("region", { name: "Environment details" });
+    await user.click(within(dock).getByRole("button", { name: /Octant/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Move to Project" });
+    await user.click(within(dialog).getByRole("radio", { name: "Stop and move now" }));
+    await user.click(within(dialog).getByRole("button", { name: /Octant mirror/ }));
+
+    // Routed through the slot: the stop names the operation that slot started.
+    // The window controller alone could not identify it and refused instead.
+    await waitFor(() => expect(cancelledTurnOperations).toEqual(startedOperations));
+    expect(
+      await within(dialog).findByText("The move is queued for when this turn finishes."),
+    ).toBeVisible();
+  });
+
   it("treats the native minimum width as compact desktop chrome", async () => {
     const originalMatchMedia = window.matchMedia;
     const addEventListener = vi.fn();
@@ -6690,6 +6863,111 @@ describe("App", () => {
     await user.click(first);
     await waitFor(() => expect(starts()).toHaveLength(1));
     expect(starts()[0]?.[0].threadId).toBe(codeThreadId);
+  });
+
+  it("does not close another thread's dock tab when its Files prompt outlives a thread switch", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const codeApi = codes();
+    const initial = codeShellBootstrap();
+    const layout = initial.workspace.layouts.code;
+    if (layout.kind !== "pane") throw new Error("Expected Code pane");
+    const otherId = decodeCodeThreadId("00000000-0000-4000-8000-000000000807");
+    const original = await codeApi.thread(codeThreadId);
+    const other = { ...original.thread, id: otherId, title: "Another Code thread" };
+    vi.mocked(codeApi.thread).mockImplementation(async (id) => ({
+      ...original,
+      thread: String(id) === String(otherId) ? other : original.thread,
+    }));
+    const workspace = applyWorkspaceOperation(
+      initial.workspace,
+      decodeWorkspaceOperation({
+        kind: "split-pane",
+        mode: "code",
+        targetPaneId: layout.paneId,
+        surface: {
+          kind: "code-overview",
+          mode: "code",
+          id: "00000000-0000-4000-8000-000000000808",
+          threadId: otherId,
+          title: other.title,
+        },
+        splitNodeId: "00000000-0000-4000-8000-000000000809",
+        newPaneNodeId: "00000000-0000-4000-8000-000000000810",
+        newPaneId: "00000000-0000-4000-8000-000000000811",
+        orientation: "horizontal",
+        placement: "after",
+        ratio: 0.5,
+      }),
+    );
+    writeUtilityDockPresentation(globalThis, String(windowId), {
+      open: true,
+      threads: new Map(
+        [codeThreadId, otherId].map((id) => [
+          threadUtilityDockKey("code", String(id)),
+          { tabs: [{ id: "files", surface: "files" }], active: "files" },
+        ]),
+      ),
+    });
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client({ ...initial, workspace, workspaceVersion: workspace.version })}
+      />,
+    );
+    const first = await screen.findByRole("region", {
+      name: "Workspace pane: Controller foundation",
+    });
+    screen.getByRole("region", { name: "Workspace pane: Another Code thread" });
+    await user.click(first);
+    await screen.findByRole("complementary", { name: "Right Utility Dock" });
+
+    let dirty = true;
+    let settleSave!: () => void;
+    const release = registerFilesCloseEntry({
+      scope: filesCloseScope(undefined, String(codeThreadId)),
+      key: "own-doc",
+      name: "draft.ts",
+      isDirty: () => dirty,
+      save: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            settleSave = () => {
+              dirty = false;
+              resolve(true);
+            };
+          }),
+      ),
+      discard: vi.fn(),
+    });
+    try {
+      await user.pointer({ target: bandTool("Files"), keys: "[MouseRight]" });
+      await user.click(await screen.findByRole("menuitem", { name: "Close Files" }));
+      await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("draft.ts"));
+      // The answer leaves the save in flight and dismisses the dialog, so the
+      // person is free to focus the other thread's pane before it settles.
+      await act(async () => {
+        filesClosePromptSnapshot()?.answer("save");
+      });
+      await user.click(screen.getByRole("region", { name: "Workspace pane: Another Code thread" }));
+      await act(async () => {
+        settleSave();
+      });
+      // The consent belonged to the first thread's dock: the second thread's
+      // Files tab was never asked about and stays open.
+      const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+      // The tile and its inner file tree both expose the "Files" region name.
+      expect(within(dock).getAllByRole("region", { name: "Files" }).length).toBeGreaterThan(0);
+    } finally {
+      dirty = false;
+      release();
+    }
   });
 
   it("restores a thread's dock tools after the window reloads", async () => {

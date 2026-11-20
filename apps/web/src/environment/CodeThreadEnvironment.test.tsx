@@ -985,16 +985,21 @@ describe("CodeThreadEnvironment", () => {
       expect(screen.queryByRole("button", { name: "Create pull request" })).not.toBeInTheDocument();
     });
 
-    it("keeps New task and Worktrees in a menu on the title row that does not fold the section", async () => {
+    it("keeps New task in this Project in a menu on the title row that does not fold the section", async () => {
       const user = userEvent.setup();
       await renderChanges(readyObservation());
-      expect(screen.queryByRole("button", { name: "Worktrees" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "New task in this Project" })).toBeNull();
       const section = screen.getByRole("button", { name: /^Changes/ });
       expect(section).toHaveAttribute("aria-expanded", "true");
       await user.click(screen.getByRole("button", { name: "More for changes" }));
-      expect(await screen.findByRole("menuitem", { name: "Worktrees" })).toBeVisible();
-      expect(screen.getByRole("menuitem", { name: "New task in this Project" })).toBeVisible();
+      expect(
+        await screen.findByRole("menuitem", { name: "New task in this Project" }),
+      ).toBeVisible();
+      // The branch entries moved to the Branch row itself; nothing else may
+      // be hidden behind this menu.
+      expect(screen.queryByRole("menuitem", { name: "Worktrees" })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "Switch branch…" })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "Move to Project…" })).toBeNull();
       await user.keyboard("{Escape}");
       expect(section).toHaveAttribute("aria-expanded", "true");
     });
@@ -1040,5 +1045,401 @@ describe("CodeThreadEnvironment", () => {
     await user.click(screen.getByRole("button", { name: /^Extra folders/ }));
 
     expect(screen.getByTitle("/Users/example/Dev/Research")).toHaveTextContent("~/Dev/Research");
+  });
+});
+
+describe("CodeThreadEnvironment branch and move actions", () => {
+  function worktreeRefsExecute() {
+    return vi.fn(async (command: { kind: string }) =>
+      command.kind === "list-code-worktree-refs"
+        ? ({
+            kind: "worktree-refs-listed",
+            refs: [
+              { name: "feature/issue-204", kind: "local", isCurrent: true },
+              { name: "main", kind: "local" },
+              { name: "held", kind: "local", hasWorktree: true },
+              { name: "origin/main", kind: "remote" },
+            ],
+          } as never)
+        : undefined,
+    );
+  }
+
+  const previewEntries = () => [
+    { path: "src/a.ts", index: " ", worktree: "M" },
+    { path: "new-file.ts", index: "?", worktree: "?" },
+  ];
+
+  const preview = (stateToken: string) => ({
+    status: "ok" as const,
+    preview: { stateToken, entries: previewEntries() },
+  });
+
+  async function openBranchMenu(extra: Partial<Parameters<typeof CodeThreadEnvironment>[0]> = {}) {
+    const user = userEvent.setup();
+    const rendered = render(
+      <CodeThreadEnvironment
+        environmentOpen
+        checkoutKind="managed-worktree"
+        onExecute={worktreeRefsExecute()}
+        onMoveToProject={vi.fn()}
+        onNewTaskOnBranch={vi.fn()}
+        onNewThreadInProject={vi.fn()}
+        onObserveBranchState={vi.fn(async () => preview("token-1"))}
+        onOpenWorktrees={vi.fn()}
+        onSwitchBranch={vi.fn(async () => ({ status: "ok", branch: "main" }) as const)}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+        {...extra}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    return { ...rendered, user };
+  }
+
+  async function openBranchMenuClicked(
+    extra: Partial<Parameters<typeof CodeThreadEnvironment>[0]> = {},
+  ) {
+    const rendered = await openBranchMenu(extra);
+    await rendered.user.click(screen.getByRole("button", { name: "Branch feature/issue-204" }));
+    return rendered;
+  }
+
+  // The row's text is the same whether it is a fact or an action; the element
+  // is what differs — a <p> states, a <button> leads somewhere.
+  function projectRowElement(container: HTMLElement): Element | undefined {
+    return [...container.querySelectorAll(".environment-row")].find(
+      (row) => row.textContent?.includes(".worktrees/issue-204") === true,
+    );
+  }
+
+  it("opens the branch menu from the Branch row itself", async () => {
+    const { user } = await openBranchMenuClicked();
+    for (const name of ["Switch branch…", "New task on another branch…", "Worktrees"]) {
+      expect(await screen.findByRole("menuitem", { name })).toBeEnabled();
+    }
+    await user.keyboard("{Escape}");
+  });
+
+  it("starts a new task on another branch from the Branch row", async () => {
+    const onNewTaskOnBranch = vi.fn();
+    const { user } = await openBranchMenuClicked({ onNewTaskOnBranch });
+    await user.click(await screen.findByRole("menuitem", { name: "New task on another branch…" }));
+    expect(onNewTaskOnBranch).toHaveBeenCalledOnce();
+  });
+
+  it("greys Switch branch while a turn runs and keeps the other entries usable", async () => {
+    const { user } = await openBranchMenuClicked({ threadBusy: true });
+    expect(await screen.findByRole("menuitem", { name: "Switch branch…" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("menuitem", { name: "New task on another branch…" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Worktrees" })).toBeEnabled();
+    await user.keyboard("{Escape}");
+  });
+
+  it("greys Switch branch under Plan mode, which is read-only", async () => {
+    const { user } = await openBranchMenuClicked({ threadPolicy: "plan" });
+    expect(await screen.findByRole("menuitem", { name: "Switch branch…" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("menuitem", { name: "New task on another branch…" })).toBeEnabled();
+    await user.keyboard("{Escape}");
+  });
+
+  it("offers no current-thread switch on a remote root or a plain folder, but still opens a new task from either", async () => {
+    for (const checkoutKind of ["remote-root", "plain-folder"] as const) {
+      const { unmount, user } = await openBranchMenuClicked({ checkoutKind });
+      expect(
+        await screen.findByRole("menuitem", { name: "New task on another branch…" }),
+      ).toBeEnabled();
+      expect(screen.queryByRole("menuitem", { name: "Switch branch…" })).toBeNull();
+      // Neither kind has a local worktree set to manage, so Worktrees stays
+      // out of the menu too; the new task is the only thing still offered.
+      expect(screen.queryByRole("menuitem", { name: "Worktrees" })).toBeNull();
+      await user.keyboard("{Escape}");
+      unmount();
+    }
+  });
+
+  it("draws the branch as a fact row when none of its actions can run", async () => {
+    const { container } = render(
+      <CodeThreadEnvironment
+        environmentOpen
+        checkoutKind="remote-root"
+        onNewThreadInProject={vi.fn()}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    expect(screen.queryByRole("button", { name: "Branch feature/issue-204" })).toBeNull();
+    const branchRow = [...container.querySelectorAll(".environment-row")].find(
+      (row) => row.textContent?.includes("feature/issue-204") === true,
+    );
+    expect(branchRow?.tagName).toBe("P");
+  });
+
+  it("switches to a real listed local branch against the preview's state token, dropping the current, held, and remote refs", async () => {
+    const onSwitchBranch = vi.fn(async () => ({ status: "ok", branch: "main" }) as const);
+    const { user } = await openBranchMenuClicked({ onSwitchBranch });
+    await user.click(await screen.findByRole("menuitem", { name: "Switch branch…" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Switch branch" });
+    expect(await within(dialog).findByRole("button", { name: "main" })).toBeEnabled();
+    for (const absent of ["feature/issue-204", "held", "origin/main"]) {
+      expect(within(dialog).queryByRole("button", { name: absent })).toBeNull();
+    }
+
+    await user.click(within(dialog).getByRole("button", { name: "main" }));
+    await user.click(within(dialog).getByRole("button", { name: "Switch" }));
+
+    await waitFor(() =>
+      expect(onSwitchBranch).toHaveBeenCalledWith({
+        branch: "main",
+        dirty: "refuse",
+        expectedStateToken: "token-1",
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("shows the observed changes before a stash choice and sends the preview's token on both attempts", async () => {
+    const onOpenGit = vi.fn();
+    const onSwitchBranch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "refused",
+        reason: "dirty-checkout",
+        message: "The checkout has uncommitted changes.",
+      })
+      .mockResolvedValueOnce({ status: "ok", branch: "main" });
+    const { user } = await openBranchMenuClicked({ onOpenGit, onSwitchBranch });
+    await user.click(await screen.findByRole("menuitem", { name: "Switch branch…" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Switch branch" });
+    await user.click(within(dialog).getByRole("button", { name: "main" }));
+    await user.click(within(dialog).getByRole("button", { name: "Switch" }));
+
+    expect(await within(dialog).findByText(/uncommitted changes/)).toBeVisible();
+    // The list is the preview's own entries — what the person consents against.
+    expect(within(dialog).getByText("src/a.ts")).toBeVisible();
+    expect(within(dialog).getByText("new-file.ts")).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Commit in Git" })).toBeEnabled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Stash and switch" }));
+    await waitFor(() =>
+      expect(onSwitchBranch).toHaveBeenLastCalledWith({
+        branch: "main",
+        dirty: "stash",
+        expectedStateToken: "token-1",
+      }),
+    );
+    expect(onSwitchBranch).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(onOpenGit).not.toHaveBeenCalled();
+  });
+
+  it("re-reads and re-shows the checkout before a second stash after a stale answer", async () => {
+    const onObserveBranchState = vi
+      .fn()
+      .mockResolvedValueOnce(preview("token-1"))
+      .mockResolvedValueOnce(preview("token-2"));
+    const onSwitchBranch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "refused",
+        reason: "dirty-checkout",
+        message: "The checkout has uncommitted changes.",
+      })
+      .mockResolvedValueOnce({
+        status: "refused",
+        reason: "stale-state",
+        message: "The checkout changed since it was read.",
+      })
+      .mockResolvedValueOnce({ status: "ok", branch: "main" });
+    const { user } = await openBranchMenuClicked({ onObserveBranchState, onSwitchBranch });
+    await user.click(await screen.findByRole("menuitem", { name: "Switch branch…" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Switch branch" });
+    await user.click(within(dialog).getByRole("button", { name: "main" }));
+    await user.click(within(dialog).getByRole("button", { name: "Switch" }));
+    await within(dialog).findByText(/uncommitted changes/);
+
+    await user.click(within(dialog).getByRole("button", { name: "Stash and switch" }));
+    // Stale means the checkout moved since what was shown: it is read again
+    // and said plainly, and nothing goes out until the person chooses again.
+    expect(await within(dialog).findByText(/changed since it was read/)).toBeVisible();
+    expect(onSwitchBranch).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(onObserveBranchState).toHaveBeenCalledTimes(2));
+
+    await user.click(within(dialog).getByRole("button", { name: "Stash and switch" }));
+    await waitFor(() =>
+      expect(onSwitchBranch).toHaveBeenLastCalledWith({
+        branch: "main",
+        dirty: "stash",
+        expectedStateToken: "token-2",
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("opens the reviewed commit flow instead of stashing when the person picks Commit", async () => {
+    const onOpenGit = vi.fn();
+    const onSwitchBranch = vi.fn(async () => ({
+      status: "refused" as const,
+      reason: "dirty-checkout",
+      message: "The checkout has uncommitted changes.",
+    }));
+    const { user } = await openBranchMenuClicked({ onOpenGit, onSwitchBranch });
+    await user.click(await screen.findByRole("menuitem", { name: "Switch branch…" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Switch branch" });
+    await user.click(within(dialog).getByRole("button", { name: "main" }));
+    await user.click(within(dialog).getByRole("button", { name: "Switch" }));
+
+    await user.click(await within(dialog).findByRole("button", { name: "Commit in Git" }));
+    expect(onOpenGit).toHaveBeenCalledOnce();
+    expect(onSwitchBranch).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends nothing when the person cancels the switch", async () => {
+    const onSwitchBranch = vi.fn();
+    const { user } = await openBranchMenuClicked({ onSwitchBranch });
+    await user.click(await screen.findByRole("menuitem", { name: "Switch branch…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Switch branch" });
+    await within(dialog).findByRole("button", { name: "main" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(onSwitchBranch).not.toHaveBeenCalled();
+  });
+
+  it("routes the connected repository to the Project's pull requests and hides it when unconnected", async () => {
+    const onOpenPullRequests = vi.fn();
+    const connected = {
+      ...codeProject(),
+      connectedRepository: { host: "github.com", owner: "Ogard-Labs", repository: "octant" },
+    } as ProjectSummary;
+    const first = render(
+      <CodeThreadEnvironment
+        environmentOpen
+        onOpenPullRequests={onOpenPullRequests}
+        project={connected}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Ogard-Labs/octant" }));
+    expect(onOpenPullRequests).toHaveBeenCalledOnce();
+    first.unmount();
+
+    render(
+      <CodeThreadEnvironment
+        environmentOpen
+        onOpenPullRequests={onOpenPullRequests}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    expect(screen.queryByRole("button", { name: "Ogard-Labs/octant" })).toBeNull();
+  });
+
+  it("opens the shared move dialog from the Project row while another same-folder Code Project could take it", async () => {
+    const onMoveToProject = vi.fn();
+    const sibling = {
+      ...codeProject(decodeProjectId("00000000-0000-4000-8000-000000000902")),
+      name: "Octant again",
+    } as ProjectSummary;
+    const user = userEvent.setup();
+    const { container } = render(
+      <CodeThreadEnvironment
+        environmentOpen
+        onMoveToProject={onMoveToProject}
+        project={codeProject()}
+        projects={[codeProject(), sibling]}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+
+    const row = projectRowElement(container);
+    expect(row?.tagName).toBe("BUTTON");
+    await user.click(row as HTMLElement);
+    expect(onMoveToProject).toHaveBeenCalledOnce();
+  });
+
+  it("opens the shared move dialog even when every other Code Project sits in another folder, so its reasons show", async () => {
+    const onMoveToProject = vi.fn();
+    const elsewhere = {
+      ...codeProject(decodeProjectId("00000000-0000-4000-8000-000000000903")),
+      binding: { canonicalRoot: "/Users/example/Dev/Repos/elsewhere" },
+    } as ProjectSummary;
+    const user = userEvent.setup();
+    const { container } = render(
+      <CodeThreadEnvironment
+        environmentOpen
+        onMoveToProject={onMoveToProject}
+        project={codeProject()}
+        projects={[codeProject(), elsewhere]}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    const row = projectRowElement(container);
+    expect(row?.tagName).toBe("BUTTON");
+    await user.click(row as HTMLElement);
+    expect(onMoveToProject).toHaveBeenCalledOnce();
+  });
+
+  it("states the Project row as a fact only while no other active Code Project exists", async () => {
+    const { container, unmount } = render(
+      <CodeThreadEnvironment
+        environmentOpen
+        onMoveToProject={vi.fn()}
+        project={codeProject()}
+        projects={[]}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    expect(projectRowElement(container)?.tagName).toBe("P");
+    unmount();
+
+    const withoutList = render(
+      <CodeThreadEnvironment
+        environmentOpen
+        onMoveToProject={vi.fn()}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    expect(projectRowElement(withoutList.container)?.tagName).toBe("P");
   });
 });

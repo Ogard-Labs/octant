@@ -4602,6 +4602,56 @@ describe("WorkTurnService", () => {
     controller.abort();
   });
 
+  it("restates the turn's reasoning total live and keeps it and a call's bounds through settle", async () => {
+    const gate = deferred<void>();
+    const timing = {
+      startedAt: "2026-08-11T12:00:00.000Z" as UtcTimestamp,
+      endedAt: "2026-08-11T12:00:03.000Z" as UtcTimestamp,
+    } as const;
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          input.onReasoningMs?.(12_000);
+          input.onToolSteps?.({
+            truncated: false,
+            steps: [{ toolCallId: "call-1", toolName: "Read", state: "completed", timing }],
+          });
+          await gate.promise;
+          return { kind: "completed", response: "Done" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const controller = new AbortController();
+    const stream = fixture.service.subscribe(ids.window, ids.thread, 0, controller.signal);
+    const frames: Array<Record<string, unknown>> = [];
+    for (;;) {
+      const next = await stream.next();
+      if (next.done === true) break;
+      const frame = next.value as Record<string, unknown>;
+      frames.push(frame);
+      if (frame.kind === "turn-tool-step") break;
+    }
+    // The reasoning total rides the step stream; a mid-turn rebuild shows it.
+    expect(frames.some((frame) => frame.reasoningMs === 12_000)).toBe(true);
+    const midTurn = (await fixture.service.transcript(ids.window, ids.thread)).turns[0];
+    expect(midTurn?.reasoningMs).toBe(12_000);
+    gate.resolve();
+    for (;;) {
+      const next = await stream.next();
+      if (next.done === true) break;
+      if ((next.value as { readonly kind: string }).kind === "turn-settled") break;
+    }
+    controller.abort();
+    await fixture.waitForIdle();
+    // The settled, replayed turn shows the same measurements the live feed did.
+    const settledTurn = (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1);
+    expect(settledTurn?.reasoningMs).toBe(12_000);
+    expect(settledTurn?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Read", state: "completed", timing },
+    ]);
+  });
+
   it("publishes the turn's tool calls live and journals them with the settled turn", async () => {
     const gate = deferred<void>();
     const fixture = serviceFixture({

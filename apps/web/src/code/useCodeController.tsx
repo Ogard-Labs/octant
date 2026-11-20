@@ -148,6 +148,28 @@ export type CodeThreadRestOutcome =
   | { readonly status: "refused"; readonly message: string };
 
 /**
+ * A move's answer: the rest outcome, a queued intent dropped by its own
+ * Cancel before it ever dispatched, or a queued intent whose real dispatch
+ * answer arrives later on `settled`.
+ */
+export type CodeThreadMoveOutcome =
+  | CodeThreadRestOutcome
+  | { readonly status: "cancelled" }
+  | {
+      readonly status: "deferred";
+      readonly settled: Promise<CodeThreadMoveOutcome>;
+      readonly cancel: () => void;
+    };
+
+/** One queued move intent: the thread, the destination, the turn it waits for, and its answer. */
+interface PendingThreadMove {
+  readonly threadId: CodeThreadId;
+  readonly projectId: ProjectId;
+  readonly sourceTurnStartedAt?: string | undefined;
+  readonly resolve: (outcome: CodeThreadMoveOutcome) => void;
+}
+
+/**
  * A question the running provider turn asked the user and is blocked on:
  * either a yes/no approval for a tool it wants to run, or free-form input.
  * The host mints these from the provider stream; the renderer only relays
@@ -2604,10 +2626,127 @@ export function useCodeController(options: CodeControllerOptions) {
     (threadId: CodeThreadId) => restCommand(threadId, wakeCodeThread),
     [restCommand],
   );
+  /**
+   * A move the person asked to run after the source thread's current turn. The
+   * intent stays scoped to that thread and that turn — each queued request is
+   * its own record, so closing the dialog cancels only that request, a newer
+   * request resolves the one it replaces rather than leaving it open, and it
+   * is dropped if a new turn takes over. The host revalidates the real move
+   * when it dispatches with the thread's version then current.
+   */
+  const pendingMoveRef = useRef<PendingThreadMove | undefined>(undefined);
+  useEffect(() => {
+    const pending = pendingMoveRef.current;
+    if (pending === undefined || bootstrap === undefined) return;
+    const runtime = bootstrap.runtime.find(
+      (entry) => String(entry.threadId) === String(pending.threadId),
+    );
+    if (runtime !== undefined && (runtime.executing === true || runtime.awaitingInput === true)) {
+      if (
+        pending.sourceTurnStartedAt !== undefined &&
+        runtime.turnStartedAt !== undefined &&
+        runtime.turnStartedAt !== pending.sourceTurnStartedAt
+      ) {
+        pendingMoveRef.current = undefined;
+        pending.resolve({
+          status: "refused",
+          message: "The thread started another turn; move it when it is idle.",
+        });
+      }
+      return;
+    }
+    pendingMoveRef.current = undefined;
+    void restCommand(pending.threadId, (thread) => moveCodeThread(thread, pending.projectId)).then(
+      pending.resolve,
+    );
+  }, [bootstrap, restCommand]);
+  const cancelPendingMove = useCallback((pending: PendingThreadMove) => {
+    if (pendingMoveRef.current !== pending) return;
+    pendingMoveRef.current = undefined;
+    pending.resolve({ status: "cancelled" });
+  }, []);
+  const queuePendingMove = useCallback((pending: PendingThreadMove) => {
+    const replaced = pendingMoveRef.current;
+    pendingMoveRef.current = pending;
+    // A newer queued move supersedes the old one; its promise still resolves
+    // so the dialog that asked for it is never left waiting on an answer that
+    // can no longer come.
+    replaced?.resolve({ status: "cancelled" });
+  }, []);
   const moveThread = useCallback(
-    (threadId: CodeThreadId, projectId: ProjectId) =>
-      restCommand(threadId, (thread) => moveCodeThread(thread, projectId)),
-    [restCommand],
+    async (
+      threadId: CodeThreadId,
+      projectId: ProjectId,
+      options?: { readonly when?: "after-turn" | "stop-now" | undefined },
+    ): Promise<CodeThreadMoveOutcome> => {
+      const runtime = bootstrapRef.current?.runtime.find(
+        (entry) => String(entry.threadId) === String(threadId),
+      );
+      const turnRunning =
+        runtime !== undefined && (runtime.executing === true || runtime.awaitingInput === true);
+      const queueAfterTurn = (): CodeThreadMoveOutcome => {
+        let resolveSettled: (outcome: CodeThreadMoveOutcome) => void = () => undefined;
+        const settled = new Promise<CodeThreadMoveOutcome>((resolve) => {
+          resolveSettled = resolve;
+        });
+        const pending: PendingThreadMove = {
+          threadId,
+          projectId,
+          ...(runtime?.turnStartedAt === undefined
+            ? {}
+            : { sourceTurnStartedAt: runtime.turnStartedAt }),
+          resolve: resolveSettled,
+        };
+        queuePendingMove(pending);
+        return {
+          status: "deferred",
+          settled,
+          cancel: () => cancelPendingMove(pending),
+        };
+      };
+      if (options?.when === "after-turn") {
+        if (turnRunning) return queueAfterTurn();
+        return await restCommand(threadId, (thread) => moveCodeThread(thread, projectId));
+      }
+      if (options?.when === "stop-now") {
+        if (!turnRunning) {
+          return await restCommand(threadId, (thread) => moveCodeThread(thread, projectId));
+        }
+        const scopedTurn = activeTurnOperations.current.get(String(threadId));
+        if (scopedTurn === undefined) {
+          // An unscoped cancel could land on a turn that replaced the one the
+          // person meant to stop; without that turn's identity the stop is
+          // refused and the move is left for them to queue.
+          return {
+            status: "refused",
+            message:
+              "The running turn cannot be identified from this window; move the thread after it finishes instead.",
+          };
+        }
+        const thread = findCodeThread(bootstrapRef.current?.threads, threadId);
+        if (thread === undefined) {
+          return { status: "refused", message: "This thread is no longer in the list." };
+        }
+        try {
+          await client.executeOperation({
+            kind: "cancel-provider-turn",
+            operationId: decodeCodeOperationId(globalThis.crypto.randomUUID()),
+            threadId,
+            checkoutId: thread.checkoutId,
+            turnOperationId: scopedTurn.operationId,
+          });
+        } catch {
+          // The stop attempt is best-effort: the queued move still waits for
+          // the turn to settle, and the host revalidates the move itself.
+        }
+        // The move dispatches once the stopped turn has actually settled —
+        // moving while it is still draining would hit the same host refusal
+        // as moving mid-turn.
+        return queueAfterTurn();
+      }
+      return await restCommand(threadId, (thread) => moveCodeThread(thread, projectId));
+    },
+    [cancelPendingMove, client, queuePendingMove, restCommand],
   );
   // The coordinator role and both wake switches are a person's choice from a
   // local window; the host refuses the rest (a worker, a fifth coordinator)
