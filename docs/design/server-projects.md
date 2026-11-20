@@ -36,6 +36,13 @@ approvals, and journal as a Project on this computer. Inference, approvals,
 every authority check, and the journal stay on this host; only the thread's
 hands are on the server.
 
+A person can also run Claude Code or Codex itself on the server, signed in
+there, with Octant's window on their own computer (designed, not built;
+[Providers running on the server](#providers-running-on-the-server)). And a
+person who wants the server to be a full Octant computer adds it as a hub
+member over SSH, without visiting it
+([Hub and spokes, decision H26](hub-and-spokes.md#decisions)).
+
 ## Setup entry
 
 Settings › Remote access begins with three explicit journeys: control an Octant
@@ -221,10 +228,12 @@ checks never change registry/configuration or journal state.
   The Git, Files, and Tests panels reach it only through the server
   ([Panels](#panels)), and a thread's own worktree is made there
   ([Worktrees and pull requests](#worktrees-and-pull-requests)).
-- **Octant Harness only.** A thread there runs on the Octant Harness, whose
-  inference stays on this host and whose hands are on the server. Every other
-  runtime is refused before it launches, naming why: its own tools act on this
-  host's files. Delegation, Browser, Computer, connectors, and forks are not
+- **Octant Harness, or a provider on the server.** A thread there runs on the
+  Octant Harness, whose inference stays on this host and whose hands are on
+  the server. Built so far: every other runtime is refused before it launches,
+  naming why: its own tools act on this host's files. A provider that runs on
+  the server itself is designed, not built
+  ([Providers running on the server](#providers-running-on-the-server)). Delegation, Browser, Computer, connectors, and forks are not
   offered there, since each acts on this host. The routine tools are offered,
   since they act only on this host's routine records ([Routines](#routines)).
 - **Attached files.** A file the turn names by path rather than sends (any
@@ -429,6 +438,48 @@ checks never change registry/configuration or journal state.
 - **Checkpoints.** A turn on a server takes no checkpoint, so restoring
   files is not offered there and Rewind to here rewinds the conversation
   only, saying why; Git on the server is the way back for files.
+
+### Providers running on the server
+
+Decided 2026-11-19 (maintainer): a person who does not want Octant installed
+on a server can still run Claude Code or Codex there, as the real CLI, with
+Octant's window on their own computer. Designed, not built.
+
+- **How it runs.** Octant starts the provider's own process on the server
+  over the Project's SSH connection, through a long-lived pipe with no
+  terminal, and speaks the provider's protocol over it exactly as it does
+  with a local process. The connection gains that pipe beside its
+  request-and-answer commands; it keeps the pinned host key, the private
+  control socket and the encoded `sh` call, and carries no secret in the
+  command line.
+- **Which providers.** Codex first, then Claude Code, whose protocols run
+  over standard input and output, and whose Octant tools travel inside that
+  protocol. OpenCode, Pi and the ACP agents reach Octant's tools over this
+  host's loopback, which would need forwarding the connection refuses, so
+  they stay refused on a server until a later decision. A provider reports
+  whether it can run on a server as a capability, and Octant refuses a launch
+  the provider does not report, naming why.
+- **Sign-in.** The provider uses its own sign-in on the server. Octant checks
+  it over SSH with the provider's own status command and never copies a
+  subscription sign-in there; the person signs in once on the server, for
+  example in the Project terminal. An API key reaches the server only when
+  the person sends it there, as [Shared sign-ins](hub-and-spokes.md#shared-sign-ins)
+  requires for another computer.
+- **Confinement.** Octant has no sandbox on the server, as above. The
+  provider's own sandbox, permission modes and plan mode apply there, Plan
+  runs in the provider's own read-only plan mode, and Strict refuses a
+  provider on a server because it needs Octant's own confinement. The
+  thread's level, approvals and journal stay on this host.
+- **Network.** The provider's requests to its model leave from the server,
+  not from this host, so this host's network limits and egress rules do not
+  cover them, and the Project's settings say so.
+- **Lifetime.** A provider process on the server ends when its pipe closes;
+  Octant records the remote process so a lost connection leaves no orphan it
+  cannot find and stop at the next connection.
+- **Files Octant reads.** Instruction files, session lists and trust records
+  the driver reads are read on the server, with the same protected-path rules
+  judged on the server's real paths. Checkpoints and forks of such a thread
+  are not offered until their own design.
 
 ### Work Projects
 
@@ -747,6 +798,12 @@ dev-server preview, and act on machines in the person's cloud account.
 
 ## Not built yet
 
+- A provider running on the server
+  ([Providers running on the server](#providers-running-on-the-server)): the
+  connection's pipe, Codex and then Claude Code over it, the capability, the
+  sign-in check and remote process cleanup.
+- Adding the server as a full Octant computer over SSH
+  ([Hub and spokes, decision H26](hub-and-spokes.md#decisions)).
 - Work file previews and editing, research sources, the status file and due
   dates for a Work Project on a server; its threads and person-operated Project
   terminal are built. A local Work Project shows its terminal through its
