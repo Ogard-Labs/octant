@@ -701,4 +701,3 @@ describe("new-device notifications", () => {
     expect(joinedReceipts()).toEqual([]);
   });
 });
-

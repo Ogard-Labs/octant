@@ -1057,12 +1057,19 @@ the check that the new member is the person's own.
     device is told where to go. A window can also dismiss a direct pairing's
     alert, and a device that loses its standing takes its alert with it.
   - The phone push is a new sealed "device joined" kind with its own phone
-    setting, on by default; turning it off leaves the in-app alert.
+    setting, on by default; turning it off leaves the in-app alert. Every
+    phone paired with the host hears of a direct pairing and of a member the
+    spoke's own roster comparison added, except the new device itself, at
+    high urgency; the receipt (`remote.push-device-joined-delivery-recorded@1`)
+    names the alert, never the device or its address. A phone from before
+    the setting is told. The notification opens the phone's Computers screen,
+    whose New devices list reads every paired computer's alerts.
 
-  Partly built: the addresses, the read route, the direct-pairing alert, and
-  the alerts in the paired browser and the window. Not built: the phone push
-  and the phone's own list, and the hub telling its own window about a member
-  it added.
+  Partly built: the addresses, the read route, the direct-pairing alert, the
+  alerts in the paired browser, the window and the phone, and the phone push
+  with its setting. Not built: the hub telling its own window about a member
+  it added. The phone push has run only in tests; a real phone is a
+  maintainer check.
 
 - **Confirm new members (optional).** A spoke can turn on a setting that
   holds each new member at status-only until the person confirms it, after

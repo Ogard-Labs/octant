@@ -129,7 +129,10 @@ export function sealPushNotification(input: {
    * with no thread the run, or for a held move its wait.
    */
   readonly threadId: string;
-  readonly kind: RemotePushNotificationKind | RemotePushMoveWaitingKind | RemotePushDeviceJoinedKind;
+  readonly kind:
+    | RemotePushNotificationKind
+    | RemotePushMoveWaitingKind
+    | RemotePushDeviceJoinedKind;
   readonly content: unknown;
 }): SealedPushNotification {
   const content = Buffer.from(JSON.stringify(input.content), "utf8");

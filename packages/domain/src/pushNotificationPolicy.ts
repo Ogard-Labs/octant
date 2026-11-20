@@ -165,7 +165,8 @@ export function buildRedactedDeviceJoinedPushNotification(input: {
   readonly computerLabel: string;
 }): RemotePushDeviceJoinedPayloadV1 {
   const name = shownName(input.deviceName);
-  const where = input.joined === "hub" ? "joined the hub" : `paired with ${computerName(input.computerLabel)}`;
+  const where =
+    input.joined === "hub" ? "joined the hub" : `paired with ${computerName(input.computerLabel)}`;
   const line =
     input.privateAddress === undefined
       ? `${where.charAt(0).toUpperCase()}${where.slice(1)}`

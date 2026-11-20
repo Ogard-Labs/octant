@@ -116,7 +116,10 @@ interface DeliveryResult {
 interface Delivery {
   readonly destination: PushTokenRecord;
   readonly receiptId: string;
-  readonly kind: RemotePushNotificationKind | RemotePushMoveWaitingKind | RemotePushDeviceJoinedKind;
+  readonly kind:
+    | RemotePushNotificationKind
+    | RemotePushMoveWaitingKind
+    | RemotePushDeviceJoinedKind;
   readonly collapseOn: string;
   readonly content: unknown;
   /** The receipt the journal keeps for this delivery; never its text. */
