@@ -25,6 +25,10 @@ export interface AwsAssumeRoleInput {
   readonly roleSessionName: string;
   readonly externalId?: string;
   readonly durationSeconds?: number;
+  /** MFA device ARN or hardware serial number from the profile's `mfa_serial`. */
+  readonly serialNumber?: string;
+  /** One-time 6-digit MFA code supplied by the person; never persisted. */
+  readonly tokenCode?: string;
 }
 
 const STS_VERSION = "2011-06-15";
@@ -60,6 +64,8 @@ export async function stsAssumeRole(
       ? {}
       : { DurationSeconds: String(input.durationSeconds) }),
     ...(input.externalId === undefined ? {} : { ExternalId: input.externalId }),
+    ...(input.serialNumber === undefined ? {} : { SerialNumber: input.serialNumber }),
+    ...(input.tokenCode === undefined ? {} : { TokenCode: input.tokenCode }),
   }).toString();
   const contentType = "application/x-www-form-urlencoded; charset=utf-8";
   const signed = signSigV4({

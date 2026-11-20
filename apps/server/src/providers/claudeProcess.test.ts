@@ -1486,4 +1486,74 @@ describe("Claude runtime confinement", () => {
       expect(child.exitCode).toBe(0);
     },
   );
+
+  it("opens AWS profile paths and narrows protected files to provider sign-ins in Plan outside Strict, while Strict keeps them closed", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-plan-aws-")));
+    const fakeHome = join(root, "home");
+    const checkout = join(root, "checkout");
+    const awsDir = join(fakeHome, ".aws");
+    const customConfig = join(fakeHome, "custom-aws-config");
+    const binary = join(root, "fake-claude");
+    mkdirSync(awsDir, { recursive: true });
+    mkdirSync(checkout, { recursive: true });
+    writeFileSync(join(awsDir, "config"), "[profile work]\n");
+    writeFileSync(customConfig, "[profile custom]\n");
+    writeFileSync(binary, "#!/bin/sh\nexit 0\n");
+    chmodSync(binary, 0o755);
+
+    const captured: Array<{
+      readonly protectedFiles?: string;
+      readonly readRoots?: ReadonlyArray<string>;
+      readonly privateHomeAllowPaths?: ReadonlyArray<string>;
+    }> = [];
+    const processPort = makeClaudeProcessLive({
+      platform: "darwin",
+      confinement: {
+        prepare: (input) => {
+          captured.push({
+            ...(input.protectedFiles === undefined ? {} : { protectedFiles: input.protectedFiles }),
+            ...(input.readRoots === undefined ? {} : { readRoots: input.readRoots }),
+            ...(input.privateHomeAllowPaths === undefined
+              ? {}
+              : { privateHomeAllowPaths: input.privateHomeAllowPaths }),
+          });
+          return { command: input.executable, args: [...input.args] };
+        },
+      },
+    });
+    const env = {
+      PATH: process.env.PATH,
+      HOME: fakeHome,
+      TMPDIR: tmpdir(),
+      AWS_PROFILE: "work",
+      AWS_CONFIG_FILE: customConfig,
+      CLAUDE_CODE_USE_BEDROCK: "1",
+    };
+
+    for (const strict of [false, true]) {
+      const child = processPort.spawn({
+        projectRoot: checkout,
+        executionPolicy: "plan",
+        strict,
+      })({
+        command: binary,
+        args: [],
+        cwd: checkout,
+        env,
+        signal: new AbortController().signal,
+      });
+      child.kill("SIGKILL");
+    }
+
+    expect(captured[0]?.protectedFiles).toBe("provider-sign-ins");
+    expect(captured[0]?.readRoots).toContain(awsDir);
+    expect(captured[0]?.readRoots).toContain(customConfig);
+    expect(captured[0]?.privateHomeAllowPaths).toContain(awsDir);
+    expect(captured[0]?.privateHomeAllowPaths).toContain(customConfig);
+
+    expect(captured[1]).not.toHaveProperty("protectedFiles");
+    expect(captured[1]?.readRoots).not.toContain(awsDir);
+    expect(captured[1]?.readRoots).not.toContain(customConfig);
+    expect(captured[1]?.privateHomeAllowPaths).not.toContain(awsDir);
+  });
 });

@@ -7900,22 +7900,26 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   stays Azure AI Foundry's opt-in.
   Amazon Bedrock speaks `cloud-iam`: the person signs in at the organization's
   single sign-on portal with a device code from the host-local
-  `octant provider sign-in` command, or, at a window on this host, opts in to
-  "Use my AWS profile" or long-lived access keys (maintainer request,
-  2026-11-12, and decision, 2026-11-16; built), and the broker keeps that
-  session and the temporary credentials it mints for the instance's one
-  account and role. A profile is read in place by the broker on every
-  renewal, the way the AWS CLI reads it (`AWS_CONFIG_FILE` and
+  `octant provider sign-in` command, or, at a local window or a device the
+  host's own person paired (refusing hub-introduced and restricted remote
+  devices), opts in to "Use my AWS profile" or long-lived access keys
+  (maintainer request, 2026-11-12, and decision, 2026-11-16; built), and the
+  broker keeps that session and the temporary credentials it mints for the
+  instance's one account and role. A profile is read in place by the broker on
+  every renewal, the way the AWS CLI reads it (`AWS_CONFIG_FILE` and
   `AWS_SHARED_CREDENTIALS_FILE` honoured): shared-file keys, the single
   sign-on token `aws sso login` cached under `~/.aws/sso/cache`, then
   `credential_process` run through the platform shell. A profile with a
   `role_arn` first assumes that role at the token service (built): from its
   `source_profile`'s credentials (chained up to five roles), from the
-  broker's environment for `credential_source = Environment`, or with its
-  `web_identity_token_file`, honouring `role_session_name`, `external_id`,
-  `duration_seconds` and `region`; the broker signs `AssumeRole` itself, and
-  a role asking for an MFA code is refused, as Connect has no place to type
-  one. A key pair goes
+  broker's environment for `credential_source = Environment`, from EC2 IMDSv2
+  for `credential_source = Ec2InstanceMetadata`, from ECS container metadata
+  for `credential_source = EcsContainer`, or with its `web_identity_token_file`,
+  honouring `role_session_name`, `external_id`, `duration_seconds` and
+  `region`; the broker signs `AssumeRole` itself, and for a role declaring
+  `mfa_serial` the sign-in panel asks for a six-digit MFA code (from a local
+  window or person-paired device) and keeps the temporary session credentials
+  in broker memory only for the role session's lifetime. A key pair goes
   to the broker's `/v1/cloud-iam/connect` route once and is kept there; the
   card warns that long-lived keys work until revoked. Either grant is cloud
   material the raw resolve refuses, and the server stores only the pointer

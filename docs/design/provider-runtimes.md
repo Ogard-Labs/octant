@@ -649,6 +649,22 @@ and `quickstart`. A publish from a type with no local file is judged at the
 Project root and its approval says it sends a page Claude made. Under Strict
 the thread's choice still decides and the tool publishes one Project file only.
 
+**Bedrock and AWS profiles outside Strict.** Provider runtimes that support
+Amazon Bedrock natively (including Claude Code with `CLAUDE_CODE_USE_BEDROCK=1`
+and Codex's Bedrock providers) read the person's AWS profile, environment, and
+own refresh settings exactly as in their own CLIs (maintainer decision,
+2026-11-19). Octant never resolves, copies, or replaces AWS credentials for a
+provider runtime. Outside Strict, the launch environment preserves the person's
+AWS variables (`AWS_PROFILE`, `AWS_REGION`, `AWS_DEFAULT_REGION`,
+`AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_ROLE_ARN`,
+`AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_CONTAINER_CREDENTIALS_*`,
+`CLAUDE_CODE_USE_BEDROCK`, and the rest), confined Plan and Chat launches
+narrow protected files to other providers' sign-ins and keep read access to
+existing `~/.aws` and configured AWS config/credential/token files, and Claude
+Code admits Bedrock account routing (`apiProvider: "bedrock"`) on both probe
+and session start. Under Strict, each runtime keeps its fixed environment list,
+protected-file wall, and first-party routing rule.
+
 **Several Claude accounts.** Each Claude account is its own provider
 instance with its own `CLAUDE_CONFIG_DIR` and secure-storage folder, its own
 claude.ai sign-in and its own artifacts switch. A thread runs on one
