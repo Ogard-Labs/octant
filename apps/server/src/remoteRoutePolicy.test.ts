@@ -1204,6 +1204,29 @@ describe("remote route policy", () => {
     expect(status(inspect("/api/replica-sync/status?x=1"))).not.toBe("allow");
   });
 
+  it("forwards scoped offer reads and answers without opening the legacy image API to devices", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const listPath = "/api/offers?threadKind=chat-thread&scopeId=thread";
+    const listRequest = request(listPath, { headers: { origin, "sec-fetch-site": "same-origin" } });
+    expect(routePolicy.inspect(listRequest)).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    const answer = request("/api/offers/decide", {
+      method: "POST",
+      headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(routePolicy.inspect(answer)).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+      maxBodyBytes: 8_192,
+    });
+    expect(classifyProductAction(listRequest)).toBeUndefined();
+    expect(classifyProductAction(answer)).toBeUndefined();
+    expect(routePolicy.inspect(request("/api/image/offers"))).toMatchObject({ kind: "reject" });
+  });
+
   it("applies an exact product route's response budget and keeps the listener default when none is declared", async () => {
     const fixture = handler({
       policy: policy({ maxResponseBytes: 8_192 }),

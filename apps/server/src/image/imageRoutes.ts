@@ -17,14 +17,10 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { listEligibleImageProfiles } from "@octant/domain";
-import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
-import { imageOfferDecisionRules } from "./imageOfferDecisionRules";
-import type { ImageGenerationOfferService } from "./imageGenerationOfferService";
 import type { ImageJobService, ImageJobServiceError } from "./imageJobService";
-import type { KeptImageGenerationChoices } from "./keptImageGenerationChoices";
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -34,10 +30,6 @@ const ARTIFACT_PATH =
 
 export interface ImageRouteDependencies {
   readonly jobs: ImageJobService;
-  /** Agents' requests to generate, answered from the thread's card. */
-  readonly offers?: Pick<ImageGenerationOfferService, "list" | "find" | "claim">;
-  /** Where "Don't ask again" is kept: the thread's Project, or the thread outside one. */
-  readonly kept?: Pick<KeptImageGenerationChoices, "remember">;
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
   readonly readImageGenerationSettings: () => ImageGenerationSettings;
   readonly authorizeScope: (
@@ -65,18 +57,9 @@ export interface ImageRouteDependencies {
 export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
   const now = dependencies.now ?? Date.now;
   const jsonLimit = dependencies.maxJsonBodySize ?? JSON_BODY_LIMIT;
-  const offerRoutes = createServiceOfferRouteHandler({
-    ...(dependencies.offers === undefined ? {} : { offers: dependencies.offers }),
-    authorizeScope: dependencies.authorizeScope,
-    windowAuthorityStore: dependencies.windowAuthorityStore,
-    rules: imageOfferDecisionRules(dependencies),
-    now,
-  });
 
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    const offerResponse = await offerRoutes(request);
-    if (offerResponse !== undefined) return offerResponse;
     if (!url.pathname.startsWith("/api/image/")) return undefined;
     const route = url.pathname.slice("/api/image/".length);
 

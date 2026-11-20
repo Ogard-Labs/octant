@@ -1,16 +1,12 @@
 import {
   decodeImageGenerationOffer,
   decodeImageGenerationOfferId,
-  MAX_PENDING_IMAGE_GENERATION_OFFERS,
   type ImageGenerationOffer,
   type ProviderInstanceId,
   type ProviderModelId,
   type WindowId,
 } from "@octant/contracts";
-import {
-  ServiceOfferService,
-  type ServiceOfferServiceOptions,
-} from "../offers/serviceOfferService";
+import type { ServiceOfferService } from "../offers/serviceOfferService";
 
 export interface ImageGenerationChoice {
   readonly profileInstanceId: ProviderInstanceId;
@@ -28,6 +24,11 @@ export type ImageGenerationOfferOutcome =
   | { readonly status: "cancelled" }
   | { readonly status: "too-many-waiting" };
 
+export type ImageOfferAnswer = Exclude<
+  ImageGenerationOfferOutcome,
+  { status: "cancelled" | "too-many-waiting" }
+>;
+
 type ThreadScope = Pick<ImageGenerationOffer, "threadKind" | "scopeId">;
 
 /** An offer as the asking tool describes it; the service stamps its id and time. */
@@ -43,14 +44,12 @@ export type ImageGenerationOfferRequest = ImageGenerationOffer extends infer Off
  * it. A thread in a Project keeps its choice on the Project instead, journaled
  * (`createKeptImageGenerationChoices`).
  */
-export class ImageGenerationOfferService extends ServiceOfferService<
-  ImageGenerationOffer,
-  Exclude<ImageGenerationOfferOutcome, { status: "cancelled" | "too-many-waiting" }>
-> {
+export class ImageGenerationOfferService {
   readonly #remembered = new Map<string, ImageGenerationChoice>();
+  readonly #offers: Pick<ServiceOfferService<ImageGenerationOffer, ImageOfferAnswer>, "wait">;
 
-  constructor(options: ServiceOfferServiceOptions) {
-    super(MAX_PENDING_IMAGE_GENERATION_OFFERS, options);
+  constructor(offers: Pick<ServiceOfferService<ImageGenerationOffer, ImageOfferAnswer>, "wait">) {
+    this.#offers = offers;
   }
 
   offer(input: {
@@ -58,7 +57,7 @@ export class ImageGenerationOfferService extends ServiceOfferService<
     readonly offer: ImageGenerationOfferRequest;
     readonly signal?: AbortSignal;
   }): Promise<ImageGenerationOfferOutcome> {
-    return this.wait({
+    return this.#offers.wait({
       ...input,
       stamp: (offerId, requestedAt) =>
         decodeImageGenerationOffer({

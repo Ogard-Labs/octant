@@ -18,12 +18,12 @@ import {
   SHELL_SETTINGS_PATH,
   SERVICE_OFFERS_DECIDE_PATH,
   SERVICE_OFFERS_PATH,
+  SERVICE_OFFER_DECISION_MAX_BYTES,
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER } from "./hub/hubLink";
 import { PENDING_REQUESTS_PATH } from "./pendingRequestRoutes";
-import { SERVICE_OFFER_DECISION_MAX_BYTES } from "./offers/serviceOfferRoutes";
 import { PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS } from "./providers/providerCredentialRoutes";
 import { PAIRED_DEVICE_ADMINISTRATION_ROUTES } from "./remote/localDeviceAdministrationRoutes";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";

@@ -8,6 +8,8 @@ import {
   decodeServiceOffersResponse,
   SERVICE_OFFERS_DECIDE_PATH,
   SERVICE_OFFERS_PATH,
+  SERVICE_OFFER_DECISION_MAX_BYTES,
+  type ImageGenerationProfileView,
   type ServiceOffer,
   type ServiceOfferDecision,
   type WindowId,
@@ -19,10 +21,8 @@ import type { WindowAuthorityStore } from "../windowAuthorityStore";
 import { resolveServiceOfferDecision, type ServiceOfferRules } from "./serviceOfferDecision";
 import type { ServiceOfferService } from "./serviceOfferService";
 
-export const SERVICE_OFFER_DECISION_MAX_BYTES = 8_192;
-
 export function createServiceOfferRouteHandler<Outcome>(input: {
-  readonly offers?: Pick<ServiceOfferService<ServiceOffer, Outcome>, "list" | "find" | "claim">;
+  readonly offers: Pick<ServiceOfferService<ServiceOffer, Outcome>, "list" | "find" | "claim">;
   readonly rules: ServiceOfferRules<
     ServiceOffer,
     ServiceOfferDecision,
@@ -35,6 +35,7 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
   ) => Promise<boolean>;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now: () => number;
+  readonly listImageProfiles: () => ReadonlyArray<ImageGenerationProfileView>;
 }) {
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
@@ -92,12 +93,18 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
         if (!(await input.authorizeScope(windowId, kind, scopeId)) || !current()) {
           return fail("Offers are unavailable.", 404);
         }
-        const waiting = offers?.list(windowId, { threadKind: kind, scopeId }) ?? [];
+        const waiting = offers.list(windowId, { threadKind: kind, scopeId });
         const response = { offers: legacy ? waiting.filter(isImageOffer) : waiting };
         return reply(
           legacy
             ? decodeImageGenerationOffersResponse(response)
-            : decodeServiceOffersResponse(response),
+            : decodeServiceOffersResponse({
+                ...response,
+                ...(context.principal.kind === "remote-device" &&
+                waiting.some((offer) => offer.kind === "generate")
+                  ? { imageProfiles: input.listImageProfiles() }
+                  : {}),
+              }),
         );
       }
       if (decide && request.method === "POST") {
@@ -112,9 +119,9 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
         } catch {
           return fail("Offer decision is invalid.", 400);
         }
-        const waiting = offers?.find(windowId, decision.offerId);
+        const waiting = legacy ? offers.find(windowId, decision.offerId) : undefined;
         const result =
-          offers === undefined || (legacy && waiting !== undefined && !isImageOffer(waiting))
+          waiting !== undefined && !isImageOffer(waiting)
             ? ({ kind: "offer-gone" } as const)
             : await resolveServiceOfferDecision({
                 offers,
