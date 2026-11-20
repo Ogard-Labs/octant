@@ -13,19 +13,23 @@ import {
   TOOL_EFFECT_AGGREGATE_TYPE,
   TOOL_EFFECT_EVENT_NAMES,
   decodeProjectId,
+  decodeProjectWorkingFolderId,
   decodeThreadGoalId,
   decodeThreadGoalRevisionId,
   decodeUtcTimestamp,
   decodeWindowId,
+  type BoundProject,
   type ProviderExecutionPolicy,
   type ThreadGoal,
   type ThreadGoalCriterionId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import { approvedWorkingFolderChoices, approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
 import type { NativeHarnessShellPort, NativeHarnessShellRun } from "../harness/nativeHarnessTools";
+import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
@@ -87,12 +91,23 @@ function openTestJournal() {
   return { connection, journal };
 }
 
-function makeStore(journal: Journal) {
+function makeStore(
+  journal: Journal,
+  options?: {
+    readonly resolveWorkFolderRoot?: (
+      projectId: string,
+      workingFolderId: string | undefined,
+    ) => string | undefined;
+  },
+) {
   const store = new ThreadFinishedReceiptStore({
     journal,
     uuid: randomUUID,
     actor: ACTOR,
     clock: () => "2026-11-19T12:00:00.000Z",
+    ...(options?.resolveWorkFolderRoot === undefined
+      ? {}
+      : { resolveWorkFolderRoot: options.resolveWorkFolderRoot }),
   });
   const unsubscribe = journal.subscribeCommitted((append) =>
     store.onCommittedEvents(append.events),
@@ -1004,18 +1019,19 @@ describe("octant_report_finished tool and receipt store", () => {
     const { journal } = openTestJournal();
     const { store, unsubscribe } = makeStore(journal);
     try {
+      const fake = createFakeSandboxConfinement();
+      tempDirs.push(fake.root);
       const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-finished-tail-")));
       tempDirs.push(root);
       const checkout = join(root, "checkout");
       const scripts = join(root, "scripts");
-      const work = join(root, "work");
       mkdirSync(checkout, { recursive: true });
       mkdirSync(scripts, { recursive: true });
-      mkdirSync(work, { recursive: true });
 
       const processPort = new RepositoryTestProcessPort({
+        confinement: fake.confinement,
         receiptDirectory: join(root, "receipts"),
-        temporaryDirectory: work,
+        temporaryDirectory: fake.temporaryDirectory,
         networkEgress: "none",
         harnessShellScriptDirectory: scripts,
         maxOutputBytes: 4_096,
@@ -1072,6 +1088,401 @@ describe("octant_report_finished tool and receipt store", () => {
         MAX_FINISHED_CHECK_OUTPUT_TAIL_LENGTH,
       );
       expect(store.read(THREAD_ID)).toEqual([]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("marks extra-folder Work receipts stale on production-shaped artifact deletions and exports, live and on replay", async () => {
+    const { journal } = openTestJournal();
+    const { store, unsubscribe } = makeStore(journal);
+    try {
+      const mainThread = "33333333-3333-4333-8333-333333333401";
+      const extraThread = "33333333-3333-4333-8333-333333333402";
+      const extraFolderId = `folder_${"c".repeat(64)}`;
+
+      const registerWorkThread = (id: string, workingFolderId?: string) => {
+        journal.append({
+          aggregate: { aggregateType: "work-thread", aggregateId: decodeAggregateId(id) },
+          expectedVersion: decodeAggregateVersion(0),
+          events: [
+            {
+              eventId: decodeEventId(randomUUID()),
+              eventName: "work.thread-created@1",
+              eventVersion: 1,
+              correlationId: decodeCorrelationId(randomUUID()),
+              actor: ACTOR,
+              occurredAt: "2026-11-19T11:55:00.000Z",
+              payload: {
+                kind: "thread-created",
+                thread: {
+                  id,
+                  projectId: String(PROJECT_ID),
+                  ...(workingFolderId === undefined ? {} : { workingFolderId }),
+                  workingDirectory: ".",
+                },
+              },
+            },
+          ],
+        });
+      };
+
+      registerWorkThread(mainThread);
+      registerWorkThread(extraThread, extraFolderId);
+
+      const { shell } = makeShell(() => ({
+        status: "ran",
+        exitCode: 0,
+        output: "ok",
+        truncated: false,
+      }));
+      const recordReceiptFor = async (threadId: string) => {
+        const tool = createReportFinishedTool({
+          mode: "work",
+          threadId,
+          projectId: String(PROJECT_ID),
+          turnId: `turn-${randomUUID()}`,
+          readPosture: () => "full-access",
+          folder: "/tmp/work",
+          shell,
+          observeDiff: async () => ({ status: "unavailable", reason: "Not a Git repo." }),
+          store,
+          uuid: randomUUID,
+          clock: () => "2026-11-19T12:00:00.000Z",
+        });
+        expect(
+          (
+            await tool.execute({
+              name: REPORT_FINISHED_TOOL_NAME,
+              inputJson: JSON.stringify({ summary: "Verified", checks: ["check"] }),
+            })
+          ).isError,
+        ).toBeUndefined();
+      };
+
+      // Create an artifact in the extra folder BEFORE recording the receipts so
+      // its folder scope is retained in the store from `created`.
+      const artifactA = decodeAggregateId("77777777-7777-4777-8777-777777777701");
+      const producedArtifactB = decodeAggregateId("77777777-7777-4777-8777-777777777702");
+      journal.append({
+        aggregate: { aggregateType: "work-artifact", aggregateId: artifactA },
+        expectedVersion: decodeAggregateVersion(0),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: "work.artifact-mutation-recorded@1",
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T11:58:00.000Z",
+            payload: {
+              projectId: String(PROJECT_ID),
+              sequence: 1,
+              occurredAt: "2026-11-19T11:58:00.000Z",
+              outcome: {
+                kind: "created",
+                artifact: {
+                  artifactId: String(artifactA),
+                  projectId: String(PROJECT_ID),
+                  workingFolderId: extraFolderId,
+                  directory: "reports",
+                },
+              },
+            },
+          },
+        ],
+      });
+
+      await recordReceiptFor(mainThread);
+      await recordReceiptFor(extraThread);
+      expect(store.latest(mainThread)?.stale).toBe(false);
+      expect(store.latest(extraThread)?.stale).toBe(false);
+
+      // Exporting the extra-folder artifact (no `outcome.artifact`) marks the extra-folder
+      // receipt stale, keeps the main-folder receipt fresh, and propagates folder ownership
+      // to `producedVersion.artifactId`.
+      journal.append({
+        aggregate: { aggregateType: "work-artifact", aggregateId: artifactA },
+        expectedVersion: decodeAggregateVersion(1),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: "work.artifact-mutation-recorded@1",
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T12:01:00.000Z",
+            payload: {
+              projectId: String(PROJECT_ID),
+              sequence: 2,
+              occurredAt: "2026-11-19T12:01:00.000Z",
+              outcome: {
+                kind: "exported",
+                handoff: {
+                  handoffKind: "in-app-version",
+                  artifactId: String(artifactA),
+                  producedVersion: {
+                    artifactId: String(producedArtifactB),
+                    projectId: String(PROJECT_ID),
+                    sequence: 2,
+                  },
+                },
+              },
+            },
+          },
+        ],
+      });
+      expect(store.latest(extraThread)?.stale).toBe(true);
+      expect(store.boardMark(extraThread)).toBeUndefined();
+      expect(store.latest(mainThread)?.stale).toBe(false);
+
+      // Re-record the extra-folder receipt, then delete the produced artifact (no `outcome.artifact`).
+      await recordReceiptFor(extraThread);
+      expect(store.latest(extraThread)?.stale).toBe(false);
+
+      journal.append({
+        aggregate: { aggregateType: "work-artifact", aggregateId: producedArtifactB },
+        expectedVersion: decodeAggregateVersion(0),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: "work.artifact-mutation-recorded@1",
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T12:02:00.000Z",
+            payload: {
+              projectId: String(PROJECT_ID),
+              sequence: 3,
+              occurredAt: "2026-11-19T12:02:00.000Z",
+              outcome: {
+                kind: "deleted",
+                artifactId: String(producedArtifactB),
+                projectId: String(PROJECT_ID),
+              },
+            },
+          },
+        ],
+      });
+      expect(store.latest(extraThread)?.stale).toBe(true);
+      expect(store.latest(mainThread)?.stale).toBe(false);
+
+      // A standalone deletion whose artifact was never seen before conservatively invalidates
+      // every Work receipt in the Project (including extra-folder receipts).
+      await recordReceiptFor(extraThread);
+      expect(store.latest(extraThread)?.stale).toBe(false);
+      const unknownArtifact = decodeAggregateId("77777777-7777-4777-8777-777777777799");
+      journal.append({
+        aggregate: { aggregateType: "work-artifact", aggregateId: unknownArtifact },
+        expectedVersion: decodeAggregateVersion(0),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: "work.artifact-mutation-recorded@1",
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T12:03:00.000Z",
+            payload: {
+              projectId: String(PROJECT_ID),
+              sequence: 1,
+              occurredAt: "2026-11-19T12:03:00.000Z",
+              outcome: {
+                kind: "deleted",
+                artifactId: String(unknownArtifact),
+                projectId: String(PROJECT_ID),
+              },
+            },
+          },
+        ],
+      });
+      expect(store.latest(extraThread)?.stale).toBe(true);
+      expect(store.latest(mainThread)?.stale).toBe(true);
+
+      const replayed = new ThreadFinishedReceiptStore({
+        journal,
+        uuid: randomUUID,
+        actor: ACTOR,
+        clock: () => "2026-11-19T12:04:00.000Z",
+      });
+      expect(replayed.read(extraThread)).toEqual(store.read(extraThread));
+      expect(replayed.read(mainThread)).toEqual(store.read(mainThread));
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("invalidates Work receipts across implicit and explicit main-folder aliases while keeping extra folders isolated", async () => {
+    const project = {
+      id: PROJECT_ID,
+      type: "work",
+      binding: { canonicalRoot: "/workspace/project-main" },
+      bindingHistory: [{ revisionId: "88888888-8888-4888-8888-888888888888" }],
+      extraFolders: [
+        {
+          canonicalRoot: "/workspace/project-extra",
+          addedAt: "2026-11-19T10:00:00.000Z",
+        },
+      ],
+    } as unknown as BoundProject;
+    const choices = approvedWorkingFolderChoices(project);
+    const mainChoice = choices.find((choice) => choice.kind === "main");
+    const extraChoice = choices.find((choice) => choice.kind === "extra");
+    expect(mainChoice).toBeDefined();
+    expect(extraChoice).toBeDefined();
+    if (mainChoice === undefined || extraChoice === undefined) return;
+
+    const resolveWorkFolderRoot = (projectId: string, workingFolderId: string | undefined) => {
+      if (projectId !== String(PROJECT_ID)) return undefined;
+      return approvedWorkingFolderRoot(
+        project,
+        workingFolderId === undefined ? undefined : decodeProjectWorkingFolderId(workingFolderId),
+      );
+    };
+
+    const { journal } = openTestJournal();
+    const { store, unsubscribe } = makeStore(journal, { resolveWorkFolderRoot });
+    try {
+      const implicitMainThread = "33333333-3333-4333-8333-333333333501";
+      const explicitMainThread = "33333333-3333-4333-8333-333333333502";
+      const extraFolderThread = "33333333-3333-4333-8333-333333333503";
+
+      const registerWorkThread = (id: string, workingFolderId?: string) => {
+        journal.append({
+          aggregate: { aggregateType: "work-thread", aggregateId: decodeAggregateId(id) },
+          expectedVersion: decodeAggregateVersion(0),
+          events: [
+            {
+              eventId: decodeEventId(randomUUID()),
+              eventName: "work.thread-created@1",
+              eventVersion: 1,
+              correlationId: decodeCorrelationId(randomUUID()),
+              actor: ACTOR,
+              occurredAt: "2026-11-19T11:55:00.000Z",
+              payload: {
+                kind: "thread-created",
+                thread: {
+                  id,
+                  projectId: String(PROJECT_ID),
+                  ...(workingFolderId === undefined ? {} : { workingFolderId }),
+                  workingDirectory: "docs",
+                },
+              },
+            },
+          ],
+        });
+      };
+
+      registerWorkThread(implicitMainThread);
+      registerWorkThread(explicitMainThread, String(mainChoice.id));
+      registerWorkThread(extraFolderThread, String(extraChoice.id));
+
+      const { shell } = makeShell(() => ({
+        status: "ran",
+        exitCode: 0,
+        output: "ok",
+        truncated: false,
+      }));
+      const recordReceiptFor = async (threadId: string) => {
+        const tool = createReportFinishedTool({
+          mode: "work",
+          threadId,
+          projectId: String(PROJECT_ID),
+          turnId: `turn-${randomUUID()}`,
+          readPosture: () => "full-access",
+          folder: "/workspace/project-main",
+          shell,
+          observeDiff: async () => ({ status: "unavailable", reason: "Not a Git repo." }),
+          store,
+          uuid: randomUUID,
+          clock: () => "2026-11-19T12:00:00.000Z",
+        });
+        expect(
+          (
+            await tool.execute({
+              name: REPORT_FINISHED_TOOL_NAME,
+              inputJson: JSON.stringify({ summary: "Verified", checks: ["check"] }),
+            })
+          ).isError,
+        ).toBeUndefined();
+      };
+
+      await recordReceiptFor(implicitMainThread);
+      await recordReceiptFor(extraFolderThread);
+
+      // A write from the explicit main-folder thread invalidates the implicit main-folder
+      // thread's receipt, while leaving the extra-folder thread fresh.
+      journal.append({
+        aggregate: {
+          aggregateType: "work-turn",
+          aggregateId: decodeAggregateId("99999999-9999-4999-8999-999999999901"),
+        },
+        expectedVersion: decodeAggregateVersion(0),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: "work.turn-updated@1",
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T12:01:00.000Z",
+            payload: {
+              kind: "turn-updated",
+              threadId: explicitMainThread,
+              turnId: "explicit-turn-1",
+              status: "completed",
+              wroteFiles: { paths: ["docs/readme.md"], truncated: false },
+            },
+          },
+        ],
+      });
+      expect(store.latest(implicitMainThread)?.stale).toBe(true);
+      expect(store.boardMark(implicitMainThread)).toBeUndefined();
+      expect(store.latest(extraFolderThread)?.stale).toBe(false);
+      expect(store.boardMark(extraFolderThread)?.provenCount).toBe(1);
+
+      // Symmetrically, a write from the implicit main-folder thread invalidates the
+      // explicit main-folder thread's receipt while keeping the extra folder fresh.
+      await recordReceiptFor(explicitMainThread);
+      expect(store.latest(explicitMainThread)?.stale).toBe(false);
+
+      journal.append({
+        aggregate: {
+          aggregateType: "work-turn",
+          aggregateId: decodeAggregateId("99999999-9999-4999-8999-999999999902"),
+        },
+        expectedVersion: decodeAggregateVersion(0),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: "work.turn-updated@1",
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T12:02:00.000Z",
+            payload: {
+              kind: "turn-updated",
+              threadId: implicitMainThread,
+              turnId: "implicit-turn-1",
+              status: "completed",
+              wroteFiles: { paths: ["docs/readme.md"], truncated: false },
+            },
+          },
+        ],
+      });
+      expect(store.latest(explicitMainThread)?.stale).toBe(true);
+      expect(store.latest(extraFolderThread)?.stale).toBe(false);
+
+      const replayed = new ThreadFinishedReceiptStore({
+        journal,
+        uuid: randomUUID,
+        actor: ACTOR,
+        clock: () => "2026-11-19T12:03:00.000Z",
+        resolveWorkFolderRoot,
+      });
+      expect(replayed.read(implicitMainThread)).toEqual(store.read(implicitMainThread));
+      expect(replayed.read(explicitMainThread)).toEqual(store.read(explicitMainThread));
+      expect(replayed.read(extraFolderThread)).toEqual(store.read(extraFolderThread));
     } finally {
       unsubscribe();
     }

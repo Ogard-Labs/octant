@@ -91,11 +91,17 @@ export class ThreadFinishedReceiptStore {
   readonly #uuid: () => string;
   readonly #actor: typeof EventActor.Type;
   readonly #clock: () => string;
+  readonly #resolveWorkFolderRoot?: (
+    projectId: string,
+    workingFolderId: string | undefined,
+  ) => string | undefined;
   readonly #threads = new Map<string, ThreadReceiptRecord>();
   /** Current Work folder scope per Work thread id, populated from work-thread and work-turn journal events. */
   readonly #workThreadFolders = new Map<string, WorkFolderScope>();
   /** Work thread ids that currently hold at least one recorded finished receipt. */
   readonly #workThreadsWithReceipts = new Set<string>();
+  /** Retained folder scope per Work artifact id from created/revised/in-app-exported frames so deletes and exports stay folder-accurate. */
+  readonly #workArtifactFolders = new Map<string, WorkFolderScope>();
   /** In-flight file-writing tool calls keyed by `${threadId}:${toolCallId}` until settled. */
   readonly #pendingWriteCalls = new Map<string, PendingWriteCall>();
 
@@ -104,11 +110,24 @@ export class ThreadFinishedReceiptStore {
     readonly uuid: () => string;
     readonly actor: typeof EventActor.Type;
     readonly clock: () => string;
+    /**
+     * Resolves a Work thread's `(projectId, workingFolderId)` to its canonical
+     * folder root so implicit main-folder (`undefined`) and explicit approved
+     * main-folder ids canonicalize to the same folder identity while extra
+     * folders stay distinct.
+     */
+    readonly resolveWorkFolderRoot?: (
+      projectId: string,
+      workingFolderId: string | undefined,
+    ) => string | undefined;
   }) {
     this.#journal = options.journal;
     this.#uuid = options.uuid;
     this.#actor = decodeActor(options.actor);
     this.#clock = options.clock;
+    if (options.resolveWorkFolderRoot !== undefined) {
+      this.#resolveWorkFolderRoot = options.resolveWorkFolderRoot;
+    }
     this.#hydrate();
   }
 
@@ -224,6 +243,18 @@ export class ThreadFinishedReceiptStore {
     thread.fileChanges.push(signal);
   }
 
+  #folderIdentity(scope: WorkFolderScope): string {
+    const resolvedRoot = this.#resolveWorkFolderRoot?.(scope.projectId, scope.workingFolderId);
+    if (resolvedRoot !== undefined) return `root:${resolvedRoot}`;
+    return scope.workingFolderId === undefined ? "main" : `id:${scope.workingFolderId}`;
+  }
+
+  #workFoldersOverlap(a: WorkFolderScope, b: WorkFolderScope): boolean {
+    if (a.projectId !== b.projectId) return false;
+    if (this.#folderIdentity(a) !== this.#folderIdentity(b)) return false;
+    return workingDirectoriesOverlap(a.workingDirectory, b.workingDirectory);
+  }
+
   /**
    * Record a Work file change on the writing thread (preserving same-turn
    * exclusion when `turnId` is supplied) and also invalidate sibling Work
@@ -242,7 +273,7 @@ export class ThreadFinishedReceiptStore {
       const siblingScope =
         this.#threads.get(siblingThreadId)?.workFolder ??
         this.#workThreadFolders.get(siblingThreadId);
-      if (siblingScope !== undefined && workFoldersOverlap(writerScope, siblingScope)) {
+      if (siblingScope !== undefined && this.#workFoldersOverlap(writerScope, siblingScope)) {
         this.#recordFileChange(siblingThreadId, { sequence: signal.sequence });
       }
     }
@@ -353,12 +384,17 @@ export class ThreadFinishedReceiptStore {
       envelope.eventName === "work.artifact-mutation-recorded@1" &&
       envelope.eventVersion === 1
     ) {
-      const mutationScope = extractWorkArtifactMutationFolder(envelope.payload);
-      if (mutationScope !== undefined) {
+      const mutation = classifyWorkArtifactMutation(envelope.payload, this.#workArtifactFolders);
+      if (mutation !== undefined) {
         for (const threadId of this.#workThreadsWithReceipts) {
           const threadScope =
             this.#threads.get(threadId)?.workFolder ?? this.#workThreadFolders.get(threadId);
-          if (threadScope !== undefined && workFoldersOverlap(mutationScope, threadScope)) {
+          if (threadScope === undefined) continue;
+          const matches =
+            mutation.kind === "folder"
+              ? this.#workFoldersOverlap(mutation.scope, threadScope)
+              : threadScope.projectId === mutation.projectId;
+          if (matches) {
             this.#recordFileChange(threadId, { sequence: envelope.globalSequence });
           }
         }
@@ -479,15 +515,10 @@ function normalizeWorkingDirectory(value: string | undefined): string {
   return trimmed.length === 0 ? "." : trimmed;
 }
 
-function workFoldersOverlap(a: WorkFolderScope, b: WorkFolderScope): boolean {
-  if (a.projectId !== b.projectId) return false;
-  if (a.workingFolderId !== b.workingFolderId) return false;
-  if (a.workingDirectory === "." || b.workingDirectory === ".") return true;
-  if (a.workingDirectory === b.workingDirectory) return true;
-  return (
-    a.workingDirectory.startsWith(`${b.workingDirectory}/`) ||
-    b.workingDirectory.startsWith(`${a.workingDirectory}/`)
-  );
+function workingDirectoriesOverlap(a: string, b: string): boolean {
+  if (a === "." || b === ".") return true;
+  if (a === b) return true;
+  return a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 }
 
 function extractWorkThreadFolder(
@@ -534,20 +565,76 @@ function extractWorkTurnAcceptedFolder(
   };
 }
 
-function extractWorkArtifactMutationFolder(payload: unknown): WorkFolderScope | undefined {
+type ClassifiedWorkArtifactMutation =
+  | { readonly kind: "folder"; readonly scope: WorkFolderScope }
+  | { readonly kind: "project-wide"; readonly projectId: string };
+
+/**
+ * Resolve the affected Work folder scope for `work.artifact-mutation-recorded@1`.
+ * `created` and `revised` outcomes carry `outcome.artifact` and populate
+ * `artifactFolders`; `exported` and `deleted` outcomes omit `outcome.artifact`
+ * and reuse the retained artifact folder (also propagating it to in-app
+ * exported versions). If a mutation arrives without any known folder identity,
+ * fall back conservatively to `project-wide` invalidation so extra-folder
+ * receipts are never silently left fresh.
+ */
+function classifyWorkArtifactMutation(
+  payload: unknown,
+  artifactFolders: Map<string, WorkFolderScope>,
+): ClassifiedWorkArtifactMutation | undefined {
   const frame = asRecord(payload);
   if (frame === undefined) return undefined;
   const outcome = asRecord(frame.outcome);
-  const artifact = asRecord(outcome?.artifact);
-  const projectId = readStringField(artifact, "projectId") ?? readStringField(frame, "projectId");
-  if (projectId === undefined) return undefined;
-  const workingFolderId = readStringField(artifact, "workingFolderId");
-  const workingDirectory = normalizeWorkingDirectory(readStringField(artifact, "directory"));
-  return {
-    projectId,
-    ...(workingFolderId === undefined ? {} : { workingFolderId }),
-    workingDirectory,
-  };
+  const outcomeKind = outcome?.kind;
+
+  if (outcomeKind === "created" || outcomeKind === "revised") {
+    const artifact = asRecord(outcome?.artifact);
+    const projectId = readStringField(artifact, "projectId") ?? readStringField(frame, "projectId");
+    if (projectId === undefined) return undefined;
+    const workingFolderId = readStringField(artifact, "workingFolderId");
+    const workingDirectory = normalizeWorkingDirectory(readStringField(artifact, "directory"));
+    const scope: WorkFolderScope = {
+      projectId,
+      ...(workingFolderId === undefined ? {} : { workingFolderId }),
+      workingDirectory,
+    };
+    const artifactId = readStringField(artifact, "artifactId");
+    if (artifactId !== undefined) {
+      artifactFolders.set(artifactId, scope);
+    }
+    return { kind: "folder", scope };
+  }
+
+  if (outcomeKind === "exported") {
+    const handoff = asRecord(outcome?.handoff);
+    const projectId =
+      readStringField(frame, "projectId") ??
+      readStringField(asRecord(handoff?.producedVersion), "projectId");
+    const sourceArtifactId = readStringField(handoff, "artifactId");
+    const known =
+      sourceArtifactId === undefined ? undefined : artifactFolders.get(sourceArtifactId);
+    if (known !== undefined) {
+      const producedArtifactId = readStringField(asRecord(handoff?.producedVersion), "artifactId");
+      if (producedArtifactId !== undefined) {
+        artifactFolders.set(producedArtifactId, known);
+      }
+      return { kind: "folder", scope: known };
+    }
+    return projectId === undefined ? undefined : { kind: "project-wide", projectId };
+  }
+
+  if (outcomeKind === "deleted") {
+    const projectId = readStringField(outcome, "projectId") ?? readStringField(frame, "projectId");
+    const artifactId = readStringField(outcome, "artifactId");
+    const known = artifactId === undefined ? undefined : artifactFolders.get(artifactId);
+    if (known !== undefined) {
+      return { kind: "folder", scope: known };
+    }
+    return projectId === undefined ? undefined : { kind: "project-wide", projectId };
+  }
+
+  const projectId = readStringField(frame, "projectId");
+  return projectId === undefined ? undefined : { kind: "project-wide", projectId };
 }
 
 function classifyWorkTurnUpdated(
