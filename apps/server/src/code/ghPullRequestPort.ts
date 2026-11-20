@@ -418,7 +418,7 @@ export class GhPullRequestPort {
     if (observed.status === "unavailable") return observed;
     if (observed.pullRequest === undefined) return { status: "none" };
     const number = String(observed.pullRequest.number);
-    const repository = deliveryTarget.baseRepository;
+    const repository = observed.pullRequest.baseRepository;
 
     const steps: Array<{ readonly arguments_: readonly string[]; readonly stdin?: string }> = [];
     if (request.title !== undefined || request.body !== undefined) {
@@ -574,13 +574,9 @@ export class GhPullRequestPort {
     const identity = observed.pullRequest;
 
     const staleSections: GhPullRequestReviewSection[] = [];
-    const detail = await this.#viewReviewDetail(
-      deliveryTarget.baseRepository,
-      identity.number,
-      signal,
-    );
+    const detail = await this.#viewReviewDetail(identity.baseRepository, identity.number, signal);
     const diff = await this.#reviewDiff(
-      deliveryTarget.baseRepository,
+      identity.baseRepository,
       identity.number,
       request.maxDiffBytes,
       signal,
@@ -744,6 +740,12 @@ export class GhPullRequestPort {
       readonly method: CodeProjectPullRequestMergeMethod;
       /** The head commit the reviewer approved. */
       readonly headSha: string;
+      /**
+       * Expected GitHub pull request node ID from the identity owner. When both
+       * this and the live pull request carry a node ID and they differ, the
+       * merge is refused so a head check can never pass against another PR.
+       */
+      readonly expectedPullRequestNodeId?: string;
     },
     signal: AbortSignal,
   ): Promise<GhPullRequestMergeResult> {
@@ -757,6 +759,13 @@ export class GhPullRequestPort {
     }
     const detail = await this.#viewReviewDetail(repository, request.number, signal);
     if (detail === undefined) return { status: "unavailable", reason: "unavailable" };
+    if (
+      request.expectedPullRequestNodeId !== undefined &&
+      detail.pullRequestNodeId !== undefined &&
+      detail.pullRequestNodeId !== request.expectedPullRequestNodeId
+    ) {
+      return { status: "refused", reason: "stale" };
+    }
     if (detail.state !== "open") return { status: "refused", reason: "not-open" };
     if (detail.mergeability !== "mergeable") {
       return { status: "refused", reason: "not-mergeable" };
@@ -938,6 +947,18 @@ export class GhPullRequestPort {
       ...(baseRepositoryNodeId === undefined ? {} : { baseRepositoryNodeId }),
       ...(baseRepository === undefined ? {} : { baseRepository }),
     };
+  }
+
+  /**
+   * Read-only lookup of a repository's stable GitHub node ID and canonical
+   * `owner/name`. Used to confirm whether multiple local Git remotes point at
+   * the same renamed or transferred repository.
+   */
+  observeBaseRepository(
+    request: { readonly owner: string; readonly name: string },
+    signal: AbortSignal,
+  ): Promise<{ readonly nodeId: string; readonly repository?: string } | undefined> {
+    return this.#observeBaseRepository(`${request.owner}/${request.name}`, signal);
   }
 
   /**
@@ -1256,6 +1277,19 @@ function decodePullRequests(
   if (!isRecord(item) || (!exactKeys(item, baseKeys) && !exactKeys(item, ["id", ...baseKeys])))
     return undefined;
   const owner = item.headRepositoryOwner;
+  const requestBaseOwner = request.baseRepository.slice(0, request.baseRepository.indexOf("/"));
+  const urlRepository =
+    typeof item.url === "string" ? repositoryFromPullRequestUrl(item.url) : undefined;
+  const urlBaseOwner =
+    urlRepository === undefined ? undefined : urlRepository.slice(0, urlRepository.indexOf("/"));
+  const headOwnerMatches =
+    isRecord(owner) &&
+    exactKeys(owner, ["login"]) &&
+    typeof owner.login === "string" &&
+    (owner.login === target.headOwner ||
+      (target.headOwner.toLowerCase() === requestBaseOwner.toLowerCase() &&
+        urlBaseOwner !== undefined &&
+        owner.login.toLowerCase() === urlBaseOwner.toLowerCase()));
   if (
     !Number.isSafeInteger(item.number) ||
     (item.number as number) <= 0 ||
@@ -1265,12 +1299,12 @@ function decodePullRequests(
     typeof item.baseRefName !== "string" ||
     !validBranch(item.baseRefName) ||
     item.headRefName !== target.headBranch ||
-    !isRecord(owner) ||
-    !exactKeys(owner, ["login"]) ||
-    owner.login !== target.headOwner
+    !headOwnerMatches
   ) {
     return undefined;
   }
+  const resolvedHeadOwner =
+    isRecord(owner) && typeof owner.login === "string" ? owner.login : target.headOwner;
   const pullRequestNodeId = validNodeId(item.id);
   return {
     number: item.number as number,
@@ -1280,7 +1314,7 @@ function decodePullRequests(
     // Read from GitHub, not the delivery target: a stacked pull request sits
     // on another open branch, and the thread still owns it by its head.
     baseBranch: item.baseRefName,
-    headOwner: target.headOwner,
+    headOwner: resolvedHeadOwner,
     headBranch: target.headBranch,
     ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
   };

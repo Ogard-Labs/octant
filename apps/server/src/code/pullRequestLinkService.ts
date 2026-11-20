@@ -35,12 +35,17 @@ import {
 } from "@octant/contracts";
 import {
   applyPullRequestLinkEvent,
+  areSamePullRequestRepositoryInProject,
+  canonicalPullRequestRepositoryInProject,
   emptyPullRequestLinkRegistryState,
+  listPullRequestDisplayAliases,
   missingPullRequestForgeIds,
   pullRequestDisplayFieldsChanged,
   pullRequestDisplayLookupKey,
   resolveCanonicalPullRequestLink,
+  resolvePullRequestLink,
   selectSurvivingPullRequestLink,
+  type PullRequestDisplayCoordinate,
   type PullRequestLinkJournalEvent,
   type PullRequestLinkRecord,
   type PullRequestLinkRegistryState,
@@ -159,6 +164,57 @@ export interface PullRequestLinkRecorder {
   ): Promise<PullRequestLinkObservationResult>;
 }
 
+export interface PullRequestLinkLookupQuery {
+  readonly projectId: ProjectId;
+  readonly repositoryOwner?: string;
+  readonly repositoryName?: string;
+  readonly number?: number;
+  readonly pullRequestNodeId?: string;
+  readonly baseRepositoryNodeId?: string;
+}
+
+export interface PullRequestLinkReader {
+  listActive(): ReadonlyArray<PullRequestLinkRecord>;
+  listForProject(projectId: ProjectId): ReadonlyArray<PullRequestLinkRecord>;
+  listForThread(threadId: CodeThreadId): ReadonlyArray<PullRequestLinkRecord>;
+  findById(linkId: PullRequestLinkId): PullRequestLinkRecord | undefined;
+  resolveCanonical(linkId: PullRequestLinkId): PullRequestLinkRecord | undefined;
+  findByForgeId(projectId: ProjectId, pullRequestNodeId: string): PullRequestLinkRecord | undefined;
+  findByDisplay(
+    projectId: ProjectId,
+    repositoryOwner: string,
+    repositoryName: string,
+    number: number,
+  ): PullRequestLinkRecord | undefined;
+  resolveLink(query: PullRequestLinkLookupQuery): PullRequestLinkRecord | undefined;
+  displayAliasesForLink(linkId: PullRequestLinkId): ReadonlyArray<PullRequestDisplayCoordinate>;
+  areSameRepository(
+    projectId: ProjectId,
+    left: { readonly owner: string; readonly name: string },
+    right: { readonly owner: string; readonly name: string },
+  ): boolean;
+  canonicalRepository(
+    projectId: ProjectId,
+    candidate: { readonly owner: string; readonly name: string },
+  ):
+    | {
+        readonly owner: string;
+        readonly name: string;
+        readonly baseRepositoryNodeId?: string;
+      }
+    | undefined;
+  recordRepositoryAlias(input: {
+    readonly projectId: ProjectId;
+    readonly baseRepositoryNodeId: string;
+    readonly canonicalOwner: string;
+    readonly canonicalName: string;
+    readonly aliasOwner: string;
+    readonly aliasName: string;
+  }): void;
+}
+
+export type PullRequestLinkOwner = PullRequestLinkRecorder & PullRequestLinkReader;
+
 /**
  * Deterministic link ID for a pre-identity `(projectId, owner/name, number)`
  * entry so materializing it from a legacy journal stream is idempotent across
@@ -194,7 +250,7 @@ export function deriveLegacyPullRequestLinkId(input: {
  * observations, updates display fields on repository renames, and merges
  * duplicate links that resolve to the same PR node ID without deleting history.
  */
-export class PullRequestLinkService implements PullRequestLinkRecorder {
+export class PullRequestLinkService implements PullRequestLinkOwner {
   readonly #journal: Pick<Journal, "append" | "replayAggregateType">;
   readonly #uuid: () => string;
   readonly #clock: () => string;
@@ -210,6 +266,21 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
    * tracked pull request even after a rename.
    */
   readonly #knownDisplayKeys = new Set<string>();
+  /**
+   * Process-local repository aliases proved by GitHub's base repository node ID
+   * (for example when a local checkout still carries a stale second remote
+   * pointing at a renamed repository). Keyed by `${projectId}:${baseRepositoryNodeId}`.
+   */
+  readonly #repositoryAliases = new Map<
+    string,
+    {
+      readonly projectId: ProjectId;
+      readonly baseRepositoryNodeId: string;
+      canonicalOwner: string;
+      canonicalName: string;
+      readonly names: Set<string>;
+    }
+  >();
   #state: PullRequestLinkRegistryState = emptyPullRequestLinkRegistryState();
   #sequence = 0;
   #queue: Promise<unknown> = Promise.resolve();
@@ -231,6 +302,12 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
 
   listActive(): ReadonlyArray<PullRequestLinkRecord> {
     return [...this.#state.byId.values()].filter((link) => link.status === "active");
+  }
+
+  listForProject(projectId: ProjectId): ReadonlyArray<PullRequestLinkRecord> {
+    return [...this.#state.byId.values()].filter(
+      (link) => link.status === "active" && String(link.projectId) === String(projectId),
+    );
   }
 
   findById(linkId: PullRequestLinkId): PullRequestLinkRecord | undefined {
@@ -278,6 +355,184 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
       }
     }
     return undefined;
+  }
+
+  resolveLink(query: PullRequestLinkLookupQuery): PullRequestLinkRecord | undefined {
+    const direct = resolvePullRequestLink(this.#state, query);
+    if (direct !== undefined) return direct;
+    if (
+      query.repositoryOwner === undefined ||
+      query.repositoryName === undefined ||
+      query.number === undefined
+    ) {
+      return undefined;
+    }
+    const canonicalRepo = this.canonicalRepository(query.projectId, {
+      owner: query.repositoryOwner,
+      name: query.repositoryName,
+    });
+    if (canonicalRepo !== undefined) {
+      const byCanonical = resolvePullRequestLink(this.#state, {
+        projectId: query.projectId,
+        repositoryOwner: canonicalRepo.owner,
+        repositoryName: canonicalRepo.name,
+        number: query.number,
+        ...(query.pullRequestNodeId === undefined
+          ? {}
+          : { pullRequestNodeId: query.pullRequestNodeId }),
+        ...(query.baseRepositoryNodeId === undefined
+          ? {}
+          : { baseRepositoryNodeId: query.baseRepositoryNodeId }),
+      });
+      if (byCanonical !== undefined) return byCanonical;
+    }
+    // Also check active links still displaying a pre-rename repository name
+    // that has now been proven via baseRepositoryNodeId to be the same repo.
+    for (const link of this.#state.byId.values()) {
+      if (
+        link.status !== "active" ||
+        String(link.projectId) !== String(query.projectId) ||
+        link.number !== query.number
+      ) {
+        continue;
+      }
+      if (
+        query.pullRequestNodeId !== undefined &&
+        link.pullRequestNodeId !== undefined &&
+        link.pullRequestNodeId !== query.pullRequestNodeId
+      ) {
+        continue;
+      }
+      if (
+        query.baseRepositoryNodeId !== undefined &&
+        link.baseRepositoryNodeId !== undefined &&
+        link.baseRepositoryNodeId !== query.baseRepositoryNodeId
+      ) {
+        continue;
+      }
+      if (
+        this.areSameRepository(
+          query.projectId,
+          { owner: link.repositoryOwner, name: link.repositoryName },
+          { owner: query.repositoryOwner, name: query.repositoryName },
+        )
+      ) {
+        return link;
+      }
+    }
+    return undefined;
+  }
+
+  displayAliasesForLink(linkId: PullRequestLinkId): ReadonlyArray<PullRequestDisplayCoordinate> {
+    return listPullRequestDisplayAliases(this.#state, linkId);
+  }
+
+  areSameRepository(
+    projectId: ProjectId,
+    left: { readonly owner: string; readonly name: string },
+    right: { readonly owner: string; readonly name: string },
+  ): boolean {
+    if (areSamePullRequestRepositoryInProject(this.#state, projectId, left, right)) return true;
+    const leftKey = `${left.owner.toLowerCase()}/${left.name.toLowerCase()}`;
+    const rightKey = `${right.owner.toLowerCase()}/${right.name.toLowerCase()}`;
+    if (leftKey === rightKey) return true;
+    for (const entry of this.#repositoryAliases.values()) {
+      if (String(entry.projectId) !== String(projectId)) continue;
+      if (!entry.names.has(leftKey) || !entry.names.has(rightKey)) continue;
+      if (
+        this.#repositoryNameOwnedByDifferentNode(projectId, leftKey, entry.baseRepositoryNodeId) ||
+        this.#repositoryNameOwnedByDifferentNode(projectId, rightKey, entry.baseRepositoryNodeId)
+      ) {
+        continue;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  canonicalRepository(
+    projectId: ProjectId,
+    candidate: { readonly owner: string; readonly name: string },
+  ):
+    | {
+        readonly owner: string;
+        readonly name: string;
+        readonly baseRepositoryNodeId?: string;
+      }
+    | undefined {
+    const key = `${candidate.owner.toLowerCase()}/${candidate.name.toLowerCase()}`;
+    for (const entry of this.#repositoryAliases.values()) {
+      if (String(entry.projectId) !== String(projectId)) continue;
+      if (!entry.names.has(key)) continue;
+      if (this.#repositoryNameOwnedByDifferentNode(projectId, key, entry.baseRepositoryNodeId)) {
+        continue;
+      }
+      return {
+        owner: entry.canonicalOwner,
+        name: entry.canonicalName,
+        baseRepositoryNodeId: entry.baseRepositoryNodeId,
+      };
+    }
+    return canonicalPullRequestRepositoryInProject(this.#state, projectId, candidate);
+  }
+
+  recordRepositoryAlias(input: {
+    readonly projectId: ProjectId;
+    readonly baseRepositoryNodeId: string;
+    readonly canonicalOwner: string;
+    readonly canonicalName: string;
+    readonly aliasOwner: string;
+    readonly aliasName: string;
+  }): void {
+    const canonicalKey = `${input.canonicalOwner.toLowerCase()}/${input.canonicalName.toLowerCase()}`;
+    const aliasKey = `${input.aliasOwner.toLowerCase()}/${input.aliasName.toLowerCase()}`;
+    for (const existing of this.#repositoryAliases.values()) {
+      if (
+        String(existing.projectId) === String(input.projectId) &&
+        existing.baseRepositoryNodeId !== input.baseRepositoryNodeId
+      ) {
+        existing.names.delete(canonicalKey);
+        existing.names.delete(aliasKey);
+      }
+    }
+    const key = `${String(input.projectId)}:${input.baseRepositoryNodeId}`;
+    let entry = this.#repositoryAliases.get(key);
+    if (entry === undefined) {
+      entry = {
+        projectId: input.projectId,
+        baseRepositoryNodeId: input.baseRepositoryNodeId,
+        canonicalOwner: input.canonicalOwner,
+        canonicalName: input.canonicalName,
+        names: new Set<string>(),
+      };
+      this.#repositoryAliases.set(key, entry);
+    } else {
+      entry.canonicalOwner = input.canonicalOwner;
+      entry.canonicalName = input.canonicalName;
+    }
+    entry.names.add(canonicalKey);
+    entry.names.add(aliasKey);
+  }
+
+  #repositoryNameOwnedByDifferentNode(
+    projectId: ProjectId,
+    nameKey: string,
+    expectedNodeId: string,
+  ): boolean {
+    for (const link of this.#state.byId.values()) {
+      if (
+        link.status !== "active" ||
+        String(link.projectId) !== String(projectId) ||
+        link.baseRepositoryNodeId === undefined
+      ) {
+        continue;
+      }
+      const linkNameKey = `${link.repositoryOwner.toLowerCase()}/${link.repositoryName.toLowerCase()}`;
+      if (linkNameKey === nameKey && String(link.baseRepositoryNodeId) !== expectedNodeId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   listForThread(threadId: CodeThreadId): ReadonlyArray<PullRequestLinkRecord> {
@@ -574,9 +829,14 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
         link.baseRepositoryNodeId !== undefined &&
         link.baseRepositoryNodeId !== normalized.baseRepositoryNodeId);
     const add = (link: PullRequestLinkRecord | undefined) => {
-      if (link !== undefined && link.status === "active") {
-        matched.set(String(link.linkId), link);
+      if (link === undefined || link.status !== "active") return;
+      // Never match or merge a link whose recorded pull-request or base-repository
+      // node ID differs from the observed one (for example if an old repository
+      // name was reused by a different repository with the same PR number).
+      if (conflictsWithObservation(link)) {
+        return;
       }
+      matched.set(String(link.linkId), link);
     };
     const addByDisplay = (owner: string, name: string) => {
       const wanted = pullRequestDisplayLookupKey(
@@ -599,6 +859,20 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
           add(link);
         }
       }
+      add(
+        this.resolveLink({
+          projectId: normalized.projectId,
+          repositoryOwner: owner,
+          repositoryName: name,
+          number: normalized.number,
+          ...(normalized.pullRequestNodeId === undefined
+            ? {}
+            : { pullRequestNodeId: normalized.pullRequestNodeId }),
+          ...(normalized.baseRepositoryNodeId === undefined
+            ? {}
+            : { baseRepositoryNodeId: normalized.baseRepositoryNodeId }),
+        }),
+      );
     };
     if (normalized.pullRequestNodeId !== undefined) {
       for (const link of this.#state.byId.values()) {
@@ -775,7 +1049,7 @@ export class PullRequestLinkService implements PullRequestLinkRecorder {
         afterSequence = envelope.globalSequence;
         this.#sequence = envelope.globalSequence;
         this.#versions.set(envelope.aggregateId, envelope.aggregateVersion);
-        const decoded = decodeEnvelopeEvent(envelope.eventName, envelope.payload);
+        const decoded = decodePullRequestLinkEnvelopeEvent(envelope.eventName, envelope.payload);
         if (decoded !== undefined) {
           this.#recordKnownDisplayKey(decoded);
           this.#state = applyPullRequestLinkEvent(this.#state, decoded, envelope.globalSequence);
@@ -873,7 +1147,7 @@ function safeDecode<T>(value: string | undefined, decode: (input: unknown) => T)
   }
 }
 
-function decodeEnvelopeEvent(
+export function decodePullRequestLinkEnvelopeEvent(
   eventName: string,
   payload: unknown,
 ): PullRequestLinkJournalEvent | undefined {

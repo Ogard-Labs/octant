@@ -118,7 +118,7 @@ import type {
 import type { Journal } from "../persistence/journal";
 import type { OutlivingSessions } from "../providers/outlivingSessions";
 import { createGhPullRequestPort } from "./ghPullRequestActionPort";
-import type { PullRequestLinkRecorder } from "./pullRequestLinkService";
+import type { PullRequestLinkReader, PullRequestLinkRecorder } from "./pullRequestLinkService";
 import { createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
 import {
@@ -527,7 +527,7 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<Pick<ProviderProbeResult, "readiness" | "models">>;
   readonly ghExecutable?: string;
   readonly pullRequestPort?: CodeOperationPullRequestPort;
-  readonly pullRequestLinks?: PullRequestLinkRecorder;
+  readonly pullRequestLinks?: PullRequestLinkRecorder & Partial<PullRequestLinkReader>;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
   readonly terminalProcessPort?: Pick<TerminalProcessPort, "start"> & {
     readonly reconcile?: () => Promise<void>;

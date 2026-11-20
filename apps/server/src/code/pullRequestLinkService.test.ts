@@ -1698,4 +1698,79 @@ describe("pull request link identity and backfill", () => {
       expect.stringContaining("Pull request watch"),
     );
   });
+
+  it("refuses to match an existing or renamed link when a reused repository name reports a different base repository node ID without a PR node ID", async () => {
+    let now = "2026-11-19T10:00:00.000Z";
+    const journal = openJournal(() => now);
+    const links = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+    });
+
+    const original = await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "reused-name",
+      number: 42,
+      pullRequestNodeId: "PR_kwDOold42",
+      baseRepositoryNodeId: "R_kgDOoldrepo1",
+      threadIds: [threadA],
+    });
+    expect(original.status).toBe("created");
+    if (original.status !== "created") throw new Error("expected created");
+
+    // Same display name, missing pullRequestNodeId, DIFFERENT baseRepositoryNodeId:
+    // must create a separate link rather than matching or mutating the original.
+    now = "2026-11-19T11:00:00.000Z";
+    const reusedActive = await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "reused-name",
+      number: 42,
+      baseRepositoryNodeId: "R_kgDOnewrepo2",
+      threadIds: [threadB],
+    });
+    expect(reusedActive.status).toBe("created");
+    if (reusedActive.status !== "created") throw new Error("expected separate link");
+    expect(String(reusedActive.link.linkId)).not.toBe(String(original.link.linkId));
+    expect(links.findById(original.link.linkId)?.baseRepositoryNodeId).toBe("R_kgDOoldrepo1");
+    expect(links.findById(original.link.linkId)?.threadIds).toEqual([threadA]);
+
+    // Also prove historical display alias rejects a conflicting baseRepositoryNodeId
+    // when the original repository was renamed away and a third repository takes its old name.
+    now = "2026-11-19T12:00:00.000Z";
+    const renamed = await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "original-renamed",
+      number: 42,
+      pullRequestNodeId: "PR_kwDOold42",
+      baseRepositoryNodeId: "R_kgDOoldrepo1",
+    });
+    expect(renamed.status).toBe("updated");
+
+    now = "2026-11-19T13:00:00.000Z";
+    const reusedHistorical = await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "reused-name",
+      number: 42,
+      baseRepositoryNodeId: "R_kgDOthirdrepo3",
+    });
+    expect(reusedHistorical.status).toBe("created");
+    if (reusedHistorical.status !== "created") throw new Error("expected third link");
+    expect(String(reusedHistorical.link.linkId)).not.toBe(String(original.link.linkId));
+    expect(String(reusedHistorical.link.linkId)).not.toBe(String(reusedActive.link.linkId));
+    expect(links.findById(original.link.linkId)?.repositoryName).toBe("original-renamed");
+    expect(
+      links.resolveLink({
+        projectId,
+        repositoryOwner: "acme",
+        repositoryName: "reused-name",
+        number: 42,
+        baseRepositoryNodeId: "R_kgDOoldrepo1",
+      })?.linkId,
+    ).toBe(original.link.linkId);
+  });
 });
