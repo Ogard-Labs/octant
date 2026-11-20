@@ -13,6 +13,8 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { openSqlite } from "../persistence/sqlitePort";
+import { MonotonicRemoteClock } from "../remote/monotonicRemoteClock";
+import { RemoteRequestProofService } from "../remoteRequestProofService";
 import {
   isPairedDeviceSessionCurrent,
   PairedBrowserControlService,
@@ -513,6 +515,116 @@ describe("PairedBrowserControlService", () => {
           "50000000-0000-4000-8000-000000000005",
         );
       expect(isPairedDeviceSessionCurrent(connection, principal, nowMs)).toBe(false);
+    } finally {
+      connection.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an open Browser stream alive across a forward wall-clock jump when sharing the gateway's monotonic clock", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "octant-paired-monotonic-clock-"));
+    const connection = openSqlite(join(dir, "octant.db"));
+    try {
+      const createdIso = "2026-11-20T10:00:00.000Z";
+      let wallMs = Date.parse(createdIso);
+      const steadyMs = 10_000;
+      applyMigrations(connection, MIGRATIONS, () => new Date(wallMs).toISOString());
+
+      const hostId = "10000000-0000-4000-8000-000000000001";
+      const deviceId = "20000000-0000-4000-8000-000000000002";
+      const sessionId = "30000000-0000-4000-8000-000000000003";
+      const sessionDigest = createHash("sha256").update(sessionId, "utf8").digest("hex");
+
+      connection
+        .prepare(
+          `INSERT INTO remote_device_projection (
+             device_id, host_id, device_key_fingerprint, device_public_key,
+             device_label, origin, protocol_floor, credential_generation,
+             created_at, expires_at, last_seen_at, state, revoked_at, revoked_reason
+           ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'active', NULL, NULL)`,
+        )
+        .run(
+          deviceId,
+          hostId,
+          "b".repeat(64),
+          "pub-key",
+          "My iPhone",
+          "https://octant.example",
+          createdIso,
+          "2027-11-20T10:00:00.000Z",
+          createdIso,
+        );
+      connection
+        .prepare(
+          `INSERT INTO remote_security_audit_projection (
+             event_kind, host_id, device_id, protocol_version, credential_generation,
+             source_class, result_category, reason_code, correlation_id, occurred_at
+           ) VALUES ('device-approved', ?, ?, 1, 1, 'lan-private', 'ok', 'user-approved', ?, ?)`,
+        )
+        .run(hostId, deviceId, "40000000-0000-4000-8000-000000000004", createdIso);
+      connection
+        .prepare(
+          `INSERT INTO remote_session_store (
+             session_id_digest, host_id, device_id, credential_generation, origin,
+             protocol_version, capability_digest, issued_at, last_seen_at,
+             idle_expires_at, absolute_expires_at, csrf_digest, state
+           ) VALUES (?, ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?, 'active')`,
+        )
+        .run(
+          sessionDigest,
+          hostId,
+          deviceId,
+          "https://octant.example",
+          "c".repeat(64),
+          wallMs,
+          wallMs,
+          wallMs + 15 * 60_000,
+          wallMs + 60 * 60_000,
+          "d".repeat(64),
+        );
+
+      const monotonicClock = new MonotonicRemoteClock({
+        connection,
+        hostId,
+        wallClock: () => wallMs,
+        monotonicSource: () => steadyMs,
+      });
+      const guardedNow = monotonicClock.now();
+      const proofService = new RemoteRequestProofService(connection, {
+        now: guardedNow,
+        resolveNegotiation: () => undefined,
+      });
+      const principal = { deviceId, sessionId, credentialGeneration: 1 };
+
+      // Establish baseline observation on the shared monotonic clock.
+      expect(proofService.describeSession(sessionId)).toBeDefined();
+      expect(isPairedDeviceSessionCurrent(connection, principal, guardedNow())).toBe(true);
+
+      const f = makeFixture();
+      try {
+        const actor = makeActor({
+          deviceId,
+          sessionId,
+          current: () => isPairedDeviceSessionCurrent(connection, principal, guardedNow()),
+        });
+        const held = await f.service.takeOver(actor, threadOne);
+        if (held.status !== "held") throw new Error("Expected held lease");
+        const streamRes = f.service.openStream(actor, held.leaseId);
+        if (streamRes.status !== "stream") throw new Error("Expected stream");
+
+        // Jump wall clock 20 minutes forward (past the 15-minute idle_expires_at)
+        // without advancing steady monotonic time.
+        wallMs += 20 * 60_000;
+        expect(isPairedDeviceSessionCurrent(connection, principal, wallMs)).toBe(false);
+        expect(proofService.describeSession(sessionId)).toBeDefined();
+        expect(isPairedDeviceSessionCurrent(connection, principal, guardedNow())).toBe(true);
+
+        // Stream stays alive and delivers multiple frames instead of ending prematurely.
+        const events = await readNdjsonLines(streamRes.stream, 2);
+        expect(events.map((event) => event.kind)).toEqual(["frame", "frame"]);
+      } finally {
+        await f.service.close();
+      }
     } finally {
       connection.close();
       rmSync(dir, { recursive: true, force: true });

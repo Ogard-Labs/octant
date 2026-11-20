@@ -198,6 +198,7 @@ export interface BrowserAutomationRouteDependencies {
   readonly resolvePairedDeviceName?: (deviceId: string) => string | undefined;
   readonly isPairedDeviceSessionCurrent?: (
     principal: Extract<ClientPrincipal, { readonly kind: "remote-device" }>,
+    sessionNow?: () => number,
   ) => boolean;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize: number;
@@ -271,6 +272,7 @@ export function createBrowserAutomationRouteHandler(
     // Who the journal names for what this request changes: the device, when a
     // device asked.
     let actor: EventActor;
+    let sessionNow: (() => number) | undefined;
     try {
       const principal = authenticateRoutePrincipal({
         request,
@@ -282,6 +284,7 @@ export function createBrowserAutomationRouteHandler(
       callerKind = principal.principal.kind;
       actsAsHostPerson = principalActsAsHostPerson(principal.principal);
       actor = eventActorForPrincipal(principal.principal);
+      sessionNow = principal.sessionNow;
     } catch {
       if (
         url.pathname === "/api/browser/remote-control/input" ||
@@ -315,7 +318,7 @@ export function createBrowserAutomationRouteHandler(
         current: () =>
           dependencies.isPairedDeviceSessionCurrent === undefined
             ? true
-            : dependencies.isPairedDeviceSessionCurrent(remote),
+            : dependencies.isPairedDeviceSessionCurrent(remote, sessionNow),
       };
     };
 
