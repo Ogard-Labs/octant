@@ -869,3 +869,45 @@ describe("the Needs you card", () => {
     expect(card.useListRows).toBeTypeOf("function");
   });
 });
+
+describe("the Needs you card with other computers", () => {
+  it("lists what another computer holds with its name and opens that thread there", async () => {
+    const user = userEvent.setup();
+    const onOpenOtherComputerAsk = vi.fn();
+    renderCard(
+      createNeedsYouCard(
+        source({
+          pendingRequestClient: reader([]),
+          otherComputerAsks: [
+            { hostId: "studio-host", computer: "Studio", request: codeApproval, readOnly: false },
+          ],
+          onOpenOtherComputerAsk,
+        }),
+      ),
+    );
+    const card = await findCard();
+    const row = await within(card).findByRole("button", { name: /Fix the flaky build/ });
+    expect(row).toHaveTextContent("Studio");
+    // Answered on its own computer: the row carries no answer buttons here.
+    expect(within(card).queryByRole("button", { name: "Approve" })).toBeNull();
+    await user.click(row);
+    expect(onOpenOtherComputerAsk).toHaveBeenCalledWith("studio-host", "code-thread");
+  });
+
+  it("marks a computer that is not connected and does not open its thread", async () => {
+    renderCard(
+      createNeedsYouCard(
+        source({
+          pendingRequestClient: reader([]),
+          otherComputerAsks: [
+            { hostId: "studio-host", computer: "Studio", request: codeApproval, readOnly: true },
+          ],
+          onOpenOtherComputerAsk: vi.fn(),
+        }),
+      ),
+    );
+    const card = await findCard();
+    expect(await within(card).findByText(/Studio · not connected/)).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: /Fix the flaky build/ })).toBeNull();
+  });
+});

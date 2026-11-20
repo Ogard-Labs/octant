@@ -5,6 +5,7 @@ import {
   type RemoteSessionBridge,
   type RemoteSessionStanding,
 } from "@octant/client-runtime";
+import type { CodeThreadId } from "@octant/contracts/code";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import { buildModelPickerGroups, type CreateHostViewScope } from "@octant/domain";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
@@ -20,6 +21,8 @@ export interface PairedComputerCodeSurfaceProps {
   readonly selectedHostId: HostId;
   readonly onSelectHost: (hostId: HostId) => void;
   readonly viewScope?: CreateHostViewScope;
+  /** A thread on that computer to open, chosen from this window's list of its threads. */
+  readonly initialThreadId?: CodeThreadId;
 }
 
 /**
@@ -92,6 +95,7 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
         connected={connected}
         providerGroups={providerGroups}
         followsContinuationLink={false}
+        {...(props.initialThreadId === undefined ? {} : { initialThreadId: props.initialThreadId })}
         onNavigate={() => undefined}
         onOpenCanvas={() => undefined}
       />

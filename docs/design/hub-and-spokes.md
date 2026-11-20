@@ -81,8 +81,8 @@ view of the provider's own app, never against a real provider sign-in. After thi
 added the same day and is designed, not built. Slices 13 to 19, starting a
 coding session on any member from one window, the hub as the front door, Code
 delegation, adding a computer over SSH and placement advice, were added on
-2026-11-19; slice 13 is built for a directly paired computer and the rest are
-designed, not built
+2026-11-19; slices 13 and 15 are built for directly paired computers and the
+rest are designed, not built
 ([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work)).
 What remains of slices 1 to 10 is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
@@ -547,8 +547,16 @@ otherwise.
   shows that computer's own Code start screen and threads, the paired
   browser's Code surface over that computer's session, and an open thread is
   followed by short reads through the desktop's paired-computer channel. A
-  computer the hub introduced follows in slice 16; choosing a folder there,
-  merged lists across computers, and image attachments are not built yet.
+  computer the hub introduced follows in slice 16; choosing a folder there
+  and image attachments are not built yet. The window also lists every
+  directly paired computer's active Code threads under "On your other
+  computers" in the Code sidebar, and what those computers hold for the
+  person in the Code start screen's Needs you card, each read over that
+  computer's session every 15 seconds while the window is visible (slice
+  15). A row opens its thread in that computer's Code start screen, where
+  it is answered; a computer that stops answering keeps its last rows,
+  marked not connected and not openable, and the Environments filter
+  decides which computers are listed.
 - **What a hub-introduced device may do.** A device the member's own person
   paired acts as that person there. A device that only the hub introduced acts
   within the member's **Act** hub-grant item: the Projects it names, the
@@ -3543,10 +3551,12 @@ a numbered slice. Built, with these narrower readings:
     Project bind. Acceptance: a device the host's person paired binds a
     folder there; a hub-introduced or restricted device is refused.
     Verification: server route and permission tests.
-15. **One window shows every computer's work.** The merged reads carry
-    each reachable host's threads, Needs you and live turns, stale and
-    read-only when a host is unreachable. Verification: client-runtime tests
-    and rendered checks.
+15. **One window shows every computer's work.** Built for computers paired
+    directly: the merged reads carry each reachable host's active Code
+    threads and Needs you, stale and read-only when a host is unreachable,
+    and a row opens its thread on that computer. A hub-introduced member's
+    rows follow with slice 16. Verification: client-runtime tests and web
+    component tests.
 16. **The hub as front door.** A device that joins the hub gets every
     member through introductions and reaches each directly; the Act item is
     enforced on each member. Acceptance: a hub-introduced device starts a

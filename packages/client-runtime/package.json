@@ -71,6 +71,7 @@
     "./scaffold-client": "./src/scaffoldClient.ts",
     "./workspace-preset-client": "./src/workspacePresetClient.ts",
     "./environment-selection": "./src/environmentSelection.ts",
+    "./paired-computer-reads": "./src/pairedComputerReads.ts",
     "./list-arrangement": "./src/listArrangement.ts",
     "./thread-checkpoint-client": "./src/threadCheckpointClient.ts",
     "./code-file-listing-client": "./src/codeFileListingClient.ts",
