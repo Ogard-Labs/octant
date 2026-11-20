@@ -55,7 +55,6 @@ const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
 export interface AcpFileReviewRead {
-  readonly runtimeVersion: string;
   readonly sourceSessionId: string;
   readonly path: string;
   readonly root?: string;
@@ -65,9 +64,13 @@ export interface AcpFileReviewRead {
   readonly call: (method: string, params: Readonly<Record<string, unknown>>) => Promise<unknown>;
 }
 
-/** Exact native read dialect; no approve/revert, prompt or session creation lives here. */
+/**
+ * Exact native read dialect; no approve/revert, prompt or session creation
+ * lives here. The caller decides whether the release may use it: a reviewed
+ * release, or at Full access a newer one offered unverified
+ * (`acpExactReleaseClaim`).
+ */
 export async function readAcpFileReview(input: AcpFileReviewRead): Promise<ProviderFileReviewRead> {
-  if (input.runtimeVersion !== "3.0.3") return refused("unsupported");
   if (!validPath(input.path)) return refused("path-refused");
   if (input.sourceSessionId.length === 0) return refused("no-session");
   const deadline = Date.now() + 8_000;

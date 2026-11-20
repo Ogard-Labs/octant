@@ -92,6 +92,31 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "enable work mode",
         },
         {
+          id: settingId("next-message-suggestions"),
+          label: "Suggest my next message",
+          scope: "app",
+          keywords:
+            "next message suggestion tab autocomplete complete predict composer placeholder",
+        },
+        {
+          id: settingId("next-message-suggestions-chat"),
+          label: "Suggest my next message in Chat",
+          scope: "app",
+          keywords: "next message suggestion tab autocomplete chat mode",
+        },
+        {
+          id: settingId("next-message-suggestions-work"),
+          label: "Suggest my next message in Work",
+          scope: "app",
+          keywords: "next message suggestion tab autocomplete work mode",
+        },
+        {
+          id: settingId("next-message-suggestions-code"),
+          label: "Suggest my next message in Code",
+          scope: "app",
+          keywords: "next message suggestion tab autocomplete code mode",
+        },
+        {
           id: settingId("background-host"),
           label: "Keep Octant running in the background",
           scope: "app",
@@ -271,13 +296,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords:
             "reply detail transcript thinking reasoning tool calls expand collapse fold open verbose quiet low medium high",
-        },
-        {
-          id: settingId("usage-bars"),
-          label: "Usage bars",
-          scope: "app",
-          keywords:
-            "usage bars plan limits meters remaining left 5h week composer smooth pixelated pixel cells dither",
         },
         {
           id: settingId("app-background"),
@@ -1416,6 +1434,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Protect another path",
           scope: "host",
           keywords: "protected files add path folder secret deny agents",
+        },
+        {
+          id: settingId("blocked-tools"),
+          label: "Blocked tools",
+          scope: "host",
+          keywords:
+            "blocked tools block disallow deny provider tool claude code codex opencode pi mcp server webfetch shell bash",
+        },
+        {
+          id: settingId("blocked-tools-add"),
+          label: "Block a tool",
+          scope: "host",
+          keywords: "blocked tools block add provider tool deny disallowedTools",
         },
         {
           id: settingId("public-links"),

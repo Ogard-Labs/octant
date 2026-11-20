@@ -780,54 +780,6 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   background: var(--oct-wash-pressed);
 }
 
-/* The checkout's diff size, always shown on a Code thread and the Code start
-   screen. It is the first control of the trailing cluster, so a longer number
-   grows leftward; the floor keeps the common "+12 −3", "+0 −0" and the dash
-   that holds the place before a first reading from nudging the title while the
-   counts arrive or tick. */
-.window-chrome__changes {
-  display: inline-flex;
-  flex: 0 0 auto;
-  min-width: 56px;
-  height: var(--oct-rail-button-h);
-  padding: 0 var(--oct-space-2);
-  align-items: center;
-  justify-content: center;
-  gap: var(--oct-space-1);
-  border: 1px solid transparent;
-  border-radius: var(--oct-radius-sm);
-  background: transparent;
-  font-size: var(--oct-text-xs);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  cursor: default;
-}
-
-.window-chrome__changes:hover,
-.window-chrome__changes:focus-visible {
-  background: var(--oct-fg-soft);
-}
-
-.window-chrome__changes:active {
-  background: var(--oct-wash-pressed);
-}
-
-.window-chrome__changes-added {
-  color: var(--oct-success-fg);
-}
-
-.window-chrome__changes-removed {
-  color: var(--oct-danger-fg);
-}
-
-/* A zero count, a reading that may be out of date and the dash before any
-   reading are meta ink: colour says "this changed", and only a current,
-   non-zero count may say it. */
-.window-chrome__changes :is([data-zero="true"], .window-chrome__changes-none),
-.window-chrome__changes[data-updating="true"] span {
-  color: var(--oct-meta);
-}
-
 .window-chrome__button:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);

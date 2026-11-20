@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SubagentsTray, ThreadSubagentsTray } from "./ComposerSubagentsTray";
@@ -290,11 +290,12 @@ describe("SubagentsTray", () => {
     expect(screen.queryByRole("group", { name: "Subagents" })).not.toBeInTheDocument();
   });
 
-  it("shows only recorded model, reason and update age without claiming total run time", () => {
+  it("shows only recorded model, reason and how long the subagent ran, never an update age", () => {
     vi.useFakeTimers({ now: Date.parse("2026-09-26T10:00:12.000Z"), shouldAdvanceTime: true });
     renderTray([
       {
         ...entry("a", "waiting"),
+        createdAt: "2026-09-26T09:58:48.000Z",
         recoveryReason: "Waiting for approval",
         route: {
           requestedProviderInstanceId: "provider-one",
@@ -308,11 +309,35 @@ describe("SubagentsTray", () => {
     ]);
     const recorded = screen.getByRole("button", { name: /^Task a\. Waiting/ });
     expect(recorded).toHaveTextContent("actual-model");
-    expect(recorded).toHaveTextContent("Updated 12s ago");
+    // Requested 09:58:48, still waiting at 10:00:12: it has run 1m 24s.
+    // Drawn once, in the trailing slot, and spoken through the label.
+    expect(recorded.textContent?.split("1m 24s")).toHaveLength(2);
+    expect(recorded).toHaveAccessibleName(expect.stringContaining("Ran 1m 24s"));
+    expect(recorded).not.toHaveTextContent(/Updated|ago/);
     expect(recorded).toHaveTextContent("Waiting for approval");
     expect(recorded).not.toHaveTextContent("requested-model");
     const unknown = screen.getByRole("button", { name: /^Task b\. Working/ });
-    expect(unknown).not.toHaveTextContent(/Updated|model|NaN/);
+    expect(unknown).not.toHaveTextContent(/Updated|ago|model|NaN/);
+  });
+
+  it("ticks a working subagent's run time and stops a finished one at its last update", async () => {
+    vi.useFakeTimers({ now: Date.parse("2026-09-26T10:01:00.000Z"), shouldAdvanceTime: true });
+    renderTray([
+      { ...entry("a", "running"), createdAt: "2026-09-26T10:00:00.000Z" },
+      {
+        ...entry("b", "failed"),
+        createdAt: "2026-09-26T09:50:00.000Z",
+        updatedAt: "2026-09-26T09:50:30.000Z",
+      },
+    ]);
+    const working = screen.getByRole("button", { name: /^Task a\. Working/ });
+    expect(working).toHaveTextContent("1m 00s");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(working).toHaveTextContent("1m 05s");
+    // A failed run is still listed as unresolved; its time stays where it stopped.
+    expect(screen.getByRole("button", { name: /^Task b\. Failed/ })).toHaveTextContent("30s");
   });
 
   it("asks to open the chosen subagent", async () => {
@@ -321,6 +346,67 @@ describe("SubagentsTray", () => {
 
     await user.click(screen.getByRole("button", { name: /^Task b\. Working/ }));
     expect(onOpenSubagent).toHaveBeenLastCalledWith("b");
+  });
+
+  it("says what a folded card waits on, oldest working child first, with the rest counted", () => {
+    const started = (id: string, createdAt: string) => ({
+      ...entry(id, "running"),
+      createdAt,
+      task: `Task ${id}\nsecond line`,
+    });
+    renderTray(
+      [
+        started("late", "2026-09-26T09:59:30.000Z"),
+        started("first", "2026-09-26T09:58:00.000Z"),
+        started("middle", "2026-09-26T09:59:00.000Z"),
+        entry("done", "completed"),
+      ],
+      { storage: memoryStorage() },
+    );
+
+    const tray = screen.getByRole("group", { name: "Subagents" });
+    expect(tray).toHaveTextContent("Waiting on Task first, Task middle and 1 other");
+    expect(tray).not.toHaveTextContent("working");
+    expect(within(tray).queryByText(/second line/)).not.toBeInTheDocument();
+  });
+
+  it("names one or two waiting children without a count", () => {
+    renderTray([entry("a", "running")], { storage: memoryStorage() });
+    expect(screen.getByRole("group", { name: "Subagents" })).toHaveTextContent("Waiting on Task a");
+    cleanup();
+    renderTray([entry("a", "running"), entry("b", "queued")], { storage: memoryStorage() });
+    expect(screen.getByRole("group", { name: "Subagents" })).toHaveTextContent(
+      "Waiting on Task a and Task b",
+    );
+  });
+
+  it("opens a child from its name in the folded head", async () => {
+    const user = userEvent.setup();
+    const { onOpenSubagent } = renderTray([entry("a", "running"), entry("b", "running")], {
+      storage: memoryStorage(),
+    });
+    await user.click(screen.getByRole("button", { name: "Task b" }));
+    expect(onOpenSubagent).toHaveBeenLastCalledWith("b");
+  });
+
+  it("keeps the counts while folded when a child failed or a result awaits review", () => {
+    renderTray([entry("a", "running"), entry("b", "failed")], { storage: memoryStorage() });
+    let tray = screen.getByRole("group", { name: "Subagents" });
+    expect(tray).toHaveTextContent("1 failed · 1 working");
+    expect(tray).not.toHaveTextContent("Waiting on");
+    cleanup();
+    renderTray([entry("a", "running"), entry("b", "completed", { required: true })], {
+      storage: memoryStorage(),
+    });
+    tray = screen.getByRole("group", { name: "Subagents" });
+    expect(tray).toHaveTextContent("1 to review · 1 working");
+    expect(tray).not.toHaveTextContent("Waiting on");
+  });
+
+  it("shows the counts, not the waiting line, once the card is open", () => {
+    renderTray([entry("a", "running")]);
+    expect(screen.getByRole("group", { name: "Subagents" })).not.toHaveTextContent("Waiting on");
+    expect(screen.getByRole("button", { name: /Subagents,/ })).toHaveTextContent("1 working");
   });
 
   it("folds to its head and stays folded for this viewer", async () => {

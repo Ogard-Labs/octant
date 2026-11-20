@@ -129,7 +129,7 @@ describe("ComposerModelPicker", () => {
 
   it("lists accounts with room first and marks the one that reached its limit", async () => {
     render(
-      <PlanUsageProvider barStyle="smooth" client={usageClient()}>
+      <PlanUsageProvider client={usageClient()}>
         <ComposerModelPicker
           groups={groups()}
           onSelect={vi.fn()}

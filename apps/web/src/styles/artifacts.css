@@ -121,17 +121,6 @@
   padding-top: 0.25rem;
 }
 
-/* The list answer to the card grid: one compact row per artifact, its facts
-   on one line, the tags it carries beside them. */
-.artifact-library__list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 /* The List view is a table: the name (with where it lives), the person's tags,
    whether it is shared, when it changed, and the sync and export controls.
    The head and every row share one column list with fixed trailing widths, so
@@ -258,71 +247,49 @@
   }
 }
 
-.artifact-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.375rem;
-  min-width: 0;
+/* Below 480px the name keeps the width: the tags, the share mark and the
+   edited time give way (the open button's description still says the last
+   two), leaving the name and the sync mark with whatever controls the row
+   carries. */
+@container (max-width: 480px) {
+  .artifact-table__head,
+  .artifact-table-row {
+    --artifact-columns: minmax(0, 1fr) auto;
+  }
+
+  .artifact-table__head > :nth-child(2),
+  .artifact-table__head > :nth-child(3),
+  .artifact-table__head > :nth-child(4),
+  .artifact-table-row__tags,
+  .artifact-table-row__share,
+  .artifact-table-row__edited {
+    display: none;
+  }
 }
 
-.artifact-row__open {
-  display: flex;
-  flex: 1 1 16rem;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-  height: auto;
-  white-space: normal;
-  padding: 0.375rem 0.5rem;
-  border-radius: var(--oct-radius-sm);
-  text-align: left;
-  cursor: default;
+/* The dock's list keeps those name-first columns at every width. Its rows carry
+   no Export or Versions controls, so the page's wider tiers would only reserve
+   empty columns: a dock resized to 500px left the name about 69px. */
+.artifact-table--dock .artifact-table__head,
+.artifact-table--dock .artifact-table-row {
+  --artifact-columns: minmax(0, 1fr) auto;
 }
 
-.artifact-row__open:hover {
-  background: var(--oct-surface);
-}
-.artifact-row__open:active:not(:has(:is(button, a, [role="button"]):active)) {
-  background: var(--oct-wash-pressed);
-}
-
-.artifact-row__title {
-  overflow: hidden;
-  min-width: 8rem;
-  flex: 0 1 auto;
-  color: var(--oct-fg);
-  font-weight: var(--oct-weight-medium);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.artifact-table--dock .artifact-table__head > :nth-child(2),
+.artifact-table--dock .artifact-table__head > :nth-child(3),
+.artifact-table--dock .artifact-table__head > :nth-child(4),
+.artifact-table--dock .artifact-table-row__tags,
+.artifact-table--dock .artifact-table-row__share,
+.artifact-table--dock .artifact-table-row__edited {
+  display: none;
 }
 
-.artifact-row__meta,
-.artifact-row__facts {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.artifact-row__facts {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.artifact-row__share {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-}
-
-.artifact-row__aside {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem;
+/* Below 360px the Export and Versions words go as well: the row's open action
+   reaches the artifact, where both are offered, and the name keeps the row. */
+@container (max-width: 360px) {
+  .artifact-table-row__action {
+    display: none;
+  }
 }
 
 /* The person's own tags, on a card or a row: a quiet chip each, its remove
@@ -339,10 +306,6 @@
    inside another button — so they carry the card's and row's own padding. */
 .artifact-card > .artifact-tags {
   margin: 0.25rem 0.25rem 0;
-}
-
-.artifact-row .artifact-tags {
-  flex: 0 1 auto;
 }
 
 .artifact-tags__chip {

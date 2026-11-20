@@ -38,8 +38,22 @@ export interface ProviderNativeSetupInput {
   readonly executionPolicy: ProviderExecutionPolicy;
   /** The account's own switch, on unless the person turned it off (`accountRunsAsItself`). */
   readonly accountAllows: boolean;
-  /** The Work or Code Project lists this provider in `nativeProviders`. Always false in Chat. */
+  /**
+   * The Work or Code Project lists this provider in `nativeProviders`
+   * (Trusted providers). Always false in Chat. It grants the Project's own
+   * code under Strict, and turns the rest of the setup on for an account the
+   * person turned off.
+   */
   readonly projectTrusts: boolean;
+  /**
+   * Outside Strict, the person added this Work or Code Project, which is
+   * their trust decision for every agent on its threads (maintainer
+   * decision, 2026-11-18): the Project's own code loads with the rest of the
+   * setup. It never turns the setup on by itself, so an account turned off
+   * stays off. Absent or false under Strict, where only `projectTrusts`
+   * grants the Project's code.
+   */
+  readonly projectAddedTrusts?: boolean;
   /**
    * The thread's own choice. `off` keeps every feature unloaded at every
    * level, Full access included; `on` counts as the account switch does and
@@ -68,8 +82,9 @@ export interface ProviderNativeSetupInput {
  * plugins carry hooks of their own. Plan also leaves the account's tool
  * servers off, because a server's tools can write. Chat may keep them: they
  * are the person's own tool servers, which Chat's no-filesystem rule does not
- * cover, and the switch says so. A Project's code loads only where the person
- * trusted that Project for that provider, Full access included.
+ * cover, and the switch says so. A Project's code loads where the person
+ * added the Project, outside Strict, and under Strict only where they
+ * confirmed that Project's code, Full access included.
  */
 export function resolveProviderNativeSetup(
   input: ProviderNativeSetupInput,
@@ -78,6 +93,8 @@ export function resolveProviderNativeSetup(
   if (input.threadChoice === "off") return undefined;
   const accountAllows = input.accountAllows || input.threadChoice === "on";
   const projectTrusts = input.mode !== "chat" && input.projectTrusts;
+  const projectCodeTrusted =
+    projectTrusts || (input.mode !== "chat" && input.projectAddedTrusts === true);
   const fullAccess = input.mode !== "chat" && input.executionPolicy === "full-access";
   const plan = input.executionPolicy === "plan";
   if (!accountAllows && !projectTrusts && !fullAccess) return undefined;
@@ -88,7 +105,7 @@ export function resolveProviderNativeSetup(
     skills: true,
     toolServers: !plan,
     hooks: !plan && !chat,
-    projectCode: projectTrusts && !plan,
+    projectCode: projectCodeTrusted && !plan,
   };
 }
 

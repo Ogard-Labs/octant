@@ -24,6 +24,7 @@ export const capabilityLabels: ReadonlyArray<
       | "reviewVerdicts"
       | "sessionRollback"
       | "turnModes"
+      | "atFullAccess"
     >,
     string,
   ]

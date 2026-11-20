@@ -17,6 +17,7 @@ import type { HostControlClient } from "@octant/client-runtime/host-control-clie
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
+import type { BlockedToolsClient } from "@octant/client-runtime/blocked-tools-client";
 import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import type { DiskCleanupClient } from "@octant/client-runtime/disk-cleanup-client";
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
@@ -94,6 +95,7 @@ export interface ShellSettingsSurfaceProps {
     "manageExtensions" | "manageFlows" | "manageProfiles"
   >;
   readonly protectedFilesClient?: ProtectedFilesClient;
+  readonly blockedToolsClient?: BlockedToolsClient;
   readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly sandboxScopes?: ReadonlyArray<SandboxSettingsScope>;
   readonly archivedWorktreesClient?: ArchivedWorktreesClient;
@@ -202,6 +204,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.protectedFilesClient === undefined
               ? {}
               : { protectedFilesClient: props.protectedFilesClient })}
+            {...(props.blockedToolsClient === undefined
+              ? {}
+              : { blockedToolsClient: props.blockedToolsClient })}
             {...(props.archivedWorktreesClient === undefined
               ? {}
               : { archivedWorktreesClient: props.archivedWorktreesClient })}

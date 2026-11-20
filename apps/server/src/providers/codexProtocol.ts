@@ -125,22 +125,95 @@ const ThreadResult = Schema.Struct({
 export type CodexThreadResult = typeof ThreadResult.Type;
 export const decodeThreadStartResult = decode(ThreadResult);
 export const decodeThreadResumeResult = decode(ThreadResult);
+export const decodeThreadForkResult = decode(ThreadResult);
 
 /**
- * Of `skills/list` only paths and scopes are read: a thread switches the
- * skills Codex found in the Project off by their paths, and every package it
- * could not load as well, which carries a path but no scope.
+ * A thread switches the skills Codex found in the Project off by their paths,
+ * and every package it could not load as well, which carries a path but no
+ * scope. The name, description and `enabled` flag label the composer's `@`
+ * menu and resolve a `$name` the person wrote; a release that omits them
+ * offers nothing there.
  */
 const SkillsListResult = Schema.Struct({
   data: Schema.Array(
     Schema.Struct({
-      skills: Schema.Array(Schema.Struct({ path: Schema.NonEmptyString, scope: Schema.String })),
+      skills: Schema.Array(
+        Schema.Struct({
+          path: Schema.NonEmptyString,
+          scope: Schema.String,
+          name: Schema.optional(Schema.String),
+          description: Schema.optional(Schema.String),
+          shortDescription: Schema.optional(Schema.String),
+          enabled: Schema.optional(Schema.Boolean),
+        }),
+      ),
       errors: Schema.Array(Schema.Struct({ path: Schema.NonEmptyString })),
     }),
   ),
 });
 export type CodexSkillsListResult = typeof SkillsListResult.Type;
 export const decodeSkillsListResult = decode(SkillsListResult);
+
+/**
+ * `plugin/installed` (codex-cli 0.135.0 and later): the plugins installed for
+ * the account, by marketplace. A plugin's `id` is `<name>@<marketplace>`, the
+ * target a `mention` input item names as `plugin://<id>`.
+ */
+const PluginInstalledResult = Schema.Struct({
+  marketplaces: Schema.Array(
+    Schema.Struct({
+      plugins: Schema.Array(
+        Schema.Struct({
+          id: Schema.NonEmptyString,
+          name: Schema.NonEmptyString,
+          installed: Schema.Boolean,
+          enabled: Schema.Boolean,
+          interface: Schema.optionalWith(
+            Schema.Struct({
+              shortDescription: Schema.optionalWith(Schema.String, { nullable: true }),
+            }),
+            { nullable: true },
+          ),
+        }),
+      ),
+    }),
+  ),
+});
+export type CodexPluginInstalledResult = typeof PluginInstalledResult.Type;
+export const decodePluginInstalledResult = decode(PluginInstalledResult);
+
+/**
+ * One stored thread as `thread/list` and `thread/read` describe it. Only what
+ * offering and adopting a session needs is read: its folder, whether it is a
+ * subagent's or ephemeral, who created it (`originator`, the `initialize`
+ * client name, from codex-cli 0.154.0), its title, and when it last changed.
+ */
+const StoredThread = Schema.Struct({
+  id: Schema.NonEmptyString,
+  cwd: Schema.String,
+  preview: Schema.optionalWith(Schema.String, { nullable: true }),
+  name: Schema.optionalWith(Schema.String, { nullable: true }),
+  updatedAt: Schema.Number,
+  ephemeral: Schema.optionalWith(Schema.Boolean, { nullable: true }),
+  parentThreadId: Schema.optionalWith(Schema.String, { nullable: true }),
+  originator: Schema.optionalWith(Schema.String, { nullable: true }),
+  gitInfo: Schema.optionalWith(
+    Schema.Struct({ branch: Schema.optionalWith(Schema.String, { nullable: true }) }),
+    { nullable: true },
+  ),
+});
+export type CodexStoredThread = typeof StoredThread.Type;
+
+const ThreadListResult = Schema.Struct({
+  data: Schema.Array(StoredThread),
+  nextCursor: NullableString,
+});
+export type CodexThreadListResult = typeof ThreadListResult.Type;
+export const decodeThreadListResult = decode(ThreadListResult);
+
+const ThreadReadResult = Schema.Struct({ thread: StoredThread });
+export type CodexThreadReadResult = typeof ThreadReadResult.Type;
+export const decodeThreadReadResult = decode(ThreadReadResult);
 
 /**
  * Of the effective config only the configured MCP server names are read: a

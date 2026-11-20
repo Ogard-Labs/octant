@@ -224,6 +224,12 @@ export interface ClaudeOpenQueryInput {
    */
   readonly withheldTools?: readonly string[];
   /**
+   * Tools the person blocked in Settings, as Claude Code names them
+   * (`mcp__server__tool` for an MCP server's). Passed as `disallowedTools`
+   * whichever tool set the session holds, so the model is never offered one.
+   */
+  readonly blockedTools?: readonly string[];
+  /**
    * What this session loads of the person's own Claude setup, already held to
    * what the driver supports for the session's mode and posture. Absent opens
    * the query with no setting sources, skills, agents, plugins, or MCP
@@ -1329,13 +1335,19 @@ interface ClaudeToolPreset {
  * still answers every call to them first.
  */
 function claudeToolSetOptions(
-  input: Pick<ClaudeOpenQueryInput, "tools" | "withheldTools">,
+  input: Pick<ClaudeOpenQueryInput, "tools" | "withheldTools" | "blockedTools">,
 ): Pick<ClaudeAgentSdkInvocationOptions, "tools" | "disallowedTools" | "allowedTools"> {
-  if (input.withheldTools === undefined) return { tools: [...input.tools] };
+  const blocked = input.blockedTools ?? [];
+  if (input.withheldTools === undefined) {
+    return {
+      tools: input.tools.filter((tool) => !blocked.includes(tool)),
+      ...(blocked.length === 0 ? {} : { disallowedTools: [...blocked] }),
+    };
+  }
   return {
     tools: { type: "preset", preset: "claude_code" },
-    disallowedTools: [...input.withheldTools],
-    allowedTools: ["Grep", "Glob"],
+    disallowedTools: [...input.withheldTools, ...blocked],
+    allowedTools: ["Grep", "Glob"].filter((tool) => !blocked.includes(tool)),
   };
 }
 

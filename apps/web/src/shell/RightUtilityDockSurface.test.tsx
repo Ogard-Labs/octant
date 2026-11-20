@@ -37,7 +37,6 @@ import {
   showUtilityTabBeside,
   type ThreadUtilityDockState,
 } from "./rightUtilityDockSelection";
-import { StartQuickToolsContext, StartQuickToolsPlacementContext } from "./StartQuickTools";
 import { DockMiniCard } from "./DockShelf";
 
 const browser = surface("browser");
@@ -154,78 +153,6 @@ describe("the right sidebar surface", () => {
         .closest('.right-utility-dock__tool[data-dock-state="true"]'),
     ).not.toBeNull();
   });
-
-  it("holds the chosen Project's terminal and browser while the new task waits for its thread", () => {
-    const services = {
-      hostId: LOCAL_HOST_ID,
-      projectTerminalClient: { execute: vi.fn() } as never,
-      projectBrowserClient: { execute: vi.fn() } as never,
-    };
-    render(
-      <StartQuickToolsContext.Provider value={services}>
-        <StartQuickToolsPlacementContext.Provider
-          value={{
-            projectId: decodeProjectId("30000000-0000-4000-8000-000000000001"),
-            chooseProject: vi.fn(),
-          }}
-        >
-          <RightUtilityDockSurface
-            onCloseTab={vi.fn()}
-            onOpenTab={vi.fn()}
-            onSelectSurface={vi.fn()}
-            resolution={{ kind: "closed", reason: "no-surface" }}
-            tabs={[]}
-            toolsAwaitingThread={[terminal, browser]}
-          />
-        </StartQuickToolsPlacementContext.Provider>
-      </StartQuickToolsContext.Provider>,
-    );
-
-    const projectTools = screen.getByRole("complementary", { name: "Project tools" });
-    expect(within(projectTools).getByRole("button", { name: "Terminal" })).toBeEnabled();
-    expect(within(projectTools).getByRole("button", { name: "Browser" })).toBeEnabled();
-    expect(within(projectTools).getByText("Other tools open once the task starts")).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Tools open once the task starts" })).toBeNull();
-  });
-
-  it("offers a server Project's terminal and no browser of this computer", () => {
-    const projectId = decodeProjectId("30000000-0000-4000-8000-000000000002");
-    const services = {
-      hostId: LOCAL_HOST_ID,
-      projectTerminalClient: { execute: vi.fn() } as never,
-      projectBrowserClient: { execute: vi.fn() } as never,
-      extraFolders: () => ["/Users/person/elsewhere"],
-    };
-    render(
-      <ServerCodeProjectsContext.Provider
-        value={{
-          projects: [{ projectId, name: "Service", location: "web1:/srv/service" }],
-          workProjects: [],
-          refresh: vi.fn(),
-        }}
-      >
-        <StartQuickToolsContext.Provider value={services}>
-          <StartQuickToolsPlacementContext.Provider value={{ projectId, chooseProject: vi.fn() }}>
-            <RightUtilityDockSurface
-              onCloseTab={vi.fn()}
-              onOpenTab={vi.fn()}
-              onSelectSurface={vi.fn()}
-              resolution={{ kind: "closed", reason: "no-surface" }}
-              tabs={[]}
-              toolsAwaitingThread={[terminal, browser]}
-            />
-          </StartQuickToolsPlacementContext.Provider>
-        </StartQuickToolsContext.Provider>
-      </ServerCodeProjectsContext.Provider>,
-    );
-
-    const projectTools = screen.getByRole("complementary", { name: "Project tools" });
-    expect(
-      within(projectTools)
-        .getAllByRole("button")
-        .map((button) => button.textContent),
-    ).toEqual(["Terminal"]);
-  });
 });
 
 function ruleBody(css: string, selector: string): string {
@@ -290,7 +217,9 @@ describe("tool tiles in the right sidebar", () => {
     readonly launchable?: ReadonlyArray<(typeof RIGHT_UTILITY_DOCK_SURFACES)[number]>;
     readonly narrow?: boolean;
     readonly resolveSurface?: DockTileControls["resolveSurface"];
-    readonly pageIcon?: (tabId: string) => string | undefined;
+    readonly pageIcon?: (
+      tabId: string,
+    ) => { readonly src?: string; readonly muted?: boolean } | undefined;
     /** The window holds two columns of tools side by side; true unless a test says no. */
     readonly columnsFit?: boolean;
     /** Tools the bottom panel can hold, and what takes one there. */
@@ -307,9 +236,12 @@ describe("tool tiles in the right sidebar", () => {
     }));
     const active = state.tabs.find((tab) => tab.id === state.active);
     const shelfDrawn = props.narrow !== true;
-    // One card for each minimised tool, standing for its first tab.
+    // One card for each minimised tool, standing for the page it last
+    // showed — the same pick DockShelf makes with `lastBrowser`.
     const cards = ["browser", "terminal"].flatMap((id) => {
-      const tab = state.tabs.find((candidate) => candidate.surface === id);
+      const candidates = state.tabs.filter((candidate) => candidate.surface === id);
+      const tab =
+        candidates.find((candidate) => candidate.id === state.lastBrowser) ?? candidates[0];
       return shelfDrawn && tab !== undefined && state.minimised?.includes(tab.id) === true
         ? [{ tabId: tab.id, surface: id as "browser" | "terminal" }]
         : [];
@@ -1090,7 +1022,12 @@ describe("tool tiles in the right sidebar", () => {
     state = addUtilityTabState(state, "browser", withIcon);
     state = addUtilityTabState(state, "browser", without);
     state = showUtilityTabBeside(state, "files");
-    render(<TiledDock initial={state} pageIcon={(id) => (id === withIcon ? ICON : undefined)} />);
+    render(
+      <TiledDock
+        initial={state}
+        pageIcon={(id) => (id === withIcon ? { src: ICON } : undefined)}
+      />,
+    );
     const tabs = within(screen.getByRole("tablist", { name: "Browser pages" })).getAllByRole("tab");
     const image = tabs[0]?.querySelector("img");
     expect(image).toHaveAttribute("src", ICON);
@@ -1764,6 +1701,30 @@ describe("tool tiles in the right sidebar", () => {
       expect(screen.getByRole("region", { name: "Terminal" })).toBeVisible();
       expect(shelf()).not.toBeInTheDocument();
       expect(mounts.get("files") ?? 0).toBeLessThanOrEqual(before ?? 1);
+    });
+
+    it("restores the Browser to its tile and its page from the card's Show button", async () => {
+      const user = userEvent.setup();
+      const pageOne = "10000000-0000-4000-8000-000000000001";
+      const pageTwo = "10000000-0000-4000-8000-000000000002";
+      let state = openUtilityTabState({ tabs: [] }, "files");
+      state = addUtilityTabState(state, "browser", pageOne);
+      state = addUtilityTabState(state, "browser", pageTwo);
+      state = showUtilityTabBeside(state, "files");
+      render(<TiledDock initial={state} />);
+      await arrange(user, "Browser", "Minimise to card");
+      const card = within(shelf()!).getByRole("region", { name: "Minimised Browser" });
+      await user.click(within(card).getByRole("button", { name: "Show Browser" }));
+      expect(shelf()).not.toBeInTheDocument();
+      // The tile is back beside Files, on the page that was showing (the
+      // second of the two), not on the first page or a new one.
+      expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
+      const pages = within(screen.getByRole("tablist", { name: "Browser pages" })).getAllByRole(
+        "tab",
+      );
+      expect(pages).toHaveLength(2);
+      expect(pages[1]).toHaveAttribute("aria-selected", "true");
+      expect(pages[0]).toHaveAttribute("aria-selected", "false");
     });
   });
 });

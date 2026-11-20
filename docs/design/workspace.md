@@ -200,7 +200,12 @@ beside the band's compose button; both run the same action. The command palette
 tooltip) lists, besides threads, the pages the rail and sidebar open (Home,
 Inbox, Agents, Artifacts, Projects, and in Work and Code Board and Automations),
 every Settings page that needs no native capability, New thread, Show or hide
-the sidebar, and the dock tools the thread can open. In the Activity feed the
+the sidebar, and the dock tools the thread can open. The palette also lists
+the focused pane's named bar controls — every button, menu row and view
+option the bar offers, folded or not — and each palette command runs the
+exact callback the bar's own control invokes; state lines and tool-drawn
+controls are not commands, and a disabled control is absent there as it is
+on the bar. In the Activity feed the
 newest group is open, so a feed whose only group is Earlier is never a blank
 column. Group headings in the sidebar are 12px in the meta ink with a 14px
 chevron and the count as a right-aligned number.
@@ -956,6 +961,20 @@ with the full-row selected fill, take a hover fill on the others, and end a chan
 success for added) read from the host's Git observation; the incomplete-tree
 note is one muted line.
 
+Closing a Files tab, a file opened in the main area, the Files tool, or
+its Code thread asks about every affected unsaved file, even if Files is
+no longer visible. Closing one view of a file that is still open in
+another view does not ask: the buffer stays open there. **Save** uses the
+file's existing revision check; a failed save cannot close the file.
+**Don't save** drops that draft, and **Cancel** leaves the target open.
+Switching threads, hiding the dock and moving a tab do not ask. Desktop
+window close uses the same check for that window. See [Quitting](#quitting)
+for a quit across windows. If a window does not respond to the check, a
+native confirmation offers Cancel or Close anyway; a missing reply never
+approves a close on its own. A window closed anyway stops taking input
+until it closes or the close or quit is cancelled, so it cannot gain
+edits while another window asks.
+
 Unsaved text is kept locally on the client, separately from pane references,
 messages and the host journal. Code recovery keys include the endpoint, checkout
 and file identity; Work recovery uses the authorized host, Project and a stable
@@ -1146,8 +1165,8 @@ under rules.
   window leaves ground, it does not stretch the cards. The To-dos page keeps the
   same measure, so both pages end on one right edge; it has no card, so its
   field, toolbar and list sit on the page itself.
-- **Cards.** **Needs you** is the left card and **GitHub**, **Linear** and
-  **Plan usage** stack to its right: Needs you takes a 560px column when the page's own width
+- **Cards.** **Needs you** is the left card and **GitHub** and **Linear**
+  stack to its right: Needs you takes a 560px column when the page's own width
   (a container query, not the window's) is 900px or more, and every card is one
   column below that. Each
   card's label sits inside it at the top in the meta ink. The Needs you filters
@@ -1157,16 +1176,14 @@ under rules.
   quiet text button. A GitHub or Linear source still loading is one quiet
   skeleton row, never a sentence that reads as an error; empty and failed are
   one sentence in their card.
-- **Plan usage** lists each provider account that reports a plan window: its
-  name, the share left on the plan usage meter and, where the reading carries
-  it, when the window resets. It reads the host observation the composer and the
-  rail already hold, adds no request, and is absent while no account reports a
-  window.
+- The Inbox shows no plan usage: that reading lives in the account menu and the
+  rail's ring, the start screen's composer line and Settings › Usage (maintainer
+  request, 2026-11-18).
 - **Inset.** A card's label, its rows' glyphs and text and its notes stand on one
   16px inset, and a row's trailing items end 16px in, on the filters' right edge.
 - **Rows** in every card carry no rule between them; the row under the pointer
   takes the quiet hover fill with the row radius. Screen readers meet the title,
-  the state sentence, Needs you, GitHub, Linear, then Plan usage.
+  the state sentence, Needs you, GitHub, then Linear.
 
 ## Tool lifecycles
 
@@ -1195,8 +1212,14 @@ Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
 has one. Each tile has one bar, 32px: the tool's name (the Browser's and the Terminal's bar is their row of pages or sessions, one tab each even for a single page, then "+"; a tool alone has no bar, so the same row stands at the top of its body, and the row is never dropped in any layout),
 then the tool's own controls (navigation as words, actions as icons, status as
-text; they fold into a named view menu and then a More menu before the name is
-cut), with an Arrange menu on the bar's context menu (right click, the menu key, Shift+F10 on a control of the bar, or Enter or Space on the bar itself, which is a Tab stop; never a button on the bar: Move left, right, up and down where the caps allow, Move
+text; when they do not fit, each view switch folds into one control naming the
+current view, then every named control — word buttons, view switches, icon
+actions and menu buttons — folds into the one More menu before any state the
+tool reports about itself does; state is the last thing to leave the bar and
+then it is the menu's first rows, whole, with a badge on the More button in
+the worst tone any folded state reports, before the tool's name is cut; a
+control the tool draws itself never folds and only then may take the one
+secondary row under the bar, which nothing else may share), with an Arrange menu on the bar's context menu (right click, the menu key, Shift+F10 on a control of the bar, or Enter or Space on the bar itself, which is a Tab stop; never a button on the bar: Move left, right, up and down where the caps allow, Move
 left of, right of, above or below each other tile where the caps allow it and it changes
 something, Show alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
 trailing edge; a tool that is open but not shown is marked on its button in the thread header's
@@ -1413,27 +1436,24 @@ Rules and limits
 are owned by
 [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
-or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
-the control but starts with the dock closed, whatever the window's saved choice;
-opened there, its tool row shows the common tools disabled ("Available once the
-task starts") and its body says so. That show or hide belongs to the draft and is
-never saved as the window's choice. Once that start screen has a Project, the dock's body holds the
-Project's quick tools (Terminal and Browser; a server Project's are its
-Terminal only); they never stand as a column
-beside the start screen ([Start screen: Welcome screen](start-screen.md#welcome-screen)). An available empty dock opens on a stack of fact cards (Environment with
+or a valid launchable tool. A start screen (the welcome screen, or a new task in
+Chat, Work or Code before its thread exists) has no dock, no bottom panel, no tool
+row and no change count, with a Project chosen as well, and nothing opens them;
+a request made there is dropped, so it cannot surface when a thread appears. They
+return once the task has a thread (maintainer request, 2026-11-18; see
+[Start screen: Welcome screen](start-screen.md#welcome-screen)). An available empty dock opens on a stack of fact cards (Environment with
 the local window's Remote access switch, Local servers, Context, Changes,
-Outputs, Background tasks, Running now; see [Right dock and bottom panel](#right-dock-and-bottom-panel));
+Outputs, Subagents, Running now; see [Right dock and bottom panel](#right-dock-and-bottom-panel));
 its header is an empty band as tall as the title rail, and the tools are opened
 from the **tool row**: at 961px and wider it stands outermost at the end of the
 title band, above the Environment section, and it is the focused thread's row.
 Before it the band keeps the window's controls: Show sidebar, Back and Forward
-while the sidebar is hidden, the Open in and Project action slots, the Code
-start screen's uncommitted-changes count. It has no switch for the dock or the bottom panel:
+while the sidebar is hidden, and the Open in and Project action slots. It has no switch for the dock or the bottom panel:
 every tool is a panel that its button in the thread header's row opens, and that
 a person can move between the side and the bottom, so a window-level "show the
 side" or "show the bottom" switch no longer named anything (the side one only
 opened Review, 2026-11-16). The window has one row, and nothing moves it: not
-Environment or a tool opening or closing, not a change count or a Project
+Environment or a tool opening or closing, not a Project
 action arriving beside it, not going from a thread to a new task. The pane
 draws it (it knows the thread and its tools) into a slot the title band offers,
 last in the band's trailing cluster; whatever stands at the window's top right
@@ -1483,12 +1503,7 @@ shell stays running and in view. A button reads pressed while its
 tool is on screen, in the dock or in the bottom panel's front tab while the panel is open, and carries a quiet dot while
 the tool is open but not shown (a bottom-panel tool behind the front one included; pressing it brings it forward). When both columns are full a tool that is not shown
 is not refused: its press shows it in the focused tile's place, the replaced tool stays
-open but hidden, and the button says "Shows in place of <the focused tool>". On a new Code task
-before its thread exists the buttons are disabled with "Available once the task starts", except that once the
-start screen has a Project, Terminal and Browser read **Project terminal** and **Project browser**
-and are enabled (a Project on a server offers the terminal only): pressing one opens the dock straight into the Project's own
-terminal or browser, no thread involved; the open one reads pressed, pressing it again closes the dock and
-stops the shell, and pressing the other switches. A press leaves focus
+open but hidden, and the button says "Shows in place of <the focused tool>". On a start screen there is no row (see above). A press leaves focus
 on the button. The row is one toolbar named "Tools" with one Tab stop and arrow-key
 movement, and it keeps its own width in the header: the title gives way first.
 The five tools with a button of their own (Environment, Terminal, Review, Browser,
@@ -2384,7 +2399,7 @@ inline and the rest under More, and entries in the command palette's Actions
 group. More is the header's one menu for this group: it also holds where the
 actions run ("Run in") and the task's Worktrees setup, which used to be text
 controls of their own in the title bar. Where to run is offered only when there
-is an action to run; with none, the header shows no control here (Worktrees setup is also a row of Environment's Changes group, the one place it is always found); the Project overview's Actions section edits them and offers suggestions
+is an action to run; with none, the header shows no control here (Worktrees setup is also an entry of Environment's Branch row, the one place it is always found); the Project overview's Actions section edits them and offers suggestions
 the person confirms. Choosing one previews its actual folder and branch,
 then starts a dedicated run beside the task. A Code thread defaults to its
 active checkout; the Project folder and approved extra folders remain explicit
@@ -2487,7 +2502,7 @@ authenticated, thread-scoped answer routes and one-use request identity.
 Provider-native question formats keep their existing adapter contracts; the
 questionnaire capability uses the provider-neutral app tool boundary.
 
-A Code task's **Worktrees** control (a row of Environment's Changes group, and
+A Code task's **Worktrees** control (an entry of Environment's Branch row, and
 an entry of the header's More menu when the Project has saved actions) opens its Setup tab beside
 that task, including a selector for its child checkouts. It shows the reviewed
 command and relative folder, bounded output, exit result, Retry, Cancel and
@@ -2831,7 +2846,7 @@ reports a window, with its lowest window's share and when it resets; a row
 opens Settings › Usage), then the Workspace and Octant groups (Settings among
 them). It replaced a Settings gear and one ring per provider, two kinds of
 thing at the foot where one does (maintainer request, 2026-11-17). The reading
-is the host's last observation, the one the composer and the Inbox read, never
+is the host's last observation, the one the start screen's composer line reads, never
 a fresh provider call, and it survives a restart.
 
 **Back and forward.** Back and Forward sit in the title band beside the
@@ -3039,11 +3054,14 @@ opens Review, and the thread's pull request with its checks in words.
 **Outputs** lists the documents and Canvases the window knows the thread has
 (those it had when opened and those its turns wrote since, never a deleted
 file), newest first and at most five, each a row that opens it in Document or
-Canvas, with the count at the title's right. **Background tasks** lists the
+Canvas, with the count at the title's right. **Subagents** lists the
 runs the thread's agent handed work to, from the same read and cadence as the
-Environment tab's Subagents row: each running one a spinner, task, and age,
-with the running count at the title's right, and the finished ones folded under
-one "N finished" row; a row opens that run in Agents.
+Environment tab's Subagents row: each running one a spinner, task, and how long
+it has run, with the running count at the title's right, and the finished ones
+folded under one "N finished" row; each row shows its run time at the trailing
+edge in a fixed-width slot, by the same rule as the transcript's subagent rows
+([Thread view: Subagents in a thread](thread-view.md#subagents-in-a-thread)); a
+row opens that run in Agents.
 **Running now** lists the other threads the window knows are working (any
 mode, at most five, newest first, never the thread on screen), each a spinner,
 title, Project, and age, and opens that thread. Model and access are not
@@ -3090,15 +3108,12 @@ size: no width animates from narrow to wide.
 Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
 
 A welcome, Project, or other pane with neither a bound thread nor a valid
-launchable tool keeps the dock closed and draws no tool row. A new Code task's
-pane before its thread exists keeps the dock available but starts closed, whatever the
-window's saved choice: it has nothing of a thread's to show, and opened by
-default it covered a third of a blank start screen to say its tools were not
-available yet. The window has no dock switch; the
-draft's dock opens from the Project terminal and Project browser buttons in the pane header once the start
-screen has a Project (they open the Project's quick tools straight into the tool pressed), and without a
-Project every button waits ("Available once the task starts") and the dock stays closed. A show or hide there belongs to the draft and is never saved as the window's choice;
-once the task has a thread the window's own choice applies again. Restored presentation for another subject never makes unavailable
+launchable tool keeps the dock closed and draws no tool row. So does a new task's
+pane before its thread exists, in every mode, with a Project chosen as well: no
+dock, no bottom panel and no tool row, and nothing opens them, so the window's
+saved choice is neither shown nor changed there; once the task has a thread the
+window's own choice applies again (maintainer request, 2026-11-18; before, a Code
+task's dock stayed available there, with the Project's quick tools). Restored presentation for another subject never makes unavailable
 chrome visible.
 
 The right Tools launcher starts directly beneath the window control rail, without an extra top spacer.
@@ -3370,10 +3385,73 @@ handlers; Escape or a press outside closes it and leaves the ceiling as it was.
 Commit or push shows for a checkout with changes or a named branch, and Create
 pull request for a named branch, because the section reads the working tree and
 the branch only, not how far the branch is ahead. Neither shows for an
-unreadable checkout. New task in this Project and Worktrees are the items of a
+unreadable checkout. The items of a
 "…" menu (More for changes) at the right end of the Changes title row, shown
-while the section is open. Routines keeps its row; Follow up later and New
-routine are the two items of one "+" menu (Add a routine) at its right end.
+while the section is open, hold only New task in this Project.
+
+The rows above the section are themselves the actions their facts describe.
+The **Branch row** opens a menu (Branch) with Switch branch…, New task on
+another branch…, and Worktrees. Switch branch… appears only while the host
+reports a readable local Git checkout — a remote root or a plain folder has
+no local HEAD to move, and neither gets it — and waits, greyed with the
+reason, while a turn runs: switching under a running turn would move the
+ground beneath it, so the host also refuses mid-turn. New task on another
+branch… opens the ordinary new-task draft in this Project on the New
+worktree choice with its Where > Start from picker already open and loading
+the checkout's real refs; it is absent without a connected, readable
+Project. The **Project row** opens the same Move to Project dialog the
+sidebar row menu opens — never a second move surface — whenever another
+active Code Project exists, even one the host would refuse: the dialog
+lists every destination and greys the refused ones with the reason — a
+different folder, the thread's working folder being bound to its current
+Project, a remote-root or unavailable checkout, or a provider policy the
+thread's provider or model fails, naming the unknown instead when the
+model is not yet known. Only with no other active Code Project does the
+row state the Project as a fact.
+
+**Switching a thread's branch.** The Switch branch dialog reads the working
+tree as it opens — the status entries and the state token, one observation —
+and lists the checkout's existing local branches beside it (the
+server-authoritative ref list, minus the current branch, remote refs, and
+branches another worktree holds). That one reading is the consent: the
+switch sends `switch-git-branch` with the observed state token, and the
+dirty-checkout choices show the observed entries themselves. A switch is
+the person's act only: no agent path exists. The host verifies the branch
+is an exact local ref, that no other worktree holds it, that the checkout's
+state still matches the token, and that no turn is running or starting. The
+first attempt asks the host to refuse a dirty checkout; only then does the
+dialog offer Commit (which opens the Git pane's own reviewed stage-and-commit
+form — nothing auto-stages or auto-commits), Stash and switch (an explicit
+`git stash push --include-untracked` against the same observed token, never
+a pop, and a failure after the stash reports that the changes stayed in the
+stash), and Cancel, which sends nothing. A checkout that moved since the
+reading refuses the token as stale: the dialog re-reads and re-shows it and
+sends nothing until the person chooses again, so a stash never carries
+changes nobody saw. A detached HEAD can switch onto a named branch the same
+way. On a completed switch the host journals the checkout's new head —
+branch and OID — against the exact checkout identity, so the next
+Environment read and the thread's binding both show the branch the checkout
+actually holds; a managed worktree is never re-observed through its
+Project's root.
+
+**Moving a busy thread.** The Move to Project dialog on a thread whose turn is
+still running offers two choices once a destination is picked: Move after this
+turn, the default, and Stop and move now. The first queues an intent scoped to
+that thread and that turn — the dialog stays open with the queue visible;
+Cancel move, Escape, the backdrop and every other way the dialog goes away
+drop that one queued request and resolve it, never leaving a promise open or
+a move to dispatch silently, and a newer queued request ends the one it
+replaces the same way. A turn that settles and another starting in its place
+ends the intent with a refusal rather than chasing the new turn, and the real
+`move-code-thread` dispatches once, with the thread's version as it stands
+then, so the host's binding, authority, and busy checks decide again. Stop
+and move now interrupts only the turn this window started — it names that
+turn's operation, and when the running turn's identity is not this window's
+to stop, the choice refuses with the reason rather than cancelling whatever
+turn happens to run; the move itself still waits for the stopped turn to
+settle before it dispatches. Routines keeps its row; Follow up later and
+New routine are the two items of one "+" menu (Add a routine) at its right
+end.
 
 **The thread's pull requests.** Under its other rows, a Code thread's Changes
 section lists the pull requests this thread opened or is tied to, newest first,
@@ -3936,6 +4014,13 @@ reach the shell.
 
 ### Quitting
 
+- Explicit Quit — from the app menu, the macOS Dock menu, or the quit
+  shortcut — checks unsaved edits in the Files tools of every open app
+  window before closing any window or starting shutdown. Cancel in any
+  window stops Quit. If a window is already asking about unsaved edits,
+  Quit brings it forward and stops there; the person answers it and quits
+  again. A file already saved stays saved. System shutdown, updater
+  restarts and forced exits do not wait for these decisions.
 - The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
   Fully quit share one guarded shutdown: refresh current host activity, ask for
   confirmation when provider sessions remain open or the desktop cannot confirm
@@ -3958,7 +4043,6 @@ reach the shell.
   first press quits nothing and shows a short "Press ⌘Q again to quit Octant"
   toast in the focused window; the second enters the guarded shutdown above
   unchanged, including its session confirmation. With no window open, the first
-  press quits directly. Choosing Quit with the pointer (app menu, Dock, status
-  menu's Fully quit), OS shutdown or logout, updater restarts and signals stay
-  immediate. A menu accelerator cannot tell a held key from a tap, so a
+  press quits directly. Choosing Quit with the pointer skips the second-press
+  guard, not the unsaved-edits check. A menu accelerator cannot tell a held key from a tap, so a
   double press stands in for hold-to-quit.

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -432,5 +434,15 @@ describe("Local provider usage history", () => {
     await userEvent.click(screen.getByRole("button", { name: "Cost" }));
     expect(screen.getByRole("heading", { name: "Unavailable" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "$0.00" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Provider usage history chart layout", () => {
+  it("sizes only the plot svg, so the chart-data chevron keeps its own icon size", () => {
+    const css = readFileSync(resolve(import.meta.dirname, "providerUsageHistory.css"), "utf8");
+    // A bare `.provider-history__chart svg` also matched the disclosure's
+    // chevron, stretching it to 100% by 240px and pushing the Overview card open.
+    expect(css).not.toMatch(/\.provider-history__chart svg\b/);
+    expect(css).toMatch(/\.provider-history__chart > svg \{\s*width: 100%;\s*height: 240px;/);
   });
 });

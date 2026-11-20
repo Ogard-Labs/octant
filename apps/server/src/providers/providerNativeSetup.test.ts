@@ -130,13 +130,15 @@ describe("a session's native setup read from the journal", () => {
     ).toMatchObject({ projectCode: true });
   });
 
-  it("loads a Project's own code on the provider CLI's trust only outside Strict", () => {
+  it("loads an added Project's own code outside Strict, and under Strict only once the person confirmed it", () => {
     const threadId = "70000000-0000-4000-8000-000000000106";
-    const launch = (strict: boolean) =>
+    const launch = (strict: boolean, nativeProviders?: ReadonlyArray<"codex">) =>
       sessionNativeSetup(
         {
-          ...sources(codex(), codeProject()),
-          readProviderCliTrust: () => true,
+          ...sources(
+            codex(),
+            codeProject(nativeProviders === undefined ? {} : { nativeProviders }),
+          ),
           readStrict: () => strict,
         },
         {
@@ -149,6 +151,24 @@ describe("a session's native setup read from the journal", () => {
       );
     expect(launch(false)).toMatchObject({ projectCode: true });
     expect(launch(true)).toMatchObject({ projectCode: false });
+    expect(launch(true, ["codex"])).toMatchObject({ projectCode: true });
+  });
+
+  it("never turns the setup on for an account the person turned off just because the Project was added", () => {
+    const threadId = "70000000-0000-4000-8000-000000000107";
+    const off = codex({ nativeSetup: false });
+    expect(
+      sessionNativeSetup(
+        { ...sources(off, codeProject()), readStrict: () => false },
+        {
+          providerInstanceId: off.id,
+          projectId,
+          threadId,
+          mode: "code",
+          executionPolicy: "approval-gated",
+        },
+      ),
+    ).toBeUndefined();
   });
 
   it("never lets a Project's trust reach a Chat thread", () => {

@@ -606,7 +606,7 @@ describe("InboxView page", () => {
     expect(await screen.findByText("Nothing is assigned to you.")).toBeVisible();
   });
 
-  it("shows a Plan usage card only for an account that reports a window", async () => {
+  it("keeps plan usage off the Inbox even when an account reports a window", async () => {
     const accountId = "10000000-0000-4000-8000-000000000001";
     const observedAt = "2026-10-20T12:00:00.000Z";
     const snapshot = (windows: ReadonlyArray<unknown>) =>
@@ -652,7 +652,6 @@ describe("InboxView page", () => {
     });
     const page = (windows: ReadonlyArray<unknown>) => (
       <PlanUsageProvider
-        barStyle="smooth"
         client={
           {
             list: vi.fn(() => Promise.resolve(snapshot(windows))),
@@ -663,19 +662,13 @@ describe("InboxView page", () => {
         <InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />
       </PlanUsageProvider>
     );
-    const { unmount } = render(
-      page([{ window: "five_hour", status: "allowed", utilization: 0.4, observedAt }]),
-    );
-    const card = await screen.findByRole("region", { name: "Plan usage" });
-    expect(card).toHaveTextContent("Claude Max");
-    expect(card).toHaveTextContent("60%");
-    unmount();
-    render(page([]));
+    render(page([{ window: "five_hour", status: "allowed", utilization: 0.4, observedAt }]));
     await waitFor(() => expect(screen.getByRole("region", { name: "Needs you" })).toBeVisible());
     expect(screen.queryByRole("region", { name: "Plan usage" })).toBeNull();
+    expect(screen.queryByText("Claude Max")).toBeNull();
   });
 
-  it("reads the plan limits once for the rail, a composer and the Inbox together", async () => {
+  it("reads the plan limits once for the rail and a composer together", async () => {
     const accountId = "10000000-0000-4000-8000-000000000001";
     const observedAt = "2026-10-20T12:00:00.000Z";
     const snapshot = decodeProviderUsageLimitsSnapshot({
@@ -724,7 +717,6 @@ describe("InboxView page", () => {
     const onOpenSettings = vi.fn();
     render(
       <PlanUsageProvider
-        barStyle="smooth"
         client={{ list } as unknown as ProviderUsageLimitsClient}
         instances={[account]}
       >
@@ -734,11 +726,9 @@ describe("InboxView page", () => {
           profile={{ ...defaultShellSettings().userProfile, displayName: "Ada" }}
         />
         <ComposerPlanUsage providerInstanceId={accountId} />
-        <InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />
       </PlanUsageProvider>,
     );
-    expect(await screen.findByRole("region", { name: "Plan usage" })).toHaveTextContent("60%");
-    expect(screen.getAllByLabelText("Plan usage left").length).toBeGreaterThan(1);
+    expect(await screen.findByLabelText("Plan usage left")).toBeVisible();
     // The rail's face rings the tightest window and lists each account's
     // reading in its menu, which leads to Settings › Usage.
     await userEvent.click(

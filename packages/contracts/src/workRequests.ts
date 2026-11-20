@@ -235,6 +235,14 @@ export const WorkRequest = Schema.Struct({
   detail: WorkRequestDetail,
   status: WorkRequestStatus,
   resolution: Schema.optional(WorkRequestResolution),
+  /**
+   * On a resolved level change the person approved: whether the new level
+   * applied inside the running turn (`in-place`, entering Plan on a provider
+   * that can hold its session to it) or from the next turn, the asking turn
+   * ending (`next-turn`). Set by the host, never by an answer; absent on
+   * every other request and in older journals.
+   */
+  levelChangeApplied: Schema.optional(Schema.Literal("in-place", "next-turn")),
   delivery: Schema.optional(WorkRequestDelivery),
   requestedAt: UtcTimestamp,
   settledAt: Schema.optional(UtcTimestamp),
@@ -245,15 +253,25 @@ export const WorkRequest = Schema.Struct({
     Schema.filter(
       (request) => {
         if (request.status === "pending") {
-          return request.resolution === undefined && request.settledAt === undefined;
+          return (
+            request.resolution === undefined &&
+            request.settledAt === undefined &&
+            request.levelChangeApplied === undefined
+          );
         }
         if (request.settledAt === undefined || request.delivery !== undefined) return false;
         if (request.status === "resolved") {
           return (
-            request.resolution !== undefined && request.resolution.kind === request.detail.kind
+            request.resolution !== undefined &&
+            request.resolution.kind === request.detail.kind &&
+            (request.levelChangeApplied === undefined ||
+              (request.detail.kind === "approval" &&
+                request.detail.levelChange !== undefined &&
+                request.resolution.kind === "approval" &&
+                request.resolution.approved))
           );
         }
-        return request.resolution === undefined;
+        return request.resolution === undefined && request.levelChangeApplied === undefined;
       },
       { jsonSchema: {} },
     ),

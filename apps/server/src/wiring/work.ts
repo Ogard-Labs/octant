@@ -157,7 +157,6 @@ import type { CanvasWiring } from "./canvas";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
 import { workTurnToolLevel } from "../work/workTurnToolLevel";
-import { hostProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   /** Sees images; absent on a host started without one. */
@@ -646,7 +645,6 @@ export function wireWork(deps: WorkDependencies) {
       onRequestSettled: (input, release) => workRequestService.onSettled(input, release),
       persistence: {
         ...persistence,
-        readProviderCliTrust: hostProviderCliProjectTrust(),
         readProviderModel: (providerInstanceId, modelId) =>
           persistence
             .readProviderCatalog?.(providerInstanceId)
@@ -1106,10 +1104,12 @@ export function wireWork(deps: WorkDependencies) {
       clock: () => new Date().toISOString(),
     });
     // An approved ask to plan first or to leave Plan moves the thread as the
-    // person who answered, then ends the turn that asked.
+    // person who answered, then ends the turn that asked, unless it entered
+    // Plan in place.
     workLevelChangeHolder.port = {
       change: (input) => workThreadService.changeLevelAtAgentRequest(input),
       endTurn: (threadId) => workTurnService.endTurnForLevelChange(threadId),
+      enteredPlanInPlace: (threadId) => workTurnService.enteredPlanInPlace(threadId),
     };
     const fileMentionService = new FileMentionService({
       authority: {

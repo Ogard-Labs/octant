@@ -1385,9 +1385,8 @@ is costly to render mounts only while open.
   cause shows: a thread whose folder the host can no longer open (moved,
   renamed, deleted, or no longer granted to the window) says so in Files,
   Review and the Terminal alike, where the host's own sentence spoke of its
-  "authority" in two wordings. The dock's own states are the same pattern in the
-  dock's middle: a new task whose tools open once it starts, and a tool the
-  pane cannot show. A bar never carries a status the state contradicts: Pull
+  "authority" in two wordings. The dock's own state is the same pattern in the
+  dock's middle: a tool the pane cannot show. A bar never carries a status the state contradicts: Pull
   requests for a Project that is not on GitHub has no "Refresh to load" in its
   bar. A notice is for a pane that still has its content (part of a
   listing failed, a diff is truncated) and keeps the row layout above. A
@@ -1512,8 +1511,13 @@ the menu key, or Shift+F10 on any control of the bar). The bar is a Tab stop
 where there is something to arrange, and Enter or Space on it opens that menu. At most one 32px secondary row
 holds content (a filter, a status line) on the bar's insets, and a pane's
 content starts on the same 12px. When the controls do not fit, word switches
-fold to a named control, then actions into one More menu; status text and
-must-read cues never fold. A tool alone used to have a 36px tab row inset 8px,
+fold to a named control, then every named control — word buttons, view
+switches, icon actions and menu buttons — folds into the one More menu before
+any state the tool reports about itself does. Status text and must-read cues
+fold last, into that menu's first rows and whole, and the More button then
+carries a badge in the worst tone any folded state reports; the tool's name is
+cut after state folds, and only then may a control the tool draws itself take
+the one secondary row under the bar, which nothing else may share. A tool alone used to have a 36px tab row inset 8px,
 a 32px control row or no bar, and a tiled one a 32px bar inset 12px, so a
 second tool moved every tab and control of the first (measured 2026-11-15).
 The bottom panel's toolbar is the same bar: the same height, its tabs 28px and
@@ -1588,8 +1592,9 @@ narrowest pane's width.
   immediately before the mode control, only while the thread is below Full
   access (at Full access nothing shows; it opens the same review as the
   Environment panel's "Outside content · read N times" row). The thread's
-  Project, branch, folder, pull requests and plan usage live in the Environment
-  panel, and its info and plan proposal are items of the + menu: a full row
+  Project, branch, folder and pull requests live in the Environment panel (plan
+  usage does not: it shows in the account menu, on a start screen and in
+  Settings), and its info and plan proposal are items of the + menu: a full row
   truncated every label in a thread's column. Labels 12px meta, icons 16px,
   nothing filled at rest.
 - **The row above the box** (start screens): where the work runs, as quiet
@@ -1943,9 +1948,11 @@ the merge queue, it reports passed without drawing, since the pull request's own
 run already compared the change. The scenes (`apps/web/visual-check.html`, source in
 `apps/web/src/visualCheck/`) are the start screen, the Code side panel, the
 Appearance and Usage Settings pages, the Agents, Artifacts and Automations
-tables, the Where, Project and approval menus open, and the icon rail with the
-account face. Each is drawn in light and dark at 1280 by 800, and the tables and
-the side panel again at 760 wide, from fixed data, a fixed clock, bundled fonts
+tables, the Where, Project and approval menus open, the icon rail with the
+account face, and a thread's subagent progress (the transcript rows, a finished
+child's result line and the composer's folded card). Each is drawn in light and
+dark at 1280 by 800, and the tables, the side panel and the subagent progress
+again at 760 wide, from fixed data, a fixed clock, bundled fonts
 and no motion, with no host behind them. A picture fails when more than 50 of
 its pixels differ by more than 24 in any channel, or its size changes. The run
 then uploads the `visual-check` artifact with the actual, baseline and diff

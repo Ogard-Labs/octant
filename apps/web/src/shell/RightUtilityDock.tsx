@@ -8,6 +8,7 @@ import {
 } from "./RightUtilityDockSurface";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import type { DockToolButtonsProps } from "./DockToolButtons";
+import type { PageIconState } from "./PageFavicon";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 import { splitEnvironmentStrip } from "./dockEnvironmentStrip";
 import {
@@ -46,8 +47,8 @@ export interface RightUtilityDockProps {
   /** A drag was abandoned: drop the preview rather than keep the width it started from. */
   readonly onCancelWidthPreview?: () => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
-  /** A Browser page's favicon as a `data:` URL, when the page has declared one. */
-  readonly pageIcon?: (tabId: string) => string | undefined;
+  /** A Browser page's icon, and whether it is the dimmed icon a sleeping tab kept. */
+  readonly pageIcon?: (tabId: string) => PageIconState | undefined;
   /** What a Browser page shows: its title, else its host; absent before a page loads. */
   readonly pageTitle?: (tabId: string) => string | undefined;
   readonly onPreviewWidth: (width: number) => void;
@@ -66,7 +67,6 @@ export interface RightUtilityDockProps {
   readonly tiles?: DockTileControls;
   /** The row of tool buttons the drawer's header carries; absent when docked. */
   readonly toolRow?: DockToolButtonsProps;
-  readonly toolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly width: number;
 }
 
@@ -89,10 +89,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
     ...(props.tiles?.minimised === undefined ? {} : { minimised: props.tiles.minimised }),
   });
   const stripOpen =
-    !props.isNarrow &&
-    props.tiles !== undefined &&
-    split.environmentTabId !== undefined &&
-    !(props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface");
+    !props.isNarrow && props.tiles !== undefined && split.environmentTabId !== undefined;
   // Fixed tools never resize, so their column draws no handle.
   const columnFixed = dockColumnIsFixed(
     props.tabs.map((tab) => ("surface" in tab ? tab.surface : tab).id),
@@ -205,9 +202,6 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       columnsFit={columnsFit}
       {...(stripOpen && !columnFixed ? { toolResizeHandle: resizeHandle } : {})}
       {...(props.toolRow === undefined ? {} : { toolRow: props.toolRow })}
-      {...(props.toolsAwaitingThread === undefined
-        ? {}
-        : { toolsAwaitingThread: props.toolsAwaitingThread })}
       {...dismiss}
     />
   );

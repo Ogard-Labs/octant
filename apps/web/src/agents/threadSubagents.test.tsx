@@ -1,5 +1,6 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadSubagentsTray } from "./ComposerSubagentsTray";
 import { observedChildFixture } from "./agentActivityFixtures";
@@ -8,7 +9,10 @@ import { ThreadSubagentsProvider, TurnSubagentRows } from "./threadSubagents";
 
 const threadId = "11111111-1111-4111-8111-111111111111";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 function run(runId: string, overrides: Record<string, unknown>) {
   return {
@@ -58,14 +62,14 @@ describe("TurnSubagentRows", () => {
       [observedChildFixture({ firstObservedAt: "2026-11-17T10:01:00.000Z" as never })],
     );
     render(
-      <ThreadSubagentsProvider client={agents} threadId={threadId}>
+      <ThreadSubagentsProvider client={agents} onOpenSubagent={vi.fn()} threadId={threadId}>
         <TurnSubagentRows
           window={{ from: "2026-11-17T09:59:00.000Z", until: "2026-11-17T10:20:00.000Z" }}
         />
       </ThreadSubagentsProvider>,
     );
     const list = await screen.findByRole("list", { name: "Subagents" });
-    const rows = within(list).getAllByRole("listitem");
+    const rows = within(list).getAllByRole("button");
     expect(rows).toHaveLength(2);
     expect(rows[0]).toHaveAccessibleName(
       "Judge batch one, 55555555-5555-4555-8555-555555555555 Sonnet 5.5 High, Done, 5m 21s",
@@ -109,5 +113,53 @@ describe("TurnSubagentRows", () => {
     expect(await screen.findByRole("button", { name: /Subagents,/ })).toBeVisible();
     expect(pane.parentSummary).toHaveBeenCalled();
     expect(trayOwn.parentSummary).not.toHaveBeenCalled();
+  });
+
+  it("opens the subagent's conversation when its row is clicked or Enter is pressed on it", async () => {
+    const user = userEvent.setup();
+    const onOpenSubagent = vi.fn();
+    const { client: agents } = client(
+      [run("90000000-0000-4000-8000-000000000001", { task: "Judge batch one" })],
+      [observedChildFixture({ firstObservedAt: "2026-11-17T10:01:00.000Z" as never })],
+    );
+    render(
+      <ThreadSubagentsProvider client={agents} onOpenSubagent={onOpenSubagent} threadId={threadId}>
+        <TurnSubagentRows window={{ from: "2026-11-17T09:59:00.000Z" }} />
+      </ThreadSubagentsProvider>,
+    );
+    const managed = await screen.findByRole("button", { name: /^Judge batch one, .*Done/ });
+    await user.click(managed);
+    expect(onOpenSubagent).toHaveBeenLastCalledWith("90000000-0000-4000-8000-000000000001");
+
+    const observed = screen.getByRole("button", { name: /^Inspect parser, .*Working/ });
+    observed.focus();
+    await user.keyboard("{Enter}");
+    expect(onOpenSubagent).toHaveBeenLastCalledWith("observation:provider-child");
+    await user.keyboard(" ");
+    expect(onOpenSubagent).toHaveBeenCalledTimes(3);
+  });
+
+  it("ticks a working subagent's run time and stops a finished one's at its last update", async () => {
+    vi.useFakeTimers({ now: Date.parse("2026-11-17T10:00:30.000Z"), shouldAdvanceTime: true });
+    const { client: agents } = client([
+      run("90000000-0000-4000-8000-000000000001", {
+        task: "Still going",
+        lifecycleStatus: "running",
+        updatedAt: "2026-11-17T10:00:20.000Z",
+      }),
+      run("90000000-0000-4000-8000-000000000002", { task: "Finished one" }),
+    ]);
+    render(
+      <ThreadSubagentsProvider client={agents} onOpenSubagent={vi.fn()} threadId={threadId}>
+        <TurnSubagentRows window={{ from: "2026-11-17T09:59:00.000Z" }} />
+      </ThreadSubagentsProvider>,
+    );
+    const working = await screen.findByRole("button", { name: /^Still going, .*Working, 3\ds$/ });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    // The clock runs on, so the label is about five seconds later than it was.
+    expect(working).toHaveAccessibleName(/Working, (3[5-9]|4\d)s$/);
+    expect(screen.getByRole("button", { name: /^Finished one, .*Done, 5m 21s$/ })).toBeVisible();
   });
 });

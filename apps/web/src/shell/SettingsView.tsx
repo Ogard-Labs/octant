@@ -56,6 +56,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
 import { DefaultFolderSettings } from "../settings/DefaultFolderSettings";
+import { NextMessageSuggestionsSettings } from "../settings/NextMessageSuggestionsSettings";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -108,6 +109,7 @@ import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-cl
 import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
 import { OctantInstructionsSettings } from "../settings/OctantInstructionsSettings";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
+import type { BlockedToolsClient } from "@octant/client-runtime/blocked-tools-client";
 import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import type { DiskCleanupClient } from "@octant/client-runtime/disk-cleanup-client";
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
@@ -132,6 +134,7 @@ import { AutomaticModelSettings } from "../settings/AutomaticModelSettings";
 import { PersonMemorySettings } from "../settings/PersonMemorySettings";
 import { TodoListHostSettings } from "../todos/TodoListHostSettings";
 import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
+import { BlockedToolsSettings } from "../settings/BlockedToolsSettings";
 import { ArchivedWorktreesSettings } from "../settings/ArchivedWorktreesSettings";
 import { HostWorktreesSettings } from "../settings/HostWorktreesSettings";
 import { XcodeBuildDataSettings } from "../settings/XcodeBuildDataSettings";
@@ -295,6 +298,7 @@ export interface SettingsViewProps {
   >;
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
+  readonly blockedToolsClient?: BlockedToolsClient;
   readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly sandboxInitialScope?:
     | import("@octant/contracts/sandbox-policy").SandboxRestrictionsScope
@@ -1572,6 +1576,7 @@ function ActiveSectionContent({
             client={props.protectedFilesClient}
             focusedSetting={focusedSetting}
           />
+          <BlockedToolsSettings client={props.blockedToolsClient} focusedSetting={focusedSetting} />
           <SafeNetworksSettings
             client={props.safeNetworksClient}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
@@ -2589,6 +2594,15 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           />
         </div>
       </SettingsSection>
+      <SettingsSection title="Composer">
+        <div className="setgroup">
+          <NextMessageSuggestionsSettings
+            focusedSetting={focusedSetting}
+            onChange={(next) => props.onSettingsChange({ nextMessageSuggestions: next })}
+            value={props.settings.nextMessageSuggestions}
+          />
+        </div>
+      </SettingsSection>
       {/* Outside the desktop app the one row says this copy never updates
           itself, so a heading promising how it updates contradicted it. */}
       <SettingsSection
@@ -3079,27 +3093,6 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                   {REPLY_DETAIL_LABELS[level]}
                 </OctantToggleGroupItem>
               ))}
-            </OctantToggleGroup>
-          </SettingRow>
-        ) : null}
-        {isAvailable("usage-bars") ? (
-          <SettingRow
-            description="How the plan-usage meters above the composer look."
-            focused={focusedSetting === settingId("usage-bars")}
-            label="Usage bars"
-            scope="app"
-            settingId="usage-bars"
-          >
-            <OctantToggleGroup<ShellSettings["usageBars"]>
-              aria-label="Usage bars"
-              onValueChange={(value) => {
-                const selected = value[0];
-                if (selected !== undefined) props.onSettingsChange({ usageBars: selected });
-              }}
-              value={[props.settings.usageBars]}
-            >
-              <OctantToggleGroupItem value="smooth">Smooth</OctantToggleGroupItem>
-              <OctantToggleGroupItem value="pixelated">Pixelated</OctantToggleGroupItem>
             </OctantToggleGroup>
           </SettingRow>
         ) : null}

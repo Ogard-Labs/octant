@@ -20,6 +20,9 @@ export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
     open: ".settings-app-background__customize > summary",
   },
   { id: "settings-usage" },
+  { id: "settings-usage-history", narrow: true },
+  { id: "dock-artifacts" },
+  { id: "dock-artifacts-tiled" },
   { id: "agents-table", narrow: true },
   { id: "artifacts-table", narrow: true },
   { id: "automations-table", narrow: true },
@@ -27,6 +30,7 @@ export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
   { id: "project-picker", open: "button[aria-label^='Project:']" },
   { id: "mode-picker", open: "button[aria-haspopup='menu']" },
   { id: "rail" },
+  { id: "subagent-progress", narrow: true },
 ];
 
 /** The two window sizes a scene is drawn at. */

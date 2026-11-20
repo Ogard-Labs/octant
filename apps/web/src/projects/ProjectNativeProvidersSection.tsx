@@ -52,10 +52,11 @@ export function ProjectNativeProvidersSection(props: ProjectNativeProvidersSecti
         <div>
           <h2 id={`native-providers-${props.project.id}`}>Trusted providers</h2>
           <p>
-            A provider you trust here runs in this {props.project.type} Project as it runs on its
-            own: its own subagents, web search, skills, and setup, plus this Project’s own settings,
-            hooks, MCP servers, and plugins. That code runs under the provider’s sandbox and the
-            thread’s mode, without an Octant review. Plan stays read-only.
+            Every agent already trusts this {props.project.type} Project, because you added it, and
+            loads this Project’s own settings, hooks, MCP servers, and plugins. Under Strict, only a
+            provider checked here loads them, and a provider checked here also runs as itself when
+            its account is turned off. That code runs under the provider’s sandbox and the thread’s
+            mode, without an Octant review. Plan stays read-only.
           </p>
         </div>
         <span className="project-provider-policy__default">Default: none</span>

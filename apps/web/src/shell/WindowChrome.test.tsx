@@ -1088,65 +1088,6 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("reserves the title band for whichever window controls the thread actually renders", () => {
-    vi.stubGlobal(
-      "ResizeObserver",
-      class {
-        observe() {}
-        disconnect() {}
-      },
-    );
-    // Stand in for layout: the cluster is as wide as the controls it holds.
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        const width = this.classList.contains("window-chrome__trailing")
-          ? this.querySelectorAll("button").length * 40
-          : 0;
-        return {
-          width,
-          height: 0,
-          top: 0,
-          left: 0,
-          right: width,
-          bottom: 0,
-          x: 0,
-          y: 0,
-        } as DOMRect;
-      },
-    );
-
-    const reserveFor = (withChanges: boolean): string => {
-      const surface = document.createElement("div");
-      surface.className = "shell-frame";
-      document.body.appendChild(surface);
-      const { unmount } = render(
-        <WindowChrome
-          activeSurface="Welcome to Code"
-          dockAvailable
-          dockExpanded={false}
-          dockLabel="Right sidebar"
-          isNarrow={false}
-          material="opaque"
-          onToggleDock={vi.fn()}
-          {...(withChanges ? { changes: { updating: true, onOpen: vi.fn() } } : {})}
-        />,
-        { container: surface.appendChild(document.createElement("div")) },
-      );
-      const reserve = surface.style.getPropertyValue("--octant-window-chrome-reserved-width");
-      unmount();
-      surface.remove();
-      return reserve;
-    };
-
-    // A start screen that draws the changes count needs a wider band than one
-    // that does not; a constant reserve is wrong for one of them by construction.
-    expect(reserveFor(false)).toBe("");
-    expect(reserveFor(true)).toBe("40px");
-
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  });
-
   it("reserves the leading band for the controls that replace a collapsed sidebar", () => {
     vi.stubGlobal(
       "ResizeObserver",

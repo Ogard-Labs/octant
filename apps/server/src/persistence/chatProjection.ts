@@ -473,6 +473,7 @@ export class ChatProjection implements Projection {
         ...attempt,
         ...(steps.length === 0 ? {} : { toolSteps: steps }),
         ...(changed.toolStepsTruncated === true ? { toolStepsTruncated: true } : {}),
+        ...(changed.reasoningMs === undefined ? {} : { reasoningMs: changed.reasoningMs }),
         updatedAt: changed.updatedAt,
       },
       event,

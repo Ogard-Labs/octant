@@ -7,7 +7,7 @@ import {
   decodeLocalServerSnapshot,
 } from "@octant/contracts";
 import type { ComponentProps } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockThreadOverviewContent } from "./DockThreadOverviewContent";
 import type { PrivateListenerPublicStatus, RemoteAccessAdministrationBridge } from "./hostBridge";
 
@@ -47,6 +47,10 @@ function snapshotFor(threadId: string) {
 
 const NOW = Date.parse("2026-10-21T08:00:00.000Z");
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 function renderOverview(
   threadId: string,
   extra: Partial<ComponentProps<typeof DockThreadOverviewContent>> = {},
@@ -55,7 +59,6 @@ function renderOverview(
     <DockThreadOverviewContent
       boardRevision={0}
       mode="code"
-      now={NOW}
       onOpenEnvironment={vi.fn()}
       onOpenReview={vi.fn()}
       onOpenRunning={vi.fn()}
@@ -89,6 +92,7 @@ function childRun(
   task: string,
   lifecycleStatus: "running" | "completed",
   updatedAt: string,
+  createdAt: string,
 ) {
   return {
     runId: decodeAgentRunId(runId),
@@ -101,6 +105,7 @@ function childRun(
     usageQuality: "exact" as const,
     resultAcknowledgement: { required: false, acknowledged: false },
     version: 2,
+    createdAt,
     updatedAt,
   };
 }
@@ -170,9 +175,11 @@ describe("the dock overview's outputs", () => {
   });
 });
 
-describe("the dock overview's background tasks", () => {
-  it("shows running runs with their age and folds the finished ones", async () => {
+describe("the dock overview's subagents", () => {
+  it("shows running runs with how long they have run and folds the finished ones", async () => {
     const user = userEvent.setup();
+    // Only the clock is faked: the host read and the tick keep their real timers.
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
     reading.snapshot = undefined;
     const onOpenSubagent = vi.fn();
     renderOverview(threadA, {
@@ -182,35 +189,67 @@ describe("the dock overview's background tasks", () => {
           "Check the sync test",
           "running",
           "2026-10-21T07:56:00.000Z",
+          "2026-10-21T07:55:00.000Z",
         ),
         childRun(
           "30000000-0000-4000-8000-000000000001",
           "Draft release notes",
           "completed",
           "2026-10-21T07:00:00.000Z",
+          "2026-10-21T06:50:00.000Z",
         ),
         childRun(
           "30000000-0000-4000-8000-000000000002",
           "Read the crash log",
           "completed",
           "2026-10-21T06:00:00.000Z",
+          "2026-10-21T05:58:30.000Z",
         ),
       ]),
       onOpenSubagent,
     });
 
-    const card = await screen.findByRole("region", { name: "Background tasks" });
+    const card = await screen.findByRole("region", { name: "Subagents" });
+    expect(screen.queryByRole("region", { name: "Background tasks" })).toBeNull();
     expect(card).toHaveTextContent("1 running");
+    // Requested 07:55, still working at 08:00: five minutes, not the age of its last update.
     const live = within(card).getByRole("button", { name: /^Check the sync test/ });
-    expect(live).toHaveTextContent("4m ago");
+    expect(live).toHaveTextContent("5m 00s");
+    expect(live).not.toHaveTextContent("ago");
     expect(within(card).queryByText("Draft release notes")).toBeNull();
 
     const fold = within(card).getByRole("button", { name: "2 finished" });
     expect(fold).toHaveAttribute("aria-expanded", "false");
     await user.click(fold);
     expect(fold).toHaveAttribute("aria-expanded", "true");
-    await user.click(within(card).getByRole("button", { name: /^Draft release notes/ }));
+    // A finished run's time stops at its last update, whatever the clock says.
+    const finished = within(card).getByRole("button", { name: /^Draft release notes/ });
+    expect(finished).toHaveTextContent("10m 00s");
+    expect(within(card).getByRole("button", { name: /^Read the crash log/ })).toHaveTextContent(
+      "1m 30s",
+    );
+    await user.click(finished);
     expect(onOpenSubagent).toHaveBeenCalledWith("30000000-0000-4000-8000-000000000001");
+  });
+
+  it("ticks a working run's time while the overview is open", async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    reading.snapshot = undefined;
+    renderOverview(threadA, {
+      agentRunClient: childRunClient([
+        childRun(
+          "50000000-0000-4000-8000-000000000001",
+          "Check the sync test",
+          "running",
+          "2026-10-21T07:56:00.000Z",
+          "2026-10-21T07:59:50.000Z",
+        ),
+      ]),
+    });
+    const live = await screen.findByRole("button", { name: /^Check the sync test/ });
+    expect(live).toHaveTextContent("10s");
+    vi.setSystemTime(NOW + 3_000);
+    await vi.waitFor(() => expect(live).toHaveTextContent(/1[3-9]s/), { timeout: 3_000 });
   });
 
   it("draws no card for a thread that handed nothing off", async () => {
@@ -219,7 +258,7 @@ describe("the dock overview's background tasks", () => {
     const read = vi.spyOn(client, "parentSummary");
     renderOverview(threadA, { agentRunClient: client });
     await vi.waitFor(() => expect(read).toHaveBeenCalled());
-    expect(screen.queryByRole("region", { name: "Background tasks" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Subagents" })).toBeNull();
   });
 });
 

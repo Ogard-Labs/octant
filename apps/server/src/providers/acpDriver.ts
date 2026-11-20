@@ -64,7 +64,7 @@ import type {
   AcpProcessPort,
   AcpSessionMode,
 } from "./acpProcess";
-import { acpSubagentsRun, type AcpProviderProfile } from "./acpProfiles";
+import { acpExactReleaseClaim, acpSubagentsRun, type AcpProviderProfile } from "./acpProfiles";
 import { createAcpManagedToolsBridge, type AcpManagedToolsBridge } from "./acpManagedTools";
 import {
   AcpFailure,
@@ -243,18 +243,39 @@ interface Factories {
   readonly commandInventory: { unverified: boolean; unreviewed: ReadonlyArray<string> };
 }
 
+/**
+ * The level a release pin is judged at for compaction and file review. The
+ * host runs both on a session it resumes for them, tool-free or under Plan,
+ * not on the thread's own Full access session, so an unverified release
+ * never earns them: below Full access the pin holds.
+ */
+const ACP_HOST_SESSION_RELEASE_POLICY: ProviderExecutionPolicy = "approval-gated";
+
 function hasVerifiedCompaction(profile: AcpProviderProfile): boolean {
   return profile.kind === "mistral-vibe" && profile.compactionVersions?.includes("3.0.3") === true;
 }
 
+/**
+ * Capabilities at one level. The exact-release features answer for the
+ * level they are asked at: below Full access only a reviewed release has
+ * them, and at Full access a newer release keeps them as unverified
+ * (`acpExactReleaseClaim`).
+ */
 function baseCapabilities(
   profile: AcpProviderProfile,
   appManagedTools: ProviderCapabilitySupport = "unsupported",
   version?: string,
+  executionPolicy?: ProviderExecutionPolicy,
 ) {
+  const claims = (reviewed: ReadonlyArray<string> | undefined) =>
+    acpExactReleaseClaim(reviewed, version, executionPolicy) !== "absent";
+  // Compaction and file review run on a session the host resumes for them
+  // read-only, whatever the thread's level, so their pin holds at Full
+  // access too (`ACP_HOST_SESSION_RELEASE_POLICY`).
   const compaction: ProviderCapabilitySupport = !hasVerifiedCompaction(profile)
     ? "unsupported"
-    : version === "3.0.3"
+    : acpExactReleaseClaim(profile.compactionVersions, version, ACP_HOST_SESSION_RELEASE_POLICY) !==
+        "absent"
       ? "supported"
       : "unavailable";
   return {
@@ -265,14 +286,11 @@ function baseCapabilities(
     userQuestions:
       profile.kind !== "mistral-vibe" || profile.elicitationVersions === undefined
         ? profile.userQuestions
-        : version === "3.0.3" && profile.elicitationVersions.includes(version)
+        : claims(profile.elicitationVersions)
           ? "supported"
           : "unavailable",
     reasoning: "unavailable",
-    usage:
-      version !== undefined && profile.usageVersions?.includes(version) === true
-        ? "supported"
-        : "unsupported",
+    usage: claims(profile.usageVersions) ? "supported" : "unsupported",
     toolActivity: "supported",
     fileChanges: "unavailable",
     diffs: "unavailable",
@@ -327,11 +345,13 @@ function negotiatedAppManagedTools(
   initialized: AcpConnection["initialized"],
   profile: AcpProviderProfile,
   version: string,
+  executionPolicy?: ProviderExecutionPolicy,
 ): ProviderCapabilitySupport {
   return appToolBridgeReachesLaunchOn(process.platform) &&
     (initialized.agentCapabilities.mcpCapabilities?.http === true ||
       (initialized.agentCapabilities.mcpCapabilities?.http === undefined &&
-        profile.unadvertisedHttpMcpVersions?.includes(version) === true))
+        acpExactReleaseClaim(profile.unadvertisedHttpMcpVersions, version, executionPolicy) !==
+          "absent"))
     ? "supported"
     : "unsupported";
 }
@@ -616,6 +636,20 @@ function normalizeProbe(
     initialized.agentCapabilities.sessionCapabilities?.resume !== undefined
       ? ("supported" as const)
       : ("unsupported" as const);
+  const pinned = baseCapabilities(
+    profile,
+    negotiatedAppManagedTools(initialized, profile, version),
+    version,
+  );
+  const atFullAccess = unverifiedAtFullAccess(
+    pinned,
+    baseCapabilities(
+      profile,
+      negotiatedAppManagedTools(initialized, profile, version, "full-access"),
+      version,
+      "full-access",
+    ),
+  );
   return decodeProviderProbeResult({
     instanceId,
     readiness: models.length === 0 ? "degraded" : "ready",
@@ -624,11 +658,8 @@ function normalizeProbe(
     ...(credentialStatus === undefined ? {} : { credentialStatus }),
     models,
     capabilities: {
-      ...baseCapabilities(
-        profile,
-        negotiatedAppManagedTools(initialized, profile, version),
-        version,
-      ),
+      ...pinned,
+      ...(atFullAccess === undefined ? {} : { atFullAccess }),
       nativeAttachments:
         promptInputs.image || promptInputs.embeddedContext ? "supported" : "unsupported",
       resume,
@@ -636,10 +667,52 @@ function normalizeProbe(
     },
     ...(models.length === 0
       ? { message: `${profile.displayName} did not report a selectable model.` }
-      : {}),
+      : atFullAccess === undefined
+        ? {}
+        : { message: unverifiedReleaseMessage(profile, version, pinned, atFullAccess) }),
     lastSuccessfulProbeAt: observedAt,
     observedAt,
   });
+}
+
+type AcpLevelCapabilities = ReturnType<typeof baseCapabilities>;
+type AcpFullAccessCapabilities = NonNullable<ProviderCapabilities["atFullAccess"]>;
+
+/**
+ * Full access's own value, present only where it differs from every other
+ * level's: the probe used to report one value for all of them, so a release
+ * newer than the reviewed one lost its pinned features at Full access too.
+ */
+function unverifiedAtFullAccess(
+  pinned: AcpLevelCapabilities,
+  open: AcpLevelCapabilities,
+): AcpFullAccessCapabilities | undefined {
+  const differs =
+    pinned.usage !== open.usage ||
+    pinned.userQuestions !== open.userQuestions ||
+    pinned.appManagedTools !== open.appManagedTools;
+  if (!differs) return undefined;
+  return {
+    release: "unverified",
+    usage: open.usage,
+    userQuestions: open.userQuestions,
+    appManagedTools: open.appManagedTools,
+  };
+}
+
+/** What the runtime card says of a release newer than the one Octant reviewed. */
+function unverifiedReleaseMessage(
+  profile: AcpProviderProfile,
+  version: string,
+  pinned: AcpLevelCapabilities,
+  open: AcpFullAccessCapabilities,
+): string {
+  const kept = [
+    ...(pinned.usage !== open.usage ? ["usage"] : []),
+    ...(pinned.userQuestions !== open.userQuestions ? ["forms"] : []),
+    ...(pinned.appManagedTools !== open.appManagedTools ? ["Octant's tools"] : []),
+  ];
+  return `${profile.displayName} ${version} is newer than the release Octant reviewed. At Full access it keeps ${kept.join(", ")}, unverified; below Full access those stay off until Octant reviews this release.`;
 }
 
 function makeClient(connection: AcpAgentConnection): AcpClientPort {
@@ -1282,8 +1355,11 @@ function makeConnection(
       if (requestMessage.method === "elicitation/create") {
         const enabled =
           profile.kind === "mistral-vibe" &&
-          state.runtime.version === "3.0.3" &&
-          profile.elicitationVersions?.includes(state.runtime.version) === true;
+          acpExactReleaseClaim(
+            profile.elicitationVersions,
+            state.runtime.version,
+            state.executionPolicy,
+          ) !== "absent";
         const form = normalizeAcpElicitation(
           requestMessage.params.message,
           requestMessage.params.requestedSchema,
@@ -1754,6 +1830,7 @@ function makeConnection(
               connection.initialized,
               profile,
               connection.version,
+              input.executionPolicy,
             );
             if (bridgeTools.length > 0 && appManagedTools !== "supported") {
               throw failure(
@@ -1779,7 +1856,13 @@ function makeConnection(
             // new/load can send their baseline before replying. Listen before
             // opening the session, then keep only its exact native identity.
             const initialUsage: AcpUsageState | undefined =
-              profile.usageVersions?.includes(connection.version) === true ? {} : undefined;
+              acpExactReleaseClaim(
+                profile.usageVersions,
+                connection.version,
+                input.executionPolicy,
+              ) === "absent"
+                ? undefined
+                : {};
             let usageSessionId = sourceSessionId;
             let usageMismatch = false;
             if (initialUsage !== undefined) {
@@ -2079,8 +2162,11 @@ function makeConnection(
                   if (state.promptActive || state.compacting)
                     return { kind: "refused", reason: "turn-running" } as const;
                   if (
-                    state.runtime.version !== "3.0.3" ||
-                    profile.compactionVersions?.includes(state.runtime.version) !== true ||
+                    acpExactReleaseClaim(
+                      profile.compactionVersions,
+                      state.runtime.version,
+                      ACP_HOST_SESSION_RELEASE_POLICY,
+                    ) === "absent" ||
                     !state.runtime.commands.has("compact")
                   )
                     return { kind: "refused", reason: "runtime-version-unsupported" } as const;
@@ -2125,10 +2211,15 @@ function makeConnection(
                   return { status: "refused", reason: "no-session" } as const;
                 if (state.promptActive || state.compacting)
                   return { status: "refused", reason: "turn-running" } as const;
-                if (profile.fileReviewVersions?.includes(state.runtime.version) !== true)
+                if (
+                  acpExactReleaseClaim(
+                    profile.fileReviewVersions,
+                    state.runtime.version,
+                    ACP_HOST_SESSION_RELEASE_POLICY,
+                  ) === "absent"
+                )
                   return { status: "refused", reason: "unsupported" } as const;
                 return readAcpFileReview({
-                  runtimeVersion: state.runtime.version,
                   sourceSessionId: state.sourceSessionId,
                   path: input.path,
                   root: projectRoot,
@@ -2394,7 +2485,11 @@ function makeConnection(
               if (
                 options.sandboxPolicy === undefined &&
                 state.completed &&
-                profile.retainedSessionVersions?.includes(state.runtime.version) === true &&
+                acpExactReleaseClaim(
+                  profile.retainedSessionVersions,
+                  state.runtime.version,
+                  state.executionPolicy,
+                ) !== "absent" &&
                 state.approvals.size === 0 &&
                 state.questions.size === 0 &&
                 state.pendingToolAnswers.size === 0 &&

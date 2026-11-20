@@ -1,6 +1,10 @@
 import type { Readable, Writable } from "node:stream";
 import type { ExtensionDebugChildAnnouncement } from "@octant/contracts";
-import { contentLength, frameHeader } from "./languageServerConnection";
+import {
+  ContentLengthFrames,
+  frameHeader,
+  type ContentLengthFrameViolation,
+} from "./contentLengthFrames";
 
 /**
  * Octant's end of one debug adapter's Debug Adapter Protocol connection:
@@ -22,7 +26,6 @@ import { contentLength, frameHeader } from "./languageServerConnection";
 
 /** The largest frame either side may send, body bytes. */
 export const DEBUG_ADAPTER_FRAME_CAP_BYTES = 4 * 1024 * 1024;
-const MAX_HEADER_BYTES = 8 * 1024;
 
 /**
  * What Octant sends: the closed list. `restart`, memory and reverse requests
@@ -117,7 +120,7 @@ export type DebugAdapterResponse =
   /** The connection ended before an answer, or the request could not be sent. */
   | { readonly status: "closed" };
 
-export type DebugAdapterViolation = "oversize-frame" | "malformed-frame";
+export type DebugAdapterViolation = ContentLengthFrameViolation;
 
 /**
  * Which connection this is: the session's own, on the capsule's stdio, which
@@ -163,7 +166,7 @@ export class DebugAdapterConnection {
   readonly #childAnnouncement: ExtensionDebugChildAnnouncement | undefined;
   readonly #onChildAnnounced: DebugAdapterConnectionOptions["onChildAnnounced"];
   readonly #pending = new Map<number, PendingRequest>();
-  #buffered: Buffer = Buffer.alloc(0);
+  readonly #frames: ContentLengthFrames;
   #nextSeq = 1;
   #closed = false;
 
@@ -176,7 +179,12 @@ export class DebugAdapterConnection {
     this.#role = options.role ?? "session";
     this.#childAnnouncement = this.#role === "session" ? options.childAnnouncement : undefined;
     this.#onChildAnnounced = options.onChildAnnounced;
-    options.input.on("data", (chunk: Buffer) => this.#receive(chunk));
+    this.#frames = new ContentLengthFrames(
+      DEBUG_ADAPTER_FRAME_CAP_BYTES,
+      (body) => this.#body(body),
+      (violation) => this.#violate(violation),
+    );
+    options.input.on("data", (chunk: Buffer) => this.#frames.push(chunk));
     options.input.on("end", () => this.close());
     options.input.on("error", () => this.close());
     // An adapter that exits mid-write must not take the host down with EPIPE.
@@ -230,7 +238,7 @@ export class DebugAdapterConnection {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
-    this.#buffered = Buffer.alloc(0);
+    this.#frames.close();
     for (const seq of this.#pending.keys()) this.#settle(seq, { status: "closed" });
   }
 
@@ -261,48 +269,20 @@ export class DebugAdapterConnection {
     this.#onViolation(violation);
   }
 
-  #receive(chunk: Buffer): void {
-    if (this.#closed) return;
-    this.#buffered =
-      this.#buffered.byteLength === 0 ? chunk : Buffer.concat([this.#buffered, chunk]);
-    while (!this.#closed) {
-      const headerEnd = this.#buffered.indexOf("\r\n\r\n");
-      if (headerEnd < 0) {
-        if (this.#buffered.byteLength > MAX_HEADER_BYTES) this.#violate("malformed-frame");
-        return;
-      }
-      if (headerEnd > MAX_HEADER_BYTES) {
-        this.#violate("malformed-frame");
-        return;
-      }
-      const length = contentLength(this.#buffered.subarray(0, headerEnd).toString("ascii"));
-      if (length === undefined) {
-        this.#violate("malformed-frame");
-        return;
-      }
-      // Judged on the declared length, before the body arrives, so an adapter
-      // cannot make the host buffer past the cap by sending slowly.
-      if (length > DEBUG_ADAPTER_FRAME_CAP_BYTES) {
-        this.#violate("oversize-frame");
-        return;
-      }
-      const bodyStart = headerEnd + 4;
-      if (this.#buffered.byteLength < bodyStart + length) return;
-      const body = this.#buffered.subarray(bodyStart, bodyStart + length);
-      this.#buffered = this.#buffered.subarray(bodyStart + length);
-      let message: unknown;
-      try {
-        message = JSON.parse(body.toString("utf8"));
-      } catch {
-        this.#violate("malformed-frame");
-        return;
-      }
-      if (!isRecord(message)) {
-        this.#violate("malformed-frame");
-        return;
-      }
-      this.#dispatch(message);
+  /** One complete frame body: a protocol message or a violation. */
+  #body(body: Buffer): void {
+    let message: unknown;
+    try {
+      message = JSON.parse(body.toString("utf8"));
+    } catch {
+      this.#violate("malformed-frame");
+      return;
     }
+    if (!isRecord(message)) {
+      this.#violate("malformed-frame");
+      return;
+    }
+    this.#dispatch(message);
   }
 
   /**

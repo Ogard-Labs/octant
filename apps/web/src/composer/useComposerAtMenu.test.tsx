@@ -9,7 +9,12 @@ import {
   useComposerSlashCommands,
   type ComposerProviderCommands,
 } from "./useComposerSlashCommands";
-import { ComposerAtTypeahead, useComposerAtMenu, type AtMenuFiles } from "./useComposerAtMenu";
+import {
+  ComposerAtTypeahead,
+  useComposerAtMenu,
+  type AtMenuFiles,
+  type ComposerProviderMentions,
+} from "./useComposerAtMenu";
 
 const COMMANDS: ReadonlyArray<OctantCommand> = [
   {
@@ -48,6 +53,7 @@ function Harness(props: {
   readonly resolve: (reference: string) => Promise<boolean>;
   readonly files?: AtMenuFiles;
   readonly provider?: ComposerProviderCommands;
+  readonly mentions?: ComposerProviderMentions;
 }) {
   const [draft, setDraft] = useState("");
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -57,6 +63,7 @@ function Harness(props: {
     onResolveExtensionReference: props.resolve,
     textarea: () => textarea.current,
     ...(props.files === undefined ? {} : { files: props.files }),
+    provider: props.mentions,
   });
   const slash = useComposerSlashCommands({
     draft,
@@ -168,6 +175,42 @@ describe("composer @ menu", () => {
     await user.type(message, "@");
     await user.keyboard("{ArrowDown}{Enter}");
     expect(resolve).toHaveBeenCalledExactlyOnceWith("@docs/search");
+  });
+
+  it("lists the provider's own skills and plugins after Octant's and writes the chosen one's own reference", async () => {
+    const user = userEvent.setup();
+    const resolve = vi.fn(async (_reference: string) => true);
+    const mentions: ComposerProviderMentions = {
+      label: "Codex",
+      mentions: [
+        { kind: "skill", name: "tidy", description: "Tidy the code" },
+        { kind: "plugin", name: "docs", description: "Search the docs" },
+      ],
+    };
+    render(
+      <OctantCommandProvider commands={COMMANDS}>
+        <Harness resolve={resolve} mentions={mentions} />
+      </OctantCommandProvider>,
+    );
+    const message = screen.getByRole("textbox", { name: "Message" });
+    await user.type(message, "@");
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "ReviewSkill",
+      "Docs searchMCP server · Docs",
+      "NotesConnector",
+      "$tidyCodex's own skill · Tidy the code",
+      "@docsCodex's own plugin · Search the docs",
+    ]);
+    await user.clear(message);
+    await user.type(message, "Ask @ti");
+    await user.click(screen.getByRole("option", { name: /\$tidy/ }));
+    // The provider resolves its own reference at send; Octant's resolver is not asked.
+    expect(message).toHaveValue("Ask $tidy ");
+    expect(message).toHaveFocus();
+    expect(resolve).not.toHaveBeenCalled();
+    await user.type(message, "@do");
+    await user.click(screen.getByRole("option", { name: /@docs/ }));
+    expect(message).toHaveValue("Ask $tidy @docs ");
   });
 
   it("offers nothing for an at sign inside a word or an unmatched query", async () => {

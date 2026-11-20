@@ -32,6 +32,7 @@ import {
   buildCompactIdentity,
   defaultEnvironmentPresentationState,
   defaultShellSettings,
+  nextMessageSuggestionsOn,
   defaultWindowWorkspace,
   deriveChatEnvironmentProjection,
   deriveCodeEnvironmentProjection,
@@ -2761,5 +2762,72 @@ describe("panes of several Projects in one window", () => {
       fastest = Math.min(fastest, ((performance.now() - started) * 1000) / rounds);
     }
     expect(fastest).toBeLessThan(50);
+  });
+});
+
+describe("next-message suggestions setting", () => {
+  it("suggests the next message in every mode until the person changes the setting", () => {
+    for (const mode of ["chat", "work", "code"] as const) {
+      expect(nextMessageSuggestionsOn(undefined, mode)).toBe(true);
+      expect(nextMessageSuggestionsOn(defaultShellSettings(), mode)).toBe(true);
+    }
+  });
+
+  it("suggests only in the chosen modes, and nowhere once switched off", () => {
+    const some = { nextMessageSuggestions: { enabled: true, modes: ["chat", "code"] as const } };
+    expect(nextMessageSuggestionsOn(some, "chat")).toBe(true);
+    expect(nextMessageSuggestionsOn(some, "work")).toBe(false);
+    const off = {
+      nextMessageSuggestions: { enabled: false, modes: ["chat", "work", "code"] as const },
+    };
+    expect(nextMessageSuggestionsOn(off, "chat")).toBe(false);
+  });
+});
+
+describe("home card activity preservation", () => {
+  const activity: NonNullable<ShellSettings["homeCards"]["activity"]> = {
+    sharedRange: { kind: "last-month" },
+    source: "octant",
+    pins: [{ card: "runs", range: { kind: "today" } }],
+  };
+
+  it("keeps stored activity choices when an older client rewrites the document", () => {
+    const current: ShellSettings = {
+      ...defaultShellSettings(),
+      homeCards: { order: [], visibility: [], activity },
+    };
+    const replacement: ShellSettings = {
+      ...defaultShellSettings(),
+      homeCards: { order: ["activity-runs"], visibility: [] },
+    };
+    const next = replaceShellSettings(current, replacement);
+    expect(next.homeCards.order).toEqual(["activity-runs"]);
+    expect(next.homeCards.activity).toEqual(activity);
+  });
+
+  it("lets a newer client replace the activity choices", () => {
+    const current: ShellSettings = {
+      ...defaultShellSettings(),
+      homeCards: { order: [], visibility: [], activity },
+    };
+    const replacement: ShellSettings = {
+      ...defaultShellSettings(),
+      homeCards: {
+        order: [],
+        visibility: [],
+        activity: { sharedRange: { kind: "total" }, source: "github", pins: [] },
+      },
+    };
+    expect(replaceShellSettings(current, replacement).homeCards.activity).toEqual({
+      sharedRange: { kind: "total" },
+      source: "github",
+      pins: [],
+    });
+  });
+
+  it("leaves activity absent when neither side recorded it", () => {
+    const current = defaultShellSettings();
+    const replacement = defaultShellSettings();
+    expect(replaceShellSettings(current, replacement).homeCards.activity).toBeUndefined();
   });
 });

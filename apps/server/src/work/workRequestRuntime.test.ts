@@ -816,6 +816,21 @@ describe("WorkRequestRuntime", () => {
       });
     }
 
+    it("records a screened ask without backdating it to the provider's event stamp", async () => {
+      // Screening runs before the record exists: the journal stamps the ask
+      // when the host records it, and the provider's own stamp never rewrites
+      // that boundary.
+      const review = vi.fn(
+        async () =>
+          await new Promise<ShieldDecision>((resolve) =>
+            setTimeout(() => resolve(decision("ask")), 25),
+          ),
+      );
+      const turn = await runTurn({ tool: "Bash", input: "{}", review });
+      expect(turn.record).toHaveBeenCalledOnce();
+      expect(turn.record.mock.calls[0]?.[0]).not.toHaveProperty("requestedAt");
+    });
+
     it("puts the agent's ask to leave Plan to the person whatever Shield would say, with its plan whole", async () => {
       const review = vi.fn(async () => decision("allow"));
       const turn = await runTurn({

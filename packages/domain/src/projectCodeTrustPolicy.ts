@@ -10,8 +10,11 @@ export interface ProjectCodeEntry {
 
 /**
  * The entries at a Project root that each key provider loads as the
- * Project's own code only once the person trusts the Project for it: the same
- * entries its driver keeps out until then.
+ * Project's own code: the entries its driver keeps out until the Project
+ * trusts it. Outside Strict every Project the person added trusts every
+ * agent (maintainer decision, 2026-11-18); under Strict these wait for the
+ * person's confirmation. A Project's instruction files (`AGENTS.md`,
+ * `CLAUDE.md` and the like) are never listed: every runtime reads them.
  *
  * Claude Code reads a Project's settings and skills only through its
  * `project` and `local` setting sources, and starts a Project's `.mcp.json`
@@ -20,9 +23,9 @@ export interface ProjectCodeEntry {
  * the `.opencode` agents, commands, plugins, and tools only once
  * `OPENCODE_DISABLE_PROJECT_CONFIG` is lifted, which happens only with the
  * Project's trust and outside Plan (maintainer decision, 2026-11-14). Codex
- * lists nothing: Octant's trust loads none of its Project configuration
- * (Codex's own folder trust decides it), so a prompt to trust for it would
- * promise something that does not happen.
+ * loads `.codex/config.toml` in every folder it trusts, and Octant tells it
+ * every Project folder is trusted, so a Strict Codex thread is refused
+ * until the person confirms a Project holding that file.
  *
  * Each ACP agent lists the Project entries its launch keeps unreadable, or
  * refuses the Project over, until the Project is trusted for it
@@ -150,7 +153,7 @@ export function projectCodeEntries(
 export interface ProjectCodeTrustInput {
   readonly driverKind: ProviderDriverKind;
   readonly projectType: "chat" | "work" | "code";
-  /** The Project lists this provider in `nativeProviders`. */
+  /** Outside Strict, always; under Strict, the Project lists this provider in `nativeProviders`. */
   readonly trusted: boolean;
   /** Which of `projectCodeEntries(driverKind)` paths exist at the Project root. */
   readonly present: ReadonlyArray<string>;
@@ -159,10 +162,9 @@ export interface ProjectCodeTrustInput {
 /**
  * Whether a thread's Project holds its provider's own Project code, and
  * whether the Project trusts that provider to load it. Untrusted is the one
- * answer that asks the person: the person's own setup loads everywhere, and a
- * Project's own code loads after one trust per Project and provider
- * (maintainer decision, 2026-11-14), as the providers' own folder-trust
- * prompts ask.
+ * answer that asks the person, and only Strict gives it: adding a Project is
+ * already the person's trust decision (maintainer decision, 2026-11-18), and
+ * Strict asks once per Project before its code that can run loads.
  */
 export function projectCodeTrust(input: ProjectCodeTrustInput): ThreadProjectCode {
   if (input.projectType === "chat" || !isKeyProviderDriverKind(input.driverKind)) {

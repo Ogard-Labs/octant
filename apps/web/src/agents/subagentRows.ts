@@ -178,6 +178,30 @@ export function nestSubagentRows<Row extends { readonly id: string; readonly par
   return ordered;
 }
 
+/** When a subagent started: the run's request, or the first sight of a provider's own. */
+export function subagentStartedAt(row: SubagentRow): string {
+  return row.kind === "octant-started"
+    ? (row.entry.createdAt ?? row.updatedAt)
+    : row.child.firstObservedAt;
+}
+
+/**
+ * "5m 21s", "17s", "1h 4m": how long the subagent ran, or has run so far. It
+ * is measured from the run's request (or first sight of a provider's own) to
+ * its last update, and to `now` while it works, so a finished run's time stops.
+ * Empty when either time cannot be read.
+ */
+export function subagentRunTime(row: SubagentRow, now: number): string {
+  const started = Date.parse(subagentStartedAt(row));
+  const ended = isActiveAgentHierarchyStatus(row.lifecycleStatus) ? now : Date.parse(row.updatedAt);
+  const seconds = Math.max(0, Math.floor((ended - started) / 1_000));
+  if (!Number.isFinite(seconds)) return "";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
 export function isActiveSubagentRow(row: SubagentRow): boolean {
   return isActiveAgentHierarchyStatus(row.lifecycleStatus);
 }

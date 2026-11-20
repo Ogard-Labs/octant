@@ -341,7 +341,9 @@ thread made.
   device may do none of these and sees "Signed-in page — open it on this
   Mac."; a profile approval from a phone-started turn waits for a local
   window, and the phone neither sees nor answers it. An approval for a page
-  outside a profile is answered as every Browser approval is.
+  outside a profile is answered as every Browser approval is. The design that
+  opens these is
+  [What a paired device sees of a signed-in page](#what-a-paired-device-sees-of-a-signed-in-page).
 - **Unattended turns.** A routine or managed child uses a stored profile only with
   the explicit, persistent [delegated session permission](#delegated-sessions) below; it
   never inherits another caller's page, sign-in permission or authority.
@@ -369,7 +371,57 @@ icon shows the page's profile at all times. The person can take the page
 from the agent with **Take over**
 ([Person and agent together](browser-agent-tool.md#person-and-agent-together));
 a paired device can too (maintainer decision, 2026-11-12; not built yet: today a
-paired device cannot, signed in or not).
+paired device cannot, signed in or not; designed in
+[A paired device holds the page](browser-agent-tool.md#a-paired-device-holds-the-page)).
+
+### What a paired device sees of a signed-in page
+
+Designed, not built (maintainer request, 2026-11-18). A device the host's own
+person paired is the person, so it sees a profile page as the person at the
+Mac does; what changes is how the content travels and what may keep it.
+
+- **Who.** A `person-paired-device` principal only. A device the hub's roster
+  introduced, an agent grant and a caller with no session keep today's
+  answer: the page exists, and "Signed-in page — open it on this Mac."
+- **What it sees.** The page's address, title, picture and the text the
+  person's own Browser pane reads, as a window does. The picture is a
+  person-only frame (the
+  [frame rules](browser-agent-tool.md#a-paired-device-holds-the-page)): never
+  in an agent observation, a capture, the journal, an export or a log, and
+  kept by no client past the one it shows. A capture the person takes from a
+  device is a person capture under [Browser captures](browser-captures.md),
+  naming the profile, as at a window.
+- **Only while open.** The host streams a profile page's content only while
+  the device's Browser pane shows that page or holds its lease; a device's
+  list of pages carries each profile page's site, profile and title, never its
+  content, and nothing is pushed to a device in the background or to a
+  notification.
+- **What is withheld still.** A frame is withheld while brokered fill or a
+  page script holds private custody, and while a native permission or
+  authentication prompt covers the page. The fixed readers' credential
+  protections stay: the text a device reads never carries a password or
+  one-time-code field's value. What the page itself shows the device shows.
+- **Approvals.** A profile site approval raised by any turn is offered to every
+  window and person-paired device that can see the thread, the phone that
+  started the turn included, and the first answer settles it, journaled with
+  its answerer. "Always allow" and "Allow all sites in this profile" from a
+  device are remembered exactly as from a window.
+- **Opening, switching, listing and clearing.** A device opens a profile page,
+  switches a page to a profile, lists profiles and clears one through the
+  same routes as a window, each journaled with the device as the actor; the
+  refusal "A profile page opens at a window on this computer." and
+  `profile-not-local` are retired for a person-paired device. Cookie import
+  keeps its own rule ([Cookie import](#cookie-import)): its Keychain prompt
+  appears on the Mac, which a person at a phone cannot answer.
+- Rationale: the 2026-11-12 decision already lets the device see the page;
+  the design only has to stop the content outliving the view. Streaming only
+  while the page is on screen, as frames nobody keeps, gives the person what a
+  window gives and adds no new copy of a signed-in page anywhere.
+- Rejected: a text-only view of profile pages for devices (it would still be
+  the account's content, so it protects nothing, and loses what the page
+  shows); and a per-page confirmation at the Mac before a device may look,
+  which would make the phone useless away from the Mac and contradicts the
+  rule that a person-paired device is the person.
 
 ## Delegated sessions
 

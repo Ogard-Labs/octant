@@ -25,7 +25,6 @@ import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { useMinuteTick } from "../polling/useMinuteTick";
-import { InboxPlanUsageRows, useInboxPlanUsage } from "./InboxPlanUsage";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   assignedWorkMeta,
@@ -226,7 +225,6 @@ export function InboxView(props: InboxViewProps) {
   );
   const activeFilter = INBOX_FILTERS.find((entry) => entry.id === filter);
 
-  const planUsage = useInboxPlanUsage();
   // A page left open past midnight must change its date, in a remote window
   // too, which has no decision source and so no app clock. The page keeps its
   // own minute tick, cleared on unmount.
@@ -503,11 +501,6 @@ export function InboxView(props: InboxViewProps) {
                   </ul>
                 </>
               )}
-            </InboxCard>
-          )}
-          {planUsage.length === 0 ? null : (
-            <InboxCard label="Plan usage">
-              <InboxPlanUsageRows usage={planUsage} />
             </InboxCard>
           )}
         </div>

@@ -126,6 +126,12 @@ import {
   type CodeLanguageDocumentRequest,
   type CodeLanguageReadRequest,
 } from "@octant/contracts/code-language";
+import {
+  ActivityView,
+  decodeActivityQuery,
+  encodeActivityQuery,
+  type ActivityQuery,
+} from "@octant/contracts/code-home-activity";
 import { bindFetchPort } from "./bindFetchPort";
 import {
   sendWithOwnerUnlock,
@@ -257,6 +263,14 @@ export interface CodeClient {
   ): Promise<CodeProjectPullRequestSwitchOutcome>;
   /** Tells the host the person is composing in a Code thread, so Auto-fix holds back. */
   noteComposerActivity?(threadId: CodeThreadId): Promise<void>;
+  /**
+   * The authorized Code Home activity view: one initial read with totals and
+   * the first page, or a later page of the snapshot that read froze.
+   *
+   * Optional like `listTests`: a host without the history answers unavailable
+   * through the view itself, and a client composite without it renders none.
+   */
+  readHomeActivity?(query: ActivityQuery): Promise<ActivityView>;
   readFollowUp(threadId: CodeThreadId): Promise<CodeThreadFollowUpView>;
   executeFollowUp(command: CodeFollowUpCommand): Promise<CodeThreadFollowUpUpdated>;
   /**
@@ -767,6 +781,24 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         },
       );
       if (!response.ok) await rejectFailure(response);
+    },
+    async readHomeActivity(query) {
+      let validated: ActivityQuery;
+      try {
+        validated = decodeActivityQuery(query);
+      } catch {
+        throw invalidCommand();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/home-activity", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(encodeActivityQuery(validated)),
+        },
+        decodeHostAnswer(ActivityView),
+      );
     },
     readFollowUp(threadId) {
       try {

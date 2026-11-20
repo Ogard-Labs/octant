@@ -99,6 +99,7 @@
     "./todo-client": "./src/todoClient.ts",
     "./octant-instructions-client": "./src/octantInstructionsClient.ts",
     "./protected-files-client": "./src/protectedFilesClient.ts",
+    "./blocked-tools-client": "./src/blockedToolsClient.ts",
     "./archived-worktrees-client": "./src/archivedWorktreesClient.ts",
     "./disk-cleanup-client": "./src/diskCleanupClient.ts",
     "./provider-federation": "./src/providerFederation.ts",

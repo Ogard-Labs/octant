@@ -18,7 +18,11 @@ import {
   ComposerSlashTypeahead,
   composerProviderCommands,
 } from "../../composer/useComposerSlashCommands";
-import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
+import {
+  ComposerAtTypeahead,
+  composerProviderMentions,
+  useComposerAtMenu,
+} from "../../composer/useComposerAtMenu";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type {
   ProviderInstanceId,
@@ -152,6 +156,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     provider: composerProviderCommands(props.providerGroups, props.selectedProviderInstanceId),
   });
   const atMenu = useComposerAtMenu({
+    provider: composerProviderMentions(props.providerGroups, props.selectedProviderInstanceId),
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,

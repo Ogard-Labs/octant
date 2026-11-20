@@ -640,10 +640,7 @@ describe("NativeHarnessRoutingPanel model tags", () => {
       routing: async () => roles({ default: [candidate(endpointA, "scribe-2")] }),
       fixtures: [local],
       wrap: (panel) => (
-        <PlanUsageProvider
-          barStyle="smooth"
-          client={{ list: vi.fn(async () => snapshot) } as never}
-        >
+        <PlanUsageProvider client={{ list: vi.fn(async () => snapshot) } as never}>
           {panel}
         </PlanUsageProvider>
       ),

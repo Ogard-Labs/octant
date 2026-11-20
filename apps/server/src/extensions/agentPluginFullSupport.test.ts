@@ -1186,6 +1186,136 @@ describe("Agent Plugin MCP session manager", () => {
     await manager.drainAll();
   });
 
+  it("keeps each tool's input schema when catalogue tools share one normalized $id", async () => {
+    const sharedId = "https://schemas.test/tools/shared";
+    const fetchImpl = (async (input, init) => {
+      if ((init?.method ?? "GET") === "DELETE") return new Response(null, { status: 204 });
+      const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string; id?: number };
+      if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+      const url = String(input);
+      return Response.json({
+        jsonrpc: "2.0",
+        id: body.id,
+        result:
+          body.method === "tools/list"
+            ? url.endsWith("/one")
+              ? {
+                  tools: [
+                    {
+                      name: "alpha",
+                      inputSchema: {
+                        $id: sharedId,
+                        type: "object",
+                        properties: { a: { type: "string" } },
+                        required: ["a"],
+                        additionalProperties: false,
+                      },
+                    },
+                    {
+                      name: "beta",
+                      inputSchema: {
+                        $id: `${sharedId}#`,
+                        type: "object",
+                        properties: { b: { type: "number" } },
+                        required: ["b"],
+                        additionalProperties: false,
+                      },
+                    },
+                  ],
+                }
+              : {
+                  tools: [
+                    {
+                      name: "gamma",
+                      inputSchema: {
+                        $id: sharedId,
+                        type: "object",
+                        properties: { c: { type: "boolean" } },
+                        required: ["c"],
+                        additionalProperties: false,
+                      },
+                    },
+                  ],
+                }
+            : {
+                protocolVersion: "2025-03-26",
+                capabilities: {},
+                serverInfo: { name: "shared", version: "1.0.0" },
+              },
+      });
+    }) as typeof fetch;
+    const manager = new AgentPluginMcpSessionManager({
+      store: {
+        contentRoot: () => "/tmp/plugin",
+        pluginDataRoot: () => "/tmp/plugin-data",
+        readVerifiedConfiguration: async () =>
+          JSON.stringify({
+            $schema: AGENT_PLUGINS_MCP_SCHEMA,
+            mcpServers: {
+              one: { type: "streamable-http", url: "https://example.test/one" },
+              two: { type: "streamable-http", url: "https://example.test/two" },
+            },
+          }),
+      },
+      fetch: fetchImpl,
+      authorizeToolCall: async () => false,
+    } as never);
+    const effective = effectiveMcpSnapshot("mcp-one", "one");
+    const currentComponent = effective.packages[0]!.components[0]!;
+    await manager.reconcile({
+      ...effective,
+      packages: [
+        {
+          ...effective.packages[0],
+          components: [
+            currentComponent,
+            {
+              component: { ...currentComponent.component, id: "mcp-two", displayName: "two" },
+              effectiveState: { kind: "effective" },
+            },
+          ],
+        },
+      ],
+    } as never);
+    const definitions = manager.toolDefinitions();
+    expect(definitions).toHaveLength(3);
+    const named = (fragment: string) => {
+      const definition = definitions.find((candidate) => candidate.name.includes(fragment));
+      expect(definition).toBeDefined();
+      return definition!.name;
+    };
+    const alpha = named("alpha");
+    const beta = named("beta");
+    const gamma = named("gamma");
+
+    const execute = (name: string, inputJson: string) =>
+      manager.createToolExecutionPort().execute({
+        thread: { id: effective.scope.threadId } as never,
+        name,
+        inputJson,
+      });
+
+    await expect(execute(alpha, '{"a":"x"}')).resolves.toMatchObject({
+      result: { error: "extension-tool-approval-required" },
+    });
+    await expect(execute(beta, '{"a":"x"}')).resolves.toMatchObject({
+      result: { error: "extension-tool-input-invalid" },
+    });
+    await expect(execute(beta, '{"b":1}')).resolves.toMatchObject({
+      result: { error: "extension-tool-approval-required" },
+    });
+    await expect(execute(alpha, '{"b":1}')).resolves.toMatchObject({
+      result: { error: "extension-tool-input-invalid" },
+    });
+    await expect(execute(gamma, '{"c":true}')).resolves.toMatchObject({
+      result: { error: "extension-tool-approval-required" },
+    });
+    await expect(execute(gamma, '{"a":"x"}')).resolves.toMatchObject({
+      result: { error: "extension-tool-input-invalid" },
+    });
+    await manager.drainAll();
+  });
+
   it("names a plugin's tools with identifier characters only, so Codex can offer them", async () => {
     const manager = new AgentPluginMcpSessionManager({
       store: {

@@ -73,6 +73,9 @@ function createService(
         readonly requestId: string;
         readonly kind: "approval" | "user-input";
       }) => Promise<void>;
+      changeLevelInPlace: (input: {
+        readonly sessionId: string;
+      }) => Promise<{ readonly status: "applied" | "refused" | "failed" }>;
     }>;
     levelChanges?: WorkRequestLevelChangePort;
     eventStore?: {
@@ -155,6 +158,44 @@ describe("WorkRequestService.record", () => {
     expect(result.request.version).toBe(1);
   });
 
+  it("settles with the journal's own ask and settle stamps for the wait a caller bills", async () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "provider-req-1",
+      detail: approvalDetail,
+    });
+    expect(recorded.status).toBe("ok");
+    if (recorded.status !== "ok") return;
+    const heard: Array<{
+      readonly person: boolean;
+      readonly requestedAt?: string;
+      readonly settledAt?: string;
+    }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "provider-req-1" },
+      (settled) => heard.push(settled ?? { person: false }),
+    );
+    await service.resolve({
+      kind: "resolve-work-request",
+      requestId: recorded.request.requestId,
+      expectedVersion: recorded.request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+    // A listener arriving after the settle reads the same recorded pair.
+    const late: typeof heard = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "provider-req-1" },
+      (settled) => late.push(settled ?? { person: false }),
+    );
+    expect(late).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
   it("settles listeners by provider session and callback identity", async () => {
     const { service } = createService();
     let settled = false;
@@ -191,6 +232,130 @@ describe("WorkRequestService.record", () => {
 
     expect(settled).toBe(true);
     removeListener();
+  });
+
+  it("tells a listener registering after the answer that a person settled, at the recorded instant", async () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "call_quick",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+
+    // The person answers before the turn's settle listener ever registers —
+    // the common race between the provider event and the journal's request.
+    await service.resolve({
+      kind: "resolve-work-request",
+      requestId: recorded.request.requestId,
+      expectedVersion: recorded.request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    const heard: Array<{ readonly person?: boolean; readonly settledAt?: string }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "call_quick" },
+      (settled) => {
+        heard.push(settled ?? {});
+      },
+    );
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
+  it("tells a listener that an expired ask ended person-facing wait at its recorded expiry", () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "call_expiring",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+
+    const expired = service.expire(recorded.request.requestId);
+    expect(expired.status).toBe("ok");
+
+    const heard: Array<{ readonly person?: boolean; readonly settledAt?: string }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "call_expiring" },
+      (settled) => {
+        heard.push(settled ?? {});
+      },
+    );
+    // The ask stood person-facing until it ran out: the wait is billed, and
+    // it ends where the journal says it ended, not when the listener asked.
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
+  it("tells a listener already waiting that an expiry is still person-facing wait", () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "call_expiring_live",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+
+    const heard: Array<{ readonly person?: boolean; readonly settledAt?: string }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "call_expiring_live" },
+      (settled) => {
+        heard.push(settled ?? {});
+      },
+    );
+    service.expire(recorded.request.requestId);
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
+  it("does not bill an automated reviewer's answer as person-facing wait", async () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "call_reviewed",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+
+    const heard: Array<{ readonly person?: boolean; readonly settledAt?: string }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "call_reviewed" },
+      (settled) => {
+        heard.push(settled ?? {});
+      },
+    );
+    const agent = Schema.decodeUnknownSync(EventActor)({
+      kind: "agent",
+      actorId: ids.actor,
+      providerInstanceId: ids.provider,
+      threadId: String(ids.thread),
+    });
+    await service.resolve(
+      {
+        kind: "resolve-work-request",
+        requestId: recorded.request.requestId,
+        expectedVersion: recorded.request.version,
+        resolution: { kind: "approval", approved: false },
+      },
+      undefined,
+      agent,
+    );
+
+    expect(heard).toEqual([{ person: false, requestedAt: clockNow, settledAt: clockLater }]);
   });
 
   it("keeps a credential-bearing provider callback private while delivering it exactly", async () => {
@@ -1648,7 +1813,17 @@ describe("an agent's ask to plan first or to leave Plan", () => {
     levelChange: { to: "auto-accept-edits", plan: "1. Edit src/main.ts" },
   } as const;
 
-  function recordLevelChange(service: WorkRequestService) {
+  const enterPlan = {
+    ...approvalDetail,
+    action: "EnterPlanMode",
+    description: "Claude asks to plan first.",
+    levelChange: { to: "plan" },
+  } as const;
+
+  function recordLevelChange(
+    service: WorkRequestService,
+    detail: typeof exitPlan | typeof enterPlan = exitPlan,
+  ) {
     const recorded = service.record({
       requestId: ids.request,
       projectId: ids.project,
@@ -1656,7 +1831,7 @@ describe("an agent's ask to plan first or to leave Plan", () => {
       providerInstanceId: ids.provider,
       providerSessionId: ids.session,
       providerCallbackId: "exit-plan-1",
-      detail: exitPlan,
+      detail,
     });
     if (recorded.status !== "ok") throw new Error("setup failed");
     return recorded.request;
@@ -1698,6 +1873,75 @@ describe("an agent's ask to plan first or to leave Plan", () => {
 
     expect(result.status).toBe("ok");
     expect(order).toEqual(["level:exit-plan:remote-device", "provider:true", "end-turn"]);
+  });
+
+  function inPlaceHarness(inPlace: "applied" | "refused" | "failed") {
+    const order: Array<string> = [];
+    const harness = createService({
+      providerSessions: {
+        answerApproval: async (input) => {
+          order.push(`provider:${String(input.approved)}`);
+        },
+        changeLevelInPlace: async () => {
+          order.push("in-place");
+          return { status: inPlace };
+        },
+      },
+      levelChanges: {
+        change: (input) => {
+          order.push(`level:${input.kind}`);
+          return { status: "changed" };
+        },
+        endTurn: () => order.push("end-turn"),
+        enteredPlanInPlace: () => order.push("entered-plan"),
+      },
+    });
+    return { ...harness, order };
+  }
+
+  it("enters Plan inside the running turn where the provider can hold its session to Plan", async () => {
+    const { service, order } = inPlaceHarness("applied");
+    const request = recordLevelChange(service, enterPlan);
+
+    const result = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    expect(result).toMatchObject({ status: "ok", request: { levelChangeApplied: "in-place" } });
+    expect(order).toEqual(["level:enter-plan", "in-place", "entered-plan", "provider:true"]);
+  });
+
+  it("ends the turn when the provider fails to enter Plan in place", async () => {
+    const { service, order } = inPlaceHarness("failed");
+    const request = recordLevelChange(service, enterPlan);
+
+    const result = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    expect(result).toMatchObject({ status: "ok", request: { levelChangeApplied: "next-turn" } });
+    expect(order).toEqual(["level:enter-plan", "in-place", "provider:true", "end-turn"]);
+  });
+
+  it("ends the turn on leaving Plan without trying an in-place change", async () => {
+    const { service, order } = inPlaceHarness("applied");
+    const request = recordLevelChange(service);
+
+    const result = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    expect(result).toMatchObject({ status: "ok", request: { levelChangeApplied: "next-turn" } });
+    expect(order).toEqual(["level:exit-plan", "provider:true", "end-turn"]);
   });
 
   it("leaves the ask waiting when the host cannot change the level, and tells the provider nothing", async () => {

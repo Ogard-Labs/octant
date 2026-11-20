@@ -1,9 +1,12 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ThreadFollowUpSuggestions } from "@octant/contracts";
-import { FollowUpSuggestionContext } from "../followUps/FollowUpSuggestionChips";
+import {
+  FollowUpSuggestionContext,
+  NextMessageSuggestionsContext,
+} from "../followUps/FollowUpSuggestionChips";
 import { useComposerSuggestionInput } from "./useComposerSuggestionInput";
 
 const threadId = "00000000-0000-4000-8000-000000000120";
@@ -55,7 +58,11 @@ function Composer() {
   );
 }
 
-function renderComposer(target: "same-thread" | "new-thread", nextMessage?: string) {
+function renderComposer(
+  target: "same-thread" | "new-thread",
+  nextMessage?: string,
+  setting?: { enabled: boolean; modes: ReadonlyArray<"chat" | "work" | "code"> },
+) {
   let activated: ReadonlyArray<string> = [];
   const client = {
     suggestions: vi.fn(async () => suggestions(target, activated, nextMessage)),
@@ -66,11 +73,13 @@ function renderComposer(target: "same-thread" | "new-thread", nextMessage?: stri
     }),
   };
   render(
-    <FollowUpSuggestionContext
-      value={{ client: client as never, threadId, mode: "chat", onCreated: vi.fn() }}
-    >
-      <Composer />
-    </FollowUpSuggestionContext>,
+    <NextMessageSuggestionsContext value={setting}>
+      <FollowUpSuggestionContext
+        value={{ client: client as never, threadId, mode: "chat", onCreated: vi.fn() }}
+      >
+        <Composer />
+      </FollowUpSuggestionContext>
+    </NextMessageSuggestionsContext>,
   );
   return client;
 }
@@ -130,5 +139,21 @@ describe("useComposerSuggestionInput", () => {
     await waitFor(() => expect(client.suggestions).toHaveBeenCalled());
 
     expect(message).toHaveAttribute("placeholder", "Reply…");
+  });
+
+  it("offers nothing on Tab in a mode the person turned suggestions off for", async () => {
+    for (const setting of [
+      { enabled: false, modes: ["chat", "work", "code"] as const },
+      { enabled: true, modes: ["work", "code"] as const },
+    ]) {
+      const client = renderComposer("same-thread", "yes, and drop the intro", setting);
+      const message = screen.getByRole("textbox", { name: "Message" });
+      await waitFor(() => expect(client.suggestions).toHaveBeenCalled());
+      expect(message).toHaveAttribute("placeholder", "Reply…");
+      message.focus();
+      await userEvent.keyboard("{Tab}");
+      expect(message).toHaveValue("");
+      cleanup();
+    }
   });
 });

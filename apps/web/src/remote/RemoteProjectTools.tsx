@@ -18,7 +18,7 @@ export interface RemoteProjectToolsProps {
 /**
  * A Project's own terminal and browser, on a browser the host's own person
  * paired: the device's own shell in the Project's folder and its own Private
- * page, through the same quick tools a window's start screen offers. The host
+ * page, through the Project tools list (a window's start screen no longer shows it). The host
  * decides everything that matters (the Project is local and active, a Work
  * Project's Developer tools are on, the shell and page belong to this device
  * alone and end when it is revoked or goes quiet, a profile page stays at a

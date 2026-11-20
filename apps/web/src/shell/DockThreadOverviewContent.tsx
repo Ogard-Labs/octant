@@ -13,10 +13,11 @@ import {
   isActiveAgentHierarchyStatus,
   subagentNeedsReview,
 } from "../agents/buildAgentHierarchyModel";
+import { useNow } from "../agents/ComposerSubagentsTray";
+import { buildSubagentRows, subagentRunTime } from "../agents/subagentRows";
 import { subagentStatusWord } from "../agents/subagentStatus";
 import { useChildRunStatus } from "../agents/useChildRunStatus";
 import { useLocalServersController } from "../environment/useLocalServersController";
-import { relativeTimeLabel } from "../lib/relativeTime";
 import {
   DockThreadOverview,
   type DockRemoteAccess,
@@ -64,7 +65,6 @@ export interface DockThreadOverviewContentProps {
    */
   readonly remoteAccess?: RemoteAccessAdministrationBridge | undefined;
   readonly onOpenRemoteAccessSettings?: (() => void) | undefined;
-  readonly now: number;
 }
 
 /** A glance, not a list: the Document and Canvas tools hold the rest. */
@@ -119,16 +119,27 @@ export function DockThreadOverviewContent(props: DockThreadOverviewContentProps)
     ...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient }),
     parentThreadId,
   });
+  // The run times tick once a second while any run works, as in the transcript.
+  const ticking =
+    childRuns.status === "ready" &&
+    childRuns.entries.some((entry) => isActiveAgentHierarchyStatus(entry.lifecycleStatus));
+  const now = useNow(ticking);
   const backgroundTasks = useMemo(() => {
     if (childRuns.status !== "ready" || childRuns.entries.length === 0) return undefined;
     const open = props.onOpenSubagent;
-    const toTask = (entry: (typeof childRuns.entries)[number]): DockThreadBackgroundTask => ({
-      id: entry.runId,
-      task: entry.task,
-      state: subagentNeedsReview(entry) ? "To review" : subagentStatusWord(entry.lifecycleStatus),
-      age: relativeTimeLabel(entry.updatedAt, props.now),
-      onOpen: () => open?.(entry.runId),
-    });
+    const rows = new Map(
+      buildSubagentRows({ entries: childRuns.entries }).map((row) => [row.id, row]),
+    );
+    const toTask = (entry: (typeof childRuns.entries)[number]): DockThreadBackgroundTask => {
+      const row = rows.get(entry.runId);
+      return {
+        id: entry.runId,
+        task: entry.task,
+        state: subagentNeedsReview(entry) ? "To review" : subagentStatusWord(entry.lifecycleStatus),
+        runTime: row === undefined ? "" : subagentRunTime(row, now),
+        onOpen: () => open?.(entry.runId),
+      };
+    };
     const byRecent = childRuns.entries.toSorted(
       (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
     );
@@ -140,7 +151,7 @@ export function DockThreadOverviewContent(props: DockThreadOverviewContentProps)
         .filter((entry) => !isActiveAgentHierarchyStatus(entry.lifecycleStatus))
         .map(toTask),
     };
-  }, [childRuns.status, childRuns.entries, props.onOpenSubagent, props.now]);
+  }, [childRuns.status, childRuns.entries, props.onOpenSubagent, now]);
   const remoteAccess = useRemoteAccess(props.remoteAccess, props.onOpenRemoteAccessSettings);
   const branch = card === undefined ? props.branchFallback : boardBranch(card);
   const facts: DockThreadFacts = {

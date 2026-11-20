@@ -1854,6 +1854,11 @@ function foldTurnFrame(
     const existing = builder.steps.findIndex(
       (step) => step.kind === "tool" && String(step.toolCallId) === toolCallId,
     );
+    const previous = existing === -1 ? undefined : builder.steps[existing];
+    // A duplicate terminal frame carries no timing of its own: the first
+    // bounded measurement the call recorded stands rather than being
+    // cleared by a restatement that cannot measure it.
+    const timing = frame.event.timing ?? (previous?.kind === "tool" ? previous.timing : undefined);
     const step = {
       kind: "tool" as const,
       toolCallId: frame.event.toolCallId,
@@ -1865,9 +1870,14 @@ function foldTurnFrame(
         ? {}
         : { outsideContent: frame.event.outsideContent }),
       ...(frame.event.routine === undefined ? {} : { routine: frame.event.routine }),
+      ...(timing === undefined ? {} : { timing }),
     };
     if (existing === -1) appendStep(builder, step);
     else builder.steps[existing] = step;
+  } else if (frame.event.kind === "reasoning-time") {
+    // The frame carries the latest cumulative total, so replay assigns it
+    // rather than adding: re-reading the stream can never double-count.
+    builder.reasoningMs = frame.event.reasoningMs;
   } else if (frame.event.kind === "approval-reviewed") {
     appendStep(builder, {
       kind: "review",
@@ -1890,6 +1900,9 @@ function foldTurnFrame(
     };
   } else if (frame.event.kind === "context-handoff-attached") {
     builder.handoff = conversationHandoff(frame.event);
+  } else if (frame.event.kind === "provider-session-ready") {
+    if (frame.event.strictKept === undefined) delete builder.strictKept;
+    else builder.strictKept = frame.event.strictKept;
   } else if (frame.event.kind === "fork-context-delivered") {
     const { kind: _kind, mergeOperationId: _merge, ...mergeBack } = frame.event;
     if (builder.forkMergeBacks.length < MAX_CODE_FORK_MERGE_BACKS_PER_TURN)
@@ -2106,10 +2119,12 @@ type CodeConversationBuilder = {
   describedImages?: CodeConversationTurn["describedImages"];
   usage?: CodeConversationTurn["usage"];
   handoff?: CodeConversationTurn["handoff"];
+  strictKept?: CodeConversationTurn["strictKept"];
   forkMergeBacks: Array<CodeForkMergeBack>;
   assistant: Array<CodeConversationTurn["assistant"][number]>;
   steps: Array<CodeConversationStep>;
   stepsTruncated: boolean;
+  reasoningMs?: number;
   status: CodeConversationTurn["status"];
   failure?: CodeConversationTurn["failure"];
   changedFiles?: CodeConversationTurn["changedFiles"];

@@ -74,6 +74,14 @@ export interface WorkRequestProviderSessionPort {
     readonly requestId: string;
     readonly answer: string;
   }): Promise<void>;
+  /**
+   * Moves the asking session's running turn to Plan in place; absent, or
+   * anything but `applied`, and an approved entry to Plan ends the turn.
+   */
+  changeLevelInPlace?(input: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly sessionId: ProviderSessionId;
+  }): Promise<{ readonly status: "applied" | "refused" | "failed" }>;
   /** End the provider-side wait before the local request is cancelled. */
   cancel(input: {
     readonly providerInstanceId: ProviderInstanceId;
@@ -85,8 +93,9 @@ export interface WorkRequestProviderSessionPort {
 
 /**
  * Carries out an approved level change: the agent's own ask to plan first or
- * to leave Plan. The thread's level changes as the person's own choice, and
- * the turn that asked ends once the provider has the answer.
+ * to leave Plan. The thread's level changes as the person's own choice. The
+ * turn that asked ends once the provider has the answer, unless it entered
+ * Plan in place, when the running turn is held to Plan from then on.
  */
 export interface WorkRequestLevelChangePort {
   change(input: {
@@ -95,6 +104,8 @@ export interface WorkRequestLevelChangePort {
     readonly actor: typeof EventActor.Type;
   }): { readonly status: "changed" } | { readonly status: "refused"; readonly message: string };
   endTurn(threadId: WorkThreadId): void;
+  /** The running turn entered Plan in place: what it may do is Plan's from now on. */
+  enteredPlanInPlace?(threadId: WorkThreadId): void;
 }
 
 export interface WorkRequestServiceOptions {
@@ -158,7 +169,16 @@ export class WorkRequestService {
   /** One process owns a pending external callback delivery at a time. */
   readonly #activeDeliveries = new Set<string>();
   readonly #interruptedSessions = new Set<string>();
-  readonly #settlementListeners = new Map<string, Set<() => void>>();
+  readonly #settlementListeners = new Map<
+    string,
+    Set<
+      (settled?: {
+        readonly person: boolean;
+        readonly requestedAt?: UtcTimestamp;
+        readonly settledAt?: UtcTimestamp;
+      }) => void
+    >
+  >();
   /**
    * The thread's posture when each pending approval in this process was
    * asked, by request id. A request restored after a restart has none, and
@@ -413,8 +433,27 @@ export class WorkRequestService {
         answeredBy,
       );
     }
+    // Entering Plan applies inside the running turn where the session's
+    // driver can hold it to Plan, before the agent hears the answer; leaving
+    // Plan, or a driver without that change, ends the turn.
+    let levelChangeApplied: "in-place" | "next-turn" | undefined;
     try {
       try {
+        if (levelChange !== undefined) {
+          const inPlace =
+            levelChange.to === "plan" && this.#providerSessions.changeLevelInPlace !== undefined
+              ? await this.#providerSessions
+                  .changeLevelInPlace({
+                    providerInstanceId: prepared.request.providerInstanceId,
+                    sessionId: prepared.request.providerSessionId,
+                  })
+                  .catch(() => ({ status: "failed" as const }))
+              : undefined;
+          levelChangeApplied = inPlace?.status === "applied" ? "in-place" : "next-turn";
+          // The running turn's ceiling narrows before the agent hears yes.
+          if (levelChangeApplied === "in-place")
+            this.#levelChanges?.enteredPlanInPlace?.(entry.request.threadId);
+        }
         if (command.resolution.kind === "approval") {
           await this.#providerSessions.answerApproval({
             providerInstanceId: prepared.request.providerInstanceId,
@@ -449,10 +488,14 @@ export class WorkRequestService {
       const settled = this.#settle(
         confirmed.request,
         "resolved",
-        { resolution: command.resolution },
+        {
+          resolution: command.resolution,
+          ...(levelChangeApplied === undefined ? {} : { levelChangeApplied }),
+        },
         answeredBy,
       );
-      if (levelChange !== undefined) this.#levelChanges?.endTurn(entry.request.threadId);
+      if (levelChange !== undefined && levelChangeApplied !== "in-place")
+        this.#levelChanges?.endTurn(entry.request.threadId);
       return settled;
     } finally {
       this.#releaseActiveDelivery(prepared.request);
@@ -540,7 +583,11 @@ export class WorkRequestService {
       readonly providerSessionId: ProviderSessionId;
       readonly providerCallbackId: string;
     },
-    callback: () => void,
+    callback: (settled?: {
+      readonly person: boolean;
+      readonly requestedAt?: UtcTimestamp;
+      readonly settledAt?: UtcTimestamp;
+    }) => void,
   ): () => void {
     const key = settlementListenerKey(input.providerSessionId, input.providerCallbackId);
     const entry = this.#findByProviderSessionCallbackId(
@@ -548,10 +595,32 @@ export class WorkRequestService {
       input.providerCallbackId,
     );
     if (entry !== undefined && entry.request.status !== "pending") {
-      callback();
+      const { status } = entry.request;
+      // Interrupted and expired settles are the system's own, and the wait
+      // was person-facing until it ran out. A resolved or cancelled request
+      // settled by a person or by an automated reviewer only the actor can
+      // tell apart: when the settle was journaled without one (a replayed
+      // frame carries none), billing would be a guess, so it is omitted.
+      const person =
+        status === "interrupted" || status === "expired"
+          ? true
+          : entry.settledActorKind !== undefined && entry.settledActorKind !== "agent";
+      callback({
+        person,
+        requestedAt: entry.request.requestedAt,
+        ...(entry.request.settledAt === undefined ? {} : { settledAt: entry.request.settledAt }),
+      });
       return () => undefined;
     }
-    const listeners = this.#settlementListeners.get(key) ?? new Set<() => void>();
+    const listeners =
+      this.#settlementListeners.get(key) ??
+      new Set<
+        (settled?: {
+          readonly person: boolean;
+          readonly requestedAt?: UtcTimestamp;
+          readonly settledAt?: UtcTimestamp;
+        }) => void
+      >();
     listeners.add(callback);
     this.#settlementListeners.set(key, listeners);
     return () => {
@@ -686,7 +755,10 @@ export class WorkRequestService {
   #settle(
     current: WorkRequest,
     status: "resolved" | "cancelled" | "interrupted" | "expired",
-    extra: { resolution?: WorkRequest["resolution"] },
+    extra: {
+      resolution?: WorkRequest["resolution"];
+      levelChangeApplied?: WorkRequest["levelChangeApplied"];
+    },
     actor: typeof EventActor.Type,
   ): WorkRequestServiceResult {
     const settledAt = decodeTimestamp(this.#clock());
@@ -698,6 +770,9 @@ export class WorkRequestService {
       settledAt,
       version: nextVersion,
       ...(extra.resolution === undefined ? {} : { resolution: extra.resolution }),
+      ...(extra.levelChangeApplied === undefined
+        ? {}
+        : { levelChangeApplied: extra.levelChangeApplied }),
     });
     const frame: WorkRequestFrame = { kind: status, request: nextRequest } as WorkRequestFrame;
     try {
@@ -714,7 +789,7 @@ export class WorkRequestService {
         "Work request event journal could not be written through the authoritative flow.",
       );
     }
-    this.#projection.apply(frame);
+    this.#projection.apply(frame, actor);
     const currentEntry = this.#projection.lookup(current.requestId);
     const listenerKey =
       currentEntry === undefined
@@ -725,7 +800,13 @@ export class WorkRequestService {
           );
     const listeners = this.#settlementListeners.get(listenerKey);
     this.#settlementListeners.delete(listenerKey);
-    for (const callback of listeners ?? []) callback();
+    // The ask was person-facing the whole time it stood open: a person's
+    // answer and a person-facing wait that ran out — expiry, interrupt, a
+    // withdraw — both end person time at this settle. Only an automated
+    // reviewer's `agent` settle is not person wait.
+    const person = actor.kind !== "agent";
+    for (const callback of listeners ?? [])
+      callback({ person, requestedAt: nextRequest.requestedAt, settledAt });
     return ok(nextRequest);
   }
 

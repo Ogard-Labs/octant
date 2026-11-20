@@ -1,4 +1,5 @@
 import type { PreparedProductFeedbackTurn } from "../browser/productFeedbackTurnPort";
+import { strictKeptForLaunch } from "../strictResolution";
 import {
   attachedFilesMessage,
   partitionAttachedFiles,
@@ -117,7 +118,6 @@ import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/
 import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
-import type { ProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
@@ -341,8 +341,6 @@ export interface WorkTurnServiceDependencies {
   readonly persistence: {
     readonly status: () => { readonly state: string; readonly integrity: string };
     readonly readProject: (projectId: ProjectId) => Project | undefined;
-    /** Whether the provider's own CLI already trusts a Project's folder; absent reads none. */
-    readonly readProviderCliTrust?: ProviderCliProjectTrust;
     /** The Project's memory, whose active entries every turn in it carries. */
     readonly readProjectMemory?: (projectId: ProjectId) => ProjectMemoryView;
     readonly readProviderInstance: (
@@ -484,7 +482,7 @@ export interface WorkTurnServiceDependencies {
   readonly forgeChanges?: RuntimeForgeChangeObserver;
   readonly onRequestSettled?: (
     input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
-    release: () => void,
+    release: (settled?: { readonly person: boolean; readonly settledAt?: UtcTimestamp }) => void,
   ) => () => void;
   /**
    * The app-managed tools a Work turn may offer its provider. Absent on a host
@@ -766,6 +764,7 @@ export class WorkTurnService {
   readonly #liveResponses = new Map<string, string>();
   readonly #liveTasks = new Map<string, ThreadTaskProgressList>();
   readonly #liveToolSteps = new Map<string, ThreadToolSteps>();
+  readonly #liveReasoningMs = new Map<string, number>();
 
   readonly #moveHold: ((threadId: string) => boolean) | undefined;
   readonly #wakeupsForThread: WorkTurnServiceDependencies["wakeupsForThread"];
@@ -2461,6 +2460,7 @@ export class WorkTurnService {
         this.#liveResponses.delete(String(command.requestId));
         this.#liveTasks.delete(String(command.requestId));
         this.#liveToolSteps.delete(String(command.requestId));
+        this.#liveReasoningMs.delete(String(command.requestId));
       });
       this.#inflight.set(String(command.requestId), launch);
       toolsLaunched = true;
@@ -2806,13 +2806,19 @@ export class WorkTurnService {
     const liveStepsHeld = this.#liveToolSteps.get(String(turn.requestId));
     const liveSteps =
       liveStepsHeld === undefined ? undefined : withoutPublishedSnapshots(liveStepsHeld);
+    const liveReasoningMs = this.#liveReasoningMs.get(String(turn.requestId));
     const withSteps =
-      liveSteps === undefined || liveSteps.steps.length === 0
+      (liveSteps === undefined || liveSteps.steps.length === 0) && liveReasoningMs === undefined
         ? turn
         : decodeWorkTurnState({
             ...turn,
-            toolSteps: liveSteps.steps,
-            ...(liveSteps.truncated ? { toolStepsTruncated: true } : {}),
+            ...(liveSteps === undefined || liveSteps.steps.length === 0
+              ? {}
+              : {
+                  toolSteps: liveSteps.steps,
+                  ...(liveSteps.truncated ? { toolStepsTruncated: true } : {}),
+                }),
+            ...(liveReasoningMs === undefined ? {} : { reasoningMs: liveReasoningMs }),
           });
     const live = this.#liveResponses.get(String(turn.requestId));
     if (live === undefined) return withSteps;
@@ -2837,6 +2843,18 @@ export class WorkTurnService {
   endTurnForLevelChange(threadId: WorkThreadId): void {
     const running = this.#runningAccess.get(String(threadId));
     if (running !== undefined) this.#controllers.get(running.requestId)?.abort();
+  }
+
+  /**
+   * The thread's running turn entered Plan in place: its session's driver
+   * now holds it to Plan, so every check that reads the running turn's level
+   * reads Plan too. Narrowing only; nothing widens a running turn.
+   */
+  enteredPlanInPlace(threadId: WorkThreadId): void {
+    const running = this.#runningAccess.get(String(threadId));
+    if (running === undefined) return;
+    const { fullAccessSandbox: _sandbox, ...rest } = running;
+    this.#runningAccess.set(String(threadId), { ...rest, access: "plan" });
   }
 
   /** The access the thread's running turn holds; undefined when none runs. */
@@ -3032,6 +3050,20 @@ export class WorkTurnService {
       fullAccess: input.access === "full-access",
       settings: this.#toolStepSettings(),
     });
+    // Read as the turn launches, never carried from an earlier one: the
+    // session starts with it, and the turn records what it kept.
+    const launchStrict = this.#resolveStrict?.(String(input.command.threadId)) ?? true;
+    const strictKept = strictKeptForLaunch({
+      strict: launchStrict,
+      driverKind: input.driver.kind,
+      executionPolicy: input.access === "full-access" ? "full-access" : "approval-gated",
+      fullAccessSandbox: input.fullAccessSandbox,
+    });
+    if (strictKept !== undefined) {
+      const launching = this.#projection.lookup(input.command.requestId);
+      if (launching !== undefined)
+        this.#persistUpdate(launching, { status: "running", strictKept });
+    }
     try {
       if (input.access !== undefined) {
         this.#runningAccess.set(String(input.command.threadId), {
@@ -3066,8 +3098,7 @@ export class WorkTurnService {
             }),
         ...(input.access === undefined ? {} : { access: input.access }),
         ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
-        // Read as the turn launches, never carried from an earlier one.
-        strict: this.#resolveStrict?.(String(input.command.threadId)) ?? true,
+        strict: launchStrict,
         ...(artifactToolName === undefined ? {} : { nativeArtifacts: true }),
         ...nativeSetupOption(
           sessionNativeSetup(
@@ -3295,6 +3326,15 @@ export class WorkTurnService {
             truncated: toolSteps.truncated,
           });
         },
+        onReasoningMs: (reasoningMs) => {
+          if (input.signal.aborted) return;
+          if (reasoningMs === this.#liveReasoningMs.get(String(input.command.requestId))) return;
+          this.#liveReasoningMs.set(String(input.command.requestId), reasoningMs);
+          this.#liveUpdates.appendToolStep(input.command.threadId, input.command.requestId, {
+            truncated: this.#liveToolSteps.get(String(input.command.requestId))?.truncated === true,
+            reasoningMs,
+          });
+        },
       });
       runOutcome = outcome;
       const wroteFiles = observation?.finish();
@@ -3324,7 +3364,12 @@ export class WorkTurnService {
         // person the folder was untouched when it was not. The tool calls it
         // made are recorded the same way, whether or not a file changed.
         const cancelledToolSteps = this.#liveToolSteps.get(String(input.command.requestId));
-        if (wroteFiles !== undefined || cancelledToolSteps !== undefined) {
+        const cancelledReasoningMs = this.#liveReasoningMs.get(String(input.command.requestId));
+        if (
+          wroteFiles !== undefined ||
+          cancelledToolSteps !== undefined ||
+          cancelledReasoningMs !== undefined
+        ) {
           const settledTasks = this.#liveTasks.get(String(input.command.requestId));
           const settledToolSteps = cancelledToolSteps;
           this.#persistUpdate(latest, {
@@ -3333,6 +3378,7 @@ export class WorkTurnService {
             ...(wroteFiles === undefined ? {} : { wroteFiles }),
             ...(settledTasks === undefined ? {} : { tasks: settledTasks }),
             ...(settledToolSteps === undefined ? {} : { toolSteps: settledToolSteps }),
+            ...(cancelledReasoningMs === undefined ? {} : { reasoningMs: cancelledReasoningMs }),
           });
           const settledCancel = this.#projection.lookup(input.command.requestId);
           if (settledCancel !== undefined) {
@@ -3348,6 +3394,7 @@ export class WorkTurnService {
         wroteFiles,
         this.#liveTasks.get(String(input.command.requestId)),
         this.#liveToolSteps.get(String(input.command.requestId)),
+        this.#liveReasoningMs.get(String(input.command.requestId)),
       );
       if (outcome.kind === "completed" && wroteFiles !== undefined) {
         await this.#backfillStatus(
@@ -3835,11 +3882,14 @@ export class WorkTurnService {
     tasks?: ThreadTaskProgressList,
     // Held in process for the same reason as the task list.
     toolSteps?: ThreadToolSteps,
+    // The turn's measured reasoning total, held the same way.
+    reasoningMs?: number,
   ): void {
     const written = wroteFiles === undefined ? {} : { wroteFiles };
     const recordedTasks = {
       ...(tasks === undefined ? {} : { tasks }),
       ...(toolSteps === undefined ? {} : { toolSteps }),
+      ...(reasoningMs === undefined ? {} : { reasoningMs }),
     };
     if (outcome.kind === "completed") {
       this.#persistUpdate(turn, {
@@ -3847,6 +3897,7 @@ export class WorkTurnService {
         response: outcome.response,
         ...written,
         ...recordedTasks,
+        ...(reasoningMs === undefined ? {} : { reasoningMs }),
       });
       return;
     }
@@ -3864,6 +3915,7 @@ export class WorkTurnService {
       ...(turn.response === undefined ? {} : { response: turn.response }),
       ...written,
       ...recordedTasks,
+      ...(reasoningMs === undefined ? {} : { reasoningMs }),
       failure: outcome.failure,
     });
   }
@@ -3877,7 +3929,9 @@ export class WorkTurnService {
       readonly failure?: WorkTurnState["failure"];
       readonly tasks?: ThreadTaskProgressList;
       readonly toolSteps?: ThreadToolSteps;
+      readonly reasoningMs?: number;
       readonly childObservations?: WorkTurnState["childObservations"];
+      readonly strictKept?: WorkTurnState["strictKept"];
     },
   ): void {
     const latest = this.#projection.lookup(turn.requestId) ?? turn;
@@ -3921,6 +3975,8 @@ export class WorkTurnService {
               toolSteps: toolSteps.steps,
               ...(toolSteps.truncated ? { toolStepsTruncated: true } : {}),
             }),
+        ...(update.reasoningMs === undefined ? {} : { reasoningMs: update.reasoningMs }),
+        ...(update.strictKept === undefined ? {} : { strictKept: update.strictKept }),
         ...(update.childObservations === undefined
           ? {}
           : { childObservations: update.childObservations }),

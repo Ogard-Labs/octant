@@ -15,6 +15,7 @@ import { AccountMoveTextHandoffCause, ContextHandoffOmissions } from "./contextH
 import { ProviderChildActivityEvent } from "./providers";
 import { ProviderNativeSessionId } from "./providerNativeSession";
 import { ThreadPublishedPage } from "./threadToolSteps";
+import { ThreadCallTiming } from "./threadToolStepList";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
 import { DescribedImageName, DescribedTurnImages, ImageDescribedBy } from "./imageDescription";
 import { Schema } from "effect";
@@ -77,6 +78,7 @@ import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMenti
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
 import { ThreadWindowBoundsFields } from "./threadWindow";
+import { StrictKeptProtections } from "./strictNotice";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -536,6 +538,12 @@ const ObserveGit = Schema.Struct({
   maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
   /** Read the diff with Git's `-w`; only the diff text changes, never the checkout state. */
   ignoreWhitespace: Schema.optional(Schema.Boolean),
+  /**
+   * Read the porcelain listing with `--untracked-files=all`: every file under
+   * an untracked directory is its own status entry, so the state token a
+   * switch is consented against changes when one nested file is added.
+   */
+  untrackedFiles: Schema.optional(Schema.Literal("all")),
 }).annotations(strict);
 const PrepareGitHunks = Schema.Struct({
   kind: Schema.Literal("prepare-git-hunks"),
@@ -631,6 +639,26 @@ const CommitGit = Schema.Struct({
     Schema.filter((entries) => entries.length <= MAX_CODE_OPERATION_PATHS),
   ),
   expectedStateToken: GitStateToken,
+}).annotations(strict);
+/**
+ * Point this thread's checkout at another local branch.
+ *
+ * Only the person at a window may send it; no agent tool or route reaches it.
+ * The branch must name an exact local ref the host can verify — never a
+ * revision, a remote name or a guessed upstream — and the checkout must be
+ * idle, so the state token binds the switch to the observation the person
+ * saw. `dirty` says what uncommitted work may do: `refuse` lets a dirty tree
+ * stop the switch, and `stash` asks the host to save tracked and untracked
+ * work aside first (never to pop or discard it). Committing belongs to the
+ * ordinary stage/commit form before this command, not to a flag on it.
+ */
+const SwitchGitBranch = Schema.Struct({
+  kind: Schema.Literal("switch-git-branch"),
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  branch: GitBranchName,
+  expectedStateToken: GitStateToken,
+  dirty: Schema.Literal("refuse", "stash"),
 }).annotations(strict);
 const PushGit = Schema.Struct({
   kind: Schema.Literal("push-git"),
@@ -1128,6 +1156,7 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "reverse-git-hunks",
   "stage-git",
   "commit-git",
+  "switch-git-branch",
   "push-git",
   "create-pull-request",
   "update-pull-request",
@@ -1172,6 +1201,7 @@ export const CodeOperationCommand = Schema.Union(
   StageGit,
   DiscardGitChanges,
   CommitGit,
+  SwitchGitBranch,
   PushGit,
   UnstageGit,
   DraftGitText,
@@ -1345,6 +1375,7 @@ const GitMutationResult = Schema.Struct({
     "unstage",
     "discard",
     "commit",
+    "switch-branch",
     "push",
     "revert",
     "restore-checkpoint",
@@ -1374,6 +1405,10 @@ const GitMutationResult = Schema.Struct({
       "invalid-hunks",
       "hunk-offset",
       "read-only",
+      "invalid-branch",
+      "branch-in-use",
+      "dirty-checkout",
+      "unsupported-git",
     ),
   ),
   /**
@@ -1390,6 +1425,11 @@ const GitMutationResult = Schema.Struct({
    */
   unconfirmed: Schema.optional(Schema.Literal(true)),
   headOid: Schema.optional(GitObjectId),
+  /**
+   * The branch the checkout reports after the mutation, read back rather
+   * than echoed from the request. Present on a completed branch switch.
+   */
+  headBranch: Schema.optional(GitBranchName),
   /**
    * The state this mutation replaced, recorded before it ran. Present on a
    * completed restore, which is what makes undoing one possible, and on a
@@ -1846,6 +1886,8 @@ const ToolEvent = Schema.Struct({
   outsideContent: Schema.optional(ToolOutsideContentMark),
   /** The routine the call set up; the transcript shows what was created. */
   routine: Schema.optional(ThreadRoutineReceipt),
+  /** Present only on a terminal state of a call whose bounds were trusted. */
+  timing: Schema.optional(ThreadCallTiming),
 }).annotations(strict);
 /**
  * The bounds a Code approval or question is journaled under. Exported so a
@@ -1873,6 +1915,13 @@ const ApprovalAnsweredEvent = Schema.Struct({
   kind: Schema.Literal("approval-answered"),
   approvalId: CodeApprovalId,
   decision: Schema.Literal("approved", "denied"),
+  /**
+   * On an approved `level-change`: whether the new level applied inside the
+   * running turn (`in-place`, entering Plan on a provider that can hold its
+   * session to it) or from the next turn, the asking turn ending
+   * (`next-turn`). Absent on every other answer and in older journals.
+   */
+  levelChangeApplied: Schema.optional(Schema.Literal("in-place", "next-turn")),
 }).annotations(strict);
 
 const ApprovalEvent = Schema.Struct({
@@ -1891,10 +1940,16 @@ const ApprovalEvent = Schema.Struct({
   ),
   summary: CodeApprovalSummaryText,
   /**
+   * The provider's own identity for the call this ask gates, when the runtime
+   * supplied one. It ties the person's wait to that call alone; absent when
+   * the runtime gave none, so no wait is ever attributed by adjacency.
+   */
+  toolCallId: Schema.optional(ProviderRequestId),
+  /**
    * With `level-change`: the level the agent asks the thread to move to, and
    * the plan it asks the person to approve when it asks to leave Plan. An
-   * approval changes the thread's level from its next turn; the turn that
-   * asked ends. Absent on every other approval.
+   * approval changes the thread's level, inside the running turn or from its
+   * next turn (see `approval-answered`). Absent on every other approval.
    */
   levelChange: Schema.optional(
     Schema.Struct({
@@ -2072,6 +2127,15 @@ const NativeSessionAdoptedEvent = Schema.Struct({
   nativeSessionId: CodeNativeSessionId,
   providerInstanceId: ProviderInstanceId,
 }).annotations(strict);
+/**
+ * The person asked to stop this turn, journaled at the request so a later
+ * `interrupted` reads as their cancellation rather than a cut-off. Only an
+ * authorized `cancel-provider-turn`/`force-stop-provider-turn` writes it —
+ * restart reconciliation and runtime cleanup never do.
+ */
+const ConversationTurnStopRequestedEvent = Schema.Struct({
+  kind: Schema.Literal("conversation-turn-stop-requested"),
+}).annotations(strict);
 
 const ProviderSessionReadyEvent = Schema.Struct({
   kind: Schema.Literal("provider-session-ready"),
@@ -2080,6 +2144,12 @@ const ProviderSessionReadyEvent = Schema.Struct({
   modelId: ProviderModelId,
   checkoutId: CodeCheckoutId,
   resumeCursor: Schema.optional(ProviderResumeCursor),
+  /**
+   * What Strict kept for this launch, as the host decided it when the session
+   * started. Absent when the launch was not Strict, and on every launch
+   * journaled before the host recorded it.
+   */
+  strictKept: Schema.optional(StrictKeptProtections),
 }).annotations(strict);
 
 /** The omissions a Code handoff counts; Chat and Work journal the same shape. */
@@ -2324,7 +2394,18 @@ const ContextHandoffAttachedEvent = Schema.Union(
   AccountMoveNativeSessionHandoffAttachedEvent,
 );
 
+/**
+ * One operation's cumulative reasoning total, journaled when a span closes —
+ * at the next non-reasoning event or the terminal. Replayed by assignment:
+ * each event carries the latest whole-millisecond total, not a delta, so a
+ * repeated or re-read frame never double-counts.
+ */
+const ReasoningTimeEvent = Schema.Struct({
+  kind: Schema.Literal("reasoning-time"),
+  reasoningMs: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
 export const CodeOperationEvent = Schema.Union(
+  ReasoningTimeEvent,
   ProviderSessionReadyEvent,
   ContextHandoffAttachedEvent,
   ForkContextMergedEvent,
@@ -2352,6 +2433,7 @@ export const CodeOperationEvent = Schema.Union(
   ProviderRetryEvent,
   RuntimeTurnStartedEvent,
   NativeSessionAdoptedEvent,
+  ConversationTurnStopRequestedEvent,
   ResultEvent,
 );
 export type CodeOperationEvent = typeof CodeOperationEvent.Type;
@@ -2405,6 +2487,8 @@ export const CodeConversationStep = Schema.Union(
     published: Schema.optional(ThreadPublishedPage),
     outsideContent: Schema.optional(ToolOutsideContentMark),
     routine: Schema.optional(ThreadRoutineReceipt),
+    /** Present only on a completed step whose bounds were trusted. */
+    timing: Schema.optional(ThreadCallTiming),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("reasoning"),
@@ -2498,12 +2582,23 @@ export const CodeConversationTurn = Schema.Struct({
   /** Whether the turn journaled more steps than `steps` carries. */
   stepsTruncated: Schema.optional(Schema.Boolean),
   /**
+   * Cumulative reasoning-channel span time in whole milliseconds, from the
+   * journaled `reasoning-time` totals. Absent on turns that recorded none and
+   * every turn journaled before them.
+   */
+  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /**
    * What this turn's new provider session started with beyond its own prompt:
    * a provider switch's text handoff, or a fork's text handoff or copied
    * native session. Absent on every turn that continued its session or
    * started an unforked thread.
    */
   handoff: Schema.optional(CodeConversationTurnHandoff),
+  /**
+   * What Strict kept for the provider launch this turn ran on. Absent when
+   * the launch was not Strict or the host did not record it.
+   */
+  strictKept: Schema.optional(StrictKeptProtections),
   /**
    * Forks of this thread whose conversation this turn carried because a
    * person merged it back, oldest first. Absent on every other turn.
@@ -3133,6 +3228,7 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   // A rewind that puts files back is approved as the restore it performs.
   "rewind-code-thread",
   "commit-git",
+  "switch-git-branch",
   "push-git",
   "create-pull-request",
   "update-pull-request",

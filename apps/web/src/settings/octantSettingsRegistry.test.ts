@@ -137,6 +137,8 @@ describe("octantSettingsRegistry", () => {
       "sandbox-policy-credentials",
       "protected-files",
       "protected-files-add",
+      "blocked-tools",
+      "blocked-tools-add",
       "public-links",
       "public-link-service",
       "public-link-setup",

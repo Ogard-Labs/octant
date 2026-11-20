@@ -22,6 +22,7 @@ import {
   MAX_BROWSER_CAPTURES_PER_THREAD,
 } from "./browserCapture";
 import { StoredBrowserProfile } from "./browserProfiles";
+import { HomeActivityCustomization } from "./codeHomeActivity";
 import {
   CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
   CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS,
@@ -320,6 +321,15 @@ export const MAX_HOME_CARDS = 32;
 export const HomeCardCustomization = Schema.Struct({
   order: Schema.Array(HomeCardId).pipe(Schema.maxItems(MAX_HOME_CARDS)),
   visibility: Schema.Array(HomeCardPreference).pipe(Schema.maxItems(MAX_HOME_CARDS)),
+  /**
+   * The activity cards' own choices — shared timeframe, source and pinned
+   * ranges. Absent on stores written before the cards shipped; readers use
+   * the domain's effective defaults rather than rewriting the record. The
+   * four cards keep the home card ids `activity-prs-merged`,
+   * `activity-issues-closed`, `activity-releases-published` and
+   * `activity-runs` inside `order`/`visibility` like any other card.
+   */
+  activity: Schema.optional(HomeActivityCustomization),
 })
   .annotations(strict)
   .pipe(
@@ -507,7 +517,7 @@ export const TranscriptTextSize = Schema.Literal("small", "medium", "large");
 export type TranscriptTextSize = typeof TranscriptTextSize.Type;
 export const TranscriptWidth = Schema.Literal("narrow", "medium", "wide");
 export type TranscriptWidth = typeof TranscriptWidth.Type;
-/** How the composer's plan-usage meters draw their bar: a smooth fill or square cells. */
+/** Retired: how the plan-usage meters drew their bar; stays so old rows decode. */
 export const UsageBarStyle = Schema.Literal("smooth", "pixelated");
 export type UsageBarStyle = typeof UsageBarStyle.Type;
 /**
@@ -713,6 +723,16 @@ export const RememberedBrowserTransfer = Schema.Struct({
   .pipe(Schema.filter((entry) => entry.profile === undefined || entry.privatePage !== true));
 export type RememberedBrowserTransfer = typeof RememberedBrowserTransfer.Type;
 
+/** The next-message suggestion switch and the modes it covers. */
+export const NextMessageSuggestionsSetting = Schema.Struct({
+  enabled: Schema.Boolean,
+  modes: Schema.Array(OctantMode).pipe(
+    Schema.maxItems(3),
+    Schema.filter((modes) => new Set(modes).size === modes.length),
+  ),
+}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
+export type NextMessageSuggestionsSetting = typeof NextMessageSuggestionsSetting.Type;
+
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
@@ -729,6 +749,11 @@ export const ShellSettings = Schema.Struct({
   defaultFolder: Schema.optional(DefaultFolder),
   /** Absent preserves streaming replies for existing installations. */
   streamReplies: Schema.optional(Schema.Boolean),
+  /**
+   * Whether a reply predicts the person's next message for the composer's Tab,
+   * and in which modes. Absent means on in every mode.
+   */
+  nextMessageSuggestions: Schema.optional(NextMessageSuggestionsSetting),
   sidebarWidth: SidebarWidth,
   contextSidebarWidth: ContextSidebarWidth,
   lastContextSurface: Schema.NullOr(ContextSurfaceId),
@@ -1021,10 +1046,7 @@ export const ShellSettings = Schema.Struct({
   transcriptWidth: Schema.optionalWith(TranscriptWidth, {
     default: () => "medium" as const,
   }),
-  /**
-   * How the plan-usage bars above the composer are drawn. A store persisted
-   * before the setting shipped decodes to the smooth bar.
-   */
+  /** Retired: the plan-usage bar style, with the Inbox card (2026-11-18); stays optional so old rows decode. */
   usageBars: Schema.optionalWith(UsageBarStyle, { default: () => "smooth" as const }),
   /**
    * How much of a turn's thinking and tool calls the transcript shows open.

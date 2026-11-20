@@ -82,7 +82,8 @@ import { createNativeHarnessEgressRouteHandler } from "../harness/nativeHarnessE
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
 import { openPromptDigester } from "../metrics/promptDigest";
 import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
-import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "../followUps/followUpSuggestionInstructions";
+import { followUpSuggestionInstructionsFor } from "../followUps/followUpSuggestionInstructions";
+import { defaultShellSettings, nextMessageSuggestionsOn } from "@octant/domain/shell-policy";
 import { octantOrientation } from "../orientation/octantOrientation";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
 import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing";
@@ -234,6 +235,13 @@ export function wireHarness(deps: HarnessDependencies) {
     workTurnProjection,
     personMemory,
   } = deps;
+  // Read on every turn, so a change in Settings applies to the next turn
+  // without a restart.
+  const predictsNextMessage = (mode: OctantMode): boolean =>
+    nextMessageSuggestionsOn(
+      persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+      mode,
+    );
   // The keys Octant keeps for servers that sign in with one, in the broker.
   const serverSshKeys =
     options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
@@ -867,7 +875,7 @@ export function wireHarness(deps: HarnessDependencies) {
       ...nativeHarnessObserver.contextFor(scope),
       ...nativeHarnessObserver.runtimeServerNotes(scope),
       ...turnDecisionInstructions(scope.mode),
-      FOLLOW_UP_SUGGESTION_INSTRUCTIONS,
+      followUpSuggestionInstructionsFor(predictsNextMessage(scope.mode)),
     ],
     admitTurn: (scope: Parameters<NativeHarnessTurnObserver["admitTurn"]>[0]) =>
       nativeHarnessObserver.admitTurn(scope),
@@ -924,7 +932,9 @@ export function wireHarness(deps: HarnessDependencies) {
           projectId: input.projectId,
           suggestedBy: { providerInstanceId: input.providerInstanceId, modelId: input.modelId },
           followUps: offered.followUps,
-          nextMessage: offered.nextMessage,
+          // A prediction from a turn that began before the setting changed is
+          // not kept, so switching a mode off empties its composer at once.
+          nextMessage: predictsNextMessage(input.mode) ? offered.nextMessage : undefined,
         });
       } catch {
         // A set the journal refused leaves the reply itself untouched.

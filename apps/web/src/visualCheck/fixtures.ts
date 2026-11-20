@@ -6,6 +6,7 @@ import type { ProjectClient } from "@octant/client-runtime/project-client";
 import {
   decodeAgentRunCenterSummary,
   decodeCodeThreadId,
+  decodeLocalUsageHistoryResponse,
   decodeProjectId,
   decodeProviderInstance,
   decodeProviderUsageLimitsSnapshot,
@@ -13,6 +14,7 @@ import {
   decodeWorkspaceTabId,
   type AgentRunCenterSummary,
   type CodeEnvironmentObservation,
+  type LocalUsageHistoryResponse,
   type ProjectSummary,
   type UsageDashboardResponse,
   type WorkspaceTab,
@@ -22,6 +24,9 @@ import {
   AUTOMATION_UI_TEST_IDS,
   automationSummaryFixture,
 } from "../automation/automationTestFixtures";
+import type { AgentHierarchyInputEntry } from "../agents/buildAgentHierarchyModel";
+import { buildChildRunStatusSummary } from "../agents/buildChildRunStatusSummary";
+import type { ChildRunStatusController } from "../agents/useChildRunStatus";
 import type { AutomationEditorCatalog } from "../automation/automationCenterModel";
 import { automationWorkDraftFixture } from "../automation/automationTestFixtures";
 
@@ -530,3 +535,188 @@ export const USAGE_LEDGER = {
   queryAt: VISUAL_NOW,
   latencyStats: { measurements: [] },
 };
+
+// --- Provider usage history ------------------------------------------------
+
+/** Fixed local provider history: two providers over five days, so the chart draws lines. */
+export function localUsageHistoryFixture(): LocalUsageHistoryResponse {
+  const totalsFor = (tokens: number, sessions: number) => ({
+    inputTokens: Math.round(tokens * 0.8),
+    outputTokens: Math.round(tokens * 0.2),
+    totalTokens: tokens,
+    requestCount: sessions * 4,
+    sessionCount: sessions,
+    cacheReadInputTokens: Math.round(tokens * 0.4),
+    uncachedInputTokens: Math.round(tokens * 0.4),
+    componentCoverage: {
+      uncachedInput: { measured: sessions * 4, total: sessions * 4 },
+      cacheRead: { measured: sessions * 4, total: sessions * 4 },
+      cacheWrite: { measured: 0, total: sessions * 4 },
+      reasoning: { measured: 0, total: sessions * 4 },
+    },
+  });
+  const costFor = (usd: number) => ({
+    apiEstimateUsd: usd,
+    pricedRecordCount: 4,
+    unpricedRecordCount: 0,
+  });
+  const days = ["2026-08-12", "2026-08-13", "2026-08-14", "2026-08-15", "2026-08-16"];
+  const codex = [120_000, 340_000, 90_000, 410_000, 220_000];
+  const claude = [80_000, 150_000, 260_000, 120_000, 300_000];
+  const dayRows = (providerKey: string, tokens: ReadonlyArray<number>) =>
+    days.map((day, index) => ({
+      day,
+      providerKey,
+      totals: totalsFor(tokens[index] ?? 0, 2),
+      cost: costFor((tokens[index] ?? 0) / 100_000),
+    }));
+  const sum = (tokens: ReadonlyArray<number>) => tokens.reduce((total, value) => total + value, 0);
+  const provider = (key: string, label: string, tokens: ReadonlyArray<number>) => ({
+    key,
+    label,
+    providerKey: key,
+    totals: totalsFor(sum(tokens), 10),
+    cost: costFor(sum(tokens) / 100_000),
+  });
+  return decodeLocalUsageHistoryResponse({
+    source: "local-provider-history",
+    from: "2026-08-12T00:00:00.000Z",
+    to: VISUAL_NOW,
+    timeZone: "UTC",
+    queryAt: VISUAL_NOW,
+    totals: totalsFor(sum(codex) + sum(claude), 20),
+    cost: costFor((sum(codex) + sum(claude)) / 100_000),
+    providers: [provider("codex", "Codex", codex), provider("claude", "Claude", claude)],
+    models: [],
+    days: [...dayRows("codex", codex), ...dayRows("claude", claude)],
+    dailyTotals: days.map((day, index) => ({
+      day,
+      providerKey: "all",
+      totals: totalsFor((codex[index] ?? 0) + (claude[index] ?? 0), 4),
+      cost: costFor(((codex[index] ?? 0) + (claude[index] ?? 0)) / 100_000),
+    })),
+    coverage: [
+      {
+        sourceKind: "codex",
+        sourceInstallationId: "local-1",
+        status: "ready",
+        scannedFileCount: 10,
+        acceptedRecordCount: 40,
+        omittedRecordCount: 0,
+        truncated: false,
+        hasMore: false,
+        detail: "Local Codex sessions on this Mac.",
+      },
+    ],
+  });
+}
+
+// --- Subagent progress -----------------------------------------------------
+
+const SUBAGENT_RUN_PREFIX = "0b9d3f40-5a52-4a1e-8c11-00000000000";
+
+function subagentEntry(
+  index: number,
+  fields: {
+    readonly role: string;
+    readonly task: string;
+    readonly lifecycleStatus: "running" | "completed";
+    readonly createdAt: string;
+    readonly updatedAt: string;
+  },
+): AgentHierarchyInputEntry {
+  return {
+    runId: `${SUBAGENT_RUN_PREFIX}${index}`,
+    executionKind: "octant-managed",
+    usageQuality: "provider-reported",
+    resultAcknowledgement: { required: false, acknowledged: false },
+    version: 2,
+    ...fields,
+  };
+}
+
+/** The first turn started at 08:50; every run below began after it. */
+export const SUBAGENT_TURN_STARTED_AT = "2026-08-18T08:50:00.000Z";
+
+/** One working (3m 30s so far at the fixed clock) and one finished (48s) child. */
+export const SUBAGENT_ROW_ENTRIES: ReadonlyArray<AgentHierarchyInputEntry> = [
+  subagentEntry(1, {
+    role: "research",
+    task: "Map where the composer reads its subagents",
+    lifecycleStatus: "running",
+    createdAt: "2026-08-18T08:56:30.000Z",
+    updatedAt: "2026-08-18T08:59:50.000Z",
+  }),
+  subagentEntry(2, {
+    role: "review",
+    task: "Check the retry button against the design",
+    lifecycleStatus: "completed",
+    createdAt: "2026-08-18T08:52:00.000Z",
+    updatedAt: "2026-08-18T08:52:48.000Z",
+  }),
+];
+
+/** A finished child whose generation-1 delivery shows as a quiet line, worked 1m 12s. */
+export const SUBAGENT_RESULT_ENTRY: AgentHierarchyInputEntry = subagentEntry(3, {
+  role: "research",
+  task: "List the call sites of the retry policy",
+  lifecycleStatus: "completed",
+  createdAt: "2026-08-18T08:53:00.000Z",
+  updatedAt: "2026-08-18T08:54:12.000Z",
+});
+
+export const SUBAGENT_RESULT_DELIVERY = [
+  "A subagent you delegated has finished.",
+  "",
+  "Subagent: research (6e1c0f3a-1111-4a7b-9c11-aaaaaaaaaaaa/haiku)",
+  `Run: ${SUBAGENT_RUN_PREFIX}3 (generation 1)`,
+  "Task: List the call sites of the retry policy",
+  "",
+  "Result:",
+  "Four call sites, all in the server's agent run package.",
+].join("\n");
+
+/** Three working children, the first with a title long enough to be cut at 760. */
+export const SUBAGENT_TRAY_ENTRIES: ReadonlyArray<AgentHierarchyInputEntry> = [
+  subagentEntry(4, {
+    role: "research",
+    task: "Trace how the folded composer card decides which working subagents to name in its head, and report every place that reads the parent summary",
+    lifecycleStatus: "running",
+    createdAt: "2026-08-18T08:50:30.000Z",
+    updatedAt: "2026-08-18T08:59:00.000Z",
+  }),
+  subagentEntry(5, {
+    role: "implementation",
+    task: "Add the run-time slot",
+    lifecycleStatus: "running",
+    createdAt: "2026-08-18T08:54:00.000Z",
+    updatedAt: "2026-08-18T08:59:00.000Z",
+  }),
+  subagentEntry(6, {
+    role: "review",
+    task: "Review the diff",
+    lifecycleStatus: "running",
+    createdAt: "2026-08-18T08:57:00.000Z",
+    updatedAt: "2026-08-18T08:59:00.000Z",
+  }),
+];
+
+/** A host read that has answered with these children and nothing else. */
+export function subagentsRead(
+  entries: ReadonlyArray<AgentHierarchyInputEntry>,
+): ChildRunStatusController {
+  return {
+    status: "ready",
+    entries,
+    observations: [],
+    observationsTruncated: false,
+    summary: buildChildRunStatusSummary(entries),
+    reconnecting: false,
+    busy: false,
+    errorMessage: undefined,
+    stopAll: async () => false,
+    cancelRun: async () => false,
+    acknowledge: async () => undefined,
+    refresh: () => undefined,
+  };
+}

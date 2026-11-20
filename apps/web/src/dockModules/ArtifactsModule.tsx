@@ -10,7 +10,7 @@ import type {
 } from "@octant/contracts/artifact-library";
 import { decodeWorkspaceTab, decodeWorkspaceTabId } from "@octant/contracts";
 import { lazy, Suspense, useEffect, useState } from "react";
-import { ArtifactListRow } from "../artifacts/ArtifactListRow";
+import { ArtifactTableHead, ArtifactTableRow } from "../artifacts/ArtifactTableRow";
 import { ClaudePageCard } from "../artifacts/ClaudePageCard";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
@@ -35,6 +35,33 @@ type Listing =
   | { readonly status: "loading" }
   | { readonly status: "ready"; readonly listing: ArtifactLibraryListing }
   | { readonly status: "unavailable"; readonly message: string };
+
+/**
+ * The library's table in a column that is 280px when tiled and 480px at least
+ * when flexible: its container tiers drop the tags, the share mark and the
+ * edited time so the name keeps the width.
+ */
+export function ArtifactDockList(props: {
+  readonly entries: ReadonlyArray<ArtifactLibraryEntry>;
+  readonly observedAt: string;
+  readonly onOpen: (entry: ArtifactLibraryEntry) => void;
+}) {
+  return (
+    <div className="artifact-table artifact-table--dock">
+      <ArtifactTableHead />
+      <ul className="artifact-table__rows">
+        {props.entries.map((entry) => (
+          <ArtifactTableRow
+            key={String(entry.canvasId)}
+            entry={entry}
+            observedAt={props.observedAt}
+            onOpen={props.onOpen}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 /**
  * The thread's Project's artifacts, beside the thread.
@@ -158,16 +185,7 @@ export default function ArtifactsModule(props: Props) {
             title="No artifacts yet"
           />
         ) : (
-          <ul className="artifact-library__list">
-            {entries.map((entry) => (
-              <ArtifactListRow
-                key={String(entry.canvasId)}
-                entry={entry}
-                observedAt={observedAt}
-                onOpen={setOpen}
-              />
-            ))}
-          </ul>
+          <ArtifactDockList entries={entries} observedAt={observedAt} onOpen={setOpen} />
         )}
         {claudePages.length === 0 ||
         serverUrl === undefined ||

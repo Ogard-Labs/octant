@@ -613,6 +613,44 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
     );
   });
 
+  it("reads the issues a pull request closes in its own repository from the exported array", async () => {
+    // `gh pr view --json closingIssuesReferences` answers a plain array of
+    // {number,url,repository} items, not a GraphQL `nodes` connection.
+    const { port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ...JSON.parse(detailJson),
+          closingIssuesReferences: [
+            {
+              number: 41,
+              url: "https://github.com/octant/octant/issues/41",
+              repository: { name: "octant", owner: { login: "octant" } },
+            },
+            {
+              number: 42,
+              url: "https://github.com/octant/octant/issues/42",
+              repository: { name: "octant", owner: { login: "octant" } },
+            },
+            {
+              number: 43,
+              url: "https://github.com/elsewhere/tracker/issues/43",
+              repository: { name: "tracker", owner: { login: "elsewhere" } },
+            },
+            { number: 0 },
+          ],
+        }),
+      },
+      { exitCode: 0, stdout: diffText },
+    ]);
+
+    const result = await port.observeReviewByIdentity(
+      identityRequest,
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({ pullRequest: { closingIssueNumbers: [41, 42] } });
+  });
+
   it("returns unavailable when both gh pr view and gh pr diff fail", async () => {
     const { port } = fixture([
       { exitCode: 1, stdout: "private failure" },
@@ -1106,5 +1144,64 @@ describe("GhPullRequestPort active list", () => {
         new AbortController().signal,
       ),
     ).resolves.toEqual({ status: "disconnected" });
+  });
+});
+
+describe("GhPullRequestPort issue closure", () => {
+  it("confirms the closer when the Project's casing differs from GitHub's canonical casing", async () => {
+    const { port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              issue: {
+                title: "The real bug",
+                timelineItems: {
+                  pageInfo: { hasPreviousPage: false },
+                  nodes: [
+                    {
+                      createdAt: "2026-08-22T09:00:00Z",
+                      closer: {
+                        number: 12,
+                        repository: {
+                          owner: { login: "octant" },
+                          name: "octant",
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+      },
+    ]);
+
+    const closure = await port.observeIssueClosure(
+      { owner: "Octant", name: "OCTANT", issueNumber: 34, closerNumber: 12 },
+      new AbortController().signal,
+    );
+
+    expect(closure).toEqual({ closedAt: "2026-08-22T09:00:00Z", title: "The real bug" });
+  });
+
+  it("sends owner and name as string variables when they look like literals", async () => {
+    const { port, command } = fixture([]);
+
+    await port.observeIssueClosure(
+      { owner: "true", name: "2048", issueNumber: 34, closerNumber: 12 },
+      new AbortController().signal,
+    );
+
+    expect(vi.mocked(command.run).mock.calls[0]?.[0].slice(-6)).toEqual([
+      "-f",
+      "owner=true",
+      "-f",
+      "name=2048",
+      "-F",
+      "number=34",
+    ]);
   });
 });

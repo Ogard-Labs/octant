@@ -151,6 +151,8 @@ export class WorkTurnProjection {
       ...(updated.toolStepsTruncated === undefined
         ? {}
         : { toolStepsTruncated: updated.toolStepsTruncated }),
+      ...(updated.reasoningMs === undefined ? {} : { reasoningMs: updated.reasoningMs }),
+      ...(updated.strictKept === undefined ? {} : { strictKept: updated.strictKept }),
       ...(updated.childObservations === undefined
         ? {}
         : { childObservations: updated.childObservations }),
