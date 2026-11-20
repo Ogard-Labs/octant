@@ -1,13 +1,12 @@
 import {
-  ActorId,
   AggregateId,
   AggregateVersion,
   CorrelationId,
-  EventActorDeviceId,
   EventId,
   EventName,
   UtcTimestamp,
 } from "@octant/contracts";
+import { eventActorForPrincipal } from "../principalEventActor";
 import {
   PAIRED_BROWSER_HOLD_AGGREGATE,
   PAIRED_BROWSER_HOLD_ENDED_EVENT,
@@ -97,11 +96,7 @@ export function createPairedBrowserJournal(input: {
           eventName: Schema.decodeUnknownSync(EventName)(eventName),
           eventVersion: 1,
           correlationId: Schema.decodeUnknownSync(CorrelationId)(input.uuid()),
-          actor: {
-            kind: "remote-device",
-            actorId: Schema.decodeUnknownSync(ActorId)(fact.deviceId),
-            deviceId: Schema.decodeUnknownSync(EventActorDeviceId)(fact.deviceId),
-          },
+          actor: eventActorForPrincipal({ kind: "remote-device", deviceId: fact.deviceId }),
           occurredAt: Schema.decodeUnknownSync(UtcTimestamp)(input.clock()),
           payload,
         },

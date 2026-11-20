@@ -1,5 +1,7 @@
-import { existsSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { decodeBrowserContextId, decodeBrowserThreadId } from "@octant/contracts";
 import {
   MAX_PAIRED_BROWSER_FILE_BYTES,
@@ -9,7 +11,10 @@ import {
   type PairedBrowserTarget,
 } from "@octant/contracts/paired-browser-control";
 import { describe, expect, it, vi } from "vitest";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { openSqlite } from "../persistence/sqlitePort";
 import {
+  isPairedDeviceSessionCurrent,
   PairedBrowserControlService,
   type PairedBrowserActor,
   type PairedBrowserHost,
@@ -289,10 +294,16 @@ describe("PairedBrowserControlService", () => {
     }
   });
 
-  it("stages uploaded chooser files in host-private temp storage, delivers them, and deletes them immediately", async () => {
+  it("retains uploaded chooser files until the browser context ends and deletes them immediately on refusal", async () => {
     let seenPath: string | undefined;
+    let refusedPath: string | undefined;
+    let shouldRefuse = false;
     const f = makeFixture({
       fileChoice: vi.fn(async (_target, _leaseId, _chooserId, paths) => {
+        if (shouldRefuse) {
+          refusedPath = paths[0];
+          return { status: "refused" as const, reason: "unavailable" as const };
+        }
         seenPath = paths[0];
         expect(seenPath !== undefined && existsSync(seenPath)).toBe(true);
         return { status: "file-chosen" as const };
@@ -314,7 +325,21 @@ describe("PairedBrowserControlService", () => {
         }),
       ).toEqual({ status: "refused", reason: "rate-limited" });
 
-      // Valid upload staged and cleaned up immediately.
+      // Refused chooser upload cleans up its staged file immediately.
+      shouldRefuse = true;
+      expect(
+        await f.service.uploadFile(actor, {
+          leaseId: held.leaseId,
+          chooserId,
+          fileName: "rejected.txt",
+          bytes: new TextEncoder().encode("nope"),
+        }),
+      ).toEqual({ status: "refused", reason: "lease-ended" });
+      expect(refusedPath !== undefined && existsSync(refusedPath)).toBe(false);
+
+      // Accepted upload stays staged past chooser selection and hand-back so the
+      // page's form can still submit it, then is removed when the context ends.
+      shouldRefuse = false;
       expect(
         await f.service.uploadFile(actor, {
           leaseId: held.leaseId,
@@ -325,9 +350,172 @@ describe("PairedBrowserControlService", () => {
       ).toEqual({ status: "released" });
       expect(seenPath).toBeDefined();
       expect(seenPath).not.toContain("/etc/passwd");
+      expect(seenPath !== undefined && existsSync(seenPath)).toBe(true);
+
+      expect(await f.service.execute(actor, { kind: "hand-back", leaseId: held.leaseId })).toEqual({
+        status: "released",
+      });
+      expect(seenPath !== undefined && existsSync(seenPath)).toBe(true);
+
+      await f.service.pageEnded(contextOne);
       expect(seenPath !== undefined && existsSync(seenPath)).toBe(false);
     } finally {
       await f.service.close();
+    }
+  });
+
+  it("refuses concurrent retries carrying the same sequence number without duplicating native input", async () => {
+    const releaseDispatch = Promise.withResolvers<void>();
+    const input = vi.fn(async () => {
+      await releaseDispatch.promise;
+      return { status: "input" as const, effect: "completed" as const };
+    });
+    const f = makeFixture({ input });
+    try {
+      const actor = makeActor();
+      const held = await f.service.takeOver(actor, threadOne);
+      if (held.status !== "held") throw new Error("Expected held lease");
+
+      const first = f.service.execute(actor, {
+        kind: "input",
+        leaseId: held.leaseId,
+        sequence: 1,
+        events: [{ kind: "text", text: "once" }],
+      });
+      const duplicate = f.service.execute(actor, {
+        kind: "input",
+        leaseId: held.leaseId,
+        sequence: 1,
+        events: [{ kind: "text", text: "once" }],
+      });
+
+      expect(await duplicate).toEqual({
+        status: "refused",
+        reason: "stale-frame",
+        effect: "none",
+      });
+      releaseDispatch.resolve();
+      expect(await first).toEqual({
+        status: "input",
+        lastAcceptedSequence: 1,
+        effect: "completed",
+      });
+      expect(input).toHaveBeenCalledTimes(1);
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("ends an open Browser stream immediately when the paired session expires or is invalidated by digest", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "octant-paired-session-check-"));
+    const connection = openSqlite(join(dir, "octant.db"));
+    try {
+      const createdIso = "2026-11-20T10:00:00.000Z";
+      let nowMs = Date.parse(createdIso);
+      applyMigrations(connection, MIGRATIONS, () => new Date(nowMs).toISOString());
+
+      const hostId = "10000000-0000-4000-8000-000000000001";
+      const deviceId = "20000000-0000-4000-8000-000000000002";
+      const sessionId = "30000000-0000-4000-8000-000000000003";
+      const sessionDigest = createHash("sha256").update(sessionId, "utf8").digest("hex");
+
+      connection
+        .prepare(
+          `INSERT INTO remote_device_projection (
+             device_id, host_id, device_key_fingerprint, device_public_key,
+             device_label, origin, protocol_floor, credential_generation,
+             created_at, expires_at, last_seen_at, state, revoked_at, revoked_reason
+           ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'active', NULL, NULL)`,
+        )
+        .run(
+          deviceId,
+          hostId,
+          "b".repeat(64),
+          "pub-key",
+          "My iPhone",
+          "https://octant.example",
+          createdIso,
+          "2027-11-20T10:00:00.000Z",
+          createdIso,
+        );
+      connection
+        .prepare(
+          `INSERT INTO remote_security_audit_projection (
+             event_kind, host_id, device_id, protocol_version, credential_generation,
+             source_class, result_category, reason_code, correlation_id, occurred_at
+           ) VALUES ('device-approved', ?, ?, 1, 1, 'lan-private', 'ok', 'user-approved', ?, ?)`,
+        )
+        .run(hostId, deviceId, "40000000-0000-4000-8000-000000000004", createdIso);
+      connection
+        .prepare(
+          `INSERT INTO remote_session_store (
+             session_id_digest, host_id, device_id, credential_generation, origin,
+             protocol_version, capability_digest, issued_at, last_seen_at,
+             idle_expires_at, absolute_expires_at, csrf_digest, state
+           ) VALUES (?, ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?, 'active')`,
+        )
+        .run(
+          sessionDigest,
+          hostId,
+          deviceId,
+          "https://octant.example",
+          "c".repeat(64),
+          nowMs,
+          nowMs,
+          nowMs + 30_000,
+          nowMs + 120_000,
+          "d".repeat(64),
+        );
+
+      const principal = { deviceId, sessionId, credentialGeneration: 1 };
+      expect(isPairedDeviceSessionCurrent(connection, principal, nowMs)).toBe(true);
+
+      // Idle session expiry ends an active stream on the next frame tick.
+      const f = makeFixture();
+      try {
+        const actor = makeActor({
+          deviceId,
+          sessionId,
+          current: () => isPairedDeviceSessionCurrent(connection, principal, nowMs),
+        });
+        const held = await f.service.takeOver(actor, threadOne);
+        if (held.status !== "held") throw new Error("Expected held lease");
+        const streamRes = f.service.openStream(actor, held.leaseId);
+        if (streamRes.status !== "stream") throw new Error("Expected stream");
+        const eventsPromise = readNdjsonLines(streamRes.stream, 2);
+        await vi.waitFor(() => expect(vi.mocked(f.host.frame)).toHaveBeenCalled());
+
+        nowMs += 35_000;
+        expect(isPairedDeviceSessionCurrent(connection, principal, nowMs)).toBe(false);
+        const events = await eventsPromise;
+        expect(events.some((event) => event.kind === "ended" && event.reason === "revoked")).toBe(
+          true,
+        );
+      } finally {
+        await f.service.close();
+      }
+
+      // Reset clock within expiry and verify digest-keyed invalidation revokes the session.
+      nowMs = Date.parse(createdIso) + 1_000;
+      expect(isPairedDeviceSessionCurrent(connection, principal, nowMs)).toBe(true);
+      connection
+        .prepare(
+          `INSERT INTO remote_session_invalidation_projection (
+             session_id_digest, host_id, device_id, credential_generation,
+             state, invalidated_at, reason_code, receipt_id
+           ) VALUES (?, ?, ?, 1, 'invalidated', ?, 'user-logout', ?)`,
+        )
+        .run(
+          sessionDigest,
+          hostId,
+          deviceId,
+          new Date(nowMs).toISOString(),
+          "50000000-0000-4000-8000-000000000005",
+        );
+      expect(isPairedDeviceSessionCurrent(connection, principal, nowMs)).toBe(false);
+    } finally {
+      connection.close();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

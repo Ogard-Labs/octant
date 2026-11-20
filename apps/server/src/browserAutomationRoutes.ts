@@ -416,6 +416,14 @@ export function createBrowserAutomationRouteHandler(
           origin,
         );
       }
+      if (
+        command.kind === "take-over" &&
+        !BROWSER_MODES.some((mode) =>
+          dependencies.authority.canAccessWindow(windowId, command.target.threadId, mode),
+        )
+      ) {
+        return pairedControlJson({ status: "refused", reason: "authority-ended" }, 403, origin);
+      }
       const result = await dependencies.pairedBrowserControl.execute(
         remote,
         command,

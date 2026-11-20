@@ -541,6 +541,7 @@ export class BrowserAutomationService {
         owned.evidence.splice(0);
         owned.record = stoppedRecord(owned.record, this.#clock(), "error", "failed");
         this.#releaseDownloadPermissions(contextId);
+        this.#notifyPairedPageEnded(contextId);
         this.#releaseUploads(contextId);
       }
     });
@@ -3129,7 +3130,7 @@ export class BrowserAutomationService {
       this.#releaseDownloadPermissions(contextId);
     for (const contextId of this.#stagedUploads.keys()) this.#releaseUploads(contextId);
     for (const owned of this.#contexts.values()) {
-      this.#reclaimPairedLease(owned.record.contextId);
+      this.#notifyPairedPageEnded(owned.record.contextId);
       owned.abort.abort();
       owned.cancelExpiry?.();
       owned.cancelExpiry = undefined;
@@ -3950,7 +3951,7 @@ export class BrowserAutomationService {
 
   async #safeClose(contextId: BrowserContextId): Promise<void> {
     this.#releaseDownloadPermissions(contextId);
-    this.#reclaimPairedLease(contextId);
+    this.#notifyPairedPageEnded(contextId);
     this.#releaseUploads(contextId);
     try {
       await this.#runtime.closeContext(contextId);

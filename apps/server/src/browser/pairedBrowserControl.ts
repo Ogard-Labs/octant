@@ -1,7 +1,14 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { UtcTimestamp, type BrowserContextId, type BrowserThreadId } from "@octant/contracts";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistration,
+  readRemoteSessionInvalidation,
+} from "../persistence/remoteAccessProjection";
+import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
   MAX_PAIRED_BROWSER_FILE_BYTES,
   MAX_PAIRED_BROWSER_FPS,
@@ -118,6 +125,7 @@ interface ActivePairedLease {
   frameCount: number;
   lastWithheldReason: PairedBrowserWithheldReason | undefined;
   stream: StreamSink | undefined;
+  inputChain: Promise<void>;
   disconnectTimer: ReturnType<typeof setTimeout> | undefined;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
   ended: boolean;
@@ -143,6 +151,64 @@ export type PairedBrowserStreamOpenResult =
   | Extract<PairedBrowserResponse, { readonly status: "refused" }>;
 
 const encoder = new TextEncoder();
+const MAX_PAIRED_STAGED_UPLOADS = 16;
+
+export function isPairedDeviceSessionCurrent(
+  connection: SqliteConnection,
+  principal: {
+    readonly deviceId: unknown;
+    readonly sessionId: unknown;
+    readonly credentialGeneration: number;
+  },
+  nowMs: number,
+): boolean {
+  const deviceId = String(principal.deviceId);
+  const registration = readDeviceRegistration(connection, deviceId);
+  if (
+    registration === undefined ||
+    registration.state !== "active" ||
+    registration.revokedAt !== null ||
+    (registration.expiresAt !== null && Date.parse(registration.expiresAt) <= nowMs)
+  ) {
+    return false;
+  }
+  if (registration.credentialGeneration !== principal.credentialGeneration) return false;
+  if (!readDeviceApprovedByPerson(connection, deviceId)) return false;
+
+  const sessionIdDigest = createHash("sha256")
+    .update(String(principal.sessionId), "utf8")
+    .digest("hex");
+  if (readRemoteSessionInvalidation(connection, sessionIdDigest) !== undefined) {
+    return false;
+  }
+
+  const session = connection
+    .prepare(
+      `SELECT device_id, credential_generation, idle_expires_at, absolute_expires_at, state
+       FROM remote_session_store
+       WHERE session_id_digest = ?`,
+    )
+    .get(sessionIdDigest) as
+    | {
+        readonly device_id: string;
+        readonly credential_generation: number;
+        readonly idle_expires_at: number;
+        readonly absolute_expires_at: number;
+        readonly state: string;
+      }
+    | undefined;
+  if (
+    session === undefined ||
+    session.state !== "active" ||
+    session.device_id !== deviceId ||
+    session.credential_generation !== principal.credentialGeneration ||
+    session.idle_expires_at <= nowMs ||
+    session.absolute_expires_at <= nowMs
+  ) {
+    return false;
+  }
+  return true;
+}
 
 export class PairedBrowserControlService {
   readonly #options: PairedBrowserControlOptions;
@@ -152,6 +218,7 @@ export class PairedBrowserControlService {
   readonly #leases = new Map<string, ActivePairedLease>();
   readonly #byContext = new Map<string, PairedBrowserLeaseId>();
   readonly #byDevice = new Map<string, PairedBrowserLeaseId>();
+  readonly #stagedUploads = new Map<string, Array<() => Promise<void>>>();
   readonly #unsubscribes: Array<() => void> = [];
   #closed = false;
 
@@ -262,6 +329,7 @@ export class PairedBrowserControlService {
       frameCount: 0,
       lastWithheldReason: undefined,
       stream: undefined,
+      inputChain: Promise.resolve(),
       disconnectTimer: undefined,
       idleTimer: undefined,
       ended: false,
@@ -358,7 +426,10 @@ export class PairedBrowserControlService {
       return { status: "refused", reason: "authority-ended" };
     }
 
-    // Input command
+    // Input command: reserve sequence and rate budget synchronously before
+    // awaiting native dispatch so concurrent retries with the same sequence
+    // number can never pass admission twice, and never roll back a reserved
+    // sequence after dispatch begins.
     const seq = evaluatePairedBrowserSequence({
       sequence: command.sequence,
       lastAcceptedSequence: lease.lastAcceptedSequence,
@@ -384,33 +455,60 @@ export class PairedBrowserControlService {
       }
     }
 
-    const opSignal =
-      signal === undefined ? lease.abort.signal : AbortSignal.any([signal, lease.abort.signal]);
-    const result = await this.#options.host.input(lease.target, lease.id, command.events, opSignal);
-    if (result.status === "refused") {
-      if (result.reason === "reclaimed-locally") {
-        await this.#endLease(lease, "reclaimed-locally", { skipHostRelease: true });
-        return { status: "refused", reason: "lease-ended", effect: "none" };
-      }
-      if (result.reason === "stale-frame") {
-        return { status: "refused", reason: "stale-frame", effect: "none" };
-      }
-      return { status: "refused", reason: "lease-ended", effect: "none" };
-    }
-    if (result.status !== "input") {
-      return { status: "refused", reason: "lease-ended", effect: "none" };
-    }
     lease.lastAcceptedSequence = command.sequence;
     lease.eventCount += command.events.length;
     lease.eventSamples.push({ at: now, count: command.events.length });
     const typedChars = countPairedBrowserTypedChars(command.events);
     if (typedChars > 0) lease.charSamples.push({ at: now, count: typedChars });
     this.#armIdleTimer(lease);
-    return {
-      status: "input",
-      lastAcceptedSequence: lease.lastAcceptedSequence,
-      effect: result.effect,
+
+    const runDispatch = async (): Promise<PairedBrowserResponse> => {
+      if (lease.ended || this.#closed || signal?.aborted) {
+        return { status: "refused", reason: "lease-ended", effect: "none" };
+      }
+      if (!actor.current() || !lease.actor.current()) {
+        await this.#endLease(lease, "revoked");
+        return { status: "refused", reason: "authority-ended", effect: "none" };
+      }
+      if (!this.#options.host.authorityCurrent(lease.target)) {
+        await this.#endLease(lease, "page-ended");
+        return { status: "refused", reason: "authority-ended", effect: "none" };
+      }
+      const opSignal =
+        signal === undefined ? lease.abort.signal : AbortSignal.any([signal, lease.abort.signal]);
+      const result = await this.#options.host.input(
+        lease.target,
+        lease.id,
+        command.events,
+        opSignal,
+      );
+      if (result.status === "refused") {
+        if (result.reason === "reclaimed-locally") {
+          await this.#endLease(lease, "reclaimed-locally", { skipHostRelease: true });
+          return { status: "refused", reason: "lease-ended", effect: "none" };
+        }
+        if (result.reason === "stale-frame") {
+          return { status: "refused", reason: "stale-frame", effect: "none" };
+        }
+        return { status: "refused", reason: "lease-ended", effect: "none" };
+      }
+      if (result.status !== "input") {
+        return { status: "refused", reason: "lease-ended", effect: "none" };
+      }
+      this.#armIdleTimer(lease);
+      return {
+        status: "input",
+        lastAcceptedSequence: command.sequence,
+        effect: result.effect,
+      };
     };
+
+    const pending = lease.inputChain.then(runDispatch, runDispatch);
+    lease.inputChain = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    return pending;
   }
 
   openStream(
@@ -508,6 +606,10 @@ export class PairedBrowserControlService {
           signal === undefined ? lease.abort.signal : AbortSignal.any([signal, lease.abort.signal]);
         const result = await this.#options.host.frame(lease.target, lease.id, opSignal);
         if (closed || lease.ended) return;
+        if (!lease.actor.current()) {
+          await this.#endLease(lease, "revoked");
+          return;
+        }
         if (result.status === "frame") {
           lease.lastWithheldReason = undefined;
           lease.frameCount += 1;
@@ -597,6 +699,8 @@ export class PairedBrowserControlService {
     const safeName = sanitizeUploadFileName(input.fileName);
     const stagingDir = await mkdtemp(join(tmpdir(), "octant-paired-upload-"));
     const stagedPath = join(stagingDir, safeName);
+    const cleanup = () => rm(stagingDir, { recursive: true, force: true });
+    let retained = false;
     try {
       await writeFile(stagedPath, input.bytes, { mode: 0o600 });
       const opSignal =
@@ -613,10 +717,18 @@ export class PairedBrowserControlService {
       if (result.status !== "file-chosen") {
         return { status: "refused", reason: "lease-ended" };
       }
+      // Retain the staged copy for the browser context's lifetime so the page's
+      // form can still read and submit the attached file after chooser selection.
+      if (!this.#closed && this.#options.host.authorityCurrent(lease.target)) {
+        this.#keepStagedUpload(String(lease.target.contextId), cleanup);
+        retained = true;
+      }
       this.#armIdleTimer(lease);
       return { status: "released" };
     } finally {
-      await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
+      if (!retained) {
+        await cleanup().catch(() => undefined);
+      }
     }
   }
 
@@ -634,6 +746,7 @@ export class PairedBrowserControlService {
     if (lease !== undefined) {
       await this.#endLease(lease, "page-ended");
     }
+    await this.#releaseStagedUploads(String(contextId));
   }
 
   async signInSettled(contextId: BrowserContextId): Promise<void> {
@@ -670,6 +783,27 @@ export class PairedBrowserControlService {
     await Promise.allSettled(
       [...this.#leases.values()].map((lease) => this.#endLease(lease, "page-ended")),
     );
+    await Promise.allSettled(
+      [...this.#stagedUploads.keys()].map((contextId) => this.#releaseStagedUploads(contextId)),
+    );
+  }
+
+  #keepStagedUpload(contextId: string, cleanup: () => Promise<void>): void {
+    const kept = this.#stagedUploads.get(contextId) ?? [];
+    kept.push(cleanup);
+    while (kept.length > MAX_PAIRED_STAGED_UPLOADS) {
+      void kept
+        .shift()?.()
+        .catch(() => undefined);
+    }
+    this.#stagedUploads.set(contextId, kept);
+  }
+
+  async #releaseStagedUploads(contextId: string): Promise<void> {
+    const kept = this.#stagedUploads.get(contextId);
+    if (kept === undefined) return;
+    this.#stagedUploads.delete(contextId);
+    await Promise.allSettled(kept.map((cleanup) => cleanup()));
   }
 
   #matchesActor(lease: ActivePairedLease, actor: PairedBrowserActor): boolean {

@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 import { BrowserContextId, BrowserThreadId } from "./browserAutomation";
+import { CodeThreadId } from "./code";
 import { UtcTimestamp } from "./events";
+import { HubMemberId, OwnerUnlockPrincipal } from "./hubAndSpokes";
 import { WindowId } from "./shell";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -405,3 +407,28 @@ export const decodePairedBrowserHoldStartedPayload = Schema.decodeUnknownSync(
 export const decodePairedBrowserHoldEndedPayload = Schema.decodeUnknownSync(
   PairedBrowserHoldEndedPayload,
 );
+
+/**
+ * Historical event schema retained strictly so upgraded hosts can still open
+ * and replay journals containing records from the retired enrolled-owner
+ * Browser control path. No route or service emits this event.
+ */
+export const LEGACY_OWNER_BROWSER_AUDIT_EVENT = "browser.owner-control-recorded@1";
+const LegacyOwnerBrowserControlId = Schema.UUID.pipe(Schema.brand("OwnerBrowserControlId"));
+const LegacyOwnerBrowserTargetVersion = Schema.String.pipe(
+  Schema.pattern(/^[a-f0-9]{64}$/),
+  Schema.brand("OwnerBrowserTargetVersion"),
+);
+export const LegacyOwnerBrowserAuditRecord = Schema.Struct({
+  actingPrincipal: OwnerUnlockPrincipal,
+  hostMemberId: HubMemberId,
+  threadId: CodeThreadId,
+  contextId: BrowserContextId,
+  controlId: LegacyOwnerBrowserControlId,
+  targetVersion: LegacyOwnerBrowserTargetVersion,
+  documentRevision: Sequence,
+  operation: Schema.Literal("take-over", "input", "hand-back", "revoke"),
+  phase: Schema.Literal("admitted", "completed", "possible"),
+  inputKind: Schema.optional(Schema.Literal("tap", "scroll", "press", "type")),
+}).annotations(strict);
+export type LegacyOwnerBrowserAuditRecord = typeof LegacyOwnerBrowserAuditRecord.Type;

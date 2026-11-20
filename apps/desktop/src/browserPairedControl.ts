@@ -28,6 +28,12 @@ export interface PairedControlPage {
   readonly identity: object;
   readonly contextId: string;
   readonly target: PairedBrowserNativeTarget;
+  /**
+   * Actual native viewport dimensions used to map normalized pointer
+   * coordinates back onto the live view, independent of the 1920x1200 cap
+   * applied to transmitted screencast frames.
+   */
+  readonly inputViewport?: { readonly width: number; readonly height: number };
   readonly personInputs: number;
   readonly privateCustody: boolean;
   readonly nativePromptOpen: boolean;
@@ -136,6 +142,7 @@ export class BrowserPairedControl {
       ) {
         return { status: "refused", reason: "unavailable" };
       }
+      const viewport = page.inputViewport ?? page.target.viewport;
       const held: ActiveLease = {
         id: command.leaseId,
         key,
@@ -145,8 +152,8 @@ export class BrowserPairedControl {
         originPolicyVersion: page.target.originPolicyVersion,
         stopChooserInterception: undefined,
         lastDocumentVersion: page.target.documentVersion,
-        lastWidth: page.target.viewport.width,
-        lastHeight: page.target.viewport.height,
+        lastWidth: viewport.width,
+        lastHeight: viewport.height,
         frameId: 0,
         minValidFrameId: 1,
         personInputs: page.personInputs,
@@ -195,7 +202,13 @@ export class BrowserPairedControl {
       try {
         held.pendingChooser = undefined;
         const applied = await pending.resolve(command.paths);
-        return applied ? { status: "file-chosen" } : { status: "refused", reason: "unavailable" };
+        if (applied) {
+          // Account for the remote file selection on the lease's input counter
+          // so subsequent frames and inputs stay in lockstep with owned.personInputs.
+          held.personInputs += 1;
+          return { status: "file-chosen" };
+        }
+        return { status: "refused", reason: "unavailable" };
       } catch {
         return { status: "refused", reason: "unavailable" };
       } finally {
@@ -308,15 +321,16 @@ export class BrowserPairedControl {
             reason: this.#reclaimedLeases.has(held.id) ? "reclaimed-locally" : "unavailable",
           };
         }
+        const latestViewport = latestPage.inputViewport ?? latestPage.target.viewport;
         const nextFrameId = held.frameId + 1;
         if (
           latestPage.target.documentVersion !== held.lastDocumentVersion ||
-          latestPage.target.viewport.width !== held.lastWidth ||
-          latestPage.target.viewport.height !== held.lastHeight
+          latestViewport.width !== held.lastWidth ||
+          latestViewport.height !== held.lastHeight
         ) {
           held.lastDocumentVersion = latestPage.target.documentVersion;
-          held.lastWidth = latestPage.target.viewport.width;
-          held.lastHeight = latestPage.target.viewport.height;
+          held.lastWidth = latestViewport.width;
+          held.lastHeight = latestViewport.height;
           held.minValidFrameId = nextFrameId;
         }
         held.frameId = nextFrameId;
@@ -348,14 +362,15 @@ export class BrowserPairedControl {
     if (page.privateCustody || page.nativePromptOpen) {
       return { status: "refused", reason: "unavailable" };
     }
+    const inputViewport = page.inputViewport ?? page.target.viewport;
     if (
       page.target.documentVersion !== held.lastDocumentVersion ||
-      page.target.viewport.width !== held.lastWidth ||
-      page.target.viewport.height !== held.lastHeight
+      inputViewport.width !== held.lastWidth ||
+      inputViewport.height !== held.lastHeight
     ) {
       held.lastDocumentVersion = page.target.documentVersion;
-      held.lastWidth = page.target.viewport.width;
-      held.lastHeight = page.target.viewport.height;
+      held.lastWidth = inputViewport.width;
+      held.lastHeight = inputViewport.height;
       held.minValidFrameId = held.frameId + 1;
     }
     const frameCheck = evaluatePairedBrowserFrameTarget({
@@ -386,22 +401,17 @@ export class BrowserPairedControl {
       this.#pendingInputs.set(held.id, held);
       this.#inputPages.add(page.identity);
       try {
-        await page.input(
-          command.events,
-          page.target.viewport.width,
-          page.target.viewport.height,
-          () => {
-            checkCustody();
-            const live = this.#page(command);
-            return (
-              !signal?.aborted &&
-              live !== undefined &&
-              this.#isLeaseLiveOnPage(held, live) &&
-              live.target.tabId === held.tabId &&
-              live.target.originPolicyVersion === held.originPolicyVersion
-            );
-          },
-        );
+        await page.input(command.events, inputViewport.width, inputViewport.height, () => {
+          checkCustody();
+          const live = this.#page(command);
+          return (
+            !signal?.aborted &&
+            live !== undefined &&
+            this.#isLeaseLiveOnPage(held, live) &&
+            live.target.tabId === held.tabId &&
+            live.target.originPolicyVersion === held.originPolicyVersion
+          );
+        });
       } catch {
         return { status: "input", effect: "possible" };
       } finally {

@@ -382,6 +382,192 @@ describe("BrowserSurfaceHost", () => {
       await host.closeAll();
     }
   });
+
+  it("keeps frames and subsequent inputs alive after a remote file chooser selection", async () => {
+    const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const stagingDir = mkdtempSync(join(tmpdir(), "octant-desktop-chooser-"));
+    const uploadPath = join(stagingDir, "doc.txt");
+    writeFileSync(uploadPath, "hello-upload");
+    const created = view();
+    created.webContents.insertText = vi.fn(async () => undefined);
+    const debuggerListeners: Array<
+      (event: unknown, method: string, params?: Record<string, unknown>, sessionId?: string) => void
+    > = [];
+    created.webContents.debugger.on = vi.fn((_event, listener) => {
+      debuggerListeners.push(listener);
+    });
+    created.webContents.debugger.removeListener = vi.fn((_event, listener) => {
+      const idx = debuggerListeners.indexOf(listener);
+      if (idx >= 0) debuggerListeners.splice(idx, 1);
+    });
+    vi.mocked(created.webContents.capturePage).mockResolvedValue({
+      isEmpty: () => false,
+      getSize: () => ({ width: 800, height: 600 }),
+      toJPEG: () => Uint8Array.from([1, 2, 3]),
+    });
+    const owner = { windowId: "a7880000-0000-4000-8000-000000000011", threadId };
+    const leaseId = "a7880000-0000-4000-8000-000000000012";
+    const host = createBrowserSurfaceHost({
+      createView: () => created,
+      isOwnerWindowAvailable: () => true,
+    });
+    const run = (command: Readonly<Record<string, unknown>>) =>
+      host.pairedControl(decodePairedBrowserNativeCommand({ contextId, owner, ...command }));
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 60_000,
+        },
+      });
+      host.attach(
+        contextId,
+        owner,
+        {
+          contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+          isDestroyed: () => false,
+          isVisible: () => true,
+          webContents: { send: vi.fn() },
+        },
+        { x: 0, y: 0, width: 800, height: 600 },
+      );
+      const inspect = await run({ operation: "inspect" });
+      if (inspect.status !== "target") throw new Error("Expected native target");
+      expect(await run({ operation: "claim", leaseId, target: inspect.target })).toEqual({
+        status: "claimed",
+      });
+
+      for (const listener of debuggerListeners) {
+        listener({}, "Page.fileChooserOpened", {
+          mode: "selectSingle",
+          backendNodeId: 91,
+          accept: ["text/plain"],
+        });
+      }
+      const frameWithChooser = await run({ operation: "frame", leaseId });
+      if (frameWithChooser.status !== "frame" || frameWithChooser.fileChooser === undefined) {
+        throw new Error("Expected fileChooser in paired frame");
+      }
+
+      expect(
+        await run({
+          operation: "file-choice",
+          leaseId,
+          chooserId: frameWithChooser.fileChooser.chooserId,
+          paths: [uploadPath],
+        }),
+      ).toEqual({ status: "file-chosen" });
+      expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
+        "DOM.setFileInputFiles",
+        { files: [uploadPath], backendNodeId: 91 },
+        undefined,
+      );
+
+      // Subsequent frames and remote inputs must keep working after file selection.
+      const nextFrame = await run({ operation: "frame", leaseId });
+      expect(nextFrame.status).toBe("frame");
+      if (nextFrame.status !== "frame") throw new Error("Expected next paired frame");
+      expect(
+        await run({
+          operation: "input",
+          leaseId,
+          events: [{ kind: "tap", frameId: nextFrame.frame.frameId, x: 0.5, y: 0.5 }],
+        }),
+      ).toEqual({ status: "input", effect: "completed" });
+    } finally {
+      await host.closeAll();
+      rmSync(stagingDir, { recursive: true, force: true });
+    }
+  });
+
+  it("maps normalized paired taps against the actual 2400x1600 native viewport while capping transmitted frames to 1920x1200", async () => {
+    const created = view();
+    const resize = vi.fn(({ width }: { readonly width: number }) => {
+      const height = Math.round((width * 1600) / 2400);
+      return {
+        isEmpty: () => false,
+        getSize: () => ({ width, height }),
+        toJPEG: () => Uint8Array.from([1, 2, 3]),
+      };
+    });
+    vi.mocked(created.webContents.capturePage).mockResolvedValue({
+      isEmpty: () => false,
+      getSize: () => ({ width: 2400, height: 1600 }),
+      resize,
+      toJPEG: () => Uint8Array.from([1, 2, 3]),
+    });
+    const owner = { windowId: "a7880000-0000-4000-8000-000000000021", threadId };
+    const leaseId = "a7880000-0000-4000-8000-000000000022";
+    const host = createBrowserSurfaceHost({
+      createView: () => created,
+      isOwnerWindowAvailable: () => true,
+    });
+    const run = (command: Readonly<Record<string, unknown>>) =>
+      host.pairedControl(decodePairedBrowserNativeCommand({ contextId, owner, ...command }));
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 60_000,
+        },
+      });
+      host.attach(
+        contextId,
+        owner,
+        {
+          contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+          isDestroyed: () => false,
+          isVisible: () => true,
+          webContents: { send: vi.fn() },
+        },
+        { x: 0, y: 0, width: 2400, height: 1600 },
+      );
+      const inspect = await run({ operation: "inspect" });
+      if (inspect.status !== "target") throw new Error("Expected native target");
+      expect(await run({ operation: "claim", leaseId, target: inspect.target })).toEqual({
+        status: "claimed",
+      });
+      const frame = await run({ operation: "frame", leaseId });
+      if (frame.status !== "frame") throw new Error("Expected frame");
+      expect(frame.frame.viewport.width).toBeLessThanOrEqual(1920);
+      expect(frame.frame.viewport.height).toBeLessThanOrEqual(1200);
+      expect(resize).toHaveBeenCalledWith({ width: 1800 });
+
+      expect(
+        await run({
+          operation: "input",
+          leaseId,
+          events: [{ kind: "tap", frameId: frame.frame.frameId, x: 0.75, y: 0.75 }],
+        }),
+      ).toEqual({ status: "input", effect: "completed" });
+
+      const touchStart = vi
+        .mocked(created.webContents.debugger.sendCommand)
+        .mock.calls.find(
+          ([method, params]) =>
+            method === "Input.dispatchTouchEvent" &&
+            (params as { readonly type?: string })?.type === "touchStart",
+        );
+      expect(touchStart?.[1]).toMatchObject({
+        type: "touchStart",
+        touchPoints: [{ x: 1800, y: 1200 }],
+      });
+    } finally {
+      await host.closeAll();
+    }
+  });
   it.each([
     ["https://example.com"],
     ["https://identity.example:8443"],

@@ -957,8 +957,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       const origin = originOf(contents.getURL());
       if (origin === undefined || !originAllowed(contents.getURL(), owned.policy.allowedOrigins))
         return undefined;
-      const width = Math.max(1, Math.min(1920, Math.round(owned.lastBounds?.width ?? 1280)));
-      const height = Math.max(1, Math.min(1200, Math.round(owned.lastBounds?.height ?? 800)));
+      const actualWidth = Math.max(1, Math.round(owned.lastBounds?.width ?? 1280));
+      const actualHeight = Math.max(1, Math.round(owned.lastBounds?.height ?? 800));
+      const width = Math.min(1920, actualWidth);
+      const height = Math.min(1200, actualHeight);
       const documentRevision = scriptGenerations.get(view) ?? 0;
       const originPolicyVersion = createHash("sha256")
         .update(JSON.stringify(owned.policy.allowedOrigins))
@@ -997,6 +999,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           viewport: { width, height },
           devicePixelRatio: 1,
         },
+        inputViewport: { width: actualWidth, height: actualHeight },
         personInputs: owned.personInputs,
         privateCustody,
         nativePromptOpen,

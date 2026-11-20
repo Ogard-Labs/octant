@@ -2079,5 +2079,59 @@ describe("browser automation routes", () => {
         reason: "not-local",
       });
     });
+
+    it("refuses take-over on /api/browser/remote-control/input when the thread is outside the device's Project scope", async () => {
+      const store = new WindowAuthorityStore();
+      const windowId = "10000000-0000-4000-8000-000000000001" as never;
+      const outOfScopeThread = decodeBrowserThreadId("99000000-0000-4000-8000-000000000099");
+      const execute = vi.fn();
+      const route = createBrowserAutomationRouteHandler({
+        service: {} as any,
+        authority: { canAccessWindow: () => false, resolve: () => undefined },
+        pairedBrowserControl: {
+          takeOver: vi.fn(),
+          handBack: vi.fn(),
+          execute,
+          openStream: vi.fn(),
+          uploadFile: vi.fn(),
+        } as any,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+
+      const req = new Request("http://127.0.0.1/api/browser/remote-control/input", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "take-over",
+          target: {
+            threadId: outOfScopeThread,
+            contextId: "88000000-0000-4000-8000-000000000088",
+            tabId: "tab-1",
+            documentVersion: "a".repeat(64),
+            profileKind: "private",
+            originPolicyVersion: "v1",
+          },
+        }),
+      });
+      bindPrincipalRouteContext(req, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: "90000000-0000-4000-8000-000000000001" as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+          admittedBy: "host-person",
+        }),
+        scopeId: windowId,
+      });
+
+      const response = await route(req);
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toEqual({ status: "refused", reason: "authority-ended" });
+      expect(execute).not.toHaveBeenCalled();
+    });
   });
 });

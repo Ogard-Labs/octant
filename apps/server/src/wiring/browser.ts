@@ -38,9 +38,11 @@ import {
   readDeviceApprovedByPerson,
   readDeviceRegistration,
   readDeviceRegistrations,
-  readRemoteSessionInvalidation,
 } from "../persistence/remoteAccessProjection";
-import { PairedBrowserControlService } from "../browser/pairedBrowserControl";
+import {
+  isPairedDeviceSessionCurrent as checkPairedDeviceSessionCurrent,
+  PairedBrowserControlService,
+} from "../browser/pairedBrowserControl";
 import { createPairedBrowserJournal } from "../browser/pairedBrowserJournal";
 import { createProductFeedbackRouteHandler } from "../productFeedbackRoutes";
 import {
@@ -1097,24 +1099,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       readonly deviceId: unknown;
       readonly sessionId: unknown;
       readonly credentialGeneration: number;
-    }): boolean => {
-      const deviceId = String(principal.deviceId);
-      const registration = readDeviceRegistration(persistence.connection, deviceId);
-      if (
-        registration === undefined ||
-        registration.state !== "active" ||
-        registration.revokedAt !== null ||
-        (registration.expiresAt !== null && Date.parse(registration.expiresAt) <= Date.now())
-      ) {
-        return false;
-      }
-      if (registration.credentialGeneration !== principal.credentialGeneration) return false;
-      if (!readDeviceApprovedByPerson(persistence.connection, deviceId)) return false;
-      return (
-        readRemoteSessionInvalidation(persistence.connection, String(principal.sessionId)) ===
-        undefined
-      );
-    };
+    }): boolean => checkPairedDeviceSessionCurrent(persistence.connection, principal, Date.now());
     return {
       pairedBrowserControlService,
       resolvePairedDeviceName,
