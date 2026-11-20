@@ -104,6 +104,10 @@ import {
 } from "../context/externalContentTaintProjection";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
+import {
+  createReportFinishedTool,
+  observeFolderFinishedDiff,
+} from "../finishedReceipts/finishedReceiptTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
 import {
   clampTurnAccessPosture,
@@ -187,6 +191,9 @@ export function withCodeOperationRuntime(
         }),
     saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
+    ...(service.resolveDesktopFileTarget === undefined
+      ? {}
+      : { resolveDesktopFileTarget: service.resolveDesktopFileTarget.bind(service) }),
     ...(service.readGitHistory === undefined
       ? {}
       : { readGitHistory: service.readGitHistory.bind(service) }),
@@ -223,7 +230,7 @@ export function withCodeOperationRuntime(
   };
 }
 
-function withCodeBoard(
+export function withCodeBoard(
   service: CodeRouteService,
   queryBoard: NonNullable<CodeRouteService["queryBoard"]>,
 ): CodeRouteService {
@@ -238,6 +245,9 @@ function withCodeBoard(
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
     saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
+    ...(service.resolveDesktopFileTarget === undefined
+      ? {}
+      : { resolveDesktopFileTarget: service.resolveDesktopFileTarget.bind(service) }),
     ...(service.readGitHistory === undefined
       ? {}
       : { readGitHistory: service.readGitHistory.bind(service) }),
@@ -339,6 +349,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "personMemoryAccess"
     | "octantInstructions"
     | "isPairedDeviceScope"
+    | "isRestrictedDeviceScope"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -347,9 +358,11 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "agentsManagedToolsFor"
     | "coordinatorWorkersHolder"
     | "externalContentIngestionStore"
+    | "managedWorktreeReceipts"
     | "nativeHarnessRoutingStore"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
+    | "finishedReceipts"
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
   > &
@@ -366,7 +379,12 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools" | "threadDesktopDestination"> &
   Pick<
     WorkspaceWiring,
-    "codeBoardPlanProgressSource" | "contextHarness" | "keptImageChoices" | "projectService"
+    | "codeBoardPlanProgressSource"
+    | "contextHarness"
+    | "gitObservationPort"
+    | "goalService"
+    | "keptImageChoices"
+    | "projectService"
   > &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<HarnessStateWiring, "onHarnessQuestionAsked" | "onHarnessQuestionSettled"> &
@@ -386,6 +404,8 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeTestDiscovery"
     | "isCodeProviderModelAllowed"
     | "onPullRequestSnapshotRefreshed"
+    | "bindPullRequestSwitchReconciler"
+    | "pullRequestLinkService"
     | "projectPullRequestActionService"
     | "projectPullRequestCadence"
     | "projectPullRequestService"
@@ -514,6 +534,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     onHarnessQuestionSettled,
     onHarnessRecoveryLifted,
     onPullRequestSnapshotRefreshed,
+    bindPullRequestSwitchReconciler,
+    pullRequestLinkService,
     onThreadArchived,
     onWindowRevoked,
     nativeHarnessTranscripts,
@@ -543,6 +565,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     serverProjectStore,
     shieldServerStore,
     sideTasks,
+    finishedReceipts,
+    gitObservationPort,
+    goalService,
     simulatorInputGrants,
     spendCeiling,
     threadMentionService,
@@ -563,6 +588,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     } = {};
     // A host started with its own runtime uses it; otherwise it is built below.
     let codeOperationRuntime: CodeOperationRuntime | undefined = options.codeOperationRuntime;
+    // Built after the operation runtime is: its checkout refresh callback
+    // reads the service lazily, and a switch before it exists observes later.
+    let builtCodeService: CodeService | undefined;
     // A Code session whose runtime keeps background work (a dev server, a
     // watch) outlives its turn; a turn the runtime starts by itself later is
     // opened through the thread's ordinary admission, below.
@@ -733,6 +761,38 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         windowId,
       }),
     );
+    contributeCodeTools(({ windowId, thread, readThread, folders, operationId, askPerson }) => {
+      const readPosture = () =>
+        clampTurnAccessPosture({
+          requested: readThread()?.executionPolicy ?? thread.executionPolicy,
+          thread: persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
+        });
+      const folder = folders[0];
+      const shell = nativeHarnessComposition.shellForCode({
+        windowId: String(windowId),
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+      });
+      return createReportFinishedTool({
+        mode: "code",
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+        ...(operationId === undefined ? {} : { turnId: operationId }),
+        readPosture,
+        toolConstraints: thread.toolConstraints,
+        profileDisplayName: thread.profileDisplayName,
+        ...(folder === undefined ? {} : { folder }),
+        ...(folders.length > 1 ? { extraFolders: folders.slice(1) } : {}),
+        ...(shell === undefined ? {} : { shell }),
+        askPerson,
+        readGoal: () => goalService.read(String(thread.id)).goal ?? undefined,
+        observeDiff: (signal) =>
+          observeFolderFinishedDiff({ folder, git: gitObservationPort, signal }),
+        store: finishedReceipts,
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      });
+    });
     const {
       androidToolchainRoutes,
       appleToolchainRoutes,
@@ -860,6 +920,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        pullRequestLinks: pullRequestLinkService,
         stalledTurnLimitMs: (turn) =>
           stalledTurnLimitMs(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -875,6 +936,26 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
           ),
         moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
+        // A branch switch moves the checkout's journaled head; the service
+        // exists only after this runtime does, so the callback reads it lazily.
+        checkoutObserved: async (checkoutId, head) => {
+          const service = builtCodeService;
+          if (service instanceof CodeService) service.noteCheckoutHead(checkoutId, head);
+          // The only caller is a completed branch switch: a managed worktree
+          // records the verified branch the host just landed it on so cleanup
+          // still recognises the worktree it owns. Its `branchIntent` — the
+          // branch the receipt may delete — never moves with it.
+          if (head.kind === "branch") {
+            const checkout = persistence.readCodeCheckout(checkoutId);
+            if (checkout?.kind === "managed-worktree") {
+              await deps.managedWorktreeReceipts.recordVerifiedBranch(
+                String(checkout.ownershipReceiptId),
+                head.name,
+                head.oid,
+              );
+            }
+          }
+        },
         verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
         prepareWorktree: async (thread, root, current) => {
           const checkout = persistence.readCodeCheckout(thread.checkoutId);
@@ -1701,6 +1782,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             },
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
+            strict: () => resolveThreadStrict(String(thread.id)),
+            readsPerTurn: () =>
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                .siblingThreadReadsPerTurn,
+            waitsPerTurn: () =>
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                .siblingThreadWaitsPerTurn,
           }),
         isCoordinatorThread: (threadId) => coordinatorService.isCoordinator(threadId),
         coordinatorContext: (threadId) => coordinatorService.contextFor(threadId),
@@ -1863,6 +1951,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       });
     }
     const { codeCompletedThreadSource, codeService } = buildCodeService(codeOperationRuntime);
+    builtCodeService = codeService instanceof CodeService ? codeService : undefined;
     yield* Effect.promise(() => codeOperationRuntime?.reconcile?.() ?? Promise.resolve());
     // A push or pull request step a restart left unknown is settled by looking
     // at the remote now, as the host, rather than when a person next opens
@@ -2349,6 +2438,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
           },
           planProgress: codeBoardPlanProgressSource,
+          finishedReceipts: {
+            read: (threadId) => finishedReceipts.boardMark(String(threadId)),
+          },
           outsideContent: {
             read: (threadId) => {
               if (
@@ -2476,6 +2568,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       uuid: randomUUID,
     });
     pullRequestWatchService = pullRequestSwitchService;
+    bindPullRequestSwitchReconciler(pullRequestSwitchService);
     // Host-local and idle-free: the forge is read only while a switch or a watch is on.
     const pullRequestSwitchAbort = new AbortController();
     const pullRequestSwitchTimer = setInterval(() => {
@@ -2555,10 +2648,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     const codeSessionRoutes = createCodeSessionRouteHandler({
       windowAuthorityStore: deps.windowAuthorityStore,
       canOpenThread: (windowId, threadId) => {
-        if (deps.isPairedDeviceScope(windowId)) return false;
+        const device = deps.isPairedDeviceScope(windowId);
+        if (device && deps.isRestrictedDeviceScope(windowId)) return false;
         try {
           const thread = persistence.readCodeThread(threadId);
-          return thread !== undefined && canAccessCodeProject(windowId, thread.projectId);
+          if (thread === undefined) return false;
+          return device
+            ? codeProjectAccess.hasActiveCodeProject(thread.projectId)
+            : canAccessCodeProject(windowId, thread.projectId);
         } catch {
           return false;
         }
@@ -2566,8 +2663,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       liveTasks: (threadId) => outlivingCodeSessions.liveTasks(codeSessionKey(threadId)),
       stopLiveTasks: (threadId) => outlivingCodeSessions.stopThread(codeSessionKey(threadId)),
       // A window here or the host's own paired device is the person; the
-      // host acting for a routine is not.
-      isPerson: (windowId) => !isRoutineHostScope(windowId),
+      // host acting for a routine or a hub-introduced device is not.
+      isPerson: (windowId) =>
+        !isRoutineHostScope(windowId) && !deps.isRestrictedDeviceScope(windowId),
       nativeSessions: () => codeOperationRuntime?.nativeSessions,
     });
     return {

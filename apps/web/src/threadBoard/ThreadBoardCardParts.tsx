@@ -1,3 +1,4 @@
+import type { ThreadBoardFinishedMark } from "@octant/contracts";
 import { Check, GitBranch, LoaderCircle } from "../ui/icons";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 
@@ -106,6 +107,27 @@ export function ThreadBoardCardLive(props: { readonly summary: string | undefine
       <span className="board-card-live__text" title={props.summary}>
         {props.summary ?? "Working…"}
       </span>
+    </span>
+  );
+}
+
+/**
+ * Compact mark shown on a Work or Code board card when the thread holds a
+ * fresh finished-with-proof receipt. Never changes the card's board column,
+ * and disappears automatically when later file changes mark the receipt stale.
+ */
+export function ThreadBoardCardFinishedMark(props: {
+  readonly mark: ThreadBoardFinishedMark | undefined;
+}) {
+  if (props.mark === undefined) return null;
+  const label =
+    props.mark.provenCount > 0
+      ? `Finished · ${props.mark.provenCount.toLocaleString("en")} proven`
+      : "Finished";
+  return (
+    <span className="board-card-finished" data-board-finished-mark="true">
+      <Check aria-hidden="true" size={12} />
+      <span>{label}</span>
     </span>
   );
 }

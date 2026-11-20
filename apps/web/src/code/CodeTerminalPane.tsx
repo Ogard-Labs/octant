@@ -52,6 +52,8 @@ export interface CodeTerminalPaneProps {
   readonly offerBrowserGrant?: boolean;
   /** Opens a second terminal for this thread. Absent when tabs cannot open. */
   readonly onOpenAnotherTerminal?: () => void;
+  /** Opens the thread composer's mode menu when shown in Plan mode. */
+  readonly onOpenModeMenu?: () => void;
   /**
    * Pins this terminal to the focus zone. Absent on a card that is already a
    * pinned window onto the shell, which has nothing to pin.
@@ -708,7 +710,24 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
       )}
       {notice === undefined ? null : <p role="status">{notice}</p>}
       {props.executionPolicy === "plan" ? (
-        <OctantAlert layout="row" tone="neutral">
+        <OctantAlert
+          {...(props.onOpenModeMenu === undefined
+            ? {}
+            : {
+                action: (
+                  <OctantButton
+                    onClick={props.onOpenModeMenu}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Change mode
+                  </OctantButton>
+                ),
+              })}
+          layout="row"
+          tone="neutral"
+        >
           Plan mode keeps terminal replay read-only.
         </OctantAlert>
       ) : null}

@@ -47,6 +47,7 @@ import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -158,7 +159,9 @@ import {
   turnWorkedFor,
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
+import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { SideTaskInline } from "../followUps/SideTaskCards";
+import { FinishedReceiptInline } from "../finishedReceipts/FinishedReceiptCard";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
@@ -192,6 +195,7 @@ import {
   runningTurnKeepsNarrowerMode,
   threadKeepsFullAccessSandbox,
 } from "./PermissionModePicker";
+import { useRegisterComposerModeMenu } from "./composerModeMenu";
 import { ThreadGuardrailLevel } from "./GuardrailLevelIndicator";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
@@ -657,6 +661,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const [queuePreparing, setQueuePreparing] = useState(false);
   const queuePreparingRef = useRef(false);
+  const [modeMenuOpener, setModeMenuOpener] = useState<(() => void) | undefined>();
+  const registerModeMenuOpener = useCallback((open: (() => void) | undefined) => {
+    setModeMenuOpener(() => open);
+  }, []);
+  useRegisterComposerModeMenu(String(props.threadId), modeMenuOpener);
 
   const composerReady = view !== undefined && props.controller.status !== "disconnected";
   useLayoutEffect(() => {
@@ -2229,6 +2238,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                   })}
                               {...(message.at === undefined ? {} : { at: message.at })}
                             />
+                            <TurnLoopStallNotice
+                              {...(message.loopNotice === undefined
+                                ? {}
+                                : { loopNotice: message.loopNotice })}
+                              {...(message.stallNotice === undefined
+                                ? {}
+                                : { stallNotice: message.stallNotice })}
+                              running={
+                                message.status === "incomplete" &&
+                                props.controller.turnStatus === "running"
+                              }
+                              onStop={() => {
+                                forceStop.requestStop();
+                                void props.controller.cancelTurn();
+                              }}
+                            />
                             {activity?.retrying === undefined ? null : (
                               <HarnessRetryStatus
                                 events={[
@@ -2440,18 +2465,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       steered={message.steeredResults}
                     />
                     {message.role === "assistant" && message.operationId !== undefined ? (
-                      <SideTaskInline
-                        last={message === lastReply}
-                        loadedTurnIds={loadedOperationIds}
-                        // The host refuses a fork through an operation that is still
-                        // incomplete or waiting, whichever reply it is.
-                        running={
-                          message.status === undefined ||
-                          message.status === "incomplete" ||
-                          message.status === "waiting"
-                        }
-                        turnId={String(message.operationId)}
-                      />
+                      <>
+                        <FinishedReceiptInline
+                          last={message === lastReply}
+                          loadedTurnIds={loadedOperationIds}
+                          turnId={String(message.operationId)}
+                        />
+                        <SideTaskInline
+                          last={message === lastReply}
+                          loadedTurnIds={loadedOperationIds}
+                          // The host refuses a fork through an operation that is still
+                          // incomplete or waiting, whichever reply it is.
+                          running={
+                            message.status === undefined ||
+                            message.status === "incomplete" ||
+                            message.status === "waiting"
+                          }
+                          turnId={String(message.operationId)}
+                        />
+                      </>
                     ) : null}
                     {continuedOnFallback?.afterId === message.id ? (
                       <OctantSeparatorWithLabel aria-label="Continued on the fallback">
@@ -2992,6 +3024,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   autoReview={props.autoReview}
                   disabled={accessChanging}
                   onChange={(next) => void changeMode(next)}
+                  onRegisterOpener={registerModeMenuOpener}
                   {...(profileName === undefined ? {} : { profileName })}
                   warningScope={{ projectId: String(thread.projectId) }}
                   value={permissionModeOf(thread)}

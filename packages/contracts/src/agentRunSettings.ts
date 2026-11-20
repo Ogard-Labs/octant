@@ -1,4 +1,4 @@
-import { HostResourcePolicy } from "./hostResourcePolicy";
+import { HostResourcePolicy, KeepAwakePolicy } from "./hostResourcePolicy";
 import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { AgentRunCreationPosture } from "./agentRun";
@@ -67,6 +67,11 @@ export const AgentRunPolicySettings = Schema.Struct({
   /** Optional so settings journaled before it existed replay as the defaults. */
   concurrency: Schema.optional(AgentRunConcurrency),
   resourcePolicy: Schema.optional(HostResourcePolicy),
+  /**
+   * The prior keep-awake policy when an update changed it, so the journaled
+   * event carries both the old and new values with its actor and timestamp.
+   */
+  previousKeepAwake: Schema.optional(KeepAwakePolicy),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);

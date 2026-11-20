@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { CorrelationId, UtcTimestamp } from "./events";
+import { CausationId, CorrelationId, GlobalSequence, UtcTimestamp } from "./events";
 import { ToolActionAuthority, ToolActionId } from "./toolActions";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -122,6 +122,49 @@ export const ValidationCompositionFailure = Schema.Union(
 ).annotations(strict);
 export type ValidationCompositionFailure = typeof ValidationCompositionFailure.Type;
 
+/**
+ * A single evidence timeline entry with replay-safe ordering.
+ * Source references are safe opaque tokens — never raw filesystem paths.
+ */
+export const ValidationTimelineEntry = Schema.Struct({
+  sequence: GlobalSequence,
+  correlationId: CorrelationId,
+  causationId: Schema.optional(CausationId),
+  evidenceId: ValidationEvidenceId,
+  planId: ValidationPlanId,
+  stepId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  outcome: ValidationOutcome,
+  sourceKind: ValidationSourceKind,
+  sourceReference: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  redacted: Schema.Boolean,
+  observedAt: UtcTimestamp,
+  detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192))),
+}).annotations(strict);
+export type ValidationTimelineEntry = typeof ValidationTimelineEntry.Type;
+
+/** A step-level summary projected from validation evidence. */
+export const ValidationStepSummary = Schema.Struct({
+  stepId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  description: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  outcome: ValidationOutcome,
+  evidenceCount: Schema.Int.pipe(Schema.nonNegative()),
+  sourceKinds: Schema.Array(ValidationSourceKind),
+}).annotations(strict);
+export type ValidationStepSummary = typeof ValidationStepSummary.Type;
+
+/** Projected validation evidence snapshot stored in SQLite for replay. */
+export const ValidationEvidenceSnapshot = Schema.Struct({
+  authority: ToolActionAuthority,
+  sequence: GlobalSequence,
+  snapshotAt: UtcTimestamp,
+  plan: Schema.optional(ValidationPlan),
+  timeline: Schema.Array(ValidationTimelineEntry),
+  steps: Schema.Array(ValidationStepSummary),
+  overallOutcome: ValidationOutcome,
+  report: Schema.optional(ValidationReport),
+}).annotations(strict);
+export type ValidationEvidenceSnapshot = typeof ValidationEvidenceSnapshot.Type;
+
 export const decodeValidationPlanId = Schema.decodeUnknownSync(ValidationPlanId);
 export const decodeValidationEvidenceId = Schema.decodeUnknownSync(ValidationEvidenceId);
 export const decodeValidationSourceKind = Schema.decodeUnknownSync(ValidationSourceKind);
@@ -133,4 +176,9 @@ export const decodeValidationEvidenceRecord = Schema.decodeUnknownSync(Validatio
 export const decodeValidationReport = Schema.decodeUnknownSync(ValidationReport);
 export const decodeValidationCompositionFailure = Schema.decodeUnknownSync(
   ValidationCompositionFailure,
+);
+export const decodeValidationTimelineEntry = Schema.decodeUnknownSync(ValidationTimelineEntry);
+export const decodeValidationStepSummary = Schema.decodeUnknownSync(ValidationStepSummary);
+export const decodeValidationEvidenceSnapshot = Schema.decodeUnknownSync(
+  ValidationEvidenceSnapshot,
 );

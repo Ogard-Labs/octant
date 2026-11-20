@@ -626,4 +626,81 @@ describe("Settings › Servers route", () => {
     expect(deleted).toEqual([]);
     store.remove({ serverId: accountId, principal: "local-window" });
   });
+
+  it("admits a person-paired device for server registration and key display as that device while refusing hub-introduced devices", async () => {
+    const journal = openJournal(scratch());
+    const store = storeOn(journal);
+    const windowId = decodeWindowId("00000000-0000-4000-8000-000000000472");
+    const windows = new WindowAuthorityStore();
+    const handler = createShieldServerRouteHandler({
+      windowAuthorityStore: windows,
+      store,
+      sshAgentAvailable: () => false,
+      projectExists: (id) => id === projectId,
+      sshKeys: {
+        ensure: async () => "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample",
+        delete: async () => true,
+      },
+      now: () => 1,
+    });
+    const url = "http://127.0.0.1/api/shield/servers";
+    const sendAs = (admittedBy: "host-person" | "hub-roster", command: unknown) => {
+      const request = new Request(url, {
+        method: "POST",
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: {
+          kind: "remote-device",
+          deviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          admittedBy,
+        } as never,
+        scopeId: windowId,
+      });
+      return handler(request);
+    };
+
+    const blocked = await sendAs("hub-roster", {
+      kind: "register-server",
+      server: { ...web, alias: "blocked", signIn: "octant-key" },
+    });
+    expect(await blocked?.json()).toMatchObject({
+      kind: "shield-servers-refused",
+      reason: "needs-local-window",
+    });
+
+    const registered = await sendAs("host-person", {
+      kind: "register-server",
+      server: { ...web, alias: "paired-keyed", signIn: "octant-key" },
+    });
+    expect(registered?.status).toBe(200);
+    expect(await registered?.json()).toMatchObject({ kind: "shield-servers-updated" });
+    const serverId = String(store.servers()[0]?.serverId);
+
+    const shown = await sendAs("host-person", { kind: "show-server-key", serverId });
+    expect(await shown?.json()).toEqual({
+      kind: "shield-server-key",
+      serverId,
+      publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample",
+    });
+
+    const blockedKey = await sendAs("hub-roster", { kind: "show-server-key", serverId });
+    expect(await blockedKey?.json()).toMatchObject({
+      kind: "shield-servers-refused",
+      reason: "needs-local-window",
+    });
+
+    const events = journal.replayAggregateType({
+      aggregateType: "shield-servers",
+      afterSequence: 0,
+      limit: 10,
+    });
+    expect(events[0]?.actor).toMatchObject({
+      kind: "remote-device",
+      deviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    });
+    expect(events[0]?.payload).toMatchObject({
+      principal: { kind: "person-paired-device" },
+    });
+  });
 });

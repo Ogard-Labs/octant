@@ -65,8 +65,8 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
     this.#persistedActiveRunIds = options.persistedActiveRunIds;
   }
 
-  start(run: AgentRun): AgentRunSessionHandle {
-    return this.#start(run);
+  start(run: AgentRun, input?: { readonly ownerWindowId?: string }): AgentRunSessionHandle {
+    return this.#start(run, undefined, undefined, input?.ownerWindowId);
   }
 
   checkResume(run: AgentRun): AgentRunResumeReadiness | Promise<AgentRunResumeReadiness> {
@@ -84,7 +84,10 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
     return this.#port.checkResume(run);
   }
 
-  resume(run: AgentRun, input?: { readonly message?: string }): AgentRunSessionHandle {
+  resume(
+    run: AgentRun,
+    input?: { readonly message?: string; readonly ownerWindowId?: string },
+  ): AgentRunSessionHandle {
     if (this.#port.resume === undefined)
       throw new AgentRunSessionError(
         "resume-unavailable",
@@ -92,16 +95,19 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
           ? "This execution cannot resume its saved conversation. Start a new delegation from the parent."
           : "This execution cannot resume its saved conversation. Use Retry for a fresh session.",
       );
-    return this.#start(run, input ?? {});
+    return this.#start(run, input ?? {}, undefined, input?.ownerWindowId);
   }
 
-  prepareStart(run: AgentRun): AgentRunPreparedResume | undefined {
+  prepareStart(
+    run: AgentRun,
+    input?: { readonly ownerWindowId?: string },
+  ): AgentRunPreparedResume | undefined {
     if (this.#sessions.has(run.id))
       throw new AgentRunSessionError(
         "provider-unavailable",
         "This child already owns a live session.",
       );
-    const prepared = this.#port.prepareStart?.(run);
+    const prepared = this.#port.prepareStart?.(run, input);
     if (prepared === undefined) return undefined;
     return {
       start: (started) => this.#start(started, undefined, prepared),
@@ -111,7 +117,7 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
 
   prepareResume(
     run: AgentRun,
-    input?: { readonly message?: string },
+    input?: { readonly message?: string; readonly ownerWindowId?: string },
   ): AgentRunPreparedResume | undefined {
     if (this.#sessions.has(run.id))
       throw new AgentRunSessionError(
@@ -128,8 +134,9 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
 
   #start(
     run: AgentRun,
-    continuation?: { readonly message?: string },
+    continuation?: { readonly message?: string; readonly ownerWindowId?: string },
     prepared?: AgentRunPreparedResume,
+    ownerWindowId?: string,
   ): AgentRunSessionHandle {
     if (this.#sessions.has(run.id)) {
       throw new AgentRunProcessSupervisorError(
@@ -141,7 +148,7 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
       prepared !== undefined
         ? prepared.start(run)
         : continuation === undefined
-          ? this.#port.start(run)
+          ? this.#port.start(run, ownerWindowId === undefined ? undefined : { ownerWindowId })
           : this.#port.resume?.(run, continuation);
     if (handle === undefined)
       throw new AgentRunSessionError(

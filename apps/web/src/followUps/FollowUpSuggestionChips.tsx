@@ -23,6 +23,7 @@ import {
   type FollowUpSuggestionClient,
 } from "@octant/client-runtime/follow-up-suggestion-client";
 import type { SideTaskClient } from "@octant/client-runtime/side-task-client";
+import type { FinishedReceiptClient } from "@octant/client-runtime/finished-receipt-client";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import {
@@ -30,6 +31,7 @@ import {
   useThreadActivityRevision,
 } from "../polling/ThreadActivityRevisions";
 import { SideTaskProvider } from "./SideTaskCards";
+import { FinishedReceiptProvider } from "../finishedReceipts/FinishedReceiptCard";
 import { EnvironmentCard } from "../environment/EnvironmentGroup";
 import "./follow-up-suggestions.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -61,6 +63,7 @@ export interface ComposerOffers extends FollowUpSuggestionChipsProps {
     SideTaskClient,
     "sideTasks" | "start" | "continueHere" | "dismiss"
   >;
+  readonly finishedReceiptClient?: Pick<FinishedReceiptClient, "receipts">;
 }
 
 /**
@@ -81,14 +84,18 @@ export const NextMessageSuggestionsContext = createContext<
 export function ComposerFollowUpSuggestions() {
   const context = useContext(FollowUpSuggestionContext);
   if (context === undefined) return null;
-  const { sideTaskClient: _sideTasks, ...chips } = context;
+  const {
+    sideTaskClient: _sideTasks,
+    finishedReceiptClient: _finishedReceipts,
+    ...chips
+  } = context;
   return <FollowUpSuggestionChips {...chips} />;
 }
 
 /**
- * Loads the pane thread's side-task offers once for the transcript's inline
- * cards, and opens the thread a start creates. It always renders its children,
- * so a pane with no offers keeps its tree.
+ * Loads the pane thread's side-task offers and finished receipts once for the
+ * transcript's inline cards, and opens the thread a start creates. It always
+ * renders its children, so a pane with none keeps its tree.
  */
 export function PaneSideTasks(props: { readonly children: ReactNode }) {
   const context = useContext(FollowUpSuggestionContext);
@@ -110,7 +117,9 @@ export function PaneSideTasks(props: { readonly children: ReactNode }) {
         })
       }
     >
-      {props.children}
+      <FinishedReceiptProvider client={context?.finishedReceiptClient} threadId={context?.threadId}>
+        {props.children}
+      </FinishedReceiptProvider>
     </SideTaskProvider>
   );
 }
@@ -535,7 +544,11 @@ export function FollowUpSuggestionChips(props: FollowUpSuggestionChipsProps) {
 export function EnvironmentSuggestedTasks() {
   const context = useContext(FollowUpSuggestionContext);
   if (context === undefined) return null;
-  const { sideTaskClient: _sideTasks, ...chips } = context;
+  const {
+    sideTaskClient: _sideTasks,
+    finishedReceiptClient: _finishedReceipts,
+    ...chips
+  } = context;
   return (
     <FollowUpSuggestionChips
       {...chips}

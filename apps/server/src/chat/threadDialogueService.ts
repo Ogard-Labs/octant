@@ -1,5 +1,4 @@
 import {
-  DEFAULT_THREAD_MESSAGES_PER_TURN,
   THREAD_DIALOGUE_TOOL_NAME,
   decodeChatThreadId,
   decodeThreadDialogueMessageInput,
@@ -11,6 +10,7 @@ import {
   type ThreadDialogueResult,
   type WindowId,
 } from "@octant/contracts";
+import { decideThreadDialogueAsk } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 
 const THREAD_DIALOGUE_TOOL = THREAD_DIALOGUE_TOOL_NAME;
@@ -40,8 +40,10 @@ export interface ThreadDialogueServiceOptions {
    * Absent means this host records no sidecars.
    */
   readonly isSideChat?: (threadId: string) => boolean;
-  /** How many messages one turn may send, read from Settings for each turn; absent is three. */
+  /** How many messages one turn may send under Strict, read from Settings; absent is three. */
   readonly messagesPerTurn?: () => number;
+  /** Whether Strict is on for the source thread now; absent reads as Strict. */
+  readonly strict?: (threadId: string) => boolean;
 }
 
 /** Provider-neutral, one-hop Chat coordination through explicit mention grants. */
@@ -73,7 +75,6 @@ export class ThreadDialogueService {
     const firstTarget = chatTargetIds[0];
     if (firstTarget === undefined) return undefined;
     let sends = 0;
-    const limit = this.#options.messagesPerTurn?.() ?? DEFAULT_THREAD_MESSAGES_PER_TURN;
     return {
       definitions: [THREAD_DIALOGUE_TOOL_DEFINITION],
       execute: async ({ name, inputJson, signal }) => {
@@ -89,12 +90,15 @@ export class ThreadDialogueService {
             isError: true,
           };
         }
-        if (sends >= limit) {
+        const askLimit = this.#options.messagesPerTurn?.();
+        const decision = decideThreadDialogueAsk({
+          asksThisTurn: sends,
+          strict: this.#options.strict?.(String(input.sourceThreadId)) ?? true,
+          ...(askLimit === undefined ? {} : { askLimit }),
+        });
+        if (decision.status === "refused") {
           return {
-            result: failedResult(
-              firstTarget,
-              `This turn reached its limit of ${limit} thread messages, set in Settings.`,
-            ),
+            result: failedResult(firstTarget, decision.message),
             isError: true,
           };
         }
@@ -188,7 +192,7 @@ export class ThreadDialogueService {
 const THREAD_DIALOGUE_TOOL_DEFINITION: ProviderToolDefinition = {
   name: THREAD_DIALOGUE_TOOL,
   description:
-    "Ask a Chat thread the user mentioned in this message one bounded question or instruction, and wait for its reply. Use it only when the user asks you to coordinate with that thread, never to act on it otherwise; a turn may ask a few times (three unless the person changed it in Settings; the answer says when the limit is reached), and the thread you ask cannot ask onward. Waiting means that thread is busy: tell the user rather than retrying. Put the reply you get in your own answer.",
+    "Ask a Chat thread the user mentioned in this message one bounded question or instruction, and wait for its reply. Use it only when the user asks you to coordinate with that thread, never to act on it otherwise; under Strict a turn is limited to the count set in Settings (three by default; the answer says when the limit is reached), and the thread you ask cannot ask onward. Waiting means that thread is busy: tell the user rather than retrying. Put the reply you get in your own answer.",
   inputSchema: {
     type: "object",
     properties: {

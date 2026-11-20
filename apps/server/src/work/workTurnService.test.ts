@@ -4602,6 +4602,56 @@ describe("WorkTurnService", () => {
     controller.abort();
   });
 
+  it("restates the turn's reasoning total live and keeps it and a call's bounds through settle", async () => {
+    const gate = deferred<void>();
+    const timing = {
+      startedAt: "2026-08-11T12:00:00.000Z" as UtcTimestamp,
+      endedAt: "2026-08-11T12:00:03.000Z" as UtcTimestamp,
+    } as const;
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          input.onReasoningMs?.(12_000);
+          input.onToolSteps?.({
+            truncated: false,
+            steps: [{ toolCallId: "call-1", toolName: "Read", state: "completed", timing }],
+          });
+          await gate.promise;
+          return { kind: "completed", response: "Done" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const controller = new AbortController();
+    const stream = fixture.service.subscribe(ids.window, ids.thread, 0, controller.signal);
+    const frames: Array<Record<string, unknown>> = [];
+    for (;;) {
+      const next = await stream.next();
+      if (next.done === true) break;
+      const frame = next.value as Record<string, unknown>;
+      frames.push(frame);
+      if (frame.kind === "turn-tool-step") break;
+    }
+    // The reasoning total rides the step stream; a mid-turn rebuild shows it.
+    expect(frames.some((frame) => frame.reasoningMs === 12_000)).toBe(true);
+    const midTurn = (await fixture.service.transcript(ids.window, ids.thread)).turns[0];
+    expect(midTurn?.reasoningMs).toBe(12_000);
+    gate.resolve();
+    for (;;) {
+      const next = await stream.next();
+      if (next.done === true) break;
+      if ((next.value as { readonly kind: string }).kind === "turn-settled") break;
+    }
+    controller.abort();
+    await fixture.waitForIdle();
+    // The settled, replayed turn shows the same measurements the live feed did.
+    const settledTurn = (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1);
+    expect(settledTurn?.reasoningMs).toBe(12_000);
+    expect(settledTurn?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Read", state: "completed", timing },
+    ]);
+  });
+
   it("publishes the turn's tool calls live and journals them with the settled turn", async () => {
     const gate = deferred<void>();
     const fixture = serviceFixture({
@@ -7493,5 +7543,67 @@ describe("continuing a Work turn a restart cut off", () => {
 
     expect(recovery.held).toMatchObject([{ reason: "cannot-resume" }]);
     expect(continuations(host)).toHaveLength(0);
+  });
+});
+
+describe("loop stops on a Work thread", () => {
+  it("journals work.turn-loop-stopped@1 under Strict and lets the thread accept the next message straight away", async () => {
+    let call = 0;
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          call += 1;
+          if (call === 1) {
+            input.onLoopStopped?.({
+              kind: "turn-loop-stopped",
+              toolName: "octant_read",
+              count: 6,
+              occurredAt: "2026-10-30T12:00:05.000Z" as never,
+            });
+            return { kind: "cancelled" };
+          }
+          return { kind: "completed", response: "Continuing cleanly." };
+        },
+      },
+    });
+
+    const first = await fixture.service.startFirstTurn(ids.window, startCommand());
+    expect(first.kind).toBe("accepted");
+    await fixture.waitForIdle();
+
+    const appendedNames = fixture.persistence.journal.append.mock.calls.flatMap((args) =>
+      (args[0] as { readonly events: ReadonlyArray<{ readonly eventName: string }> }).events.map(
+        (e) => e.eventName,
+      ),
+    );
+    expect(appendedNames).toContain("work.turn-loop-stopped@1");
+
+    const turnsAfterStop = fixture.projection.listForThread(ids.thread);
+    expect(turnsAfterStop[0]).toMatchObject({
+      status: "cancelled",
+      loopNotice: {
+        kind: "turn-loop-stopped",
+        toolName: "octant_read",
+        count: 6,
+      },
+    });
+
+    // Thread accepts a new message straight away.
+    const nextRequestId = decodeWorkTurnRequestId("84000000-0000-4000-8000-000000000098");
+    const second = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      requestId: nextRequestId,
+      turnId: "84000000-0000-4000-8000-000000000099",
+      prompt: "Try a different approach",
+    });
+    expect(second.kind).toBe("accepted");
+    await fixture.waitForIdle(nextRequestId);
+
+    const turnsAfterNext = fixture.projection.listForThread(ids.thread);
+    expect(turnsAfterNext).toHaveLength(2);
+    expect(turnsAfterNext[1]).toMatchObject({
+      status: "completed",
+      response: "Continuing cleanly.",
+    });
   });
 });

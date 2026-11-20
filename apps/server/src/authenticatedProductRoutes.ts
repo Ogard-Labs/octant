@@ -368,17 +368,6 @@ export function classifyProductAction(request: Request): string | undefined {
     }
     return method === "GET" || method === "HEAD" ? "settings.read-non-secret" : undefined;
   }
-  if (path.startsWith("/api/validation/")) {
-    // Validation evidence is the only route on this prefix and is POST-only by
-    // construction, so admitting only GET/HEAD left every evidence pane blank
-    // on a paired browser. Admission is still only forwarding: the route
-    // authenticates the window and re-checks the requested tool authority
-    // against it before loading any snapshot.
-    if (method === "POST" && path === "/api/validation/evidence") {
-      return "settings.read-non-secret";
-    }
-    return method === "GET" || method === "HEAD" ? "settings.read-non-secret" : undefined;
-  }
   if (path.startsWith("/api/browser/")) {
     // A companion client watches the page the host already opened and acts
     // inside it. Reading the thread's scope, its current context, and the

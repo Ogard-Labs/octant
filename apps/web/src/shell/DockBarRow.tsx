@@ -24,7 +24,7 @@ import {
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { IconButton } from "./IconButton";
-import type { DockBarChoice, DockBarItem } from "./dockBarControls";
+import type { DockBarChoice, DockBarItem, DockBarText } from "./dockBarControls";
 
 /** A 24px control, and the 4px between two. */
 const CONTROL = 24;
@@ -37,51 +37,61 @@ export const TILE_CONTROLS = CONTROL + GAP;
 export const TILE_MINIMISE_CONTROL = CONTROL + GAP;
 
 /**
- * How much of a tool's controls a bar shows: every control as it is (`full`),
+ * How much of a tool's controls a bar shows: every control as it is (`full`);
  * with each view switch folded into one control that names the current view
- * (`named`), with the actions folded into one menu as well (`menu`), or with
- * the controls the tool draws itself moved to a row of their own under the
- * bar (`row`). The tool's name is cut only after the last step, and status
- * text and a state kept in words (View only) never fold.
+ * (`named`); with every named control — word buttons, view switches, actions —
+ * folded into the one More menu (`menu`); with the state the tool reports
+ * about itself folded into that menu's first rows, its badge on the More
+ * button (`cues`); or with the controls the tool draws itself moved to a row
+ * of their own under the bar, the tool's name shortened first (`row`). State
+ * is the last thing to leave the bar and the second row belongs to a
+ * tool-drawn control alone.
  */
-export type DockBarFold = "full" | "named" | "menu" | "row";
+export type DockBarFold = "full" | "named" | "menu" | "cues" | "row";
 
-const FOLDS: ReadonlyArray<DockBarFold> = ["full", "named", "menu", "row"];
+const FOLDS: ReadonlyArray<DockBarFold> = ["full", "named", "menu", "cues", "row"];
+const foldAtLeast = (fold: DockBarFold, step: DockBarFold): boolean =>
+  FOLDS.indexOf(fold) >= FOLDS.indexOf(step);
 
 const isAction = (item: DockBarItem): boolean =>
   (item.kind === "button" && item.words !== true) || item.kind === "menu";
 const isWords = (item: DockBarItem) => item.kind === "button" && item.words === true;
-/** What moves to the secondary row, whole, when the bar cannot hold it: never cut. */
-const isRowable = (item: DockBarItem): boolean =>
-  item.kind === "node" || isWords(item) || (item.kind === "text" && item.cue === true);
+/** A named control: the bar folds every one into the More menu before any state cue. */
+const isNamedControl = (item: DockBarItem): boolean =>
+  item.kind === "button" || item.kind === "menu" || item.kind === "choice";
+/** The state the tool reports about itself: it stays whole until even it must fold. */
+const isStateCue = (item: DockBarItem): item is DockBarText => item.kind === "text";
 /**
- * In the last step the view switch moves too: folded to a named button it is
- * the one control that is still cut ("W⌄" in a 280px Review tile), so it goes
- * to the row beside the other things that must stay whole.
+ * What a secondary row may hold: only a control the tool draws itself, and
+ * only once the tool's name has already shortened.
  */
 const movesToRow = (item: DockBarItem, fold: DockBarFold): boolean =>
-  isRowable(item) || (fold === "row" && item.kind === "choice");
+  fold === "row" && item.kind === "node";
 const isSwitch = (item: DockBarItem): item is DockBarChoice =>
   item.kind === "choice" && item.compact !== true;
 
 type Rulers = ReadonlyMap<string, number>;
 
 function widthOf(items: ReadonlyArray<DockBarItem>, fold: DockBarFold, rulers: Rulers): number {
-  const actions = items.filter(isAction);
-  const moreWidth = fold !== "full" && fold !== "named" && actions.length > 0 ? GAP + CONTROL : 0;
+  const namedFolded = foldAtLeast(fold, "menu");
+  const cuesFolded = foldAtLeast(fold, "cues");
+  const menuDrawn =
+    (namedFolded && items.some(isNamedControl)) || (cuesFolded && items.some(isStateCue));
   return (
-    moreWidth +
+    (menuDrawn ? GAP + CONTROL : 0) +
     items.reduce((sum, item) => {
-      if (isAction(item)) return fold === "menu" || fold === "row" ? sum : sum + GAP + CONTROL;
-      if (fold === "row" && movesToRow(item, fold)) return sum;
-      if (item.kind === "node") return sum + GAP + (rulers.get(`node:${item.id}`) || item.width);
+      if (item.kind === "node")
+        return fold === "row" ? sum : sum + GAP + (rulers.get(`node:${item.id}`) || item.width);
+      if (item.kind === "text")
+        return cuesFolded ? sum : sum + GAP + (rulers.get(`text:${item.id}`) ?? 0);
+      // Named controls fold into the menu together, whatever drew them.
+      if (namedFolded) return sum;
       if (item.kind === "choice") {
         const named = fold !== "full" || item.compact === true;
         return sum + GAP + (rulers.get(`${named ? "named" : "full"}:${item.id}`) ?? 0);
       }
-      // Status text and a state kept in words count in every step, so the
-      // actions fold before either is cut.
-      return sum + GAP + (rulers.get(`text:${item.id}`) ?? 0);
+      // A state kept in words measures its words; an icon, its 24px.
+      return sum + GAP + (isWords(item) ? (rulers.get(`text:${item.id}`) ?? 0) : CONTROL);
     }, 0)
   );
 }
@@ -106,6 +116,7 @@ export function useFoldedControls(
       item.kind,
       item.kind === "choice" ? [item.value, item.options.map((option) => option.label)] : 0,
       item.kind === "text" ? item.text : 0,
+      item.kind === "button" ? item.words === true : 0,
     ]),
   );
   useLayoutEffect(() => {
@@ -135,12 +146,21 @@ export function useFoldedControls(
       const name = node.querySelector<HTMLElement>(".dock-tile__name");
       // The name's 16px icon and the 8px between them.
       const lead = name === null ? 0 : 16 + 2 * GAP + name.scrollWidth;
-      const room = node.clientWidth - insets - lead - trailing;
-      // The row exists only for something that must move to it.
-      const steps = items.some((item) => movesToRow(item, "row"))
-        ? FOLDS
-        : FOLDS.filter((step) => step !== "row");
-      const fits = steps.find((step) => widthOf(items, step, rulers) <= room);
+      // The name gives way before a control may take the second row: at the
+      // last step it counts only its floor — icon, gaps and a truncated
+      // remnant — so the row is the very last resort, not an earlier folding.
+      const leadFloor = name === null ? 0 : 16 + 2 * GAP + 32;
+      // The row exists only for a control the tool draws itself, the cue step
+      // only for state that could fold into the menu.
+      const steps = FOLDS.filter(
+        (step) =>
+          (step !== "row" || items.some((item) => movesToRow(item, "row"))) &&
+          (step !== "cues" || items.some(isStateCue)),
+      );
+      const fits = steps.find((step) => {
+        const room = node.clientWidth - insets - (step === "row" ? leadFloor : lead) - trailing;
+        return widthOf(items, step, rulers) <= room;
+      });
       setFold(fits ?? steps.at(-1) ?? "menu");
     };
     measure();
@@ -357,7 +377,23 @@ export function MenuEntries(props: { readonly item: Extract<DockBarItem, { kind:
   return <>{out}</>;
 }
 
+/** The badge's severity for a folded cue: the explicit tone, else the dot's. */
+function cueTone(cue: DockBarText): "neutral" | "warning" | "danger" {
+  if (cue.tone !== undefined) return cue.tone;
+  if (cue.dot === "lost") return "danger";
+  if (cue.dot === "busy") return "warning";
+  return "neutral";
+}
+
+const TONE_RANK: Readonly<Record<"neutral" | "warning" | "danger", number>> = {
+  neutral: 0,
+  warning: 1,
+  danger: 2,
+};
+
 function MoreMenu(props: {
+  /** State cues the bar could not hold: the menu's first rows, and its badge. */
+  readonly cues: ReadonlyArray<DockBarText>;
   readonly items: ReadonlyArray<DockBarItem>;
   readonly toolLabel: string;
 }) {
@@ -365,11 +401,21 @@ function MoreMenu(props: {
   const active = props.items
     .flatMap((item) => (item.kind === "menu" && item.active !== undefined ? [item.active] : []))
     .join(", ");
+  const tone = props.cues.reduce<"neutral" | "warning" | "danger">(
+    (worst, cue) => (TONE_RANK[cueTone(cue)] > TONE_RANK[worst] ? cueTone(cue) : worst),
+    "neutral",
+  );
+  // The badge and the description say what folded: a cue the bar dropped is
+  // read on the More button itself, not only inside the menu.
+  const description = [props.cues.map((cue) => cue.text).join("; "), active]
+    .filter((part) => part !== "")
+    .join("; ");
   return (
     <OctantMenuRoot>
       <OctantMenuTrigger
         aria-label={name}
-        {...(active === "" ? {} : { "aria-description": active, "data-active": "true" })}
+        {...(description === "" ? {} : { "aria-description": description, "data-active": "true" })}
+        {...(props.cues.length === 0 ? {} : { "data-cue": tone })}
         className="shell-icon-button dock-tile__control window-no-drag"
         title={name}
       >
@@ -378,7 +424,19 @@ function MoreMenu(props: {
       <OctantMenuPortal>
         <OctantMenuPositioner>
           <OctantMenuPopup aria-label={name}>
-            {props.items.filter(isAction).map((item, index) =>
+            {props.cues.length === 0 ? null : (
+              <OctantMenuGroup>
+                {props.cues.map((cue) => (
+                  <OctantMenuGroupLabel className="dock-bar-cue-row" key={cue.id}>
+                    {cue.dot === undefined ? null : (
+                      <span aria-hidden="true" className="device-dot" data-dot={cue.dot} />
+                    )}
+                    {cue.text}
+                  </OctantMenuGroupLabel>
+                ))}
+              </OctantMenuGroup>
+            )}
+            {props.items.map((item, index) =>
               item.kind === "button" ? (
                 <OctantMenuItem
                   className="workspace-disclosure__action window-no-drag"
@@ -390,9 +448,33 @@ function MoreMenu(props: {
                 </OctantMenuItem>
               ) : item.kind === "menu" ? (
                 <OctantMenuGroup key={item.id}>
-                  {index === 0 ? null : <OctantMenuSeparator />}
+                  {index === 0 && props.cues.length === 0 ? null : <OctantMenuSeparator />}
                   <OctantMenuGroupLabel>{item.label}</OctantMenuGroupLabel>
                   <MenuEntries item={item} />
+                </OctantMenuGroup>
+              ) : item.kind === "choice" ? (
+                <OctantMenuGroup key={item.id}>
+                  {index === 0 && props.cues.length === 0 ? null : <OctantMenuSeparator />}
+                  <OctantMenuGroupLabel>{item.label}</OctantMenuGroupLabel>
+                  <OctantMenuRadioGroup
+                    onValueChange={(value) => item.onChange(String(value))}
+                    value={item.value}
+                  >
+                    {item.options.map((option) => (
+                      <OctantMenuRadioItem
+                        className="workspace-disclosure__action window-no-drag"
+                        key={option.id}
+                        value={option.id}
+                      >
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate">{option.label}</span>
+                          {option.description === undefined ? null : (
+                            <span className="truncate oct-menu-detail">{option.description}</span>
+                          )}
+                        </span>
+                      </OctantMenuRadioItem>
+                    ))}
+                  </OctantMenuRadioGroup>
                 </OctantMenuGroup>
               ) : null,
             )}
@@ -439,10 +521,11 @@ function moveAlongToolbar(event: KeyboardEvent<HTMLDivElement>) {
 }
 
 /**
- * What must stay whole (cues, a control the tool draws itself). In the row it
- * wraps onto further lines when it is wider than the bar, and the bar reserves
- * the height it really has; where there is no row it scrolls in its own box,
- * which a keyboard can reach and scroll.
+ * The one secondary row: the controls the tool draws itself, whole and in the
+ * same toolbar. The row wraps onto further lines when they are wider than the
+ * bar, and the bar reserves the height it really has; where there is no row
+ * (the bottom panel) they scroll in their own box, which a keyboard can reach
+ * and scroll.
  */
 function CuesGroup(props: {
   readonly fold: DockBarFold;
@@ -482,10 +565,11 @@ function CuesGroup(props: {
 }
 
 /**
- * A tool's bar controls, as one labelled toolbar. Navigation and status lead,
+ * A tool's bar controls, as one labelled toolbar. State and navigation lead,
  * after the tool's name; actions trail, ending where the tile's own Arrange and
- * Close begin. Each action is a 24px icon button, folded into one menu when the
- * bar cannot hold them (see `DockBarFold`).
+ * Close begin. Named controls fold into one menu before state does, and a
+ * folded cue reads first in that menu, on the button's badge (see
+ * `DockBarFold`).
  */
 export function DockBarRow(props: {
   readonly items: ReadonlyArray<DockBarItem>;
@@ -495,9 +579,21 @@ export function DockBarRow(props: {
   readonly scrollCues?: boolean;
 }) {
   if (props.items.length === 0) return null;
-  const actions = props.items.filter(isAction);
-  const lead = props.items.filter((item) => !isAction(item) && !movesToRow(item, props.fold));
-  const rowable = props.items.filter((item) => movesToRow(item, props.fold));
+  const namedFolded = foldAtLeast(props.fold, "menu");
+  const cuesFolded = foldAtLeast(props.fold, "cues");
+  const foldedCues = cuesFolded ? props.items.filter(isStateCue) : [];
+  const foldedNamed = namedFolded ? props.items.filter(isNamedControl) : [];
+  const actions = namedFolded ? [] : props.items.filter(isAction);
+  const lead = props.items.filter((item) => {
+    if (item.kind === "text") return !cuesFolded;
+    // A tool-drawn control always stands in the cues box, so the row that
+    // takes it never remounts it — the same element keeps its own state.
+    if (item.kind === "node") return false;
+    if (item.kind === "choice") return !namedFolded;
+    // A state kept in words stands with the lead until every named control folds.
+    return isWords(item) && !namedFolded;
+  });
+  const rowable = props.items.filter((item) => item.kind === "node");
   const drawItem = (item: DockBarItem) => {
     if (item.kind === "text")
       return (
@@ -555,10 +651,10 @@ export function DockBarRow(props: {
       </CuesGroup>
     );
   const actionsBlock =
-    actions.length === 0 ? null : (
+    foldedCues.length + foldedNamed.length === 0 && actions.length === 0 ? null : (
       <div className="dock-tile__tool-actions" key="actions">
-        {props.fold === "menu" || props.fold === "row" ? (
-          <MoreMenu items={props.items} toolLabel={props.toolLabel} />
+        {foldedCues.length + foldedNamed.length > 0 ? (
+          <MoreMenu cues={foldedCues} items={foldedNamed} toolLabel={props.toolLabel} />
         ) : (
           actions.map((item) =>
             item.kind === "button" ? (

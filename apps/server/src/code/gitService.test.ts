@@ -524,6 +524,91 @@ describe("GitService", () => {
       undefined,
     );
   });
+
+  it("switches branches inside the per-checkout queue under the caller's token and live admission", async () => {
+    const observation = readyObservation();
+    const mutation = {
+      ...mutationPort(),
+      switchBranch: vi.fn(async () => ({
+        status: "applied" as const,
+        oid: "b".repeat(40),
+        branch: "feature",
+      })),
+    };
+    const observe = vi.fn(async () => observation);
+    const service = new GitService({ observe }, mutation);
+    const base = {
+      checkoutId: "checkout-1",
+      checkoutRoot: "/repo",
+      branch: "feature",
+      dirty: "refuse" as const,
+      expectedStateToken: observation.stateToken,
+    };
+
+    await expect(service.switchBranch({ ...base, expectedStateToken: "stale" })).resolves.toEqual({
+      status: "rejected",
+      reason: "stale-state",
+    });
+    // Admission that lapsed while the call waited in the queue still refuses.
+    await expect(service.switchBranch({ ...base, current: () => false })).resolves.toEqual({
+      status: "rejected",
+      reason: "stale-state",
+    });
+    expect(mutation.switchBranch).not.toHaveBeenCalled();
+
+    await expect(service.switchBranch(base)).resolves.toEqual({
+      status: "applied",
+      oid: "b".repeat(40),
+      branch: "feature",
+    });
+    // The token check reads the full untracked listing: the same setting the
+    // switch preview asked for, so a file added inside an untracked directory
+    // after the preview shows up as a changed token rather than stashed unseen.
+    expect(observe).toHaveBeenCalledWith("/repo", undefined, { untrackedFiles: "all" });
+    expect(mutation.switchBranch).toHaveBeenCalledWith(
+      { checkoutRoot: "/repo", branch: "feature", dirty: "refuse" },
+      undefined,
+    );
+
+    // Live admission is forwarded so the port rechecks it before each write,
+    // not just once at the queue's head.
+    const admission = () => true;
+    await expect(service.switchBranch({ ...base, current: admission })).resolves.toEqual({
+      status: "applied",
+      oid: "b".repeat(40),
+      branch: "feature",
+    });
+    expect(mutation.switchBranch).toHaveBeenLastCalledWith(
+      { checkoutRoot: "/repo", branch: "feature", dirty: "refuse", current: admission },
+      undefined,
+    );
+  });
+
+  it("lets a detached checkout switch to a local branch with the same protections", async () => {
+    const observation = {
+      ...readyObservation(),
+      head: { kind: "detached" as const, oid: headOid },
+    };
+    const mutation = {
+      ...mutationPort(),
+      switchBranch: vi.fn(async () => ({
+        status: "applied" as const,
+        oid: "b".repeat(40),
+        branch: "feature",
+      })),
+    };
+    const service = new GitService({ observe: vi.fn(async () => observation) }, mutation);
+
+    await expect(
+      service.switchBranch({
+        checkoutId: "checkout-1",
+        checkoutRoot: "/repo",
+        branch: "feature",
+        dirty: "refuse",
+        expectedStateToken: observation.stateToken,
+      }),
+    ).resolves.toEqual({ status: "applied", oid: "b".repeat(40), branch: "feature" });
+  });
 });
 
 const headOid = "a".repeat(40);

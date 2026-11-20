@@ -11,6 +11,7 @@ import { Schema } from "effect";
 import type { XcodeDerivedData } from "./apple/xcodeDerivedData";
 import type { HostWorktreeScan as Scanned } from "./code/hostWorktreeDiscovery";
 import type { HostWorktreeRemoval, HostWorktreeRemovalRequest } from "./code/hostWorktreeRemoval";
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -155,7 +156,7 @@ export function createDiskCleanupRouteHandler(dependencies: DiskCleanupRouteDepe
       }
       throw error;
     }
-    if (principal.kind !== "local-window") {
+    if (!principalActsAsHostPerson(principal)) {
       return json(refusedWorktree("unauthorized"), 403, origin);
     }
 

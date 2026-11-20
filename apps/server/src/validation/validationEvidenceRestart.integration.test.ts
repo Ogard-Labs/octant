@@ -10,9 +10,11 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { catchUpProjection } from "../persistence/projection";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
-import { createValidationEvidenceLoader } from "./validationEvidenceLoader";
 import { ValidationEventStore } from "./validationEventStore";
-import { ValidationEvidenceProjection } from "./validationEvidenceProjection";
+import {
+  readValidationEvidenceSnapshot,
+  ValidationEvidenceProjection,
+} from "./validationEvidenceProjection";
 import {
   ValidationEvidenceRecorded,
   ValidationPlanCreated,
@@ -140,11 +142,8 @@ describe("validation evidence restart replay", () => {
     firstStore.appendEvidence({ evidence: makeEvidence(), expectedVersion: 1 });
     firstStore.appendReport({ report: makeReport(), expectedVersion: 2 });
 
-    const firstSnapshot = createValidationEvidenceLoader({
-      connection: first,
-      clock: () => now,
-    })({ authority });
-    expect(firstSnapshot.kind).toBe("snapshot");
+    const firstSnapshot = readValidationEvidenceSnapshot(first, authority, now);
+    expect(firstSnapshot).toBeDefined();
     first.close();
 
     // Second boot: reopen, catch up the projection from the journal, and
@@ -166,26 +165,19 @@ describe("validation evidence restart replay", () => {
       });
     }
 
-    const restartedSnapshot = createValidationEvidenceLoader({
-      connection: reopened,
-      clock: () => now,
-    })({ authority });
+    const restartedSnapshot = readValidationEvidenceSnapshot(reopened, authority, now);
 
-    expect(restartedSnapshot.kind).toBe("snapshot");
-    if (restartedSnapshot.kind === "snapshot" && firstSnapshot.kind === "snapshot") {
-      expect(restartedSnapshot.snapshot.overallOutcome).toBe(firstSnapshot.snapshot.overallOutcome);
-      expect(restartedSnapshot.snapshot.timeline).toHaveLength(
-        firstSnapshot.snapshot.timeline.length,
-      );
-      expect(restartedSnapshot.snapshot.sequence).toBe(firstSnapshot.snapshot.sequence);
-      expect(restartedSnapshot.snapshot.report?.overallOutcome).toBe(
-        firstSnapshot.snapshot.report?.overallOutcome,
-      );
+    expect(restartedSnapshot).toBeDefined();
+    if (restartedSnapshot !== undefined && firstSnapshot !== undefined) {
+      expect(restartedSnapshot.overallOutcome).toBe(firstSnapshot.overallOutcome);
+      expect(restartedSnapshot.timeline).toHaveLength(firstSnapshot.timeline.length);
+      expect(restartedSnapshot.sequence).toBe(firstSnapshot.sequence);
+      expect(restartedSnapshot.report?.overallOutcome).toBe(firstSnapshot.report?.overallOutcome);
     }
     reopened.close();
   });
 
-  it("reconnect replay with afterSequence produces the same snapshot without duplicates", () => {
+  it("replaying the journal does not duplicate timeline entries or advance sequence", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-validation-reconnect-"));
     directories.push(directory);
     const path = join(directory, "octant.sqlite3");
@@ -206,23 +198,19 @@ describe("validation evidence restart replay", () => {
     firstStore.appendPlan({ plan: makePlan(), expectedVersion: 0 });
     firstStore.appendEvidence({ evidence: makeEvidence(), expectedVersion: 1 });
 
-    const loader = createValidationEvidenceLoader({
-      connection: first,
-      clock: () => now,
-    });
-    const initial = loader({ authority });
-    expect(initial.kind).toBe("snapshot");
+    const initial = readValidationEvidenceSnapshot(first, authority, now);
+    expect(initial).toBeDefined();
 
-    // Reconnect with the last-known sequence: the snapshot is identical and
-    // no duplicate or stale evidence is produced.
-    if (initial.kind === "snapshot") {
-      const reconnect = loader({ authority, afterSequence: initial.snapshot.sequence });
-      expect(reconnect.kind).toBe("snapshot");
-      if (reconnect.kind === "snapshot") {
-        expect(reconnect.snapshot.timeline).toHaveLength(initial.snapshot.timeline.length);
-        expect(reconnect.snapshot.sequence).toBe(initial.snapshot.sequence);
-      }
+    for (const projection of firstRegistries.projections.all()) {
+      catchUpProjection({
+        connection: first,
+        journal: firstJournal,
+        projection,
+        clock: () => now,
+      });
     }
+    const replayed = readValidationEvidenceSnapshot(first, authority, now);
+    expect(replayed).toEqual(initial);
     first.close();
   });
 
@@ -311,14 +299,11 @@ describe("validation evidence restart replay", () => {
     expect(reopened.prepare("SELECT count(*) AS count FROM event_quarantine").get()).toEqual({
       count: 0,
     });
-    const snapshot = createValidationEvidenceLoader({
-      connection: reopened,
-      clock: () => now,
-    })({ authority });
-    expect(snapshot.kind).toBe("snapshot");
-    if (snapshot.kind === "snapshot") {
-      expect(snapshot.snapshot.overallOutcome).toBe("passed");
-      expect(snapshot.snapshot.report?.stepResults).toEqual([
+    const snapshot = readValidationEvidenceSnapshot(reopened, authority, now);
+    expect(snapshot).toBeDefined();
+    if (snapshot !== undefined) {
+      expect(snapshot.overallOutcome).toBe("passed");
+      expect(snapshot.report?.stepResults).toEqual([
         { stepId, outcome: "passed", evidenceCount: 1 },
       ]);
     }

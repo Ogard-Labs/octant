@@ -167,25 +167,33 @@ export type SiblingThreadCallDecision =
 /**
  * Whether this turn may make another call of `action`, given the calls of
  * each kind it has already made. `list` is not counted: it returns titles and
- * states only, and the reads it leads to are.
+ * states only, and the reads it leads to are. Outside Strict there is no cap;
+ * under Strict the per-turn Settings limits (default 8 reads and 4 waits) hold.
+ * Absent `strict` reads as Strict.
  */
 export function decideSiblingThreadCall(input: {
   readonly action: SiblingThreadAction;
   readonly readsThisTurn: number;
   readonly waitsThisTurn: number;
+  readonly strict?: boolean;
+  readonly readLimit?: number;
+  readonly waitLimit?: number;
 }): SiblingThreadCallDecision {
-  if (input.action === "read" && input.readsThisTurn >= MAX_SIBLING_THREAD_READS_PER_TURN) {
+  if (input.strict === false) return { status: "admitted" };
+  const readLimit = input.readLimit ?? MAX_SIBLING_THREAD_READS_PER_TURN;
+  const waitLimit = input.waitLimit ?? MAX_SIBLING_THREAD_WAITS_PER_TURN;
+  if (input.action === "read" && input.readsThisTurn >= readLimit) {
     return {
       status: "refused",
       reason: "rate-limited",
-      message: `This turn has already read ${String(MAX_SIBLING_THREAD_READS_PER_TURN)} threads.`,
+      message: `This turn has already read ${String(readLimit)} threads.`,
     };
   }
-  if (input.action === "wait" && input.waitsThisTurn >= MAX_SIBLING_THREAD_WAITS_PER_TURN) {
+  if (input.action === "wait" && input.waitsThisTurn >= waitLimit) {
     return {
       status: "refused",
       reason: "rate-limited",
-      message: `This turn has already waited ${String(MAX_SIBLING_THREAD_WAITS_PER_TURN)} times.`,
+      message: `This turn has already waited ${String(waitLimit)} times.`,
     };
   }
   return { status: "admitted" };

@@ -484,11 +484,14 @@ device the host's own person paired, through `/api/shell/settings`, journaled
 as the device (maintainer decisions, 2026-11-12 and 2026-11-13; built). A
 device the hub introduced, and a restricted one, cannot change it.
 Chat, Work and Code read it when a turn starts: a change applies from the
-next turn, and a running turn keeps the limit it started with. A turn cut off
-by the limit ends as it did under the fixed limit. With the setting Off, only
-Stop and Force stop end a silent turn. The tool-call pause limit
-(`providerToolCallPauseLimitMinutes`, `null` for Off) is stored, changed and
-read the same way.
+next turn, and a running turn keeps the limit it started with. Outside Strict,
+reaching the limit does not cut the turn off: the host journals
+`turn-stall-noticed` and the thread shows one quiet line with a **Stop**
+button ([Thread view: Loop and stall notices](thread-view.md#loop-and-stall-notices)).
+Under Strict, a turn cut off by the limit ends as it did under the fixed
+limit. With the setting Off, only Stop and Force stop end a silent turn. The
+tool-call pause limit (`providerToolCallPauseLimitMinutes`, `null` for Off)
+is stored, changed and read the same way.
 
 A provider tool call is running from its normalized `tool-start` until the
 `tool-success` or `tool-failure` with the same `toolCallId`. Claude Code,
@@ -512,6 +515,47 @@ Force stop still end such a turn.
 
 An app-managed tool call in Chat keeps its own deadline of five minutes,
 apart from the stalled-turn limit; it does not follow the setting.
+
+### Loop detection and provider tool inputs
+
+Chat, Work and Code track consecutive identical tool calls within a turn using
+canonical sorted-key JSON comparison of the tool input (same tool name, same
+normalized JSON input, no other tool call in between; pure policy in
+`@octant/domain`).
+
+- **Early warning on Octant's own tools.** On the 3rd identical consecutive
+  call to one of Octant's own app-managed tools (`tool-request`), the tool
+  still runs normally and its result adds one informational sentence noting
+  that it has been called the same way three times. It is information, never a
+  refusal, and has no setting.
+- **Loop threshold (6 consecutive calls).** Outside Strict, at every level,
+  Octant does not stop the turn: it journals `turn-loop-noticed` (tool name
+  and count) once for that streak and the thread shows one quiet line with a
+  **Stop** button. Under Strict, Octant stops the turn immediately, interrupts
+  the provider session, journals `turn-loop-stopped`, and settles the turn so
+  the thread accepts the next message straight away.
+- **Which providers carry tool inputs on normalized runtime events:**
+  - **Octant Harness and direct model endpoints** (OpenAI-compatible,
+    Anthropic-compatible, Ollama, Amazon Bedrock, Azure Foundry): every tool
+    call emits `tool-request` with `toolName` and full `inputJson`, so all
+    calls are loop-checked and receive the 3rd-call early warning.
+  - **Claude Code:** provider-native tools emit `tool-start` paired with
+    `tool-call-content` (`part: "input"`), so they are loop-checked except
+    `Edit`, `Write`, and `NotebookEdit` (whose `tool-call-content` intentionally
+    omits file contents and keeps only the path, marked `partial: true`, so
+    each call resets the consecutive streak instead of falsely matching on path
+    alone) and inputs truncated past `MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS`.
+    Octant's app-managed tools bridged into Claude emit `tool-request` and are
+    checked with the 3rd-call early warning.
+  - **Codex, OpenCode, Pi, Oh-My-Pi, and ACP agents:** provider-native tools
+    emit `tool-start` (at most a redacted one-line display `argument` on Codex)
+    without JSON input on normalized runtime events, so their native tools are
+    not loop-checked and completing one resets any consecutive streak. Octant's
+    app-managed tools bridged into them emit `tool-request` with full
+    `inputJson` and are checked with the 3rd-call early warning.
+  - **Outside provider drivers:** checked for calls emitted as `tool-request`
+    or `tool-start` paired with un-truncated, non-partial `tool-call-content`
+    (`part: "input"`).
 
 Codex sends nothing while the model streams a tool call's arguments: the
 installed 0.163.0 app-server schema has no argument-delta notification, and

@@ -31,6 +31,7 @@ import {
   CodeCheckoutId,
   CodeDigest,
   CodeEvidenceContentId,
+  CodeFileId,
   GlobalSequence,
   MAX_CODE_OPERATION_EVIDENCE_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
@@ -499,6 +500,19 @@ export interface CodeRouteService {
     authenticatedWindowId: WindowId,
     input: CodeFileOpenInput,
   ) => Promise<CodeFileOpenResultEnvelope> | CodeFileOpenResultEnvelope;
+  /**
+   * Resolves a Code file identity (journaled or opened via `openFile`) to its
+   * authorized local root and path for desktop external-editor / default-app
+   * handoff.
+   */
+  readonly resolveDesktopFileTarget?: (
+    authenticatedWindowId: WindowId,
+    input: {
+      readonly threadId: typeof CodeThreadId.Type;
+      readonly checkoutId: typeof CodeCheckoutId.Type;
+      readonly fileId: typeof CodeFileId.Type;
+    },
+  ) => Promise<{ readonly rootPath: string; readonly relativePath: CodeRelativePath } | undefined>;
   /**
    * Confined listing of the checkout bound to a thread (#code-file-explorer).
    * Optional so a host without a listing capability answers `unavailable`
@@ -1013,6 +1027,9 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               actor: callerActor,
               ...(operation.kind === "start-provider-turn" ||
               requiresLiveCodeReviewAuthority(operation) ||
+              // A switch may wait behind another Git mutation in the queue;
+              // its admission is asked again when its turn to run arrives.
+              operation.kind === "switch-git-branch" ||
               [
                 "prepare-git-hunks",
                 "stage-git-hunks",

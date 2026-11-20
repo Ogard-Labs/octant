@@ -5,11 +5,18 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { StrictMode, useState, type ReactNode } from "react";
 import { DockBarTestHost } from "./dockBarHost.test-support";
+import { buildOctantCommands, type OctantCommandSources } from "../palette/buildOctantCommands";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockTiles, type DockTileContent } from "./DockTiles";
 import { BottomUtilityPanel } from "./BottomUtilityPanel";
 import { RIGHT_UTILITY_DOCK_SURFACES } from "./rightUtilityDockModel";
-import { useDockBarControls, useDockBarPlacement, type DockBarItem } from "./dockBarControls";
+import {
+  createFocusedDockTool,
+  FocusedDockToolContext,
+  useDockBarControls,
+  useDockBarPlacement,
+  type DockBarItem,
+} from "./dockBarControls";
 import type { DockTileLayout } from "./rightUtilityDockSelection";
 
 const dockStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/dock.css"), "utf8");
@@ -119,7 +126,9 @@ function barOfWidth(width: number) {
   barWidth = width;
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
     function (this: HTMLElement) {
-      return this.classList.contains("dock-tile__bar") || this.classList.contains("dock-tile__row")
+      return this.classList.contains("dock-tile__bar") ||
+        this.classList.contains("dock-tile__row") ||
+        this.classList.contains("bottom-utility-panel__controls")
         ? barWidth
         : 0;
     },
@@ -215,17 +224,23 @@ describe("a tool's controls in its tile's bar", () => {
     expect(screen.getByRole("button", { name: "View B, Things view" })).toHaveTextContent("View B");
   });
 
-  it("folds the actions into one menu only after the words have folded, and returns focus to the trigger", async () => {
-    barOfWidth(260);
+  it("folds every named control into the one More menu before the state, and returns focus to the trigger", async () => {
+    barOfWidth(230);
     const onRefresh = vi.fn();
     render(<Dock layout={two} onRefresh={onRefresh} />);
-    expect(screen.getByRole("button", { name: "View A, Things view" })).toBeInTheDocument();
+    // Choice, button and menu action fold together; the state text still stands.
+    expect(screen.queryByRole("button", { name: "View A, Things view" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Refresh things" })).toBeNull();
+    expect(
+      screen.getAllByText("3 things").find((element) => element.closest("[inert]") === null),
+    ).toBeVisible();
     const more = screen.getByRole("button", { name: "More one actions" });
     await act(async () => {
       await userEvent.click(more);
     });
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Refresh things" }));
+    expect(await screen.findByRole("menuitemradio", { name: "View A" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Export things" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Refresh things" }));
     expect(onRefresh).toHaveBeenCalledTimes(1);
     await vi.waitFor(() =>
       expect(screen.getByRole("button", { name: "More one actions" })).toHaveFocus(),
@@ -262,8 +277,11 @@ describe("a tool shown alone", () => {
   it("folds its controls by the same steps as a tiled bar's", () => {
     barOfWidth(200);
     render(<Dock layout={alone} />);
-    expect(screen.getByRole("button", { name: "View A, Things view" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View A, Things view" })).toBeNull();
     expect(screen.getByRole("button", { name: "More one actions" })).toBeInTheDocument();
+    expect(
+      screen.getAllByText("3 things").find((element) => element.closest("[inert]") === null),
+    ).toBeVisible();
   });
 });
 
@@ -643,7 +661,7 @@ describe("controls a tool draws itself", () => {
   });
 });
 
-describe("a bar and its secondary row", () => {
+describe("a bar whose own state no longer fits", () => {
   function Cues() {
     useDockBarControls([
       { kind: "text", id: "state", text: "iOS 27 · Running", live: true },
@@ -660,38 +678,65 @@ describe("a bar and its secondary row", () => {
     return null;
   }
 
-  it("moves a state kept in words (a cue) to the row, in the toolbar, when nothing else fits", () => {
+  it("folds the state itself into the More menu's first row, badged on its button, last of all", async () => {
     textWidth = 300;
     barOfWidth(280);
     render(dockOf(<Cues />));
-    // A words button is a cue and could move, so the row is allowed here...
-    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "row");
-    // ...and what moved is in it, in the toolbar; nothing else is.
-    const cues = document.querySelector(".dock-tile__tool-cues");
-    expect(cues).not.toBeNull();
-    expect(
-      within(cues as HTMLElement).getByRole("button", { name: "View only" }),
-    ).toBeInTheDocument();
+    // No tool-drawn control, so there is never a second row: the state folds
+    // into the menu after every named control.
+    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "cues");
+    expect(document.querySelector(".dock-tile__tool-cues")).toBeNull();
+    const more = screen.getByRole("button", { name: "More one actions" });
+    expect(more).toHaveAttribute("data-cue");
+    expect(more).toHaveAttribute("aria-description", expect.stringContaining("iOS 27"));
+    await act(async () => {
+      await userEvent.click(more);
+    });
+    const popup = await screen.findByRole("menu", { name: "More one actions" });
+    // The folded cue is the menu's first row: read, never pressed.
+    const cueRows = popup.querySelectorAll(".dock-bar-cue-row");
+    expect(cueRows).toHaveLength(1);
+    expect(cueRows[0]).toHaveTextContent("iOS 27 · Running");
+    expect(popup.firstElementChild?.contains(cueRows[0] ?? null)).toBe(true);
+    await userEvent.click(within(popup).getByRole("menuitem", { name: "View only" }));
+    await act(async () => {
+      await userEvent.click(more);
+    });
+    await userEvent.click(
+      within(await screen.findByRole("menu", { name: "More one actions" })).getByRole("menuitem", {
+        name: "Home",
+      }),
+    );
   });
 
-  it("draws no row at all when the tool has only status text and actions, however narrow", () => {
+  it("still folds the state into More when the tool reports only status and actions", async () => {
+    const home = vi.fn();
     function Plainly() {
       useDockBarControls([
         { kind: "text", id: "state", text: "iOS 27 · Running", live: true },
-        { kind: "button", id: "home", label: "Home", icon: RefreshCw, onSelect: () => {} },
+        { kind: "button", id: "home", label: "Home", icon: RefreshCw, onSelect: home },
       ]);
       return null;
     }
     textWidth = 400;
     barOfWidth(280);
     render(dockOf(<Plainly />));
-    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "menu");
+    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "cues");
     expect(document.querySelector(".dock-tile__tool-cues")).toBeNull();
+    await act(async () => {
+      await userEvent.click(screen.getByRole("button", { name: "More one actions" }));
+    });
+    const popup = await screen.findByRole("menu", { name: "More one actions" });
+    const cueRows = popup.querySelectorAll(".dock-bar-cue-row");
+    expect(cueRows).toHaveLength(1);
+    expect(cueRows[0]).toHaveTextContent("iOS 27 · Running");
+    await userEvent.click(within(popup).getByRole("menuitem", { name: "Home" }));
+    expect(home).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("a billed desktop's cue at the dock's minimum", () => {
-  it("moves to the secondary row whole, with its full text as the tooltip, before the name is cut", () => {
+  it("reads whole as the More menu's first rows, badged on the button, before the name is cut", async () => {
     function Billed() {
       useDockBarControls([
         {
@@ -716,30 +761,29 @@ describe("a billed desktop's cue at the dock's minimum", () => {
     barOfWidth(280);
     render(dockOf(<Billed />));
     const bar = document.querySelector(".dock-tile__bar");
-    expect(bar).toHaveAttribute("data-fold", "row");
-    const cues = document.querySelector(".dock-tile__tool-cues") as HTMLElement;
-    const where = within(cues).getByText("A cloud provider with a long name · A far away place");
-    expect(where).toHaveAttribute("title", "A cloud provider with a long name · A far away place");
+    expect(bar).toHaveAttribute("data-fold", "cues");
+    const more = screen.getByRole("button", { name: "More one actions" });
+    expect(more).toHaveAttribute("data-cue", "neutral");
+    await act(async () => {
+      await userEvent.click(more);
+    });
+    const popup = await screen.findByRole("menu", { name: "More one actions" });
+    const rows = popup.querySelectorAll(".dock-bar-cue-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("A cloud provider with a long name · A far away place");
+    expect(rows[0]?.querySelector('[data-dot="running"]')).not.toBeNull();
+    expect(rows[1]).toHaveTextContent("Live · 3 min");
+    expect(popup.firstElementChild?.contains(rows[0] ?? null)).toBe(true);
+    expect(within(popup).getByRole("menuitem", { name: "Release desktop" })).toBeInTheDocument();
     expect(screen.getByText("one", { selector: ".dock-tile__name" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "More one actions" })).toBeInTheDocument();
   });
 });
 
 describe("cues that are never cut", () => {
   const longPlace = "A cloud provider with a very long name · A place far away from here";
-  function Cues(props: { readonly two?: boolean }) {
+  function Cues() {
     useDockBarControls([
       { kind: "text", id: "where", text: longPlace, cue: true },
-      ...(props.two === true
-        ? [
-            {
-              kind: "text" as const,
-              id: "billing",
-              text: "Billed to your account until it ends",
-              cue: true,
-            },
-          ]
-        : []),
       {
         kind: "button",
         id: "view-only",
@@ -753,37 +797,56 @@ describe("cues that are never cut", () => {
     return null;
   }
 
-  it("draws a cue longer than 16em in a class with no cap, no ellipsis and no shrinking, and moves it whole to the row", () => {
+  it("draws a cue longer than 16em in a class with no cap, no ellipsis and no shrinking, and folds it whole into the menu", async () => {
     textWidth = 420;
-    barOfWidth(280);
-    render(dockOf(<Cues />));
-    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "row");
-    const cues = document.querySelector(".dock-tile__tool-cues") as HTMLElement;
-    const place = within(cues).getByText(longPlace);
+    barOfWidth(700);
+    const wide = render(dockOf(<Cues />));
+    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "menu");
+    const place = screen
+      .getAllByText(longPlace)
+      .find((element) => element.closest("[inert]") === null);
+    if (place === undefined) throw new Error("The cue is not drawn.");
     expect(place).toHaveClass("dock-tile__tool-cue");
     expect(place).not.toHaveClass("dock-tile__tool-text");
     expect(place).toHaveAttribute("title", longPlace);
     const cue = rule(".dock-tile__tool-cue");
     expect(cue).toMatch(/flex:\s*none/);
     expect(cue).not.toMatch(/max-width|text-overflow|overflow:\s*hidden/);
+    wide.unmount();
+    // Even folded, the cue is whole: the More menu's first row, not shortened.
+    barWidth = 280;
+    render(dockOf(<Cues />));
+    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "cues");
+    await act(async () => {
+      await userEvent.click(screen.getByRole("button", { name: "More one actions" }));
+    });
+    const popup = await screen.findByRole("menu", { name: "More one actions" });
+    const cueRows = popup.querySelectorAll(".dock-bar-cue-row");
+    expect(cueRows).toHaveLength(1);
+    expect(cueRows[0]).toHaveTextContent(longPlace);
   });
 
-  it("reserves the real height of a row that wraps, so two cues wider than the bar are both whole", () => {
-    textWidth = 420;
+  it("reserves the real height of a row that wraps, so tool-drawn controls wider than the bar are whole", () => {
+    function Drawn() {
+      useDockBarControls([
+        { kind: "node", id: "one_", width: 420, node: <button type="button">First</button> },
+        { kind: "node", id: "two_", width: 420, node: <button type="button">Second</button> },
+      ]);
+      return null;
+    }
     vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
       function (this: HTMLElement) {
         return this.classList.contains("dock-tile__tool-cues") ? 96 : 0;
       },
     );
     barOfWidth(280);
-    render(dockOf(<Cues two />));
+    render(dockOf(<Drawn />));
     const bar = document.querySelector(".dock-tile__bar") as HTMLElement;
     expect(bar).toHaveAttribute("data-fold", "row");
     expect(bar.style.getPropertyValue("--dock-cues-height")).toBe("96px");
     const cues = document.querySelector(".dock-tile__tool-cues") as HTMLElement;
-    expect(within(cues).getByText(longPlace)).toBeInTheDocument();
-    expect(within(cues).getByText("Billed to your account until it ends")).toBeInTheDocument();
-    expect(within(cues).getByRole("button", { name: "View only" })).toBeInTheDocument();
+    expect(within(cues).getByRole("button", { name: "First" })).toBeInTheDocument();
+    expect(within(cues).getByRole("button", { name: "Second" })).toBeInTheDocument();
     // The row wraps and nothing in it shrinks or is cut.
     expect(dockStylesheet).toMatch(
       /\[data-fold="row"\] \.dock-tile__tool-cues \{[^}]*flex-wrap:\s*wrap/,
@@ -794,15 +857,22 @@ describe("cues that are never cut", () => {
     expect(dockStylesheet).toMatch(/margin-bottom:\s*var\(--dock-cues-height, 32px\)/);
   });
 
-  it("scrolls the cues in their own box in the bottom panel, which a keyboard reaches, with Hide beside it", () => {
+  it("folds the cue into More in the bottom panel and lets a tool-drawn box scroll beside Hide", async () => {
     const review = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === "review");
     if (review === undefined) throw new Error("Missing review surface.");
+    function Panelled() {
+      useDockBarControls([
+        { kind: "text", id: "where", text: longPlace, cue: true },
+        { kind: "node", id: "own", width: 420, node: <button type="button">Versions</button> },
+      ]);
+      return null;
+    }
     textWidth = 420;
     barOfWidth(280);
     render(
       <BottomUtilityPanel
         activeSurface={review}
-        content={<Cues />}
+        content={<Panelled />}
         height={260}
         launchableSurfaces={[]}
         onClose={() => {}}
@@ -815,14 +885,384 @@ describe("cues that are never cut", () => {
     const toolbar = document.querySelector(".bottom-utility-panel__toolbar") as HTMLElement;
     const cues = within(toolbar).getByRole("group", { name: /status$/ });
     expect(cues).toHaveAttribute("tabindex", "0");
-    expect(within(cues).getByText(longPlace)).toBeInTheDocument();
+    expect(within(cues).getByRole("button", { name: "Versions" })).toBeInTheDocument();
     expect(dockStylesheet).toMatch(
       /\.bottom-utility-panel__controls \.dock-tile__tool-cues \{[^}]*overflow-x:\s*auto/,
     );
+    await act(async () => {
+      await userEvent.click(within(toolbar).getByRole("button", { name: /More .* actions/ }));
+    });
+    const popup = await screen.findByRole("menu", { name: /More .* actions/ });
+    const cueRows = popup.querySelectorAll(".dock-bar-cue-row");
+    expect(cueRows).toHaveLength(1);
+    expect(cueRows[0]).toHaveTextContent(longPlace);
     const labels = within(toolbar)
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label") ?? button.textContent);
     expect(labels.at(-1)).toBe("Hide bottom panel");
+  });
+});
+
+describe("the focused pane's bar controls for the command palette", () => {
+  it("publishes the focused tile's controls once, and clears only its own publication", () => {
+    const store = createFocusedDockTool();
+    const view = render(
+      <FocusedDockToolContext.Provider value={store}>
+        {dockOf(<Tool onRefresh={() => {}} />)}
+      </FocusedDockToolContext.Provider>,
+    );
+    const published = store.get();
+    expect(published?.toolLabel).toBe("one");
+    expect(published?.items.map((item) => item.id)).toEqual(
+      expect.arrayContaining(["view", "count", "refresh", "more"]),
+    );
+    // An unfocused tile publishes nothing.
+    expect(store.get()?.toolLabel).not.toBe("two");
+    view.unmount();
+    expect(store.get()).toBeUndefined();
+    // A publication another owner left is not the unmounted tile's to clear.
+    store.set("other", { toolLabel: "other", items: [] });
+    store.set("gone", undefined);
+    expect(store.get()?.toolLabel).toBe("other");
+  });
+
+  it("keeps the palette on the owner the person addressed while other owners' controls change", () => {
+    const store = createFocusedDockTool();
+    const seen: string[] = [];
+    store.set("tile", {
+      toolLabel: "tile",
+      items: [
+        {
+          kind: "button",
+          id: "stop",
+          label: "Stop",
+          icon: RefreshCw,
+          onSelect: () => seen.push("first"),
+        },
+      ],
+    });
+    store.set("terminal", { toolLabel: "terminal", items: [] });
+    store.focus("tile");
+    // An inactive owner's controls change — Stop becomes Restart — without
+    // taking the palette from the tile the person is in.
+    store.set("terminal", {
+      toolLabel: "terminal",
+      items: [
+        {
+          kind: "button",
+          id: "restart",
+          label: "Restart",
+          icon: RefreshCw,
+          onSelect: () => seen.push("restart"),
+        },
+      ],
+    });
+    expect(store.get()?.toolLabel).toBe("tile");
+    // A first registration from a third owner does not steal it either.
+    store.set("browser", { toolLabel: "browser", items: [] });
+    expect(store.get()?.toolLabel).toBe("tile");
+    // The person addresses the terminal; the tile's own changes cannot take
+    // the palette back.
+    store.focus("terminal");
+    store.set("tile", {
+      toolLabel: "tile",
+      items: [
+        {
+          kind: "button",
+          id: "stop",
+          label: "Stop",
+          icon: RefreshCw,
+          onSelect: () => seen.push("second"),
+        },
+      ],
+    });
+    expect(store.get()?.toolLabel).toBe("terminal");
+    // The addressed owner still sees its freshest callbacks.
+    const restart = store.get()?.items.find((item) => item.id === "restart");
+    if (restart?.kind !== "button") throw new Error("Missing restart button.");
+    restart.onSelect();
+    expect(seen).toEqual(["restart"]);
+    // When the addressed owner unmounts, the last published one stands up.
+    store.set("terminal", undefined);
+    expect(store.get()?.toolLabel).toBe("browser");
+  });
+
+  it("keeps the palette on the focused tile while the inactive bottom panel's controls change", () => {
+    const store = createFocusedDockTool();
+    const review = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === "review");
+    if (review === undefined) throw new Error("Missing review surface.");
+    const view = render(
+      <FocusedDockToolContext.Provider value={store}>
+        {dockOf(<Tool onRefresh={() => {}} />)}
+        <BottomUtilityPanel
+          activeSurface={review}
+          content={<Tool onRefresh={() => {}} />}
+          height={260}
+          launchableSurfaces={[]}
+          onClose={() => {}}
+          onCommitHeight={() => {}}
+          onOpenTool={() => {}}
+          onPreviewHeight={() => {}}
+          tabs={[review]}
+        />
+      </FocusedDockToolContext.Provider>,
+    );
+    // The focused tile holds the palette even though the panel registered.
+    expect(store.get()?.toolLabel).toBe("one");
+    // The panel's controls change while it is inactive: no steal.
+    view.rerender(
+      <FocusedDockToolContext.Provider value={store}>
+        {dockOf(<Tool onRefresh={() => {}} />)}
+        <BottomUtilityPanel
+          activeSurface={review}
+          content={<Plain />}
+          height={260}
+          launchableSurfaces={[]}
+          onClose={() => {}}
+          onCommitHeight={() => {}}
+          onOpenTool={() => {}}
+          onPreviewHeight={() => {}}
+          tabs={[review]}
+        />
+      </FocusedDockToolContext.Provider>,
+    );
+    expect(store.get()?.toolLabel).toBe("one");
+    view.unmount();
+  });
+
+  it("promotes the panel only when the person addresses it, then keeps it through the tile's changes", () => {
+    const store = createFocusedDockTool();
+    const review = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === "review");
+    if (review === undefined) throw new Error("Missing review surface.");
+    const view = render(
+      <FocusedDockToolContext.Provider value={store}>
+        {dockOf(<Tool onRefresh={() => {}} />)}
+        <BottomUtilityPanel
+          activeSurface={review}
+          content={<Tool onRefresh={() => {}} />}
+          height={260}
+          launchableSurfaces={[]}
+          onClose={() => {}}
+          onCommitHeight={() => {}}
+          onOpenTool={() => {}}
+          onPreviewHeight={() => {}}
+          tabs={[review]}
+        />
+      </FocusedDockToolContext.Provider>,
+    );
+    const panel = document.getElementById("bottom-utility-panel");
+    if (panel === null) throw new Error("Missing bottom panel.");
+    fireEvent.pointerDown(panel);
+    expect(store.get()?.toolLabel).toBe(review.label);
+    // The tile's controls change while the panel is the addressed owner —
+    // a plain click fires the choice without the pointer's promotion.
+    const tile = document.querySelector(".dock-tile");
+    if (tile === null) throw new Error("Missing tile.");
+    const option = within(tile as HTMLElement).getByRole("button", { name: "View B" });
+    fireEvent.click(option);
+    expect(store.get()?.toolLabel).toBe(review.label);
+    view.unmount();
+    expect(store.get()).toBeUndefined();
+  });
+
+  it("does not wake the palette when only the tool-drawn parts or a callback change", () => {
+    const store = createFocusedDockTool();
+    const wakes: number[] = [];
+    store.subscribe(() => wakes.push(wakes.length + 1));
+    const button = (label: string, onSelect: () => void): DockBarItem => ({
+      kind: "button",
+      id: "go",
+      label,
+      icon: RefreshCw,
+      onSelect,
+    });
+    const node = (id: string): DockBarItem => ({
+      kind: "node",
+      id,
+      width: 40,
+      node: <div data-testid={id} />,
+    });
+    const cue = (text: string): DockBarItem => ({ kind: "text", id: "cue", text });
+    store.set("tool", { toolLabel: "tool", items: [button("Go", () => {}), node("a")] });
+    expect(wakes).toHaveLength(1);
+    // The tool repaints its node and its cue, and swaps the button's callback:
+    // the commands the palette lists are the same, so nothing wakes it.
+    store.set("tool", {
+      toolLabel: "tool",
+      items: [button("Go", () => {}), node("b"), cue("busy")],
+    });
+    expect(wakes).toHaveLength(1);
+    // A real command change — a label, a disabled flag, a menu entry — still
+    // wakes the palette to read the fresh items.
+    store.set("tool", { toolLabel: "tool", items: [button("Go again", () => {})] });
+    expect(wakes).toHaveLength(2);
+    expect(store.get()?.items.find((item) => item.id === "go")).toMatchObject({
+      label: "Go again",
+    });
+  });
+
+  it("clears the palette's former commands when the addressed owner drops its controls", () => {
+    const store = createFocusedDockTool();
+    const seen: string[] = [];
+    store.set("terminal", {
+      toolLabel: "Terminal",
+      items: [
+        {
+          kind: "button",
+          id: "stop",
+          label: "Stop",
+          icon: RefreshCw,
+          onSelect: () => seen.push("stop"),
+        },
+      ],
+    });
+    store.focus("terminal");
+    expect(store.get()?.items).toHaveLength(1);
+    // The terminal's controls go away. Rather than silence — which would leave
+    // Stop in the palette — it publishes an empty source and stays the owner.
+    store.set("terminal", { toolLabel: "Terminal", items: [] });
+    const published = store.get();
+    expect(published?.toolLabel).toBe("Terminal");
+    expect(published?.items).toHaveLength(0);
+  });
+
+  const paletteSources = (
+    focusedToolCommands: ReturnType<ReturnType<typeof createFocusedDockTool>["get"]>,
+  ): OctantCommandSources => ({
+    activeMode: "code",
+    modes: ["chat", "work", "code"],
+    onSelectMode: vi.fn(),
+    onNewThread: vi.fn(),
+    onOpenSearch: vi.fn(),
+    onOpenSettings: vi.fn(),
+    threads: [],
+    onOpenThread: vi.fn(),
+    projects: [],
+    onOpenProject: vi.fn(),
+    skills: [],
+    pluginServers: [],
+    appleProjects: [],
+    onOpenAppleProject: vi.fn(),
+    ...(focusedToolCommands === undefined ? {} : { focusedToolCommands }),
+  });
+
+  const runCommand = (commandId: string, commands: ReturnType<typeof buildOctantCommands>) => {
+    const command = commands.find((candidate) => candidate.id === commandId);
+    if (command === undefined) throw new Error(`Missing palette command ${commandId}.`);
+    if (command.action.kind !== "run") throw new Error("Expected a runnable command.");
+    command.action.run();
+  };
+
+  it("runs the newest callback through a command the palette captured before a callback-only update", () => {
+    const store = createFocusedDockTool();
+    const seen: string[] = [];
+    const stop = (mark: string): DockBarItem => ({
+      kind: "button",
+      id: "stop",
+      label: "Stop",
+      icon: RefreshCw,
+      onSelect: () => seen.push(mark),
+    });
+    store.set("tile", { toolLabel: "Terminal", items: [stop("first")] });
+    store.focus("tile");
+    const captured = buildOctantCommands(paletteSources(store.get()));
+    // Only the callback changed: the palette keeps its captured command, and
+    // the command resolves the owner's latest publication when it runs.
+    store.set("tile", { toolLabel: "Terminal", items: [stop("second")] });
+    runCommand("tool-command:stop", captured);
+    expect(seen).toEqual(["second"]);
+  });
+
+  it("never runs an owner the palette moved past, and nothing once it relinquishes", () => {
+    const store = createFocusedDockTool();
+    const seen: string[] = [];
+    store.set("tile", {
+      toolLabel: "Terminal",
+      items: [
+        {
+          kind: "button",
+          id: "stop",
+          label: "Stop",
+          icon: RefreshCw,
+          onSelect: () => seen.push("tile"),
+        },
+      ],
+    });
+    store.focus("tile");
+    const captured = buildOctantCommands(paletteSources(store.get()));
+    // The person addresses the panel: the old owner's captured command is
+    // dead even though its publication still stands.
+    store.set("panel", {
+      toolLabel: "Panel",
+      items: [
+        {
+          kind: "button",
+          id: "stop",
+          label: "Stop",
+          icon: RefreshCw,
+          onSelect: () => seen.push("panel"),
+        },
+      ],
+    });
+    store.focus("panel");
+    runCommand("tool-command:stop", captured);
+    expect(seen).toEqual([]);
+    // Relinquished entirely, the captured command stays harmless.
+    store.set("tile", undefined);
+    runCommand("tool-command:stop", captured);
+    expect(seen).toEqual([]);
+  });
+
+  it("does not re-render subscribers when a source with no commands repaints its nodes", () => {
+    const store = createFocusedDockTool();
+    const wakes = vi.fn();
+    store.subscribe(wakes);
+    store.set("tool", {
+      toolLabel: "tool",
+      items: [
+        { kind: "node", id: "pop", width: 40, node: <div /> },
+        { kind: "text", id: "cue", text: "one" },
+      ],
+    });
+    wakes.mockClear();
+    const first = store.get();
+    store.set("tool", {
+      toolLabel: "tool",
+      items: [
+        { kind: "node", id: "pop", width: 80, node: <div /> },
+        { kind: "text", id: "cue", text: "two" },
+      ],
+    });
+    // Nothing a person can run changed: no wake, and readers keep the same
+    // projected snapshot.
+    expect(wakes).not.toHaveBeenCalled();
+    expect(store.get()).toBe(first);
+  });
+
+  it("settles on the last addressed owner through rapid control and focus changes", () => {
+    const store = createFocusedDockTool();
+    const seen: string[] = [];
+    const stop = (mark: string): DockBarItem => ({
+      kind: "button",
+      id: "stop",
+      label: "Stop",
+      icon: RefreshCw,
+      onSelect: () => seen.push(mark),
+    });
+    // A burst of publications and promotions the way fast pane switches and
+    // control refreshes interleave.
+    for (let round = 0; round < 12; round += 1) {
+      store.set("tile", { toolLabel: "Terminal", items: [stop(`tile-${round}`)] });
+      store.focus("tile");
+      store.set("panel", { toolLabel: "Panel", items: [stop(`panel-${round}`)] });
+      store.focus("panel");
+    }
+    expect(store.get()?.toolLabel).toBe("Panel");
+    const published = store.get();
+    const item = published?.items.find((candidate) => candidate.id === "stop");
+    if (item?.kind !== "button") throw new Error("Missing Stop button.");
+    item.onSelect();
+    expect(seen).toEqual(["panel-11"]);
   });
 });
 
