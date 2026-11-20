@@ -61,7 +61,13 @@ export type AcpHostAuthentication =
 
 export type AcpConfinementStrategy =
   /** Shared deny-default Seatbelt profile; explicit Full access runs unconfined. */
-  { readonly kind: "deny-default-seatbelt" };
+  | { readonly kind: "deny-default-seatbelt" }
+  /**
+   * Work and Code outside Strict start unconfined at every level, the agent's
+   * own mode asking Octant before each side effect; everything else takes
+   * the deny-default profile.
+   */
+  | { readonly kind: "provider-approvals-outside-strict" };
 
 export interface AcpProcessProfile {
   /** `agentInfo.name` the ACP `initialize` response must report. */
@@ -1717,23 +1723,29 @@ const kimiProfile: AcpProviderProfile = {
   },
 };
 
-const ANTIGRAVITY_PROJECT_ENTRIES: ReadonlyArray<string> = [".agents/skills", ".gemini/skills"];
-
 /**
- * Google Antigravity's official CLI, `agy`, run unmodified as `agy acp`.
+ * Google Antigravity's official CLI, `agy`, run unmodified as `agy acp`, the
+ * way other ACP clients run it (maintainer decision, 2026-11-20).
+ *
+ * In Work and Code outside Strict it starts with no Octant sandbox at every
+ * level, as Windows starts ACP agents below Full access: its `default` mode
+ * asks Octant before every edit and command, so the thread's level holds
+ * through approvals rather than the OS. The person's own environment, network
+ * and setup reach it as in their own terminal. Chat and Plan, Strict, an
+ * explicit sandbox and a Full access thread that keeps the sandbox still
+ * start inside Octant's sandbox.
  *
  * It signs in with the person's own Google account and keeps that sign-in in
- * the macOS login keychain, so the launch keeps the real HOME and, below Full
- * access, gets the same narrow keychain read Claude Code's runtime has
- * (`readsLoginKeychain`; maintainer decision, 2026-11-20). Octant sends no
- * spoofed client identity, no faked environment to move the sign-in, and
- * calls none of Google's internal endpoints: the CLI talks to Google itself.
+ * the macOS login keychain, so the launch keeps the real HOME, and a
+ * sandboxed launch gets the narrow keychain read Claude Code's runtime has
+ * (`readsLoginKeychain`). Octant sends no spoofed client identity, no faked
+ * environment to move the sign-in, and calls none of Google's internal
+ * endpoints: the CLI talks to Google itself.
  *
  * Its modes are `default`, `auto_edit`, `yolo` and, for some accounts, `auto`.
- * `default` asks before every edit and command, and the CLI refuses
- * `auto_edit` and `yolo` from an ACP client (observed by other ACP clients of
- * 1.5.x), so the session stays in the mode it opens with and Octant's
- * approvals and sandbox hold the thread's level, Full access included.
+ * The CLI refuses `auto_edit` and `yolo` from an ACP client (observed by other
+ * ACP clients of 1.5.x), so the session stays in `default` and Octant answers
+ * its approvals for the thread's level, Full access included.
  */
 const antigravityProfile: AcpProviderProfile = {
   kind: "antigravity",
@@ -1743,6 +1755,10 @@ const antigravityProfile: AcpProviderProfile = {
   selectsNoMode: true,
   chatSessionRoot: "managed-home",
   userQuestions: "unsupported",
+  // Its questions arrive as permission requests whose tool call id starts
+  // with `interaction_` and name no tool Octant has seen; without this text
+  // such a request would fail the turn instead of being asked.
+  unnamedPermissionDescription: "Google Antigravity is asking before it continues.",
   // `session/load` replays the whole history into the turn; `session/resume`
   // reattaches without it, and `initialize` advertises `resume`.
   resumeMethod: "session/resume",
@@ -1752,15 +1768,16 @@ const antigravityProfile: AcpProviderProfile = {
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
     "Google Antigravity is not signed in. Run agy in your terminal and sign in with your Google account, then retry.",
-  nativeSetupSupport: acpOwnSetupSupport(["skills"]),
+  // Nothing of its own setup is held back, so no switch reports anything.
+  nativeSetupSupport: acpOwnSetupSupport([]),
   process: {
-    // Reported by 1.5.x; 1.1.x reported `antigravity-acp`, below the minimum.
     agentName: "Antigravity ACP Server",
-    // `agy --version` names its release after a product prefix whose wording
-    // has changed between releases (`agy_acp_server_1.1.1` on the bundled
-    // server), so any non-numeric prefix on the one line is accepted.
-    versionPattern:
-      /^[^\d\r\n]*(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+_.][0-9A-Za-z.+_-]*)?\s*$/,
+    // Any agent name is accepted, as other ACP clients of the CLI accept it:
+    // the name changed between releases (`antigravity-acp` on 1.1.x).
+    verifyAgentInfo: () => true,
+    // The first `x.y.z` anywhere in `agy --version`, whatever prefix or later
+    // lines the release prints (`agy_acp_server_1.1.1` on the bundled server).
+    versionPattern: /\b(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)/,
     // Releases before 1.5.0 offered only some models to unlisted clients and
     // had no mid-turn steering; other ACP clients require 1.5.0 or later.
     minimumVersion: [1, 5, 0],
@@ -1773,25 +1790,15 @@ const antigravityProfile: AcpProviderProfile = {
     args: () => ["acp", "--disable-telemetry"],
     managedFiles: () => [],
     readsLoginKeychain: true,
-    // The CLI keeps its settings, conversations and skills under ~/.gemini
-    // and reads the person's own instructions and skills from there.
+    // The CLI keeps its settings, conversations, instructions and skills
+    // under ~/.gemini and loads all of them, as it does on its own.
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".gemini"),
       loginHint: "Run agy in your terminal and sign in with your Google account, then retry.",
       environment: (path) => ({ GEMINI_HOME: path }),
-      forbiddenEntries: ["AGENTS.md", "GEMINI.md", "skills", "config/skills"],
     },
-    hostDeniedEntries: ["AGENTS.md", "GEMINI.md", "skills", "config/skills"],
-    // The CLI loads workspace skills from these folders by itself.
-    forbiddenRootEntries: ANTIGRAVITY_PROJECT_ENTRIES,
-    nativeSetup: releasesTrustedProject(ANTIGRAVITY_PROJECT_ENTRIES, {
-      hostEntries: (setup) => [
-        ...(providerRunsAsItself(setup) ? ["AGENTS.md", "GEMINI.md"] : []),
-        ...(setup.skills ? ["skills", "config/skills"] : []),
-      ],
-    }),
-    confinement: { kind: "deny-default-seatbelt" },
+    confinement: { kind: "provider-approvals-outside-strict" },
   },
 };
 

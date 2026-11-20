@@ -99,7 +99,7 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
   cline: ["3.0.61", "3.0.60", "cline release 3.0.61 private-noise"],
   qwen: ["0.23.0", "0.22.9", "qwen-code release 0.23.0 private-noise"],
   fx: ["0.0.13", "0.0.12", "fx release 0.0.13 private-noise"],
-  antigravity: ["agy 1.5.12", "agy 1.4.5", "agy 1.5.12 built from private-noise"],
+  antigravity: ["agy 1.5.12", "agy 1.4.5", "agy development build private-noise"],
   // An added agent has no floor, so it has no too-old release.
   "acp-agent": ["1.2.3", "1.2.3", "no version"],
 };
@@ -2009,9 +2009,13 @@ describe("ACP probe confinement", () => {
   });
 });
 
-it("ships every ACP profile through deny-default confinement", () => {
+it("ships every ACP profile through deny-default confinement, Google Antigravity's Work and Code outside Strict excepted", () => {
   for (const profile of Object.values(acpProviderProfiles)) {
-    expect(profile.process.confinement.kind).toBe("deny-default-seatbelt");
+    expect(profile.process.confinement.kind).toBe(
+      profile.kind === "antigravity"
+        ? "provider-approvals-outside-strict"
+        : "deny-default-seatbelt",
+    );
     expect(profile.authentication.kind).toBe("provider-owned");
   }
 });
@@ -2325,6 +2329,95 @@ describe("login keychain read for Google Antigravity", () => {
   );
 });
 
+describe("Google Antigravity launches without Octant's sandbox outside Strict", () => {
+  async function launchFor(input: {
+    readonly mode: "chat" | "work" | "code";
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly strict?: boolean;
+    readonly fullAccessSandbox?: boolean;
+    readonly purpose?: "probe" | "session";
+  }) {
+    const target = fixture(antigravity);
+    return Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile: antigravity,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode: input.mode,
+        executionPolicy: input.executionPolicy,
+        ...(input.strict === undefined ? {} : { strict: input.strict }),
+        ...(input.fullAccessSandbox === undefined
+          ? {}
+          : { fullAccessSandbox: input.fullAccessSandbox }),
+        ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+        environment: { PATH: "/usr/bin" },
+      }),
+    ).then((launch) => ({ launch, binaryPath: target.binaryPath }));
+  }
+
+  it.each([
+    ["work", "approval-gated"],
+    ["code", "approval-gated"],
+    ["code", "auto-accept-edits"],
+  ] as const)(
+    "starts %s at %s as the CLI itself, with no sandbox",
+    async (mode, executionPolicy) => {
+      const { launch, binaryPath } = await launchFor({ mode, executionPolicy, strict: false });
+      expect(launch.command).toBe(binaryPath);
+      expect(launch.args).toEqual(["acp", "--disable-telemetry"]);
+    },
+  );
+
+  it.each([
+    ["under Strict", { mode: "code", executionPolicy: "approval-gated" }],
+    ["in Chat", { mode: "chat", executionPolicy: "approval-gated", strict: false }],
+    ["in Plan", { mode: "code", executionPolicy: "plan", strict: false }],
+    [
+      "at Full access that keeps the sandbox",
+      { mode: "code", executionPolicy: "full-access", strict: false, fullAccessSandbox: true },
+    ],
+    [
+      "for a readiness check",
+      { mode: "code", executionPolicy: "approval-gated", strict: false, purpose: "probe" },
+    ],
+  ] as const)("keeps the sandbox %s", async (_label, input) => {
+    const { launch, binaryPath } = await launchFor(input);
+    expect(launch.command).not.toBe(binaryPath);
+    expect(seatbeltProfile(launch)).toContain("login.keychain-db");
+  });
+
+  it("gives every other profile its sandbox below Full access outside Strict", async () => {
+    for (const profile of profiles.filter((candidate) => candidate.kind !== "antigravity")) {
+      if (profile.refuses?.("code", "approval-gated") !== undefined) continue;
+      const target = fixture(profile);
+      const launch = await Effect.runPromise(
+        makeAcpConfinementLive({
+          platform: "darwin",
+          sandboxPath: target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+        }).prepare({
+          profile,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode: "code",
+          executionPolicy: "approval-gated",
+          strict: false,
+          environment: { PATH: "/usr/bin" },
+        }),
+      );
+      expect(launch.command, profile.displayName).not.toBe(target.binaryPath);
+    }
+  });
+});
+
 describe("ACP protocol version negotiation", () => {
   const initialized = (protocolVersion: number, name: string) => ({
     protocolVersion,
@@ -2332,7 +2425,7 @@ describe("ACP protocol version negotiation", () => {
     agentInfo: { name, version: "1.5.12" },
   });
 
-  it("accepts Google Antigravity reporting protocol version 1 or 2, and no other profile reporting 2", () => {
+  it("accepts Google Antigravity reporting protocol version 1 or 2 under any name, and no other profile reporting 2", () => {
     expect(acpNegotiationAccepted(antigravity, initialized(1, "Antigravity ACP Server"))).toBe(
       true,
     );
@@ -2342,7 +2435,8 @@ describe("ACP protocol version negotiation", () => {
     expect(acpNegotiationAccepted(antigravity, initialized(3, "Antigravity ACP Server"))).toBe(
       false,
     );
-    expect(acpNegotiationAccepted(antigravity, initialized(2, "antigravity-acp"))).toBe(false);
+    // Any agent name is accepted, as the CLI renamed itself between releases.
+    expect(acpNegotiationAccepted(antigravity, initialized(2, "antigravity-acp"))).toBe(true);
     expect(acpNegotiationAccepted(gemini, initialized(2, gemini.process.agentName))).toBe(false);
   });
 });
@@ -2603,7 +2697,8 @@ describe("ACP agents running as themselves", () => {
     for (const profile of Object.values(acpProviderProfiles)) {
       const held = profile.process.forbiddenRootEntries ?? [];
       const release = profile.process.nativeSetup;
-      if (profile.kind === "opencode") continue;
+      // Google Antigravity holds nothing of a Project back, so it has nothing to release.
+      if (profile.kind === "opencode" || profile.kind === "antigravity") continue;
       expect(release, profile.kind).toBeDefined();
       if (release === undefined) continue;
       const launch = { executionPolicy: "approval-gated" as const, mode: "code" as const };

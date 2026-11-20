@@ -2601,63 +2601,79 @@ threads stay.
 
 Built (maintainer decision, 2026-11-20): Google Antigravity is a shipped ACP
 profile, `antigravity`, on Google's official CLI, `agy`, run unmodified as
-`agy acp --disable-telemetry` with `AGY_CLI_DISABLE_AUTO_UPDATE=1`. Discovery
-finds `agy` on the PATH; releases before 1.5.0 are refused. It speaks
-standard ACP over stdio, and Octant does nothing to the CLI's identity or
-sign-in: no spoofed `clientInfo`, no faked environment that moves where the
-CLI keeps its sign-in, and no call to Google's internal endpoints with the
-person's token. The CLI talks to Google itself.
+`agy acp --disable-telemetry` with `AGY_CLI_DISABLE_AUTO_UPDATE=1`, under the
+same rules other ACP clients of the CLI apply. Discovery finds `agy` on the
+PATH. It speaks standard ACP over stdio, and Octant does nothing to the CLI's
+identity or sign-in: no spoofed `clientInfo`, no faked environment that moves
+where the CLI keeps its sign-in, and no call to Google's internal endpoints
+with the person's token. The CLI talks to Google itself.
 
-- **Sign-in.** The person runs `agy` in a terminal and signs in with their
-  own Google account; Octant reuses that sign-in as the CLI reads it, for one
-  person using it interactively. On macOS the CLI keeps the sign-in in the
-  login keychain and reads it by running `/usr/bin/security`, so the profile
-  sets `readsLoginKeychain`. A sandboxed macOS launch below Full access then
-  gets the grant Claude Code's runtime measured as the least that reads a
-  keychain sign-in: exec of `/usr/bin/security`, the `com.apple.SecurityServer`
-  and `com.apple.securityd.xpc` lookups, a literal read of
-  `~/Library/Keychains/login.keychain-db`, and process-fork, which Chat and
-  Plan otherwise deny. The rules follow the built-in secret-file denials, so a
-  path the person protects in Settings still wins; nothing grants a Keychain
-  write, no other file in that folder is readable, and no other profile gets
-  the grant. Octant never reads the keychain item itself. Unlike Claude
-  Code's, the grant is not held to the runtime alone: commands the agent
-  runs in-process share its sandbox. Rationale: the
-  alternatives were Full access only (the person's own sign-in unreadable at
-  every lower level) or an Octant-owned token file, which the 1.5.x CLI keeps
-  in the keychain anyway unless its environment is faked. Cost: commands the
-  agent runs inside that sandbox may also run `security`, which returns any
-  Keychain item that trusts that tool; in Guarded each such command still
-  needs the person's approval.
-- **Folders.** The CLI keeps its settings, conversations and skills under
-  `~/.gemini`, which the launch may read and write (`GEMINI_HOME` names it).
-  The person's own `AGENTS.md`, `GEMINI.md`, `skills` and `config/skills` there
-  are denied until their own setup carries them; a Project's `.agents/skills`
-  and `.gemini/skills` are denied until the Project is trusted for the agent.
-- **Modes.** The CLI offers `default`, `auto_edit`, `yolo` and, for some
-  accounts, `auto`, and refuses `auto_edit` and `yolo` from an ACP client. The
-  profile selects no mode (`selectsNoMode`): the session keeps `default`,
-  which asks before every edit and command, and Octant's approvals and sandbox
-  hold the thread's level, Full access included.
-- **Sessions.** A follow-up reattaches with `session/resume`, because
-  `session/load` replays the whole history; no `session/close` is sent, since
-  `initialize` does not advertise it. `initialize` may report protocol version
-  1 or 2 (1.1.1 reported 2 with version 1 shapes); every other profile
-  accepts exactly 1. `agentInfo.name` must be `Antigravity ACP Server`.
-- **Network.** Below Full access the runtime reaches Google's sign-in and
-  model service (`cloudcode-pa.googleapis.com`,
+- **No sandbox in Work and Code outside Strict.** There the CLI starts as the
+  person's own terminal would start it, at every level: no Octant sandbox, no
+  network allowlist, the person's whole environment, and its own sign-in read
+  as it reads it (`confinement: provider-approvals-outside-strict`). This is
+  the rule Windows already applies to ACP agents below Full access: the CLI's
+  `default` mode asks Octant before every edit and command, so the thread's
+  level holds through Octant's approvals rather than the OS. Rationale: other
+  ACP clients of the CLI run it this way, and the person asked for the same
+  reach. Cost: below Full access the process itself may read and write
+  anything the person can, and Octant's protected files and network limits do
+  not bind it; only the approvals it asks for do.
+- **Where the sandbox stays.** A readiness check, Chat (which has no folder),
+  Plan (which writes nothing), Strict, an explicit sandbox policy, and a Full
+  access thread that keeps the sandbox start inside Octant's deny-default
+  sandbox. Under Strict, Network limits still reach only Google's sign-in and
+  model hosts (`cloudcode-pa.googleapis.com`,
   `daily-cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`,
   `www.googleapis.com`, `accounts.google.com`, `antigravity.google`).
+- **Sign-in.** The person runs `agy` in a terminal and signs in with their
+  own Google account; Octant reuses that sign-in as the CLI reads it, for one
+  person using it interactively. On macOS the CLI keeps it in the login
+  keychain and reads it by running `/usr/bin/security`. Unconfined, that read
+  needs nothing from Octant. A sandboxed launch sets `readsLoginKeychain`: the
+  grant Claude Code's runtime measured as the least that reads a keychain
+  sign-in (exec of `/usr/bin/security`, the `com.apple.SecurityServer` and
+  `com.apple.securityd.xpc` lookups, a literal read of
+  `~/Library/Keychains/login.keychain-db`, and process-fork, which Chat and
+  Plan otherwise deny). The rules follow the built-in secret-file denials, so
+  a path the person protects in Settings still wins; nothing grants a Keychain
+  write, no other file in that folder is readable, and no other profile gets
+  the grant. Unlike Claude Code's, it is not held to the runtime alone:
+  commands the agent runs in-process share its sandbox. Octant never reads the
+  keychain item itself.
+- **Own setup.** Nothing of the CLI's own setup is held back, at any level or
+  under Strict: it reads and writes `~/.gemini` (`GEMINI_HOME` names it), and
+  loads the person's `AGENTS.md`, `GEMINI.md` and skills there and a Project's
+  `.agents/skills` and `.gemini/skills` as it does on its own. Its own-setup
+  switches report nothing, and Strict has no Project code to ask about for it.
+- **Release and identity.** The version is the first `x.y.z` anywhere in
+  `agy --version`; releases before 1.5.0 are refused, as other ACP clients of
+  the CLI refuse them. Any `agentInfo.name` is accepted (1.1.x reported
+  `antigravity-acp`, 1.5.x `Antigravity ACP Server`), and `initialize` may
+  report protocol version 1 or 2 (1.1.1 reported 2 with version 1 shapes);
+  every other profile accepts exactly 1.
+- **Modes and questions.** The CLI offers `default`, `auto_edit`, `yolo` and,
+  for some accounts, `auto`, and refuses `auto_edit` and `yolo` from an ACP
+  client. The profile selects no mode (`selectsNoMode`): the session keeps
+  `default` and Octant answers its approvals for the thread's level, Full
+  access included. Its questions arrive as permission requests whose tool
+  call id starts with `interaction_`; they are shown as approvals
+  (`unnamedPermissionDescription`) instead of failing the turn.
+- **Sessions.** A follow-up reattaches with `session/resume`, because
+  `session/load` replays the whole history; no `session/close` is sent, since
+  `initialize` does not advertise it.
+
+Kept, where other ACP clients of the CLI differ: the self-update guard (other
+clients both set and leave it), `--disable-telemetry`, Strict and Network
+limits as the person sets them, and Chat and Plan, which those clients do not
+have.
 
 Not built yet, each pending the signed-in probe on a Mac with a personal
-subscription: the exact `agy --version` output (the version contract accepts
-any non-numeric prefix on one line), whether reading the keychain under the
-sandbox signs in as measured for Claude Code, the model and thinking option
-ids, usage and limit reporting (the CLI's own `agy -p /usage --output-format
-json` is the candidate source; nothing is reported until then), questions,
-which arrive as permission requests whose tool call id starts with
-`interaction_` and are shown as approvals, and a pinned usage or compaction
-release.
+subscription: whether the sandboxed keychain read signs in as measured for
+Claude Code, the model and thinking option ids, usage and limit reporting
+(the CLI's own `agy -p /usage --output-format json` is the candidate source;
+nothing is reported until then), answering a question with text rather than
+Allow or Deny, mid-turn steering, and a pinned usage or compaction release.
 
 ### Any ACP agent
 

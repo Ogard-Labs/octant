@@ -538,6 +538,32 @@ function acpWallPolicy(input: {
     : input.executionPolicy;
 }
 
+/**
+ * A profile that keeps no sandbox outside Strict starts Work and Code as Full
+ * access does, at every level: its own mode asks Octant before each side
+ * effect. A readiness check, Chat, Plan, Strict, an explicit sandbox and a
+ * Full access thread that keeps the sandbox stay confined.
+ */
+function acpStartsUnconfinedBelowFullAccess(input: {
+  readonly profile: AcpProviderProfile;
+  readonly mode: AcpSessionMode;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly strict?: boolean;
+  readonly purpose?: "probe" | "session";
+  readonly fullAccessSandbox?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
+}): boolean {
+  return (
+    input.profile.process.confinement.kind === "provider-approvals-outside-strict" &&
+    input.strict === false &&
+    input.sandboxPolicy === undefined &&
+    input.fullAccessSandbox !== true &&
+    input.purpose !== "probe" &&
+    (input.mode === "work" || input.mode === "code") &&
+    input.executionPolicy !== "plan"
+  );
+}
+
 export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): AcpConfinementPort {
   const platform = options.platform ?? process.platform;
   const sandboxPath =
@@ -636,9 +662,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           return { command: program.command, args: [...program.args], cwd: root, environment };
         }
         if (
-          wall === "full-access" &&
           input.sandboxPolicy === undefined &&
-          input.fullAccessSandbox !== true
+          input.fullAccessSandbox !== true &&
+          (wall === "full-access" || acpStartsUnconfinedBelowFullAccess(input))
         ) {
           return {
             command: input.binaryPath,
@@ -1509,7 +1535,9 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
         });
         const wall = acpWallPolicy(input);
         const network =
-          wall === "full-access" || windows !== undefined
+          wall === "full-access" ||
+          windows !== undefined ||
+          acpStartsUnconfinedBelowFullAccess({ ...input, profile })
             ? undefined
             : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                 ...(input.sandboxPolicy === undefined
