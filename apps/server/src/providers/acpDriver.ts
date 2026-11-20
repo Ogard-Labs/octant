@@ -27,6 +27,7 @@ import {
   type ProviderToolAnswer,
   type ProviderToolDefinition,
   type ProviderApprovalCall,
+  type PermissionPersistence,
   type ProviderTurnInput,
 } from "@octant/contracts";
 import { attachedFileText } from "../attachments/attachedFiles";
@@ -149,6 +150,16 @@ export interface AcpDriverOptions {
   readonly clock?: () => string;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
+  /** The person's setting for how long an approval holds. */
+  readonly permissionPersistence?: () => PermissionPersistence;
+}
+
+function permissionPersistence(options: AcpDriverOptions): PermissionPersistence {
+  try {
+    return options.permissionPersistence?.() ?? "current-session";
+  } catch {
+    return "project-default";
+  }
 }
 
 interface ResumeIdentity {
@@ -162,6 +173,7 @@ interface PendingApproval {
   readonly kind: "approval";
   readonly providerRequestId: string | number;
   readonly allowOptionId: string;
+  readonly allowAlwaysOptionId?: string;
   readonly rejectOptionId: string;
   /** The pending call, for an automatic reviewer; never published. */
   readonly call?: ProviderApprovalCall;
@@ -1489,6 +1501,7 @@ function makeConnection(
         ...(profile.unseenChildCalls === undefined
           ? {}
           : { unseenChildCalls: profile.unseenChildCalls }),
+        ...(profile.toleratesStrayUpdates === true ? { toleratesStrayUpdates: true as const } : {}),
       };
       let state!: SessionState;
       const removeNotification = client.onNotification((message) =>
@@ -2434,6 +2447,20 @@ function makeConnection(
                     ) {
                       const stop = outputStopReason(result.stopReason);
                       state.completed = true;
+                      // A call the agent never finished (a subagent's read)
+                      // is done once its turn is.
+                      if (profile.toleratesStrayUpdates === true)
+                        for (const tool of state.context.tools.values()) {
+                          if (tool.terminal) continue;
+                          tool.terminal = true;
+                          offer(
+                            eventFor(state, factories.clock, {
+                              kind: "tool-success",
+                              toolCallId: tool.toolCallId,
+                              summary: "Tool completed.",
+                            }),
+                          );
+                        }
                       offer(
                         eventFor(state, factories.clock, {
                           kind: "completed",
@@ -2455,7 +2482,12 @@ function makeConnection(
                       offer(
                         eventFor(state, factories.clock, {
                           kind: "failed",
-                          failure: failure("provider-failed", `${name} turn did not complete.`),
+                          failure: failure(
+                            "provider-failed",
+                            result.stopReason === "refusal" && profile.refusalMessage !== undefined
+                              ? profile.refusalMessage
+                              : `${name} turn did not complete.`,
+                          ),
                         }),
                       );
                     }
@@ -2561,7 +2593,19 @@ function makeConnection(
                 ),
               );
             }
-            const selected = input.approved ? pending.allowOptionId : pending.rejectOptionId;
+            // An agent that remembers its own allow-always gets it when the
+            // person keeps answers for the session, never for a one-call
+            // answer (an automatic reviewer's, or one on a child's behalf).
+            const remembers =
+              profile.forwardsAllowAlways === true &&
+              input.scope !== "once" &&
+              pending.allowAlwaysOptionId !== undefined &&
+              permissionPersistence(options) === "current-session";
+            const selected = !input.approved
+              ? pending.rejectOptionId
+              : remembers && pending.allowAlwaysOptionId !== undefined
+                ? pending.allowAlwaysOptionId
+                : pending.allowOptionId;
             return request(() =>
               state.client.respondPermission(pending.providerRequestId, selected),
             );
@@ -2654,6 +2698,9 @@ function rememberPermission(state: SessionState, mapped: AcpMappedPermission): v
       kind: "approval",
       providerRequestId: mapped.providerRequestId,
       allowOptionId: mapped.allowOptionId,
+      ...(mapped.allowAlwaysOptionId === undefined
+        ? {}
+        : { allowAlwaysOptionId: mapped.allowAlwaysOptionId }),
       rejectOptionId: mapped.rejectOptionId,
       ...(mapped.call === undefined ? {} : { call: mapped.call }),
     });

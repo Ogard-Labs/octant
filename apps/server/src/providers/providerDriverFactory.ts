@@ -151,6 +151,7 @@ export function makeProviderDriver(
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
+      permissionPersistence: options.permissionPersistence,
     });
     const credential = profile.process.hostAuthentication;
     return instance.driverKind === "devin" && credential?.kind === "credential-file"

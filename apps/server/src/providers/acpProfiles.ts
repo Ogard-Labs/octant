@@ -249,6 +249,20 @@ export interface AcpProviderProfile {
    */
   readonly unseenChildCalls?: { readonly readOnlyAgents: ReadonlyArray<string> };
   /**
+   * The agent sends updates the strict mapper would fail a turn on, as other
+   * ACP clients of it accept: updates after the prompt answered (usage,
+   * background replies), a subagent's updates under its own session id, a
+   * tool update for a call never started or already finished. They are
+   * ignored or read as the start they imply, a call left running is done
+   * when its turn is, and a permission request whose options are not an
+   * allow-and-reject pair is asked as a question.
+   */
+  readonly toleratesStrayUpdates?: true;
+  /** The agent's own allow-always option is chosen when approvals hold for the session. */
+  readonly forwardsAllowAlways?: true;
+  /** What a turn the agent ends with `refusal` says. */
+  readonly refusalMessage?: string;
+  /**
    * The agent answers a mode it does not offer with success and keeps its
    * previous mode, so a renamed or dropped mode would leave a turn running
    * under whatever mode the session already had. Octant then refuses a mode
@@ -1754,11 +1768,16 @@ const antigravityProfile: AcpProviderProfile = {
   sessionMode: () => "default",
   selectsNoMode: true,
   chatSessionRoot: "managed-home",
-  userQuestions: "unsupported",
   // Its questions arrive as permission requests whose tool call id starts
-  // with `interaction_` and name no tool Octant has seen; without this text
-  // such a request would fail the turn instead of being asked.
+  // with `interaction_`; options that are no allow-and-reject pair are asked
+  // as a question (`toleratesStrayUpdates`), and a pair as an approval.
+  userQuestions: "supported",
   unnamedPermissionDescription: "Google Antigravity is asking before it continues.",
+  toleratesStrayUpdates: true,
+  forwardsAllowAlways: true,
+  // The CLI ends a turn with `refusal` when the account's quota is used up.
+  refusalMessage:
+    "Google Antigravity stopped: your account's usage limit may be reached. Check your plan, then retry.",
   // `session/load` replays the whole history into the turn; `session/resume`
   // reattaches without it, and `initialize` advertises `resume`.
   resumeMethod: "session/resume",

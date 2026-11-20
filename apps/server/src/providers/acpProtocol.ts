@@ -98,6 +98,22 @@ const SessionConfigOption = Schema.Struct({
 });
 export type AcpSessionConfigOption = typeof SessionConfigOption.Type;
 
+/**
+ * The select options an agent reports. ACP also defines other option types (a
+ * boolean toggle, for one); Octant sets none of them, so each is left out
+ * rather than failing the whole reply it came in.
+ */
+const isSelectOption = Schema.is(SessionConfigOption);
+const SessionConfigOptions = Schema.transform(
+  Schema.Array(Schema.Unknown),
+  Schema.Array(SessionConfigOption),
+  {
+    strict: true,
+    decode: (options) => options.filter(isSelectOption),
+    encode: (options) => options,
+  },
+);
+
 // An agent may report its models as the session's own model state instead of a
 // `model` config option; both are ACP, and an agent that only sends this one
 // would otherwise be read as having no model to select at all.
@@ -119,7 +135,7 @@ export type AcpSessionModel = AcpSessionModelState["availableModels"][number];
 
 const NewSessionResult = Schema.Struct({
   sessionId: Schema.NonEmptyTrimmedString,
-  configOptions: Schema.optional(Schema.Array(SessionConfigOption)),
+  configOptions: Schema.optional(SessionConfigOptions),
   models: Schema.optional(SessionModelState),
 });
 export type AcpNewSessionResult = typeof NewSessionResult.Type;
@@ -127,7 +143,7 @@ export type AcpNewSessionResult = typeof NewSessionResult.Type;
 // Load/resume acknowledge the requested identity; unlike session/new, ACP
 // does not require them to return a sessionId (Vibe omits it).
 const ExistingSessionResult = Schema.Struct({
-  configOptions: Schema.optional(Schema.Array(SessionConfigOption)),
+  configOptions: Schema.optional(SessionConfigOptions),
   models: Schema.optional(SessionModelState),
 });
 
@@ -138,7 +154,7 @@ const PromptResult = Schema.Struct({
 export type AcpPromptResult = typeof PromptResult.Type;
 
 const ConfigOptionsResult = Schema.Struct({
-  configOptions: Schema.Array(SessionConfigOption),
+  configOptions: SessionConfigOptions,
 });
 export type AcpConfigOptionsResult = typeof ConfigOptionsResult.Type;
 
