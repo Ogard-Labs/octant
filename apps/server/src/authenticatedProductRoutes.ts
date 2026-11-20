@@ -103,6 +103,14 @@ export function classifyProductAction(request: Request): string | undefined {
     // action starts, controls, or observes a session, whatever the method.
     if (path.startsWith("/api/code/debug/")) return undefined;
     if (method === "POST" && path === "/api/code/board") return "project.overview.read";
+    if (
+      method === "POST" &&
+      (path === "/api/code/pull-request-reviews/project/query" ||
+        path === "/api/code/pull-request-reviews/thread/query" ||
+        path === "/api/code/pull-request-reviews/pr/query")
+    ) {
+      return "project.overview.read";
+    }
     if (method === "POST" && path === "/api/code/evidence/batch") {
       return "project.overview.read";
     }

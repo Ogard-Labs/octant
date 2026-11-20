@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { decodeCodeReviewFinding } from "./codeOperations";
 import { decodeExtensionContentDigest, decodeExtensionPackageManifest } from "./extensions";
 import {
   decodePullRequestReviewDiffSnapshot,
   decodePullRequestReviewFindingProposal,
   decodePullRequestReviewOutcome,
+  decodePullRequestReviewProjectSettingsCommand,
+  decodePullRequestReviewPullRequestSettingsCommand,
   decodePullRequestReviewRequest,
+  decodePullRequestReviewRunRecord,
+  decodePullRequestReviewThreadOverrideCommand,
   decodePullRequestReviewerId,
 } from "./pullRequestReviewer";
 
@@ -166,5 +171,122 @@ describe("pull request reviewer contracts", () => {
       ],
     });
     expect(manifest.components[0]?.kind).toBe("pull-request-reviewer");
+  });
+
+  it("round-trips a CodeReviewFinding with an agent author and pull request reviewer provenance", () => {
+    const raw = {
+      id: UUID_1,
+      threadId: UUID_3,
+      checkoutId: UUID_4,
+      fileId: UUID_2,
+      path: "src/index.ts",
+      fileDigest: FILE_DIGEST,
+      anchor: {
+        kind: "captured-diff",
+        reviewOperationId: UUID_5,
+        diff: {
+          contentId: UUID_6,
+          digest: FILE_DIGEST,
+          byteLength: 128,
+        },
+        revision: {
+          kind: "branch",
+          head: HEAD_SHA,
+          base: BASE_SHA,
+          baseRef: "origin/main",
+        },
+        side: "modified",
+        capturedAt: "2026-11-20T10:00:00.000Z",
+      },
+      location: { kind: "line", line: 12 },
+      severity: "error",
+      author: {
+        kind: "agent",
+        providerInstanceId: UUID_6,
+        sessionId: "reviewer-session-1",
+      },
+      provenance: {
+        kind: "pull-request-reviewer",
+        reviewerId: "octant/second-model-pull-request-reviewer",
+        reviewId: UUID_1,
+        runId: UUID_2,
+        providerInstanceId: UUID_6,
+        modelId: "gpt-5.3-codex",
+        effort: "high",
+        headSha: HEAD_SHA,
+      },
+      summary: "Missing bounds check before indexing the payload.",
+      state: "open",
+      version: 1,
+      createdAt: "2026-11-20T10:01:00.000Z",
+      updatedAt: "2026-11-20T10:01:00.000Z",
+    };
+
+    const decoded = decodeCodeReviewFinding(raw);
+    expect(decoded.author).toEqual({
+      kind: "agent",
+      providerInstanceId: UUID_6,
+      sessionId: "reviewer-session-1",
+    });
+    expect(decoded.provenance).toEqual({
+      kind: "pull-request-reviewer",
+      reviewerId: "octant/second-model-pull-request-reviewer",
+      reviewId: UUID_1,
+      runId: UUID_2,
+      providerInstanceId: UUID_6,
+      modelId: "gpt-5.3-codex",
+      effort: "high",
+      headSha: HEAD_SHA,
+    });
+    expect(decodeCodeReviewFinding(JSON.parse(JSON.stringify(decoded)))).toEqual(decoded);
+
+    expect(() =>
+      decodeCodeReviewFinding({
+        ...raw,
+        provenance: { ...raw.provenance, headSha: "not-a-sha" },
+      }),
+    ).toThrow();
+  });
+
+  it("decodes project, thread override, per-PR settings commands and run records strictly", () => {
+    const projectCommand = decodePullRequestReviewProjectSettingsCommand({
+      projectId: UUID_2,
+      enabled: true,
+      reviewerId: "octant/second-model-pull-request-reviewer",
+      route: { providerInstanceId: UUID_6, modelId: "gpt-5.3-codex", effort: "medium" },
+      postSummaryComment: false,
+    });
+    expect(projectCommand.enabled).toBe(true);
+    expect(projectCommand.postSummaryComment).toBe(false);
+
+    const threadCommand = decodePullRequestReviewThreadOverrideCommand({
+      threadId: UUID_3,
+      mode: "disabled",
+      route: null,
+    });
+    expect(threadCommand.mode).toBe("disabled");
+
+    const prCommand = decodePullRequestReviewPullRequestSettingsCommand({
+      target: validRequest.target,
+      sendBlockingFindingsToWorker: true,
+    });
+    expect(prCommand.sendBlockingFindingsToWorker).toBe(true);
+
+    const record = decodePullRequestReviewRunRecord({
+      reviewId: UUID_1,
+      reviewerId: "octant/second-model-pull-request-reviewer",
+      target: validRequest.target,
+      threadId: UUID_3,
+      headSha: HEAD_SHA,
+      status: "refused",
+      findingIds: [],
+      summaryCommentPosted: false,
+      handedBackToWorker: false,
+      reason: "spend-ceiling",
+      detail: "Thread spend ceiling reached before starting the review.",
+      startedAt: "2026-11-20T10:00:00.000Z",
+      completedAt: "2026-11-20T10:00:01.000Z",
+    });
+    expect(record.reason).toBe("spend-ceiling");
   });
 });

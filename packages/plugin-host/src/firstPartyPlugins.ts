@@ -13,12 +13,18 @@ import {
  */
 export type FirstPartyPluginComponentId =
   | "board"
+  | "second-model-pull-request-reviewer"
   | "github-integration"
   | "linear-integration"
   | "azure-arm-integration"
   | "appearance-pack"
   | "preview-viewers"
   | "zen";
+
+export const SECOND_MODEL_PULL_REQUEST_REVIEWER_EXTENSION_ID =
+  "10000000-0000-4000-8000-000000000061" as const;
+export const SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID =
+  "second-model-pull-request-reviewer" as const;
 
 const digest = (nibble: string) => decodeExtensionContentDigest(`sha256:${nibble.repeat(64)}`);
 
@@ -390,16 +396,51 @@ const zenPlugin = firstPartyManifest({
 });
 
 /**
+ * Bundled second-model pull request reviewer. Contributes a read-only
+ * `pull-request-reviewer` component through the same seam a third-party
+ * reviewer plugin uses; Project and thread settings stay off by default until
+ * the person picks a reviewer model and turns review on.
+ */
+const secondModelPullRequestReviewerPlugin = firstPartyManifest({
+  manifestVersion: 1,
+  extensionId: SECOND_MODEL_PULL_REQUEST_REVIEWER_EXTENSION_ID,
+  packageId: "20000000-0000-4000-8000-000000000061",
+  slug: "pull-request-reviewer",
+  displayName: "Second-model PR reviewer",
+  version: "1.0.0",
+  digest: digest("6"),
+  source: { kind: "bundled", sourceRef: "app:pull-request-reviewer" },
+  provenance: { publisher: "Octant", reviewed: true },
+  license: { kind: "spdx", identifier: "MIT" },
+  compatibility: {
+    platforms: ["macos", "linux"],
+    modes: ["code"],
+    providerFamilies: [],
+  },
+  declaredCapabilities: [],
+  primaryComponentId: SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID,
+  components: [
+    {
+      id: SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID,
+      kind: "pull-request-reviewer",
+      displayName: "Second-model PR reviewer",
+      declaredCapabilities: [],
+    },
+  ],
+  contributions: [],
+});
+
+/**
  * Every first-party plugin, and whether a person may switch it off in
  * Settings. A switchable plugin starts on and keeps its data while off; the
- * others are core parts of Octant that have no switch. Maintainers decided on
- * 2026-11-07 that GitHub, thread boards, and Zen are the switchable ones.
+ * others are core parts of Octant that have no switch.
  */
 const FIRST_PARTY_PLUGINS: ReadonlyArray<{
   readonly manifest: ExtensionPackageManifest;
   readonly switchable: boolean;
 }> = [
   { manifest: boardPlugin, switchable: true },
+  { manifest: secondModelPullRequestReviewerPlugin, switchable: true },
   { manifest: githubPlugin, switchable: true },
   { manifest: linearPlugin, switchable: false },
   { manifest: azurePlugin, switchable: false },

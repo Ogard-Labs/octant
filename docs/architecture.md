@@ -3842,6 +3842,61 @@ CI or reviewers should be woken, not left polling; maintainer request,
   switch or a watch is on, through the host's `gh` login. It is not a routine
   and needs no hosted service; a stopped host observes nothing.
 
+**Second-model pull request reviewer.** Octant ships a bundled, switchable
+first-party pull request reviewer plugin (`pull-request-reviewer`, component
+`second-model-pull-request-reviewer`, registered under
+`octant/second-model-pull-request-reviewer`) built strictly on top of the
+`@octant/plugin-api/pull-request-reviewer` and
+`@octant/plugin-host/pull-request-reviewers` seams, taking no shortcut a
+third-party reviewer plugin could not take.
+
+- **Settings and authority.** Off by default. Turned on per Code Project in the
+  Project overview (`POST /api/code/pull-request-reviews/project`), with a
+  per-thread override in Code thread Environment
+  (`POST /api/code/pull-request-reviews/thread`). The reviewer route specifies
+  provider instance, model, and optional effort; the picker suggests providers
+  different from the worker while still allowing the same provider, and carries
+  **no default model** (review stays off and refuses `no-route-configured` until
+  a model is explicitly picked). **Post findings as a PR comment** is a
+  per-Project opt-in, off by default; **Send blocking findings to the worker**
+  is a per-PR opt-in on the pull request review surface
+  (`POST /api/code/pull-request-reviews/pr`), off by default. Every mutation
+  requires `principalActsAsHostPerson` (a local window or a device the host's
+  own person paired); hub-introduced and restricted devices are refused 403
+  server-side. Every setting change and run record is journaled with
+  `eventActorForPrincipal` on `pull-request-review-*` aggregates and rebuilt by
+  replay on restart.
+- **Trigger, read-only gate, and staleness.** Runs at most once per pushed PR
+  head SHA (deduplicated across repeated pushes, refreshes, and restarts) after
+  the linked Code thread's worker turn settles. Executes as a host-scope
+  (`ROUTINE_HOST_SCOPE_ID`), research-only, read-only review turn at Plan's
+  read-only gate (`executionPolicy: "plan"`, zero tools, no child-run tool),
+  whatever the parent thread's guardrail level (Full access included): file
+  edits, shell writes, Git mutations, forge writes/reviews, and child-run
+  spawns are all refused. Bound to the exact PR head SHA it read; if the head
+  moves while running, the review settles as `stale`, records no current
+  findings, posts no comment, and wakes no worker.
+- **Findings, comments, and hand-back.** Recorded findings use the existing
+  `CodeReviewFinding` contract with `author.kind = "agent"`, structured
+  `provenance.kind = "pull-request-reviewer"` (reviewer id, review id, run id,
+  provider instance, model, optional effort, head SHA), severity, file digest,
+  and diff anchor; stale anchors stay visible as stale in Review and support
+  selection into the existing correction-request draft composer. By default,
+  nothing is posted to GitHub and hand-back is the person's own act. When
+  **Post findings as a PR comment** is on, the host posts at most one plain
+  summary comment for that head via the person's own `gh` login and never
+  approves or requests changes. When **Send blocking findings to the worker** is
+  on for the PR, blocking (`error`) findings wake the linked thread through
+  Auto-fix's wake path after recording an outside-content mark (source label
+  `pull-request-review`; a refused mark sends nothing); under Strict, Auto-fix's
+  three-attempt cap applies, while outside Strict there is no attempt cap.
+- **Spend and unavailable state.** Every review turn counts toward the parent
+  Code thread's spend ceiling (`SpendCeilingService`), usage ledger
+  (`pull-request-review-usage`), and `TurnMetricsStore`. When no reviewer can
+  run (`no-route-configured`, `no-account`, `route-refused`, `capacity`,
+  `spend-ceiling`, `not-effective`), the host records and the Review pane shows
+  the explicit reason and never falls back silently to another model.
+
 **The GitHub plugin switch.** GitHub is a bundled first-party plugin
 (component `github-integration`) a person can switch off; it is on by default,
 and a missing store row counts as on. Switching it off removes the GitHub
@@ -14173,8 +14228,8 @@ schema, offered-side rules and task-owned command presentation are unchanged.
 The core's additional command presentation stays in a private server adapter;
 it is not added to the installed-plugin port's fixed metadata types.
 
-**Pull request reviewers** (seam built; no reviewer plugin ships yet). A plugin
-may contribute a Code-only `pull-request-reviewer` component through
+**Pull request reviewers** (seam and bundled second-model reviewer built). A
+plugin may contribute a Code-only `pull-request-reviewer` component through
 `@octant/plugin-api/pull-request-reviewer` and `@octant/plugin-host/pull-request-reviewers`.
 Installation, trust, and enablement stay separate preconditions evaluated on
 every lookup, and colliding reviewer ids are withheld together. Stored

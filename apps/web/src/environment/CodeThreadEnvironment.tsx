@@ -73,6 +73,7 @@ import { EnvironmentGoal } from "./EnvironmentGoal";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { EnvironmentRoutines } from "./EnvironmentRoutines";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
+import { ThreadPullRequestReviewerSection } from "../code/PullRequestReviewerSettings";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { SwitchBranchDialog } from "./SwitchBranchDialog";
 import type { CodeBranchPreviewOutcome, SwitchCodeBranchOutcome } from "../code/switchCodeBranch";
@@ -218,6 +219,9 @@ export interface CodeThreadEnvironmentProps {
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
   /** Whether the Usage group shows its spend ceiling row when no ceiling is set. */
   readonly spendCeilingShown?: boolean;
+  readonly pullRequestReviewClient?: import("@octant/client-runtime").PullRequestReviewClient;
+  readonly providerSnapshot?: import("@octant/contracts").ProviderRegistrySnapshot;
+  readonly workerProviderInstanceId?: import("@octant/contracts").ProviderInstanceId;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
 }
 
@@ -832,6 +836,16 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             <EnvironmentExtraFolders
               folders={props.project?.type === "code" ? props.project.extraFolders : undefined}
             />
+            {props.pullRequestReviewClient === undefined ? null : (
+              <EnvironmentGroup title="Pull request review">
+                <ThreadPullRequestReviewerSection
+                  client={props.pullRequestReviewClient}
+                  providerSnapshot={props.providerSnapshot}
+                  threadId={props.tab.threadId}
+                  workerProviderInstanceId={props.workerProviderInstanceId}
+                />
+              </EnvironmentGroup>
+            )}
             {props.usageDashboardClient === undefined &&
             props.spendCeilingClient === undefined ? null : (
               <ThreadUsagePanel

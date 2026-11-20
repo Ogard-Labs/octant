@@ -341,6 +341,7 @@ export interface WorkspaceViewProps {
   readonly planClient?: PlanClient;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  readonly pullRequestReviewClient?: import("@octant/client-runtime").PullRequestReviewClient;
   readonly spendCeilingShown?: boolean;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
   readonly workCreateThreadAvailable?: boolean;
@@ -1952,6 +1953,17 @@ function renderCodeTab(
             {...(props.spendCeilingClient === undefined
               ? {}
               : { spendCeilingClient: props.spendCeilingClient })}
+            {...(props.pullRequestReviewClient === undefined
+              ? {}
+              : {
+                  pullRequestReviewClient: props.pullRequestReviewClient,
+                  ...(props.providerController.snapshot === undefined
+                    ? {}
+                    : { providerSnapshot: props.providerController.snapshot }),
+                  ...(activeThread?.providerInstanceId === undefined
+                    ? {}
+                    : { workerProviderInstanceId: activeThread.providerInstanceId }),
+                })}
             {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
             {...(props.onOpenUsageDashboard === undefined
               ? {}
@@ -2683,6 +2695,14 @@ function renderNonCodeTab(
         {...(props.spendCeilingClient === undefined
           ? {}
           : { spendCeilingClient: props.spendCeilingClient })}
+        {...(props.pullRequestReviewClient === undefined
+          ? {}
+          : {
+              pullRequestReviewClient: props.pullRequestReviewClient,
+              ...(props.providerController.snapshot === undefined
+                ? {}
+                : { providerSnapshot: props.providerController.snapshot }),
+            })}
         {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
         {...(props.onMemoryChanged === undefined ? {} : { onMemoryChanged: props.onMemoryChanged })}
         {...(props.onNewThreadInProject === undefined || project.lifecycle !== "active"

@@ -95,6 +95,7 @@ export * from "./usageClient";
 export * from "./benchmarksClient";
 export * from "./usageDashboardClient";
 export * from "./spendCeilingClient";
+export * from "./pullRequestReviewClient";
 export * from "./agentGrantClient";
 export * from "./protectedFilesClient";
 export * from "./diagnosticsExportClient";
