@@ -47,6 +47,7 @@ import {
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
 import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequestSwitchService";
+import { PullRequestReviewerRegistry } from "../pullRequestReviewers/pullRequestReviewerRegistry";
 import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
@@ -2685,6 +2686,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         !isRoutineHostScope(windowId) && !deps.isRestrictedDeviceScope(windowId),
       nativeSessions: () => codeOperationRuntime?.nativeSessions,
     });
+    const pullRequestReviewers = new PullRequestReviewerRegistry();
     return {
       androidToolchainRoutes,
       appleToolchainRoutes,
@@ -2699,6 +2701,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       coordinatorService,
       coordinatorWakes,
       codeThreadWakeupPort,
+      pullRequestReviewers,
       routeCodeService,
       terminalProcessPort,
     };

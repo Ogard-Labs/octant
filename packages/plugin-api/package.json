@@ -21,7 +21,8 @@
     "./credential-request": "./src/credentialRequest.ts",
     "./canvas-export-package": "./src/canvasExportPackage.ts",
     "./canvas-export-worker": "./src/canvasExportWorker.ts",
-    "./code-tools": "./src/codeTools.ts"
+    "./code-tools": "./src/codeTools.ts",
+    "./pull-request-reviewer": "./src/pullRequestReviewer.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

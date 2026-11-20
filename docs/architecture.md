@@ -13999,6 +13999,7 @@ and the marketplace and plugin registry are no longer extraction candidates.
 | Zen                                                                   | Switchable bundled plugin; appearance contributions and their scoped state                                                 |
 | Linear, Azure Resource Manager reads                                  | Bundled Integration plugins with no switch; integration ports and contributed views                                        |
 | Declarative Code tools                                                | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned |
+| Pull request reviewers                                                | Code-only plugin seam (`pull-request-reviewer`); host owns Plan read-only turns, head-staleness, findings, and opt-ins     |
 | Canvas, preview viewers, backgrounds, theme presets                   | Core; scoped artifact contracts, registered viewers, and appearance contributions                                          |
 | Usage, diagnostics, Navigator, automations UI                         | Core; underlying authority stays in the host                                                                               |
 | Project memory and its agent tool                                     | Core; the journal, the person's confirmation, and purge stay host-owned                                                    |
@@ -14171,6 +14172,26 @@ port and family composer as installed declarations. Its existing name, help,
 schema, offered-side rules and task-owned command presentation are unchanged.
 The core's additional command presentation stays in a private server adapter;
 it is not added to the installed-plugin port's fixed metadata types.
+
+**Pull request reviewers** (seam built; no reviewer plugin ships yet). A plugin
+may contribute a Code-only `pull-request-reviewer` component through
+`@octant/plugin-api/pull-request-reviewer` and `@octant/plugin-host/pull-request-reviewers`.
+Installation, trust, and enablement stay separate preconditions evaluated on
+every lookup, and colliding reviewer ids are withheld together. Stored
+third-party packages remain host-prohibited until an out-of-process confined
+worker launch class exists. A reviewer receives one immutable
+`PullRequestReviewRequest` for a specific pushed PR head and one
+capability-scoped `PullRequestReviewHostPort` carrying no raw filesystem path,
+shell handle, credential, forge token, or direct host-service access. The host
+enforces effectiveness and PR head currency before and after every await, runs
+any model review turn at Plan's read-only gate under the configured route
+without silent fallback, verifies finding anchors and run ownership before
+writing `CodeReviewFinding` records, caps PR publication to at most one summary
+comment behind a default-off Project opt-in (formal forge reviews — approve or
+request changes — are structurally absent from the port), and gates blocking
+finding hand-back to the worker behind a default-off per-PR opt-in. If the head
+moves or the plugin becomes inactive during a review, the host withholds
+publication and records the outcome as `stale` or `refused`.
 
 Preserve the sequence: establish a provider-neutral port and renderer seam
 before moving a feature behind them, and keep that work separate from unrelated
