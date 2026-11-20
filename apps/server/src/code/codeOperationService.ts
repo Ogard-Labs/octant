@@ -131,6 +131,7 @@ import type {
 } from "./ghPullRequestActionPort";
 import { pullRequestCommentDigest } from "./codeRuntimeWorkRecorder";
 import type { GhPullRequestMergeResult } from "./ghPullRequestPort";
+import { splitRepositoryName, type PullRequestLinkRecorder } from "./pullRequestLinkService";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
 import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
@@ -866,9 +867,12 @@ interface CodeOperationPullRequestIdentity {
   readonly number: number;
   readonly url: string;
   readonly baseRepository: string;
+  readonly canonicalBaseRepository?: string;
   readonly baseBranch: string;
   readonly headOwner: string;
   readonly headBranch: string;
+  readonly pullRequestNodeId?: string;
+  readonly baseRepositoryNodeId?: string;
 }
 
 export interface CodeOperationPullRequestPort {
@@ -995,11 +999,14 @@ export type CodeOperationPullRequestReview =
         readonly title: string;
         readonly state: "open" | "merged" | "closed" | "draft";
         readonly baseRepository: string;
+        readonly canonicalBaseRepository?: string;
         readonly baseBranch: string;
         readonly headRepository: string;
         readonly headBranch: string;
         readonly author: string;
         readonly matchesDeliveryBranch: boolean;
+        readonly pullRequestNodeId?: string;
+        readonly baseRepositoryNodeId?: string;
       };
       readonly description: string;
       readonly diff: string;
@@ -1367,6 +1374,12 @@ export interface CodeOperationServiceOptions {
     | { readonly status: "unavailable" }
   >;
   readonly pullRequests: CodeOperationPullRequestPort;
+  /**
+   * Authoritative pull-request link identity registry. Receives every created
+   * or observed PR so forge node IDs are recorded and backfilled in the
+   * journal without changing existing readers.
+   */
+  readonly pullRequestLinks?: PullRequestLinkRecorder;
   /**
    * The thread's push and pull request steps whose outcome the host never
    * learned (`ambiguous`), and how to settle one. Observing the checkout or the
@@ -4527,17 +4540,17 @@ export class CodeOperationService {
       case "rewind-code-thread":
         return await this.#rewind(command, thread, checkout, root.checkoutRoot);
       case "create-pull-request":
-        return this.#pullRequest(command, root.checkoutRoot, git);
+        return this.#pullRequest(command, thread, root.checkoutRoot, git);
       case "update-pull-request":
-        return this.#updatePullRequest(command, root.checkoutRoot, git);
+        return this.#updatePullRequest(command, thread, root.checkoutRoot, git);
       case "comment-pull-request":
         return this.#commentPullRequest(command, thread, root.checkoutRoot, git);
       case "merge-pull-request":
-        return this.#mergePullRequest(command, root.checkoutRoot, git);
+        return this.#mergePullRequest(command, thread, root.checkoutRoot, git);
       case "observe-pull-request":
         await this.#settlementsInFlight.get(String(thread.id));
         await this.#settleLostPullRequestSteps(thread);
-        return this.#pullRequestReview(command, root.checkoutRoot, git);
+        return this.#pullRequestReview(command, thread, root.checkoutRoot, git);
       case "observe-turn-review": {
         const preview = await this.#options.turns.reviewPreview?.({
           windowId,
@@ -5987,6 +6000,7 @@ export class CodeOperationService {
 
   async #pullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "create-pull-request" }>,
+    thread: CodeThread,
     checkoutRoot: string,
     git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
@@ -6014,11 +6028,13 @@ export class CodeOperationService {
         state: "unavailable",
         ...(result.code === "invalid-base" ? { failureCode: "invalid-base" } : {}),
       });
+    await this.#recordPullRequestLink(thread, result.pullRequest);
     return pullRequestState(command.operationId, result.status, result.pullRequest, result.draft);
   }
 
   async #updatePullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "update-pull-request" }>,
+    thread: CodeThread,
     checkoutRoot: string,
     git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
@@ -6043,6 +6059,7 @@ export class CodeOperationService {
         command.state === "closed" ? "open" : "closed",
       );
       if (located.status !== "found") return located.result(command.operationId);
+      await this.#recordPullRequestLink(thread, located.pullRequest);
       const done = await pullRequests.actions?.setState(
         { ...located.target, state: command.state },
         new AbortController().signal,
@@ -6068,10 +6085,12 @@ export class CodeOperationService {
         return unavailable(result.status === "none" ? "not-found" : undefined);
       draft = result.draft;
       identity = result.pullRequest;
+      await this.#recordPullRequestLink(thread, identity);
     }
     if (changesLabels) {
       const located = await this.#locatePullRequest(command.threadId, "open");
       if (located.status !== "found") return located.result(command.operationId);
+      await this.#recordPullRequestLink(thread, located.pullRequest);
       const done = await pullRequests.actions?.editLabels(
         {
           ...located.target,
@@ -6121,6 +6140,7 @@ export class CodeOperationService {
       return this.#pullRequestUnavailable(command.operationId, "no-remote");
     const located = await this.#locatePullRequest(command.threadId, "open");
     if (located.status !== "found") return located.result(command.operationId);
+    await this.#recordPullRequestLink(thread, located.pullRequest);
     const already = await this.#settleEarlierComment(command, located.target);
     if (already.status === "posted")
       return pullRequestState(command.operationId, "existing", located.pullRequest, undefined);
@@ -6207,6 +6227,7 @@ export class CodeOperationService {
 
   async #mergePullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "merge-pull-request" }>,
+    thread: CodeThread,
     checkoutRoot: string,
     git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
@@ -6222,10 +6243,10 @@ export class CodeOperationService {
       );
     }
     if (command.authorization.kind === "standing") {
-      const thread = this.#options.authority.readThread(command.threadId);
+      const current = this.#options.authority.readThread(command.threadId);
       if (
-        thread === undefined ||
-        !this.#standingMergeBacked(command.authorization.allowedBy, thread)
+        current === undefined ||
+        !this.#standingMergeBacked(command.authorization.allowedBy, current)
       ) {
         return this.#failed(
           command.operationId,
@@ -6239,6 +6260,7 @@ export class CodeOperationService {
     const actions = this.#options.pullRequests.actions;
     const located = await this.#locatePullRequest(command.threadId, "open");
     if (located.status !== "found") return located.result(command.operationId);
+    await this.#recordPullRequestLink(thread, located.pullRequest);
     if (actions === undefined) return this.#pullRequestUnavailable(command.operationId);
     const signal = new AbortController().signal;
     const summary = await actions.summary(located.target, signal);
@@ -6274,6 +6296,12 @@ export class CodeOperationService {
         headBranch: located.pullRequest.headBranch,
         baseRepository: located.pullRequest.baseRepository,
         baseBranch: located.pullRequest.baseBranch,
+        ...(located.pullRequest.pullRequestNodeId === undefined
+          ? {}
+          : { pullRequestNodeId: located.pullRequest.pullRequestNodeId }),
+        ...(located.pullRequest.baseRepositoryNodeId === undefined
+          ? {}
+          : { baseRepositoryNodeId: located.pullRequest.baseRepositoryNodeId }),
       });
     }
     if (merged.status === "unavailable")
@@ -6371,6 +6399,7 @@ export class CodeOperationService {
 
   async #pullRequestReview(
     command: Extract<CodeOperationCommand, { readonly kind: "observe-pull-request" }>,
+    thread: CodeThread,
     checkoutRoot: string,
     git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
@@ -6401,6 +6430,21 @@ export class CodeOperationService {
         freshness: "fresh",
       });
     const pr = result.pullRequest;
+    await this.#recordPullRequestLink(thread, {
+      number: pr.number,
+      url: pr.url,
+      baseRepository: pr.baseRepository,
+      ...(pr.canonicalBaseRepository === undefined
+        ? {}
+        : { canonicalBaseRepository: pr.canonicalBaseRepository }),
+      baseBranch: pr.baseBranch,
+      headOwner: pr.headRepository,
+      headBranch: pr.headBranch,
+      ...(pr.pullRequestNodeId === undefined ? {} : { pullRequestNodeId: pr.pullRequestNodeId }),
+      ...(pr.baseRepositoryNodeId === undefined
+        ? {}
+        : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
+    });
     return decodeCodeOperationResult({
       kind: "pull-request-review",
       operationId: command.operationId,
@@ -6425,7 +6469,45 @@ export class CodeOperationService {
       checks: result.checks,
       reviews: result.reviews,
       comments: result.comments,
+      ...(pr.pullRequestNodeId === undefined ? {} : { pullRequestNodeId: pr.pullRequestNodeId }),
+      ...(pr.baseRepositoryNodeId === undefined
+        ? {}
+        : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
     });
+  }
+
+  async #recordPullRequestLink(
+    thread: CodeThread,
+    pr: CodeOperationPullRequestIdentity,
+  ): Promise<void> {
+    if (this.#options.pullRequestLinks === undefined) return;
+    const repo = splitRepositoryName(pr.canonicalBaseRepository ?? pr.baseRepository);
+    if (repo === undefined) return;
+    const lookup =
+      splitRepositoryName(pr.baseRepository) ??
+      splitRepositoryName(thread.deliveryTarget.proposedBaseRepository);
+    await this.#options.pullRequestLinks
+      .recordObservation({
+        projectId: thread.projectId,
+        repositoryOwner: repo.owner,
+        repositoryName: repo.name,
+        ...(lookup !== undefined &&
+        (lookup.owner.toLowerCase() !== repo.owner.toLowerCase() ||
+          lookup.name.toLowerCase() !== repo.name.toLowerCase())
+          ? { lookupRepositoryOwner: lookup.owner, lookupRepositoryName: lookup.name }
+          : {}),
+        number: pr.number,
+        url: pr.url,
+        baseBranch: pr.baseBranch,
+        headOwner: pr.headOwner,
+        headBranch: pr.headBranch,
+        ...(pr.pullRequestNodeId === undefined ? {} : { pullRequestNodeId: pr.pullRequestNodeId }),
+        ...(pr.baseRepositoryNodeId === undefined
+          ? {}
+          : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
+        threadIds: [thread.id],
+      })
+      .catch(() => undefined);
   }
 
   /** Read with the checkout's own Git: a server thread's runs on its server. */
@@ -7565,6 +7647,10 @@ function pullRequestState(
     baseRepository: pr.baseRepository,
     baseBranch: pr.baseBranch,
     ...(draft === undefined ? {} : { draft }),
+    ...(pr.pullRequestNodeId === undefined ? {} : { pullRequestNodeId: pr.pullRequestNodeId }),
+    ...(pr.baseRepositoryNodeId === undefined
+      ? {}
+      : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
   });
 }
 

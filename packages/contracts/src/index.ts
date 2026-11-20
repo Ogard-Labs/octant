@@ -206,6 +206,7 @@ export * from "./githubClone";
 export * from "./githubOnboarding";
 export * from "./codeProjectPullRequests";
 export * from "./codeProjectPullRequestSwitches";
+export * from "./pullRequestIdentity";
 export * from "./canvasShareSnapshot";
 export * from "./canvasShareAccessLog";
 export * from "./canvasBoard";

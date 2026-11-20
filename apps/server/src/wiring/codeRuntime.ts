@@ -387,6 +387,8 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeTestDiscovery"
     | "isCodeProviderModelAllowed"
     | "onPullRequestSnapshotRefreshed"
+    | "bindPullRequestSwitchReconciler"
+    | "pullRequestLinkService"
     | "projectPullRequestActionService"
     | "projectPullRequestCadence"
     | "projectPullRequestService"
@@ -515,6 +517,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     onHarnessQuestionSettled,
     onHarnessRecoveryLifted,
     onPullRequestSnapshotRefreshed,
+    bindPullRequestSwitchReconciler,
+    pullRequestLinkService,
     onThreadArchived,
     onWindowRevoked,
     nativeHarnessTranscripts,
@@ -864,6 +868,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        pullRequestLinks: pullRequestLinkService,
         stalledTurnLimitMs: (turn) =>
           stalledTurnLimitMs(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -2501,6 +2506,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       uuid: randomUUID,
     });
     pullRequestWatchService = pullRequestSwitchService;
+    bindPullRequestSwitchReconciler(pullRequestSwitchService);
     // Host-local and idle-free: the forge is read only while a switch or a watch is on.
     const pullRequestSwitchAbort = new AbortController();
     const pullRequestSwitchTimer = setInterval(() => {
