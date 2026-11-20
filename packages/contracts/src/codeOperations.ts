@@ -2079,6 +2079,8 @@ const UsageEvent = Schema.Struct({
   /** Absent means the provider did not report cache usage. */
   cacheReadInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   cacheWriteInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /** Absent means the provider did not report reasoning tokens, never that it spent none. */
+  reasoningTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
 
   /**
    * What the provider says this turn cost, in US dollars. Absent whenever the
