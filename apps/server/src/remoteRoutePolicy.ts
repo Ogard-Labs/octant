@@ -1037,6 +1037,15 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path,
     methods: ["POST"] as const,
   })),
+  // One-time connector OAuth callback relay for a person-paired device:
+  // JSON-only, tightly bounded, never in the restricted device catalogue.
+  {
+    kind: "exact" as const,
+    path: "/api/extensions/mcp-sign-in/relay",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
+  },
   // The person's own reads and lists, for a device that person paired: every
   // approval and question their scope can answer and putting one off, the
   // fleet read, provider limits and an asked-for refresh, and the protected

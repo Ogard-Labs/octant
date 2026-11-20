@@ -649,6 +649,22 @@ and `quickstart`. A publish from a type with no local file is judged at the
 Project root and its approval says it sends a page Claude made. Under Strict
 the thread's choice still decides and the tool publishes one Project file only.
 
+**Bedrock and AWS profiles outside Strict.** Provider runtimes that support
+Amazon Bedrock natively (including Claude Code with `CLAUDE_CODE_USE_BEDROCK=1`
+and Codex's Bedrock providers) read the person's AWS profile, environment, and
+own refresh settings exactly as in their own CLIs (maintainer decision,
+2026-11-19). Octant never resolves, copies, or replaces AWS credentials for a
+provider runtime. Outside Strict, the launch environment preserves the person's
+AWS variables (`AWS_PROFILE`, `AWS_REGION`, `AWS_DEFAULT_REGION`,
+`AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_ROLE_ARN`,
+`AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_CONTAINER_CREDENTIALS_*`,
+`CLAUDE_CODE_USE_BEDROCK`, and the rest), confined Plan and Chat launches
+narrow protected files to other providers' sign-ins and keep read access to
+existing `~/.aws` and configured AWS config/credential/token files, and Claude
+Code admits Bedrock account routing (`apiProvider: "bedrock"`) on both probe
+and session start. Under Strict, each runtime keeps its fixed environment list,
+protected-file wall, and first-party routing rule.
+
 **Several Claude accounts.** Each Claude account is its own provider
 instance with its own `CLAUDE_CONFIG_DIR` and secure-storage folder, its own
 claude.ai sign-in and its own artifacts switch. A thread runs on one
@@ -1710,33 +1726,47 @@ no rule about an Octant tool reaches its model. A session still open in the
 person's own Codex keeps its writer there, and the resume reports that
 another Codex process is using the thread until it closes.
 
-**Codex fork and rewind** (maintainer request, 2026-11-18; built for fork).
-A Code fork continues a copy of Codex's own thread rather than a text
-handoff where it can, as Claude Code's does ([Fork and rewind](#fork-and-rewind)).
-Each completed turn journals its Codex turn id as its native anchor, and the
-driver's `forkSession` calls `thread/fork` with `lastTurnId` set to it,
-`cwd` set to the Project's folder and `excludeTurns`. The copy keeps the
-source's app tools (measured with codex-cli 0.170.0), so its cursor carries
-the source's tool record and `adopted` mark. Codex leaves the copy loaded in
-the app-server that made it, and another app-server's resume refuses a
-loaded thread, so the copy is made on a short-lived catalog process of its
-own that closes as soon as the copy exists; the fork's first turn then
-resumes it on its own lease, and the journal holds the copy from then on.
-Each copy has a process of its own, so two forks at once never leave one
-copy loaded while the other is made. A copy is made only into the source's own folder and
-mode, and only by a release whose fork cuts at a turn (`lastTurnId`, from
-codex-cli 0.143.0); a fork onto its own worktree, a turn with no anchor, an
-older Codex and a failed copy go back with the text handoff. Codex still
-reports `sessionRollback` unsupported, so a rewind keeps the text handoff.
+**Codex fork and rewind** (maintainer request, 2026-11-18; built for fork and
+rewind, maintainer decision 2026-11-19). A Code fork or rewind continues a copy
+of Codex's own thread rather than a text handoff where it can, as Claude Code's
+does ([Fork and rewind](#fork-and-rewind)). Each completed turn journals its
+Codex turn id as its native anchor, and the driver's `forkSession` calls
+`thread/fork` with `lastTurnId` set to it, `cwd` set to the Project's folder
+and `excludeTurns`. The copy keeps the source's app tools (measured with
+codex-cli 0.170.0), so its cursor carries the source's tool record and
+`adopted` mark. Codex leaves the copy loaded in the app-server that made it,
+and another app-server's resume refuses a loaded thread, so the copy is made on
+a short-lived catalog process of its own that closes as soon as the copy
+exists; the fork's first turn or the rewound thread's next turn then resumes it
+on its own lease, leaving the source thread untouched, and the journal holds
+the copy from then on. Each copy has a process of its own, so two concurrent
+copies never leave one loaded while the other is made. Codex reports
+`sessionRollback` supported from `0.143.0` (the first release whose
+`thread/fork` cuts at `lastTurnId`) and `unsupported` on older releases; the
+rewind preview promises a native copy only when Codex is `0.143.0` or later,
+the folder and mode match the kept turn's session binding, and the last kept
+turn journaled its Codex turn anchor. A fork onto its own worktree, a different
+folder or mode, a turn with no anchor, a Codex release older than `0.143.0`, or
+a failed copy goes back cleanly with the text handoff. Files come back only
+through Octant's checkpoints.
 
-**Codex skills and plugins in `@`** (maintainer request, 2026-11-18; built).
+**Codex skills and plugins in `@`** (maintainer requests, 2026-11-18 and 2026-11-19; built).
 The composer's `@` menu lists Codex's own skills and plugins after Octant's,
 labelled as Codex's. The probe reads the account's skills with `skills/list`
 (no folder: the `user`, `system` and `admin` scopes; a Project's skills are
 not the account's) and its installed, enabled plugins with
 `plugin/installed` (codex-cli 0.135.0 and later), into the observation's
 `mentions`; a release that lists neither offers none, and a failed read never
-fails the probe. Choosing one writes Codex's own reference into the draft:
+fails the probe. In a local Work or Code thread (or draft), opening `@` also
+queries `skills/list` for the thread's own folder (`cwd` / checkout / working
+directory, bypassing Codex's cache) **only when the thread's launch actually
+loads Project skills** (`nativeSetup.skills === true`). Project skills are
+marked `scope: "project"` and labelled **Project** beside the account's skills
+(winning deduplication if a Project skill shares a name with an account skill);
+when Project skills are off (`nativeSetup.skills !== true`), or for a Chat
+thread or server Project with no local folder, no Project skills are listed
+and no disabled or greyed rows appear. Choosing one writes Codex's own
+reference into the draft:
 `$name` for a skill, `@name` for a plugin. At send the driver reads the
 prompt's `$name` and `@name` references and resolves each against Codex's
 own listing for the thread's folder, never a path the client sent: a skill

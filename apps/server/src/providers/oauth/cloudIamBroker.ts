@@ -27,6 +27,8 @@ export interface CloudIamBrokerPort {
     readonly scope: CloudIamSignInDescriptor["scope"];
     readonly actorId: string;
     readonly termsAcknowledgedAt: string;
+    /** One-time 6-digit MFA code for a profile role with `mfa_serial`; never persisted. */
+    readonly mfaCode?: string;
   }) => Promise<unknown>;
   readonly sign: (
     credentialRef: string,
@@ -117,6 +119,7 @@ export function makeCloudIamBrokerClient(options: {
         },
         actorId: input.actorId,
         termsAcknowledgedAt: input.termsAcknowledgedAt,
+        ...(input.mfaCode === undefined ? {} : { mfaCode: input.mfaCode }),
       });
     },
     status: async (attemptId) => {

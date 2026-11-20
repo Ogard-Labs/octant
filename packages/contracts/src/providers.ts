@@ -1522,23 +1522,6 @@ export const ProviderAcpAgentInstallScriptsRan = Schema.Struct({
   );
 export type ProviderAcpAgentInstallScriptsRan = typeof ProviderAcpAgentInstallScriptsRan.Type;
 
-export const PROVIDER_EVENT_NAMES = [
-  "provider.instance-created@1",
-  "provider.instance-renamed@1",
-  "provider.instance-binary-changed@1",
-  "provider.instance-configuration-changed@1",
-  "provider.instance-driver-rebound@1",
-  "provider.instance-driver-quarantined@1",
-  "provider.instance-data-tags-changed@1",
-  "provider.instance-enabled-changed@1",
-  "provider.instance-native-setup-changed@1",
-  "provider.instance-own-memory-changed@1",
-  "provider.instance-removed@1",
-  "provider.defaults-updated@1",
-  "provider.catalog-updated@1",
-  PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN,
-] as const;
-
 /**
  * Whether a model can read image input, as a driver-reported fact.
  *
@@ -2281,6 +2264,10 @@ export const ProviderSlashCommand = Schema.Struct({
 export type ProviderSlashCommand = typeof ProviderSlashCommand.Type;
 export const MAX_PROVIDER_SLASH_COMMANDS = 256;
 
+/** Where a provider's own skill or plugin lives: `project` for a thread's folder, `account` (or absent) for the account. */
+export const ProviderMentionScope = Schema.Literal("account", "project");
+export type ProviderMentionScope = typeof ProviderMentionScope.Type;
+
 /**
  * One of the provider's own skills or plugins a composer's `@` menu offers,
  * as its runtime listed it: Codex's `skills/list` and `plugin/installed`.
@@ -2292,6 +2279,7 @@ export const ProviderMention = Schema.Struct({
   kind: Schema.Literal("skill", "plugin"),
   name: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9:_.-]*$/u), Schema.maxLength(128)),
   description: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+  scope: Schema.optional(ProviderMentionScope),
 }).annotations(strict);
 export type ProviderMention = typeof ProviderMention.Type;
 export const MAX_PROVIDER_MENTIONS = 256;

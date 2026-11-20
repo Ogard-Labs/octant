@@ -17,6 +17,8 @@ import {
   CodeDigest,
   type CodeReviewDiffAnchor,
   type CodeReviewFindingAssessment,
+  type PullRequestReviewEffectiveConfig,
+  type PullRequestReviewRunRecord,
 } from "@octant/contracts";
 import { Schema } from "effect";
 const decodeCodeDigest = Schema.decodeUnknownSync(CodeDigest);
@@ -29,6 +31,7 @@ import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { PullRequestReviewStatusBanner } from "./PullRequestReviewerSettings";
 
 const REVIEW_STATE_LABELS: Record<CodePullRequestReviewOpinion["state"], string> = {
   approved: "Approved",
@@ -161,6 +164,38 @@ export interface CodeReviewPaneProps {
     findings: ReadonlyArray<{ findingId: CodeReviewFindingId; expectedVersion: number }>,
   ) => Promise<void>;
   readonly preparingCorrection?: boolean;
+  readonly latestPullRequestReview?: PullRequestReviewRunRecord | undefined;
+  readonly effectivePullRequestReview?: PullRequestReviewEffectiveConfig | undefined;
+}
+
+const FINDING_SEVERITY_LABELS: Readonly<Record<CodeReviewFinding["severity"], string>> = {
+  error: "Blocking",
+  warning: "Warning",
+  note: "Note",
+};
+
+const FINDING_SEVERITY_VARIANTS: Readonly<
+  Record<CodeReviewFinding["severity"], NonNullable<OctantBadgeProps["variant"]>>
+> = {
+  error: "destructive",
+  warning: "warning",
+  note: "secondary",
+};
+
+function findingProvenanceText(finding: CodeReviewFinding): string | undefined {
+  if (finding.provenance.kind === "pull-request-reviewer") {
+    const effort =
+      finding.provenance.effort === undefined ? "" : ` (${finding.provenance.effort} effort)`;
+    const run =
+      finding.provenance.runId === undefined
+        ? ""
+        : ` · run ${finding.provenance.runId.slice(0, 8)}`;
+    return `Second-model reviewer · ${String(finding.provenance.modelId)}${effort} · head ${finding.provenance.headSha.slice(0, 7)}${run}`;
+  }
+  if (finding.author.kind === "agent") {
+    return `Agent finding · session ${finding.author.sessionId}`;
+  }
+  return undefined;
 }
 
 export function CodeReviewPane(props: CodeReviewPaneProps) {
@@ -244,6 +279,10 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
 
   return (
     <section aria-label="Local review" className="code-delivery-pane code-review-pane">
+      <PullRequestReviewStatusBanner
+        effective={props.effectivePullRequestReview}
+        latestReview={props.latestPullRequestReview}
+      />
       {findings.length === 0 ? null : (
         <header className="code-review-pane__header">
           <h2>Findings</h2>
@@ -252,67 +291,84 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
       )}
       {findings.length === 0 ? null : (
         <ul className="code-review-pane__findings">
-          {findings.map((finding) => (
-            <li key={finding.id}>
-              {props.onPrepareCorrection !== undefined && finding.state === "open" ? (
-                <label>
-                  <OctantCheckbox
-                    aria-label={`Select finding: ${finding.summary}`}
-                    checked={selected.has(finding.id)}
-                    onChange={(event) => {
-                      const checked = event.currentTarget.checked;
-                      setSelected((current) => {
-                        const next = new Set(current);
-                        if (checked) next.add(finding.id);
-                        else next.delete(finding.id);
-                        return next;
-                      });
-                    }}
-                  />
-                  Select for correction request
-                </label>
-              ) : null}
-              <strong>{finding.summary}</strong>
-              <span>
-                {finding.path} · {finding.anchor?.side ?? "legacy file"}{" "}
-                {finding.location.kind === "line"
-                  ? `line ${finding.location.line}`
-                  : `lines ${finding.location.startLine}–${finding.location.endLine}`}{" "}
-                · {finding.severity} · {finding.state}
-                {finding.anchor?.revision.kind === "turn-capture"
-                  ? ` · turn capture ${finding.anchor.revision.version}`
-                  : ""}
-              </span>
-              <p>
-                {props.assessments?.find((item) => item.finding.id === finding.id)?.explanation ??
-                  (finding.anchor === undefined
-                    ? "Legacy finding: original comparison revision unrecorded."
-                    : `Captured ${finding.anchor.capturedAt}; original comparison digest ${finding.fileDigest}.`)}
-              </p>
-              {finding.state !== "open" ? null : (
-                <div>
-                  <OctantButton
-                    disabled={saving}
-                    onClick={() => void changeState(finding, "resolved")}
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    Resolve
-                  </OctantButton>
-                  <OctantButton
-                    disabled={saving}
-                    onClick={() => void changeState(finding, "dismissed")}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    Dismiss
-                  </OctantButton>
+          {findings.map((finding) => {
+            const assessment = props.assessments?.find((item) => item.finding.id === finding.id);
+            const staleAnchor = assessment?.anchorState === "outdated";
+            const provenanceText = findingProvenanceText(finding);
+            return (
+              <li key={finding.id}>
+                {props.onPrepareCorrection !== undefined && finding.state === "open" ? (
+                  <label>
+                    <OctantCheckbox
+                      aria-label={`Select finding: ${finding.summary}`}
+                      checked={selected.has(finding.id)}
+                      onChange={(event) => {
+                        const checked = event.currentTarget.checked;
+                        setSelected((current) => {
+                          const next = new Set(current);
+                          if (checked) next.add(finding.id);
+                          else next.delete(finding.id);
+                          return next;
+                        });
+                      }}
+                    />
+                    Select for correction request
+                  </label>
+                ) : null}
+                <div className="pr-reviewer-finding__badges">
+                  <OctantBadge variant={FINDING_SEVERITY_VARIANTS[finding.severity]}>
+                    {FINDING_SEVERITY_LABELS[finding.severity]}
+                  </OctantBadge>
+                  {finding.author.kind === "agent" ? (
+                    <OctantBadge variant="secondary">Agent review</OctantBadge>
+                  ) : null}
+                  {staleAnchor ? <OctantBadge variant="warning">Stale anchor</OctantBadge> : null}
                 </div>
-              )}
-            </li>
-          ))}
+                <strong>{finding.summary}</strong>
+                {provenanceText === undefined ? null : (
+                  <p className="pr-reviewer-finding__provenance">{provenanceText}</p>
+                )}
+                <span>
+                  {finding.path} · {finding.anchor?.side ?? "legacy file"}{" "}
+                  {finding.location.kind === "line"
+                    ? `line ${finding.location.line}`
+                    : `lines ${finding.location.startLine}–${finding.location.endLine}`}{" "}
+                  · {finding.severity} · {finding.state}
+                  {finding.anchor?.revision.kind === "turn-capture"
+                    ? ` · turn capture ${finding.anchor.revision.version}`
+                    : ""}
+                </span>
+                <p>
+                  {assessment?.explanation ??
+                    (finding.anchor === undefined
+                      ? "Legacy finding: original comparison revision unrecorded."
+                      : `Captured ${finding.anchor.capturedAt}; original comparison digest ${finding.fileDigest}.`)}
+                </p>
+                {finding.state !== "open" ? null : (
+                  <div>
+                    <OctantButton
+                      disabled={saving}
+                      onClick={() => void changeState(finding, "resolved")}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      Resolve
+                    </OctantButton>
+                    <OctantButton
+                      disabled={saving}
+                      onClick={() => void changeState(finding, "dismissed")}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Dismiss
+                    </OctantButton>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
       {props.onPrepareCorrection === undefined || findings.length === 0 ? null : (

@@ -315,6 +315,8 @@ export function wireContext(deps: ContextDependencies) {
         turnRefusal: (threadId) => chatService.turnStandingRefusal(decodeChatThreadId(threadId)),
         conversation: (threadId) =>
           chatService.sessionCompactionConversation(decodeChatThreadId(threadId)),
+        conversationForCompaction: (threadId) =>
+          chatService.sessionCompactionConversationWithAttachments(decodeChatThreadId(threadId)),
         scratchRoot: (threadId) => chatService.scratchRoot(decodeChatThreadId(threadId)),
         runtimeSessions: {
           exists: (threadId) => chatRuntimeSession(threadId) !== undefined,

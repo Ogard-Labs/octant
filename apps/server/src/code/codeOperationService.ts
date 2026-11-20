@@ -20,7 +20,10 @@ import type {
 } from "../context/externalContentIngestionStore";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import {
+  MAX_CODE_OPERATION_PATHS,
   type AutomationRunReference,
+  type CodeGitOperationId,
+  type CodeRelativePath,
   type CodeReviewTarget,
   type CodeReviewRevision,
   type CodeReviewFindingAssessment,
@@ -1475,6 +1478,7 @@ export interface CodeOperationServiceOptions {
   readonly supportsSessionRollback?: (
     thread: CodeThread,
     lastKeptTurn: CodeOperationId | undefined,
+    providerRoot?: string,
   ) => Awaitable<boolean>;
   readonly events: CodeOperationEventPort;
   /**
@@ -3122,6 +3126,68 @@ export class CodeOperationService {
     return selected.target;
   }
 
+  /**
+   * Stores a host-observed pull request diff through the same retained evidence
+   * and `run-reviewed` frame path that `resolveReviewTarget` and
+   * `ReviewFindingService.create` validate against.
+   */
+  async retainPullRequestDiff(
+    windowId: WindowId,
+    input: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly operationId: CodeOperationId;
+      readonly gitOperationId: CodeGitOperationId;
+      readonly baseRef: string;
+      readonly head: string;
+      readonly base?: string | undefined;
+      readonly diff: string;
+      readonly diffTruncated: boolean;
+      readonly changedPaths: ReadonlyArray<CodeRelativePath>;
+    },
+  ): Promise<Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>> {
+    const scope = await this.#scope(windowId, {
+      threadId: input.threadId,
+      checkoutId: input.checkoutId,
+    });
+    if ("failure" in scope) {
+      throw new CodeOperationServiceError(
+        scope.failure === "waiting" ? "unavailable" : scope.failure,
+      );
+    }
+    const evidence = this.#options.evidence.put(input.diff, {
+      truncated: input.diffTruncated,
+    });
+    const result = decodeCodeOperationResult({
+      kind: "run-reviewed",
+      reviewScope: { threadId: input.threadId, checkoutId: input.checkoutId },
+      operationId: input.operationId,
+      gitOperationId: input.gitOperationId,
+      outcome: {
+        branch: scope.thread.deliveryTarget.branchIntent,
+        baseRef: input.baseRef,
+        head: input.head,
+        ...(input.base === undefined ? {} : { base: input.base }),
+        ahead: 0,
+        behind: 0,
+        changedPaths: input.changedPaths.slice(0, MAX_CODE_OPERATION_PATHS),
+        diff: evidence,
+        uncommittedPaths: [],
+        mergeability: "unknown",
+      },
+    });
+    if (result.kind !== "run-reviewed") {
+      throw new CodeOperationServiceError("unavailable");
+    }
+    this.#options.events.append({
+      threadId: input.threadId,
+      operationId: input.operationId,
+      expectedCursor: 0,
+      event: { kind: "operation-result", result },
+    });
+    return result;
+  }
+
   #latestTurnCapture(
     threadId: CodeThreadId,
     operationId: CodeOperationId,
@@ -3241,11 +3307,27 @@ export class CodeOperationService {
         "oid" in observed.head &&
         observed.head.oid === revision.head
       ) {
-        const compared = await git.compareBranch({
+        let compared = await git.compareBranch({
           checkoutRoot,
           baseRef: revision.baseRef,
           headRef: "HEAD",
         });
+        if (
+          compared.status === "ready" &&
+          compared.base === undefined &&
+          !revision.baseRef.includes("/") &&
+          threadId !== undefined
+        ) {
+          const remoteName =
+            this.#options.authority.readThread(threadId)?.deliveryTarget.remoteName;
+          if (remoteName !== undefined) {
+            compared = await git.compareBranch({
+              checkoutRoot,
+              baseRef: `${remoteName}/${revision.baseRef}`,
+              headRef: "HEAD",
+            });
+          }
+        }
         current =
           compared.status === "ready" &&
           compared.head === revision.head &&
@@ -4539,7 +4621,13 @@ export class CodeOperationService {
         return switched;
       }
       case "preview-code-rewind":
-        return await this.#previewRewind(command, thread, checkout, root.checkoutRoot);
+        return await this.#previewRewind(
+          command,
+          thread,
+          checkout,
+          root.checkoutRoot,
+          thread.workingFolderId === undefined ? undefined : root.workingDirectory,
+        );
       case "rewind-code-thread":
         return await this.#rewind(command, thread, checkout, root.checkoutRoot);
       case "create-pull-request":
@@ -5848,6 +5936,7 @@ export class CodeOperationService {
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
     checkoutRoot: string,
+    providerRoot?: string,
   ): Promise<CodeOperationResult> {
     const turns = this.#rewindTurns(command.operationId, thread, command.fromOperationId);
     if (turns.status === "refused") return turns.result;
@@ -5855,7 +5944,11 @@ export class CodeOperationService {
     const native =
       checkout.kind !== "remote-root" &&
       (await Promise.resolve(
-        this.#options.supportsSessionRollback?.(thread, turns.kept.at(-1)?.operationId),
+        this.#options.supportsSessionRollback?.(
+          thread,
+          turns.kept.at(-1)?.operationId,
+          providerRoot ?? checkoutRoot,
+        ),
       ).catch(() => false)) === true;
     const point = this.#rewindFilePoint(thread, checkout, turns.all, command.fromOperationId);
     let files: Extract<CodeOperationResult, { kind: "rewind-preview" }>["files"];

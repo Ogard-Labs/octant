@@ -39,7 +39,6 @@ import {
   decodePaneId,
   decodeWorkspaceTabId,
   type EnvironmentCompactIdentity,
-  type EnvironmentPresentation,
   type EnvironmentPresentationByMode,
   type EnvironmentPresentationState,
   type EnvironmentSectionDescriptor,
@@ -50,6 +49,7 @@ import {
   type LayoutNodeId,
   type PaneId,
   type RememberedBrowserTransfer,
+  type RememberedComputerUseApp,
   type ShellSettings,
   type SplitRatio,
   type StowedWorkspaceLayout,
@@ -273,6 +273,7 @@ export function defaultShellSettings(): ShellSettings {
     browserHeldDownloadLimit: MAX_BROWSER_HELD_DOWNLOADS,
     browserUploadFileCountLimit: MAX_BROWSER_UPLOAD_FILES,
     rememberedBrowserTransfers: [],
+    rememberedComputerUseApps: [],
     persistentBrowserOwner: false,
     pairedDeviceLifetime: DEFAULT_PAIRED_DEVICE_LIFETIME,
   };
@@ -284,15 +285,6 @@ export function defaultEnvironmentPresentationByMode(): EnvironmentPresentationB
 
 export function defaultEnvironmentPresentationState(): EnvironmentPresentationState {
   return { byTab: [], byMode: defaultEnvironmentPresentationByMode() };
-}
-
-export function resolveEffectivePresentation(
-  state: EnvironmentPresentationState,
-  mode: OctantMode,
-  tabId: WorkspaceTabId,
-): EnvironmentPresentation {
-  const override = state.byTab.find((entry) => entry.tabId === tabId);
-  return override?.presentation ?? state.byMode[mode];
 }
 
 export type EnvironmentPresentationInput = EnvironmentTabPresentation;
@@ -811,6 +803,10 @@ export function replaceShellSettings(
       current.rememberedBrowserTransfers,
       replacement.rememberedBrowserTransfers,
     ),
+    rememberedComputerUseApps: resolveRememberedComputerUseApps(
+      current.rememberedComputerUseApps,
+      replacement.rememberedComputerUseApps,
+    ),
   };
 }
 
@@ -874,6 +870,39 @@ function resolveRememberedBrowserTransfers(
       "invalid-settings",
       "Remembered Browser uploads and downloads can only be added by the approval decision.",
     );
+  }
+  return replacement;
+}
+
+function resolveRememberedComputerUseApps(
+  current: ReadonlyArray<RememberedComputerUseApp>,
+  replacement: ReadonlyArray<RememberedComputerUseApp> | undefined,
+): ReadonlyArray<RememberedComputerUseApp> {
+  if (replacement === undefined) return current;
+  const seen = new Set<string>();
+  for (const entry of replacement) {
+    const key = `${String(entry.projectId)}\0${entry.appId}`;
+    if (seen.has(key)) {
+      reject(
+        "invalid-settings",
+        "Remembered Computer use approvals cannot contain duplicate entries.",
+      );
+    }
+    seen.add(key);
+    const stored = current.find(
+      (candidate) =>
+        String(candidate.projectId) === String(entry.projectId) && candidate.appId === entry.appId,
+    );
+    if (
+      stored === undefined ||
+      stored.grantedAt !== entry.grantedAt ||
+      JSON.stringify(stored.grantedBy) !== JSON.stringify(entry.grantedBy)
+    ) {
+      reject(
+        "invalid-settings",
+        "Remembered Computer use approvals can only be added by the approval decision.",
+      );
+    }
   }
   return replacement;
 }

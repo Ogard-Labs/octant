@@ -40,7 +40,6 @@ export const IMAGE_LIBRARY_SCOPE_ID = Schema.decodeSync(ImageGenerationScopeId)(
 export const IMAGE_JOB_AGGREGATE_TYPE = "image-job";
 export const IMAGE_JOB_QUEUED = "image.job-queued@1";
 export const IMAGE_JOB_STATUS_CHANGED = "image.job-status-changed@1";
-export const IMAGE_JOB_EVENT_NAMES = [IMAGE_JOB_QUEUED, IMAGE_JOB_STATUS_CHANGED] as const;
 export const IMAGE_GENERATION_REQUEST_SHAPE = "image-generation";
 export const IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE = "interrupted by restart";
 

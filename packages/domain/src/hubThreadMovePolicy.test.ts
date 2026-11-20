@@ -1,18 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type {
-  HostOwnerEntry,
-  HubMemberId,
-  HubRoster,
-  PeerGrant,
-  ProjectId,
-  RosterMember,
-  ThreadMoveId,
-} from "@octant/contracts";
-import { defaultHubGrant, fullMemberPeerGrant } from "./hubAndSpokesPolicy";
+import type { HubMemberId, ProjectId, RosterMember, ThreadMoveId } from "@octant/contracts";
+import { fullMemberPeerGrant } from "./hubAndSpokesPolicy";
 import {
   ACTIVATE_ANYWAY_AFTER_MS,
-  authorizeMoveIn,
-  decideMoveEligibility,
   defaultShutdownDestination,
   handoverBranch,
   mayActivateAnyway,
@@ -23,9 +13,6 @@ import {
   SHUTDOWN_RECENT_WINDOW_MS,
   shutdownListing,
   startingShutdownChoice,
-  type DestinationProject,
-  type DestinationReading,
-  type MovableThread,
 } from "./hubThreadMovePolicy";
 
 const id = (n: number) =>
@@ -45,39 +32,6 @@ const member = (n: number, role: RosterMember["role"]): RosterMember => ({
   addresses: ["100.64.0.1"],
   owner: false,
 });
-
-const roster: HubRoster = {
-  sequence: 4,
-  members: [member(1, "hub"), member(3, "spoke"), member(4, "spoke")],
-  standbyOrder: [],
-  failoverAfterSeconds: 300,
-};
-
-const repository = "git@github.com:Ogard-Labs/octant.git";
-
-const codeThread: MovableThread = {
-  mode: "code",
-  activity: "idle",
-  delegated: false,
-  repositoryRemotes: [repository],
-};
-
-const project = (n: number, mode: DestinationProject["mode"], remotes: string[] = []) => ({
-  projectId: projectId(n),
-  mode,
-  repositoryRemotes: remotes,
-});
-
-const reachable: DestinationReading = {
-  reachable: true,
-  acceptsMoves: true,
-  ownerThere: true,
-  projects: [
-    project(5, "code", ["https://github.com/ogard-labs/octant"]),
-    project(6, "code", ["https://github.com/ogard-labs/other.git"]),
-    project(7, "work"),
-  ],
-};
 
 describe("repository remotes", () => {
   it("treats an SSH clone and an HTTPS clone of one repository as the same repository", () => {
@@ -117,21 +71,6 @@ describe("repository remotes", () => {
     );
   });
 
-  it("refuses a Code destination bound to a same-named repository on another port", () => {
-    const thread = {
-      ...codeThread,
-      repositoryRemotes: ["ssh://git@git.example:2222/team/app.git"],
-    };
-    const destination = {
-      ...reachable,
-      projects: [project(5, "code", ["ssh://git@git.example:2223/team/app.git"])],
-    };
-    expect(decideMoveEligibility({ thread, destination })).toEqual({
-      status: "cannot-move",
-      reason: "no-eligible-project",
-    });
-  });
-
   it("names a repository on the same disk by its path", () => {
     expect(normalizeRepositoryRemote("/srv/git/app.git")).toBe(
       normalizeRepositoryRemote("file:///srv/git/app"),
@@ -150,115 +89,10 @@ describe("repository remotes", () => {
   });
 });
 
-describe("whether a thread can move", () => {
-  it("offers a Code thread only Projects bound to a clone of its own repository", () => {
-    const eligibility = decideMoveEligibility({ thread: codeThread, destination: reachable });
-    expect(eligibility).toEqual({
-      status: "eligible",
-      projects: [reachable.projects[0]],
-      waitsForTurn: false,
-    });
-  });
-
-  it("refuses a Code thread whose repository the destination has no Project for", () => {
-    const destination = {
-      ...reachable,
-      projects: [
-        project(6, "code", ["https://github.com/ogard-labs/other.git"]),
-        project(7, "work"),
-      ],
-    };
-    expect(decideMoveEligibility({ thread: codeThread, destination })).toEqual({
-      status: "cannot-move",
-      reason: "no-eligible-project",
-    });
-  });
-
-  it("lets a Chat thread move into no Project", () => {
-    const chat: MovableThread = { ...codeThread, mode: "chat", repositoryRemotes: [] };
-    expect(decideMoveEligibility({ thread: chat, destination: reachable })).toEqual({
-      status: "eligible",
-      projects: [],
-      waitsForTurn: false,
-    });
-  });
-
-  it("never moves a thread a peer delegated here, whatever the destination", () => {
-    expect(
-      decideMoveEligibility({ thread: { ...codeThread, delegated: true }, destination: reachable }),
-    ).toEqual({ status: "cannot-move", reason: "delegated" });
-  });
-
-  it("names an unreachable or refusing destination before looking at its Projects", () => {
-    expect(
-      decideMoveEligibility({
-        thread: codeThread,
-        destination: { ...reachable, reachable: false, projects: [] },
-      }),
-    ).toEqual({ status: "cannot-move", reason: "destination-unreachable" });
-    expect(
-      decideMoveEligibility({
-        thread: codeThread,
-        destination: { ...reachable, acceptsMoves: false, projects: [] },
-      }),
-    ).toEqual({ status: "cannot-move", reason: "refused" });
-    expect(
-      decideMoveEligibility({
-        thread: codeThread,
-        destination: { ...reachable, ownerThere: false },
-      }),
-    ).toEqual({ status: "cannot-move", reason: "unlock-required" });
-  });
-
-  it("keeps a busy thread eligible but makes it wait for its turn", () => {
-    const eligibility = decideMoveEligibility({
-      thread: { ...codeThread, activity: "running" },
-      destination: reachable,
-    });
-    expect(eligibility.status === "eligible" && eligibility.waitsForTurn).toBe(true);
-  });
-});
-
-describe("whether a destination accepts a move", () => {
-  const owners: HostOwnerEntry[] = [
-    { memberId: memberId(3), identityKeyFingerprint: key(3), unlockKeyFingerprint: key(8) },
-  ];
-  const fullGrant: PeerGrant = { memberId: memberId(3), readStatus: true, moveIn: true };
-  const ask = (overrides: Partial<Parameters<typeof authorizeMoveIn>[0]> = {}) =>
-    authorizeMoveIn({
-      host: "spoke",
-      hubGrant: defaultHubGrant(),
-      roster,
-      grants: [fullGrant],
-      owners,
-      senderMemberId: memberId(3),
-      ownerMemberId: memberId(3),
-      ownerIdentityKeyFingerprint: key(3),
-      unlock: "fresh",
-      ...overrides,
-    });
-
-  it("accepts a move from a member with Move in, signed by a listed owner's fresh unlock", () => {
-    expect(ask().status).toBe("allowed");
-  });
-
-  it("answers every missing permission in the same words", () => {
-    const refused = { status: "refused", reason: "refused" };
-    expect(ask({ grants: [{ ...fullGrant, moveIn: false }] })).toEqual(refused);
-    expect(ask({ grants: [{ memberId: memberId(3), readStatus: true }] })).toEqual(refused);
-    expect(ask({ hubGrant: { items: ["roster", "status"], actProjects: [] } })).toEqual(refused);
-    expect(
-      ask({ senderMemberId: memberId(7), grants: [{ ...fullGrant, memberId: memberId(7) }] }),
-    ).toEqual(refused);
-    expect(ask({ ownerMemberId: memberId(4), ownerIdentityKeyFingerprint: key(4) })).toEqual(
-      refused,
-    );
-  });
-
+describe("whether a peer grant allows Move in", () => {
   it("reads Move in as on for a full member whose grant was stored before Move in existed", () => {
     const { moveIn: _absent, ...stored } = fullMemberPeerGrant(member(3, "spoke"));
     expect(peerGrantAllowsMoveIn(stored)).toBe(true);
-    expect(ask({ grants: [stored] }).status).toBe("allowed");
   });
 
   it("keeps Move in off for a grant the person narrowed, turned off, or held until confirmed", () => {
@@ -274,11 +108,6 @@ describe("whether a destination accepts a move", () => {
     ).toBe(false);
     expect(peerGrantAllowsMoveIn({ memberId: memberId(3), readStatus: true })).toBe(false);
     expect(peerGrantAllowsMoveIn(fullMemberPeerGrant(member(4, "guest")))).toBe(false);
-  });
-
-  it("never lets an administration session cover a move", () => {
-    expect(ask({ unlock: "session" })).toEqual({ status: "refused", reason: "unlock-required" });
-    expect(ask({ unlock: "absent" })).toEqual({ status: "refused", reason: "unlock-required" });
   });
 });
 

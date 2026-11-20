@@ -7,6 +7,7 @@ import {
   decodeProviderRegistryCommandResult,
   decodeProviderRegistrySnapshot,
   decodeThreadNativeSetupRequest,
+  decodeThreadProviderMentionsResult,
   type ThreadNativeSetupChoice,
   type ThreadNativeSetupRequest,
   type ThreadProjectCode,
@@ -15,7 +16,12 @@ import {
   type ProviderFailure,
   type ProviderModelId,
   type EventActor,
+  type WindowId,
 } from "@octant/contracts";
+import type {
+  ThreadProviderMentionsOutcome,
+  ThreadProviderMentionsRequest,
+} from "./threadProviderMentions";
 import { boundPrincipalIsRestricted, readPrincipalRouteContext } from "../principalRouteContext";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateProjectRequest } from "../projectBindingRoutes";
@@ -44,6 +50,11 @@ export interface ProviderRouteDependencies {
     projectCode?(
       request: Extract<ThreadNativeSetupRequest, { kind: "project-code" }>,
     ): Promise<ThreadProjectCode>;
+    /** Provider skills and plugins available for a thread or draft in its bound folder. */
+    mentions?(
+      windowId: WindowId,
+      request: ThreadProviderMentionsRequest,
+    ): Promise<ThreadProviderMentionsOutcome>;
   };
 }
 
@@ -192,6 +203,36 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
               threadId: threadRequest.threadId,
               projectCode: await store.projectCode(threadRequest),
             },
+            200,
+            origin,
+          );
+        }
+        if (threadRequest.kind === "mentions" || threadRequest.kind === "draft-mentions") {
+          const caller = readPrincipalRouteContext(request)?.principal;
+          if (caller !== undefined && !principalActsAsHostPerson(caller)) {
+            return response(
+              { category: "unauthorized", message: "Provider request is unauthorized." },
+              401,
+              origin,
+            );
+          }
+          if (store.mentions === undefined) {
+            return response(
+              { category: "unsupported", message: "Thread provider mentions are unavailable." },
+              503,
+              origin,
+            );
+          }
+          const outcome = await store.mentions(windowId, threadRequest);
+          if (outcome.status === "unauthorized") {
+            return response(
+              { category: "unauthorized", message: "Provider request is unauthorized." },
+              401,
+              origin,
+            );
+          }
+          return response(
+            decodeThreadProviderMentionsResult({ mentions: outcome.mentions }),
             200,
             origin,
           );

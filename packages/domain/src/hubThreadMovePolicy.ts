@@ -5,10 +5,7 @@
 // these; nothing here touches a network, a disk, or a journal.
 
 import type {
-  HostOwnerEntry,
-  HubGrant,
   HubMemberId,
-  HubRoster,
   OctantMode,
   PeerGrant,
   ProjectId,
@@ -16,7 +13,6 @@ import type {
   ThreadMoveDestinationState,
   ThreadMoveFailureReason,
 } from "@octant/contracts";
-import { authorizeOwnerRequest } from "./hubAndSpokesPolicy";
 
 const sameId = (left: { toString(): string }, right: { toString(): string }) =>
   String(left) === String(right);
@@ -24,31 +20,12 @@ const sameId = (left: { toString(): string }, right: { toString(): string }) =>
 /** What keeps a thread busy; any of these refuses a move unless the person picks Stop and move. */
 export type ThreadActivity = "idle" | "running" | "waiting-on-person" | "child-running";
 
-export type MovableThread = {
-  readonly mode: OctantMode;
-  readonly activity: ThreadActivity;
-  /** A thread a peer delegated to this host belongs to that delegation and never moves. */
-  readonly delegated: boolean;
-  /** For Code: the remote URLs the thread's checkout has. */
-  readonly repositoryRemotes: ReadonlyArray<string>;
-};
-
 /** A Project on the destination as the source reads it for the move sheet. */
 export type DestinationProject = {
   readonly projectId: ProjectId;
   readonly mode: OctantMode;
   /** For Code: the remote URLs of the clone the Project is bound to. */
   readonly repositoryRemotes: ReadonlyArray<string>;
-};
-
-/** What the source knows about a destination before it asks for an unlock. */
-export type DestinationReading = {
-  readonly reachable: boolean;
-  /** False when the destination's answer was the same-words refusal. */
-  readonly acceptsMoves: boolean;
-  /** Whether this device is on the destination's owner list. */
-  readonly ownerThere: boolean;
-  readonly projects: ReadonlyArray<DestinationProject>;
 };
 
 export type MoveEligibility =
@@ -119,90 +96,6 @@ export function normalizeRepositoryRemote(remote: string): string | undefined {
   if (lowerHost.length === 0 || cleanPath.length === 0) return undefined;
   const comparedPath = CASE_INSENSITIVE_HOSTS.has(lowerHost) ? cleanPath.toLowerCase() : cleanPath;
   return `${lowerHost}${port.length > 0 ? `:${port}` : ""}/${comparedPath}`;
-}
-
-function sharesRepository(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
-  const known = new Set(left.map(normalizeRepositoryRemote).filter((value) => value !== undefined));
-  return right.some((remote) => {
-    const normalized = normalizeRepositoryRemote(remote);
-    return normalized !== undefined && known.has(normalized);
-  });
-}
-
-/**
- * Whether one thread can move to one destination, and into which Projects.
- * Checked in the order the person can act on: a delegated thread never moves;
- * an unreachable or refusing destination is named before its Projects; a
- * busy thread is eligible but waits for its turn.
- */
-export function decideMoveEligibility(input: {
-  readonly thread: MovableThread;
-  readonly destination: DestinationReading;
-}): MoveEligibility {
-  const { thread, destination } = input;
-  if (thread.delegated) return { status: "cannot-move", reason: "delegated" };
-  if (!destination.reachable) return { status: "cannot-move", reason: "destination-unreachable" };
-  if (!destination.acceptsMoves) return { status: "cannot-move", reason: "refused" };
-  if (!destination.ownerThere) return { status: "cannot-move", reason: "unlock-required" };
-  const sameMode = destination.projects.filter((project) => project.mode === thread.mode);
-  const projects =
-    thread.mode === "code"
-      ? sameMode.filter((project) =>
-          sharesRepository(thread.repositoryRemotes, project.repositoryRemotes),
-        )
-      : sameMode;
-  if (thread.mode !== "chat" && projects.length === 0) {
-    return { status: "cannot-move", reason: "no-eligible-project" };
-  }
-  return { status: "eligible", projects, waitsForTurn: thread.activity !== "idle" };
-}
-
-export type MoveInAuthorization =
-  | { readonly status: "allowed"; readonly owner: HostOwnerEntry }
-  | { readonly status: "refused"; readonly reason: "refused" | "unlock-required" };
-
-/**
- * Whether a destination accepts a move. The sending member needs the Move in
- * item on the peer grant this host gave it, and the request needs an owner
- * device on this host's own owner list with an own-class fresh unlock (an
- * administration session never covers a move). A missing grant item, Owners
- * unticked, a sender no longer in the roster, and a sender that is not an
- * owner all answer `refused` in the same words; only a missing or stale
- * unlock from a real owner answers `unlock-required`, so the owner can retry.
- */
-export function authorizeMoveIn(input: {
-  readonly host: "hub" | "spoke";
-  readonly hubGrant: HubGrant | undefined;
-  readonly roster: HubRoster;
-  readonly grants: ReadonlyArray<PeerGrant>;
-  readonly owners: ReadonlyArray<HostOwnerEntry>;
-  readonly senderMemberId: HubMemberId;
-  readonly ownerMemberId: HubMemberId;
-  readonly ownerIdentityKeyFingerprint: string;
-  readonly unlock: "fresh" | "session" | "absent";
-}): MoveInAuthorization {
-  const sender = input.roster.members.find((member) =>
-    sameId(member.memberId, input.senderMemberId),
-  );
-  const grant = input.grants.find((entry) => sameId(entry.memberId, input.senderMemberId));
-  if (sender === undefined || !peerGrantAllowsMoveIn(grant)) {
-    return { status: "refused", reason: "refused" };
-  }
-  const owner = authorizeOwnerRequest({
-    host: input.host,
-    grant: input.hubGrant,
-    owners: input.owners,
-    roster: input.roster,
-    memberId: input.ownerMemberId,
-    identityKeyFingerprint: input.ownerIdentityKeyFingerprint,
-    unlock: input.unlock,
-    unlockClass: "own",
-  });
-  if (owner.status === "allowed") return { status: "allowed", owner: owner.entry };
-  if (owner.kind === "unlock-required" || owner.kind === "own-unlock-required") {
-    return { status: "refused", reason: "unlock-required" };
-  }
-  return { status: "refused", reason: "refused" };
 }
 
 /** A member as Prepare to shut down reads it when choosing the destination. */

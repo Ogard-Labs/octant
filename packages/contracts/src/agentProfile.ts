@@ -225,13 +225,6 @@ export const AgentProfileRemoved = Schema.Struct({
 export type AgentProfileRemoved = typeof AgentProfileRemoved.Type;
 export const decodeAgentProfileRemoved = Schema.decodeUnknownSync(AgentProfileRemoved);
 
-export const AGENT_PROFILE_EVENT_NAMES = [
-  "agent.profile-created@1",
-  "agent.profile-updated@1",
-  "agent.profile-removed@1",
-] as const;
-export type AgentProfileEventName = (typeof AGENT_PROFILE_EVENT_NAMES)[number];
-
 /**
  * The source of an effective execution resolution, in deterministic
  * priority order. Higher priority sources override lower ones.

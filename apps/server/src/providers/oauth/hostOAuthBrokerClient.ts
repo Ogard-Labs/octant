@@ -27,6 +27,7 @@ export interface HostOAuthBrokerDescriptor {
   /** Absent only for the directory dialect, whose authority the broker builds. */
   readonly tokenEndpoint?: string;
   readonly deviceAuthorizationEndpoint?: string;
+  readonly verificationHosts?: readonly string[];
   readonly scopes: readonly string[];
   readonly termsId: string;
   /** ChatGPT plan dialect: the stable host id sent as `ext_agent_host_id`. */
@@ -76,11 +77,19 @@ export interface HostOAuthBrokerPort {
     readonly termsAcknowledgedAt: string;
     /** ChatGPT plan reauthorization: the instance's stored grant. Optional. */
     readonly credentialRef?: string;
+    /** MCP PKCE only: permits a one-time callback relay from the paired device that began it. */
+    readonly relayable?: boolean;
   }) => Promise<unknown>;
   readonly cancel?: (input: {
     readonly attemptId: string;
     readonly descriptorId: string;
     readonly actorId: string;
+  }) => Promise<unknown>;
+  readonly relay?: (input: {
+    readonly attemptId: string;
+    readonly descriptorId: string;
+    readonly actorId: string;
+    readonly callbackUrl: string;
   }) => Promise<unknown>;
   readonly status: (attemptId: string) => Promise<unknown>;
   readonly refresh: (credentialRef: string) => Promise<unknown>;
@@ -163,6 +172,7 @@ export function makeHostOAuthBrokerClient(options: {
         actorId: input.actorId,
         termsAcknowledgedAt: input.termsAcknowledgedAt,
         ...(input.credentialRef === undefined ? {} : { credentialRef: input.credentialRef }),
+        ...(input.relayable === true ? { relayable: true } : {}),
         descriptor: {
           descriptorId: input.descriptor.descriptorId,
           ...(input.descriptor.clientId === undefined
@@ -184,6 +194,9 @@ export function makeHostOAuthBrokerClient(options: {
           ...(input.descriptor.deviceAuthorizationEndpoint === undefined
             ? {}
             : { deviceAuthorizationEndpoint: input.descriptor.deviceAuthorizationEndpoint }),
+          ...(input.descriptor.verificationHosts === undefined
+            ? {}
+            : { verificationHosts: input.descriptor.verificationHosts }),
           ...(input.descriptor.extAgentHostId === undefined
             ? {}
             : { extAgentHostId: input.descriptor.extAgentHostId }),
@@ -231,6 +244,20 @@ export function makeHostOAuthBrokerClient(options: {
           actorId: input.actorId,
         },
         AbortSignal.timeout(10_000),
+      );
+    },
+    relay: (input) => {
+      if (!UUID_PATTERN.test(input.attemptId) || !UUID_PATTERN.test(input.actorId))
+        return Promise.reject(new Error("Octant host OAuth broker refused the request."));
+      return post(
+        "/v1/oauth/relay",
+        {
+          attemptId: input.attemptId,
+          descriptorId: input.descriptorId,
+          actorId: input.actorId,
+          callbackUrl: input.callbackUrl,
+        },
+        AbortSignal.timeout(20_000),
       );
     },
     status: (attemptId) => {

@@ -967,6 +967,7 @@ describe("remote route policy", () => {
       "/api/extensions/skills",
       "/api/extensions/user-servers",
       "/api/extensions/sign-in",
+      "/api/extensions/mcp-sign-in/relay",
     ]) {
       expect(inspect(path, "POST")).toMatchObject({
         kind: "allow",

@@ -520,6 +520,7 @@ import {
 } from "./githubCloneProjection";
 import { ImageJobProjection } from "../image/imageJobProjection";
 import { registerBenchmarkEvents } from "../benchmarks/benchmarkEventStore";
+import { registerPullRequestReviewEvents } from "../pullRequestReviewers/pullRequestReviewService";
 import { BenchmarkProjection } from "../benchmarks/benchmarkProjection";
 import {
   DesktopLeaseProjection,
@@ -976,6 +977,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerReplicaStoreSettingsEvents(events);
   registerDesktopLeaseEvents(events);
   registerBenchmarkEvents(events);
+  registerPullRequestReviewEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);
   const agentRunProjection = new AgentRunProjection();
