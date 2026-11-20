@@ -2768,6 +2768,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         const evidence = await read(windowId, threadId, operationId, contentId);
         return { text: new TextDecoder().decode(evidence.bytes) };
       },
+      resolveReviewTarget: async (windowId, input, admissionCurrent) => {
+        const resolve = codeOperationRuntime?.resolveReviewTarget;
+        if (resolve === undefined) {
+          throw new Error("Code review target resolver is unavailable.");
+        }
+        return resolve(windowId, input, admissionCurrent);
+      },
+      retainPullRequestDiff: async (windowId, input) => {
+        const retain = codeOperationRuntime?.retainPullRequestDiff;
+        if (retain === undefined) {
+          throw new Error("Code pull request diff retainer is unavailable.");
+        }
+        return retain(windowId, input);
+      },
       createFinding: async (input, actor) => {
         const create = codeOperationRuntime?.createReviewFinding;
         if (create === undefined) {

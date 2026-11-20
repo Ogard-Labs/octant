@@ -87,34 +87,66 @@ interface ParsedProposalCandidate {
   readonly summary?: unknown;
 }
 
-function extractJsonObject(text: string): unknown {
+export type ParsedReviewerFindings =
+  | Readonly<{
+      status: "ok";
+      findings: ReadonlyArray<PullRequestReviewFindingProposal>;
+    }>
+  | Readonly<{
+      status: "invalid";
+      reason: string;
+    }>;
+
+function extractJsonEnvelope(
+  text: string,
+): Readonly<{ ok: true; value: unknown }> | Readonly<{ ok: false; reason: string }> {
   const trimmed = text.trim();
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
-  const candidate = fenced?.[1]?.trim() ?? trimmed;
+  if (trimmed.length === 0) {
+    return {
+      ok: false,
+      reason: "Reviewer reply was empty instead of a JSON object with a `findings` array.",
+    };
+  }
+  const fencedMatches = [...trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)];
+  const candidate =
+    fencedMatches.length === 1 && fencedMatches[0]?.[1] !== undefined
+      ? fencedMatches[0][1].trim()
+      : trimmed;
   try {
-    return JSON.parse(candidate);
+    return { ok: true, value: JSON.parse(candidate) };
   } catch {
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end <= start) return undefined;
-    try {
-      return JSON.parse(candidate.slice(start, end + 1));
-    } catch {
-      return undefined;
-    }
+    return {
+      ok: false,
+      reason:
+        'Reviewer reply was not valid JSON (expected `{"findings":[...]}`); Octant did not treat it as a clean review.',
+    };
   }
 }
 
 export function parseReviewerFindings(
   text: string,
   diff: PullRequestReviewDiffSnapshot,
-): ReadonlyArray<PullRequestReviewFindingProposal> {
-  const parsed = extractJsonObject(text);
+): ParsedReviewerFindings {
+  const extracted = extractJsonEnvelope(text);
+  if (!extracted.ok) {
+    return { status: "invalid", reason: extracted.reason };
+  }
+  const parsed = extracted.value;
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return [];
+    return {
+      status: "invalid",
+      reason:
+        "Reviewer reply JSON must be an object containing a `findings` array; Octant did not treat it as a clean review.",
+    };
   }
   const findingsRaw = (parsed as { readonly findings?: unknown }).findings;
-  if (!Array.isArray(findingsRaw)) return [];
+  if (!Array.isArray(findingsRaw)) {
+    return {
+      status: "invalid",
+      reason:
+        "Reviewer reply JSON is missing a `findings` array; Octant did not treat it as a clean review.",
+    };
+  }
 
   const validPaths = new Set(diff.files.map((file) => String(file.path)));
   const proposals: PullRequestReviewFindingProposal[] = [];
@@ -144,11 +176,11 @@ export function parseReviewerFindings(
         }),
       );
     } catch {
-      // Skip malformed proposals rather than discarding valid ones.
+      // Skip malformed proposals inside a validated `{ findings: [...] }` envelope.
     }
   }
 
-  return proposals;
+  return { status: "ok", findings: proposals };
 }
 
 export function formatSummaryComment(input: {
@@ -258,9 +290,15 @@ export function createSecondModelPullRequestReviewer(): PullRequestReviewer {
         return { status: "failed", detail: turn.detail };
       }
 
-      const proposals = parseReviewerFindings(turn.text, diffResult.diff);
+      const parsed = parseReviewerFindings(turn.text, diffResult.diff);
+      if (parsed.status === "invalid") {
+        return {
+          status: "failed",
+          detail: parsed.reason,
+        };
+      }
       const recorded = await host.recordFindings(
-        { findings: proposals, runId: turn.runId },
+        { findings: parsed.findings, runId: turn.runId },
         signal,
       );
       if (signal.aborted) return { status: "cancelled" };

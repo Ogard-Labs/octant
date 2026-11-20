@@ -24,11 +24,13 @@ import {
   type CodeReviewFinding,
   type CodeThread,
   type EventActor,
+  type ProviderRuntimeEvent,
   type PullRequestReviewRoute,
   type PullRequestReviewTarget,
   type TurnUsage,
 } from "@octant/contracts";
-import { Schema } from "effect";
+import { Effect, Schema, Stream } from "effect";
+import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { afterEach, describe, expect, it } from "vitest";
 import { TurnMetricsStore } from "../metrics/turnMetricsStore";
 import { Journal } from "../persistence/journal";
@@ -178,23 +180,42 @@ function createHarness(options?: {
   readonly spendCeilingAdmit?: () =>
     | { readonly status: "admitted" }
     | { readonly status: "refused" };
+  readonly useDriverDirectly?: boolean;
+  readonly turnTimeoutMs?: number;
+  readonly onPostSummaryComment?: () => void;
+  readonly onStartWorkerTurn?: () => void;
+  readonly failAppendOnEventName?: () => string | undefined;
 }) {
   const dir = mkdtempSync(join(tmpdir(), "octant-pr-review-service-"));
   dirs.push(dir);
   const connection = openSqlite(join(dir, "octant.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => NOW);
   const registries = createPhase1RuntimeRegistries();
-  const journal = new Journal({
+  const rawJournal = new Journal({
     connection,
     registry: registries.events,
     projections: registries.projections,
     clock: () => NOW,
   });
+  const journal: Pick<Journal, "append" | "replayAggregateType"> = {
+    append: (input: Parameters<Journal["append"]>[0]) => {
+      const failEventName = options?.failAppendOnEventName?.();
+      const batch = input as { readonly events: ReadonlyArray<{ readonly eventName: string }> };
+      if (
+        failEventName !== undefined &&
+        batch.events.some((event) => event.eventName === failEventName)
+      ) {
+        throw new Error(`Simulated crash before journaling ${failEventName}`);
+      }
+      return rawJournal.append(input);
+    },
+    replayAggregateType: (aggregateType) => rawJournal.replayAggregateType(aggregateType),
+  };
 
   let counter = 0;
   const uuid = () => `80000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`;
   const turnMetrics = new TurnMetricsStore({
-    journal,
+    journal: rawJournal,
     uuid,
     actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID as never },
     clock: () => NOW,
@@ -220,7 +241,7 @@ function createHarness(options?: {
   const outsideMarks: Array<{ readonly threadId: string; readonly sourceLabel: string }> = [];
   const workerWakes: Array<{ readonly threadId: string; readonly text: string }> = [];
   const notifications: Array<{ readonly threadId: string; readonly reason: string }> = [];
-  const recordedUsages: Array<{ readonly threadId: string; readonly usage: TurnUsage }> = [];
+  const recordedUsages: Array<{ readonly threadId: string; readonly usage?: TurnUsage }> = [];
   const ceilingEvents: string[] = [];
   let turnCalls = 0;
 
@@ -232,30 +253,35 @@ function createHarness(options?: {
       capture: makeDiffCapture(headSha),
     }),
     inspectRoute: () => options?.inspectRoute?.() ?? { status: "ready" },
-    executeReadOnlyTurn: async (input) => {
-      turnCalls += 1;
-      if (options?.executeReadOnlyTurn !== undefined) {
-        return options.executeReadOnlyTurn(input);
-      }
-      return {
-        status: "completed",
-        sessionId: `review-session-${turnCalls}`,
-        text: JSON.stringify({
-          findings: [
-            {
-              path: "src/auth.ts",
-              line: 2,
-              side: "modified",
-              severity: "error",
-              summary: "Guests must not be granted owner access.",
-            },
-          ],
+    ...(options?.useDriverDirectly === true
+      ? {}
+      : {
+          executeReadOnlyTurn: async (input) => {
+            turnCalls += 1;
+            if (options?.executeReadOnlyTurn !== undefined) {
+              return options.executeReadOnlyTurn(input);
+            }
+            return {
+              status: "completed",
+              sessionId: `review-session-${turnCalls}`,
+              text: JSON.stringify({
+                findings: [
+                  {
+                    path: "src/auth.ts",
+                    line: 2,
+                    side: "modified",
+                    severity: "error",
+                    summary: "Guests must not be granted owner access.",
+                  },
+                ],
+              }),
+              usage: { inputTokens: 1200, outputTokens: 180 },
+            };
+          },
         }),
-        usage: { inputTokens: 1200, outputTokens: 180 },
-      };
-    },
     postSummaryComment: async ({ target, body }) => {
       postedComments.push({ target, body });
+      options?.onPostSummaryComment?.();
       return { status: "posted", commentId: `comment-${postedComments.length}` };
     },
     findings: {
@@ -286,7 +312,10 @@ function createHarness(options?: {
     },
     turnMetrics,
     recordUsage: ({ threadId, usage }) => {
-      recordedUsages.push({ threadId: String(threadId), usage });
+      recordedUsages.push({
+        threadId: String(threadId),
+        ...(usage === undefined ? {} : { usage }),
+      });
     },
   };
 
@@ -312,6 +341,7 @@ function createHarness(options?: {
         },
         startWorkerTurn: async (threadId, text) => {
           workerWakes.push({ threadId: String(threadId), text });
+          options?.onStartWorkerTurn?.();
           return true;
         },
         notifyPerson: async (threadId, reason) => {
@@ -321,6 +351,7 @@ function createHarness(options?: {
       runtime,
       uuid,
       clock: () => NOW,
+      ...(options?.turnTimeoutMs === undefined ? {} : { turnTimeoutMs: options.turnTimeoutMs }),
     });
 
   const service = makeService();
@@ -690,5 +721,334 @@ describe("second-model pull request reviewer service", () => {
     });
     expect(disabledRun).toMatchObject({ status: "refused", reason: "not-effective" });
     expect(disabled.getTurnCalls()).toBe(0);
+  });
+
+  it("interrupts the running provider fiber, awaits connection stop before returning, and preserves partial usage on cancellation", async () => {
+    let activeSessionId: string | undefined;
+    let sendStarted: (() => void) | undefined;
+    const sendReady = new Promise<void>((resolve) => {
+      sendStarted = resolve;
+    });
+    let stopStarted = false;
+    let stopCompleted = false;
+    let fiberInterrupted = false;
+    const pendingEvents: ProviderRuntimeEvent[] = [];
+    let flushPending: (() => void) | undefined;
+
+    const hangingDriver: ProviderDriver = {
+      kind: "codex",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          start: (input: { readonly sessionId: string }) =>
+            Effect.sync(() => {
+              activeSessionId = String(input.sessionId);
+            }),
+          send: () =>
+            Effect.sync(() => {
+              pendingEvents.push({
+                kind: "usage",
+                sessionId: activeSessionId as never,
+                inputTokens: 450,
+                outputTokens: 60,
+              } as never);
+              flushPending?.();
+              sendStarted?.();
+            }),
+          stop: () =>
+            Effect.promise(async () => {
+              stopStarted = true;
+              await new Promise((resolve) => setTimeout(resolve, 15));
+              stopCompleted = true;
+            }),
+          subscribe: Effect.succeed(
+            Stream.async<ProviderRuntimeEvent>((emit) => {
+              const flush = () => {
+                for (const event of pendingEvents.splice(0)) {
+                  void emit.single(event);
+                }
+              };
+              flushPending = flush;
+              flush();
+              return Effect.sync(() => {
+                fiberInterrupted = true;
+              });
+            }),
+          ),
+        } as never),
+    };
+
+    const h = createHarness({
+      useDriverDirectly: true,
+      inspectRoute: () => ({ status: "ready", driver: hangingDriver }),
+    });
+    await h.service.updateProjectSettings(
+      WINDOW_ID,
+      { projectId: PROJECT_ID, enabled: true, route: REVIEWER_ROUTE, postSummaryComment: false },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+
+    const runPromise = h.service.reviewPullRequestHead({
+      target: TARGET,
+      threadId: THREAD_ID,
+      headSha: HEAD_1,
+      baseRef: "origin/main",
+      state: "open",
+    });
+
+    await sendReady;
+    // Wait a tick for the usage event to be consumed before aborting.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    h.service.dispose();
+
+    const result = await runPromise;
+    expect(result?.status).toBe("cancelled");
+    expect(fiberInterrupted).toBe(true);
+    expect(stopStarted).toBe(true);
+    expect(stopCompleted).toBe(true);
+    // Partial usage from the interrupted turn is settled and recorded, not abandoned.
+    expect(h.ceilingEvents).toEqual(["admit:admitted", "settle"]);
+    expect(h.recordedUsages).toEqual([
+      { threadId: String(THREAD_ID), usage: { inputTokens: 450, outputTokens: 60 } },
+    ]);
+  });
+
+  it("never repeats a GitHub summary comment or worker hand-back when the host restarts before recording run completion", async () => {
+    // 1. Crash right after posting the summary comment, before `run-recorded`.
+    let failOnRunRecorded = true;
+    const commentCrash = createHarness({
+      failAppendOnEventName: () =>
+        failOnRunRecorded ? "pull-request-review.run-recorded@1" : undefined,
+    });
+    await commentCrash.service.updateProjectSettings(
+      WINDOW_ID,
+      { projectId: PROJECT_ID, enabled: true, route: REVIEWER_ROUTE, postSummaryComment: true },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    await expect(
+      commentCrash.service.reviewPullRequestHead({
+        target: TARGET,
+        threadId: THREAD_ID,
+        headSha: HEAD_1,
+        baseRef: "origin/main",
+        state: "open",
+      }),
+    ).rejects.toThrow("Simulated crash");
+    expect(commentCrash.postedComments).toHaveLength(1);
+    expect(commentCrash.getTurnCalls()).toBe(1);
+
+    // Host restarts on the same journal and re-observes the same PR head.
+    failOnRunRecorded = false;
+    const restartedAfterComment = commentCrash.makeService();
+    const afterCommentRestart = await restartedAfterComment.reviewPullRequestHead({
+      target: TARGET,
+      threadId: THREAD_ID,
+      headSha: HEAD_1,
+      baseRef: "origin/main",
+      state: "open",
+    });
+    expect(afterCommentRestart).toBeUndefined();
+    expect(commentCrash.postedComments).toHaveLength(1);
+    expect(commentCrash.getTurnCalls()).toBe(1);
+    const commentView = await restartedAfterComment.queryPullRequestSettings(
+      WINDOW_ID,
+      TARGET,
+      THREAD_ID,
+    );
+    expect(commentView.status).toBe("ok");
+    if (commentView.status === "ok") {
+      expect(commentView.view.latestReview?.status).toBe("failed");
+      expect(commentView.view.latestReview?.summaryCommentPosted).toBe(true);
+    }
+
+    // 2. Crash right after waking the worker, before `run-recorded`.
+    let failWakeOnRunRecorded = true;
+    const wakeCrash = createHarness({
+      strict: () => true,
+      failAppendOnEventName: () =>
+        failWakeOnRunRecorded ? "pull-request-review.run-recorded@1" : undefined,
+    });
+    await wakeCrash.service.updateProjectSettings(
+      WINDOW_ID,
+      { projectId: PROJECT_ID, enabled: true, route: REVIEWER_ROUTE, postSummaryComment: false },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    await wakeCrash.service.updatePullRequestSettings(
+      WINDOW_ID,
+      { target: TARGET, sendBlockingFindingsToWorker: true },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    await expect(
+      wakeCrash.service.reviewPullRequestHead({
+        target: TARGET,
+        threadId: THREAD_ID,
+        headSha: HEAD_1,
+        baseRef: "origin/main",
+        state: "open",
+      }),
+    ).rejects.toThrow("Simulated crash");
+    expect(wakeCrash.workerWakes).toHaveLength(1);
+    expect(wakeCrash.getTurnCalls()).toBe(1);
+
+    // Host restarts on the same journal and re-observes the same PR head.
+    failWakeOnRunRecorded = false;
+    const restartedAfterWake = wakeCrash.makeService();
+    const afterWakeRestart = await restartedAfterWake.reviewPullRequestHead({
+      target: TARGET,
+      threadId: THREAD_ID,
+      headSha: HEAD_1,
+      baseRef: "origin/main",
+      state: "open",
+    });
+    expect(afterWakeRestart).toBeUndefined();
+    expect(wakeCrash.workerWakes).toHaveLength(1);
+    expect(wakeCrash.getTurnCalls()).toBe(1);
+    const wakeView = await restartedAfterWake.queryPullRequestSettings(
+      WINDOW_ID,
+      TARGET,
+      THREAD_ID,
+    );
+    expect(wakeView.status).toBe("ok");
+    if (wakeView.status === "ok") {
+      expect(wakeView.view.handBackAttempts).toBe(1);
+      expect(wakeView.view.latestReview?.handedBackToWorker).toBe(true);
+    }
+  });
+
+  it("settles reservations and records unreported spend when reviews complete or time out without reported usage", async () => {
+    // 1. Completed review with no provider usage reported.
+    const noUsageCompleted = createHarness({
+      executeReadOnlyTurn: async () => ({
+        status: "completed",
+        sessionId: "no-usage-session",
+        text: JSON.stringify({ findings: [] }),
+      }),
+    });
+    await noUsageCompleted.service.updateProjectSettings(
+      WINDOW_ID,
+      { projectId: PROJECT_ID, enabled: true, route: REVIEWER_ROUTE, postSummaryComment: false },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    const completed = await noUsageCompleted.service.reviewPullRequestHead({
+      target: TARGET,
+      threadId: THREAD_ID,
+      headSha: HEAD_1,
+      baseRef: "origin/main",
+      state: "open",
+    });
+    expect(completed?.status).toBe("completed");
+    expect(noUsageCompleted.ceilingEvents).toEqual(["admit:admitted", "settle"]);
+    expect(noUsageCompleted.recordedUsages).toEqual([{ threadId: String(THREAD_ID) }]);
+
+    // 2. Driver turn that times out without ever emitting a usage event.
+    const slowDriver: ProviderDriver = {
+      kind: "codex",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          start: () => Effect.void,
+          send: () => Effect.void,
+          stop: () => Effect.void,
+          subscribe: Effect.succeed(Stream.never),
+        } as never),
+    };
+    const timedOut = createHarness({
+      useDriverDirectly: true,
+      turnTimeoutMs: 40,
+      inspectRoute: () => ({ status: "ready", driver: slowDriver }),
+    });
+    await timedOut.service.updateProjectSettings(
+      WINDOW_ID,
+      { projectId: PROJECT_ID, enabled: true, route: REVIEWER_ROUTE, postSummaryComment: false },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    const failed = await timedOut.service.reviewPullRequestHead({
+      target: TARGET,
+      threadId: THREAD_ID,
+      headSha: HEAD_1,
+      baseRef: "origin/main",
+      state: "open",
+    });
+    expect(failed?.status).toBe("failed");
+    expect(timedOut.ceilingEvents).toEqual(["admit:admitted", "settle"]);
+    expect(timedOut.recordedUsages).toEqual([{ threadId: String(THREAD_ID) }]);
+  });
+
+  it("fails reviews on prose, truncated JSON, or missing findings array without publishing a clean summary comment", async () => {
+    const malformedReplies = [
+      "Looks good to me! No issues found.",
+      '{"findings":[{"path":"src/auth.ts","line":2',
+      '{"issues":[]}',
+    ];
+    for (const [index, reply] of malformedReplies.entries()) {
+      const h = createHarness({
+        executeReadOnlyTurn: async () => ({
+          status: "completed",
+          sessionId: `malformed-${index}`,
+          text: reply,
+          usage: { inputTokens: 300, outputTokens: 40 },
+        }),
+      });
+      await h.service.updateProjectSettings(
+        WINDOW_ID,
+        { projectId: PROJECT_ID, enabled: true, route: REVIEWER_ROUTE, postSummaryComment: true },
+        "local-window",
+        LOCAL_ACTOR,
+      );
+      const run = await h.service.reviewPullRequestHead({
+        target: TARGET,
+        threadId: THREAD_ID,
+        headSha: HEAD_1,
+        baseRef: "origin/main",
+        state: "open",
+      });
+      expect(run?.status).toBe("failed");
+      expect(run?.summaryCommentPosted).toBe(false);
+      expect(h.postedComments).toHaveLength(0);
+      expect(h.recordedFindings).toHaveLength(0);
+    }
+
+    // Inside a valid `{ findings: [...] }` envelope, invalid entries are selectively skipped while valid ones still persist.
+    const mixed = createHarness({
+      executeReadOnlyTurn: async () => ({
+        status: "completed",
+        sessionId: "mixed-valid-envelope",
+        text: JSON.stringify({
+          findings: [
+            { path: "src/does-not-exist.ts", line: 1, severity: "error", summary: "Skip me" },
+            {
+              path: "src/auth.ts",
+              line: 2,
+              side: "modified",
+              severity: "error",
+              summary: "Keep valid finding inside valid envelope.",
+            },
+          ],
+        }),
+        usage: { inputTokens: 300, outputTokens: 40 },
+      }),
+    });
+    await mixed.service.updateProjectSettings(
+      WINDOW_ID,
+      { projectId: PROJECT_ID, enabled: true, route: REVIEWER_ROUTE, postSummaryComment: true },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    const mixedRun = await mixed.service.reviewPullRequestHead({
+      target: TARGET,
+      threadId: THREAD_ID,
+      headSha: HEAD_1,
+      baseRef: "origin/main",
+      state: "open",
+    });
+    expect(mixedRun?.status).toBe("completed");
+    expect(mixed.recordedFindings).toHaveLength(1);
+    expect(mixed.postedComments).toHaveLength(1);
   });
 });

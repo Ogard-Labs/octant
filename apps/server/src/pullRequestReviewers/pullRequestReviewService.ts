@@ -9,8 +9,10 @@ import {
   PULL_REQUEST_REVIEW_AGGREGATE_TYPES,
   PULL_REQUEST_REVIEW_EVENT_NAMES,
   PullRequestReviewProjectSettingsEvent,
+  PullRequestReviewPublicationRecordedEvent,
   PullRequestReviewPullRequestSettingsEvent,
   PullRequestReviewRunRecordedEvent,
+  PullRequestReviewRunStartedEvent,
   PullRequestReviewThreadOverrideEvent,
   UtcTimestamp,
   decodeAgentRunId,
@@ -25,12 +27,15 @@ import {
   type AgentRunId,
   type CodeReviewDiffAnchor,
   type CodeReviewFinding,
+  type CodeReviewTarget,
   type CodeThread,
   type CodeThreadId,
   type EventActor,
   type ProjectId,
   type ProviderInstanceId,
+  type ProviderModel,
   type ProviderModelId,
+  type ProviderModelOptionValues,
   type PullRequestReviewDiffSnapshot,
   type PullRequestReviewEffectiveConfig,
   type PullRequestReviewFindingProposal,
@@ -73,7 +78,7 @@ import type {
   PullRequestReviewTurnResult,
 } from "@octant/plugin-api/pull-request-reviewer";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { Effect, Fiber, Schema, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Schema, Stream } from "effect";
 import { deriveCodeFileId } from "../code/codeFileIdentity";
 import { retainedReviewTarget, type RetainedCodeReview } from "../code/codeReviewComparison";
 import type { EventRegistry } from "../persistence/eventRegistry";
@@ -97,6 +102,66 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const REVIEW_TURN_TIMEOUT_MS = 120_000;
 const MAX_REVIEW_TURN_TEXT_CHARS = 64 * 1024;
 const OUTSIDE_CONTENT_SOURCE_LABEL = "pull-request-review";
+const EFFORT_OPTION_IDS: ReadonlyArray<string> = [
+  "reasoning",
+  "effort",
+  "thinking",
+  "reasoning_effort",
+  "thought_level",
+];
+
+export type ResolvedReviewModelOptions =
+  | Readonly<{ status: "ok"; modelOptionValues?: ProviderModelOptionValues }>
+  | Readonly<{ status: "refused"; reason: "route-refused"; detail: string }>;
+
+/**
+ * Translates a configured reviewer effort string into the normalized
+ * `ProviderModelOptionValues` key declared by the selected model in the
+ * provider's catalog (for example `reasoning` on Codex, `effort` on Claude,
+ * `thinking` or `effort` on ACP agents). Refuses unsupported values instead of
+ * silently running at the provider default while recording the requested effort.
+ */
+export function resolvePullRequestReviewModelOptions(
+  model: ProviderModel | undefined,
+  effort: string | undefined,
+): ResolvedReviewModelOptions {
+  if (effort === undefined) {
+    return { status: "ok" };
+  }
+  if (model === undefined) {
+    return {
+      status: "refused",
+      reason: "route-refused",
+      detail: `The reviewer model's catalog options are unavailable, so effort "${effort}" cannot be verified. Octant will not fall back silently.`,
+    };
+  }
+  const selectionOptions = model.options.filter((option) => option.kind === "selection");
+  let matchedOption:
+    | Extract<ProviderModel["options"][number], { readonly kind: "selection" }>
+    | undefined;
+  for (const preferredId of EFFORT_OPTION_IDS) {
+    matchedOption = selectionOptions.find((option) => option.id === preferredId);
+    if (matchedOption !== undefined) break;
+  }
+  if (matchedOption === undefined) {
+    return {
+      status: "refused",
+      reason: "route-refused",
+      detail: `Model ${String(model.id)} does not declare a configurable effort option, so effort "${effort}" cannot be applied.`,
+    };
+  }
+  if (!matchedOption.values.includes(effort)) {
+    return {
+      status: "refused",
+      reason: "route-refused",
+      detail: `Effort "${effort}" is not supported by ${String(model.id)} (supported: ${matchedOption.values.join(", ")}).`,
+    };
+  }
+  return {
+    status: "ok",
+    modelOptionValues: { [matchedOption.id]: effort },
+  };
+}
 
 export function registerPullRequestReviewEvents(registry: EventRegistry): EventRegistry {
   return registry
@@ -115,6 +180,12 @@ export function registerPullRequestReviewEvents(registry: EventRegistry): EventR
       1,
       PullRequestReviewPullRequestSettingsEvent,
     )
+    .register(PULL_REQUEST_REVIEW_EVENT_NAMES.runStarted, 1, PullRequestReviewRunStartedEvent)
+    .register(
+      PULL_REQUEST_REVIEW_EVENT_NAMES.publicationRecorded,
+      1,
+      PullRequestReviewPublicationRecordedEvent,
+    )
     .register(PULL_REQUEST_REVIEW_EVENT_NAMES.runRecorded, 1, PullRequestReviewRunRecordedEvent);
 }
 
@@ -131,12 +202,22 @@ export interface ObservedPullRequestHead {
 export interface PullRequestReviewRouteInspection {
   readonly status: "ready" | "refused";
   readonly driver?: ProviderDriver;
+  readonly model?: ProviderModel;
+  readonly modelOptionValues?: ProviderModelOptionValues;
   readonly reason?: PullRequestReviewTurnRefusalReason;
   readonly detail?: string;
 }
 
 export interface PullRequestReviewDiffCapture {
   readonly snapshot: PullRequestReviewDiffSnapshot;
+  /** Raw unified diff text used only for line-number snapping before host anchor resolution. */
+  readonly diffText?: string;
+  /** Host target resolver backed by `CodeOperationService.resolveReviewTarget`. */
+  readonly resolveTarget?: (input: {
+    readonly path: string;
+    readonly side: "original" | "modified";
+    readonly line: number;
+  }) => Promise<CodeReviewTarget | undefined>;
   readonly retained?: RetainedCodeReview;
   readonly anchorByPath?: ReadonlyMap<string, CodeReviewDiffAnchor>;
 }
@@ -193,7 +274,7 @@ export type PullRequestReviewTurnExecutionResult =
       readonly reason: PullRequestReviewTurnRefusalReason;
       readonly detail: string;
     }
-  | { readonly status: "cancelled" }
+  | { readonly status: "cancelled"; readonly usage?: TurnUsage }
   | { readonly status: "failed"; readonly detail: string; readonly usage?: TurnUsage };
 
 export interface PullRequestReviewHostRuntimePort {
@@ -232,12 +313,17 @@ export interface PullRequestReviewHostRuntimePort {
   readonly findings: PullRequestReviewFindingWriter;
   readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
   readonly turnMetrics?: Pick<TurnMetricsStore, "record">;
+  /**
+   * Records provider usage under the reviewed thread. When `usage` is absent,
+   * records an explicit unreported spend entry (`providerReported: false`) so
+   * unknown spend remains visible to spend ceilings.
+   */
   readonly recordUsage?: (input: {
     readonly threadId: CodeThreadId;
     readonly projectId: ProjectId;
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
-    readonly usage: TurnUsage;
+    readonly usage?: TurnUsage | undefined;
   }) => void;
 }
 
@@ -252,7 +338,18 @@ export type PullRequestReviewSettingResult<TView> =
 interface RunFold {
   version: number;
   readonly records: PullRequestReviewRunRecord[];
+  /** Heads that settled with a completed (clean or findings-recorded) review. */
+  readonly completedHeadShas: Set<string>;
+  /** Heads that already started or settled (never auto-repeated on poll or restart). */
   readonly reviewedHeadShas: Set<string>;
+  /** Heads where a summary comment publication intent or completion was journaled. */
+  readonly publishedCommentHeads: Set<string>;
+  /** Heads where a worker hand-back intent or completion was journaled. */
+  readonly handedBackHeads: Set<string>;
+  /** Unique review ids already counted toward `handBackAttempts`. */
+  readonly countedHandBackReviews: Set<string>;
+  /** In-flight runs journaled as started without a matching terminal `run-recorded`. */
+  readonly pendingStarts: Map<string, PullRequestReviewRunStartedEvent>;
   handBackAttempts: number;
 }
 
@@ -343,17 +440,18 @@ function formatHandBackTurnText(input: {
 async function runDriverReadOnlyTurn(input: {
   readonly driver: ProviderDriver;
   readonly route: PullRequestReviewRoute;
+  readonly modelOptionValues?: ProviderModelOptionValues;
   readonly scratchRoot: string;
   readonly sessionId: string;
   readonly prompt: string;
   readonly systemInstructions?: string;
+  readonly timeoutMs: number;
   readonly signal: AbortSignal;
 }): Promise<PullRequestReviewTurnExecutionResult> {
+  if (input.signal.aborted) return { status: "cancelled" };
   const sessionId = decodeProviderSessionId(input.sessionId);
-  const modelOptionValues =
-    input.route.effort === undefined
-      ? undefined
-      : { effort: input.route.effort, reasoningEffort: input.route.effort };
+  let observedUsage: TurnUsage | undefined;
+
   const program = Effect.gen(function* () {
     const connection = yield* input.driver.acquire({
       instanceId: input.route.providerInstanceId,
@@ -371,14 +469,15 @@ async function runDriverReadOnlyTurn(input: {
       executionPolicy: "plan",
       singleUse: true,
       tools: [],
-      ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
+      ...(input.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: input.modelOptionValues }),
     });
 
     let text = "";
     let completed = false;
     let interrupted = false;
     let failureMessage: string | undefined;
-    let usage: TurnUsage | undefined;
 
     const collected = yield* subscribeThenSend({
       connection,
@@ -398,7 +497,7 @@ async function runDriverReadOnlyTurn(input: {
               if (event.kind === "interrupted") interrupted = true;
               if (event.kind === "failed") failureMessage = event.failure.message;
               if (event.kind === "usage") {
-                usage = {
+                observedUsage = {
                   inputTokens: event.inputTokens,
                   outputTokens: event.outputTokens,
                   ...(event.reasoningTokens === undefined
@@ -433,54 +532,82 @@ async function runDriverReadOnlyTurn(input: {
       return {
         status: "failed" as const,
         detail: failureMessage,
-        ...(usage === undefined ? {} : { usage }),
+        ...(observedUsage === undefined ? {} : { usage: observedUsage }),
       };
     }
-    if (interrupted) return { status: "cancelled" as const };
+    if (interrupted) {
+      return {
+        status: "cancelled" as const,
+        ...(observedUsage === undefined ? {} : { usage: observedUsage }),
+      };
+    }
     if (!completed) {
       return {
         status: "failed" as const,
         detail: "The reviewer turn ended without completing.",
-        ...(usage === undefined ? {} : { usage }),
+        ...(observedUsage === undefined ? {} : { usage: observedUsage }),
       };
     }
     return {
       status: "completed" as const,
       sessionId: String(sessionId),
       text,
-      ...(usage === undefined ? {} : { usage }),
+      ...(observedUsage === undefined ? {} : { usage: observedUsage }),
     };
   });
 
-  if (input.signal.aborted) return { status: "cancelled" };
-  try {
-    const running = Effect.runPromise(
-      Effect.scoped(program).pipe(
-        Effect.timeoutTo({
-          duration: REVIEW_TURN_TIMEOUT_MS,
-          onTimeout: (): PullRequestReviewTurnExecutionResult => ({
-            status: "failed",
-            detail: "The pull request review turn timed out.",
-          }),
-          onSuccess: (value: PullRequestReviewTurnExecutionResult) => value,
-        }),
-      ),
+  const scopedEffect = Effect.scoped(program).pipe(
+    Effect.timeoutTo({
+      duration: input.timeoutMs,
+      onTimeout: (): PullRequestReviewTurnExecutionResult => ({
+        status: "failed",
+        detail: "The pull request review turn timed out.",
+        ...(observedUsage === undefined ? {} : { usage: observedUsage }),
+      }),
+      onSuccess: (value: PullRequestReviewTurnExecutionResult) => value,
+    }),
+  );
+
+  // Fork and explicitly interrupt on abort so Effect runs scoped `connection.stop`
+  // finalizers and releases provider resources before returning.
+  const fiber = Effect.runFork(scopedEffect);
+  let interrupting: Promise<void> | undefined;
+  const onAbort = () => {
+    interrupting ??= Effect.runPromise(Fiber.interrupt(fiber)).then(
+      () => undefined,
+      () => undefined,
     );
-    const aborted = new Promise<PullRequestReviewTurnExecutionResult>((resolve) => {
-      if (input.signal.aborted) {
-        resolve({ status: "cancelled" });
-        return;
-      }
-      input.signal.addEventListener("abort", () => resolve({ status: "cancelled" }), {
-        once: true,
-      });
-    });
-    return await Promise.race([running, aborted]);
+  };
+  if (input.signal.aborted) {
+    onAbort();
+  } else {
+    input.signal.addEventListener("abort", onAbort, { once: true });
+  }
+  try {
+    const exit = await Effect.runPromise(Fiber.await(fiber));
+    if (interrupting !== undefined) await interrupting;
+    if (Exit.isSuccess(exit)) {
+      return exit.value;
+    }
+    if (Cause.isInterruptedOnly(exit.cause) || input.signal.aborted) {
+      return {
+        status: "cancelled",
+        ...(observedUsage === undefined ? {} : { usage: observedUsage }),
+      };
+    }
+    return {
+      status: "failed",
+      detail: "The configured reviewer provider could not be reached.",
+      ...(observedUsage === undefined ? {} : { usage: observedUsage }),
+    };
   } catch {
     return {
       status: "failed",
       detail: "The configured reviewer provider could not be reached.",
+      ...(observedUsage === undefined ? {} : { usage: observedUsage }),
     };
+  } finally {
+    input.signal.removeEventListener("abort", onAbort);
   }
 }
 
@@ -493,6 +620,7 @@ export interface PullRequestReviewServiceOptions {
   readonly uuid: () => string;
   readonly clock?: () => string;
   readonly defaultReviewerId?: PullRequestReviewerId;
+  readonly turnTimeoutMs?: number;
 }
 
 /**
@@ -510,6 +638,7 @@ export class PullRequestReviewService {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #defaultReviewerId: PullRequestReviewerId;
+  readonly #turnTimeoutMs: number;
 
   readonly #projectSettings = new Map<string, PullRequestReviewProjectSettings>();
   readonly #threadOverrides = new Map<string, PullRequestReviewThreadOverride>();
@@ -527,6 +656,7 @@ export class PullRequestReviewService {
     this.#uuid = options.uuid;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#defaultReviewerId = options.defaultReviewerId ?? SECOND_MODEL_PULL_REQUEST_REVIEWER_ID;
+    this.#turnTimeoutMs = options.turnTimeoutMs ?? REVIEW_TURN_TIMEOUT_MS;
     this.#hydrate();
   }
 
@@ -558,7 +688,12 @@ export class PullRequestReviewService {
     const created: RunFold = {
       version: 0,
       records: [],
+      completedHeadShas: new Set<string>(),
       reviewedHeadShas: new Set<string>(),
+      publishedCommentHeads: new Set<string>(),
+      handedBackHeads: new Set<string>(),
+      countedHandBackReviews: new Set<string>(),
+      pendingStarts: new Map<string, PullRequestReviewRunStartedEvent>(),
       handBackAttempts: 0,
     };
     this.#runs.set(key, created);
@@ -991,6 +1126,18 @@ export class PullRequestReviewService {
     this.#inFlightByTarget.set(targetKey, { headSha: observation.headSha, abort });
     const reviewId = decodePullRequestReviewId(this.#uuid());
     const startedAt = decodeTimestamp(this.#clock());
+    // Persist durable per-head invocation reservation BEFORE starting provider
+    // work so a crash or restart never repeats an already-started review.
+    this.#recordRunStarted({
+      kind: "pull-request-review-run-started",
+      reviewId,
+      reviewerId,
+      target: observation.target,
+      threadId: thread.id,
+      headSha: observation.headSha,
+      ...(effective.route === undefined ? {} : { route: effective.route }),
+      startedAt,
+    });
     let lastCapture: PullRequestReviewDiffCapture | undefined;
     let handBackAttemptNumber: number | undefined;
 
@@ -1074,6 +1221,41 @@ export class PullRequestReviewService {
               };
             }
 
+            let modelOptionValues = inspection.modelOptionValues;
+            if (
+              modelOptionValues === undefined &&
+              route.effort !== undefined &&
+              inspection.model !== undefined
+            ) {
+              const resolvedOptions = resolvePullRequestReviewModelOptions(
+                inspection.model,
+                route.effort,
+              );
+              if (resolvedOptions.status === "refused") {
+                return {
+                  status: "refused",
+                  reason: resolvedOptions.reason,
+                  detail: resolvedOptions.detail,
+                };
+              }
+              modelOptionValues = resolvedOptions.modelOptionValues;
+            }
+
+            if (signal.aborted) {
+              return { status: "cancelled" };
+            }
+
+            if (
+              this.#runtime.executeReadOnlyTurn === undefined &&
+              inspection.driver === undefined
+            ) {
+              return {
+                status: "refused",
+                reason: "no-account",
+                detail: "The configured reviewer provider driver is unavailable.",
+              };
+            }
+
             const reservationId = decodeSpendCeilingReservationId(this.#uuid());
             if (this.#runtime.spendCeiling !== undefined) {
               const admitted = this.#runtime.spendCeiling.admit({
@@ -1092,6 +1274,27 @@ export class PullRequestReviewService {
                 };
               }
             }
+
+            const settleStartedWork = (usage: TurnUsage | undefined) => {
+              const observedTokens =
+                usage === undefined
+                  ? undefined
+                  : usage.inputTokens + usage.outputTokens + (usage.reasoningTokens ?? 0);
+              this.#runtime.spendCeiling?.settle({
+                reservationId,
+                ...(observedTokens === undefined ? {} : { observedTokens }),
+              });
+              // Always record usage once execution started: absent `usage` writes
+              // an explicit `providerReported: false` row so unknown spend stays
+              // visible to spend ceilings rather than disappearing as free.
+              this.#runtime.recordUsage?.({
+                threadId: thread.id,
+                projectId: thread.projectId,
+                providerInstanceId: route.providerInstanceId,
+                modelId: route.modelId,
+                ...(usage === undefined ? {} : { usage }),
+              });
+            };
 
             const turnStartedAt = this.#clock();
             const turnStartedMs = Date.now();
@@ -1113,12 +1316,14 @@ export class PullRequestReviewService {
                 result = await runDriverReadOnlyTurn({
                   driver: inspection.driver,
                   route,
+                  ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
                   scratchRoot: this.#runtime.scratchRoot,
                   sessionId,
                   prompt: input.prompt,
                   ...(input.systemInstructions === undefined
                     ? {}
                     : { systemInstructions: input.systemInstructions }),
+                  timeoutMs: this.#turnTimeoutMs,
                   signal,
                 });
               } else {
@@ -1130,7 +1335,17 @@ export class PullRequestReviewService {
                 };
               }
             } catch {
-              this.#runtime.spendCeiling?.abandon({ reservationId });
+              const turnEndedAt = this.#clock();
+              const durationMs = Math.max(0, Date.now() - turnStartedMs);
+              settleStartedWork(undefined);
+              this.#recordTurnMetrics({
+                thread,
+                route,
+                startedAt: turnStartedAt,
+                endedAt: turnEndedAt,
+                durationMs,
+                stopReason: "failed",
+              });
               return {
                 status: "failed",
                 detail: "The reviewer turn failed unexpectedly.",
@@ -1140,25 +1355,7 @@ export class PullRequestReviewService {
             const turnEndedAt = this.#clock();
             const durationMs = Math.max(0, Date.now() - turnStartedMs);
             if (result.status === "completed") {
-              const observedTokens =
-                result.usage === undefined
-                  ? undefined
-                  : result.usage.inputTokens +
-                    result.usage.outputTokens +
-                    (result.usage.reasoningTokens ?? 0);
-              this.#runtime.spendCeiling?.settle({
-                reservationId,
-                ...(observedTokens === undefined ? {} : { observedTokens }),
-              });
-              if (result.usage !== undefined) {
-                this.#runtime.recordUsage?.({
-                  threadId: thread.id,
-                  projectId: thread.projectId,
-                  providerInstanceId: route.providerInstanceId,
-                  modelId: route.modelId,
-                  usage: result.usage,
-                });
-              }
+              settleStartedWork(result.usage);
               this.#recordTurnMetrics({
                 thread,
                 route,
@@ -1179,22 +1376,7 @@ export class PullRequestReviewService {
             }
 
             if (result.status === "failed") {
-              if (result.usage !== undefined) {
-                const observedTokens =
-                  result.usage.inputTokens +
-                  result.usage.outputTokens +
-                  (result.usage.reasoningTokens ?? 0);
-                this.#runtime.spendCeiling?.settle({ reservationId, observedTokens });
-                this.#runtime.recordUsage?.({
-                  threadId: thread.id,
-                  projectId: thread.projectId,
-                  providerInstanceId: route.providerInstanceId,
-                  modelId: route.modelId,
-                  usage: result.usage,
-                });
-              } else {
-                this.#runtime.spendCeiling?.abandon({ reservationId });
-              }
+              settleStartedWork(result.usage);
               this.#recordTurnMetrics({
                 thread,
                 route,
@@ -1207,11 +1389,23 @@ export class PullRequestReviewService {
               return { status: "failed", detail: result.detail };
             }
 
-            this.#runtime.spendCeiling?.abandon({ reservationId });
-            if (result.status === "refused") {
-              return { status: "refused", reason: result.reason, detail: result.detail };
+            if (result.status === "cancelled") {
+              settleStartedWork(result.usage);
+              this.#recordTurnMetrics({
+                thread,
+                route,
+                startedAt: turnStartedAt,
+                endedAt: turnEndedAt,
+                durationMs,
+                stopReason: "failed",
+                ...(result.usage === undefined ? {} : { usage: result.usage }),
+              });
+              return { status: "cancelled" };
             }
-            return { status: "cancelled" };
+
+            // Pre-start refusal from the turn executor: abandon without recording spend.
+            this.#runtime.spendCeiling?.abandon({ reservationId });
+            return { status: "refused", reason: result.reason, detail: result.detail };
           },
 
           recordFindings: async ({
@@ -1235,7 +1429,7 @@ export class PullRequestReviewService {
             const route = effective.route;
             const created: CodeReviewFinding[] = [];
             for (const proposal of proposals) {
-              const resolved = this.#resolveFindingForProposal({
+              const resolved = await this.#resolveFindingForProposal({
                 thread,
                 capture: lastCapture,
                 proposal,
@@ -1276,8 +1470,36 @@ export class PullRequestReviewService {
           isPostSummaryCommentEnabled: () =>
             this.#projectSettingsFor(observation.target.projectId).postSummaryComment,
 
-          postSummaryComment: ({ body }, signal) =>
-            this.#runtime.postSummaryComment({ target: observation.target, body }, signal),
+          postSummaryComment: async ({ body }, signal) => {
+            if (fold.publishedCommentHeads.has(observation.headSha)) {
+              return { status: "refused", reason: "already-posted" };
+            }
+            this.#recordPublication({
+              kind: "pull-request-review-publication-recorded",
+              reviewId,
+              target: observation.target,
+              threadId: thread.id,
+              headSha: observation.headSha,
+              action: "summary-comment",
+              phase: "intent",
+              occurredAt: decodeTimestamp(this.#clock()),
+            });
+            const posted = await this.#runtime.postSummaryComment(
+              { target: observation.target, body },
+              signal,
+            );
+            this.#recordPublication({
+              kind: "pull-request-review-publication-recorded",
+              reviewId,
+              target: observation.target,
+              threadId: thread.id,
+              headSha: observation.headSha,
+              action: "summary-comment",
+              phase: posted.status === "posted" ? "completed" : "failed",
+              occurredAt: decodeTimestamp(this.#clock()),
+            });
+            return posted;
+          },
 
           isSendBlockingFindingsEnabled: () =>
             this.#prSettingsFor(observation.target).sendBlockingFindingsToWorker,
@@ -1285,6 +1507,9 @@ export class PullRequestReviewService {
           handBackBlockingFindings: async ({
             findings,
           }): Promise<PullRequestReviewHandBackResult> => {
+            if (fold.handedBackHeads.has(observation.headSha)) {
+              return { status: "refused", reason: "already-handed-back" };
+            }
             const strict = this.#threads.isStrict(thread.id);
             const maxStrictAttempts = this.#threads.maxStrictHandBackAttempts();
             const decision = decidePullRequestReviewHandBack({
@@ -1319,6 +1544,20 @@ export class PullRequestReviewService {
               return { status: "refused", reason: "unmarked" };
             }
 
+            // Persist durable hand-back intent BEFORE waking the worker so a
+            // crash mid-wake cannot repeat the hand-back on host restart.
+            this.#recordPublication({
+              kind: "pull-request-review-publication-recorded",
+              reviewId,
+              target: observation.target,
+              threadId: thread.id,
+              headSha: observation.headSha,
+              action: "worker-hand-back",
+              phase: "intent",
+              attempt: decision.attempt,
+              occurredAt: decodeTimestamp(this.#clock()),
+            });
+
             const text = formatHandBackTurnText({
               target: observation.target,
               headSha: observation.headSha,
@@ -1327,6 +1566,17 @@ export class PullRequestReviewService {
               ...(strict ? { maxStrictAttempts } : {}),
             });
             const started = await this.#threads.startWorkerTurn(thread.id, text).catch(() => false);
+            this.#recordPublication({
+              kind: "pull-request-review-publication-recorded",
+              reviewId,
+              target: observation.target,
+              threadId: thread.id,
+              headSha: observation.headSha,
+              action: "worker-hand-back",
+              phase: started ? "completed" : "failed",
+              attempt: decision.attempt,
+              occurredAt: decodeTimestamp(this.#clock()),
+            });
             if (!started) {
               return { status: "refused", reason: "turn-refused" };
             }
@@ -1359,11 +1609,11 @@ export class PullRequestReviewService {
     }
   }
 
-  #resolveFindingForProposal(input: {
+  async #resolveFindingForProposal(input: {
     readonly thread: CodeThread;
     readonly capture: PullRequestReviewDiffCapture;
     readonly proposal: PullRequestReviewFindingProposal;
-  }):
+  }): Promise<
     | {
         readonly fileId: CodeReviewFinding["fileId"];
         readonly path: CodeReviewFinding["path"];
@@ -1371,12 +1621,62 @@ export class PullRequestReviewService {
         readonly location: CodeReviewFinding["location"];
         readonly anchor?: CodeReviewDiffAnchor;
       }
-    | undefined {
+    | undefined
+  > {
     const file = input.capture.snapshot.files.find(
       (candidate) => String(candidate.path) === String(input.proposal.path),
     );
     if (file === undefined) return undefined;
     const side = input.proposal.side ?? "modified";
+
+    // Production path: resolve directly through `CodeOperationService.resolveReviewTarget`
+    // so every finding carries the exact persisted operation-result `occurredAt`
+    // timestamp and host-verified `captured-diff` anchor accepted by `ReviewFindingService.create`.
+    if (input.capture.resolveTarget !== undefined) {
+      if (input.proposal.location.kind !== "line") return undefined;
+      const exact = await input.capture.resolveTarget({
+        path: String(file.path),
+        side,
+        line: input.proposal.location.line,
+      });
+      if (exact !== undefined) {
+        return {
+          fileId: exact.fileId,
+          path: exact.path,
+          fileDigest: exact.fileDigest,
+          location: exact.location,
+          anchor: exact.anchor,
+        };
+      }
+      if (input.capture.diffText !== undefined) {
+        const parsed = parseUnifiedDiff(input.capture.diffText).find(
+          (candidate) => candidate.path === String(file.path),
+        );
+        if (parsed !== undefined && !parsed.binary) {
+          const firstLine = parsed.hunks[0]?.lines.find((line) =>
+            side === "modified" ? line.newNumber !== undefined : line.oldNumber !== undefined,
+          );
+          const snappedLine = side === "modified" ? firstLine?.newNumber : firstLine?.oldNumber;
+          if (snappedLine !== undefined) {
+            const snapped = await input.capture.resolveTarget({
+              path: String(file.path),
+              side,
+              line: snappedLine,
+            });
+            if (snapped !== undefined) {
+              return {
+                fileId: snapped.fileId,
+                path: snapped.path,
+                fileDigest: snapped.fileDigest,
+                location: snapped.location,
+                anchor: snapped.anchor,
+              };
+            }
+          }
+        }
+      }
+      return undefined;
+    }
 
     if (input.capture.retained !== undefined && input.proposal.location.kind === "line") {
       const exact = retainedReviewTarget(input.capture.retained, {
@@ -1395,9 +1695,6 @@ export class PullRequestReviewService {
           anchor: exact.target.anchor,
         };
       }
-      // If the model named a nearby line outside the diff hunk, snap to the
-      // nearest real hunk line on the same side when available, otherwise use
-      // the snapshot's file digest without fabricating an invalid anchor.
       const parsed = parseUnifiedDiff(input.capture.retained.text).find(
         (candidate) => candidate.path === String(file.path),
       );
@@ -1428,12 +1725,13 @@ export class PullRequestReviewService {
     }
 
     const fallbackAnchor = input.capture.anchorByPath?.get(String(file.path));
+    if (fallbackAnchor === undefined) return undefined;
     return {
       fileId: deriveCodeFileId(input.thread.id, input.thread.checkoutId, String(file.path)),
       path: file.path,
       fileDigest: decodeCodeDigest(file.fileDigest),
       location: input.proposal.location,
-      ...(fallbackAnchor === undefined ? {} : { anchor: fallbackAnchor }),
+      anchor: fallbackAnchor,
     };
   }
 
@@ -1555,6 +1853,99 @@ export class PullRequestReviewService {
     }
   }
 
+  #recordRunStarted(payload: PullRequestReviewRunStartedEvent): void {
+    const key = pullRequestReviewTargetKey(payload.target);
+    const fold = this.#runFoldFor(payload.target);
+    this.#journal.append({
+      aggregate: {
+        aggregateType: PULL_REQUEST_REVIEW_AGGREGATE_TYPES.run,
+        aggregateId: targetAggregateId(key),
+      },
+      expectedVersion: decodeAggregateVersion(fold.version),
+      events: [
+        {
+          eventId: decodeEventId(this.#uuid()),
+          eventName: PULL_REQUEST_REVIEW_EVENT_NAMES.runStarted,
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#uuid()),
+          actor: localSystemActor(),
+          occurredAt: payload.startedAt,
+          payload,
+        },
+      ],
+    });
+    this.#applyRunStarted(fold, payload);
+  }
+
+  #applyRunStarted(fold: RunFold, payload: PullRequestReviewRunStartedEvent): void {
+    fold.version += 1;
+    fold.pendingStarts.set(String(payload.reviewId), payload);
+  }
+
+  #recordPublication(payload: PullRequestReviewPublicationRecordedEvent): void {
+    const key = pullRequestReviewTargetKey(payload.target);
+    const fold = this.#runFoldFor(payload.target);
+    this.#journal.append({
+      aggregate: {
+        aggregateType: PULL_REQUEST_REVIEW_AGGREGATE_TYPES.run,
+        aggregateId: targetAggregateId(key),
+      },
+      expectedVersion: decodeAggregateVersion(fold.version),
+      events: [
+        {
+          eventId: decodeEventId(this.#uuid()),
+          eventName: PULL_REQUEST_REVIEW_EVENT_NAMES.publicationRecorded,
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#uuid()),
+          actor: localSystemActor(),
+          occurredAt: payload.occurredAt,
+          payload,
+        },
+      ],
+    });
+    this.#applyPublication(fold, payload);
+  }
+
+  #applyPublication(fold: RunFold, payload: PullRequestReviewPublicationRecordedEvent): void {
+    fold.version += 1;
+    if (payload.action === "summary-comment") {
+      if (payload.phase === "intent" || payload.phase === "completed") {
+        fold.publishedCommentHeads.add(payload.headSha);
+      }
+    } else if (payload.action === "worker-hand-back") {
+      if (payload.phase === "intent" || payload.phase === "completed") {
+        fold.handedBackHeads.add(payload.headSha);
+        if (!fold.countedHandBackReviews.has(String(payload.reviewId))) {
+          fold.countedHandBackReviews.add(String(payload.reviewId));
+          fold.handBackAttempts += 1;
+        }
+      }
+    }
+  }
+
+  #applyRunRecord(fold: RunFold, record: PullRequestReviewRunRecord): void {
+    fold.version += 1;
+    fold.pendingStarts.delete(String(record.reviewId));
+    fold.records.push(record);
+    if (record.status === "completed") {
+      fold.completedHeadShas.add(record.headSha);
+    }
+    if (record.status !== "cancelled") {
+      fold.reviewedHeadShas.add(record.headSha);
+    }
+    if (record.summaryCommentPosted) {
+      fold.publishedCommentHeads.add(record.headSha);
+    }
+    if (record.handedBackToWorker) {
+      fold.handedBackHeads.add(record.headSha);
+      if (!fold.countedHandBackReviews.has(String(record.reviewId))) {
+        fold.countedHandBackReviews.add(String(record.reviewId));
+        fold.handBackAttempts += 1;
+      }
+    }
+    this.#latestByThread.set(String(record.threadId), record);
+  }
+
   #recordRun(target: PullRequestReviewTarget, record: PullRequestReviewRunRecord): void {
     const key = pullRequestReviewTargetKey(target);
     const fold = this.#runFoldFor(target);
@@ -1580,15 +1971,7 @@ export class PullRequestReviewService {
         },
       ],
     });
-    fold.version += 1;
-    fold.records.push(record);
-    if (record.status !== "cancelled") {
-      fold.reviewedHeadShas.add(record.headSha);
-    }
-    if (record.handedBackToWorker) {
-      fold.handBackAttempts += 1;
-    }
-    this.#latestByThread.set(String(record.threadId), record);
+    this.#applyRunRecord(fold, record);
   }
 
   #hydrate(): void {
@@ -1633,19 +2016,43 @@ export class PullRequestReviewService {
           version: decodeAggregateVersion((previous?.version ?? 0) + 1),
           updatedAt: decodeTimestamp(envelope.occurredAt),
         });
+      } else if (envelope.eventName === PULL_REQUEST_REVIEW_EVENT_NAMES.runStarted) {
+        const payload = envelope.payload as PullRequestReviewRunStartedEvent;
+        this.#applyRunStarted(this.#runFoldFor(payload.target), payload);
+      } else if (envelope.eventName === PULL_REQUEST_REVIEW_EVENT_NAMES.publicationRecorded) {
+        const payload = envelope.payload as PullRequestReviewPublicationRecordedEvent;
+        this.#applyPublication(this.#runFoldFor(payload.target), payload);
       } else if (envelope.eventName === PULL_REQUEST_REVIEW_EVENT_NAMES.runRecorded) {
         const payload = envelope.payload as PullRequestReviewRunRecordedEvent;
-        const fold = this.#runFoldFor(payload.record.target);
-        fold.version += 1;
-        fold.records.push(payload.record);
-        if (payload.record.status !== "cancelled") {
-          fold.reviewedHeadShas.add(payload.record.headSha);
-        }
-        if (payload.record.handedBackToWorker) {
-          fold.handBackAttempts += 1;
-        }
-        this.#latestByThread.set(String(payload.record.threadId), payload.record);
+        this.#applyRunRecord(this.#runFoldFor(payload.record.target), payload.record);
       }
+    }
+
+    // Any started invocation left open across a host restart is treated as
+    // interrupted/uncertain: never auto-repeat the review or external
+    // publication/hand-back on the next observation.
+    for (const fold of this.#runs.values()) {
+      for (const pending of fold.pendingStarts.values()) {
+        fold.reviewedHeadShas.add(pending.headSha);
+        const recovered = decodePullRequestReviewRunRecord({
+          reviewId: pending.reviewId,
+          reviewerId: pending.reviewerId,
+          target: pending.target,
+          threadId: pending.threadId,
+          headSha: pending.headSha,
+          ...(pending.route === undefined ? {} : { route: pending.route }),
+          status: "failed",
+          findingIds: [],
+          summaryCommentPosted: fold.publishedCommentHeads.has(pending.headSha),
+          handedBackToWorker: fold.handedBackHeads.has(pending.headSha),
+          detail:
+            "The host restarted while this pull request review was in progress; Octant did not repeat external publication or hand-back.",
+          startedAt: pending.startedAt,
+        });
+        fold.records.push(recovered);
+        this.#latestByThread.set(String(recovered.threadId), recovered);
+      }
+      fold.pendingStarts.clear();
     }
   }
 

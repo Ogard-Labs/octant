@@ -20,7 +20,10 @@ import type {
 } from "../context/externalContentIngestionStore";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import {
+  MAX_CODE_OPERATION_PATHS,
   type AutomationRunReference,
+  type CodeGitOperationId,
+  type CodeRelativePath,
   type CodeReviewTarget,
   type CodeReviewRevision,
   type CodeReviewFindingAssessment,
@@ -3120,6 +3123,68 @@ export class CodeOperationService {
     if ("failure" in current) throw new CodeOperationServiceError("unauthorized");
     if (admissionCurrent?.() === false) throw new CodeOperationServiceError("unauthorized");
     return selected.target;
+  }
+
+  /**
+   * Stores a host-observed pull request diff through the same retained evidence
+   * and `run-reviewed` frame path that `resolveReviewTarget` and
+   * `ReviewFindingService.create` validate against.
+   */
+  async retainPullRequestDiff(
+    windowId: WindowId,
+    input: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly operationId: CodeOperationId;
+      readonly gitOperationId: CodeGitOperationId;
+      readonly baseRef: string;
+      readonly head: string;
+      readonly base?: string | undefined;
+      readonly diff: string;
+      readonly diffTruncated: boolean;
+      readonly changedPaths: ReadonlyArray<CodeRelativePath>;
+    },
+  ): Promise<Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>> {
+    const scope = await this.#scope(windowId, {
+      threadId: input.threadId,
+      checkoutId: input.checkoutId,
+    });
+    if ("failure" in scope) {
+      throw new CodeOperationServiceError(
+        scope.failure === "waiting" ? "unavailable" : scope.failure,
+      );
+    }
+    const evidence = this.#options.evidence.put(input.diff, {
+      truncated: input.diffTruncated,
+    });
+    const result = decodeCodeOperationResult({
+      kind: "run-reviewed",
+      reviewScope: { threadId: input.threadId, checkoutId: input.checkoutId },
+      operationId: input.operationId,
+      gitOperationId: input.gitOperationId,
+      outcome: {
+        branch: scope.thread.deliveryTarget.branchIntent,
+        baseRef: input.baseRef,
+        head: input.head,
+        ...(input.base === undefined ? {} : { base: input.base }),
+        ahead: 0,
+        behind: 0,
+        changedPaths: input.changedPaths.slice(0, MAX_CODE_OPERATION_PATHS),
+        diff: evidence,
+        uncommittedPaths: [],
+        mergeability: "unknown",
+      },
+    });
+    if (result.kind !== "run-reviewed") {
+      throw new CodeOperationServiceError("unavailable");
+    }
+    this.#options.events.append({
+      threadId: input.threadId,
+      operationId: input.operationId,
+      expectedCursor: 0,
+      event: { kind: "operation-result", result },
+    });
+    return result;
   }
 
   #latestTurnCapture(

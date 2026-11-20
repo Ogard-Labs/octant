@@ -362,13 +362,12 @@ export const PULL_REQUEST_REVIEW_AGGREGATE_TYPES = {
   run: "pull-request-review-run",
 } as const;
 
-export const PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE = "pull-request-review-usage" as const;
-export const PULL_REQUEST_REVIEW_REQUEST_SHAPE = "pull-request-review" as const;
-
 export const PULL_REQUEST_REVIEW_EVENT_NAMES = {
   projectSettingsUpdated: "pull-request-review.project-settings-updated@1",
   threadOverrideUpdated: "pull-request-review.thread-override-updated@1",
   pullRequestSettingsUpdated: "pull-request-review.pr-settings-updated@1",
+  runStarted: "pull-request-review.run-started@1",
+  publicationRecorded: "pull-request-review.publication-recorded@1",
   runRecorded: "pull-request-review.run-recorded@1",
 } as const;
 
@@ -398,6 +397,32 @@ export const PullRequestReviewPullRequestSettingsEvent = Schema.Struct({
 }).annotations(strict);
 export type PullRequestReviewPullRequestSettingsEvent =
   typeof PullRequestReviewPullRequestSettingsEvent.Type;
+
+export const PullRequestReviewRunStartedEvent = Schema.Struct({
+  kind: Schema.Literal("pull-request-review-run-started"),
+  reviewId: PullRequestReviewId,
+  reviewerId: PullRequestReviewerId,
+  target: PullRequestReviewTarget,
+  threadId: CodeThreadId,
+  headSha: GitObjectId,
+  route: Schema.optional(PullRequestReviewRoute),
+  startedAt: UtcTimestamp,
+}).annotations(strict);
+export type PullRequestReviewRunStartedEvent = typeof PullRequestReviewRunStartedEvent.Type;
+
+export const PullRequestReviewPublicationRecordedEvent = Schema.Struct({
+  kind: Schema.Literal("pull-request-review-publication-recorded"),
+  reviewId: PullRequestReviewId,
+  target: PullRequestReviewTarget,
+  threadId: CodeThreadId,
+  headSha: GitObjectId,
+  action: Schema.Literal("summary-comment", "worker-hand-back"),
+  phase: Schema.Literal("intent", "completed", "failed"),
+  attempt: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type PullRequestReviewPublicationRecordedEvent =
+  typeof PullRequestReviewPublicationRecordedEvent.Type;
 
 export const PullRequestReviewRunRecordedEvent = Schema.Struct({
   kind: Schema.Literal("pull-request-review-run-recorded"),

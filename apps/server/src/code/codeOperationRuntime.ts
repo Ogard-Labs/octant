@@ -1049,6 +1049,8 @@ export interface CodeOperationRuntime {
     checkoutId: import("@octant/contracts").CodeCheckoutId,
   ): Promise<import("@octant/contracts").CodeRepositoryTestStatus>;
   createReviewFinding?: ReviewFindingService["create"];
+  resolveReviewTarget?: CodeOperationService["resolveReviewTarget"];
+  retainPullRequestDiff?: CodeOperationService["retainPullRequestDiff"];
   conversation(
     windowId: WindowId,
     threadId: CodeThreadId,
@@ -2584,6 +2586,9 @@ export function createCodeOperationRuntime(
       service.readRepositoryTestStatus(windowId, threadId, checkoutId),
     createReviewFinding: (windowId, input, admissionCurrent, actor) =>
       reviewFindings.create(windowId, input, admissionCurrent, actor),
+    resolveReviewTarget: (windowId, input, admissionCurrent) =>
+      service.resolveReviewTarget(windowId, input, admissionCurrent),
+    retainPullRequestDiff: (windowId, input) => service.retainPullRequestDiff(windowId, input),
     conversation: async (windowId, threadId, afterCursor, limit) => {
       const thread = options.persistence.readCodeThread(threadId);
       if (thread === undefined || thread.id !== threadId) {

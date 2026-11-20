@@ -12,7 +12,6 @@ import {
   decodeCodeOperationId,
   decodeCodeRelativePath,
   decodePullRequestReviewDiffSnapshot,
-  decodeUtcTimestamp,
   type CodeOperationCommand,
   type CodeOperationResult,
   type CodeProjectPullRequestRow,
@@ -34,8 +33,13 @@ import type { PullRequestReviewSummaryCommentResult } from "@octant/plugin-api/p
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Schema } from "effect";
 import { deriveCodeFileId } from "../code/codeFileIdentity";
+import type { CodeOperationService } from "../code/codeOperationService";
 import { GhPullRequestActionPort } from "../code/ghPullRequestActionPort";
-import { GhPullRequestPort, createGhCommandPort } from "../code/ghPullRequestPort";
+import {
+  GhPullRequestPort,
+  createGhCommandPort,
+  type GhCommandPort,
+} from "../code/ghPullRequestPort";
 import type { Journal } from "../persistence/journal";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
@@ -43,11 +47,11 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { recordOneShotUsage } from "../shield/shieldUsageLedger";
 import type { SpendCeilingService } from "../spendCeilingService";
 import type { TurnMetricsStore } from "../metrics/turnMetricsStore";
-import type {
-  ObservedPullRequestHead,
-  PullRequestReviewDiffCapture,
-  PullRequestReviewHostRuntimePort,
-  PullRequestReviewService,
+import {
+  resolvePullRequestReviewModelOptions,
+  type ObservedPullRequestHead,
+  type PullRequestReviewHostRuntimePort,
+  type PullRequestReviewService,
 } from "./pullRequestReviewService";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
@@ -121,9 +125,11 @@ function unifiedDiffToFiles(
 
 export interface CreatePullRequestReviewHostRuntimeOptions {
   readonly ghExecutable?: string | undefined;
+  readonly ghCommand?: GhCommandPort | undefined;
   readonly providerDataDirectory: string;
   readonly connection: SqliteConnection;
   readonly journal: Journal;
+  readonly clock?: () => string;
   readonly readProviderInstances: () => ReadonlyArray<ProviderInstance>;
   readonly observedProviderState: (
     instanceId: ProviderInstanceId,
@@ -144,6 +150,8 @@ export interface CreatePullRequestReviewHostRuntimeOptions {
     operationId: CodeOperationCommand["operationId"],
     contentId: string,
   ) => Promise<{ readonly text: string }>;
+  readonly resolveReviewTarget: CodeOperationService["resolveReviewTarget"];
+  readonly retainPullRequestDiff: CodeOperationService["retainPullRequestDiff"];
   readonly createFinding: (
     input: Omit<CodeReviewFinding, "state" | "version" | "createdAt" | "updatedAt">,
     actor: EventActor,
@@ -165,9 +173,11 @@ export function createPullRequestReviewHostRuntime(
 ): PullRequestReviewRuntimeWiring {
   const scratchRoot = join(options.providerDataDirectory, "pull-request-review-scratch");
   mkdirSync(scratchRoot, { recursive: true });
+  const clock = options.clock ?? (() => new Date().toISOString());
 
   const ghCommand =
-    options.ghExecutable === undefined
+    options.ghCommand ??
+    (options.ghExecutable === undefined
       ? undefined
       : (() => {
           try {
@@ -175,7 +185,7 @@ export function createPullRequestReviewHostRuntime(
           } catch {
             return undefined;
           }
-        })();
+        })());
   const ghActions =
     ghCommand === undefined ? undefined : new GhPullRequestActionPort({ command: ghCommand });
   const ghPullRequest =
@@ -183,10 +193,7 @@ export function createPullRequestReviewHostRuntime(
       ? undefined
       : new GhPullRequestPort({ command: ghCommand, resolveTarget: async () => undefined });
 
-  const readCurrentHeadSha = async (
-    target: PullRequestReviewTarget,
-    signal: AbortSignal,
-  ): Promise<string | undefined> => {
+  const readPullRequestSummary = async (target: PullRequestReviewTarget, signal: AbortSignal) => {
     if (ghActions === undefined) return undefined;
     const summary = await ghActions.summary(
       {
@@ -197,7 +204,39 @@ export function createPullRequestReviewHostRuntime(
       signal,
     );
     if (summary.status !== "read" || summary.state !== "open") return undefined;
-    return summary.headSha;
+    return summary;
+  };
+
+  const readCurrentHeadSha = async (
+    target: PullRequestReviewTarget,
+    signal: AbortSignal,
+  ): Promise<string | undefined> => {
+    const summary = await readPullRequestSummary(target, signal);
+    return summary?.headSha;
+  };
+
+  const makeTargetResolver = (
+    thread: CodeThread,
+    reviewOperationId: CodeOperationCommand["operationId"],
+  ) => {
+    return async (targetInput: {
+      readonly path: string;
+      readonly side: "original" | "modified";
+      readonly line: number;
+    }) => {
+      try {
+        return await options.resolveReviewTarget(ROUTINE_HOST_SCOPE_ID, {
+          threadId: thread.id,
+          checkoutId: thread.checkoutId,
+          reviewOperationId,
+          path: targetInput.path,
+          side: targetInput.side,
+          line: targetInput.line,
+        });
+      } catch {
+        return undefined;
+      }
+    };
   };
 
   const runtime: PullRequestReviewHostRuntimePort = {
@@ -205,61 +244,78 @@ export function createPullRequestReviewHostRuntime(
     readCurrentHeadSha,
 
     capturePullRequestDiff: async (input, signal) => {
-      const currentHead = await readCurrentHeadSha(input.target, signal);
-      if (currentHead !== input.headSha) {
-        return currentHead === undefined
+      const summary = await readPullRequestSummary(input.target, signal);
+      if (summary === undefined || summary.headSha !== input.headSha) {
+        return summary === undefined
           ? { status: "stale" }
-          : { status: "stale", currentHeadSha: currentHead };
+          : { status: "stale", currentHeadSha: summary.headSha };
       }
 
-      // First try capturing a real `run-reviewed` operation on the thread's
-      // checkout so findings carry host-verified diff anchors compatible with
-      // `list-review-findings` and `prepare-review-correction`.
-      const operationId = decodeCodeOperationId(randomUUID());
-      try {
-        const result = await options.executeOperation(ROUTINE_HOST_SCOPE_ID, {
-          kind: "review-run",
-          operationId,
-          threadId: input.thread.id,
-          checkoutId: input.thread.checkoutId,
-          gitOperationId: decodeCodeGitOperationId(randomUUID()),
-          maxDiffBytes: 1_048_576,
-        });
-        if (result.kind === "run-reviewed" && result.outcome.head === input.headSha) {
-          const read = await options.readOperationEvidence(
-            ROUTINE_HOST_SCOPE_ID,
-            input.thread.id,
-            operationId,
-            String(result.outcome.diff.contentId),
-          );
-          const { files, truncated } = unifiedDiffToFiles(input.thread, read.text);
-          const capturedAt = decodeUtcTimestamp(new Date().toISOString());
-          const capture: PullRequestReviewDiffCapture = {
-            snapshot: decodePullRequestReviewDiffSnapshot({
-              headSha: input.headSha,
-              baseRef: result.outcome.baseRef,
-              ...(result.outcome.base === undefined ? {} : { baseSha: result.outcome.base }),
-              reviewOperationId: operationId,
-              files,
-              ...(truncated || result.outcome.diff.truncated === true ? { truncated: true } : {}),
-            }),
-            retained: {
-              operationId,
-              evidence: result.outcome.diff,
-              revision: {
-                kind: "branch",
-                head: result.outcome.head,
-                ...(result.outcome.base === undefined ? {} : { base: result.outcome.base }),
-                baseRef: result.outcome.baseRef,
+      const targetRepository =
+        `${String(input.target.repositoryOwner)}/${String(input.target.repositoryName)}`.toLowerCase();
+      const observedBaseBranch = summary.baseBranch;
+      const deliveryRepository = input.thread.deliveryTarget.proposedBaseRepository.toLowerCase();
+      const deliveryBaseBranch = input.thread.deliveryTarget.proposedBaseBranch;
+      const localBindingEligible =
+        deliveryRepository === targetRepository &&
+        deliveryBaseBranch === observedBaseBranch &&
+        input.baseRef === observedBaseBranch;
+
+      // Only reuse the local `review-run` comparison when both the PR's
+      // repository and base branch match the thread's delivery target and the
+      // local checkout head/base match the observed PR head/base.
+      if (localBindingEligible) {
+        const localOperationId = decodeCodeOperationId(randomUUID());
+        try {
+          const result = await options.executeOperation(ROUTINE_HOST_SCOPE_ID, {
+            kind: "review-run",
+            operationId: localOperationId,
+            threadId: input.thread.id,
+            checkoutId: input.thread.checkoutId,
+            gitOperationId: decodeCodeGitOperationId(randomUUID()),
+            maxDiffBytes: 1_048_576,
+          });
+          const expectedRemoteBaseRef = `${input.thread.deliveryTarget.remoteName}/${observedBaseBranch}`;
+          const baseRefMatches =
+            result.kind === "run-reviewed" &&
+            (result.outcome.baseRef === observedBaseBranch ||
+              result.outcome.baseRef === expectedRemoteBaseRef);
+          const baseShaMatches =
+            result.kind === "run-reviewed" &&
+            (input.baseSha === undefined || result.outcome.base === input.baseSha);
+          if (
+            result.kind === "run-reviewed" &&
+            result.outcome.head === input.headSha &&
+            baseRefMatches &&
+            baseShaMatches &&
+            result.outcome.diff.truncated !== true
+          ) {
+            const read = await options.readOperationEvidence(
+              ROUTINE_HOST_SCOPE_ID,
+              input.thread.id,
+              localOperationId,
+              String(result.outcome.diff.contentId),
+            );
+            const { files, truncated } = unifiedDiffToFiles(input.thread, read.text);
+            return {
+              status: "ready",
+              capture: {
+                snapshot: decodePullRequestReviewDiffSnapshot({
+                  headSha: input.headSha,
+                  baseRef: result.outcome.baseRef,
+                  ...(result.outcome.base === undefined ? {} : { baseSha: result.outcome.base }),
+                  reviewOperationId: localOperationId,
+                  files,
+                  ...(truncated ? { truncated: true } : {}),
+                }),
+                diffText: read.text,
+                resolveTarget: makeTargetResolver(input.thread, localOperationId),
               },
-              capturedAt,
-              text: read.text,
-            },
-          };
-          return { status: "ready", capture };
+            };
+          }
+        } catch {
+          // Fall through to the authoritative GitHub PR diff below.
         }
-      } catch {
-        // Fall through to host-observed PR diff below when local checkout head differs.
       }
 
       if (ghPullRequest === undefined) return { status: "unavailable" };
@@ -278,18 +334,43 @@ export function createPullRequestReviewHostRuntime(
       if (observedHeadSha !== input.headSha) {
         return { status: "stale", currentHeadSha: observedHeadSha };
       }
+      if (
+        observed.pullRequest.baseRepository.toLowerCase() !== targetRepository ||
+        observed.pullRequest.baseBranch !== observedBaseBranch
+      ) {
+        return { status: "unavailable" };
+      }
       const { files, truncated } = unifiedDiffToFiles(input.thread, observed.diff);
+      const retainedOperationId = decodeCodeOperationId(randomUUID());
+      try {
+        await options.retainPullRequestDiff(ROUTINE_HOST_SCOPE_ID, {
+          threadId: input.thread.id,
+          checkoutId: input.thread.checkoutId,
+          operationId: retainedOperationId,
+          gitOperationId: decodeCodeGitOperationId(randomUUID()),
+          baseRef: observed.pullRequest.baseBranch,
+          head: observedHeadSha,
+          ...(input.baseSha === undefined ? {} : { base: input.baseSha }),
+          diff: observed.diff,
+          diffTruncated: observed.diffTruncated,
+          changedPaths: files.map((file) => file.path),
+        });
+      } catch {
+        return { status: "unavailable" };
+      }
       return {
         status: "ready",
         capture: {
           snapshot: decodePullRequestReviewDiffSnapshot({
             headSha: observedHeadSha,
-            baseRef: input.baseRef,
+            baseRef: observed.pullRequest.baseBranch,
             ...(input.baseSha === undefined ? {} : { baseSha: input.baseSha }),
-            reviewOperationId: operationId,
+            reviewOperationId: retainedOperationId,
             files,
             ...(truncated || observed.diffTruncated ? { truncated: true } : {}),
           }),
+          diffText: observed.diff,
+          resolveTarget: makeTargetResolver(input.thread, retainedOperationId),
         },
       };
     },
@@ -332,6 +413,17 @@ export function createPullRequestReviewHostRuntime(
           detail: `The reviewer model ${String(route.modelId)} is not allowed for this Project. Octant will not fall back silently.`,
         };
       }
+      const observedModel = state?.models.find(
+        (candidate) => String(candidate.id) === String(route.modelId),
+      );
+      const resolvedOptions = resolvePullRequestReviewModelOptions(observedModel, route.effort);
+      if (resolvedOptions.status === "refused") {
+        return {
+          status: "refused",
+          reason: resolvedOptions.reason,
+          detail: resolvedOptions.detail,
+        };
+      }
       const driver = options.createDriver(instance);
       if (driver === undefined) {
         return {
@@ -340,7 +432,14 @@ export function createPullRequestReviewHostRuntime(
           detail: `No driver is available for reviewer account ${instance.displayName}.`,
         };
       }
-      return { status: "ready", driver };
+      return {
+        status: "ready",
+        driver,
+        ...(observedModel === undefined ? {} : { model: observedModel }),
+        ...(resolvedOptions.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: resolvedOptions.modelOptionValues }),
+      };
     },
 
     postSummaryComment: async (
@@ -382,14 +481,14 @@ export function createPullRequestReviewHostRuntime(
         {
           connection: options.connection,
           journal: options.journal,
-          clock: () => new Date().toISOString(),
+          clock,
           uuid: randomUUID,
         },
         {
           threadId: String(threadId),
           providerInstanceId,
           modelId,
-          usage,
+          ...(usage === undefined ? {} : { usage }),
           aggregateType: PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE,
           requestShape: PULL_REQUEST_REVIEW_REQUEST_SHAPE,
         },
@@ -414,13 +513,15 @@ export function createPullRequestReviewHostRuntime(
         number: row.number,
       };
       const controller = new AbortController();
-      const headSha = await readCurrentHeadSha(target, controller.signal).catch(() => undefined);
-      if (headSha === undefined) continue;
+      const summary = await readPullRequestSummary(target, controller.signal).catch(
+        () => undefined,
+      );
+      if (summary === undefined) continue;
       observations.push({
         target,
         threadId: linked.threadId,
-        headSha,
-        baseRef: row.baseBranch,
+        headSha: summary.headSha,
+        baseRef: summary.baseBranch,
         state: row.draft ? "draft" : "open",
       });
     }
