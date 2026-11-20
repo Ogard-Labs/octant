@@ -12,8 +12,9 @@ import {
   REPORT_FINISHED_TOOL_NAME,
   TOOL_EFFECT_AGGREGATE_TYPE,
   TOOL_EFFECT_EVENT_NAMES,
+  decodeProject,
+  decodeProjectExtraFolder,
   decodeProjectId,
-  decodeProjectWorkingFolderId,
   decodeThreadGoalId,
   decodeThreadGoalRevisionId,
   decodeUtcTimestamp,
@@ -25,7 +26,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
-import { approvedWorkingFolderChoices, approvedWorkingFolderRoot } from "../approvedWorkingFolders";
+import { approvedWorkingFolderChoices } from "../approvedWorkingFolders";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
 import type { NativeHarnessShellPort, NativeHarnessShellRun } from "../harness/nativeHarnessTools";
@@ -73,6 +74,8 @@ function openTestJournal() {
   openConnections.push(connection);
   applyMigrations(connection, MIGRATIONS, () => "2026-11-19T12:00:00.000Z");
   const registry = registerFinishedReceiptEvents(new EventRegistry())
+    .register("project.created@1", 1, Schema.Unknown)
+    .register("project.binding-relinked@1", 1, Schema.Unknown)
     .register("code.operation-event-recorded@1", 1, Schema.Unknown)
     .register("code.file-reference-updated@1", 1, Schema.Unknown)
     .register("work.thread-created@1", 1, Schema.Unknown)
@@ -91,23 +94,12 @@ function openTestJournal() {
   return { connection, journal };
 }
 
-function makeStore(
-  journal: Journal,
-  options?: {
-    readonly resolveWorkFolderRoot?: (
-      projectId: string,
-      workingFolderId: string | undefined,
-    ) => string | undefined;
-  },
-) {
+function makeStore(journal: Journal) {
   const store = new ThreadFinishedReceiptStore({
     journal,
     uuid: randomUUID,
     actor: ACTOR,
     clock: () => "2026-11-19T12:00:00.000Z",
-    ...(options?.resolveWorkFolderRoot === undefined
-      ? {}
-      : { resolveWorkFolderRoot: options.resolveWorkFolderRoot }),
   });
   const unsubscribe = journal.subscribeCommitted((append) =>
     store.onCommittedEvents(append.events),
@@ -1312,37 +1304,60 @@ describe("octant_report_finished tool and receipt store", () => {
     }
   });
 
-  it("invalidates Work receipts across implicit and explicit main-folder aliases while keeping extra folders isolated", async () => {
-    const project = {
+  it("invalidates Work receipts across implicit and explicit main-folder aliases and preserves staleness on replay after Project relinking", async () => {
+    const extraFolder = decodeProjectExtraFolder({
+      canonicalRoot: "/workspace/project-extra",
+      addedBy: ACTOR,
+      addedAt: "2026-11-19T10:00:00.000Z",
+    });
+    const projectV1 = decodeProject({
       id: PROJECT_ID,
       type: "work",
+      name: "Work",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-11-19T10:00:00.000Z",
+      updatedAt: "2026-11-19T10:00:00.000Z",
       binding: { canonicalRoot: "/workspace/project-main" },
-      bindingHistory: [{ revisionId: "88888888-8888-4888-8888-888888888888" }],
-      extraFolders: [
+      bindingHistory: [
         {
-          canonicalRoot: "/workspace/project-extra",
-          addedAt: "2026-11-19T10:00:00.000Z",
+          revisionId: "88888888-8888-4888-8888-888888888881",
+          revision: 1,
+          currentBinding: { canonicalRoot: "/workspace/project-main" },
+          actor: ACTOR,
+          changedAt: "2026-11-19T10:00:00.000Z",
         },
       ],
-    } as unknown as BoundProject;
-    const choices = approvedWorkingFolderChoices(project);
-    const mainChoice = choices.find((choice) => choice.kind === "main");
-    const extraChoice = choices.find((choice) => choice.kind === "extra");
-    expect(mainChoice).toBeDefined();
-    expect(extraChoice).toBeDefined();
-    if (mainChoice === undefined || extraChoice === undefined) return;
-
-    const resolveWorkFolderRoot = (projectId: string, workingFolderId: string | undefined) => {
-      if (projectId !== String(PROJECT_ID)) return undefined;
-      return approvedWorkingFolderRoot(
-        project,
-        workingFolderId === undefined ? undefined : decodeProjectWorkingFolderId(workingFolderId),
-      );
-    };
+      extraFolders: [extraFolder],
+    }) as BoundProject;
+    const choicesV1 = approvedWorkingFolderChoices(projectV1);
+    const mainChoiceV1 = choicesV1.find((choice) => choice.kind === "main");
+    const extraChoiceV1 = choicesV1.find((choice) => choice.kind === "extra");
+    expect(mainChoiceV1).toBeDefined();
+    expect(extraChoiceV1).toBeDefined();
+    if (mainChoiceV1 === undefined || extraChoiceV1 === undefined) return;
 
     const { journal } = openTestJournal();
-    const { store, unsubscribe } = makeStore(journal, { resolveWorkFolderRoot });
+    const { store, unsubscribe } = makeStore(journal);
     try {
+      journal.append({
+        aggregate: { aggregateType: "project", aggregateId: decodeAggregateId(String(PROJECT_ID)) },
+        expectedVersion: decodeAggregateVersion(0),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: "project.created@1",
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T10:00:00.000Z",
+            payload: { kind: "project-created", project: projectV1 },
+          },
+        ],
+      });
+
       const implicitMainThread = "33333333-3333-4333-8333-333333333501";
       const explicitMainThread = "33333333-3333-4333-8333-333333333502";
       const extraFolderThread = "33333333-3333-4333-8333-333333333503";
@@ -1374,8 +1389,8 @@ describe("octant_report_finished tool and receipt store", () => {
       };
 
       registerWorkThread(implicitMainThread);
-      registerWorkThread(explicitMainThread, String(mainChoice.id));
-      registerWorkThread(extraFolderThread, String(extraChoice.id));
+      registerWorkThread(explicitMainThread, String(mainChoiceV1.id));
+      registerWorkThread(extraFolderThread, String(extraChoiceV1.id));
 
       const { shell } = makeShell(() => ({
         status: "ran",
@@ -1473,13 +1488,71 @@ describe("octant_report_finished tool and receipt store", () => {
       expect(store.latest(explicitMainThread)?.stale).toBe(true);
       expect(store.latest(extraFolderThread)?.stale).toBe(false);
 
+      // Relink the Project to a new binding revision (changing the current approved
+      // folder IDs). Replaying the journal must still recognize the historical
+      // rev-1 main-folder ID so stale receipts are never revived after restart.
+      const projectV2 = decodeProject({
+        id: PROJECT_ID,
+        type: "work",
+        name: "Work",
+        lifecycle: "active",
+        pinned: false,
+        rank: "0/1",
+        version: 2,
+        createdAt: "2026-11-19T10:00:00.000Z",
+        updatedAt: "2026-11-19T12:02:30.000Z",
+        binding: { canonicalRoot: "/workspace/project-relinked" },
+        bindingHistory: [
+          {
+            revisionId: "88888888-8888-4888-8888-888888888881",
+            revision: 1,
+            currentBinding: { canonicalRoot: "/workspace/project-main" },
+            actor: ACTOR,
+            changedAt: "2026-11-19T10:00:00.000Z",
+          },
+          {
+            revisionId: "88888888-8888-4888-8888-888888888882",
+            revision: 2,
+            previousBinding: { canonicalRoot: "/workspace/project-main" },
+            currentBinding: { canonicalRoot: "/workspace/project-relinked" },
+            actor: ACTOR,
+            changedAt: "2026-11-19T12:02:30.000Z",
+          },
+        ],
+        extraFolders: [extraFolder],
+      }) as BoundProject;
+      const choicesV2 = approvedWorkingFolderChoices(projectV2);
+      const mainChoiceV2 = choicesV2.find((choice) => choice.kind === "main");
+      expect(mainChoiceV2?.id).not.toBe(mainChoiceV1.id);
+
+      journal.append({
+        aggregate: { aggregateType: "project", aggregateId: decodeAggregateId(String(PROJECT_ID)) },
+        expectedVersion: decodeAggregateVersion(1),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: "project.binding-relinked@1",
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T12:02:30.000Z",
+            payload: { kind: "project-binding-relinked", project: projectV2 },
+          },
+        ],
+      });
+
       const replayed = new ThreadFinishedReceiptStore({
         journal,
         uuid: randomUUID,
         actor: ACTOR,
         clock: () => "2026-11-19T12:03:00.000Z",
-        resolveWorkFolderRoot,
       });
+      expect(replayed.latest(implicitMainThread)?.stale).toBe(true);
+      expect(replayed.boardMark(implicitMainThread)).toBeUndefined();
+      expect(replayed.latest(explicitMainThread)?.stale).toBe(true);
+      expect(replayed.boardMark(explicitMainThread)).toBeUndefined();
+      expect(replayed.latest(extraFolderThread)?.stale).toBe(false);
+      expect(replayed.boardMark(extraFolderThread)?.provenCount).toBe(1);
       expect(replayed.read(implicitMainThread)).toEqual(store.read(implicitMainThread));
       expect(replayed.read(explicitMainThread)).toEqual(store.read(explicitMainThread));
       expect(replayed.read(extraFolderThread)).toEqual(store.read(extraFolderThread));

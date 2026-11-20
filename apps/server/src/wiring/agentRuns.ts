@@ -5,7 +5,6 @@ import {
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
 import { HostResourceBudget } from "../process/hostResourceBudget";
-import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { conversationInputSource, supportsConversationInput } from "./conversationInputs";
 import { prepareConversationInputs } from "../attachments/conversationInputs";
 import { observedChildren } from "../agentRun/agentObservedChildren";
@@ -21,7 +20,6 @@ import {
   decodeCodeThreadId,
   decodeMultiModelRoutingVendorId,
   decodeProjectId,
-  decodeProjectWorkingFolderId,
   decodeProviderInstanceId,
   decodeWorkThreadId,
   decodeUtcTimestamp,
@@ -35,7 +33,6 @@ import {
   NATIVE_HARNESS_BUILT_IN_SLOTS,
   type OctantMode,
   type ProjectId,
-  type ProjectWorkingFolderId,
   type ProviderChildObservation,
   type ProviderContextBlock,
   type UtcTimestamp,
@@ -678,25 +675,6 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     uuid: randomUUID,
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     clock: () => new Date().toISOString(),
-    resolveWorkFolderRoot: (projectId, workingFolderId) => {
-      let decodedProjectId: ProjectId;
-      try {
-        decodedProjectId = decodeProjectId(projectId);
-      } catch {
-        return undefined;
-      }
-      const project = persistence.readProject(decodedProjectId);
-      if (project === undefined || project.type === "chat") return undefined;
-      let decodedFolderId: ProjectWorkingFolderId | undefined;
-      if (workingFolderId !== undefined) {
-        try {
-          decodedFolderId = decodeProjectWorkingFolderId(workingFolderId);
-        } catch {
-          return undefined;
-        }
-      }
-      return approvedWorkingFolderRoot(project, decodedFolderId);
-    },
   });
   const agentRunSettingsStore = new AgentRunSettingsStore({
     journal: persistence.journal,

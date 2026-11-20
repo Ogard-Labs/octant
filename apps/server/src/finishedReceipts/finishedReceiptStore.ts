@@ -11,6 +11,8 @@ import {
   TOOL_EFFECT_AGGREGATE_TYPE,
   TOOL_EFFECT_EVENT_NAMES,
   decodeFinishedReceiptRecorded,
+  decodeProject,
+  type BoundProject,
   type EventEnvelope,
   type ThreadBoardFinishedMark,
   type ThreadFinishedReceipt,
@@ -22,6 +24,7 @@ import {
   type SequencedFinishedReceipt,
 } from "@octant/domain/finished-receipt-policy";
 import { Schema } from "effect";
+import { approvedWorkingFolderChoices, approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
 import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
@@ -66,6 +69,14 @@ interface WorkFolderScope {
   readonly workingFolderId?: string | undefined;
   /** Normalized relative path inside the folder root (`"."` for the root itself). */
   readonly workingDirectory: string;
+  /** Canonical root path captured when the Project binding was active at this event's journal sequence. */
+  readonly resolvedRoot?: string | undefined;
+}
+
+interface ProjectFolderRegistry {
+  mainRoot: string;
+  /** Maps every observed approved workingFolderId (including historical binding revisions) to its canonical root. */
+  readonly rootsByFolderId: Map<string, string>;
 }
 
 interface ThreadReceiptRecord {
@@ -91,11 +102,9 @@ export class ThreadFinishedReceiptStore {
   readonly #uuid: () => string;
   readonly #actor: typeof EventActor.Type;
   readonly #clock: () => string;
-  readonly #resolveWorkFolderRoot?: (
-    projectId: string,
-    workingFolderId: string | undefined,
-  ) => string | undefined;
   readonly #threads = new Map<string, ThreadReceiptRecord>();
+  /** Project main and extra folder roots folded in journal order so replay matches the binding active at each event. */
+  readonly #projectFolders = new Map<string, ProjectFolderRegistry>();
   /** Current Work folder scope per Work thread id, populated from work-thread and work-turn journal events. */
   readonly #workThreadFolders = new Map<string, WorkFolderScope>();
   /** Work thread ids that currently hold at least one recorded finished receipt. */
@@ -110,24 +119,11 @@ export class ThreadFinishedReceiptStore {
     readonly uuid: () => string;
     readonly actor: typeof EventActor.Type;
     readonly clock: () => string;
-    /**
-     * Resolves a Work thread's `(projectId, workingFolderId)` to its canonical
-     * folder root so implicit main-folder (`undefined`) and explicit approved
-     * main-folder ids canonicalize to the same folder identity while extra
-     * folders stay distinct.
-     */
-    readonly resolveWorkFolderRoot?: (
-      projectId: string,
-      workingFolderId: string | undefined,
-    ) => string | undefined;
   }) {
     this.#journal = options.journal;
     this.#uuid = options.uuid;
     this.#actor = decodeActor(options.actor);
     this.#clock = options.clock;
-    if (options.resolveWorkFolderRoot !== undefined) {
-      this.#resolveWorkFolderRoot = options.resolveWorkFolderRoot;
-    }
     this.#hydrate();
   }
 
@@ -212,6 +208,7 @@ export class ThreadFinishedReceiptStore {
 
   #hydrate(): void {
     for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      "project",
       THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE,
       "code-operation",
       "code-file",
@@ -243,8 +240,37 @@ export class ThreadFinishedReceiptStore {
     thread.fileChanges.push(signal);
   }
 
+  #applyProjectSnapshot(project: BoundProject): void {
+    const projectId = String(project.id);
+    const existing = this.#projectFolders.get(projectId);
+    const entry: ProjectFolderRegistry = existing ?? {
+      mainRoot: project.binding.canonicalRoot,
+      rootsByFolderId: new Map<string, string>(),
+    };
+    entry.mainRoot = project.binding.canonicalRoot;
+    try {
+      for (const choice of approvedWorkingFolderChoices(project)) {
+        const root = approvedWorkingFolderRoot(project, choice.id);
+        if (root !== undefined) {
+          entry.rootsByFolderId.set(String(choice.id), root);
+        }
+      }
+    } catch {
+      // Ignore malformed historical binding history; mainRoot is still updated.
+    }
+    this.#projectFolders.set(projectId, entry);
+  }
+
+  #resolveRootFor(projectId: string, workingFolderId: string | undefined): string | undefined {
+    const registry = this.#projectFolders.get(projectId);
+    if (registry === undefined) return undefined;
+    if (workingFolderId === undefined) return registry.mainRoot;
+    return registry.rootsByFolderId.get(workingFolderId);
+  }
+
   #folderIdentity(scope: WorkFolderScope): string {
-    const resolvedRoot = this.#resolveWorkFolderRoot?.(scope.projectId, scope.workingFolderId);
+    const resolvedRoot =
+      scope.resolvedRoot ?? this.#resolveRootFor(scope.projectId, scope.workingFolderId);
     if (resolvedRoot !== undefined) return `root:${resolvedRoot}`;
     return scope.workingFolderId === undefined ? "main" : `id:${scope.workingFolderId}`;
   }
@@ -280,6 +306,14 @@ export class ThreadFinishedReceiptStore {
   }
 
   #applyEnvelope(envelope: EventEnvelope): void {
+    if (envelope.aggregateType === "project" && envelope.eventVersion === 1) {
+      const project = extractBoundProject(envelope.payload);
+      if (project !== undefined) {
+        this.#applyProjectSnapshot(project);
+      }
+      return;
+    }
+
     if (
       envelope.aggregateType === THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE &&
       envelope.eventName === THREAD_FINISHED_RECEIPT_EVENT_NAMES.recorded &&
@@ -298,14 +332,15 @@ export class ThreadFinishedReceiptStore {
       thread.receipts.push({ sequence: envelope.globalSequence, receipt });
       thread.version = Math.max(thread.version, envelope.aggregateVersion);
       if (receipt.mode === "work") {
-        const folderScope = this.#workThreadFolders.get(receipt.threadId) ?? {
+        const baseScope = this.#workThreadFolders.get(receipt.threadId) ?? {
           projectId: String(receipt.projectId),
           workingDirectory: ".",
         };
         if (!this.#workThreadFolders.has(receipt.threadId)) {
-          this.#workThreadFolders.set(receipt.threadId, folderScope);
+          this.#workThreadFolders.set(receipt.threadId, baseScope);
         }
-        thread.workFolder = folderScope;
+        const resolvedRoot = this.#resolveRootFor(baseScope.projectId, baseScope.workingFolderId);
+        thread.workFolder = resolvedRoot === undefined ? baseScope : { ...baseScope, resolvedRoot };
         this.#workThreadsWithReceipts.add(receipt.threadId);
       }
       return;
@@ -437,6 +472,18 @@ export class ThreadFinishedReceiptStore {
         }
       }
     }
+  }
+}
+
+function extractBoundProject(payload: unknown): BoundProject | undefined {
+  const frame = asRecord(payload);
+  const candidate = frame?.project;
+  if (candidate === undefined) return undefined;
+  try {
+    const decoded = decodeProject(candidate);
+    return decoded.type === "chat" ? undefined : decoded;
+  } catch {
+    return undefined;
   }
 }
 
