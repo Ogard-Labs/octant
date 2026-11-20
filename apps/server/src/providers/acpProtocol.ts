@@ -58,9 +58,9 @@ export type AcpInitializeResult = typeof InitializeResult.Type;
  */
 export type AcpPromptAttachment =
   | {
-      readonly type: "image";
+      readonly type: "image" | "audio";
       readonly mimeType: string;
-      /** Base64 of the image bytes. */
+      /** Base64 of the image or audio bytes. */
       readonly data: string;
     }
   | {

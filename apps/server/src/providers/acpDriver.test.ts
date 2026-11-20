@@ -993,7 +993,8 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         userQuestions:
           profile.elicitationVersions === undefined ? profile.userQuestions : "unavailable",
         reasoning: "supported",
-        usage: "unsupported",
+        // An agent that reports each turn's usage in its reply has it on any release.
+        usage: profile.reportsTurnUsage === true ? "supported" : "unsupported",
         fileChanges: "unavailable",
         nativeChildAgents: "unavailable",
         // Mistral Vibe's auto-approve mode is its own reviewer; no other agent has one.
@@ -1252,6 +1253,36 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(textOnly.probed.models[0]?.inputModalities).toEqual(["text"]);
     expect(textOnly.sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
     expect(textOnly.prompt).not.toHaveBeenCalled();
+  });
+
+  it("sends attached audio as an audio block to an agent that advertises audio", async () => {
+    const memo = {
+      attachmentId: "file-3",
+      displayName: "memo.wav",
+      mediaType: "audio/wav",
+      bytes: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+    };
+    const f = fixture(profile);
+    Object.assign(f.connection.initialized.agentCapabilities, {
+      promptCapabilities: { image: false, audio: true, embeddedContext: false },
+    });
+    const probed = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    expect(probed.models[0]?.inputModalities).toEqual(["text", "audio"]);
+    const sent = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          return yield* Effect.either(
+            connection.send({ sessionId, prompt: "listen", attachments: [memo], tools: [] }),
+          );
+        }),
+      ),
+    );
+    expect(sent._tag).toBe("Right");
+    expect(f.client.prompt).toHaveBeenCalledWith(expect.any(String), expect.any(String), [
+      { type: "audio", mimeType: "audio/wav", data: Buffer.from(memo.bytes).toString("base64") },
+    ]);
   });
 
   it("sends an attached document as an embedded resource only to an agent that advertises embedded context", async () => {
@@ -4537,10 +4568,10 @@ it("sends Google Antigravity its own command first and Octant's context after it
       }),
     ),
   );
-  const [, blocks] = client.prompt.mock.calls[0] ?? [];
-  expect(Array.isArray(blocks)).toBe(true);
-  expect((blocks as ReadonlyArray<string>)[0]).toBe("/compact");
-  expect((blocks as ReadonlyArray<string>)[1]).toContain("Octant's standing instructions.");
+  const blocks: unknown = client.prompt.mock.calls[0]?.at(1);
+  if (!Array.isArray(blocks)) throw new Error("Expected separate text blocks");
+  expect(blocks[0]).toBe("/compact");
+  expect(String(blocks[1])).toContain("Octant's standing instructions.");
 });
 
 describe("ACP Chat on Windows", () => {

@@ -40,6 +40,7 @@ import { withAccountSignIn } from "./accountSignIn";
 import { isolatedClaudeAccountEnvironment } from "./claudeAccountIsolation";
 import type { CodexProcessPort } from "./codexProcess";
 import { makeAcpDriver } from "./acpDriver";
+import { makeAntigravityUsageFacts } from "./antigravityUsage";
 import { addedAcpAgentProfile, withAddedAcpAgentLaunch } from "./addedAcpAgent";
 import type { AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind } from "./acpProfiles";
@@ -154,6 +155,15 @@ export function makeProviderDriver(
       permissionPersistence: options.permissionPersistence,
     });
     const credential = profile.process.hostAuthentication;
+    // Antigravity's limits come from its own CLI's usage command.
+    if (instance.driverKind === "antigravity")
+      return {
+        ...driver,
+        contextFacts: makeAntigravityUsageFacts({
+          instanceId: instance.id,
+          binaryPath: configuration.binaryPath,
+        }),
+      };
     return instance.driverKind === "devin" && credential?.kind === "credential-file"
       ? {
           ...driver,

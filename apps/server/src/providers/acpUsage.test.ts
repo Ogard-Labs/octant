@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  acpTurnUsage,
   beginAcpUsageTurn,
   finishAcpUsageTurn,
   observeAcpUsage,
@@ -130,5 +131,27 @@ describe("ACP cumulative usage", () => {
     beginAcpUsageTurn(state);
     observeAcpUsage(state, update(300));
     expect(finishAcpUsageTurn(state, receipt(300, 10))).toMatchObject({ inputTokens: 100 });
+  });
+});
+
+describe("usage an agent reports in its prompt reply", () => {
+  it("adds cached reads back into input and keeps them as cache reads", () => {
+    expect(acpTurnUsage({ inputTokens: 100, outputTokens: 20, cachedReadTokens: 300 })).toEqual({
+      kind: "usage",
+      inputTokens: 400,
+      outputTokens: 20,
+      cacheReadInputTokens: 300,
+    });
+    expect(acpTurnUsage({ inputTokens: 5, outputTokens: 1 })).toEqual({
+      kind: "usage",
+      inputTokens: 5,
+      outputTokens: 1,
+    });
+  });
+
+  it("reports nothing for a reply without whole counts", () => {
+    expect(acpTurnUsage(undefined)).toBeUndefined();
+    expect(acpTurnUsage({ inputTokens: "5", outputTokens: 1 })).toBeUndefined();
+    expect(acpTurnUsage({ inputTokens: 5, outputTokens: 1.5 })).toBeUndefined();
   });
 });
