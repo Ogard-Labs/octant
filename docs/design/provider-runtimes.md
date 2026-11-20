@@ -2482,8 +2482,10 @@ takes documents (text, PDF and office files), and each goes as an embedded
 text and it is not a PDF or office file, otherwise its bytes as
 `BlobResourceContents` (a PDF stays bytes even when they decode), under an
 `attachment:<id>/<name>` URI that names the attachment, not a path. ACP states
-these for the agent, not per model. The probe reports `nativeAttachments`
-supported when either is advertised. In Work and Code any other file (an
+these for the agent, not per model. With `promptCapabilities.audio` every
+listed model takes audio, and each recording goes as an ACP `audio` block
+with its bytes in base64 (built, 2026-11-20). The probe reports
+`nativeAttachments` supported when any of the three is advertised. In Work and Code any other file (an
 archive, a binary, or a document to an agent without embedded context) is
 named by its path in the thread's attachments folder, which the agent's launch
 confinement reads and never writes, at every level; an ACP `resource_link`
@@ -2491,7 +2493,18 @@ block is not sent, since the path in the message already reaches every agent.
 In Chat a file the agent does not take natively follows Chat's rule
 ([Plan and Chat tool parity](../architecture.md#security-and-authority)). An
 attachment of a kind the agent advertised no block for is refused rather than
-dropped. Audio is not sent.
+dropped; audio to an agent without the `audio` block goes as an embedded
+resource where it advertises embedded context.
+
+A turn's `session/prompt` has a budget of silence, not of total time (built,
+2026-11-20): ten minutes, restarted by every message the agent sends, and
+standing still while the agent waits on an answer from Octant (an approval,
+a question, a client request). A turn that keeps streaming is never cut;
+before, a fixed ten minutes failed long agentic turns that were still
+working. A session config option that is not a `select` (ACP also defines a
+boolean toggle) is left out of what Octant reads, since Octant sets none,
+instead of failing the whole `session/new`, load or update reply that
+carried it.
 
 ### Registry coverage
 
@@ -2652,28 +2665,64 @@ with the person's token. The CLI talks to Google itself.
   `antigravity-acp`, 1.5.x `Antigravity ACP Server`), and `initialize` may
   report protocol version 1 or 2 (1.1.1 reported 2 with version 1 shapes);
   every other profile accepts exactly 1.
-- **Modes and questions.** The CLI offers `default`, `auto_edit`, `yolo` and,
-  for some accounts, `auto`, and refuses `auto_edit` and `yolo` from an ACP
-  client. The profile selects no mode (`selectsNoMode`): the session keeps
-  `default` and Octant answers its approvals for the thread's level, Full
-  access included. Its questions arrive as permission requests whose tool
-  call id starts with `interaction_`; they are shown as approvals
-  (`unnamedPermissionDescription`) instead of failing the turn.
+- **Modes, approvals and questions.** The CLI offers `default`, `auto_edit`,
+  `yolo` and, for some accounts, `auto`, and refuses `auto_edit` and `yolo`
+  from an ACP client. The profile selects no mode (`selectsNoMode`): the
+  session keeps `default` and Octant answers its approvals for the thread's
+  level, Full access included. Where the CLI offers its own `allow_always`
+  and the person keeps approvals for the session, an approval chooses it, so
+  the CLI remembers the answer (`forwardsAllowAlways`); a one-call answer (an
+  automatic reviewer's, or one on a child run's behalf) never does. Its
+  questions arrive as permission requests whose tool call id starts with
+  `interaction_`: one whose options are no allow-and-reject pair is asked as
+  a question with its options as the answers, and a pair as an approval.
+- **Turns that do not fail on stray updates** (`toleratesStrayUpdates`).
+  Updates after the prompt answered (usage, background-command replies,
+  scheduled wakes), a subagent's updates under its own session id, a repeated
+  tool start, a repeated finish and an update for a call never started are
+  ignored or read as the start they imply, as other ACP clients of the CLI
+  accept them; a call still running when the turn ends (a subagent's read
+  the CLI never finishes) is marked done with it. Every other profile keeps
+  the strict mapper. A turn the CLI ends with `refusal` says the account's
+  usage limit may be reached (`refusalMessage`).
+- **Prompts.** A prompt that opens with `/` is one of the CLI's own commands
+  (`/plan`, `/goal`, `/compact`), which it runs only from the start of the
+  prompt: the command goes as the first text block and Octant's context as
+  the next (`commandLeadsPrompt`). Octant does not offer it `fs/write_text_file`
+  (`withholdsClientWrites`): offered it, the CLI rewrites whole files through
+  it instead of making its own edits, which its edit approvals already ask
+  for. Octant's instructions reach it in the prompt as they reach every
+  agent, not through the `_meta.antigravity.systemPrompt.append` it
+  advertises, because Octant's context arrives with each turn, after
+  `session/new`.
 - **Sessions.** A follow-up reattaches with `session/resume`, because
   `session/load` replays the whole history; no `session/close` is sent, since
-  `initialize` does not advertise it.
+  `initialize` does not advertise it. The process stays open between turns on
+  every release (`retainsSessions`), as other clients keep it, since each
+  launch unpacks the CLI again before it answers. A thread may start from
+  one of the CLI's own sessions for its folder, listed through `session/list`
+  when `initialize` advertises it, leaving out any an Octant thread holds
+  (`importsSessions`).
+- **Usage and limits.** The `session/prompt` reply's `usage` is that turn's
+  own; its `inputTokens` leaves out cached reads, so Octant's input is input
+  plus `cachedReadTokens`, kept also as cache reads (`reportsTurnUsage`). The
+  account's windows come from the CLI's own `agy -p /usage --output-format
+json`: each enabled bucket's share used of its window (5-hour, weekly, per
+  model group) and reset, read in the background at most every five minutes
+  and on demand; a disabled bucket is left out, and an answer that is not a
+  successful reading is refused rather than read as unused.
 
 Kept, where other ACP clients of the CLI differ: the self-update guard (other
 clients both set and leave it), `--disable-telemetry`, Strict and Network
 limits as the person sets them, and Chat and Plan, which those clients do not
-have.
+have. A prompt sent while a turn runs is refused as for every ACP agent;
+the CLI steers a running turn with it, which Octant does not offer yet.
 
 Not built yet, each pending the signed-in probe on a Mac with a personal
 subscription: whether the sandboxed keychain read signs in as measured for
-Claude Code, the model and thinking option ids, usage and limit reporting
-(the CLI's own `agy -p /usage --output-format json` is the candidate source;
-nothing is reported until then), answering a question with text rather than
-Allow or Deny, mid-turn steering, and a pinned usage or compaction release.
+Claude Code, the model and thinking option ids, the exact shape of a question
+and of `session/list`, the `/usage` answer on a real account, mid-turn
+steering, and a pinned compaction release.
 
 ### Any ACP agent
 
