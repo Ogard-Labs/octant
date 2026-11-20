@@ -39,6 +39,7 @@ import {
 } from "./acpElicitation";
 import { outputStopReason } from "./outputStopReason";
 import {
+  acpTurnUsage,
   beginAcpUsageTurn,
   finishAcpUsageTurn,
   observeAcpUsage,
@@ -303,7 +304,10 @@ function baseCapabilities(
           ? "supported"
           : "unavailable",
     reasoning: "unavailable",
-    usage: claims(profile.usageVersions) ? "supported" : "unsupported",
+    usage:
+      profile.reportsTurnUsage === true || claims(profile.usageVersions)
+        ? "supported"
+        : "unsupported",
     toolActivity: "supported",
     fileChanges: "unavailable",
     diffs: "unavailable",
@@ -446,6 +450,8 @@ interface AcpPromptInputs {
   readonly image: boolean;
   /** `promptCapabilities.embeddedContext`: the agent takes embedded `resource` blocks. */
   readonly embeddedContext: boolean;
+  /** `promptCapabilities.audio`: the agent takes `audio` blocks. */
+  readonly audio: boolean;
 }
 
 /**
@@ -457,14 +463,19 @@ interface AcpPromptInputs {
  */
 function acceptedPromptInputs(initialized: AcpConnection["initialized"]): AcpPromptInputs {
   const prompt = initialized.agentCapabilities.promptCapabilities;
-  return { image: prompt?.image === true, embeddedContext: prompt?.embeddedContext === true };
+  return {
+    image: prompt?.image === true,
+    embeddedContext: prompt?.embeddedContext === true,
+    audio: prompt?.audio === true,
+  };
 }
 
 function promptInputModalities(inputs: AcpPromptInputs): readonly ProviderInputModality[] {
-  if (!inputs.image && !inputs.embeddedContext) return textOnlyInputModalities;
+  if (!inputs.image && !inputs.embeddedContext && !inputs.audio) return textOnlyInputModalities;
   return [
     "text",
     ...(inputs.image ? (["image"] as const) : []),
+    ...(inputs.audio ? (["audio"] as const) : []),
     ...(inputs.embeddedContext ? (["document"] as const) : []),
   ];
 }
@@ -487,6 +498,15 @@ function acpPromptAttachment(
           data: Buffer.from(attachment.bytes).toString("base64"),
         }
       : undefined;
+  }
+  // Audio goes as the `audio` block an agent advertised for it, and otherwise
+  // as an embedded file like any other.
+  if (modality === "audio" && inputs.audio) {
+    return {
+      type: "audio",
+      mimeType: attachment.mediaType,
+      data: Buffer.from(attachment.bytes).toString("base64"),
+    };
   }
   if (!inputs.embeddedContext) return undefined;
   const uri = `attachment:${encodeURIComponent(attachment.attachmentId)}/${encodeURIComponent(attachment.displayName)}`;
@@ -514,7 +534,7 @@ function normalizeModels(
   options: ReadonlyArray<AcpSessionConfigOption>,
   models: AcpSessionModelState | undefined,
   optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
-  promptInputs: AcpPromptInputs = { image: false, embeddedContext: false },
+  promptInputs: AcpPromptInputs = { image: false, embeddedContext: false, audio: false },
 ) {
   const model = options.find((option) => option.id === "model");
   // The config option and the session's model state are two ACP spellings of
@@ -674,7 +694,9 @@ function normalizeProbe(
       ...pinned,
       ...(atFullAccess === undefined ? {} : { atFullAccess }),
       nativeAttachments:
-        promptInputs.image || promptInputs.embeddedContext ? "supported" : "unsupported",
+        promptInputs.image || promptInputs.embeddedContext || promptInputs.audio
+          ? "supported"
+          : "unsupported",
       resume,
       reasoning,
     },
@@ -2353,7 +2375,8 @@ function makeConnection(
             if (
               input.attachments.length > 0 &&
               !promptInputs.image &&
-              !promptInputs.embeddedContext
+              !promptInputs.embeddedContext &&
+              !promptInputs.audio
             )
               return Effect.fail(failure("unsupported", "Native attachments are unsupported."));
             const attachments: AcpPromptAttachment[] = [];
@@ -2444,6 +2467,9 @@ function makeConnection(
                     if (state.closed || state.context.terminal) return;
                     if (state.runtime.usage !== undefined) {
                       const usage = finishAcpUsageTurn(state.runtime.usage, result.usage);
+                      if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
+                    } else if (profile.reportsTurnUsage === true) {
+                      const usage = acpTurnUsage(result.usage);
                       if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
                     }
                     state.context.terminal = true;

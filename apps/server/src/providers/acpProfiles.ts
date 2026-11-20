@@ -279,6 +279,8 @@ export interface AcpProviderProfile {
    * which its own edit approvals already ask for.
    */
   readonly withholdsClientWrites?: true;
+  /** The `session/prompt` reply carries that turn's own usage (`acpTurnUsage`). */
+  readonly reportsTurnUsage?: true;
   /**
    * The agent answers a mode it does not offer with success and keeps its
    * previous mode, so a renamed or dropped mode would leave a turn running
@@ -1797,6 +1799,7 @@ const antigravityProfile: AcpProviderProfile = {
   retainsSessions: true,
   commandLeadsPrompt: true,
   withholdsClientWrites: true,
+  reportsTurnUsage: true,
   // The CLI ends a turn with `refusal` when the account's quota is used up.
   refusalMessage:
     "Google Antigravity stopped: your account's usage limit may be reached. Check your plan, then retry.",
