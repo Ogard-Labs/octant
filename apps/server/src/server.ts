@@ -1046,6 +1046,7 @@ export function startOctantServer(
       languageServerApprovals,
       localServerRoutes,
       pairedMergeUnlockSlot,
+      hubActScopeSlot,
       projectTerminals,
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
@@ -1507,6 +1508,7 @@ export function startOctantServer(
       threadSearchRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
+      hubActScopeSlot,
       agentRunInteractions,
       browserToolApprovalService,
       extensionToolApprovalService,
@@ -2022,6 +2024,7 @@ export function startOctantServer(
       codeAttachments,
       hubPushHandoffSlot,
       pairedMergeUnlockSlot,
+      hubActScopeSlot,
       pushGatewaySetting,
       codeProjectAccess,
       credentialBroker,

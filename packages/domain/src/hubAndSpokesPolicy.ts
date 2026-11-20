@@ -670,6 +670,37 @@ export function memberThreadPage(
   return url.toString();
 }
 
+export type HubIntroducedStartDecision =
+  | { readonly status: "allowed" }
+  /** This host is in no hub, so no hub grant speaks for the device. */
+  | { readonly status: "not-in-a-hub" }
+  | {
+      readonly status: "refused";
+      readonly kind: "removed-from-hub" | "act-not-granted" | "project-not-named";
+    };
+
+/**
+ * Whether a device only the hub introduced may start a thread in a Project on
+ * this member: only while the member's grant to its hub ticks Act and names
+ * that Project. The grant is read at each start, so unticking Act or dropping
+ * a Project refuses the next one (hub and spokes, "What a hub-introduced device
+ * may do"). A device the member's own person paired never reaches this rule.
+ */
+export function decideHubIntroducedThreadStart(input: {
+  readonly membership: "none" | "member" | "removed";
+  readonly grant: HubGrant | undefined;
+  readonly projectId: string;
+}): HubIntroducedStartDecision {
+  if (input.membership === "none") return { status: "not-in-a-hub" };
+  if (input.membership === "removed" || input.grant === undefined) {
+    return { status: "refused", kind: "removed-from-hub" };
+  }
+  if (!input.grant.items.includes("act")) return { status: "refused", kind: "act-not-granted" };
+  return input.grant.actProjects.some((projectId) => String(projectId) === input.projectId)
+    ? { status: "allowed" }
+    : { status: "refused", kind: "project-not-named" };
+}
+
 /** The hub grant a spoke starts with: the roster, Introduce, and Owners ticked, the rest off. */
 export function defaultHubGrant(): HubGrant {
   return { items: ["roster", "introduce", "owners"], actProjects: [] };

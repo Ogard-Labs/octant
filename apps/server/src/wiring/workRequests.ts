@@ -1,4 +1,5 @@
 import { pendingQuestionDeferrals } from "../pendingQuestionDeferrals";
+import type { HubActScopeSlot } from "../hub/hubActScope";
 import { randomUUID } from "node:crypto";
 import {
   decodeAgentRunParentThreadId,
@@ -72,6 +73,8 @@ import type { WorkWiring } from "./work";
 import type { WorkFilesWiring } from "./workFiles";
 
 export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
+  /** The member's Act item for its hub, bound by the hub side after this is built. */
+  readonly hubActScopeSlot: HubActScopeSlot;
   /** The model side of a decision's second opinion, built where the configured drivers are. */
   readonly decisionReviewModelPort: Pick<
     DecisionReviewDependencies,
@@ -127,6 +130,7 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
 
 export function wireWorkRequests(deps: WorkRequestsDependencies) {
   const {
+    hubActScopeSlot,
     agentRunInteractions,
     agentRunPersistence,
     decisionReviewModelPort,
@@ -469,6 +473,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     windowAuthorityStore,
   });
   const workThreadRoutes = createWorkThreadRouteHandler({
+    hubActScope: hubActScopeSlot.current,
     service: {
       bootstrap: (windowId) => workThreadServiceWithWorkflows.bootstrap(windowId),
       navigation: (windowId) => workThreadServiceWithWorkflows.navigation(windowId),

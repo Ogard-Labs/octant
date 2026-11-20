@@ -1495,6 +1495,7 @@ function ActiveSectionContent({
             }
             ownerUnlock={ownerUnlockOf(props.hostBridge)}
             pairedComputers={pairedComputersOf(props.hostBridge)}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             pairedDeviceLifetime={props.settings.pairedDeviceLifetime}
           />
           {agentAccess}

@@ -160,6 +160,7 @@ import type { ThreadMoveStatePort } from "../hub/threadMoveStateStore";
 import type { ChatService } from "../chat/chatService";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
 import { PairedMergeUnlockService } from "../hub/pairedMergeUnlock";
+import { hubActScopeFromSpokeLink } from "../hub/hubActScope";
 import { OwnerApprovalAnswerUnlock } from "../hub/ownerApprovalAnswerUnlock";
 import { createHubMembershipJournal } from "../hub/hubMembershipJournal";
 import { FailoverService } from "../hub/failoverService";
@@ -293,6 +294,7 @@ export type RemoteDependencies = {
     | "debugService"
     | "languageServerApprovals"
     | "pairedMergeUnlockSlot"
+    | "hubActScopeSlot"
     | "remoteServerGrants"
   > &
   Pick<
@@ -367,6 +369,7 @@ export function wireRemote(deps: RemoteDependencies) {
     octantInstructions,
     hubPushHandoffSlot,
     pairedMergeUnlockSlot,
+    hubActScopeSlot,
     nativeHarnessSessions,
     remoteDelegationHolder,
     threadStandingAnswers,
@@ -914,6 +917,7 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordHubMembership,
   });
   pairedMergeUnlockSlot.bind(pairedMergeUnlock);
+  hubActScopeSlot.bind(hubActScopeFromSpokeLink(spokeLinkService));
   const ownerApprovalAnswerUnlock = new OwnerApprovalAnswerUnlock({
     state: hubStateStore,
     record: recordHubMembership,

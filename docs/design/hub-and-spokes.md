@@ -81,8 +81,9 @@ view of the provider's own app, never against a real provider sign-in. After thi
 added the same day and is designed, not built. Slices 13 to 19, starting a
 coding session on any member from one window, the hub as the front door, Code
 delegation, adding a computer over SSH and placement advice, were added on
-2026-11-19; slice 13 is built for a directly paired computer and the rest are
-designed, not built
+2026-11-19; slice 13 is built for a directly paired computer, slice 16 is
+partly built (the Act item bounds where a hub-introduced device starts
+threads), and the rest are designed, not built
 ([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work)).
 What remains of slices 1 to 10 is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
@@ -555,6 +556,15 @@ otherwise.
   threads it may start there (Code included), and never more than the
   member's own level allows. Approvals stay on the member, answerable as
   [What the hub may do on a spoke](#what-the-hub-may-do-on-a-spoke) says.
+  Built for starting threads (slice 16): while a host is a hub member, a
+  device only the hub introduced starts a Code or Work thread there only in
+  a Project the member's Act item names, read at each start, so unticking
+  Act or a Project refuses the next one with a sentence; a Code fork from
+  such a device is refused, because its Project is its source's and the
+  route does not read it. The hub settings name those Projects under Act. A
+  host in no hub keeps its own rules for such a device. Not built yet: a
+  desktop window adding the hub's other members to its computers, so the
+  window reaches each member directly as a browser guest does.
 - **A computer without Octant.** A server the person reaches only over SSH
   is a [server Project](server-projects.md), not a member. Adding a computer
   as a member over SSH, without visiting it, is [decision H26](#decisions).
@@ -3549,7 +3559,11 @@ a numbered slice. Built, with these narrower readings:
     and rendered checks.
 16. **The hub as front door.** A device that joins the hub gets every
     member through introductions and reaches each directly; the Act item is
-    enforced on each member. Acceptance: a hub-introduced device starts a
+    enforced on each member. Partly built: the Act item bounds where a
+    hub-introduced device starts Code and Work threads, with server route
+    and domain tests, and the hub settings name its Projects; a desktop
+    window does not yet add the hub's members to its computers, and the
+    three-host smoke has not run. Acceptance: a hub-introduced device starts a
     Code thread only in a Project the Act item names; removing the item
     refuses the next create. Verification: server tests and a three-host
     loopback smoke.
