@@ -13,8 +13,10 @@ import {
   type CodeReviewFinding,
 } from "@octant/contracts";
 import {
+  MAX_PULL_REQUEST_REVIEW_FINDINGS_PER_RUN,
   decodePullRequestReviewRequest,
   decodePullRequestReviewerId,
+  type PullRequestReviewHostPort,
 } from "@octant/plugin-api/pull-request-reviewer";
 import { fakePullRequestReviewer } from "./fakePullRequestReviewer.test-support";
 import { PullRequestReviewerRegistry } from "./pullRequestReviewerRegistry";
@@ -615,5 +617,696 @@ describe("pull request reviewer registry and host port", () => {
     if (crashed.status === "failed") {
       expect(crashed.detail).not.toContain("internal stack detail");
     }
+  });
+
+  it("rechecks effectiveness, opt-ins, and cancellation after awaiting head currency before invoking delegates", async () => {
+    // Case A: opt-ins switched off while checkHead is pending.
+    {
+      const registry = new PullRequestReviewerRegistry();
+      let commentOptIn = true;
+      let handBackOptIn = true;
+      let commentDelegateCalls = 0;
+      let handBackDelegateCalls = 0;
+      let headReads = 0;
+
+      const fake = fakePullRequestReviewer(async (_request, host) => {
+        const recorded = await host.recordFindings({
+          findings: [
+            {
+              path: APP_PATH,
+              location: { kind: "line", line: 5 },
+              severity: "error",
+              summary: "Blocking defect.",
+            },
+          ],
+        });
+        expect(recorded.status).toBe("recorded");
+        if (recorded.status !== "recorded") return { status: "failed", detail: "record failed" };
+
+        expect(await host.postSummaryComment({ body: "Summary" })).toEqual({ status: "disabled" });
+        expect(
+          await host.handBackBlockingFindings({
+            findingIds: recorded.findings.map((finding) => finding.id),
+          }),
+        ).toEqual({ status: "disabled" });
+
+        return { status: "completed", findingIds: recorded.findings.map((finding) => finding.id) };
+      });
+
+      registry.register({
+        reviewerId: REVIEWER_ID,
+        displayName: "Example",
+        activation: () => ({ installed: true, trusted: true, enabled: true }),
+        reviewer: fake.reviewer,
+      });
+
+      const outcome = await registry.run({
+        reviewerId: REVIEWER_ID,
+        request: makeRequest({
+          optIns: { postSummaryComment: true, sendBlockingFindingsToWorker: true },
+        }),
+        signal: new AbortController().signal,
+        delegates: {
+          readCurrentHeadSha: async () => {
+            headReads += 1;
+            // Read 1: initial registry check; Reads 2-3: recordFindings before/after;
+            // Read 4: postSummaryComment checkHead; Read 5: handBackBlockingFindings checkHead.
+            if (headReads === 4) commentOptIn = false;
+            if (headReads === 5) handBackOptIn = false;
+            return HEAD_SHA;
+          },
+          recordFindings: async () => ({
+            status: "recorded",
+            findings: [makeRecordedFinding(FINDING_ID_1, "error", "Blocking defect.")],
+          }),
+          isPostSummaryCommentEnabled: () => commentOptIn,
+          postSummaryComment: async () => {
+            commentDelegateCalls += 1;
+            return { status: "posted" };
+          },
+          isSendBlockingFindingsEnabled: () => handBackOptIn,
+          handBackBlockingFindings: async () => {
+            handBackDelegateCalls += 1;
+            return { status: "handed-back", attempt: 1 };
+          },
+        },
+      });
+
+      expect(commentDelegateCalls).toBe(0);
+      expect(handBackDelegateCalls).toBe(0);
+      expect(outcome).toMatchObject({
+        status: "completed",
+        summaryCommentPosted: false,
+        handedBackToWorker: false,
+      });
+    }
+
+    // Case B: reviewer disabled while checkHead is pending during postSummaryComment.
+    {
+      const registry = new PullRequestReviewerRegistry();
+      let enabled = true;
+      let commentDelegateCalls = 0;
+      let headReads = 0;
+
+      const fake = fakePullRequestReviewer(async (_request, host) => {
+        expect(await host.postSummaryComment({ body: "Summary" })).toEqual({
+          status: "refused",
+          reason: "not-effective",
+        });
+        return { status: "completed", findingIds: [] };
+      });
+
+      registry.register({
+        reviewerId: REVIEWER_ID,
+        displayName: "Example",
+        activation: () => ({ installed: true, trusted: true, enabled }),
+        reviewer: fake.reviewer,
+      });
+
+      const outcome = await registry.run({
+        reviewerId: REVIEWER_ID,
+        request: makeRequest({
+          optIns: { postSummaryComment: true, sendBlockingFindingsToWorker: false },
+        }),
+        signal: new AbortController().signal,
+        delegates: {
+          readCurrentHeadSha: async () => {
+            headReads += 1;
+            if (headReads === 2) enabled = false;
+            return HEAD_SHA;
+          },
+          isPostSummaryCommentEnabled: () => true,
+          postSummaryComment: async () => {
+            commentDelegateCalls += 1;
+            return { status: "posted" };
+          },
+        },
+      });
+
+      expect(commentDelegateCalls).toBe(0);
+      expect(outcome).toMatchObject({ status: "refused", reason: "not-effective" });
+    }
+
+    // Case C: cancellation arrives while checkHead is pending during postSummaryComment.
+    {
+      const registry = new PullRequestReviewerRegistry();
+      const abort = new AbortController();
+      let commentDelegateCalls = 0;
+      let headReads = 0;
+
+      const fake = fakePullRequestReviewer(async (_request, host) => {
+        expect(await host.postSummaryComment({ body: "Summary" })).toEqual({
+          status: "unavailable",
+          reason: "unavailable",
+        });
+        return { status: "completed", findingIds: [] };
+      });
+
+      registry.register({
+        reviewerId: REVIEWER_ID,
+        displayName: "Example",
+        activation: () => ({ installed: true, trusted: true, enabled: true }),
+        reviewer: fake.reviewer,
+      });
+
+      const outcome = await registry.run({
+        reviewerId: REVIEWER_ID,
+        request: makeRequest({
+          optIns: { postSummaryComment: true, sendBlockingFindingsToWorker: false },
+        }),
+        signal: abort.signal,
+        delegates: {
+          readCurrentHeadSha: async () => {
+            headReads += 1;
+            if (headReads === 2) abort.abort();
+            return HEAD_SHA;
+          },
+          isPostSummaryCommentEnabled: () => true,
+          postSummaryComment: async () => {
+            commentDelegateCalls += 1;
+            return { status: "posted" };
+          },
+        },
+      });
+
+      expect(commentDelegateCalls).toBe(0);
+      expect(outcome).toEqual({ status: "cancelled" });
+    }
+  });
+
+  it("synchronously reserves single-comment, single-hand-back, and per-run finding budgets across concurrent calls", async () => {
+    const registry = new PullRequestReviewerRegistry();
+    let commentDelegateCalls = 0;
+    let handBackDelegateCalls = 0;
+    let totalProposalsSent = 0;
+    let nextFinding = 0;
+
+    const makeUuid = (index: number) =>
+      `${String(index).padStart(8, "0")}-1111-4111-8111-111111111111`;
+
+    const proposals = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        path: APP_PATH,
+        location: { kind: "line" as const, line: index + 1 },
+        severity: "error" as const,
+        summary: `Finding ${index + 1}`,
+      }));
+
+    const fake = fakePullRequestReviewer(async (_request, host) => {
+      // Two concurrent batches of 40 exceed the 64-finding per-run cap.
+      const halfPlus = Math.floor(MAX_PULL_REQUEST_REVIEW_FINDINGS_PER_RUN / 2) + 8;
+      const [batchA, batchB] = await Promise.all([
+        host.recordFindings({ findings: proposals(halfPlus) }),
+        host.recordFindings({ findings: proposals(halfPlus) }),
+      ]);
+      expect(batchA.status).toBe("recorded");
+      expect(batchB).toEqual({ status: "refused", reason: "limit-exceeded" });
+      if (batchA.status !== "recorded") return { status: "failed", detail: "expected batchA" };
+      const firstId = batchA.findings[0]?.id;
+      if (firstId === undefined) return { status: "failed", detail: "missing finding id" };
+
+      // Concurrent summary comment posts: only one reaches the delegate.
+      const [commentA, commentB] = await Promise.all([
+        host.postSummaryComment({ body: "Comment A" }),
+        host.postSummaryComment({ body: "Comment B" }),
+      ]);
+      expect(commentA).toEqual({ status: "posted", commentId: "c-1" });
+      expect(commentB).toEqual({ status: "refused", reason: "already-posted" });
+
+      // Concurrent hand-backs: only one reaches the delegate.
+      const [handBackA, handBackB] = await Promise.all([
+        host.handBackBlockingFindings({ findingIds: [firstId] }),
+        host.handBackBlockingFindings({ findingIds: [firstId] }),
+      ]);
+      expect(handBackA).toEqual({ status: "handed-back", attempt: 1 });
+      expect(handBackB).toEqual({ status: "refused", reason: "already-handed-back" });
+
+      return {
+        status: "completed",
+        findingIds: batchA.findings.map((finding) => finding.id),
+      };
+    });
+
+    registry.register({
+      reviewerId: REVIEWER_ID,
+      displayName: "Example",
+      activation: () => ({ installed: true, trusted: true, enabled: true }),
+      reviewer: fake.reviewer,
+    });
+
+    const outcome = await registry.run({
+      reviewerId: REVIEWER_ID,
+      request: makeRequest({
+        optIns: { postSummaryComment: true, sendBlockingFindingsToWorker: true },
+      }),
+      signal: new AbortController().signal,
+      delegates: {
+        readCurrentHeadSha: async () => {
+          await Promise.resolve();
+          return HEAD_SHA;
+        },
+        recordFindings: async ({ proposals: incoming }) => {
+          await Promise.resolve();
+          totalProposalsSent += incoming.length;
+          return {
+            status: "recorded",
+            findings: incoming.map((proposal) => {
+              nextFinding += 1;
+              return makeRecordedFinding(
+                makeUuid(nextFinding),
+                proposal.severity,
+                proposal.summary,
+              );
+            }),
+          };
+        },
+        isPostSummaryCommentEnabled: () => true,
+        postSummaryComment: async () => {
+          await Promise.resolve();
+          commentDelegateCalls += 1;
+          return { status: "posted", commentId: "c-1" };
+        },
+        isSendBlockingFindingsEnabled: () => true,
+        handBackBlockingFindings: async () => {
+          await Promise.resolve();
+          handBackDelegateCalls += 1;
+          return { status: "handed-back", attempt: 1 };
+        },
+      },
+    });
+
+    expect(totalProposalsSent).toBeLessThanOrEqual(MAX_PULL_REQUEST_REVIEW_FINDINGS_PER_RUN);
+    expect(commentDelegateCalls).toBe(1);
+    expect(handBackDelegateCalls).toBe(1);
+    expect(outcome).toMatchObject({
+      status: "completed",
+      summaryCommentPosted: true,
+      handedBackToWorker: true,
+    });
+  });
+
+  it("reports cancellation rather than staleness when aborted during initial or final head reads", async () => {
+    // Initial head read aborted.
+    {
+      const registry = new PullRequestReviewerRegistry();
+      const abort = new AbortController();
+      const fake = fakePullRequestReviewer(async () => ({ status: "completed", findingIds: [] }));
+      registry.register({
+        reviewerId: REVIEWER_ID,
+        displayName: "Example",
+        activation: () => ({ installed: true, trusted: true, enabled: true }),
+        reviewer: fake.reviewer,
+      });
+
+      const outcome = await registry.run({
+        reviewerId: REVIEWER_ID,
+        request: makeRequest(),
+        signal: abort.signal,
+        delegates: {
+          readCurrentHeadSha: async () => {
+            abort.abort();
+            throw new Error("aborted");
+          },
+        },
+      });
+      expect(outcome).toEqual({ status: "cancelled" });
+      expect(fake.calls).toHaveLength(0);
+    }
+
+    // Final head read aborted after reviewer returned.
+    {
+      const registry = new PullRequestReviewerRegistry();
+      const abort = new AbortController();
+      let headReads = 0;
+      const fake = fakePullRequestReviewer(async () => ({ status: "completed", findingIds: [] }));
+      registry.register({
+        reviewerId: REVIEWER_ID,
+        displayName: "Example",
+        activation: () => ({ installed: true, trusted: true, enabled: true }),
+        reviewer: fake.reviewer,
+      });
+
+      const outcome = await registry.run({
+        reviewerId: REVIEWER_ID,
+        request: makeRequest(),
+        signal: abort.signal,
+        delegates: {
+          readCurrentHeadSha: async () => {
+            headReads += 1;
+            if (headReads === 2) {
+              abort.abort();
+              throw new Error("aborted");
+            }
+            return HEAD_SHA;
+          },
+        },
+      });
+      expect(outcome).toEqual({ status: "cancelled" });
+    }
+  });
+
+  it("latches staleness when head lookup throws or when comment or hand-back delegates report stale", async () => {
+    // Case A: readCurrentHeadSha throws mid-review (not aborted) -> latches stale and blocks later calls.
+    {
+      const registry = new PullRequestReviewerRegistry();
+      let headReads = 0;
+      let commentDelegateCalls = 0;
+
+      const fake = fakePullRequestReviewer(async (_request, host) => {
+        expect(await host.isHeadCurrent()).toBe(false);
+        expect(await host.postSummaryComment({ body: "Summary" })).toEqual({ status: "stale" });
+        return { status: "completed", findingIds: [] };
+      });
+
+      registry.register({
+        reviewerId: REVIEWER_ID,
+        displayName: "Example",
+        activation: () => ({ installed: true, trusted: true, enabled: true }),
+        reviewer: fake.reviewer,
+      });
+
+      const outcome = await registry.run({
+        reviewerId: REVIEWER_ID,
+        request: makeRequest({
+          optIns: { postSummaryComment: true, sendBlockingFindingsToWorker: false },
+        }),
+        signal: new AbortController().signal,
+        delegates: {
+          readCurrentHeadSha: async () => {
+            headReads += 1;
+            if (headReads === 2) throw new Error("transient git failure");
+            return HEAD_SHA;
+          },
+          isPostSummaryCommentEnabled: () => true,
+          postSummaryComment: async () => {
+            commentDelegateCalls += 1;
+            return { status: "posted" };
+          },
+        },
+      });
+
+      expect(commentDelegateCalls).toBe(0);
+      expect(outcome).toEqual({ status: "stale" });
+    }
+
+    // Case B: postSummaryComment delegate reports stale -> latches stale and overrides completion.
+    {
+      const registry = new PullRequestReviewerRegistry();
+      let handBackDelegateCalls = 0;
+
+      const fake = fakePullRequestReviewer(async (_request, host) => {
+        const recorded = await host.recordFindings({
+          findings: [
+            {
+              path: APP_PATH,
+              location: { kind: "line", line: 10 },
+              severity: "error",
+              summary: "Blocking defect.",
+            },
+          ],
+        });
+        if (recorded.status !== "recorded") return { status: "failed", detail: "record failed" };
+
+        expect(await host.postSummaryComment({ body: "Summary" })).toEqual({
+          status: "stale",
+          currentHeadSha: MOVED_HEAD_SHA,
+        });
+        // Latched staleness now prevents hand-back from invoking its delegate.
+        expect(
+          await host.handBackBlockingFindings({
+            findingIds: recorded.findings.map((finding) => finding.id),
+          }),
+        ).toEqual({ status: "stale", currentHeadSha: MOVED_HEAD_SHA });
+
+        return { status: "completed", findingIds: recorded.findings.map((finding) => finding.id) };
+      });
+
+      registry.register({
+        reviewerId: REVIEWER_ID,
+        displayName: "Example",
+        activation: () => ({ installed: true, trusted: true, enabled: true }),
+        reviewer: fake.reviewer,
+      });
+
+      const outcome = await registry.run({
+        reviewerId: REVIEWER_ID,
+        request: makeRequest({
+          optIns: { postSummaryComment: true, sendBlockingFindingsToWorker: true },
+        }),
+        signal: new AbortController().signal,
+        delegates: {
+          readCurrentHeadSha: async () => HEAD_SHA,
+          recordFindings: async () => ({
+            status: "recorded",
+            findings: [makeRecordedFinding(FINDING_ID_1, "error", "Blocking defect.")],
+          }),
+          isPostSummaryCommentEnabled: () => true,
+          postSummaryComment: async () => ({ status: "stale", currentHeadSha: MOVED_HEAD_SHA }),
+          isSendBlockingFindingsEnabled: () => true,
+          handBackBlockingFindings: async () => {
+            handBackDelegateCalls += 1;
+            return { status: "handed-back", attempt: 1 };
+          },
+        },
+      });
+
+      expect(handBackDelegateCalls).toBe(0);
+      expect(outcome).toEqual({ status: "stale", currentHeadSha: MOVED_HEAD_SHA });
+    }
+
+    // Case C: handBackBlockingFindings delegate reports stale -> latches stale and overrides completion.
+    {
+      const registry = new PullRequestReviewerRegistry();
+      const fake = fakePullRequestReviewer(async (_request, host) => {
+        const recorded = await host.recordFindings({
+          findings: [
+            {
+              path: APP_PATH,
+              location: { kind: "line", line: 10 },
+              severity: "error",
+              summary: "Blocking defect.",
+            },
+          ],
+        });
+        if (recorded.status !== "recorded") return { status: "failed", detail: "record failed" };
+
+        expect(
+          await host.handBackBlockingFindings({
+            findingIds: recorded.findings.map((finding) => finding.id),
+          }),
+        ).toEqual({ status: "stale", currentHeadSha: MOVED_HEAD_SHA });
+
+        return { status: "completed", findingIds: recorded.findings.map((finding) => finding.id) };
+      });
+
+      registry.register({
+        reviewerId: REVIEWER_ID,
+        displayName: "Example",
+        activation: () => ({ installed: true, trusted: true, enabled: true }),
+        reviewer: fake.reviewer,
+      });
+
+      const outcome = await registry.run({
+        reviewerId: REVIEWER_ID,
+        request: makeRequest({
+          optIns: { postSummaryComment: false, sendBlockingFindingsToWorker: true },
+        }),
+        signal: new AbortController().signal,
+        delegates: {
+          readCurrentHeadSha: async () => HEAD_SHA,
+          recordFindings: async () => ({
+            status: "recorded",
+            findings: [makeRecordedFinding(FINDING_ID_1, "error", "Blocking defect.")],
+          }),
+          isSendBlockingFindingsEnabled: () => true,
+          handBackBlockingFindings: async () => ({
+            status: "stale",
+            currentHeadSha: MOVED_HEAD_SHA,
+          }),
+        },
+      });
+
+      expect(outcome).toEqual({ status: "stale", currentHeadSha: MOVED_HEAD_SHA });
+    }
+  });
+
+  it("withdraws authority from an in-flight reviewer when replaced by a new registration under the same id", async () => {
+    const registry = new PullRequestReviewerRegistry();
+    let commentDelegateCalls = 0;
+
+    const replacement = fakePullRequestReviewer(async () => ({
+      status: "completed",
+      findingIds: [],
+    }));
+    const original = fakePullRequestReviewer(async (_request, host) => {
+      const turn = await host.runReadOnlyReviewTurn({ prompt: "Review head" });
+      expect(turn).toMatchObject({ status: "refused", reason: "not-effective" });
+      expect(await host.postSummaryComment({ body: "From superseded reviewer" })).toEqual({
+        status: "refused",
+        reason: "not-effective",
+      });
+      return { status: "completed", findingIds: [] };
+    });
+
+    const firstRegistration = registry.register({
+      reviewerId: REVIEWER_ID,
+      displayName: "Original",
+      activation: () => ({ installed: true, trusted: true, enabled: true }),
+      reviewer: original.reviewer,
+    });
+    expect(firstRegistration.kind).toBe("registered");
+
+    const outcome = await registry.run({
+      reviewerId: REVIEWER_ID,
+      request: makeRequest({
+        optIns: { postSummaryComment: true, sendBlockingFindingsToWorker: false },
+      }),
+      signal: new AbortController().signal,
+      delegates: {
+        readCurrentHeadSha: async () => HEAD_SHA,
+        runReadOnlyReviewTurn: async () => {
+          // Release original and immediately register a replacement under the same id.
+          if (firstRegistration.kind === "registered") firstRegistration.release();
+          registry.register({
+            reviewerId: REVIEWER_ID,
+            displayName: "Replacement",
+            activation: () => ({ installed: true, trusted: true, enabled: true }),
+            reviewer: replacement.reviewer,
+          });
+          return {
+            status: "completed",
+            runId: decodeAgentRunId(RUN_ID),
+            providerInstanceId: decodeProviderInstanceId(REVIEWER_PROVIDER_ID),
+            modelId: decodeProviderModelId("gpt-5.3-codex"),
+            sessionId: "review-session-1",
+            text: "Late turn result",
+          };
+        },
+        isPostSummaryCommentEnabled: () => true,
+        postSummaryComment: async () => {
+          commentDelegateCalls += 1;
+          return { status: "posted" };
+        },
+      },
+    });
+
+    expect(commentDelegateCalls).toBe(0);
+    expect(outcome).toMatchObject({ status: "refused", reason: "not-effective" });
+
+    // The replacement registration itself can now run cleanly.
+    const nextOutcome = await registry.run({
+      reviewerId: REVIEWER_ID,
+      request: makeRequest(),
+      signal: new AbortController().signal,
+      delegates: { readCurrentHeadSha: async () => HEAD_SHA },
+    });
+    expect(nextOutcome).toMatchObject({ status: "completed", findingIds: [] });
+    expect(replacement.calls).toHaveLength(1);
+  });
+
+  it("revokes the host port as soon as review settles so retained handles cannot act afterwards", async () => {
+    const registry = new PullRequestReviewerRegistry();
+    let capturedPort: PullRequestReviewHostPort | undefined;
+    let delegateCallsAfterSettlement = 0;
+    let settled = false;
+
+    const fake = fakePullRequestReviewer(async (_request, host) => {
+      capturedPort = host;
+      const recorded = await host.recordFindings({
+        findings: [
+          {
+            path: APP_PATH,
+            location: { kind: "line", line: 10 },
+            severity: "error",
+            summary: "Blocking defect.",
+          },
+        ],
+      });
+      if (recorded.status !== "recorded") return { status: "failed", detail: "record failed" };
+      return { status: "completed", findingIds: recorded.findings.map((finding) => finding.id) };
+    });
+
+    registry.register({
+      reviewerId: REVIEWER_ID,
+      displayName: "Example",
+      activation: () => ({ installed: true, trusted: true, enabled: true }),
+      reviewer: fake.reviewer,
+    });
+
+    const outcome = await registry.run({
+      reviewerId: REVIEWER_ID,
+      request: makeRequest({
+        optIns: { postSummaryComment: true, sendBlockingFindingsToWorker: true },
+      }),
+      signal: new AbortController().signal,
+      delegates: {
+        readCurrentHeadSha: async () => {
+          if (settled) delegateCallsAfterSettlement += 1;
+          return HEAD_SHA;
+        },
+        readPullRequestDiff: async () => {
+          if (settled) delegateCallsAfterSettlement += 1;
+          return { status: "unavailable", reason: "unavailable" };
+        },
+        runReadOnlyReviewTurn: async () => {
+          if (settled) delegateCallsAfterSettlement += 1;
+          return { status: "cancelled" };
+        },
+        recordFindings: async () => {
+          if (settled) delegateCallsAfterSettlement += 1;
+          return {
+            status: "recorded",
+            findings: [makeRecordedFinding(FINDING_ID_1, "error", "Blocking defect.")],
+          };
+        },
+        isPostSummaryCommentEnabled: () => true,
+        postSummaryComment: async () => {
+          if (settled) delegateCallsAfterSettlement += 1;
+          return { status: "posted" };
+        },
+        isSendBlockingFindingsEnabled: () => true,
+        handBackBlockingFindings: async () => {
+          if (settled) delegateCallsAfterSettlement += 1;
+          return { status: "handed-back", attempt: 1 };
+        },
+      },
+    });
+    settled = true;
+
+    expect(outcome).toMatchObject({ status: "completed", findingIds: [FINDING_ID_1] });
+    expect(capturedPort).toBeDefined();
+    if (capturedPort === undefined) return;
+
+    expect(await capturedPort.isHeadCurrent()).toBe(false);
+    expect(await capturedPort.readPullRequestDiff()).toEqual({
+      status: "unavailable",
+      reason: "not-effective",
+    });
+    expect(await capturedPort.runReadOnlyReviewTurn({ prompt: "Late turn" })).toMatchObject({
+      status: "refused",
+      reason: "not-effective",
+    });
+    expect(
+      await capturedPort.recordFindings({
+        findings: [
+          {
+            path: APP_PATH,
+            location: { kind: "line", line: 1 },
+            severity: "note",
+            summary: "Late finding.",
+          },
+        ],
+      }),
+    ).toEqual({ status: "refused", reason: "not-effective" });
+    expect(await capturedPort.postSummaryComment({ body: "Late comment" })).toEqual({
+      status: "refused",
+      reason: "not-effective",
+    });
+    expect(
+      await capturedPort.handBackBlockingFindings({
+        findingIds: [decodeCodeReviewFindingId(FINDING_ID_1)],
+      }),
+    ).toEqual({ status: "refused", reason: "not-effective" });
+    expect(delegateCallsAfterSettlement).toBe(0);
   });
 });

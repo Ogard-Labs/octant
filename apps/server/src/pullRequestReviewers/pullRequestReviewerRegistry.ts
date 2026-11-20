@@ -38,6 +38,11 @@ export interface RunPullRequestReviewerInput {
   };
 }
 
+interface RegistrationRecord {
+  readonly identity: object;
+  readonly entry: PullRequestReviewerRegistration;
+}
+
 const GIT_OBJECT_ID_PATTERN = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/;
 
 /**
@@ -45,15 +50,14 @@ const GIT_OBJECT_ID_PATTERN = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/;
  *
  * Every listing and invocation passes through `@octant/plugin-host`'s pure
  * activation and collision policy (`offeredPullRequestReviewers`). A reviewer
- * runs with a scoped `PullRequestReviewHostPort`, and the registry enforces the
- * final effectiveness, head-staleness, and outcome-validation fences so a
- * stale or inactive review is never reported as current.
+ * runs with a scoped `PullRequestReviewHostPort` bound to the exact
+ * registration instance that started it and revoked as soon as `review(...)`
+ * settles. The registry enforces the final effectiveness, cancellation,
+ * head-staleness, and outcome-validation fences so a stale, replaced, or
+ * inactive review is never reported as current.
  */
 export class PullRequestReviewerRegistry {
-  readonly #registrations: Array<{
-    readonly identity: object;
-    readonly entry: PullRequestReviewerRegistration;
-  }> = [];
+  readonly #registrations: Array<RegistrationRecord> = [];
 
   register(entry: PullRequestReviewerRegistration): PullRequestReviewerRegisterResult {
     if (entry.reviewer.kind !== PULL_REQUEST_REVIEWER_CONTRIBUTION_KIND) {
@@ -87,6 +91,18 @@ export class PullRequestReviewerRegistry {
     return this.list().some((entry) => String(entry.reviewerId) === key);
   }
 
+  #resolveOfferedRecord(reviewerId: PullRequestReviewerId): RegistrationRecord | undefined {
+    const key = String(reviewerId);
+    const offered = this.list().find((entry) => String(entry.reviewerId) === key);
+    if (offered === undefined) return undefined;
+    // `offeredPullRequestReviewers` withholds colliding ids, so at most one
+    // registration matches this id at any instant.
+    return this.#registrations.find(
+      (record) =>
+        String(record.entry.reviewerId) === key && record.entry.reviewer === offered.reviewer,
+    );
+  }
+
   async run(input: RunPullRequestReviewerInput): Promise<PullRequestReviewOutcome> {
     let request: PullRequestReviewRequest;
     try {
@@ -98,12 +114,18 @@ export class PullRequestReviewerRegistry {
       };
     }
 
-    const offered = this.list().find(
-      (entry) => String(entry.reviewerId) === String(input.reviewerId),
-    );
-    const isEffective = () => this.has(input.reviewerId) && (input.delegates.effective?.() ?? true);
+    const startingRecord = this.#resolveOfferedRecord(input.reviewerId);
+    const isEffective = (): boolean => {
+      if (startingRecord === undefined) return false;
+      const current = this.#resolveOfferedRecord(input.reviewerId);
+      return (
+        current !== undefined &&
+        current.identity === startingRecord.identity &&
+        (input.delegates.effective?.() ?? true)
+      );
+    };
 
-    if (offered === undefined || !isEffective()) {
+    if (startingRecord === undefined || !isEffective()) {
       return {
         status: "refused",
         reason: "not-effective",
@@ -116,6 +138,16 @@ export class PullRequestReviewerRegistry {
     }
 
     const initialHead = await safeReadHead(input.delegates.readCurrentHeadSha, input.signal);
+    if (input.signal.aborted) {
+      return { status: "cancelled" };
+    }
+    if (!isEffective()) {
+      return {
+        status: "refused",
+        reason: "not-effective",
+        detail: "The selected pull request reviewer is not active.",
+      };
+    }
     if (initialHead !== request.headSha) {
       return staleOutcome(initialHead);
     }
@@ -131,13 +163,17 @@ export class PullRequestReviewerRegistry {
 
     let rawOutcome: PullRequestReviewOutcome;
     try {
-      rawOutcome = await offered.reviewer.review(request, session.port, input.signal);
+      rawOutcome = await startingRecord.entry.reviewer.review(request, session.port, input.signal);
     } catch {
       if (input.signal.aborted) return { status: "cancelled" };
       return {
         status: "failed",
         detail: "The pull request reviewer failed before completing its review.",
       };
+    } finally {
+      // Immediately revoke the port so a retained handle cannot publish or wake
+      // workers after this invocation settles.
+      session.revoke();
     }
 
     if (session.observedIneffective() || !isEffective()) {
@@ -148,16 +184,19 @@ export class PullRequestReviewerRegistry {
       };
     }
 
+    if (input.signal.aborted) {
+      return { status: "cancelled" };
+    }
+
     const stale = session.observedStale();
     if (stale.stale) {
       return staleOutcome(stale.currentHeadSha);
     }
 
+    const finalHead = await safeReadHead(input.delegates.readCurrentHeadSha, input.signal);
     if (input.signal.aborted) {
       return { status: "cancelled" };
     }
-
-    const finalHead = await safeReadHead(input.delegates.readCurrentHeadSha, input.signal);
     if (finalHead !== request.headSha) {
       return staleOutcome(finalHead);
     }
