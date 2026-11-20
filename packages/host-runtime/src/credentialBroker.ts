@@ -117,6 +117,7 @@ const ROUTES = new Set([
   "/v1/cloud-cli/aws/session",
   "/v1/oauth/begin",
   "/v1/oauth/cancel",
+  "/v1/oauth/relay",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
   "/v1/oauth/access",

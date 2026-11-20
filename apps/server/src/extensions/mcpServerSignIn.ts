@@ -1,4 +1,5 @@
 import type { EventActor } from "@octant/contracts";
+import { actsAsHostPerson, type PrincipalKind } from "@octant/domain/remote-access-policy";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -7,6 +8,7 @@ import {
   decodeMcpReportedAccount,
   type McpReportedAccount,
   type McpClientSetupInput,
+  type McpServerSignInRelayResult,
   type McpServerSignInView,
 } from "@octant/contracts/extension-rpc";
 import { decodeMcpOAuthClientRegistration } from "@octant/contracts/host-oauth";
@@ -49,8 +51,14 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 // RFC 6749 §3.3 scope-token: a resource may advertise URL-shaped scopes, and
 // dropping one silently would register and authorize without it.
 const SCOPE_TOKEN_PATTERN = /^[\x21\x23-\x5B\x5D-\x7E]{1,256}$/;
+const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
+const MAX_SETTLED_RELAYS = 256;
 
-type PrincipalKind = "local-window" | "remote-device";
+export interface McpSignInDeviceBinding {
+  readonly deviceId: string;
+  readonly sessionId: string;
+  readonly credentialGeneration: number;
+}
 
 export interface McpServerSignInRecord {
   readonly credentialRef: string;
@@ -63,7 +71,10 @@ export interface McpServerSignInRecord {
   readonly account?: McpReportedAccount;
 }
 
-type AwaitingConsent = Extract<McpServerSignInView, { kind: "awaiting-consent" }>;
+type PendingView = Extract<
+  McpServerSignInView,
+  { readonly kind: "awaiting-consent" | "awaiting-device-code" }
+>;
 
 interface PersistedSignIns {
   readonly schemaVersion: 1;
@@ -125,6 +136,8 @@ type Discovered =
       readonly issuer: string;
       readonly authorizationEndpoint: string;
       readonly tokenEndpoint: string;
+      readonly deviceAuthorizationEndpoint: string | undefined;
+      readonly verificationHosts: ReadonlyArray<string>;
       readonly registrationEndpoint: string | undefined;
       readonly issuerUrl: string;
       readonly metadataClientSupported: boolean;
@@ -159,12 +172,17 @@ export class McpServerSignIn {
       readonly attemptId: string;
       readonly discovered: Extract<Discovered, { kind: "discovered" }>;
       readonly descriptor: HostOAuthDescriptor;
-      /** The last state shown, so a paired device can read it without polling. */
-      readonly view: AwaitingConsent;
+      readonly flow: "authorization-code-pkce" | "device-code" | "relay";
+      readonly relayable: boolean;
+      readonly device?: McpSignInDeviceBinding;
+      /** The last state shown, so a restricted device can read it without polling. */
+      readonly view: PendingView;
       cancelPending?: boolean;
       statusUnavailable?: boolean;
     }
   >();
+  /** Remembers recently settled relayable attempts so late replays return `sign-in-settled`. */
+  readonly #settledRelays = new Map<string, McpSignInDeviceBinding>();
   #loading: Promise<void> | undefined;
   readonly #operations = new Map<string, Promise<unknown>>();
   /** Known component/resource queue ownership lets uninstall wait for an in-flight Begin. */
@@ -266,8 +284,9 @@ export class McpServerSignIn {
     extensionId: string,
     componentId: string,
     principalKind: PrincipalKind,
+    device?: McpSignInDeviceBinding,
   ): Promise<McpServerSignInView> {
-    return this.#status(extensionId, componentId, principalKind);
+    return this.#status(extensionId, componentId, principalKind, device);
   }
   begin(
     extensionId: string,
@@ -275,13 +294,15 @@ export class McpServerSignIn {
     principalKind: PrincipalKind,
     /** Who began it, as the route resolved them; the sign-in's records are journaled as theirs. */
     actor?: EventActor,
+    /** Present when a person-paired device begins an attempt; binds relay completion to it. */
+    device?: McpSignInDeviceBinding,
   ): Promise<McpServerSignInView> {
     if (this.#removals.has(extensionId))
       return Promise.resolve(
         refused("unavailable", "Finish removing this server before starting another sign-in."),
       );
     return this.#forServer(extensionId, componentId, () =>
-      this.#begin(extensionId, componentId, principalKind, actor),
+      this.#begin(extensionId, componentId, principalKind, actor, device),
     );
   }
   poll(
@@ -289,10 +310,20 @@ export class McpServerSignIn {
     componentId: string,
     attemptId: string,
     principalKind: PrincipalKind,
+    device?: McpSignInDeviceBinding,
   ): Promise<McpServerSignInView> {
     return this.#forServer(extensionId, componentId, () =>
-      this.#pollForServer(extensionId, componentId, attemptId, principalKind),
+      this.#pollForServer(extensionId, componentId, attemptId, principalKind, device),
     );
+  }
+  relay(input: {
+    readonly attemptId: string;
+    readonly callbackUrl: string;
+    readonly principalKind: PrincipalKind;
+    readonly device?: McpSignInDeviceBinding;
+    readonly actor?: EventActor;
+  }): Promise<McpServerSignInRelayResult> {
+    return this.#relay(input);
   }
   signOut(
     extensionId: string,
@@ -302,7 +333,7 @@ export class McpServerSignIn {
     actor?: EventActor,
   ): Promise<McpServerSignInView> {
     return this.#forServer(extensionId, componentId, async () => {
-      if (principalKind === "local-window" && this.#removals.has(extensionId)) {
+      if (actsAsHostPerson(principalKind) && this.#removals.has(extensionId)) {
         await this.#load();
         const record = this.#signIns.get(signInKey(extensionId, componentId));
         return record?.signOutPending
@@ -368,7 +399,7 @@ export class McpServerSignIn {
     principalKind: PrincipalKind,
     retainPolicy?: (policy: GeneratedMcpSignInPolicy) => void,
   ): Promise<McpServerSignInView> {
-    if (principalKind !== "local-window")
+    if (!actsAsHostPerson(principalKind))
       return refused("local-host-required", "Set up the client on this host.");
     const url = await this.#options.serverUrl(extensionId, componentId);
     if (url === undefined) return { kind: "not-applicable" };
@@ -440,7 +471,7 @@ export class McpServerSignIn {
   ): Promise<McpServerSignInView> {
     if (this.#removals.has(extensionId))
       return refused("unavailable", "Finish removing this server before starting another sign-in.");
-    if (principalKind !== "local-window")
+    if (!actsAsHostPerson(principalKind))
       return refused("local-host-required", "Set up the client on this host.");
     if (this.#attempts.has(signInKey(extensionId, componentId)))
       return refused("unavailable", "Finish the pending sign-in before changing client setup.");
@@ -645,7 +676,7 @@ export class McpServerSignIn {
       readonly current?: () => boolean;
     },
   ): Promise<McpServerSignInView> {
-    if (principalKind !== "local-window")
+    if (!actsAsHostPerson(principalKind))
       return refused("local-host-required", "Set up the client on this host.");
     const url = await this.#options.serverUrl(extensionId, componentId);
     if (url === undefined) return { kind: "not-applicable" };
@@ -705,7 +736,7 @@ export class McpServerSignIn {
     reservedSecretRef?: string,
     current?: () => boolean,
   ): Promise<{ readonly kind: "configured" } | Extract<McpServerSignInView, { kind: "refused" }>> {
-    if (principalKind !== "local-window")
+    if (!actsAsHostPerson(principalKind))
       return {
         kind: "refused",
         reason: "local-host-required",
@@ -873,17 +904,18 @@ export class McpServerSignIn {
     extensionId: string,
     componentId: string,
     principalKind: PrincipalKind,
+    device?: McpSignInDeviceBinding,
   ): Promise<McpServerSignInView> {
     await this.#load();
     const key = signInKey(extensionId, componentId);
     const pending = this.#attempts.get(key);
     if (pending !== undefined) {
       if (pending.cancelPending) return cancellationPending();
-      return principalKind === "local-window"
-        ? this.poll(extensionId, componentId, pending.attemptId, principalKind)
+      return actsAsHostPerson(principalKind)
+        ? this.poll(extensionId, componentId, pending.attemptId, principalKind, device)
         : pending.statusUnavailable
           ? statusUnavailable()
-          : pending.view;
+          : viewForCaller(pending, undefined);
     }
     const record = this.#signIns.get(key);
     if (record !== undefined) return recordView(record);
@@ -921,11 +953,15 @@ export class McpServerSignIn {
     componentId: string,
     principalKind: PrincipalKind,
     actor?: EventActor,
+    device?: McpSignInDeviceBinding,
   ): Promise<McpServerSignInView> {
     if (this.#removals.has(extensionId))
       return refused("unavailable", "Finish removing this server before starting another sign-in.");
     await this.#load();
-    if (principalKind !== "local-window") {
+    if (
+      !actsAsHostPerson(principalKind) ||
+      (principalKind === "person-paired-device" && device === undefined)
+    ) {
       return refused("local-host-required", "Sign in from the Octant window on this host.");
     }
     const key = signInKey(extensionId, componentId);
@@ -942,7 +978,7 @@ export class McpServerSignIn {
         ? cancellationPending()
         : existing.statusUnavailable
           ? statusUnavailable()
-          : existing.view;
+          : viewForCaller(existing, device);
     const url = await this.#options.serverUrl(extensionId, componentId);
     if (url === undefined) return { kind: "not-applicable" };
     const policy = await this.#readServerPolicy(extensionId, componentId, url);
@@ -1014,6 +1050,12 @@ export class McpServerSignIn {
         "issuer-unsupported",
         "Use your registered OAuth App with its retained loopback callback and linked app secret.",
       );
+    const isPairedDevice = principalKind === "person-paired-device" && device !== undefined;
+    const canTryDeviceCode =
+      isPairedDevice &&
+      discovered.deviceAuthorizationEndpoint !== undefined &&
+      (setup?.clientAuthentication === undefined ||
+        sameHttpsOrigin(discovered.deviceAuthorizationEndpoint, discovered.tokenEndpoint));
     let port: number;
     try {
       port = setup?.redirectPort ?? (await (this.#options.pickPort ?? pickFreePort)());
@@ -1021,15 +1063,114 @@ export class McpServerSignIn {
       return refused("unavailable", "No loopback port was free for the sign-in callback.");
     }
     const redirectUri = `http://${setup?.redirectHostname ?? "127.0.0.1"}:${port}/oauth/callback`;
-    const registered =
-      setup === undefined
-        ? await this.#register(
-            discovered.registrationEndpoint ?? "",
-            redirectUri,
-            discovered.scopes,
-          )
-        : { kind: "registered" as const, clientId: setup.clientId };
+    let deviceCodeClientRegistered = canTryDeviceCode;
+    let registered: { kind: "registered"; clientId: string } | { kind: "refused"; message: string };
+    if (setup !== undefined) {
+      registered = { kind: "registered", clientId: setup.clientId };
+    } else if (canTryDeviceCode) {
+      registered = await this.#register(
+        discovered.registrationEndpoint ?? "",
+        redirectUri,
+        discovered.scopes,
+        true,
+      );
+      if (registered.kind !== "registered") {
+        deviceCodeClientRegistered = false;
+        registered = await this.#register(
+          discovered.registrationEndpoint ?? "",
+          redirectUri,
+          discovered.scopes,
+          false,
+        );
+      }
+    } else {
+      registered = await this.#register(
+        discovered.registrationEndpoint ?? "",
+        redirectUri,
+        discovered.scopes,
+        false,
+      );
+    }
     if (registered.kind !== "registered") return refused("issuer-unsupported", registered.message);
+    if (
+      canTryDeviceCode &&
+      deviceCodeClientRegistered &&
+      discovered.deviceAuthorizationEndpoint !== undefined
+    ) {
+      const deviceDescriptor: HostOAuthDescriptor = {
+        descriptorId: `mcp-${digest(key)}` as HostOAuthDescriptor["descriptorId"],
+        clientId: registered.clientId as HostOAuthDescriptor["clientId"],
+        dialect: discovered.mcpDialect,
+        flow: "device-code",
+        deviceAuthorizationEndpoint:
+          discovered.deviceAuthorizationEndpoint as HostOAuthDescriptor["deviceAuthorizationEndpoint"],
+        tokenEndpoint: discovered.tokenEndpoint as HostOAuthDescriptor["tokenEndpoint"],
+        verificationHosts: discovered.verificationHosts as HostOAuthDescriptor["verificationHosts"],
+        scopes: discovered.scopes as HostOAuthDescriptor["scopes"],
+        termsId: TERMS_ID as HostOAuthDescriptor["termsId"],
+        resource: discovered.resource as HostOAuthDescriptor["resource"],
+        ...(setup?.clientAuthentication === undefined
+          ? {}
+          : { clientAuthentication: setup.clientAuthentication }),
+      };
+      const acknowledgedDevice = this.#options.oauth.acknowledgeTerms({
+        principalKind,
+        actorId: this.#options.actorId,
+        actor,
+        descriptor: deviceDescriptor,
+      });
+      if (acknowledgedDevice.kind === "refused") return fromRefusal(acknowledgedDevice.reason);
+      if (!policy.current() || this.#removals.has(extensionId))
+        return refused(
+          "unavailable",
+          "The server changed before sign-in could start. Reopen this connection.",
+        );
+      const deviceState = await this.#boundedBegin(principalKind, deviceDescriptor, actor);
+      if (deviceState !== "timed-out" && deviceState.kind === "awaiting-consent") {
+        if (
+          deviceState.flow === "device-code" &&
+          isAllowedVerificationUri(deviceState.verificationUri, discovered.verificationHosts) &&
+          (deviceState.verificationUriComplete === undefined ||
+            isAllowedVerificationUri(
+              deviceState.verificationUriComplete,
+              discovered.verificationHosts,
+            ))
+        ) {
+          const view: PendingView = {
+            kind: "awaiting-device-code",
+            attemptId: deviceState.attemptId,
+            issuerHost: discovered.issuer,
+            verificationUri: deviceState.verificationUri,
+            ...(deviceState.verificationUriComplete === undefined
+              ? {}
+              : { verificationUriComplete: deviceState.verificationUriComplete }),
+            userCode: deviceState.userCode,
+            expiresAt: deviceState.expiresAt,
+          };
+          this.#attempts.set(key, {
+            attemptId: deviceState.attemptId,
+            discovered,
+            descriptor: deviceDescriptor,
+            flow: "device-code",
+            relayable: false,
+            device,
+            view,
+          });
+          return view;
+        }
+        // Verification address failed host/https check: cancel and fall back to relay.
+        await this.#options.oauth
+          .cancel({
+            principalKind,
+            actorId: this.#options.actorId,
+            actor,
+            attemptId: deviceState.attemptId,
+            descriptor: deviceDescriptor,
+          })
+          .catch(() => undefined);
+      }
+      // Device authorization declined, unavailable, or untrusted verification URI: fall back to relay.
+    }
     const descriptor: HostOAuthDescriptor = {
       descriptorId: `mcp-${digest(key)}` as HostOAuthDescriptor["descriptorId"],
       clientId: registered.clientId as HostOAuthDescriptor["clientId"],
@@ -1072,17 +1213,34 @@ export class McpServerSignIn {
         "unavailable",
         "The server changed before sign-in could start. Reopen this connection.",
       );
-    const state = await this.#boundedBegin(principalKind, descriptor, actor);
+    const state = await this.#boundedBegin(principalKind, descriptor, actor, isPairedDevice);
     if (state === "timed-out")
       return refused("unavailable", "The credential broker did not start the sign-in. Try again.");
     if (state.kind === "awaiting-consent" && state.flow === "authorization-code-pkce") {
-      const view: AwaitingConsent = {
-        kind: "awaiting-consent",
+      const view: PendingView = isPairedDevice
+        ? {
+            kind: "awaiting-consent",
+            attemptId: state.attemptId,
+            flow: "relay",
+            relayable: true,
+            authorizationUrl: state.authorizationUrl,
+            expiresAt: state.expiresAt,
+          }
+        : {
+            kind: "awaiting-consent",
+            attemptId: state.attemptId,
+            authorizationUrl: state.authorizationUrl,
+            expiresAt: state.expiresAt,
+          };
+      this.#attempts.set(key, {
         attemptId: state.attemptId,
-        authorizationUrl: state.authorizationUrl,
-        expiresAt: state.expiresAt,
-      };
-      this.#attempts.set(key, { attemptId: state.attemptId, discovered, descriptor, view });
+        discovered,
+        descriptor,
+        flow: isPairedDevice ? "relay" : "authorization-code-pkce",
+        relayable: isPairedDevice,
+        ...(device === undefined ? {} : { device }),
+        view,
+      });
       return view;
     }
     return viewOf(state, discovered.issuer);
@@ -1097,12 +1255,14 @@ export class McpServerSignIn {
     principalKind: PrincipalKind,
     descriptor: HostOAuthDescriptor,
     actor?: EventActor,
+    relayable?: boolean,
   ): Promise<HostOAuthSignInState | "timed-out"> {
     const started = this.#options.oauth.begin({
       principalKind,
       actorId: this.#options.actorId,
       actor,
       descriptor,
+      ...(relayable === true ? { relayable: true } : {}),
     });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const outcome = await Promise.race([
@@ -1121,6 +1281,7 @@ export class McpServerSignIn {
           ? this.#options.oauth.cancel({
               principalKind,
               actorId: this.#options.actorId,
+              actor,
               attemptId: late.attemptId,
               descriptor,
             })
@@ -1130,29 +1291,103 @@ export class McpServerSignIn {
     return "timed-out";
   }
 
+  #recordSettledRelay(attemptId: string, device: McpSignInDeviceBinding | undefined): void {
+    if (device === undefined) return;
+    this.#settledRelays.delete(attemptId);
+    this.#settledRelays.set(attemptId, device);
+    if (this.#settledRelays.size > MAX_SETTLED_RELAYS) {
+      const oldest = this.#settledRelays.keys().next().value;
+      if (oldest !== undefined) this.#settledRelays.delete(oldest);
+    }
+  }
+
+  async #commitSignedInGrant(
+    key: string,
+    pending: {
+      readonly attemptId: string;
+      readonly discovered: Extract<Discovered, { kind: "discovered" }>;
+      readonly descriptor: HostOAuthDescriptor;
+      readonly relayable: boolean;
+      readonly device?: McpSignInDeviceBinding;
+      cancelPending?: boolean;
+    },
+    credentialRef: string,
+  ): Promise<McpServerSignInView> {
+    let previousRef: string | undefined;
+    let committed = false;
+    await this.#commit(async () => {
+      if (this.#attempts.get(key) !== pending || pending.cancelPending) return;
+      previousRef = this.#signIns.get(key)?.descriptor.clientAuthentication?.secretRef;
+      this.#attempts.delete(key);
+      if (pending.relayable) this.#recordSettledRelay(pending.attemptId, pending.device);
+      this.#signIns.set(key, {
+        credentialRef,
+        descriptor: pending.descriptor,
+        issuer: pending.discovered.issuer,
+      });
+      this.#reserveUnownedSecret(previousRef);
+      await this.#persist();
+      committed = true;
+    });
+    if (!committed) return pending.cancelPending ? cancellationPending() : { kind: "signed-out" };
+    await this.#options.onAuthenticationChanged?.(
+      key.slice(0, key.indexOf(":")),
+      key.slice(key.indexOf(":") + 1),
+    );
+    const record = this.#signIns.get(key);
+    if (
+      record?.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect ||
+      record?.descriptor.dialect === GITHUB_MCP_OAUTH_APP.dialect
+    ) {
+      try {
+        const answer = await this.#credentialStage(() =>
+          this.#options.access(record.credentialRef),
+        );
+        if (isRecord(answer) && answer.kind === "granted") {
+          const observed = await this.#observeAccount(key, record, answer);
+          if (isRecord(observed) && observed.kind === "sign-in-again")
+            await this.#markSignInAgain(
+              key,
+              record,
+              observed.reason,
+              key.slice(0, key.indexOf(":")),
+              key.slice(key.indexOf(":") + 1),
+            );
+        }
+      } catch {
+        /* Account details remain explicitly unreported; the grant already has a durable owner. */
+      }
+    }
+    await this.#retireUnusedSecret(previousRef);
+    const current = this.#signIns.get(key);
+    return current === undefined ? { kind: "signed-out" } : recordView(current);
+  }
+
   async #pollForServer(
     extensionId: string,
     componentId: string,
     attemptId: string,
     principalKind: PrincipalKind,
+    device?: McpSignInDeviceBinding,
   ): Promise<McpServerSignInView> {
     await this.#load();
-    return this.#poll(signInKey(extensionId, componentId), attemptId, principalKind);
+    return this.#poll(signInKey(extensionId, componentId), attemptId, principalKind, device);
   }
 
   async #poll(
     key: string,
     attemptId: string,
     principalKind: PrincipalKind,
+    device?: McpSignInDeviceBinding,
   ): Promise<McpServerSignInView> {
     const pending = this.#attempts.get(key);
     if (pending === undefined || pending.attemptId !== attemptId) {
       const record = this.#signIns.get(key);
       return record === undefined ? { kind: "signed-out" } : recordView(record);
     }
-    // Polling can finish the attempt and store the grant; a paired device
+    // Polling can finish the attempt and store the grant; a restricted device
     // may neither, and the broker's own refusal must not end the attempt.
-    if (principalKind !== "local-window") {
+    if (!actsAsHostPerson(principalKind)) {
       return refused("local-host-required", "Sign in from the Octant window on this host.");
     }
     if (pending.cancelPending) return cancellationPending();
@@ -1174,7 +1409,8 @@ export class McpServerSignIn {
     if (
       !(
         state.kind === "signed-in" ||
-        (state.kind === "awaiting-consent" && state.flow === "authorization-code-pkce") ||
+        (state.kind === "awaiting-consent" &&
+          (state.flow === "authorization-code-pkce" || state.flow === "device-code")) ||
         terminal
       )
     ) {
@@ -1183,59 +1419,14 @@ export class McpServerSignIn {
     }
     pending.statusUnavailable = false;
     if (state.kind === "signed-in") {
-      let previousRef: string | undefined;
-      let committed = false;
-      await this.#commit(async () => {
-        if (this.#attempts.get(key) !== pending || pending.cancelPending) return;
-        previousRef = this.#signIns.get(key)?.descriptor.clientAuthentication?.secretRef;
-        this.#attempts.delete(key);
-        this.#signIns.set(key, {
-          credentialRef: state.credentialRef,
-          descriptor: pending.descriptor,
-          issuer: pending.discovered.issuer,
-        });
-        this.#reserveUnownedSecret(previousRef);
-        await this.#persist();
-        committed = true;
-      });
-      if (!committed) return pending.cancelPending ? cancellationPending() : { kind: "signed-out" };
-      await this.#options.onAuthenticationChanged?.(
-        key.slice(0, key.indexOf(":")),
-        key.slice(key.indexOf(":") + 1),
-      );
-      const record = this.#signIns.get(key);
-      if (
-        record?.descriptor.dialect === SLACK_MCP_USER_OAUTH.dialect ||
-        record?.descriptor.dialect === GITHUB_MCP_OAUTH_APP.dialect
-      ) {
-        try {
-          const answer = await this.#credentialStage(() =>
-            this.#options.access(record.credentialRef),
-          );
-          if (isRecord(answer) && answer.kind === "granted") {
-            const observed = await this.#observeAccount(key, record, answer);
-            if (isRecord(observed) && observed.kind === "sign-in-again")
-              await this.#markSignInAgain(
-                key,
-                record,
-                observed.reason,
-                key.slice(0, key.indexOf(":")),
-                key.slice(key.indexOf(":") + 1),
-              );
-          }
-        } catch {
-          /* Account details remain explicitly unreported; the grant already has a durable owner. */
-        }
-      }
-      await this.#retireUnusedSecret(previousRef);
-      const current = this.#signIns.get(key);
-      return current === undefined ? { kind: "signed-out" } : recordView(current);
+      return this.#commitSignedInGrant(key, pending, state.credentialRef);
     }
     if (state.kind === "refused") {
       let removed = false;
       await this.#commit(async () => {
         if (this.#attempts.get(key) !== pending || pending.cancelPending) return;
         this.#attempts.delete(key);
+        if (pending.relayable) this.#recordSettledRelay(pending.attemptId, pending.device);
         removed = true;
         if (this.#reserveUnownedSecret(pending.descriptor.clientAuthentication?.secretRef))
           await this.#persist();
@@ -1243,20 +1434,235 @@ export class McpServerSignIn {
       if (!removed) return pending.cancelPending ? cancellationPending() : { kind: "signed-out" };
       await this.#retireUnusedSecret(pending.descriptor.clientAuthentication?.secretRef);
     }
-    if (state.kind === "awaiting-consent" && state.flow === "authorization-code-pkce") {
-      const view: AwaitingConsent = {
-        kind: "awaiting-consent",
-        attemptId: state.attemptId,
-        authorizationUrl: state.authorizationUrl,
-        expiresAt: state.expiresAt,
-      };
-      this.#attempts.set(key, { ...pending, view });
-      return view;
+    if (state.kind === "awaiting-consent") {
+      if (state.flow === "authorization-code-pkce") {
+        const view: PendingView = pending.relayable
+          ? {
+              kind: "awaiting-consent",
+              attemptId: state.attemptId,
+              flow: "relay",
+              relayable: true,
+              authorizationUrl: state.authorizationUrl,
+              expiresAt: state.expiresAt,
+            }
+          : {
+              kind: "awaiting-consent",
+              attemptId: state.attemptId,
+              authorizationUrl: state.authorizationUrl,
+              expiresAt: state.expiresAt,
+            };
+        const updated = { ...pending, view };
+        this.#attempts.set(key, updated);
+        return viewForCaller(updated, device);
+      }
+      if (state.flow === "device-code") {
+        const view: PendingView = {
+          kind: "awaiting-device-code",
+          attemptId: state.attemptId,
+          issuerHost: pending.discovered.issuer,
+          verificationUri: state.verificationUri,
+          ...(state.verificationUriComplete === undefined
+            ? {}
+            : { verificationUriComplete: state.verificationUriComplete }),
+          userCode: state.userCode,
+          expiresAt: state.expiresAt,
+        };
+        this.#attempts.set(key, { ...pending, view });
+        return view;
+      }
     }
     return viewOf(state, pending.discovered.issuer);
   }
 
-  async #cancelPending(key: string, principalKind: PrincipalKind): Promise<boolean> {
+  async #relay(input: {
+    readonly attemptId: string;
+    readonly callbackUrl: string;
+    readonly principalKind: PrincipalKind;
+    readonly device?: McpSignInDeviceBinding;
+    readonly actor?: EventActor;
+  }): Promise<McpServerSignInRelayResult> {
+    await this.#load();
+    if (input.principalKind !== "person-paired-device" || input.device === undefined) {
+      return {
+        kind: "refused",
+        reason: "local-host-required",
+        message: "Only a person-paired device can finish a connector sign-in by relay.",
+      };
+    }
+    const callerDevice = input.device;
+    let foundKey: string | undefined;
+    let foundPending:
+      | {
+          readonly attemptId: string;
+          readonly discovered: Extract<Discovered, { kind: "discovered" }>;
+          readonly descriptor: HostOAuthDescriptor;
+          readonly flow: "authorization-code-pkce" | "device-code" | "relay";
+          readonly relayable: boolean;
+          readonly device?: McpSignInDeviceBinding;
+          readonly view: PendingView;
+          cancelPending?: boolean;
+          statusUnavailable?: boolean;
+        }
+      | undefined;
+    for (const [key, pending] of this.#attempts) {
+      if (pending.attemptId === input.attemptId) {
+        foundKey = key;
+        foundPending = pending;
+        break;
+      }
+    }
+    if (foundKey === undefined || foundPending === undefined) {
+      const settledDevice = this.#settledRelays.get(input.attemptId);
+      if (settledDevice !== undefined) {
+        return sameDevice(settledDevice, callerDevice)
+          ? {
+              kind: "refused",
+              reason: "sign-in-settled",
+              message: "This sign-in attempt has already finished.",
+            }
+          : {
+              kind: "refused",
+              reason: "local-host-required",
+              message: "Only the device that started this sign-in can finish it.",
+            };
+      }
+      return {
+        kind: "refused",
+        reason: "invalid",
+        message: "No matching sign-in attempt is waiting.",
+      };
+    }
+    if (
+      !foundPending.relayable ||
+      foundPending.device === undefined ||
+      !sameDevice(foundPending.device, callerDevice)
+    ) {
+      return {
+        kind: "refused",
+        reason: "local-host-required",
+        message: "Only the device that started this sign-in can finish it.",
+      };
+    }
+    const key = foundKey;
+    const pending = foundPending;
+    return this.#serialized(
+      pending.discovered.resource,
+      async (): Promise<McpServerSignInRelayResult> => {
+        if (this.#attempts.get(key) !== pending) {
+          const settledDevice = this.#settledRelays.get(input.attemptId);
+          return settledDevice !== undefined && sameDevice(settledDevice, callerDevice)
+            ? {
+                kind: "refused",
+                reason: "sign-in-settled",
+                message: "This sign-in attempt has already finished.",
+              }
+            : {
+                kind: "refused",
+                reason: "invalid",
+                message: "No matching sign-in attempt is waiting.",
+              };
+        }
+        if (pending.cancelPending) {
+          return {
+            kind: "refused",
+            reason: "sign-in-settled",
+            message: "This sign-in attempt is being cancelled.",
+          };
+        }
+        if (this.#options.oauth.relay === undefined) {
+          return {
+            kind: "refused",
+            reason: "unavailable",
+            message: "Sign-in relay is unavailable right now.",
+          };
+        }
+        const result = await this.#options.oauth.relay({
+          principalKind: input.principalKind,
+          actorId: this.#options.actorId,
+          actor: input.actor,
+          attemptId: pending.attemptId,
+          descriptor: pending.descriptor,
+          callbackUrl: input.callbackUrl,
+        });
+        if (result.kind === "sign-in-settled") {
+          this.#recordSettledRelay(pending.attemptId, pending.device);
+          return {
+            kind: "refused",
+            reason: "sign-in-settled",
+            message: "This sign-in attempt has already finished.",
+          };
+        }
+        if (result.kind === "not-found") {
+          return {
+            kind: "refused",
+            reason: "invalid",
+            message: "No matching sign-in attempt is waiting.",
+          };
+        }
+        if (result.kind === "retry") {
+          return {
+            kind: "retry",
+            remainingAttempts: result.remainingAttempts,
+            message: relayRetryMessage(result.reason),
+          };
+        }
+        if (result.kind === "signed-in") {
+          const committed = await this.#commitSignedInGrant(key, pending, result.credentialRef);
+          if (committed.kind === "signed-in" || committed.kind === "sign-in-again")
+            return committed;
+          return {
+            kind: "refused",
+            reason: "unavailable",
+            message: "The sign-in could not be saved. Try again.",
+          };
+        }
+        if (result.kind === "refused") {
+          const terminal = [
+            "denied",
+            "timeout",
+            "state-mismatch",
+            "verifier-mismatch",
+            "exchange-refused",
+          ].includes(result.reason);
+          if (terminal) {
+            await this.#commit(async () => {
+              if (this.#attempts.get(key) !== pending || pending.cancelPending) return;
+              this.#attempts.delete(key);
+              this.#recordSettledRelay(pending.attemptId, pending.device);
+              if (this.#reserveUnownedSecret(pending.descriptor.clientAuthentication?.secretRef))
+                await this.#persist();
+            });
+            await this.#retireUnusedSecret(pending.descriptor.clientAuthentication?.secretRef);
+          }
+          const mapped = viewOf(result, pending.discovered.issuer);
+          if (mapped.kind === "refused") {
+            return {
+              kind: "refused",
+              reason:
+                mapped.reason === "denied" ||
+                mapped.reason === "timeout" ||
+                mapped.reason === "unavailable" ||
+                mapped.reason === "local-host-required"
+                  ? mapped.reason
+                  : "invalid",
+              message: mapped.message,
+            };
+          }
+        }
+        return {
+          kind: "refused",
+          reason: "unavailable",
+          message: "Sign-in is unavailable right now.",
+        };
+      },
+    );
+  }
+
+  async #cancelPending(
+    key: string,
+    principalKind: PrincipalKind,
+    actor?: EventActor,
+  ): Promise<boolean> {
     const pending = this.#attempts.get(key);
     if (pending === undefined) return true;
     pending.cancelPending = true;
@@ -1265,6 +1671,7 @@ export class McpServerSignIn {
       result = await this.#options.oauth.cancel({
         principalKind,
         actorId: this.#options.actorId,
+        actor,
         attemptId: pending.attemptId,
         descriptor: pending.descriptor,
       });
@@ -1273,7 +1680,10 @@ export class McpServerSignIn {
     }
     if (result.kind !== "cancelled") return false;
     await this.#commit(async () => {
-      if (this.#attempts.get(key) === pending) this.#attempts.delete(key);
+      if (this.#attempts.get(key) === pending) {
+        this.#attempts.delete(key);
+        if (pending.relayable) this.#recordSettledRelay(pending.attemptId, pending.device);
+      }
       if (this.#reserveUnownedSecret(pending.descriptor.clientAuthentication?.secretRef))
         await this.#persist();
     });
@@ -1288,11 +1698,11 @@ export class McpServerSignIn {
     actor?: EventActor,
   ): Promise<McpServerSignInView> {
     await this.#load();
-    if (principalKind !== "local-window") {
+    if (!actsAsHostPerson(principalKind)) {
       return refused("local-host-required", "Sign out from the Octant window on this host.");
     }
     const key = signInKey(extensionId, componentId);
-    if (!(await this.#cancelPending(key, principalKind))) return cancellationPending();
+    if (!(await this.#cancelPending(key, principalKind, actor))) return cancellationPending();
     const record = this.#signIns.get(key);
     if (record === undefined) {
       await this.#options.onAuthenticationChanged?.(extensionId, componentId);
@@ -2020,6 +2430,19 @@ export class McpServerSignIn {
           "GitHub authorization metadata does not support the selected OAuth App permission profile.",
       };
     const registration = issuerMetadata.registration_endpoint;
+    const deviceAuthorizationRaw = issuerMetadata.device_authorization_endpoint;
+    const grantTypes = issuerMetadata.grant_types_supported;
+    const deviceAuthorizationEndpoint =
+      googleScopes === undefined &&
+      !slack &&
+      !github &&
+      typeof deviceAuthorizationRaw === "string" &&
+      isHttps(deviceAuthorizationRaw) &&
+      Array.isArray(grantTypes) &&
+      grantTypes.includes(DEVICE_CODE_GRANT_TYPE)
+        ? deviceAuthorizationRaw
+        : undefined;
+    const verificationHosts = collectVerificationHosts(issuerUrl, issuerMetadata);
     const scopes =
       googleScopes !== undefined
         ? [...googleScopes]
@@ -2060,6 +2483,8 @@ export class McpServerSignIn {
               : ["client_secret_basic"],
       authorizationEndpoint,
       tokenEndpoint,
+      deviceAuthorizationEndpoint,
+      verificationHosts,
       registrationEndpoint:
         googleScopes === undefined &&
         !github &&
@@ -2076,6 +2501,7 @@ export class McpServerSignIn {
     registrationEndpoint: string,
     redirectUri: string,
     scopes: ReadonlyArray<string>,
+    includeDeviceGrant = false,
   ): Promise<{ kind: "registered"; clientId: string } | { kind: "refused"; message: string }> {
     let response: Response;
     try {
@@ -2085,7 +2511,9 @@ export class McpServerSignIn {
         body: JSON.stringify({
           client_name: "Octant",
           redirect_uris: [redirectUri],
-          grant_types: ["authorization_code", "refresh_token"],
+          grant_types: includeDeviceGrant
+            ? ["authorization_code", DEVICE_CODE_GRANT_TYPE, "refresh_token"]
+            : ["authorization_code", "refresh_token"],
           response_types: ["code"],
           token_endpoint_auth_method: "none",
           ...(scopes.length === 0 ? {} : { scope: scopes.join(" ") }),
@@ -2225,6 +2653,99 @@ export class McpServerSignIn {
 
 function signInKey(extensionId: string, componentId: string): string {
   return `${extensionId}:${componentId}`;
+}
+
+function sameDevice(expected: McpSignInDeviceBinding, actual: McpSignInDeviceBinding): boolean {
+  return (
+    expected.deviceId === actual.deviceId &&
+    expected.sessionId === actual.sessionId &&
+    expected.credentialGeneration === actual.credentialGeneration
+  );
+}
+
+function viewForCaller(
+  pending: {
+    readonly relayable: boolean;
+    readonly device?: McpSignInDeviceBinding;
+    readonly view: PendingView;
+  },
+  callerDevice: McpSignInDeviceBinding | undefined,
+): PendingView {
+  if (pending.view.kind !== "awaiting-consent" || !pending.relayable) return pending.view;
+  if (
+    callerDevice !== undefined &&
+    pending.device !== undefined &&
+    sameDevice(pending.device, callerDevice)
+  ) {
+    return pending.view;
+  }
+  return {
+    kind: "awaiting-consent",
+    attemptId: pending.view.attemptId,
+    authorizationUrl: pending.view.authorizationUrl,
+    expiresAt: pending.view.expiresAt,
+  };
+}
+
+const ISSUER_METADATA_URI_FIELDS = [
+  "authorization_endpoint",
+  "token_endpoint",
+  "device_authorization_endpoint",
+  "registration_endpoint",
+  "revocation_endpoint",
+  "introspection_endpoint",
+  "userinfo_endpoint",
+  "jwks_uri",
+  "service_documentation",
+  "op_policy_uri",
+  "op_tos_uri",
+] as const;
+
+function collectVerificationHosts(
+  issuerUrl: URL,
+  issuerMetadata: Readonly<Record<string, unknown>>,
+): ReadonlyArray<string> {
+  const hosts = new Set<string>([issuerUrl.host]);
+  for (const field of ISSUER_METADATA_URI_FIELDS) {
+    const value = issuerMetadata[field];
+    if (typeof value !== "string" || !isHttps(value)) continue;
+    try {
+      hosts.add(new URL(value).host);
+    } catch {
+      /* Ignore unparseable metadata URIs. */
+    }
+    if (hosts.size >= 16) break;
+  }
+  return Array.from(hosts);
+}
+
+function isAllowedVerificationUri(value: string, allowedHosts: ReadonlyArray<string>): boolean {
+  if (value.length === 0 || value.length > 2_048 || !isHttps(value)) return false;
+  try {
+    return allowedHosts.includes(new URL(value).host);
+  } catch {
+    return false;
+  }
+}
+
+function sameHttpsOrigin(first: string, second: string): boolean {
+  try {
+    const a = new URL(first);
+    const b = new URL(second);
+    return a.protocol === "https:" && b.protocol === "https:" && a.origin === b.origin;
+  } catch {
+    return false;
+  }
+}
+
+function relayRetryMessage(
+  reason: "invalid-callback" | "state-mismatch" | "issuer-mismatch",
+): string {
+  if (reason === "state-mismatch")
+    return "That callback address did not match this sign-in attempt. Copy the full address from your browser and try again.";
+  if (reason === "issuer-mismatch")
+    return "That callback address named a different authorization server. Check the address and try again.";
+  return "That address was not this sign-in's callback URL. Copy the full localhost address from your browser and try again.";
 }
 
 function refused(

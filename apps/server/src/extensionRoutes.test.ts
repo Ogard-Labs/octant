@@ -1822,6 +1822,115 @@ describe("signing in to a hosted server from Settings", () => {
       (await handler(request("/api/extensions/sign-in", { kind: "poll", ...target })))?.status,
     ).toBe(400);
   });
+
+  it("admits POST /api/extensions/mcp-sign-in/relay only for a person-paired device and passes its binding on sign-in", async () => {
+    const attemptId = "55000000-0000-4000-8000-000000000099";
+    const relaySignIn = {
+      ...signIn,
+      begin: vi.fn(async () => ({
+        kind: "awaiting-consent" as const,
+        attemptId,
+        flow: "relay" as const,
+        relayable: true,
+        authorizationUrl: "https://auth.example/authorize?state=abc",
+        expiresAt: "2026-11-20T12:00:00.000Z",
+      })),
+      relay: vi.fn(async () => ({ kind: "signed-in" as const, issuer: "auth.example" })),
+    };
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      mcpServerSignIn: relaySignIn as never,
+      now: () => now,
+    });
+
+    // Person-paired device begins with device binding and completes via relay.
+    const begun = await handler(
+      pairedDeviceRequest("/api/extensions/sign-in", { kind: "begin", ...target }, "host-person"),
+    );
+    expect(begun?.status).toBe(200);
+    expect(relaySignIn.begin).toHaveBeenCalledWith(
+      extensionId,
+      "mcp-docs",
+      "person-paired-device",
+      expect.objectContaining({ kind: "remote-device", deviceId: pairedDeviceId }),
+      {
+        deviceId: pairedDeviceId,
+        sessionId: "55000000-0000-4000-8000-000000000002",
+        credentialGeneration: 1,
+      },
+    );
+
+    const relayBody = {
+      attemptId,
+      callbackUrl: "http://127.0.0.1:43125/oauth/callback?code=abc&state=xyz",
+    };
+    const relayed = await handler(
+      pairedDeviceRequest("/api/extensions/mcp-sign-in/relay", relayBody, "host-person"),
+    );
+    expect(relayed?.status).toBe(200);
+    expect(await relayed?.json()).toEqual({ kind: "signed-in", issuer: "auth.example" });
+    expect(relaySignIn.relay).toHaveBeenCalledWith({
+      attemptId,
+      callbackUrl: relayBody.callbackUrl,
+      principalKind: "person-paired-device",
+      device: {
+        deviceId: pairedDeviceId,
+        sessionId: "55000000-0000-4000-8000-000000000002",
+        credentialGeneration: 1,
+      },
+      actor: expect.objectContaining({ kind: "remote-device", deviceId: pairedDeviceId }),
+    });
+
+    relaySignIn.relay.mockClear();
+
+    // Hub-introduced, restricted/unproved, agent-grant, local window, and unauthenticated callers are all refused 401.
+    const agentGrantRequest = new Request("http://127.0.0.1/api/extensions/mcp-sign-in/relay", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(relayBody),
+    });
+    bindPrincipalRouteContext(agentGrantRequest, {
+      principal: {
+        kind: "remote-device",
+        hostId: "local",
+        deviceId: pairedDeviceId,
+        credentialGeneration: 1,
+        origin: "octant-agent-access",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "55000000-0000-4000-8000-000000000002",
+        admittedBy: "host-person",
+      } as never,
+      scopeId: pairedDeviceId as never,
+    });
+    for (const refusedRequest of [
+      pairedDeviceRequest("/api/extensions/mcp-sign-in/relay", relayBody, "hub-roster"),
+      pairedDeviceRequest("/api/extensions/mcp-sign-in/relay", relayBody),
+      agentGrantRequest,
+      request("/api/extensions/mcp-sign-in/relay", relayBody),
+      request("/api/extensions/mcp-sign-in/relay", relayBody, {
+        "x-octant-window-capability": "wrong",
+      }),
+    ]) {
+      expect((await handler(refusedRequest))?.status).toBe(401);
+    }
+    expect(relaySignIn.relay).not.toHaveBeenCalled();
+
+    // Malformed body or excess field returns 400 without calling the service.
+    expect(
+      (
+        await handler(
+          pairedDeviceRequest(
+            "/api/extensions/mcp-sign-in/relay",
+            { ...relayBody, verifier: "forbidden" },
+            "host-person",
+          ),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(relaySignIn.relay).not.toHaveBeenCalled();
+  });
 });
 
 describe("server connection status in Settings", () => {

@@ -635,6 +635,32 @@
   overflow-wrap: anywhere;
 }
 
+.mcp-sign-in__code {
+  font-family: var(--oct-font-mono);
+  font-weight: var(--oct-weight-medium);
+  color: var(--oct-fg);
+  letter-spacing: 0.04em;
+}
+
+.mcp-sign-in__relay {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.mcp-sign-in__relay-input {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.mcp-sign-in__relay-error {
+  flex-basis: 100%;
+  color: var(--oct-danger);
+  font-size: var(--oct-text-xs);
+}
+
 /* The Installed / Marketplace / Connectors toggle drops under the title when
    both do not fit: at 390px "Connectors" beside it ran 9px past the column. */
 .extensions-settings__section > .settings-section-head {

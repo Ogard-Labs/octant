@@ -13586,17 +13586,16 @@ retrying. No shared confidential secret ships in the app, and no hosted Octant
 confidential-client service is introduced. GitHub's PAT path remains available.
 A server that never asks for a sign-in is reported as such. The
 person's click on Sign in is the acknowledgment: there is no vendor terms
-text for a server they added themselves. A paired device starts, finishes
-and removes a sign-in as a local window does; the grant is still stored only
-in the host's credential broker (maintainer decision, 2026-11-12). Not built
-yet: today a paired device can read the state and nothing more, and a status
-read from a device returns the last known state of a pending attempt without
-polling the broker, since polling can finish the sign-in and store the grant.
-How a device finishes one is designed below. The release-boundary hold on a connector
+text for a server they added themselves. A paired device starts, finishes and removes a sign-in as a local window does;
+the grant is still stored only in the host's credential broker (maintainer
+decision, 2026-11-12; built under **Finishing a connector sign-in from a paired
+device** below). A restricted or hub-introduced device can read the last known
+state only without polling the broker, since polling can finish the sign-in and
+store the grant. The release-boundary hold on a connector
 marketplace was lifted by the maintainer on 2026-10-20; the start gates it set
 are met by this section and the rules above.
 
-**Finishing a connector sign-in from a paired device** (designed, not built;
+**Finishing a connector sign-in from a paired device** (built;
 maintainer request, 2026-11-18). The authorization server redirects to the
 exact loopback callback this host registered, which a phone's browser cannot
 reach: on the phone, `127.0.0.1` is the phone. A device the host's own person
@@ -15197,15 +15196,16 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   (the terminal as plain lines of output and a line to run), and answers
   every Work request a window can: the Plan block, a provider's tool
   approval, its questions and questionnaires, each with the version read and
-  a tool or plan approval behind the phone's own confirmation.
+  a tool or plan approval behind the phone's own confirmation. Built too:
+  finishing a connector sign-in from a paired browser or phone, by device
+  authorization where the issuer offers it and otherwise a one-time relay
+  bound to the device that began it
+  ([Finishing a connector sign-in from a paired device](#extensions-and-skills)).
   Designed, not built (maintainer request, 2026-11-18): the Browser's
   Take over and Hand back, `sign-in`, profile pages and saved flows, through
   a one-page lease carrying a closed input stream and person-only frames
   ([A paired device holds the page](design/browser-agent-tool.md#a-paired-device-holds-the-page),
   [what a device sees of a signed-in page](design/browser-profiles.md#what-a-paired-device-sees-of-a-signed-in-page));
-  finishing a connector sign-in, by device authorization where the issuer
-  offers it and otherwise a one-time relay bound to the device that began it
-  ([Finishing a connector sign-in from a paired device](#extensions-and-skills));
   and provider cloud sessions and server Projects beyond reading, whose
   records gain a versioned device principal
   ([Paired devices and cloud jobs](#provider-cloud-jobs),
