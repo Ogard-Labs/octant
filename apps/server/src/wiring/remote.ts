@@ -262,7 +262,7 @@ export type RemoteDependencies = {
     | "remoteDelegationHolder"
     | "threadStandingAnswers"
   > &
-  Pick<HarnessStateWiring, "nativeHarnessSessions"> &
+  Pick<HarnessStateWiring, "nativeHarnessSessions" | "serverAttachmentCleanup"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
   Pick<CodeWiring, "codeAttachments" | "codeProjectAccess" | "workAttachments"> &
@@ -368,6 +368,7 @@ export function wireRemote(deps: RemoteDependencies) {
     hubPushHandoffSlot,
     pairedMergeUnlockSlot,
     nativeHarnessSessions,
+    serverAttachmentCleanup,
     remoteDelegationHolder,
     threadStandingAnswers,
     canvasNetworkAccess,
@@ -2387,6 +2388,9 @@ export function wireRemote(deps: RemoteDependencies) {
         purgeChatAttachments: (id) => chatAttachmentStore.purgeThread(decodeChatThreadId(id)),
         purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),
         purgeCodeAttachments: (id) => codeAttachments.purgeThread(decodeCodeThreadId(id)),
+        purgeServerAttachments: async (scope) => {
+          await serverAttachmentCleanup.removeForThreadScope(scope);
+        },
         purgeGeneratedImages: async (id) => {
           try {
             await generatedImageStore.purgeScope(decodeImageGenerationScopeId(id));

@@ -312,7 +312,10 @@ import {
   ShieldServerSetPayload,
 } from "@octant/contracts/shield-servers";
 import {
+  SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES,
   SERVER_PROJECTS_EVENT_NAMES,
+  ServerAttachmentCleanupPendingPayload,
+  ServerAttachmentCleanupSettledPayload,
   ServerProjectBoundPayload,
   ServerProjectRemovedPayload,
   ServerProjectRenamedPayload,
@@ -714,6 +717,16 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged,
       1,
       ServerWorkDeveloperToolsChangedPayload,
+    )
+    .register(
+      SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending,
+      1,
+      ServerAttachmentCleanupPendingPayload,
+    )
+    .register(
+      SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.settled,
+      1,
+      ServerAttachmentCleanupSettledPayload,
     )
     .register(CLOUD_MACHINES_EVENT_NAMES.creationRequested, 1, CloudMachineCreationRequestedPayload)
     .register(CLOUD_MACHINES_EVENT_NAMES.created, 1, CloudMachineCreatedPayload)

@@ -21,6 +21,7 @@ import {
   CODE_DEBUG_EGRESS_AGGREGATE,
   CODE_DEBUG_SESSION_AGGREGATE,
 } from "@octant/contracts/code-debug";
+import { SERVER_ATTACHMENT_CLEANUP_AGGREGATE } from "@octant/contracts/server-projects";
 import { purgeAgentRunSubjectContent } from "./agentRunContentStore";
 import { purgeThreadContent } from "./chatProjection";
 import { purgeContextCompactions, purgeContextSubjectContent } from "./contextProjection";
@@ -244,11 +245,15 @@ const RUN_LINK_PATHS = [
 // Observed: it did, the run's head went with it, and the run's later purge
 // event restarted at version 1, below the version the projection had reached,
 // so the projection skipped it and kept listing the run.
+// An owed remote attachment removal names the purged threadId, and must
+// outlive the thread's erasure until the server is reached again and the
+// remote folder is deleted.
 const RETAINED_AGGREGATE_TYPES = new Set<string>([
   THREAD_RETENTION_AGGREGATE,
   "context-ledger",
   TOOL_EGRESS_PROJECT_AGGREGATE,
   BENCHMARK_RUN_AGGREGATE_TYPE,
+  SERVER_ATTACHMENT_CLEANUP_AGGREGATE,
 ]);
 
 const USAGE_EVENT_NAME = "context.usage-reconciled@1";

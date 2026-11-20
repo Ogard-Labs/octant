@@ -13,6 +13,7 @@ import { serverWorkBindingRevisionId } from "./serverWorkThreads";
 import { authenticateRoutePrincipal, boundPrincipalIsRestricted } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
+import type { ServerAddress } from "./serverConnection";
 import type {
   ServerProjectPrincipal,
   ServerProjectsChange,
@@ -27,10 +28,26 @@ export interface ServerProjectRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly store: Pick<
     ServerProjectStore,
-    "projects" | "bind" | "rename" | "remove" | "setActions" | "setDeveloperTools"
+    | "projects"
+    | "project"
+    | "addressOf"
+    | "bind"
+    | "rename"
+    | "remove"
+    | "setActions"
+    | "setDeveloperTools"
   >;
   /** The cloud machine behind a Project, when Octant created one for it. */
   readonly cloudMachineOf?: (projectId: string) => ServerProjectCloudMachine | undefined;
+  /**
+   * Removes remote attachment folders for a server Project that was just
+   * removed. Returns a notice naming the folder left on the server when the
+   * server could not be reached.
+   */
+  readonly removeProjectAttachments?: (input: {
+    readonly project: ServerProject;
+    readonly server: ServerAddress | undefined;
+  }) => Promise<string | undefined>;
   readonly now?: () => number;
 }
 
@@ -116,40 +133,54 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
     } catch {
       return failure("Server Project command is invalid.", 400, origin);
     }
-    const change: ServerProjectsChange =
-      command.kind === "set-server-work-developer-tools"
-        ? dependencies.store.setDeveloperTools({
-            projectId: String(command.projectId),
-            enabled: command.enabled,
-            principal,
-          })
-        : command.kind === "set-server-project-actions"
-          ? dependencies.store.setActions({
+    let notice: string | undefined;
+    let change: ServerProjectsChange;
+    if (command.kind === "remove-server-project") {
+      const projectId = String(command.projectId);
+      const existing = dependencies.store.project(projectId);
+      const address = existing === undefined ? undefined : dependencies.store.addressOf(projectId);
+      change = dependencies.store.remove({ projectId, principal });
+      if (change.kind === "changed" && existing !== undefined) {
+        notice = await dependencies.removeProjectAttachments?.({
+          project: existing,
+          server: address?.kind === "address" ? address.server : undefined,
+        });
+      }
+    } else {
+      change =
+        command.kind === "set-server-work-developer-tools"
+          ? dependencies.store.setDeveloperTools({
               projectId: String(command.projectId),
-              actions: command.actions,
-              expectedVersion: command.expectedVersion,
+              enabled: command.enabled,
               principal,
             })
-          : command.kind === "bind-server-project"
-            ? await dependencies.store.bind({
-                name: command.name,
-                serverId: String(command.serverId),
-                folder: command.folder,
-                mode: command.mode,
+          : command.kind === "set-server-project-actions"
+            ? dependencies.store.setActions({
+                projectId: String(command.projectId),
+                actions: command.actions,
+                expectedVersion: command.expectedVersion,
                 principal,
               })
-            : command.kind === "rename-server-project"
-              ? dependencies.store.rename({
+            : command.kind === "bind-server-project"
+              ? await dependencies.store.bind({
+                  name: command.name,
+                  serverId: String(command.serverId),
+                  folder: command.folder,
+                  mode: command.mode,
+                  principal,
+                })
+              : dependencies.store.rename({
                   projectId: String(command.projectId),
                   name: command.name,
                   principal,
-                })
-              : dependencies.store.remove({ projectId: String(command.projectId), principal });
+                });
+    }
     const result: ServerProjectsCommandResult =
       change.kind === "changed"
         ? {
             kind: "server-projects-updated",
             view: catalogView(dependencies.store.projects(), dependencies.cloudMachineOf),
+            ...(notice === undefined ? {} : { notice }),
           }
         : {
             kind: "server-projects-refused",
