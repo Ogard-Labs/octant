@@ -163,6 +163,8 @@ describe("ACP protocol boundary", () => {
               name: "Model",
               type: "select",
             },
+            // A toggle Octant never sets is left out instead of failing the reply.
+            { type: "boolean", id: "web_search", name: "Web search", currentValue: true },
           ],
           models: {
             availableModels: [
