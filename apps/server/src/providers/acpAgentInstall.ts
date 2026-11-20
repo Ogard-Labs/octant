@@ -7,6 +7,11 @@
  * builds off, or an archive downloaded over HTTPS from the URL the listing
  * names and checked against its checksum when the registry lists one. A local
  * agent's install only checks that the person's executable is on disk.
+ *
+ * When the person later clicks Trust, `runAcpAgentInstallScripts` runs a
+ * package's deferred install scripts once for that install: natively outside
+ * Strict, and inside Octant's sandbox with writes limited to the agent's
+ * install folder under Strict.
  */
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -14,6 +19,7 @@ import { constants, createWriteStream } from "node:fs";
 import {
   access,
   chmod,
+  lstat,
   mkdir,
   readdir,
   readFile,
@@ -22,9 +28,18 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
-import { delimiter, isAbsolute, join, normalize, sep } from "node:path";
-import type { AcpAgentInstallIntegrity, AddedAcpAgentConfiguration } from "@octant/contracts";
+import { delimiter, dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
+import type {
+  AcpAgentInstallIntegrity,
+  AcpAgentInstallScriptsFailureReason,
+  AddedAcpAgentConfiguration,
+} from "@octant/contracts";
 import type { AcpRegistryAgent } from "@octant/plugin-host/acp-agents";
+import {
+  makeProcessConfinementLive,
+  ProcessConfinementError,
+  type ProcessConfinementPort,
+} from "../process/seatbeltProfile";
 
 /** Why an install put nothing on disk. Each carries Octant's own sentence. */
 export type AcpAgentInstallRefusalReason =
@@ -46,10 +61,26 @@ export type AcpAgentInstallResult =
       readonly status: "installed";
       readonly executable: string;
       readonly integrity: AcpAgentInstallIntegrity;
+      readonly hasInstallScripts?: boolean;
     }
   | {
       readonly status: "refused";
       readonly reason: AcpAgentInstallRefusalReason;
+      readonly message: string;
+    };
+
+export type AcpAgentInstallScriptsResult =
+  | { readonly status: "not-needed" }
+  | {
+      readonly status: "completed";
+      readonly sandboxed: boolean;
+      readonly completedAt: string;
+    }
+  | {
+      readonly status: "failed";
+      readonly sandboxed: boolean;
+      readonly completedAt: string;
+      readonly reason: AcpAgentInstallScriptsFailureReason;
       readonly message: string;
     };
 
@@ -64,15 +95,21 @@ export interface AcpAgentInstallPorts {
       readonly env: Readonly<Record<string, string>>;
       readonly timeoutMs: number;
     },
-  ) => Promise<{ readonly exitCode: number | null }>;
+  ) => Promise<{ readonly exitCode: number | null; readonly timedOut?: boolean }>;
   /** An executable found on the host's PATH, as an absolute path. */
   readonly findExecutable: (name: string) => Promise<string | undefined>;
   /** The Marketplace fetches switch: with it off, nothing is downloaded. */
   readonly fetchesAllowed: () => boolean;
+  /** Confinement launcher used when Strict is on during Trust install-script runs. */
+  readonly confinement?: ProcessConfinementPort;
+  readonly clock?: () => string;
 }
 
 export const MAX_ACP_AGENT_ARCHIVE_BYTES = 1024 * 1024 * 1024;
 const PACKAGE_MANAGER_TIMEOUT_MS = 10 * 60 * 1000;
+const PROCESS_GROUP_KILL_GRACE_MS = 2_000;
+const MAX_SCANNED_NPM_PACKAGES = 2_000;
+const NPM_INSTALL_LIFECYCLE_SCRIPTS = ["preinstall", "install", "postinstall"] as const;
 
 const refused = (reason: AcpAgentInstallRefusalReason, message: string): AcpAgentInstallResult => ({
   status: "refused",
@@ -318,9 +355,10 @@ async function installNpmPackage(
   if (binName === undefined)
     return refused("executable-missing", "The package names no executable.");
   const executable = await executableInside(destination, join("node_modules", ".bin", binName));
-  return executable === undefined
-    ? refused("executable-missing", "The package names no executable.")
-    : { status: "installed", executable, integrity: "package-manager" };
+  if (executable === undefined)
+    return refused("executable-missing", "The package names no executable.");
+  const hasInstallScripts = await detectNpmInstallScripts(destination);
+  return { status: "installed", executable, integrity: "package-manager", hasInstallScripts };
 }
 
 async function installUvPackage(
@@ -354,7 +392,326 @@ async function installUvPackage(
   const executable = await executableInside(destination, join("bin", name));
   return executable === undefined
     ? refused("executable-missing", "The package names no executable.")
-    : { status: "installed", executable, integrity: "package-manager" };
+    : { status: "installed", executable, integrity: "package-manager", hasInstallScripts: false };
+}
+
+/**
+ * Whether an installed npm prefix holds any package that declares lifecycle
+ * install scripts (`preinstall`, `install`, `postinstall`) or a native
+ * `binding.gyp` that `npm rebuild` would execute. Only directories resolving
+ * inside `installFolder` are inspected.
+ */
+export async function detectNpmInstallScripts(installFolder: string): Promise<boolean> {
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = await realpath(installFolder);
+  } catch {
+    return false;
+  }
+  const queue: string[] = [join(canonicalRoot, "node_modules")];
+  const visited = new Set<string>();
+  let scanned = 0;
+  while (queue.length > 0 && scanned < MAX_SCANNED_NPM_PACKAGES) {
+    const modulesDir = queue.shift();
+    if (modulesDir === undefined) break;
+    let entries: ReadonlyArray<string>;
+    try {
+      entries = await readdir(modulesDir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (scanned >= MAX_SCANNED_NPM_PACKAGES) break;
+      if (entry.startsWith(".")) continue;
+      const entryPath = join(modulesDir, entry);
+      if (entry.startsWith("@")) {
+        let scoped: ReadonlyArray<string>;
+        try {
+          scoped = await readdir(entryPath);
+        } catch {
+          continue;
+        }
+        for (const name of scoped) {
+          if (scanned >= MAX_SCANNED_NPM_PACKAGES) break;
+          if (name.startsWith(".")) continue;
+          const result = await inspectNpmPackageDirectory(
+            join(entryPath, name),
+            canonicalRoot,
+            visited,
+            queue,
+          );
+          scanned += 1;
+          if (result) return true;
+        }
+        continue;
+      }
+      const result = await inspectNpmPackageDirectory(entryPath, canonicalRoot, visited, queue);
+      scanned += 1;
+      if (result) return true;
+    }
+  }
+  return false;
+}
+
+async function inspectNpmPackageDirectory(
+  directory: string,
+  canonicalRoot: string,
+  visited: Set<string>,
+  queue: string[],
+): Promise<boolean> {
+  let resolved: string;
+  try {
+    if ((await lstat(directory)).isSymbolicLink()) return false;
+    resolved = await realpath(directory);
+    if (!resolved.startsWith(`${canonicalRoot}${sep}`)) return false;
+    if (!(await stat(resolved)).isDirectory()) return false;
+  } catch {
+    return false;
+  }
+  if (visited.has(resolved)) return false;
+  visited.add(resolved);
+  try {
+    const parsed = JSON.parse(await readFile(join(resolved, "package.json"), "utf8")) as {
+      readonly scripts?: unknown;
+    };
+    if (typeof parsed.scripts === "object" && parsed.scripts !== null) {
+      const scripts = parsed.scripts as Readonly<Record<string, unknown>>;
+      for (const name of NPM_INSTALL_LIFECYCLE_SCRIPTS) {
+        const value = scripts[name];
+        if (typeof value === "string" && value.trim().length > 0) return true;
+      }
+    }
+  } catch {
+    // Missing or unreadable package.json contributes no install script.
+  }
+  try {
+    if ((await stat(join(resolved, "binding.gyp"))).isFile()) return true;
+  } catch {
+    // No native addon build file.
+  }
+  queue.push(join(resolved, "node_modules"));
+  return false;
+}
+
+/**
+ * Resolves the managed package install folder for an added npm agent under
+ * `root` (`<root>/<version>-<suffix>`), refusing anything outside `root`.
+ */
+async function resolveAcpAgentPackageInstallFolder(
+  root: string,
+  executable: string,
+): Promise<string | undefined> {
+  try {
+    const canonicalRoot = await realpath(root);
+    // An npm install places its executable at `<folder>/node_modules/.bin/<name>`.
+    const candidate = dirname(dirname(dirname(executable)));
+    const canonicalFolder = await realpath(candidate);
+    if (dirname(canonicalFolder) !== canonicalRoot) return undefined;
+    if (!(await stat(canonicalFolder)).isDirectory()) return undefined;
+    return canonicalFolder;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether an untrusted package ACP agent still has deferred install scripts
+ * that will run when the person clicks Trust.
+ */
+export async function hasPendingAcpAgentInstallScripts(input: {
+  readonly configuration: AddedAcpAgentConfiguration;
+  readonly root: string;
+}): Promise<boolean> {
+  const { configuration } = input;
+  if (configuration.source.kind !== "registry") return false;
+  if (configuration.source.distribution !== "npx" && configuration.source.distribution !== "uvx") {
+    return false;
+  }
+  const install = configuration.install;
+  if (install === undefined || configuration.trusted || install.installScriptsCompleted === true) {
+    return false;
+  }
+  if (install.hasInstallScripts === true) return true;
+  if (install.hasInstallScripts === false || configuration.source.distribution === "uvx") {
+    return false;
+  }
+  const folder = await resolveAcpAgentPackageInstallFolder(input.root, install.executable);
+  return folder === undefined ? false : detectNpmInstallScripts(folder);
+}
+
+/**
+ * Runs a package ACP agent's deferred install scripts when the person clicks
+ * Trust. Non-package agents, packages without install scripts, and installs
+ * whose scripts already completed return `{ status: "not-needed" }`. Outside
+ * Strict scripts run natively with no Octant sandbox; under Strict they run
+ * inside Octant's sandbox with writes limited to the agent's install folder.
+ */
+export async function runAcpAgentInstallScripts(
+  input: {
+    readonly configuration: AddedAcpAgentConfiguration;
+    readonly root: string;
+    readonly strict: boolean;
+  },
+  ports: Pick<AcpAgentInstallPorts, "findExecutable" | "run" | "confinement" | "clock">,
+): Promise<AcpAgentInstallScriptsResult> {
+  const { configuration } = input;
+  if (configuration.source.kind !== "registry") return { status: "not-needed" };
+  if (configuration.source.distribution !== "npx" && configuration.source.distribution !== "uvx") {
+    return { status: "not-needed" };
+  }
+  const install = configuration.install;
+  if (install === undefined || install.installScriptsCompleted === true) {
+    return { status: "not-needed" };
+  }
+  // uv installs published wheels only (`--no-build`), which carry no install scripts.
+  if (configuration.source.distribution === "uvx" || install.hasInstallScripts === false) {
+    return { status: "not-needed" };
+  }
+  const completedAt = () => (ports.clock ?? (() => new Date().toISOString()))();
+  const failed = (
+    reason: AcpAgentInstallScriptsFailureReason,
+    message: string,
+  ): AcpAgentInstallScriptsResult => ({
+    status: "failed",
+    sandboxed: input.strict,
+    completedAt: completedAt(),
+    reason,
+    message,
+  });
+
+  const installFolder = await resolveAcpAgentPackageInstallFolder(input.root, install.executable);
+  if (installFolder === undefined) {
+    return failed(
+      "invalid-install-folder",
+      "The agent's install folder is missing or invalid. Reinstall the agent and try again.",
+    );
+  }
+  if (!(await detectNpmInstallScripts(installFolder))) {
+    return { status: "not-needed" };
+  }
+  const npm = await ports.findExecutable("npm");
+  if (npm === undefined) {
+    return failed(
+      "package-manager-missing",
+      "npm is not on this host, so Octant cannot run this agent's install script.",
+    );
+  }
+
+  const npmArgs = ["rebuild", "--prefix", installFolder, "--ignore-scripts=false"];
+  let runResult: { readonly exitCode: number | null; readonly timedOut?: boolean };
+  if (!input.strict) {
+    runResult = await ports.run(npm, npmArgs, {
+      cwd: installFolder,
+      env: packageManagerEnvironment({ npm_config_ignore_scripts: "false" }),
+      timeoutMs: PACKAGE_MANAGER_TIMEOUT_MS,
+    });
+  } else {
+    const tempDir = join(installFolder, ".octant-install-tmp");
+    const cacheDir = join(installFolder, ".octant-npm-cache");
+    try {
+      await mkdir(tempDir, { recursive: true, mode: 0o700 });
+      await mkdir(cacheDir, { recursive: true, mode: 0o700 });
+    } catch {
+      return failed(
+        "invalid-install-folder",
+        "Octant could not prepare the agent's install folder for its install script.",
+      );
+    }
+    try {
+      const baseEnv = packageManagerEnvironment({
+        HOME: tempDir,
+        TMPDIR: tempDir,
+        npm_config_cache: cacheDir,
+        npm_config_ignore_scripts: "false",
+      });
+      const node = await ports.findExecutable("node");
+      const readRoots = await toolchainReadRoots([installFolder, tempDir, cacheDir], [npm, node]);
+      const confinement = ports.confinement ?? makeProcessConfinementLive();
+      let launch: ReturnType<ProcessConfinementPort["prepare"]>;
+      try {
+        launch = confinement.prepare({
+          executable: npm,
+          args: npmArgs,
+          boundRoot: installFolder,
+          temporaryDirectory: tempDir,
+          networkEgress: "allow",
+          writeBoundRoot: true,
+          allowFileReadStar: true,
+          allowProcessExec: true,
+          allowProcessFork: true,
+          readRoots,
+          ...(baseEnv.PATH === undefined ? {} : { interpreterSearchPath: baseEnv.PATH }),
+        });
+      } catch (error) {
+        if (error instanceof ProcessConfinementError) {
+          return failed(
+            "sandbox-unavailable",
+            "Octant's sandbox is unavailable on this host, so the install script was not run under Strict.",
+          );
+        }
+        throw error;
+      }
+      runResult = await ports.run(launch.command, launch.args, {
+        cwd: installFolder,
+        env: { ...baseEnv, ...launch.environment },
+        timeoutMs: PACKAGE_MANAGER_TIMEOUT_MS,
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+      await rm(cacheDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  if (runResult.timedOut === true) {
+    return failed("timed-out", "The package's install script timed out before finishing.");
+  }
+  if (runResult.exitCode !== 0) {
+    return failed(
+      "script-failed",
+      input.strict
+        ? "The package's install script failed inside Octant's sandbox."
+        : "The package's install script failed.",
+    );
+  }
+  const executableRelative = relative(installFolder, install.executable);
+  const verified = await executableInside(installFolder, executableRelative);
+  if (verified === undefined) {
+    return failed(
+      "executable-missing",
+      "The package's executable is missing after its install script ran.",
+    );
+  }
+  return {
+    status: "completed",
+    sandboxed: input.strict,
+    completedAt: completedAt(),
+  };
+}
+
+/** Collects read-only toolchain roots so npm and node remain readable under Strict confinement. */
+async function toolchainReadRoots(
+  baseRoots: ReadonlyArray<string>,
+  executables: ReadonlyArray<string | undefined>,
+): Promise<ReadonlyArray<string>> {
+  const roots = new Set<string>(baseRoots);
+  const addPathAndParents = (path: string, levels: number): void => {
+    let current = path;
+    for (let index = 0; index < levels; index += 1) {
+      current = dirname(current);
+      if (isAbsolute(current) && current !== "/") roots.add(current);
+    }
+  };
+  for (const executable of executables) {
+    if (executable === undefined || !isAbsolute(executable)) continue;
+    addPathAndParents(executable, 2);
+    try {
+      const resolved = await realpath(executable);
+      addPathAndParents(resolved, 3);
+    } catch {
+      // Unresolvable symlink target; keep the configured path's ancestors only.
+    }
+  }
+  return [...roots];
 }
 
 /** A package's executable: its only bin, or the one named for the package. */
@@ -425,13 +782,28 @@ function capture(command: string, args: ReadonlyArray<string>): Promise<string |
   });
 }
 
+/** Terminates a spawned package-manager process and any children in its process group. */
+function terminateProcessGroup(pid: number | undefined, signal: NodeJS.Signals): void {
+  if (pid === undefined) return;
+  try {
+    if (process.platform !== "win32") process.kill(-pid, signal);
+    else process.kill(pid, signal);
+  } catch {
+    // Process or group has already exited.
+  }
+}
+
 /** The live ports: the host's fetch, PATH and process spawning. */
 export function makeAcpAgentInstallPorts(options: {
   readonly fetchesAllowed: () => boolean;
+  readonly confinement?: ProcessConfinementPort;
+  readonly clock?: () => string;
 }): AcpAgentInstallPorts {
   return {
     fetch: (url, init) => fetch(url, init),
     fetchesAllowed: options.fetchesAllowed,
+    ...(options.confinement === undefined ? {} : { confinement: options.confinement }),
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
     findExecutable: async (name) => {
       for (const directory of (process.env.PATH ?? "").split(delimiter)) {
         if (!isAbsolute(directory)) continue;
@@ -440,21 +812,36 @@ export function makeAcpAgentInstallPorts(options: {
       }
       return undefined;
     },
-    run: (executable, args, options) =>
+    run: (executable, args, runOptions) =>
       new Promise((resolve) => {
+        const detached = process.platform !== "win32";
         const child = spawn(executable, [...args], {
-          cwd: options.cwd,
-          env: options.env,
+          cwd: runOptions.cwd,
+          env: runOptions.env,
           stdio: "ignore",
+          detached,
         });
-        const timer = setTimeout(() => child.kill("SIGTERM"), options.timeoutMs);
-        child.once("error", () => {
+        let timedOut = false;
+        let killTimer: ReturnType<typeof setTimeout> | undefined;
+        const timer = setTimeout(() => {
+          timedOut = true;
+          terminateProcessGroup(child.pid, "SIGTERM");
+          killTimer = setTimeout(() => {
+            terminateProcessGroup(child.pid, "SIGKILL");
+          }, PROCESS_GROUP_KILL_GRACE_MS);
+          killTimer.unref();
+        }, runOptions.timeoutMs);
+        const clearTimers = () => {
           clearTimeout(timer);
-          resolve({ exitCode: null });
+          if (killTimer !== undefined) clearTimeout(killTimer);
+        };
+        child.once("error", () => {
+          clearTimers();
+          resolve({ exitCode: null, ...(timedOut ? { timedOut: true } : {}) });
         });
         child.once("close", (code) => {
-          clearTimeout(timer);
-          resolve({ exitCode: code });
+          clearTimers();
+          resolve({ exitCode: code, ...(timedOut ? { timedOut: true } : {}) });
         });
       }),
   };

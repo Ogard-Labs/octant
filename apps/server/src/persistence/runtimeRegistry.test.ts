@@ -1215,6 +1215,18 @@ function providerEvents(): ReadonlyArray<readonly [string, Record<string, unknow
       "provider.defaults-updated@1",
       { defaults: { permissionPersistence: "project-default", version: 1 } },
     ],
+    [
+      "provider.acp-agent-install-scripts-ran@1",
+      {
+        instanceId: instance.id,
+        registryId: "factory-droid",
+        version: "1.12.1",
+        distribution: "npx",
+        outcome: "succeeded",
+        sandboxed: true,
+        completedAt: "2026-07-14T10:00:00.000Z",
+      },
+    ],
   ];
 }
 

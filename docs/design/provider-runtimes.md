@@ -2578,7 +2578,20 @@ The host decides every step:
   run. See the rationale below for how each distribution is checked.
 - **Trust.** Shows what trusting grants and how the install vouched for the
   bytes; an unverified download is said plainly. Trust is refused before an
-  install, and a reinstall drops it.
+  install, and a reinstall drops it. When an installed npm package declares
+  deferred install scripts (`preinstall`, `install`, `postinstall`, or
+  `binding.gyp`) that have not yet completed for that install, clicking
+  **Trust** runs them (`npm rebuild --prefix <folder> --ignore-scripts=false`)
+  with no further prompt (maintainer decision, 2026-11-19): natively outside
+  Strict, and inside Octant's sandbox with writes limited to the agent's own
+  install folder under Strict. Each run is journaled as
+  `provider.acp-agent-install-scripts-ran@1` with its outcome, actor, timestamp
+  and whether it was sandboxed. A failed script journals the failure, returns a
+  clear failure value and leaves the agent untrusted so the person can retry or
+  reinstall; non-package agents and packages with no install script stay clean
+  no-ops. Before Trust, if Connection Check fails because a package's install
+  script has not run yet, Octant reports: `"This package needs its install
+script, which runs when you trust it."`
 - **Enable.** Refused until the agent is installed and trusted
   (`acpAgentEnableRefusal`). Stopping trust later leaves the agent on; its
   next launch is held as an untrusted one.
@@ -2617,14 +2630,18 @@ level, and the Full access "unverified" rule has nothing to offer it. An
 agent whose session lists no model has nothing to select and cannot start a
 thread.
 
-Rationale (lead decision, 2026-11-18), install integrity: an `npx` or
-`uvx` distribution installs the exact pinned release with the package
-manager into Octant's managed folder for that agent
-(`<data>/acp-agent-installs/<instance>`), relying on the package manager's
-own lockfile and integrity checks; npm runs with `--ignore-scripts` and uv
-with `--no-build`, so no package code runs at install time. A package that
-needs its install script to fetch its real binary then fails its
-Connection Check instead. A binary distribution downloads only over HTTPS
+Rationale (lead decision, 2026-11-18; Trust install-script rule, maintainer
+decision, 2026-11-19), install integrity: an `npx` or `uvx` distribution
+installs the exact pinned release with the package manager into Octant's
+managed folder for that agent (`<data>/acp-agent-installs/<instance>`), relying
+on the package manager's own lockfile and integrity checks; npm runs with
+`--ignore-scripts` and uv with `--no-build`, so no package code runs at install
+time. Before Trust, a package that needs its install script to fetch its real
+binary fails Connection Check with `"This package needs its install script,
+which runs when you trust it."` Clicking **Trust** then runs its install
+scripts with no further prompt (natively outside Strict, and inside Octant's
+sandbox with writes limited to the agent's install folder under Strict) and
+journals the run. A binary distribution downloads only over HTTPS
 (a redirect included) from the URL the listing names, capped at 1 GiB. The
 registry schema's `sha256` is optional: an archive that carries one is
 checked and refused on a mismatch, leaving nothing on disk; one without is
