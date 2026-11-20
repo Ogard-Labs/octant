@@ -1,5 +1,7 @@
 import {
   BENCHMARK_ROUTE_PATHS,
+  BenchmarkAdviceResponse,
+  type BenchmarkAdviceRequest,
   BenchmarkCellRateResponse,
   BenchmarkHistoryResponse,
   BenchmarkRunExportResponse,
@@ -33,6 +35,7 @@ export interface BenchmarksClientOptions {
 }
 
 export interface BenchmarksClient {
+  advice(request: BenchmarkAdviceRequest): Promise<BenchmarkAdviceResponse>;
   listSuites(): Promise<BenchmarkSuitesListResponse>;
   saveSuite(request: BenchmarkSuiteSaveRequest): Promise<BenchmarkSuiteSaveResponse>;
   deleteSuite(request: BenchmarkSuiteDeleteRequest): Promise<BenchmarkSuiteDeleteResponse>;
@@ -112,6 +115,7 @@ export function createBenchmarksClient(options: BenchmarksClientOptions): Benchm
   }
 
   return {
+    advice: (request) => call("/api/benchmarks/advice", request, BenchmarkAdviceResponse),
     listSuites: () => call(BENCHMARK_ROUTE_PATHS.suitesList, {}, BenchmarkSuitesListResponse),
     saveSuite: (request) =>
       call("/api/benchmarks/suites/save", request, BenchmarkSuiteSaveResponse, SAVE_TIMEOUT_MS),

@@ -3,6 +3,7 @@ import { principalActsAsHostPerson } from "../clientPrincipal";
 import { eventActorForPrincipal } from "../principalEventActor";
 import {
   BENCHMARK_ROUTE_PATHS,
+  decodeBenchmarkAdviceRequest,
   decodeBenchmarkCellRateRequest,
   decodeBenchmarkHistoryRequest,
   decodeBenchmarkRunExportRequest,
@@ -28,6 +29,7 @@ const HEADERS = "content-type, x-octant-window-capability";
 const MAX_BODY_BYTES = 8 * 1_048_576;
 
 const READ_PATHS: ReadonlySet<string> = new Set([
+  BENCHMARK_ROUTE_PATHS.advice,
   BENCHMARK_ROUTE_PATHS.suitesList,
   BENCHMARK_ROUTE_PATHS.runsList,
   BENCHMARK_ROUTE_PATHS.runsRead,
@@ -58,6 +60,7 @@ export interface BenchmarkRouteDependencies {
     | "cancelRun"
     | "purgeRun"
     | "rateCell"
+    | "advice"
   >;
   /** History and export reads; a host without them answers those two paths as unavailable. */
   readonly reports?: Pick<BenchmarkReports, "history" | "exportRun">;
@@ -130,6 +133,7 @@ export function createBenchmarkRouteHandler(
         actor,
         dependencies.service,
         dependencies.reports,
+        now(),
         origin,
         allowedOrigin,
       );
@@ -146,6 +150,7 @@ async function dispatch(
   actor: EventActor,
   service: BenchmarkRouteDependencies["service"],
   reports: BenchmarkRouteDependencies["reports"],
+  now: number,
   origin: string | null,
   allowedOrigin: string | null | undefined,
 ): Promise<Response> {
@@ -162,6 +167,12 @@ async function dispatch(
   };
   const invalid = () => failure("Benchmark request is invalid.", 400, origin, allowedOrigin);
   switch (path) {
+    case BENCHMARK_ROUTE_PATHS.advice: {
+      const request = parse(decodeBenchmarkAdviceRequest);
+      return request === undefined
+        ? invalid()
+        : json(service.advice(request, now), origin, allowedOrigin);
+    }
     case BENCHMARK_ROUTE_PATHS.suitesList: {
       return parse(decodeBenchmarkSuitesListRequest) === undefined
         ? invalid()

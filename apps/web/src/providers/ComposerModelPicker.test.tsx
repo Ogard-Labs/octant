@@ -1,6 +1,8 @@
 import { requestThreadControl } from "../composer/threadControlNavigation";
 import {
   decodeProviderInstance,
+  decodeBenchmarkAdviceResponse,
+  decodeProjectId,
   decodeProviderInstanceId,
   decodeProviderModelId,
   type ProviderInstance,
@@ -27,6 +29,7 @@ import {
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { ModelToolVerificationContext } from "./ModelToolVerificationContext";
+import { BenchmarkAdviceContext } from "../usage/benchmarks/BenchmarkAdviceContext";
 
 const providerA = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000a1");
 const providerB = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000a2");
@@ -37,6 +40,69 @@ const modelThree = decodeProviderModelId("model-three");
 describe("ComposerModelPicker", () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+
+  it("shows a better ranked model only for the matching Project and kind and dismisses per Project", async () => {
+    const user = userEvent.setup();
+    const first = decodeProjectId("80000000-0000-4000-8000-0000000000d1");
+    const second = decodeProjectId("80000000-0000-4000-8000-0000000000d2");
+    const model = {
+      providerInstanceId: providerA,
+      passRate: 1,
+      runAt: "2026-01-01T12:00:00.000Z",
+      stale: true,
+    };
+    const ranked = decodeBenchmarkAdviceResponse({
+      suites: [
+        {
+          suiteId: "80000000-0000-4000-8000-0000000000aa",
+          name: "Code review",
+          models: [
+            { ...model, modelId: modelTwo, costPerPass: 0.01 },
+            { ...model, modelId: modelOne, costPerPass: 0.03 },
+          ],
+        },
+      ],
+    });
+    const advice = vi.fn(
+      async (
+        request: Parameters<
+          NonNullable<React.ContextType<typeof BenchmarkAdviceContext>>["client"]["advice"]
+        >[0],
+      ) => ("kind" in request && request.kind === "code" ? ranked : { suites: [] }),
+    );
+    const context = { client: { listSuites: vi.fn(), advice }, projects: [] };
+    const onSelect = vi.fn();
+    const tree = (projectId: typeof first, kind: "work" | "code", modelId = modelOne) => (
+      <BenchmarkAdviceContext.Provider value={context}>
+        <ComposerModelPicker
+          ariaLabel="Thread model"
+          groups={groups()}
+          selectedProviderInstanceId={providerA}
+          selectedModelId={modelId}
+          onSelect={onSelect}
+          benchmarkScope={{ projectId, kind }}
+        />
+      </BenchmarkAdviceContext.Provider>
+    );
+    const view = render(tree(first, "work"));
+    await user.click(screen.getByRole("button", { name: "Thread model" }));
+    await waitFor(() => expect(advice).toHaveBeenCalledWith({ projectId: first, kind: "work" }));
+    expect(screen.queryByRole("button", { name: "Use model" })).not.toBeInTheDocument();
+    view.rerender(tree(first, "code"));
+    expect(await screen.findByText(/Code review.*2026-01-01.*Stale/)).toBeVisible();
+    expect(onSelect).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Use model" }));
+    expect(onSelect).toHaveBeenCalledWith({ providerInstanceId: providerA, modelId: modelTwo });
+    view.rerender(tree(first, "code", modelTwo));
+    expect(screen.queryByRole("button", { name: "Use model" })).not.toBeInTheDocument();
+    view.rerender(tree(first, "code"));
+    await user.click(screen.getByRole("button", { name: "Dismiss for this Project" }));
+    expect(screen.queryByRole("button", { name: "Use model" })).not.toBeInTheDocument();
+    view.rerender(tree(second, "code"));
+    expect(await screen.findByRole("button", { name: "Use model" })).toBeVisible();
+    view.rerender(tree(first, "code"));
+    expect(screen.queryByRole("button", { name: "Use model" })).not.toBeInTheDocument();
   });
 
   it("marks only a picker whose model cannot change as locked, so its name keeps its ink", () => {

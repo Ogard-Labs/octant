@@ -427,6 +427,7 @@ import {
 } from "./projects/serverProjectEntries";
 import { useProviderController } from "./providers/useProviderController";
 import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
+import { BenchmarkAdviceContext } from "./usage/benchmarks/BenchmarkAdviceContext";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
@@ -9628,7 +9629,16 @@ function LaunchedShell(
                                                                   <PaneDockToolsContext.Provider
                                                                     value={paneDockTools}
                                                                   >
-                                                                    {shell}
+                                                                    <BenchmarkAdviceContext.Provider
+                                                                      value={{
+                                                                        client:
+                                                                          launchedClients.benchmarksClient,
+                                                                        projects:
+                                                                          projectController.allProjects,
+                                                                      }}
+                                                                    >
+                                                                      {shell}
+                                                                    </BenchmarkAdviceContext.Provider>
                                                                   </PaneDockToolsContext.Provider>
                                                                 </QuestionnaireDraftsProvider>
                                                               </CodeDebugWindowProvider>

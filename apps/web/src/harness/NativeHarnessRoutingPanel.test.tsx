@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
+  decodeBenchmarkAdviceResponse,
+  decodeBenchmarkSuite,
   DEFAULT_NATIVE_HARNESS_ROUTING_SETTINGS,
   type NativeHarnessRoutingConfiguration,
   type NativeHarnessRoutingSettings,
@@ -12,6 +14,7 @@ import {
 import { buildModelPickerGroups } from "@octant/domain";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
+import { BenchmarkAdviceContext } from "../usage/benchmarks/BenchmarkAdviceContext";
 import {
   NativeHarnessRoutingPanel,
   type NativeHarnessProviderOption,
@@ -410,6 +413,109 @@ describe("NativeHarnessRoutingPanel roles", () => {
     expect(screen.getByRole("button", { name: "Scout model" })).toHaveTextContent(
       "Same as Builder",
     );
+  });
+
+  it("previews a selected suite without writing and reloads if accepting its ranking is stale", async () => {
+    const user = userEvent.setup();
+    const suite = decodeBenchmarkSuite({
+      suiteId: "10000000-0000-4000-8000-000000000111",
+      revision: 1,
+      name: "Review changes",
+      cases: [
+        {
+          caseId: "10000000-0000-4000-8000-000000000112",
+          kind: "prompt",
+          title: "Review",
+          prompt: "Review the changes",
+          checks: [],
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    });
+    const advice = vi.fn(async () =>
+      decodeBenchmarkAdviceResponse({
+        suites: [
+          {
+            suiteId: suite.suiteId,
+            name: suite.name,
+            models: [
+              {
+                modelId: "scribe-2-mini",
+                providerInstanceId: endpointA,
+                passRate: 1,
+                costPerPass: 0,
+                runAt: now,
+                stale: true,
+              },
+              {
+                modelId: "sonnet-5-5",
+                providerInstanceId: claudeId,
+                passRate: 1,
+                runAt: now,
+                stale: true,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    let reads = 0;
+    const initial = roles({ default: [candidate(endpointA, "scribe-2")] });
+    const elsewhere = roles({ default: [candidate(endpointB, "router-text")] });
+    const updateRouting = vi.fn(async () => ({
+      kind: "routing-refused",
+      reason: "stale-version",
+      message: "The routing table changed.",
+    }));
+    const { routing } = renderPanel({
+      routing: async () =>
+        reads++ === 0 ? settings(initial.configuration, 3) : settings(elsewhere.configuration, 4),
+      fixtures: [local, router, claude],
+      updateRouting,
+      wrap: (panel) => (
+        <BenchmarkAdviceContext.Provider
+          value={{
+            projects: [],
+            client: { listSuites: async () => ({ suites: [suite] }), advice },
+          }}
+        >
+          {panel}
+        </BenchmarkAdviceContext.Provider>
+      ),
+    });
+    await user.click(
+      await screen.findByRole("button", { name: "Suggest from my benchmarks for Builder" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Benchmark suggestions for Builder",
+    });
+    const accept = within(dialog).getByRole("button", { name: "Use these models" });
+    expect(accept).toBeDisabled();
+    await chooseSelectFieldOption(
+      user,
+      await within(dialog).findByRole("combobox", { name: "Benchmark suite" }),
+      suite.name,
+    );
+    expect(
+      await within(dialog).findByText(/Sonnet 5\.5.*2026-09-05.*Cost not reported.*Stale/i),
+    ).toBeVisible();
+    expect(within(dialog).queryByText(/scribe-2-mini/i)).not.toBeInTheDocument();
+    expect(advice).toHaveBeenCalledWith({ suiteId: suite.suiteId });
+    expect(updateRouting).not.toHaveBeenCalled();
+    await user.click(accept);
+    expect(updateRouting).toHaveBeenCalledWith({
+      expectedVersion: 3,
+      configuration: {
+        slots: [{ id: "default", candidates: [candidate(claudeId, "sonnet-5-5")] }],
+        jobSlots: [],
+      },
+    });
+    expect(
+      await screen.findByText("Changed elsewhere. Reloaded; make your change again."),
+    ).toBeVisible();
+    expect(routing).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: "Builder, main" })).toHaveTextContent("Router Text");
   });
 
   it("turns a role back to the Builder by removing its only model, and the advisor off", async () => {

@@ -3527,6 +3527,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   >
                     <ComposerModelPicker
                       threadId={String(thread.id)}
+                      benchmarkScope={
+                        thread.projectId === undefined
+                          ? undefined
+                          : { kind: "work", projectId: thread.projectId }
+                      }
                       ariaLabel="Provider and model"
                       disabled={providerChanging || creating}
                       locked={completionLocked}

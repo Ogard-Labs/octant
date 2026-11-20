@@ -1024,6 +1024,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   // cancelling, or purging a run are forwarded with the person-paired device
   // routes; the route refuses them for any other device session.
   ...[
+    "/api/benchmarks/advice",
     "/api/benchmarks/suites/list",
     "/api/benchmarks/runs/list",
     "/api/benchmarks/runs/read",
