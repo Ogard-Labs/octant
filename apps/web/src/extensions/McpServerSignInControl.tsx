@@ -37,6 +37,7 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
   const [busy, setBusy] = useState(false);
   const [relayInput, setRelayInput] = useState("");
   const [relayError, setRelayError] = useState<string | undefined>();
+  const [pollNonce, setPollNonce] = useState(0);
   const { client, extensionId, componentId } = props;
   const target = { extensionId: extensionId as never, componentId: componentId as never };
   const polling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -120,12 +121,14 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
         if (generation !== requestGeneration.current) return;
         if (result.kind === "retry") {
           setRelayError(result.message);
+          setPollNonce((count) => count + 1);
           return;
         }
         setView(result);
       } catch {
         if (generation !== requestGeneration.current) return;
         setRelayError("Could not send that callback address. Try again or cancel sign-in.");
+        setPollNonce((count) => count + 1);
       } finally {
         if (generation === requestGeneration.current) setBusy(false);
       }
@@ -178,7 +181,7 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
       void ask({ kind: "poll", ...target, attemptId }, false);
     }, props.pollIntervalMs ?? 2_000);
     return () => clearTimeout(polling.current);
-  }, [view, ask, props.pollIntervalMs]);
+  }, [view, pollNonce, ask, props.pollIntervalMs]);
 
   if (
     view === undefined ||

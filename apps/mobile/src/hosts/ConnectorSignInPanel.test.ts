@@ -211,4 +211,118 @@ describe("connector sign-in from the phone", () => {
       },
     ]);
   });
+
+  it("offers Check sign-in and Cancel sign-in recovery when status becomes unavailable", async () => {
+    const unavailable = {
+      kind: "status-unavailable",
+      message:
+        "Sign-in status is unavailable. Restore the credential broker, then check sign-in or cancel this attempt.",
+    };
+    const makeTransport = (onCheck: "signed-in" | "cancel"): MobileRemoteTransport => {
+      let statusCalls = 0;
+      return {
+        hostId: "host-1",
+        authenticatedFetch: (async (input) => {
+          if (input.path === "/api/extensions/connections") {
+            return Response.json({ servers: [HOSTED_CONNECTOR] });
+          }
+          const body = typeof input.body === "string" ? JSON.parse(input.body) : {};
+          if (body.kind === "status") {
+            statusCalls += 1;
+            return Response.json(
+              statusCalls === 1
+                ? unavailable
+                : onCheck === "signed-in"
+                  ? { kind: "signed-in", issuer: "auth.example" }
+                  : unavailable,
+            );
+          }
+          if (body.kind === "sign-out") return Response.json({ kind: "signed-out" });
+          return Response.json(unavailable);
+        }) as MobileRemoteTransport["authenticatedFetch"],
+      };
+    };
+
+    // Check sign-in recovers to signed-in.
+    const recoverContainer = await mount({
+      transport: makeTransport("signed-in"),
+      actsAsHostPerson: true,
+      pollIntervalMs: 60_000,
+    });
+    expect(recoverContainer.textContent).toContain(unavailable.message);
+    expect(recoverContainer.textContent).not.toContain("Not signed in");
+    const checkButton = recoverContainer.querySelector<HTMLElement>(
+      '[data-testid="mobile-connector-check-status"]',
+    );
+    expect(checkButton).not.toBeNull();
+    expect(
+      recoverContainer.querySelector('[data-testid="mobile-connector-cancel"]'),
+    ).not.toBeNull();
+    await act(async () => {
+      checkButton?.click();
+      await Promise.resolve();
+    });
+    expect(recoverContainer.textContent).toContain("Signed in through auth.example");
+
+    // Cancel sign-in cancels cleanly back to signed-out.
+    const cancelContainer = await mount({
+      transport: makeTransport("cancel"),
+      actsAsHostPerson: true,
+      pollIntervalMs: 60_000,
+    });
+    const cancelButton = cancelContainer.querySelector<HTMLElement>(
+      '[data-testid="mobile-connector-cancel"]',
+    );
+    expect(cancelButton).not.toBeNull();
+    await act(async () => {
+      cancelButton?.click();
+      await Promise.resolve();
+    });
+    expect(cancelContainer.textContent).toContain("Not signed in");
+  });
+
+  it("reschedules automatic polling after a transient transport error and discovers completion", async () => {
+    let pollAttempts = 0;
+    const transport: MobileRemoteTransport = {
+      hostId: "host-1",
+      authenticatedFetch: (async (input) => {
+        if (input.path === "/api/extensions/connections") {
+          return Response.json({ servers: [HOSTED_CONNECTOR] });
+        }
+        const body = typeof input.body === "string" ? JSON.parse(input.body) : {};
+        if (body.kind === "status") {
+          return Response.json({
+            kind: "awaiting-device-code",
+            attemptId: ATTEMPT,
+            issuerHost: "auth.example",
+            verificationUri: "https://auth.example/device",
+            userCode: "ABCD-5678",
+            expiresAt: "2026-11-20T12:10:00.000Z",
+          });
+        }
+        if (body.kind === "poll") {
+          pollAttempts += 1;
+          if (pollAttempts === 1) throw new Error("temporary network drop");
+          return Response.json({ kind: "signed-in", issuer: "auth.example" });
+        }
+        return Response.json({ kind: "signed-out" });
+      }) as MobileRemoteTransport["authenticatedFetch"],
+    };
+
+    const container = await mount({
+      transport,
+      actsAsHostPerson: true,
+      pollIntervalMs: 15,
+    });
+    expect(container.textContent).toContain("ABCD-5678");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    });
+    expect(pollAttempts).toBe(1);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    });
+    expect(pollAttempts).toBeGreaterThanOrEqual(2);
+    expect(container.textContent).toContain("Signed in through auth.example");
+  });
 });

@@ -468,4 +468,92 @@ describe("Sign in to a hosted server", () => {
       callbackUrl: "http://127.0.0.1:43125/oauth/callback?code=good&state=abc",
     });
   });
+
+  it("resumes polling after a relay retry response and after a lost relay transport error", async () => {
+    const user = userEvent.setup();
+    const attemptId = "55000000-0000-4000-8000-000000000010";
+    const awaiting: McpServerSignInView = {
+      kind: "awaiting-consent",
+      attemptId,
+      flow: "relay",
+      relayable: true,
+      authorizationUrl: "https://auth.example/authorize?state=abc",
+      expiresAt: "2026-11-20T12:10:00.000Z" as never,
+    };
+
+    // Case 1: retry response resumes polling and observes expiry.
+    let retrySubmitted = false;
+    const retrySignIn = vi.fn(async (request: { kind: string }) => {
+      if (request.kind === "status") return { kind: "signed-out" as const };
+      if (request.kind === "begin") return awaiting;
+      return retrySubmitted
+        ? {
+            kind: "refused" as const,
+            reason: "timeout" as const,
+            message: "The sign-in page was not completed in time.",
+          }
+        : awaiting;
+    });
+    const retryRelay = vi.fn(async () => {
+      retrySubmitted = true;
+      return {
+        kind: "retry" as const,
+        remainingAttempts: 2 as const,
+        message: "That callback address did not match this sign-in attempt.",
+      };
+    });
+    const first = render(
+      <McpServerSignInControl
+        client={{
+          mcpServerSignIn: retrySignIn as never,
+          relayMcpServerSignIn: retryRelay as never,
+        }}
+        componentId={componentId}
+        disabled={false}
+        extensionId={extensionId}
+        pollIntervalMs={15}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign in" }));
+    await user.type(
+      await screen.findByLabelText("Callback address"),
+      "http://127.0.0.1:43125/oauth/callback?code=bad&state=wrong",
+    );
+    await user.click(screen.getByRole("button", { name: "Finish sign-in" }));
+    expect(
+      await screen.findByText("The sign-in page was not completed in time."),
+    ).toBeInTheDocument();
+    first.unmount();
+
+    // Case 2: thrown/lost relay transport error resumes polling and discovers signed-in completion.
+    let lostSubmitted = false;
+    const lostSignIn = vi.fn(async (request: { kind: string }) => {
+      if (request.kind === "status") return { kind: "signed-out" as const };
+      if (request.kind === "begin") return awaiting;
+      return lostSubmitted ? { kind: "signed-in" as const, issuer: "auth.example" } : awaiting;
+    });
+    const lostRelay = vi.fn(async () => {
+      lostSubmitted = true;
+      throw new Error("connection lost");
+    });
+    render(
+      <McpServerSignInControl
+        client={{
+          mcpServerSignIn: lostSignIn as never,
+          relayMcpServerSignIn: lostRelay as never,
+        }}
+        componentId={componentId}
+        disabled={false}
+        extensionId={extensionId}
+        pollIntervalMs={15}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign in" }));
+    await user.type(
+      await screen.findByLabelText("Callback address"),
+      "http://127.0.0.1:43125/oauth/callback?code=good&state=abc",
+    );
+    await user.click(screen.getByRole("button", { name: "Finish sign-in" }));
+    expect(await screen.findByText("Signed in through auth.example")).toBeInTheDocument();
+  });
 });

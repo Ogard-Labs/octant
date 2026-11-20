@@ -37,8 +37,16 @@ export function ConnectorSignInPanel(props: ConnectorSignInPanelProps) {
   const [busyKey, setBusyKey] = useState<string | undefined>();
   const [relayInputs, setRelayInputs] = useState<Readonly<Record<string, string>>>({});
   const [relayErrors, setRelayErrors] = useState<Readonly<Record<string, string>>>({});
+  const [pollNonce, setPollNonce] = useState(0);
   const openUrl = props.openExternalUrl ?? ((url: string) => Linking.openURL(url));
   const pollTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const transport = props.transport;
@@ -132,6 +140,7 @@ export function ConnectorSignInPanel(props: ConnectorSignInPanelProps) {
                 componentId: server.componentId,
               };
         const next = await mobileMcpServerSignIn({ transport, request });
+        if (!mounted.current) return;
         setViews((current) => ({ ...current, [key]: next }));
         if (next.kind !== "awaiting-consent") {
           setRelayInputs((current) => {
@@ -140,18 +149,66 @@ export function ConnectorSignInPanel(props: ConnectorSignInPanelProps) {
           });
         }
       } catch {
-        if (interactive) {
-          setViews((current) => ({
+        if (!mounted.current) return;
+        if (!interactive) {
+          setPollNonce((count) => count + 1);
+          return;
+        }
+        setViews((current) => {
+          const existing = current[key];
+          if (kind === "status" || kind === "poll") {
+            return {
+              ...current,
+              [key]: {
+                kind: "status-unavailable",
+                message:
+                  "Sign-in status is unavailable. Check sign-in or cancel this attempt when the host is available.",
+              },
+            };
+          }
+          if (
+            kind === "sign-out" &&
+            (existing?.kind === "signed-in" ||
+              existing?.kind === "sign-in-again" ||
+              existing?.kind === "sign-out-pending")
+          ) {
+            return {
+              ...current,
+              [key]: {
+                kind: "sign-out-pending",
+                message:
+                  "Sign-out is not confirmed. Finish signing out when the host is available.",
+              },
+            };
+          }
+          if (
+            kind === "sign-out" &&
+            (existing?.kind === "awaiting-consent" ||
+              existing?.kind === "awaiting-device-code" ||
+              existing?.kind === "cancel-pending" ||
+              existing?.kind === "status-unavailable")
+          ) {
+            return {
+              ...current,
+              [key]: {
+                kind: "cancel-pending",
+                message:
+                  "Sign-in cancellation is not confirmed. Try Cancel sign-in again when the host is available.",
+              },
+            };
+          }
+          return {
             ...current,
             [key]: {
               kind: "refused",
               reason: "unavailable",
               message: "Sign-in is unavailable right now.",
             },
-          }));
-        }
+          };
+        });
       } finally {
-        if (interactive) setBusyKey((current) => (current === key ? undefined : current));
+        if (interactive && mounted.current)
+          setBusyKey((current) => (current === key ? undefined : current));
       }
     },
     [props.transport],
@@ -175,7 +232,7 @@ export function ConnectorSignInPanel(props: ConnectorSignInPanelProps) {
       for (const timer of pollTimers.current.values()) clearTimeout(timer);
       pollTimers.current.clear();
     };
-  }, [servers, views, sendSignIn, props.pollIntervalMs]);
+  }, [servers, views, pollNonce, sendSignIn, props.pollIntervalMs]);
 
   const submitRelay = useCallback(
     async (server: McpServerConnection, attemptId: string) => {
@@ -197,18 +254,22 @@ export function ConnectorSignInPanel(props: ConnectorSignInPanelProps) {
           transport,
           request: { attemptId, callbackUrl },
         });
+        if (!mounted.current) return;
         if (result.kind === "retry") {
           setRelayErrors((current) => ({ ...current, [key]: result.message }));
+          setPollNonce((count) => count + 1);
           return;
         }
         setViews((current) => ({ ...current, [key]: result }));
       } catch {
+        if (!mounted.current) return;
         setRelayErrors((current) => ({
           ...current,
           [key]: "Could not send that callback address. Try again or cancel sign-in.",
         }));
+        setPollNonce((count) => count + 1);
       } finally {
-        setBusyKey((current) => (current === key ? undefined : current));
+        if (mounted.current) setBusyKey((current) => (current === key ? undefined : current));
       }
     },
     [props.transport, relayInputs],
@@ -432,6 +493,30 @@ export function ConnectorSignInPanel(props: ConnectorSignInPanelProps) {
               </>
             ) : view.kind === "client-setup-required" ? (
               <Text style={styles.detail}>{view.message}</Text>
+            ) : view.kind === "status-unavailable" ? (
+              <>
+                <Text style={styles.detail}>{view.message}</Text>
+                <View style={styles.actions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={() => void sendSignIn(server, "status")}
+                    style={styles.primaryButton}
+                    testID="mobile-connector-check-status"
+                  >
+                    <Text style={styles.primaryButtonText}>Check sign-in</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={() => void sendSignIn(server, "sign-out")}
+                    style={styles.secondaryButton}
+                    testID="mobile-connector-cancel"
+                  >
+                    <Text style={styles.secondaryButtonText}>Cancel sign-in</Text>
+                  </Pressable>
+                </View>
+              </>
             ) : view.kind === "cancel-pending" || view.kind === "sign-out-pending" ? (
               <>
                 <Text style={styles.detail}>{view.message}</Text>

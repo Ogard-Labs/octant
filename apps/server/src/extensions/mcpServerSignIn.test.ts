@@ -2486,4 +2486,94 @@ describe("connector sign-in finished from a paired device", () => {
       await runtime.close();
     }
   });
+
+  it("accepts a relay queued behind a concurrent poll that refreshes the same pending attempt", async () => {
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === SERVER) return new Response("", { status: 401 });
+      if (url === "https://mcp.example/.well-known/oauth-protected-resource/mcp") {
+        return json({ resource: SERVER, authorization_servers: [ISSUER] });
+      }
+      if (url === `${ISSUER}/.well-known/oauth-authorization-server`) {
+        return json({
+          issuer: ISSUER,
+          authorization_endpoint: `${ISSUER}/authorize`,
+          token_endpoint: `${ISSUER}/token`,
+          registration_endpoint: `${ISSUER}/register`,
+          code_challenge_methods_supported: ["S256"],
+        });
+      }
+      if (url === `${ISSUER}/register`) return json({ client_id: "relay-concurrent-client" }, 201);
+      if (url === `${ISSUER}/token`) {
+        return json({
+          access_token: "relay-concurrent-token",
+          refresh_token: "relay-concurrent-refresh",
+          token_type: "Bearer",
+          expires_in: 600,
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const { runtime, oauth } = makeRealStack(fetchImpl);
+    const pollEntered = Promise.withResolvers<void>();
+    const releasePoll = Promise.withResolvers<void>();
+    const gatedOauth: HostOAuthService = {
+      ...oauth,
+      status: async (input) => {
+        pollEntered.resolve();
+        await releasePoll.promise;
+        return oauth.status(input);
+      },
+    };
+    try {
+      const { service } = await signIn({
+        fetchImpl,
+        oauth: gatedOauth,
+        access: (ref) => runtime.access(ref),
+      });
+      const begun = await service.begin(
+        EXTENSION,
+        COMPONENT,
+        "person-paired-device",
+        deviceActor,
+        device,
+      );
+      if (begun.kind !== "awaiting-consent") throw new Error("expected awaiting-consent");
+      const authUrl = new URL(begun.authorizationUrl);
+      const redirectUri = authUrl.searchParams.get("redirect_uri") ?? "";
+      const state = authUrl.searchParams.get("state") ?? "";
+
+      // Start an automatic poll that holds the serialized resource queue.
+      const pendingPoll = service.poll(
+        EXTENSION,
+        COMPONENT,
+        begun.attemptId,
+        "person-paired-device",
+        device,
+      );
+      await pollEntered.promise;
+
+      // Queue the relay while the poll is still running.
+      const pendingRelay = service.relay({
+        attemptId: begun.attemptId,
+        callbackUrl: `${redirectUri}?code=concurrent-code-1&state=${state}`,
+        principalKind: "person-paired-device",
+        device,
+        actor: deviceActor,
+      });
+
+      // Release the poll: it refreshes #attempts with { ...pending, view }, then the queued relay runs.
+      releasePoll.resolve();
+      expect(await pendingPoll).toMatchObject({
+        kind: "awaiting-consent",
+        attemptId: begun.attemptId,
+        relayable: true,
+      });
+      expect(await pendingRelay).toEqual({ kind: "signed-in", issuer: "auth.example" });
+    } finally {
+      releasePoll.resolve();
+      await runtime.close();
+    }
+  });
 });

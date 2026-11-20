@@ -1544,23 +1544,41 @@ export class McpServerSignIn {
       };
     }
     const key = foundKey;
-    const pending = foundPending;
     return this.#serialized(
-      pending.discovered.resource,
+      foundPending.discovered.resource,
       async (): Promise<McpServerSignInRelayResult> => {
-        if (this.#attempts.get(key) !== pending) {
+        const pending = this.#attempts.get(key);
+        if (pending === undefined || pending.attemptId !== input.attemptId) {
           const settledDevice = this.#settledRelays.get(input.attemptId);
-          return settledDevice !== undefined && sameDevice(settledDevice, callerDevice)
-            ? {
-                kind: "refused",
-                reason: "sign-in-settled",
-                message: "This sign-in attempt has already finished.",
-              }
-            : {
-                kind: "refused",
-                reason: "invalid",
-                message: "No matching sign-in attempt is waiting.",
-              };
+          if (settledDevice !== undefined) {
+            return sameDevice(settledDevice, callerDevice)
+              ? {
+                  kind: "refused",
+                  reason: "sign-in-settled",
+                  message: "This sign-in attempt has already finished.",
+                }
+              : {
+                  kind: "refused",
+                  reason: "local-host-required",
+                  message: "Only the device that started this sign-in can finish it.",
+                };
+          }
+          return {
+            kind: "refused",
+            reason: "invalid",
+            message: "No matching sign-in attempt is waiting.",
+          };
+        }
+        if (
+          !pending.relayable ||
+          pending.device === undefined ||
+          !sameDevice(pending.device, callerDevice)
+        ) {
+          return {
+            kind: "refused",
+            reason: "local-host-required",
+            message: "Only the device that started this sign-in can finish it.",
+          };
         }
         if (pending.cancelPending) {
           return {
