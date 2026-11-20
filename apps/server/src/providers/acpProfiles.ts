@@ -99,6 +99,20 @@ export interface AcpProcessProfile {
    * keychain path.
    */
   readonly readsSystemKeychain?: boolean;
+  /**
+   * The CLI keeps the person's own sign-in in the macOS login keychain and
+   * reads it by running `/usr/bin/security`. On macOS a sandboxed launch
+   * below Full access may then fork, run that one program, reach the two
+   * security-server services and read `login.keychain-db`; nothing grants a
+   * Keychain write or any other file in that folder. Octant never reads the
+   * item itself.
+   */
+  readonly readsLoginKeychain?: boolean;
+  /**
+   * ACP protocol versions the `initialize` reply may report. Absent means
+   * exactly 1, the version every other profile speaks.
+   */
+  readonly protocolVersions?: ReadonlyArray<number>;
   readonly environment: (input: {
     readonly managedHome: string;
     readonly executionPolicy: ProviderExecutionPolicy;
@@ -197,9 +211,10 @@ export interface AcpProviderProfile {
     autoReview?: boolean,
   ) => string;
   /**
-   * No mode is selected: an added agent's own modes were never mapped onto
-   * Chat, Work, Code and Plan, so its session keeps the mode it opens with
-   * and Octant's sandbox and approvals hold the thread's level.
+   * No mode is selected: the session keeps the mode it opens with and
+   * Octant's sandbox and approvals hold the thread's level. An added agent's
+   * own modes were never mapped onto Chat, Work, Code and Plan; Google
+   * Antigravity refuses every mode but its asking `default` from a client.
    */
   readonly selectsNoMode?: true;
   /**
@@ -1702,6 +1717,84 @@ const kimiProfile: AcpProviderProfile = {
   },
 };
 
+const ANTIGRAVITY_PROJECT_ENTRIES: ReadonlyArray<string> = [".agents/skills", ".gemini/skills"];
+
+/**
+ * Google Antigravity's official CLI, `agy`, run unmodified as `agy acp`.
+ *
+ * It signs in with the person's own Google account and keeps that sign-in in
+ * the macOS login keychain, so the launch keeps the real HOME and, below Full
+ * access, gets the same narrow keychain read Claude Code's runtime has
+ * (`readsLoginKeychain`; maintainer decision, 2026-11-20). Octant sends no
+ * spoofed client identity, no faked environment to move the sign-in, and
+ * calls none of Google's internal endpoints: the CLI talks to Google itself.
+ *
+ * Its modes are `default`, `auto_edit`, `yolo` and, for some accounts, `auto`.
+ * `default` asks before every edit and command, and the CLI refuses
+ * `auto_edit` and `yolo` from an ACP client (observed by other ACP clients of
+ * 1.5.x), so the session stays in the mode it opens with and Octant's
+ * approvals and sandbox hold the thread's level, Full access included.
+ */
+const antigravityProfile: AcpProviderProfile = {
+  kind: "antigravity",
+  displayName: "Google Antigravity",
+  reasoningOptionId: "thinking",
+  sessionMode: () => "default",
+  selectsNoMode: true,
+  chatSessionRoot: "managed-home",
+  userQuestions: "unsupported",
+  // `session/load` replays the whole history into the turn; `session/resume`
+  // reattaches without it, and `initialize` advertises `resume`.
+  resumeMethod: "session/resume",
+  // `initialize` advertises `list` and `resume` but no `close`.
+  closesSessions: false,
+  authenticateOnProbe: false,
+  authentication: { kind: "provider-owned" },
+  unauthenticatedMessage:
+    "Google Antigravity is not signed in. Run agy in your terminal and sign in with your Google account, then retry.",
+  nativeSetupSupport: acpOwnSetupSupport(["skills"]),
+  process: {
+    // Reported by 1.5.x; 1.1.x reported `antigravity-acp`, below the minimum.
+    agentName: "Antigravity ACP Server",
+    // `agy --version` names its release after a product prefix whose wording
+    // has changed between releases (`agy_acp_server_1.1.1` on the bundled
+    // server), so any non-numeric prefix on the one line is accepted.
+    versionPattern:
+      /^[^\d\r\n]*(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+_.][0-9A-Za-z.+_-]*)?\s*$/,
+    // Releases before 1.5.0 offered only some models to unlisted clients and
+    // had no mid-turn steering; other ACP clients require 1.5.0 or later.
+    minimumVersion: [1, 5, 0],
+    // 1.1.1 reported protocol version 2 while sending version 1 shapes
+    // (recorded `initialize` reply); later releases may still.
+    protocolVersions: [1, 2],
+    passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    guards: { NO_COLOR: "1", AGY_CLI_DISABLE_AUTO_UPDATE: "1" },
+    environment: () => ({}),
+    args: () => ["acp", "--disable-telemetry"],
+    managedFiles: () => [],
+    readsLoginKeychain: true,
+    // The CLI keeps its settings, conversations and skills under ~/.gemini
+    // and reads the person's own instructions and skills from there.
+    hostAuthentication: {
+      kind: "directory",
+      defaultPath: join(homedir(), ".gemini"),
+      loginHint: "Run agy in your terminal and sign in with your Google account, then retry.",
+      environment: (path) => ({ GEMINI_HOME: path }),
+      forbiddenEntries: ["AGENTS.md", "GEMINI.md", "skills", "config/skills"],
+    },
+    hostDeniedEntries: ["AGENTS.md", "GEMINI.md", "skills", "config/skills"],
+    // The CLI loads workspace skills from these folders by itself.
+    forbiddenRootEntries: ANTIGRAVITY_PROJECT_ENTRIES,
+    nativeSetup: releasesTrustedProject(ANTIGRAVITY_PROJECT_ENTRIES, {
+      hostEntries: (setup) => [
+        ...(providerRunsAsItself(setup) ? ["AGENTS.md", "GEMINI.md"] : []),
+        ...(setup.skills ? ["skills", "config/skills"] : []),
+      ],
+    }),
+    confinement: { kind: "deny-default-seatbelt" },
+  },
+};
+
 export const acpProviderProfiles: Readonly<
   Record<Exclude<AcpProviderKind, "acp-agent">, AcpProviderProfile>
 > = {
@@ -1718,6 +1811,7 @@ export const acpProviderProfiles: Readonly<
   cline: clineProfile,
   qwen: qwenProfile,
   fx: fxProfile,
+  antigravity: antigravityProfile,
 };
 
 export function isAcpProviderKind(kind: ProviderDriverKind): kind is AcpProviderKind {

@@ -20,6 +20,7 @@ import type {
 import { Effect, Either } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  acpNegotiationAccepted,
   makeAcpConfinementLive,
   makeAcpProcessLive,
   probeAcpBinary,
@@ -56,10 +57,24 @@ const copilot = acpProviderProfiles.copilot;
 const cline = acpProviderProfiles.cline;
 const qwen = acpProviderProfiles.qwen;
 const fx = acpProviderProfiles.fx;
+const antigravity = acpProviderProfiles.antigravity;
 const profiles = Object.values(acpProviderProfiles).filter(
   (profile) => profile.kind !== "opencode",
 );
-const denyDefaultProfiles = [kilo, devin, vibe, grok, goose, glm, gemini, copilot, cline, qwen, fx];
+const denyDefaultProfiles = [
+  kilo,
+  devin,
+  vibe,
+  grok,
+  goose,
+  glm,
+  gemini,
+  copilot,
+  cline,
+  qwen,
+  fx,
+  antigravity,
+];
 
 /** `--version` outputs per profile: [ready, too-old, malformed]. */
 const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, string, string]> = {
@@ -84,6 +99,7 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
   cline: ["3.0.61", "3.0.60", "cline release 3.0.61 private-noise"],
   qwen: ["0.23.0", "0.22.9", "qwen-code release 0.23.0 private-noise"],
   fx: ["0.0.13", "0.0.12", "fx release 0.0.13 private-noise"],
+  antigravity: ["agy 1.5.12", "agy 1.4.5", "agy 1.5.12 built from private-noise"],
   // An added agent has no floor, so it has no too-old release.
   "acp-agent": ["1.2.3", "1.2.3", "no version"],
 };
@@ -101,6 +117,7 @@ const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   cline: "3.0.61",
   qwen: "0.23.0",
   fx: "0.0.13",
+  antigravity: "1.5.12",
   "acp-agent": "1.2.3",
 };
 
@@ -1037,7 +1054,13 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
     );
     expect(plan.args[1]).not.toContain(`(allow file-write* (subpath "${target.canonicalRoot}"))`);
     expect(plan.args[1]).not.toContain("(allow process-exec)");
-    expect(plan.args[1]).not.toContain("(allow process-fork)");
+    // A keychain sign-in read forks `/usr/bin/security`, the only exec its
+    // rules add; no other profile forks in Plan.
+    if (profile.process.readsLoginKeychain === true) {
+      expect(plan.args[1]).toContain("(allow process-fork)");
+    } else {
+      expect(plan.args[1]).not.toContain("(allow process-fork)");
+    }
     expect(plan.args[1]).toContain(`(allow file-read* (subpath "${target.canonicalRoot}"))`);
 
     const chat = await Effect.runPromise(
@@ -2238,6 +2261,89 @@ describe("Kimi Code provider-owned profile", () => {
     const spawned = spawnRecord(target.root);
     expect(spawned?.cwd).toBe(root);
     expect(spawned?.args.at(-1)).toBe("acp");
+  });
+});
+
+describe("login keychain read for Google Antigravity", () => {
+  const loginKeychain = join(realpathSync(homedir()), "Library", "Keychains", "login.keychain-db");
+
+  async function profileText(
+    profile: AcpProviderProfile,
+    mode: "chat" | "code",
+    executionPolicy: ProviderExecutionPolicy,
+  ) {
+    const target = fixture(profile);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode,
+        executionPolicy,
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+    return seatbeltProfile(launch);
+  }
+
+  it.each([
+    ["code", "approval-gated"],
+    ["chat", "approval-gated"],
+    ["code", "plan"],
+  ] as const)(
+    "lets its %s launch at %s run security and read only the login keychain file, after every built-in denial",
+    async (mode, executionPolicy) => {
+      const lines = (await profileText(antigravity, mode, executionPolicy)).trimEnd().split("\n");
+      const allow = `(allow file-read* (literal "${loginKeychain}"))`;
+      expect(lines).toContain(allow);
+      expect(lines).toContain('(allow mach-lookup (global-name "com.apple.SecurityServer"))');
+      expect(lines.some((line) => line.includes('"/usr/bin/security"'))).toBe(true);
+      expect(lines).toContain("(allow process-fork)");
+      expect(
+        lines.filter((line) => line.includes("Keychains/") && line.startsWith("(allow")),
+      ).toEqual([allow]);
+      expect(
+        lines.some((line) => line.startsWith("(allow file-write") && line.includes("Keychains")),
+      ).toBe(false);
+    },
+  );
+
+  it.each(profiles.filter((profile) => profile.kind !== "antigravity"))(
+    "gives $displayName no login keychain read",
+    async (profile) => {
+      if (profile.refuses?.("code", "approval-gated") !== undefined) return;
+      const text = await profileText(profile, "code", "approval-gated");
+      expect(text).not.toContain("login.keychain-db");
+      expect(text).not.toContain("/usr/bin/security");
+    },
+  );
+});
+
+describe("ACP protocol version negotiation", () => {
+  const initialized = (protocolVersion: number, name: string) => ({
+    protocolVersion,
+    agentCapabilities: {},
+    agentInfo: { name, version: "1.5.12" },
+  });
+
+  it("accepts Google Antigravity reporting protocol version 1 or 2, and no other profile reporting 2", () => {
+    expect(acpNegotiationAccepted(antigravity, initialized(1, "Antigravity ACP Server"))).toBe(
+      true,
+    );
+    expect(acpNegotiationAccepted(antigravity, initialized(2, "Antigravity ACP Server"))).toBe(
+      true,
+    );
+    expect(acpNegotiationAccepted(antigravity, initialized(3, "Antigravity ACP Server"))).toBe(
+      false,
+    );
+    expect(acpNegotiationAccepted(antigravity, initialized(2, "antigravity-acp"))).toBe(false);
+    expect(acpNegotiationAccepted(gemini, initialized(2, gemini.process.agentName))).toBe(false);
   });
 });
 

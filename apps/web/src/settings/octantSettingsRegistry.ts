@@ -883,7 +883,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Providers & Models",
       scope: "app",
       keywords:
-        "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
+        "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot antigravity agy google devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
       settings: [
         {
           id: settingId("automatic-model-judge"),

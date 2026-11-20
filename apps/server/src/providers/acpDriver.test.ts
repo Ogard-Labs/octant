@@ -1966,7 +1966,14 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       }
       const modeValue = profile.sessionMode(productMode, executionPolicy);
       const expectedModeRequest = profile.setModeCall?.("agent-session-1", modeValue);
-      if (expectedModeRequest === undefined) {
+      if (profile.selectsNoMode === true) {
+        // The session keeps the mode it opened with.
+        expect(client.setConfigOption).not.toHaveBeenCalledWith(
+          "agent-session-1",
+          "mode",
+          expect.anything(),
+        );
+      } else if (expectedModeRequest === undefined) {
         expect(client.setConfigOption).toHaveBeenCalledWith("agent-session-1", "mode", modeValue);
       } else {
         expect(client.call).toHaveBeenCalledWith(

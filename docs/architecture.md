@@ -16753,7 +16753,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   tool that names that folder, and the profile refuses both `security` and
   that file to every process but the runtime (and the file to `security`),
   so the grant serves the runtime's sign-in read and not the model. A
-  launch on an API key takes none of it.
+  launch on an API key takes none of it. Google Antigravity's ACP launch
+  takes the same four below Full access to read its own keychain sign-in
+  (maintainer decision, 2026-11-20), but commands the agent runs in-process
+  share that launch's sandbox, so they may run `security` too; see
+  [Provider runtimes: Google Antigravity](design/provider-runtimes.md#google-antigravity).
   Linux keeps the login in
   a file inside the account directory, which the launch already holds, and
   Seatbelt rules do not apply there.
