@@ -1479,18 +1479,28 @@ export function wireProviders(deps: ProvidersDependencies) {
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.configureForServer(extensionId, componentId, registration, principalKind),
           ),
-        status: (extensionId, componentId, principalKind) =>
+        status: (extensionId, componentId, principalKind, device) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.status(extensionId, componentId, principalKind),
+            signIn.status(extensionId, componentId, principalKind, device),
           ),
-        begin: (extensionId, componentId, principalKind, actor) =>
+        begin: (extensionId, componentId, principalKind, actor, device) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.begin(extensionId, componentId, principalKind, actor),
+            signIn.begin(extensionId, componentId, principalKind, actor, device),
           ),
-        poll: (extensionId, componentId, attemptId, principalKind) =>
+        poll: (extensionId, componentId, attemptId, principalKind, device) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.poll(extensionId, componentId, attemptId, principalKind),
+            signIn.poll(extensionId, componentId, attemptId, principalKind, device),
           ),
+        relay: async (input) => {
+          if (mcpServerSignInHolder.current === undefined) {
+            return {
+              kind: "refused",
+              reason: "unavailable",
+              message: "Signing in needs the credential broker.",
+            };
+          }
+          return mcpServerSignInHolder.current.relay(input);
+        },
         signOut: (extensionId, componentId, principalKind, actor) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.signOut(extensionId, componentId, principalKind, actor),
