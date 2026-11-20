@@ -7361,7 +7361,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   Devin and OpenCode Go have no such channel in their runtimes, so their
   plan windows come from the account usage endpoint under the
   account usage endpoint rule in
-  [Security and authority](#security-and-authority). The Claude
+  [Security and authority](#security-and-authority). Google
+  Antigravity's come from its own CLI's `agy -p /usage --output-format
+json`, which reads its own sign-in; Octant reads none, and the reading is
+  paced as the endpoint readings are
+  ([Provider runtimes: Google Antigravity](design/provider-runtimes.md#google-antigravity)). The Claude
   reading starts
   the provider's process, so it is made only on an explicit refresh
   (`onDemand` on the context-facts input), never on the schedule or
