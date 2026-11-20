@@ -15703,9 +15703,23 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
       over it is refused rather than cut short. Any other file (an archive,
       a binary) is refused before the turn is accepted, naming a Work or Code
       thread as where it can go, and the composer refuses it when it is
-      chosen. The file stays on the turn for the record; as with an image sent
-      natively, its text reaches later turns where the provider keeps its own
-      session, and a host-built history carries only the person's message.
+      chosen. The file stays on the turn for the record; its text reaches
+      later turns both where the provider keeps its own session and when
+      Octant rebuilds the conversation history itself. On a host-built history
+      rebuild, Octant reads finalized non-image attachments owned by the thread
+      back through its confined, digest-verified attachment store, extracts
+      document or UTF-8 text under the same rules, and frames each file ahead
+      of its turn's message while keeping the journaled context manifest label
+      limited to the person's message. Attached text across the rebuilt history
+      and the current turn shares the 400,000-character limit, prioritizing
+      newer turns first, truncating cleanly on a UTF-16 boundary with an honest
+      limit notice when the budget runs out, and skipping older files once
+      exhausted. Missing, purged, tampered, binary, or unreadable attachments
+      are skipped without blocking later turns; already-compacted turns and
+      attachments delivered natively or explicitly excluded by a `text-only`
+      continuation receipt are not re-inlined. Requested compaction receives
+      the same bounded, policy-filtered attachment text when generating its
+      summary so summarized turns retain their attached file content.
       Rationale: a read-only tool scoped to the one attachment was the other
       design. It changes the session's tool catalog on the turn a file
       arrives, which a resumed native session refuses, it needs app-managed

@@ -60,6 +60,7 @@ interface SentTurn {
   readonly providerInstanceId: string;
   readonly attachmentIds: ReadonlyArray<string>;
   readonly toolNames: ReadonlyArray<string>;
+  readonly context: ReadonlyArray<{ readonly kind: string; readonly text: string }>;
 }
 
 interface LifecycleFixture {
@@ -153,12 +154,14 @@ function makeDriver(input: {
           readonly sessionId: string;
           readonly attachments: ReadonlyArray<{ readonly attachmentId: string }>;
           readonly tools: ReadonlyArray<{ readonly name: string }>;
+          readonly context?: ReadonlyArray<{ readonly kind: string; readonly text: string }>;
         }) =>
           Effect.gen(function* () {
             input.sentTurns.push({
               providerInstanceId: input.instanceId,
               attachmentIds: turn.attachments.map((attachment) => attachment.attachmentId),
               toolNames: turn.tools.map((tool) => tool.name),
+              context: turn.context ?? [],
             });
             yield* Queue.offer(queue, {
               kind: "text-delta",
@@ -1156,5 +1159,90 @@ describe("Chat lifecycle integration", () => {
       expect(readThreadExternalContentTaint(connection, heldId).externalContentIngested).toBe(true);
       fixture.close();
     }
+  });
+
+  it("carries attached text files across a host restart and honors an explicit text-only provider switch boundary", async () => {
+    const fixture = createFixture({
+      providerA: ["complete", "complete"],
+      providerB: ["complete", "complete"],
+    });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Restart attached files",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected a created Chat thread.");
+    const beforeRestartAttachment = await fixture.service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "deploy.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode("replicas: 3\n"),
+    });
+    await fixture.service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: fixture.service.read(created.thread.id).thread.version,
+      prompt: "Review this deployment",
+      attachmentIds: [beforeRestartAttachment.id],
+    });
+
+    await fixture.restart();
+
+    await fixture.service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: fixture.service.read(created.thread.id).thread.version,
+      prompt: "Continue after restart",
+    });
+    const rebuiltAfterRestart = fixture.sentTurns
+      .at(-1)
+      ?.context.find(
+        (block) => block.kind === "user-message" && block.text.includes("Review this deployment"),
+      );
+    expect(rebuiltAfterRestart?.text).toContain("replicas: 3");
+
+    // Switching to provider B with explicit text-only keeps the excluded earlier file out of rebuilt history.
+    await fixture.service.execute({
+      kind: "change-chat-provider",
+      threadId: created.thread.id,
+      expectedVersion: fixture.service.read(created.thread.id).thread.version,
+      providerInstanceId: ids.providerB,
+      modelId: "model-b",
+    });
+    const afterSwitchAttachment = await fixture.service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId("86000000-0000-4000-8000-000000000099"),
+      displayName: "next.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode("replicas: 5\n"),
+    });
+    await fixture.service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: fixture.service.read(created.thread.id).thread.version,
+      prompt: "Switch without old files",
+      attachmentIds: [afterSwitchAttachment.id],
+      contextInputPolicy: "text-only",
+    });
+    const switchContextText = (fixture.sentTurns.at(-1)?.context ?? [])
+      .map((block) => block.text)
+      .join("\n");
+    expect(switchContextText).not.toContain("replicas: 3");
+    expect(switchContextText).toContain("replicas: 5");
+
+    // A follow-up turn on provider B carries the file attached after the switch, still excluding the pre-switch one.
+    await fixture.service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: fixture.service.read(created.thread.id).thread.version,
+      prompt: "Follow up on provider B",
+    });
+    const followUpContextText = (fixture.sentTurns.at(-1)?.context ?? [])
+      .map((block) => block.text)
+      .join("\n");
+    expect(followUpContextText).not.toContain("replicas: 3");
+    expect(followUpContextText).toContain("replicas: 5");
+    fixture.close();
   });
 });
