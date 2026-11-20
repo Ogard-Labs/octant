@@ -12,9 +12,17 @@ import {
 import {
   ComposerAtTypeahead,
   useComposerAtMenu,
+  useThreadProviderMentions,
   type AtMenuFiles,
   type ComposerProviderMentions,
 } from "./useComposerAtMenu";
+import { ThreadNativeSetupProvider } from "../providers/ThreadNativeSetupControl";
+import {
+  decodeAggregateVersion,
+  decodeProviderInstanceId,
+  decodeUtcTimestamp,
+} from "@octant/contracts";
+import type { PickerGroup } from "@octant/domain";
 
 const COMMANDS: ReadonlyArray<OctantCommand> = [
   {
@@ -211,6 +219,195 @@ describe("composer @ menu", () => {
     await user.type(message, "@do");
     await user.click(screen.getByRole("option", { name: /@docs/ }));
     expect(message).toHaveValue("Ask $tidy @docs ");
+  });
+
+  it("labels Project Codex skills as Project beside account skills, inserts $name, and renders no disabled rows when off", async () => {
+    const user = userEvent.setup();
+    const resolve = vi.fn(async (_reference: string) => true);
+    const loadOn = vi.fn(async () => [
+      {
+        kind: "skill" as const,
+        name: "local",
+        scope: "project" as const,
+        description: "Deploy this Project",
+      },
+      { kind: "skill" as const, name: "tidy", description: "Tidy the code" },
+    ]);
+    const loadOff = vi.fn(async () => [
+      { kind: "skill" as const, name: "tidy", description: "Tidy the code" },
+    ]);
+    const accountOnly: ComposerProviderMentions = {
+      label: "Codex",
+      mentions: [{ kind: "skill", name: "tidy", description: "Tidy the code" }],
+      scopeKey: "code:thread-1:on",
+      load: loadOn,
+    };
+    const rendered = render(
+      <OctantCommandProvider commands={COMMANDS}>
+        <Harness resolve={resolve} mentions={accountOnly} />
+      </OctantCommandProvider>,
+    );
+    const message = screen.getByRole("textbox", { name: "Message" });
+    await user.type(message, "@");
+    expect(loadOn).toHaveBeenCalledTimes(1);
+    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
+      "ReviewSkill",
+      "Docs searchMCP server · Docs",
+      "NotesConnector",
+      "$localProject · Codex's own skill · Deploy this Project",
+      "$tidyCodex's own skill · Tidy the code",
+    ]);
+
+    // Typing to filter the open `@` menu does not re-query the server on each keystroke.
+    await user.type(message, "loc");
+    expect(loadOn).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "$localProject · Codex's own skill · Deploy this Project",
+    ]);
+    await user.click(screen.getByRole("option", { name: /\$local/ }));
+    expect(message).toHaveValue("$local ");
+    expect(resolve).not.toHaveBeenCalled();
+
+    // Turning Project skills off changes the scope: stale Project skills drop and no greyed/disabled row appears.
+    rendered.rerender(
+      <OctantCommandProvider commands={COMMANDS}>
+        <Harness
+          resolve={resolve}
+          mentions={{
+            label: "Codex",
+            mentions: [{ kind: "skill", name: "tidy", description: "Tidy the code" }],
+            scopeKey: "code:thread-1:off",
+            load: loadOff,
+          }}
+        />
+      </OctantCommandProvider>,
+    );
+    await user.clear(message);
+    await user.type(message, "@");
+    expect(loadOff).toHaveBeenCalledTimes(1);
+    const optionsWhenOff = screen.getAllByRole("option");
+    expect(optionsWhenOff.map((option) => option.textContent)).toEqual([
+      "ReviewSkill",
+      "Docs searchMCP server · Docs",
+      "NotesConnector",
+      "$tidyCodex's own skill · Tidy the code",
+    ]);
+    expect(screen.queryByRole("option", { name: /\$local/ })).toBeNull();
+    for (const option of optionsWhenOff) {
+      expect(option).not.toBeDisabled();
+      expect(option).not.toHaveAttribute("aria-disabled", "true");
+    }
+  });
+
+  it("opens the @ menu for a Project Codex skill even when the account has no skills of its own", async () => {
+    const user = userEvent.setup();
+    const load = vi.fn(async () => [
+      { kind: "skill" as const, name: "project-only", scope: "project" as const },
+    ]);
+    render(
+      <OctantCommandProvider commands={[]}>
+        <Harness
+          resolve={vi.fn(async () => true)}
+          mentions={{ label: "Codex", mentions: [], scopeKey: "code:thread-2:on", load }}
+        />
+      </OctantCommandProvider>,
+    );
+    const message = screen.getByRole("textbox", { name: "Message" });
+    await user.type(message, "@");
+    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
+      "$project-onlyProject · Codex's own skill",
+    ]);
+    await user.click(screen.getByRole("option", { name: /\$project-only/ }));
+    expect(message).toHaveValue("$project-only ");
+  });
+
+  it("refreshes thread provider mentions through ThreadNativeSetupProvider when setup revision changes", async () => {
+    const user = userEvent.setup();
+    const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000099");
+    const groups: ReadonlyArray<PickerGroup> = [
+      {
+        instance: {
+          id: instanceId,
+          displayName: "Codex",
+          driverKind: "codex",
+          configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex" },
+          enabled: true,
+          environmentPolicy: "inherit-host",
+          nativeSetup: true,
+          version: decodeAggregateVersion(1),
+          createdAt: decodeUtcTimestamp("2026-11-19T00:00:00.000Z"),
+          updatedAt: decodeUtcTimestamp("2026-11-19T00:00:00.000Z"),
+        },
+        runtime: { kind: "codex-cli", label: "Codex CLI" } as never,
+        readiness: "ready",
+        driverLabel: "Codex",
+        endpointHost: undefined,
+        executionHost: "local",
+        sections: [],
+        providerMentions: [{ kind: "skill", name: "tidy", description: "Tidy the code" }],
+      },
+    ];
+    const readMentions = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { kind: "skill", name: "local", scope: "project", description: "Deploy" },
+        { kind: "skill", name: "tidy", description: "Tidy the code" },
+      ])
+      .mockResolvedValueOnce([{ kind: "skill", name: "tidy", description: "Tidy the code" }]);
+
+    function ThreadHarness() {
+      const mentions = useThreadProviderMentions(groups, {
+        kind: "thread",
+        mode: "code",
+        threadId: "80000000-0000-4000-8000-000000000098",
+        providerInstanceId: instanceId,
+        executionPolicy: "approval-gated",
+      });
+      return (
+        <Harness
+          resolve={vi.fn(async () => true)}
+          {...(mentions === undefined ? {} : { mentions })}
+        />
+      );
+    }
+
+    const baseServices = {
+      instances: [{ id: instanceId, driverKind: "codex" as const }],
+      read: vi.fn(async () => "inherit" as const),
+      change: vi.fn(async () => "off" as const),
+      readMentions,
+    };
+
+    const rendered = render(
+      <OctantCommandProvider commands={[]}>
+        <ThreadNativeSetupProvider services={{ ...baseServices, revision: 0 }}>
+          <ThreadHarness />
+        </ThreadNativeSetupProvider>
+      </OctantCommandProvider>,
+    );
+    const message = screen.getByRole("textbox", { name: "Message" });
+    await user.type(message, "@");
+    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
+      "$localProject · Codex's own skill · Deploy",
+      "$tidyCodex's own skill · Tidy the code",
+    ]);
+    expect(readMentions).toHaveBeenCalledWith({
+      kind: "mentions",
+      mode: "code",
+      threadId: "80000000-0000-4000-8000-000000000098",
+    });
+
+    rendered.rerender(
+      <OctantCommandProvider commands={[]}>
+        <ThreadNativeSetupProvider services={{ ...baseServices, revision: 1 }}>
+          <ThreadHarness />
+        </ThreadNativeSetupProvider>
+      </OctantCommandProvider>,
+    );
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "$tidyCodex's own skill · Tidy the code",
+    ]);
+    expect(screen.queryByRole("option", { name: /\$local/ })).toBeNull();
   });
 
   it("offers nothing for an at sign inside a word or an unmatched query", async () => {

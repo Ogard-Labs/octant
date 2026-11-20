@@ -3,6 +3,10 @@ import { MAX_THREAD_PUBLISHED_SNAPSHOT_BYTES } from "./threadToolSteps";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+  decodeThreadNativeSetupRequest,
+  decodeThreadProviderMentionsResult,
+} from "./threadNativeSetup";
+import {
   ProviderCapabilitySupport,
   ProviderDriverKind,
   decodeProviderDefaults,
@@ -3619,6 +3623,47 @@ describe("provider runtime contracts", () => {
         category: "incompatible",
         message: "private provider diagnostic",
         reason: "OpenCode 2 preview is discovery-only",
+      }),
+    ).toThrow();
+  });
+
+  it("decodes thread and draft provider mention requests and project-scoped mentions strictly", () => {
+    const threadId = "80000000-0000-4000-8000-000000000440";
+    const projectId = "80000000-0000-4000-8000-000000000441";
+    expect(decodeThreadNativeSetupRequest({ kind: "mentions", threadId, mode: "code" })).toEqual({
+      kind: "mentions",
+      threadId,
+      mode: "code",
+    });
+    expect(
+      decodeThreadNativeSetupRequest({
+        kind: "draft-mentions",
+        projectId,
+        mode: "work",
+        providerInstanceId: ids.instance,
+      }),
+    ).toMatchObject({ kind: "draft-mentions", projectId, mode: "work" });
+    expect(() =>
+      decodeThreadNativeSetupRequest({ kind: "mentions", threadId, mode: "chat" }),
+    ).toThrow();
+    expect(
+      decodeThreadProviderMentionsResult({
+        mentions: [
+          { kind: "skill", name: "local", scope: "project", description: "Deploy" },
+          { kind: "skill", name: "tidy" },
+          { kind: "plugin", name: "docs", scope: "account" },
+        ],
+      }),
+    ).toEqual({
+      mentions: [
+        { kind: "skill", name: "local", scope: "project", description: "Deploy" },
+        { kind: "skill", name: "tidy" },
+        { kind: "plugin", name: "docs", scope: "account" },
+      ],
+    });
+    expect(() =>
+      decodeThreadProviderMentionsResult({
+        mentions: [{ kind: "skill", name: "local", scope: "repo" }],
       }),
     ).toThrow();
   });

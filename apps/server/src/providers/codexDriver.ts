@@ -946,21 +946,56 @@ function mentionDescription(...candidates: ReadonlyArray<string | null | undefin
 }
 
 /**
- * The account's own skills (not a Project's) and its installed plugins, for
- * the composer's `@` menu. A release that lists neither, or answers either
- * badly, offers what the other listed: the menu grants nothing, so a failed
- * read never fails the probe.
+ * The skills and installed plugins Codex offers in the composer's `@` menu.
+ *
+ * When `includeProjectSkills` is true (the thread's launch actually loads
+ * Project skills, `nativeSetup.skills === true`) and `projectRoot` is given,
+ * `skills/list` runs for `projectRoot` bypassing Codex's cache and returns
+ * Project skills (`scope: "project"`) ahead of account skills, with a Project
+ * skill winning if both share a name. Otherwise `skills/list` runs with no
+ * folder and only account skills (`user`, `system`, `admin`) and installed
+ * plugins are returned — zero Project rows, no disabled entries.
+ *
+ * A release that lists neither, or answers either badly, offers what the other
+ * listed: the menu grants nothing, so a failed read never fails.
  */
-async function codexAccountMentions(
+async function codexMentions(
   client: CodexClientPort,
+  options?: { readonly projectRoot?: string; readonly includeProjectSkills?: boolean },
 ): Promise<ReadonlyArray<ProviderMention>> {
   const mentions = new Map<string, ProviderMention>();
   const add = (mention: ProviderMention) => {
     const key = `${mention.kind}:${mention.name}`;
     if (mentions.size < MAX_CODEX_MENTIONS && !mentions.has(key)) mentions.set(key, mention);
   };
-  const skills = await client.skillsList({ cwds: [] }).catch(() => undefined);
-  for (const skill of skills?.data.flatMap((entry) => entry.skills) ?? []) {
+  const includeProject =
+    options?.includeProjectSkills === true && options.projectRoot !== undefined;
+  const projectRoot = includeProject ? options.projectRoot : undefined;
+  const skills = await client
+    .skillsList(
+      projectRoot === undefined ? { cwds: [] } : { cwds: [projectRoot], forceReload: true },
+    )
+    .catch(() => undefined);
+  const allSkills = skills?.data.flatMap((entry) => entry.skills) ?? [];
+  if (projectRoot !== undefined) {
+    for (const skill of allSkills) {
+      if (
+        skill.name === undefined ||
+        !CODEX_MENTION_NAME.test(skill.name) ||
+        skill.enabled === false ||
+        CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT.has(skill.scope)
+      )
+        continue;
+      const description = mentionDescription(skill.shortDescription, skill.description);
+      add({
+        kind: "skill",
+        name: skill.name,
+        scope: "project",
+        ...(description === undefined ? {} : { description }),
+      });
+    }
+  }
+  for (const skill of allSkills) {
     if (
       skill.name === undefined ||
       !CODEX_MENTION_NAME.test(skill.name) ||
@@ -971,7 +1006,9 @@ async function codexAccountMentions(
     const description = mentionDescription(skill.shortDescription, skill.description);
     add({ kind: "skill", name: skill.name, ...(description === undefined ? {} : { description }) });
   }
-  const plugins = await client.pluginInstalled?.({}).catch(() => undefined);
+  const plugins = await client
+    .pluginInstalled?.(projectRoot === undefined ? {} : { cwds: [projectRoot] })
+    .catch(() => undefined);
   for (const plugin of plugins?.marketplaces.flatMap((entry) => entry.plugins) ?? []) {
     if (!plugin.installed || !plugin.enabled || !CODEX_MENTION_NAME.test(plugin.name)) continue;
     const description = mentionDescription(plugin.interface?.shortDescription);
@@ -1997,7 +2034,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             const runtime = yield* acquireRuntime(options, clientFactory, CATALOG_AUTHORITY);
             const accountResult = yield* request(runtime.client.accountRead);
             const models = yield* readModels(runtime.client);
-            const mentions = yield* Effect.promise(() => codexAccountMentions(runtime.client));
+            const mentions = yield* Effect.promise(() => codexMentions(runtime.client));
             const environment = yield* Effect.promise(() => resolveCodexLaunchEnvironment(options));
             // A Bedrock sign-in through an AWS profile or exported credentials
             // is refused only for a Strict session, when its lease starts;
@@ -2018,6 +2055,35 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             options.runtimeRegistry.setObservedState(result);
             return result;
           }),
+    listMentions: (input) => {
+      if (String(input.instanceId) !== String(options.instanceId)) {
+        return Effect.fail(
+          failure("invalid-configuration", "Provider instance does not match driver."),
+        );
+      }
+      if (
+        input.projectRoot !== undefined &&
+        (!isAbsolute(input.projectRoot) || resolve(input.projectRoot) !== input.projectRoot)
+      ) {
+        return Effect.fail(
+          failure(
+            "invalid-configuration",
+            "Provider Project root must be an absolute normalized path.",
+          ),
+        );
+      }
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* acquireRuntime(options, clientFactory, CATALOG_AUTHORITY);
+          return yield* Effect.promise(() =>
+            codexMentions(runtime.client, {
+              ...(input.projectRoot === undefined ? {} : { projectRoot: input.projectRoot }),
+              includeProjectSkills: input.nativeSetup?.skills === true,
+            }),
+          );
+        }),
+      );
+    },
     acquire: ({
       instanceId,
       projectRoot,

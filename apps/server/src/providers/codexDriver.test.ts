@@ -6100,6 +6100,28 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
       { kind: "skill", name: "tidy", description: "Tidy the code" },
       { kind: "plugin", name: "docs", description: "Search the docs" },
     ]);
+
+    // For a thread folder whose launch loads Project skills, `skills/list` returns them marked project.
+    const driver = fakeCodexDriver(target);
+    const threadMentions = await Effect.runPromise(
+      driver.listMentions?.({
+        instanceId,
+        projectRoot,
+        nativeSetup: {
+          subagents: true,
+          webTools: true,
+          skills: true,
+          toolServers: true,
+          hooks: true,
+          projectCode: true,
+        },
+      }) ?? Effect.succeed([]),
+    );
+    expect(threadMentions).toEqual([
+      { kind: "skill", name: "local", scope: "project", description: "A Project skill" },
+      { kind: "skill", name: "tidy", description: "Tidy the code" },
+      { kind: "plugin", name: "docs", description: "Search the docs" },
+    ]);
   });
 
   it("sends the skills and plugins a prompt names as Codex input items, never one switched off for the thread", async () => {
@@ -6164,5 +6186,181 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
     ]);
     // A Chat thread has its plugins switched off, so it names none.
     expect(await turnInput("chat", "Ask @docs.")).toEqual([{ type: "text", text: "Ask @docs." }]);
+  });
+
+  it("lists Project Codex skills marked project alongside account skills only when nativeSetup.skills is on", async () => {
+    const f = fixture({
+      skillsList: async (input) => ({
+        data: [
+          {
+            skills: [
+              {
+                name: "tidy",
+                description: "Tidy the code",
+                path: "/home/person/.codex/skills/tidy/SKILL.md",
+                scope: "user",
+                enabled: true,
+              },
+              ...(input.cwds.length === 1
+                ? [
+                    {
+                      name: "local",
+                      description: "Deploy this Project",
+                      path: `${input.cwds[0]}/.agents/skills/local/SKILL.md`,
+                      scope: "repo",
+                      enabled: true,
+                    },
+                    {
+                      name: "disabled-local",
+                      description: "Disabled Project skill",
+                      path: `${input.cwds[0]}/.agents/skills/disabled-local/SKILL.md`,
+                      scope: "repo",
+                      enabled: false,
+                    },
+                  ]
+                : []),
+            ],
+            errors: [],
+          },
+        ],
+      }),
+      pluginInstalled: async () => ({
+        marketplaces: [
+          {
+            plugins: [
+              {
+                id: "docs@local",
+                name: "docs",
+                installed: true,
+                enabled: true,
+                interface: { shortDescription: "Search the docs" },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    const driver = makeCodexDriver(f.options());
+    const nativeOn = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: true,
+    } as const;
+
+    const withProject = await Effect.runPromise(
+      driver.listMentions?.({ instanceId, projectRoot, nativeSetup: nativeOn }) ??
+        Effect.succeed([]),
+    );
+    expect(withProject).toEqual([
+      { kind: "skill", name: "local", scope: "project", description: "Deploy this Project" },
+      { kind: "skill", name: "tidy", description: "Tidy the code" },
+      { kind: "plugin", name: "docs", description: "Search the docs" },
+    ]);
+    expect(f.calls.filter(({ method }) => method === "skills/list")).toEqual([
+      { method: "skills/list", input: { cwds: [projectRoot], forceReload: true } },
+    ]);
+
+    f.calls.length = 0;
+    const withProjectOff = await Effect.runPromise(
+      driver.listMentions?.({
+        instanceId,
+        projectRoot,
+        nativeSetup: { ...nativeOn, skills: false },
+      }) ?? Effect.succeed([]),
+    );
+    expect(withProjectOff).toEqual([
+      { kind: "skill", name: "tidy", description: "Tidy the code" },
+      { kind: "plugin", name: "docs", description: "Search the docs" },
+    ]);
+    expect(f.calls.filter(({ method }) => method === "skills/list")).toEqual([
+      { method: "skills/list", input: { cwds: [] } },
+    ]);
+
+    f.calls.length = 0;
+    const withoutSetup = await Effect.runPromise(
+      driver.listMentions?.({ instanceId, projectRoot }) ?? Effect.succeed([]),
+    );
+    expect(withoutSetup).toEqual([
+      { kind: "skill", name: "tidy", description: "Tidy the code" },
+      { kind: "plugin", name: "docs", description: "Search the docs" },
+    ]);
+    expect(f.calls.filter(({ method }) => method === "skills/list")).toEqual([
+      { method: "skills/list", input: { cwds: [] } },
+    ]);
+  });
+
+  it("prefers a Project skill over an account skill of the same name and omits Project skills when there is no folder", async () => {
+    const f = fixture({
+      skillsList: async () => ({
+        data: [
+          {
+            skills: [
+              // Account skill returned before the Project skill of the same name.
+              {
+                name: "deploy",
+                description: "Account deploy",
+                path: "/home/person/.codex/skills/deploy/SKILL.md",
+                scope: "user",
+                enabled: true,
+              },
+              {
+                name: "deploy",
+                description: "Project deploy",
+                path: `${projectRoot}/.agents/skills/deploy/SKILL.md`,
+                scope: "repo",
+                enabled: true,
+              },
+            ],
+            errors: [],
+          },
+        ],
+      }),
+      pluginInstalled: async () => ({
+        marketplaces: [
+          {
+            plugins: [
+              // Same name as the skill, different kind: plugin stays listed beside the skill.
+              {
+                id: "deploy@local",
+                name: "deploy",
+                installed: true,
+                enabled: true,
+                interface: { shortDescription: "Deploy plugin" },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    const driver = makeCodexDriver(f.options());
+    const nativeOn = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: true,
+    } as const;
+
+    const withFolder = await Effect.runPromise(
+      driver.listMentions?.({ instanceId, projectRoot, nativeSetup: nativeOn }) ??
+        Effect.succeed([]),
+    );
+    expect(withFolder).toEqual([
+      { kind: "skill", name: "deploy", scope: "project", description: "Project deploy" },
+      { kind: "plugin", name: "deploy", description: "Deploy plugin" },
+    ]);
+
+    // Without a folder (for example, Chat), Project skills are never returned even if skills is on.
+    const withoutFolder = await Effect.runPromise(
+      driver.listMentions?.({ instanceId, nativeSetup: nativeOn }) ?? Effect.succeed([]),
+    );
+    expect(withoutFolder).toEqual([
+      { kind: "skill", name: "deploy", description: "Account deploy" },
+      { kind: "plugin", name: "deploy", description: "Deploy plugin" },
+    ]);
   });
 });

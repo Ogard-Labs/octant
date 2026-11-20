@@ -1,5 +1,12 @@
 import { Schema } from "effect";
-import { KeyProviderDriverKind, ProviderInstanceId } from "./providers";
+import { ProjectId } from "./projects";
+import {
+  KeyProviderDriverKind,
+  MAX_PROVIDER_MENTIONS,
+  ProviderExecutionPolicy,
+  ProviderInstanceId,
+  ProviderMention,
+} from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -49,6 +56,28 @@ export const ThreadNativeSetupRequest = Schema.Union(
     threadId: ThreadNativeSetupThreadId,
     mode: Schema.Literal("work", "code"),
   }).annotations(strict),
+  Schema.Struct({
+    /**
+     * The provider's own skills and plugins available for this Work or Code
+     * thread's folder and effective native setup, for the composer's `@` menu.
+     * Project skills are listed only when the thread's launch actually loads
+     * them (`nativeSetup.skills === true`).
+     */
+    kind: Schema.Literal("mentions"),
+    threadId: ThreadNativeSetupThreadId,
+    mode: Schema.Literal("work", "code"),
+  }).annotations(strict),
+  Schema.Struct({
+    /**
+     * Same as `mentions`, for a Work or Code draft before its thread exists,
+     * using the Project's root folder and the selected provider.
+     */
+    kind: Schema.Literal("draft-mentions"),
+    projectId: ProjectId,
+    mode: Schema.Literal("work", "code"),
+    providerInstanceId: ProviderInstanceId,
+    executionPolicy: Schema.optional(ProviderExecutionPolicy),
+  }).annotations(strict),
 );
 export type ThreadNativeSetupRequest = typeof ThreadNativeSetupRequest.Type;
 export const decodeThreadNativeSetupRequest = Schema.decodeUnknownSync(ThreadNativeSetupRequest);
@@ -97,3 +126,11 @@ export const ThreadProjectCodeResult = Schema.Struct({
 }).annotations(strict);
 export type ThreadProjectCodeResult = typeof ThreadProjectCodeResult.Type;
 export const decodeThreadProjectCodeResult = Schema.decodeUnknownSync(ThreadProjectCodeResult);
+
+export const ThreadProviderMentionsResult = Schema.Struct({
+  mentions: Schema.Array(ProviderMention).pipe(Schema.maxItems(MAX_PROVIDER_MENTIONS)),
+}).annotations(strict);
+export type ThreadProviderMentionsResult = typeof ThreadProviderMentionsResult.Type;
+export const decodeThreadProviderMentionsResult = Schema.decodeUnknownSync(
+  ThreadProviderMentionsResult,
+);

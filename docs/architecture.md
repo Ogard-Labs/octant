@@ -4455,7 +4455,10 @@ picker in every composer: it lists the effective snapshot's available skills,
 effective plugin MCP servers, and connectors the person added (a disabled or
 untrusted item is absent), then the thread's provider's own skills and plugins
 its runtime listed on the observation (`mentions`; Codex's account skills and
-installed plugins), labelled as the provider's, plus the thread's files in Work
+installed plugins) and, for a local Work or Code thread whose launch loads
+Project skills (`nativeSetup.skills === true`), the thread's folder skills
+labelled **Project** beside them (with zero Project or greyed rows when
+Project skills are off), labelled as the provider's, plus the thread's files in Work
 and Code. Choosing an Octant row makes a structured selection chip that the
 host re-resolves at send; choosing a provider's row writes the runtime's own
 reference (`$name`, `@name`), which its driver resolves against its own listing

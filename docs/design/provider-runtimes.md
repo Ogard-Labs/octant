@@ -1685,14 +1685,23 @@ codex-cli 0.143.0); a fork onto its own worktree, a turn with no anchor, an
 older Codex and a failed copy go back with the text handoff. Codex still
 reports `sessionRollback` unsupported, so a rewind keeps the text handoff.
 
-**Codex skills and plugins in `@`** (maintainer request, 2026-11-18; built).
+**Codex skills and plugins in `@`** (maintainer requests, 2026-11-18 and 2026-11-19; built).
 The composer's `@` menu lists Codex's own skills and plugins after Octant's,
 labelled as Codex's. The probe reads the account's skills with `skills/list`
 (no folder: the `user`, `system` and `admin` scopes; a Project's skills are
 not the account's) and its installed, enabled plugins with
 `plugin/installed` (codex-cli 0.135.0 and later), into the observation's
 `mentions`; a release that lists neither offers none, and a failed read never
-fails the probe. Choosing one writes Codex's own reference into the draft:
+fails the probe. In a local Work or Code thread (or draft), opening `@` also
+queries `skills/list` for the thread's own folder (`cwd` / checkout / working
+directory, bypassing Codex's cache) **only when the thread's launch actually
+loads Project skills** (`nativeSetup.skills === true`). Project skills are
+marked `scope: "project"` and labelled **Project** beside the account's skills
+(winning deduplication if a Project skill shares a name with an account skill);
+when Project skills are off (`nativeSetup.skills !== true`), or for a Chat
+thread or server Project with no local folder, no Project skills are listed
+and no disabled or greyed rows appear. Choosing one writes Codex's own
+reference into the draft:
 `$name` for a skill, `@name` for a plugin. At send the driver reads the
 prompt's `$name` and `@name` references and resolves each against Codex's
 own listing for the thread's folder, never a path the client sent: a skill

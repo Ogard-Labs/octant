@@ -388,6 +388,77 @@ describe("ProviderRoutes", () => {
     expect(chat?.status).toBe(400);
   });
 
+  it("answers thread and draft provider mentions after window authorization and refuses unauthorized or chat requests", async () => {
+    const threadId = "80000000-0000-4000-8000-000000000063";
+    const projectId = "80000000-0000-4000-8000-000000000064";
+    const mentions = vi.fn(async (_windowId, request) =>
+      request.kind === "mentions"
+        ? {
+            status: "ok" as const,
+            mentions: [
+              { kind: "skill" as const, name: "local", scope: "project" as const },
+              { kind: "skill" as const, name: "tidy" },
+            ],
+          }
+        : { status: "unauthorized" as const },
+    );
+    const route = routeFixture({}, undefined, false, {
+      get: () => "inherit",
+      set: () => "recorded",
+      mentions,
+    });
+    const post = (body: unknown, headers: Record<string, string> = {}) =>
+      new Request("http://127.0.0.1/api/providers/thread-native-setup", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      });
+
+    const unauthenticated = await route(post({ kind: "mentions", threadId, mode: "code" }));
+    expect(unauthenticated?.status).toBe(401);
+    expect(mentions).not.toHaveBeenCalled();
+
+    const ok = await route(
+      post(
+        { kind: "mentions", threadId, mode: "code" },
+        { "x-octant-window-capability": capability },
+      ),
+    );
+    expect(ok?.status).toBe(200);
+    expect(await ok?.json()).toEqual({
+      mentions: [
+        { kind: "skill", name: "local", scope: "project" },
+        { kind: "skill", name: "tidy" },
+      ],
+    });
+    expect(mentions).toHaveBeenCalledWith(windowId, {
+      kind: "mentions",
+      threadId,
+      mode: "code",
+    });
+
+    const denied = await route(
+      post(
+        {
+          kind: "draft-mentions",
+          projectId,
+          mode: "code",
+          providerInstanceId: instanceId,
+        },
+        { "x-octant-window-capability": capability },
+      ),
+    );
+    expect(denied?.status).toBe(401);
+
+    const chat = await route(
+      post(
+        { kind: "mentions", threadId, mode: "chat" },
+        { "x-octant-window-capability": capability },
+      ),
+    );
+    expect(chat?.status).toBe(400);
+  });
+
   it("refuses a paired device turning on Claude artifacts before the service runs", async () => {
     const execute = vi.fn(() => ({ kind: "provider-updated", instance: provider() }));
     const route = routeFixture({ execute });
