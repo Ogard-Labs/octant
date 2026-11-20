@@ -15433,7 +15433,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
       exhausted. Missing, purged, tampered, binary, or unreadable attachments
       are skipped without blocking later turns; already-compacted turns and
       attachments delivered natively or explicitly excluded by a `text-only`
-      continuation receipt are not re-inlined.
+      continuation receipt are not re-inlined. Requested compaction receives
+      the same bounded, policy-filtered attachment text when generating its
+      summary so summarized turns retain their attached file content.
       Rationale: a read-only tool scoped to the one attachment was the other
       design. It changes the session's tool catalog on the turn a file
       arrives, which a resumed native session refuses, it needs app-managed

@@ -3550,6 +3550,131 @@ describe("ChatService", () => {
     expect(secondFileBlocks).toHaveLength(1);
   });
 
+  it("includes attached file text in requested compaction materials and carries the summary plus uncompacted attachments into later rebuilt turns", async () => {
+    const textOnly = probeFixture({
+      models: [
+        {
+          id: decodeProviderModelId("model-a"),
+          displayName: "Model A",
+          contextLimit: 8_000,
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+    });
+    const { service, fakeDriver, contextHarness } = openFixture({ probe: textOnly });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Requested compaction attachments",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const firstUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "deploy.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode(`replicas: 3\n${"# note ".repeat(600)}`),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Review this deployment",
+      attachmentIds: [firstUpload.id],
+    });
+    const secondUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId("84000000-0000-4000-8000-000000000018"),
+      displayName: "scaling.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode(`maxReplicas: 10\n${"# scale ".repeat(600)}`),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Add autoscaling",
+      attachmentIds: [secondUpload.id],
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Check readiness",
+    });
+
+    const subject = decodeContextSubjectRef({
+      aggregateType: "chat-thread",
+      aggregateId: created.thread.id,
+    });
+    const compactionConversation = await service.sessionCompactionConversationWithAttachments(
+      created.thread.id,
+    );
+    expect(compactionConversation[0]?.content).toContain(
+      'The person attached a file, "deploy.yaml" (application/yaml). Its text follows',
+    );
+    expect(compactionConversation[0]?.content).toContain("replicas: 3");
+
+    const compactionId = decodeContextCompactionId("84000000-0000-4000-8000-000000000098");
+    const requested = contextHarness.requestCompaction({
+      subject,
+      compactionId,
+      executor: {
+        kind: "host",
+        providerInstanceId: decodeProviderInstanceId(ids.provider),
+        modelId: decodeProviderModelId("model-a"),
+      },
+      requestedBy: "local-window",
+    });
+    if (requested.kind !== "requested") throw new Error("Expected requested compaction.");
+    const seenMaterials: Array<string> = [];
+    await contextHarness.compactSession({
+      subject,
+      compactionId,
+      conversation: compactionConversation,
+      plannedVersion: requested.version,
+      generateSummary: async (request) => {
+        seenMaterials.push(...request.materials.map((material) => material.content));
+        return {
+          kind: "generated",
+          summary: {
+            content: "Summary: deploy.yaml configures replicas: 3.",
+            summaryTokens: { kind: "known", tokens: 12, accuracy: "conservative-heuristic" },
+          },
+        };
+      },
+      reportedUsage: () => undefined,
+      subjectAvailability: () => "available",
+    });
+    expect(seenMaterials.join("\n")).toContain("replicas: 3");
+
+    // Turn 4 rebuilds history using the summary for compacted Turn 1 and raw attachment text for uncompacted Turn 2.
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Proceed with rollout",
+    });
+    const rebuiltContext = fakeDriver.sentTurns[3]?.context ?? [];
+    expect(rebuiltContext.find((block) => block.kind === "conversation-summary")?.text).toContain(
+      "Summary: deploy.yaml configures replicas: 3.",
+    );
+    expect(
+      rebuiltContext.some(
+        (block) => block.kind === "user-message" && block.text.includes("Review this deployment"),
+      ),
+    ).toBe(false);
+    const secondHistory = rebuiltContext.find(
+      (block) => block.kind === "user-message" && block.text.includes("Add autoscaling"),
+    );
+    expect(secondHistory?.text).toContain("maxReplicas: 10");
+  });
+
   it("refuses a binary file the model cannot read before any turn is journaled", async () => {
     const { service, fakeDriver } = openFixture();
     const created = await service.execute({

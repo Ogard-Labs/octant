@@ -6172,7 +6172,7 @@ export class ChatService {
     thread: ChatThread,
     view: ChatThreadView | undefined,
     options: {
-      readonly currentContentId: ChatContentReference["contentId"];
+      readonly currentContentId?: ChatContentReference["contentId"];
       readonly maxCharacters: number;
       readonly skipAttachmentIds?: ReadonlySet<string>;
     },
@@ -6180,9 +6180,12 @@ export class ChatService {
     if (view === undefined || options.maxCharacters <= 0) return new Map();
     const activeTurns = activeChatTurns(view.turns);
     if (activeTurns.length === 0) return new Map();
-    const currentTurn = activeTurns.find(
-      (turn) => String(turn.userMessageRef.contentId) === String(options.currentContentId),
-    );
+    const currentTurn =
+      options.currentContentId === undefined
+        ? undefined
+        : activeTurns.find(
+            (turn) => String(turn.userMessageRef.contentId) === String(options.currentContentId),
+          );
     const priorTurns =
       currentTurn === undefined
         ? activeTurns
@@ -7976,13 +7979,40 @@ export class ChatService {
   sessionCompactionConversation(threadId: ChatThreadId): ReadonlyArray<SessionConversationMessage> {
     const view = this.#persistence.readChatThreadView(threadId);
     if (view === undefined) return [];
+    return this.#buildCompactionConversation(view);
+  }
+
+  /**
+   * The conversation a requested compaction summarizes, enriched with the same
+   * bounded, digest-verified, policy-filtered text of finalized text and
+   * document attachments that a host-rebuilt turn carries, so the summary sees
+   * those files before their turns are replaced by the summary.
+   */
+  async sessionCompactionConversationWithAttachments(
+    threadId: ChatThreadId,
+  ): Promise<ReadonlyArray<SessionConversationMessage>> {
+    const thread = this.#persistence.readChatThread(threadId);
+    const view = this.#persistence.readChatThreadView(threadId);
+    if (thread === undefined || view === undefined) return [];
+    const attachedTextsByTurnId = await this.#priorTurnAttachedTexts(thread, view, {
+      maxCharacters: MAX_CHAT_ATTACHED_TEXT_CHARACTERS,
+    });
+    return this.#buildCompactionConversation(view, attachedTextsByTurnId);
+  }
+
+  #buildCompactionConversation(
+    view: ChatThreadView,
+    attachedTextsByTurnId?: ReadonlyMap<string, ReadonlyArray<string>>,
+  ): ReadonlyArray<SessionConversationMessage> {
     const contentById = new Map(view.contents.map((content) => [content.contentId, content]));
     return activeChatTurns(view.turns).flatMap((turn) => {
       const exchangeKey = String(turn.id);
       const user = contentById.get(turn.userMessageRef.contentId);
       // As the turn's context entry sources it: the words Sees images wrote
-      // for the turn's images, then the person's message.
+      // for the turn's images, any framed text/document attachments, then the
+      // person's message.
       const describedWords = describedWordsOf(turn, contentById);
+      const attachedTexts = attachedTextsByTurnId?.get(String(turn.id)) ?? [];
       const messages: Array<SessionConversationMessage> =
         user === undefined
           ? []
@@ -7991,7 +8021,7 @@ export class ChatService {
                 source: { kind: "message", referenceId: String(user.contentId) },
                 role: "user",
                 exchangeKey,
-                content: [...describedWords, user.body].join("\n\n"),
+                content: [...describedWords, ...attachedTexts, user.body].join("\n\n"),
               },
             ];
       const attempt = chatTurnAnsweredAttempt(turn);
