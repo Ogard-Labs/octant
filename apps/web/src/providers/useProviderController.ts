@@ -2271,26 +2271,32 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
+  const [threadNativeSetupRevision, setThreadNativeSetupRevision] = useState(0);
   const threadNativeSetup = useMemo(
     () =>
       client?.threadNativeSetup === undefined
         ? undefined
         : {
+            revision: threadNativeSetupRevision,
             read: async (threadId: string) =>
               (await client.threadNativeSetup?.({ kind: "get", threadId }))?.choice ?? "inherit",
             change: async (
               threadId: string,
               providerInstanceId: ProviderInstanceId,
               choice: ThreadNativeSetupChoice,
-            ) =>
-              (
-                await client.threadNativeSetup?.({
-                  kind: "set",
-                  threadId,
-                  providerInstanceId,
-                  choice,
-                })
-              )?.choice ?? "inherit",
+            ) => {
+              const updated =
+                (
+                  await client.threadNativeSetup?.({
+                    kind: "set",
+                    threadId,
+                    providerInstanceId,
+                    choice,
+                  })
+                )?.choice ?? "inherit";
+              setThreadNativeSetupRevision((current) => current + 1);
+              return updated;
+            },
             ...(client.threadProjectCode === undefined
               ? {}
               : {
@@ -2298,8 +2304,15 @@ export function useProviderController(options: ProviderControllerOptions) {
                     (await client.threadProjectCode?.({ kind: "project-code", threadId, mode }))
                       ?.projectCode ?? { status: "none" as const },
                 }),
+            ...(client.threadProviderMentions === undefined
+              ? {}
+              : {
+                  readMentions: async (
+                    request: Parameters<NonNullable<typeof client.threadProviderMentions>>[0],
+                  ) => (await client.threadProviderMentions?.(request))?.mentions ?? [],
+                }),
           },
-    [client],
+    [client, threadNativeSetupRevision],
   );
   const setDataTags = useCallback(
     (instanceId: ProviderInstanceId, dataTags: ProviderDataTags) =>

@@ -231,8 +231,8 @@ import {
 } from "../composer/useComposerSlashCommands";
 import {
   ComposerAtTypeahead,
-  composerProviderMentions,
   useComposerAtMenu,
+  useThreadProviderMentions,
 } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 
@@ -1545,8 +1545,17 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
   const fileMentionOpen = fileMentions.open && !mention.open;
+  const providerMentions = useThreadProviderMentions(props.providerGroups, {
+    kind: "thread",
+    mode: "work",
+    threadId: String(props.threadId),
+    projectId: thread?.projectId,
+    providerInstanceId: thread?.providerInstanceId,
+    executionPolicy:
+      thread?.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
+  });
   const atMenu = useComposerAtMenu({
-    provider: composerProviderMentions(props.providerGroups, thread?.providerInstanceId),
+    provider: providerMentions,
     textarea: () => textareaRef.current,
     draft: composerDraft.text,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),

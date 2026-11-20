@@ -137,6 +137,8 @@ export type GhPullRequestReviewResult =
         headBranch: string;
         /** Empty when the read carried no head commit. */
         headSha: string;
+        /** Present when the forge reported the base branch commit SHA. */
+        baseSha?: string;
         author: string;
         mergeability?: "mergeable" | "conflicting" | "unknown";
         updatedAt?: string;
@@ -293,6 +295,7 @@ const PR_VIEW_FIELDS = [
   "body",
   "author",
   "baseRefName",
+  "baseRefOid",
   "headRefName",
   "headRefOid",
   "url",
@@ -606,6 +609,7 @@ export class GhPullRequestPort {
         headRepository: identity.headOwner,
         headBranch: identity.headBranch,
         headSha: detail?.headSha ?? "",
+        ...(detail?.baseSha === undefined ? {} : { baseSha: detail.baseSha }),
         author: detail?.author ?? "",
         mergeability: detail?.mergeability ?? "unknown",
         ...(detail?.updatedAt === undefined ? {} : { updatedAt: detail.updatedAt }),
@@ -692,6 +696,7 @@ export class GhPullRequestPort {
         headRepository: detail?.headRepository ?? "",
         headBranch: detail?.headBranch ?? "",
         headSha: detail?.headSha ?? "",
+        ...(detail?.baseSha === undefined ? {} : { baseSha: detail.baseSha }),
         author: detail?.author ?? "",
         mergeability: detail?.mergeability ?? "unknown",
         ...(detail?.updatedAt === undefined ? {} : { updatedAt: detail.updatedAt }),
@@ -1337,6 +1342,7 @@ interface GhPullRequestReviewDetail {
   readonly headBranch: string;
   readonly headRepository: string;
   readonly headSha: string;
+  readonly baseSha?: string;
   readonly description: string;
   readonly commits: readonly Readonly<{ oid: string; messageHeadline: string; author: string }>[];
   readonly files: readonly Readonly<{ path: string; additions: number; deletions: number }>[];
@@ -1376,6 +1382,11 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
     typeof value.headRefOid === "string" && /^[0-9a-f]{40}$/i.test(value.headRefOid)
       ? value.headRefOid
       : "";
+  const baseSha =
+    typeof value.baseRefOid === "string" &&
+    /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(value.baseRefOid)
+      ? value.baseRefOid
+      : undefined;
   const updatedAt =
     typeof value.updatedAt === "string" &&
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value.updatedAt)
@@ -1406,6 +1417,7 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
     headBranch,
     headRepository,
     headSha,
+    ...(baseSha === undefined ? {} : { baseSha }),
     description: clampBytes(value.body, MAX_PR_DESCRIPTION_BYTES),
     commits: decodeCommits(value.commits),
     files: decodeFiles(value.files),

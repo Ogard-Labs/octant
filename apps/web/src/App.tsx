@@ -413,7 +413,6 @@ import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
 import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
-import { MoveThreadToProjectDialog } from "./projects/MoveThreadToProjectDialog";
 import {
   ProjectActionRunDialog,
   type ProjectActionTarget,
@@ -708,6 +707,11 @@ const ReaderPagesContainer = lazy(() =>
 const SettingsContainer = lazy(() =>
   import("./app/SettingsContainer").then(({ SettingsContainer }) => ({
     default: SettingsContainer,
+  })),
+);
+const MoveThreadToProjectDialog = lazy(() =>
+  import("./projects/MoveThreadToProjectDialog").then(({ MoveThreadToProjectDialog }) => ({
+    default: MoveThreadToProjectDialog,
   })),
 );
 
@@ -9234,67 +9238,69 @@ function LaunchedShell(
       <OctantDialogPresence>
         <FilesClosePrompt />
       </OctantDialogPresence>
-      <OctantDialogPresence>
-        {moveRequest === undefined ? null : (
-          // The one Move to Project dialog lives above the shell frame so it
-          // stays mounted and reachable wherever the asking surface is —
-          // including when the sidebar that used to host it is hidden.
-          <MoveThreadToProjectDialog
-            {...(moveRequest.busy === true ||
-            (moveRequest.mode === "code" &&
-              navigationModel.codeSidebarThreads.some(
-                (thread) =>
-                  String(thread.threadId) === moveRequest.threadId &&
-                  (thread.activity === "working" || thread.activity === "attention"),
-              ))
-              ? { busy: true }
-              : {})}
-            currentProjectId={moveRequest.projectId}
-            mode={moveRequest.mode}
-            onClose={() => setMoveRequest(undefined)}
-            {...(() => {
-              const moveProvider = providerController.instances.find(
-                (instance) => String(instance.id) === moveRequest.providerInstanceId,
-              );
-              const moveModel =
-                moveProvider === undefined || moveRequest.modelId === undefined
-                  ? undefined
-                  : providerController.observedByInstance
-                      .get(moveProvider.id)
-                      ?.models.find((listed) => String(listed.id) === moveRequest.modelId);
-              return {
-                ...(moveProvider === undefined ? {} : { threadProvider: moveProvider }),
-                ...(moveModel === undefined ? {} : { threadModel: moveModel }),
-                ...(moveRequest.workingFolderId === undefined
-                  ? {}
-                  : { threadWorkingFolderId: moveRequest.workingFolderId }),
-                ...(moveRequest.checkoutKind === undefined
-                  ? {}
-                  : { threadCheckoutKind: moveRequest.checkoutKind }),
-                ...(moveRequest.checkoutAvailability === undefined
-                  ? {}
-                  : { threadCheckoutAvailability: moveRequest.checkoutAvailability }),
-              };
-            })()}
-            onMove={async (projectId: string, when?: "after-turn" | "stop-now") =>
-              moveRequest.mode === "code"
-                ? actions.moveCodeThread(
-                    decodeCodeThreadId(moveRequest.threadId),
-                    decodeProjectId(projectId),
-                    { when },
-                  )
-                : actions.tryWorkRestCommand(moveRequest.threadId, (expectedVersion) => ({
-                    kind: "move-work-thread",
-                    threadId: decodeWorkThreadId(moveRequest.threadId),
-                    expectedVersion,
-                    projectId: decodeProjectId(projectId),
-                  }))
-            }
-            projects={projectController.allProjects}
-            threadTitle={moveRequest.title}
-          />
-        )}
-      </OctantDialogPresence>
+      <Suspense fallback={null}>
+        <OctantDialogPresence>
+          {moveRequest === undefined ? null : (
+            // The one Move to Project dialog lives above the shell frame so it
+            // stays mounted and reachable wherever the asking surface is —
+            // including when the sidebar that used to host it is hidden.
+            <MoveThreadToProjectDialog
+              {...(moveRequest.busy === true ||
+              (moveRequest.mode === "code" &&
+                navigationModel.codeSidebarThreads.some(
+                  (thread) =>
+                    String(thread.threadId) === moveRequest.threadId &&
+                    (thread.activity === "working" || thread.activity === "attention"),
+                ))
+                ? { busy: true }
+                : {})}
+              currentProjectId={moveRequest.projectId}
+              mode={moveRequest.mode}
+              onClose={() => setMoveRequest(undefined)}
+              {...(() => {
+                const moveProvider = providerController.instances.find(
+                  (instance) => String(instance.id) === moveRequest.providerInstanceId,
+                );
+                const moveModel =
+                  moveProvider === undefined || moveRequest.modelId === undefined
+                    ? undefined
+                    : providerController.observedByInstance
+                        .get(moveProvider.id)
+                        ?.models.find((listed) => String(listed.id) === moveRequest.modelId);
+                return {
+                  ...(moveProvider === undefined ? {} : { threadProvider: moveProvider }),
+                  ...(moveModel === undefined ? {} : { threadModel: moveModel }),
+                  ...(moveRequest.workingFolderId === undefined
+                    ? {}
+                    : { threadWorkingFolderId: moveRequest.workingFolderId }),
+                  ...(moveRequest.checkoutKind === undefined
+                    ? {}
+                    : { threadCheckoutKind: moveRequest.checkoutKind }),
+                  ...(moveRequest.checkoutAvailability === undefined
+                    ? {}
+                    : { threadCheckoutAvailability: moveRequest.checkoutAvailability }),
+                };
+              })()}
+              onMove={async (projectId: string, when?: "after-turn" | "stop-now") =>
+                moveRequest.mode === "code"
+                  ? actions.moveCodeThread(
+                      decodeCodeThreadId(moveRequest.threadId),
+                      decodeProjectId(projectId),
+                      { when },
+                    )
+                  : actions.tryWorkRestCommand(moveRequest.threadId, (expectedVersion) => ({
+                      kind: "move-work-thread",
+                      threadId: decodeWorkThreadId(moveRequest.threadId),
+                      expectedVersion,
+                      projectId: decodeProjectId(projectId),
+                    }))
+              }
+              projects={projectController.allProjects}
+              threadTitle={moveRequest.title}
+            />
+          )}
+        </OctantDialogPresence>
+      </Suspense>
       {(() => {
         const coordinator = codeController.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(coordinatorBoundsThreadId),

@@ -52,6 +52,7 @@ export interface DockReviewToolProps {
   readonly onSendLineNotes?: (message: string) => Promise<CodeLineNotesSendResult>;
   /** Why line notes cannot be sent right now, such as a turn still running. */
   readonly lineNotesSendUnavailable?: string;
+  readonly pullRequestReviewClient?: import("@octant/client-runtime").PullRequestReviewClient;
 }
 
 /**
@@ -121,6 +122,9 @@ export function DockReviewTool(props: DockReviewToolProps) {
       {...(props.createUuid === undefined ? {} : { createUuid: props.createUuid })}
       {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
       {...(props.watchClient === undefined ? {} : { watchClient: props.watchClient })}
+      {...(props.pullRequestReviewClient === undefined
+        ? {}
+        : { pullRequestReviewClient: props.pullRequestReviewClient })}
       {...lineNoteProps(props)}
     />
   );
@@ -153,6 +157,7 @@ function BoundReview(props: {
   readonly watchClient?: Pick<CodeFileListingClient, "watch">;
   readonly onSendLineNotes?: (message: string) => Promise<CodeLineNotesSendResult>;
   readonly lineNotesSendUnavailable?: string;
+  readonly pullRequestReviewClient?: import("@octant/client-runtime").PullRequestReviewClient;
 }) {
   const nextUuid = useCallback(
     () => props.createUuid?.() ?? globalThis.crypto.randomUUID(),
@@ -283,6 +288,9 @@ function BoundReview(props: {
           executionPolicy={props.view.thread.executionPolicy}
           {...(line === undefined ? {} : { line })}
           {...(props.createUuid === undefined ? {} : { createUuid: props.createUuid })}
+          {...(props.pullRequestReviewClient === undefined
+            ? {}
+            : { pullRequestReviewClient: props.pullRequestReviewClient })}
           onRefreshComparison={() => void observe()}
           onStatus={setStatus}
           refreshTick={refreshTick}

@@ -523,6 +523,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     sideTaskClient,
     finishedReceiptClient,
     spendCeilingClient,
+    pullRequestReviewClient,
     usageDashboardClient,
     workMutationClient,
     workOverviewClient,
@@ -805,6 +806,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   }}
                   usageDashboardClient={usageDashboardClient}
                   spendCeilingClient={spendCeilingClient}
+                  pullRequestReviewClient={pullRequestReviewClient}
                   {...(settings.spendCeilingShown ? { spendCeilingShown: true } : {})}
                   onOpenUsageDashboard={(filter) => {
                     setPendingUsageFilter(filter);

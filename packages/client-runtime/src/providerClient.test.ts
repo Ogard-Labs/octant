@@ -34,6 +34,38 @@ describe("ProviderClient", () => {
     }
   });
 
+  it("fetches and decodes thread provider mentions with project scope", async () => {
+    const threadId = "80000000-0000-4000-8000-000000000039";
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      Response.json({
+        mentions: [
+          { kind: "skill", name: "local", scope: "project", description: "Deploy this Project" },
+          { kind: "skill", name: "tidy", description: "Tidy the code" },
+        ],
+      }),
+    );
+    const client = createProviderClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    await expect(
+      client.threadProviderMentions?.({ kind: "mentions", threadId, mode: "code" }),
+    ).resolves.toEqual({
+      mentions: [
+        { kind: "skill", name: "local", scope: "project", description: "Deploy this Project" },
+        { kind: "skill", name: "tidy", description: "Tidy the code" },
+      ],
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:13773/api/providers/thread-native-setup",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ kind: "mentions", threadId, mode: "code" }),
+      }),
+    );
+  });
+
   it("decodes successes and typed failures, dropping unknown fields and refusing wrong types", async () => {
     const newer = createProviderClient({
       baseUrl: "http://localhost",

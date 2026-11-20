@@ -575,6 +575,12 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                   ? {}
                   : { onMergeWhenReady: props.onMergeWhenReady })}
                 {...(props.onAutoFix === undefined ? {} : { onAutoFix: props.onAutoFix })}
+                {...(props.pullRequestReviewClient === undefined
+                  ? {}
+                  : { pullRequestReviewClient: props.pullRequestReviewClient })}
+                {...(props.pullRequestTarget === undefined
+                  ? {}
+                  : { pullRequestTarget: props.pullRequestTarget })}
               />
             )}
 

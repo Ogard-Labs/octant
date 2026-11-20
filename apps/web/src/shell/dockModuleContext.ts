@@ -14,6 +14,7 @@ import type { AndroidToolchainClient } from "@octant/client-runtime/android-tool
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
+import type { PullRequestReviewClient } from "@octant/client-runtime/pull-request-review-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
 import type { WorkFileListingClient } from "@octant/client-runtime/work-file-listing-client";
 import type {
@@ -94,6 +95,7 @@ export interface ThreadUtilityDockContentProps {
   readonly onSelectProjectPullRequest?: (row: CodeProjectPullRequestRow) => void;
   readonly onSidecarOpened: (sidecar: SideChatSidecar) => void;
   readonly planClient?: PlanClient;
+  readonly pullRequestReviewClient?: PullRequestReviewClient;
   readonly providerController?: ProviderController;
   /** Marks the row the shell currently shows in Review, wherever it was chosen. */
   readonly selectedProjectPullRequestKey?: string;

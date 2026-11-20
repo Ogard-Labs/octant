@@ -1,4 +1,5 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { PullRequestReviewClient } from "@octant/client-runtime/pull-request-review-client";
 import {
   decodeCodeOperationCommand,
   decodeCodeOperationId,
@@ -11,6 +12,7 @@ import {
   type CodeReviewFindingAssessment,
   type CodeRepositoryTestStatus,
   type ProviderExecutionPolicy,
+  type PullRequestReviewThreadView,
 } from "@octant/contracts";
 import { useEffect, useRef, useState } from "react";
 import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
@@ -64,6 +66,7 @@ interface CodeLocalReviewProps {
   readonly onStatus?: (status: CodeLocalReviewStatus) => void;
   /** The toolbar's refresh: a new value re-reads findings and checks. */
   readonly refreshTick?: number;
+  readonly pullRequestReviewClient?: PullRequestReviewClient | undefined;
 }
 
 export interface CodeLocalReviewStatus {
@@ -122,6 +125,7 @@ function BoundCodeLocalReview(props: CodeLocalReviewProps) {
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
   const [checks, setChecks] = useState<CodeRepositoryTestStatus>();
+  const [pullRequestReview, setPullRequestReview] = useState<PullRequestReviewThreadView>();
   const [preparing, setPreparing] = useState(false);
   const preparingRef = useRef(false);
   const owner = useRef(new AbortController());
@@ -193,8 +197,25 @@ function BoundCodeLocalReview(props: CodeLocalReviewProps) {
             setChecks(result);
         })
         .catch(() => undefined);
+    const reviewClient = props.pullRequestReviewClient;
+    setPullRequestReview(undefined);
+    if (reviewClient !== undefined) {
+      void reviewClient
+        .queryThread(props.scope.threadId, controller.signal)
+        .then((result) => {
+          if (!controller.signal.aborted) setPullRequestReview(result);
+        })
+        .catch(() => undefined);
+    }
     return () => controller.abort();
-  }, [identity, props.client, props.createUuid, refresh, props.refreshTick]);
+  }, [
+    identity,
+    props.client,
+    props.createUuid,
+    props.pullRequestReviewClient,
+    refresh,
+    props.refreshTick,
+  ]);
 
   const onStatus = props.onStatus;
   const checksText =
@@ -282,6 +303,8 @@ function BoundCodeLocalReview(props: CodeLocalReviewProps) {
         executionPolicy={props.executionPolicy}
         findings={assessments.map((item) => item.finding)}
         assessments={assessments}
+        effectivePullRequestReview={pullRequestReview?.effective}
+        latestPullRequestReview={pullRequestReview?.latestReview}
         createFindingId={() => decodeCodeReviewFindingId(uuid())}
         createOperationId={nextOperation}
         {...(target === undefined ||
