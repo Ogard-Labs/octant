@@ -465,9 +465,10 @@ export interface AcpClient {
     mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
     meta?: Readonly<Record<string, unknown>>,
   ): Promise<AcpNewSessionResult>;
+  /** Each string is one text block, in order, ahead of the attachments. */
   prompt(
     sessionId: string,
-    prompt: string,
+    prompt: string | ReadonlyArray<string>,
     attachments?: ReadonlyArray<AcpPromptAttachment>,
   ): Promise<AcpPromptResult>;
   setConfigOption(
@@ -1050,7 +1051,16 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     prompt: (sessionId, prompt, attachments = []) =>
       request(
         "session/prompt",
-        { sessionId, prompt: [{ type: "text", text: prompt }, ...attachments] },
+        {
+          sessionId,
+          prompt: [
+            ...(typeof prompt === "string" ? [prompt] : prompt).map((text) => ({
+              type: "text",
+              text,
+            })),
+            ...attachments,
+          ],
+        },
         decode(PromptResult),
         limits.turnTimeoutMs,
         "idle",
