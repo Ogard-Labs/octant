@@ -91,6 +91,7 @@ describe("useMachineChangeFeed", () => {
             "thread-follow-ups" as const,
             "thread-message-queue" as const,
             "todos" as const,
+            "canvas-choice-answers" as const,
           ],
         };
       },
@@ -102,6 +103,7 @@ describe("useMachineChangeFeed", () => {
     expect(result.current.threadFollowUps).toBe(1);
     expect(result.current.threadMessageQueue).toBe(1);
     expect(result.current.todos).toBe(1);
+    expect(result.current.canvasChoiceAnswers).toBe(1);
     expect(result.current.chatNavigation).toBe(0);
   });
 
@@ -148,6 +150,7 @@ describe("useMachineChangeFeed", () => {
     expect(result.current.threadMessageQueue).toBe(1);
     expect(result.current.chatNavigation).toBe(1);
     expect(result.current.imageJobs).toBe(1);
+    expect(result.current.canvasChoiceAnswers).toBe(1);
   });
 });
 

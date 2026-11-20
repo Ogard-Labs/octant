@@ -936,6 +936,11 @@ export function wireCanvas(deps: CanvasDependencies) {
       uuid: randomUUID,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       now: () => new Date().toISOString() as UtcTimestamp,
+      // A person's answer or clear on a Canvas the replica carries goes to
+      // their other computers; one taken in from another computer does not.
+      committed: (canvasId, event) => {
+        void replicaArtifactSync.service?.choiceAnswerCommitted({ canvasId, event });
+      },
     },
     { authorize: authorizeCanvas },
   );
@@ -1388,6 +1393,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     artifactLibraryService,
     artifactMirrorRoutes,
     canvasAgentToolPort,
+    canvasChoiceAnswerService,
     canvasCommentService,
     canvasNetworkAccess,
     canvasPublicShareService,
