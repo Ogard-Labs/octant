@@ -347,6 +347,7 @@ export function startOctantServer(
       remoteDelegationHolder,
       runtimeOutsideContentMarks,
       sideTasks,
+      finishedReceipts,
       spendCeiling,
       spendCeilingHolder,
       threadAwaitsHarnessApproval,
@@ -646,6 +647,7 @@ export function startOctantServer(
       webSearchSettings,
       sideTaskHost,
       sideTaskRoutes,
+      finishedReceiptRoutes,
       hostShield,
       observeTurnEnded,
       threadWork,
@@ -693,6 +695,7 @@ export function startOctantServer(
       runningWorkTurnAccess,
       runningWorkTurnSandbox,
       sideTasks,
+      finishedReceipts,
       threadFollowUpSuggestions,
       toolEgressRules,
       turnMetrics,
@@ -701,6 +704,10 @@ export function startOctantServer(
       workTurnProjection,
     });
     yield* Effect.promise(recoverGoogleCliCommands);
+    const unsubscribeFinishedReceipts = persistence.journal.subscribeCommitted((append) =>
+      finishedReceipts.onCommittedEvents(append.events),
+    );
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeFinishedReceipts));
     const {
       agentProfileRoutes,
       archivedWorktreeRoutes,
@@ -744,6 +751,7 @@ export function startOctantServer(
       refreshStandaloneSkills,
       onGithubPullRequestsUnreadable,
       onWindowRevoked,
+      finishedReceipts,
       threadAwaitsHarnessApproval,
       bindingReceiptStore,
       cacheStats,
@@ -1021,6 +1029,9 @@ export function startOctantServer(
       selectCodeConversation,
       siblingThreadsService,
       sideTasks,
+      finishedReceipts,
+      gitObservationPort,
+      goalService,
       simulatorInputGrants,
       spendCeiling,
       threadMentionService: (): ThreadMentionService => threadMentionService,
@@ -1275,6 +1286,9 @@ export function startOctantServer(
       routineProposalService,
       sideTaskHost,
       sideTasks,
+      finishedReceipts,
+      gitObservationPort,
+      nativeHarnessApprovals,
       siblingThreadsService,
       agentMessageService,
       spendCeiling,
@@ -1534,6 +1548,7 @@ export function startOctantServer(
       codeTurnDecisions,
       gitObservationPort,
       goalService,
+      finishedReceipts,
       nativeHarnessApprovals,
       nativeHarnessQuestions,
       nativeHarnessSessions,
@@ -1936,6 +1951,7 @@ export function startOctantServer(
       shipRoutes,
       sidebarBackgroundRoutes,
       sideTaskRoutes,
+      finishedReceiptRoutes,
       snapshotCanvas,
       speechRoutes,
       spendCeilingRoutes,

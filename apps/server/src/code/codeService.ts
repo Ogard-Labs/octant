@@ -2,6 +2,7 @@ import {
   decodeThreadWorkingDirectory,
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   type CodeTranscriptSearch,
+  type ThreadFinishedReceipt,
 } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
@@ -23,6 +24,7 @@ import {
   guardrailLowered,
   permissionModeOf,
 } from "@octant/domain/guardrail-policy";
+import { selectCompletionReceiptId } from "@octant/domain/finished-receipt-policy";
 import {
   decodeGuardrailLevelLowered,
   GUARDRAIL_LEVEL_LOWERED,
@@ -732,6 +734,8 @@ export interface CodeServiceOptions {
    * the thread needs the person.
    */
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
+  /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
+  readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
   readonly gitHistory?: Pick<GitHistoryPort, "read">;
   /**
    * The history of a thread in a server Project, read by Git on its server,
@@ -970,10 +974,14 @@ function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
 }
 
 /** The thread without a person's Done mark, as if it had never been marked. */
-function withoutDoneMark<T extends Pick<CodeThread, "markedDoneAt">>(
+function withoutDoneMark<T extends Pick<CodeThread, "markedDoneAt" | "completionReceiptId">>(
   thread: T,
-): Omit<T, "markedDoneAt"> {
-  const { markedDoneAt: _markedDoneAt, ...unmarked } = thread;
+): Omit<T, "markedDoneAt" | "completionReceiptId"> {
+  const {
+    markedDoneAt: _markedDoneAt,
+    completionReceiptId: _completionReceiptId,
+    ...unmarked
+  } = thread;
   return unmarked;
 }
 
@@ -1091,6 +1099,9 @@ export class CodeService {
   readonly #onThreadArchived: CodeServiceOptions["onThreadArchived"];
   readonly #waitForThreadChange: CodeServiceOptions["waitForThreadChange"];
   readonly #pullRequests: CodeNavigationPullRequestSource | undefined;
+  readonly #readLatestFinishedReceipt:
+    | ((threadId: string) => ThreadFinishedReceipt | undefined)
+    | undefined;
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #issueContext?: GithubIssueContextPort;
@@ -1149,6 +1160,7 @@ export class CodeService {
     this.#pullRequests = options.pullRequests;
     this.#liveTurns = options.liveTurns;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
+    this.#readLatestFinishedReceipt = options.readLatestFinishedReceipt;
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
     }
@@ -3054,12 +3066,20 @@ export class CodeService {
                                     updatedAt,
                                   }
                                 : command.kind === "mark-code-thread-done"
-                                  ? {
-                                      ...current,
-                                      markedDoneAt: updatedAt,
-                                      version: command.expectedVersion + 1,
-                                      updatedAt,
-                                    }
+                                  ? (() => {
+                                      const completionReceiptId = selectCompletionReceiptId(
+                                        this.#readLatestFinishedReceipt?.(String(current.id)),
+                                      );
+                                      return {
+                                        ...current,
+                                        markedDoneAt: updatedAt,
+                                        ...(completionReceiptId === undefined
+                                          ? {}
+                                          : { completionReceiptId }),
+                                        version: command.expectedVersion + 1,
+                                        updatedAt,
+                                      };
+                                    })()
                                   : {
                                       ...current,
                                       ...(command.workingFolderId === undefined

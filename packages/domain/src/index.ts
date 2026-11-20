@@ -107,6 +107,7 @@ export * from "./workTurnPolicy";
 export * from "./dataLifecyclePolicy";
 export * from "./threadRetentionPolicy";
 export * from "./threadCompletionPolicy";
+export * from "./finishedReceiptPolicy";
 export * from "./threadProjectMovePolicy";
 export * from "./threadExportPolicy";
 export * from "./threadHandOffPolicy";

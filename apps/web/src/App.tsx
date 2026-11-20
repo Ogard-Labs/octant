@@ -1888,6 +1888,7 @@ function LaunchedShell(
     workRequestClient,
     workThreadClient,
     workTurnClient,
+    finishedReceiptClient,
   } = launchedClients;
   const machineChanges = useMachineChangeFeed(machineChangeClient);
   // Which bundled plugins (GitHub, the board) the person has switched on,
@@ -5505,8 +5506,9 @@ function LaunchedShell(
         work: workThreadClient,
         workTurns: workTurnClient,
         chat: chatClient,
+        finishedReceipts: finishedReceiptClient,
       }),
-    [chatClient, codeClient, workThreadClient, workTurnClient],
+    [chatClient, codeClient, finishedReceiptClient, workThreadClient, workTurnClient],
   );
   const workingNowProviders = useMemo(
     () =>

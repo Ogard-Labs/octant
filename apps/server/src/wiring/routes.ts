@@ -105,6 +105,7 @@ export type RoutesDependencies = {
     | "serverProjectRoutes"
     | "nativeHarnessSessionRoutes"
     | "sideTaskRoutes"
+    | "finishedReceiptRoutes"
   > &
   Pick<
     ChatWiring,
@@ -255,6 +256,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     shipRoutes,
     sidebarBackgroundRoutes,
     sideTaskRoutes,
+    finishedReceiptRoutes,
     speechRoutes,
     spendCeilingRoutes,
     syncedArtifactRoutes,
@@ -321,6 +323,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await safeNetworkRoutes(request)) ??
     (await followUpSuggestionRoutes(request)) ??
     (await sideTaskRoutes(request)) ??
+    (await finishedReceiptRoutes(request)) ??
     (await githubRoutes(request)) ??
     (await integrationRoutes(request)) ??
     (await credentialRequestRoutes(request)) ??

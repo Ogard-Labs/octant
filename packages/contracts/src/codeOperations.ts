@@ -17,6 +17,7 @@ import { ProviderNativeSessionId } from "./providerNativeSession";
 import { ThreadPublishedPage } from "./threadToolSteps";
 import { ThreadCallTiming } from "./threadToolStepList";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
+import { ThreadBoardFinishedMark } from "./finishedReceipt";
 import { DescribedImageName, DescribedTurnImages, ImageDescribedBy } from "./imageDescription";
 import { Schema } from "effect";
 import {
@@ -3191,6 +3192,8 @@ export const CodeBoardCard = Schema.Struct({
    * is never a card.
    */
   coordinatorThreadId: Schema.optional(CodeThreadId),
+  /** Fresh finished-with-proof mark; absent when none exists or when stale. Never moves the column. */
+  finishedReceipt: Schema.optional(ThreadBoardFinishedMark),
 }).annotations(strict);
 export type CodeBoardCard = typeof CodeBoardCard.Type;
 

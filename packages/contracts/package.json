@@ -17,6 +17,7 @@
     "./secret-stores": "./src/secretStores.ts",
     "./automation": "./src/automation.ts",
     "./goal-loop": "./src/goalLoop.ts",
+    "./finished-receipt": "./src/finishedReceipt.ts",
     "./ship-target": "./src/shipTarget.ts",
     "./automation-notifications": "./src/automationNotifications.ts",
     "./linked-thread": "./src/linkedThread.ts",
