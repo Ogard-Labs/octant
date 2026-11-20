@@ -195,7 +195,7 @@ export const ACP_AGENT_PROFILES = {
     authenticationNote:
       "Uses your own Google account sign-in from the Antigravity CLI, for one person using it interactively.",
     signInGuidance:
-      "Run agy in your terminal and sign in with your Google account, then check the connection again.",
+      "Run agy (or agy acp --login) in your terminal and sign in with your Google account, then check the connection again.",
     // 0x1b is taken: copilot's 0x11 seed normalizes to the `1b` digest.
     bundledPluginSerial: 0x1c,
   },

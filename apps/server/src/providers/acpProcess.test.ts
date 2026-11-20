@@ -2370,7 +2370,7 @@ describe("Google Antigravity launches without Octant's sandbox outside Strict", 
     async (mode, executionPolicy) => {
       const { launch, binaryPath } = await launchFor({ mode, executionPolicy, strict: false });
       expect(launch.command).toBe(binaryPath);
-      expect(launch.args).toEqual(["acp", "--disable-telemetry"]);
+      expect(launch.args).toEqual(["acp", "--process-per-session", "--disable-telemetry"]);
     },
   );
 
