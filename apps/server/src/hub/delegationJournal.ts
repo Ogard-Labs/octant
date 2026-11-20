@@ -18,6 +18,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 
 const HUB_DELEGATION_AGGREGATE = "hub-delegation";
@@ -90,4 +91,23 @@ export function createDelegationJournal(
       console.warn("Octant could not record a delegation.");
     }
   };
+}
+
+/**
+ * Every thread id this host created to carry a peer-delegated task, rebuilt
+ * from the delegation journal so restart recovery still withholds host-wide
+ * person memory from those threads.
+ */
+export function readReceivedDelegationThreadIds(
+  journal: Pick<Journal, "replayAggregateType">,
+): ReadonlySet<string> {
+  const threadIds = new Set<string>();
+  for (const envelope of replayAggregateTypesInOrder(journal, [HUB_DELEGATION_AGGREGATE])) {
+    if (envelope.eventName !== HUB_DELEGATION_RECORDED) continue;
+    const payload = decodeHubDelegationRecordedPayload(envelope.payload);
+    if (payload.change === "received" && payload.threadId !== undefined) {
+      threadIds.add(payload.threadId);
+    }
+  }
+  return threadIds;
 }

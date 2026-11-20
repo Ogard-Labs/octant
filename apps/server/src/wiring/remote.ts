@@ -250,6 +250,7 @@ export type RemoteDependencies = {
     | "browserCaptureStore"
     | "browserCaptures"
     | "personMemory"
+    | "withholdThreadFromPersonMemory"
     | "octantInstructions"
     | "windowAuthorityStore"
   > &
@@ -364,6 +365,7 @@ export function wireRemote(deps: RemoteDependencies) {
     automationScheduler,
     browserCaptureStore,
     personMemory,
+    withholdThreadFromPersonMemory,
     octantInstructions,
     hubPushHandoffSlot,
     pairedMergeUnlockSlot,
@@ -989,6 +991,7 @@ export function wireRemote(deps: RemoteDependencies) {
             workTurnService.cancelFirstTurn(scope, command),
         },
         scope: ROUTINE_HOST_SCOPE_ID,
+        onDelegatedThreadCreated: withholdThreadFromPersonMemory,
       }),
       state: delegationState,
       record: recordDelegation,

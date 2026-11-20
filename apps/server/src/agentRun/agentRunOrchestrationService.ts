@@ -92,13 +92,19 @@ export interface AgentRunProcessSupervisorPort {
   ) => AgentRunResumeReadiness | Promise<AgentRunResumeReadiness>;
   readonly prepareResume?: (
     run: AgentRun,
-    input?: { readonly message?: string },
+    input?: { readonly message?: string; readonly ownerWindowId?: string },
   ) => AgentRunPreparedResume | undefined;
   /** Reserves what a fresh child needs without starting it; absent means start reserves it. */
-  readonly prepareStart?: (run: AgentRun) => AgentRunPreparedResume | undefined;
-  readonly start: (run: AgentRun) => unknown;
+  readonly prepareStart?: (
+    run: AgentRun,
+    input?: { readonly ownerWindowId?: string },
+  ) => AgentRunPreparedResume | undefined;
+  readonly start: (run: AgentRun, input?: { readonly ownerWindowId?: string }) => unknown;
   /** Continues a saved provider conversation; absent means only explicit fresh retry is available. */
-  readonly resume?: (run: AgentRun, input?: { readonly message?: string }) => unknown;
+  readonly resume?: (
+    run: AgentRun,
+    input?: { readonly message?: string; readonly ownerWindowId?: string },
+  ) => unknown;
   readonly stop: (runId: AgentRunId) => Promise<void>;
   readonly reconcile?: () => Promise<void>;
   readonly subscribeToProcessDeath?: (listener: (runId: AgentRunId) => void) => () => void;
@@ -318,8 +324,19 @@ export class AgentRunOrchestrationService {
     runId: AgentRunId,
     expectedVersion: number,
     liveAuthority: AgentRunAuthority,
+    input?: {
+      readonly ownerWindowId?: string;
+      readonly onExecutionAccepted?: (run: AgentRun) => void;
+    },
   ): AgentRunCommandResult {
-    return this.#start(runId, expectedVersion, liveAuthority);
+    return this.#start(
+      runId,
+      expectedVersion,
+      liveAuthority,
+      undefined,
+      input?.ownerWindowId,
+      input?.onExecutionAccepted,
+    );
   }
 
   #start(
@@ -328,8 +345,11 @@ export class AgentRunOrchestrationService {
     liveAuthority: AgentRunAuthority,
     continuation?: {
       readonly message?: string;
+      readonly ownerWindowId?: string;
       readonly onExecutionAccepted?: (run: AgentRun) => void;
     },
+    ownerWindowId = continuation?.ownerWindowId,
+    onExecutionAccepted = continuation?.onExecutionAccepted,
   ): AgentRunCommandResult {
     const current = this.#persistence.getById(runId);
     if (current === undefined) {
@@ -418,11 +438,14 @@ export class AgentRunOrchestrationService {
     try {
       prepared =
         continuation === undefined
-          ? this.#processes?.prepareStart?.(current)
-          : this.#processes?.prepareResume?.(
+          ? this.#processes?.prepareStart?.(
               current,
-              continuation.message === undefined ? {} : { message: continuation.message },
-            );
+              ownerWindowId === undefined ? undefined : { ownerWindowId },
+            )
+          : this.#processes?.prepareResume?.(current, {
+              ...(continuation.message === undefined ? {} : { message: continuation.message }),
+              ...(ownerWindowId === undefined ? {} : { ownerWindowId }),
+            });
     } catch (error) {
       if (continuation === undefined && error instanceof AgentRunSessionError) {
         return this.#refuseFreshStart(current, expectedVersion, error);
@@ -496,16 +519,20 @@ export class AgentRunOrchestrationService {
         this.#providerSlotRefusals.delete(started.run.id);
         if (continuation === undefined) {
           if (prepared !== undefined) prepared.start(started.run);
-          else this.#processes.start(started.run);
+          else
+            this.#processes.start(
+              started.run,
+              ownerWindowId === undefined ? undefined : { ownerWindowId },
+            );
         } else {
           if (prepared !== undefined) prepared.start(started.run);
           else
-            this.#processes.resume?.(
-              started.run,
-              continuation.message === undefined ? {} : { message: continuation.message },
-            );
-          continuation.onExecutionAccepted?.(started.run);
+            this.#processes.resume?.(started.run, {
+              ...(continuation.message === undefined ? {} : { message: continuation.message }),
+              ...(ownerWindowId === undefined ? {} : { ownerWindowId }),
+            });
         }
+        onExecutionAccepted?.(started.run);
         return started;
       } catch (error) {
         prepared?.release();
@@ -737,7 +764,14 @@ export class AgentRunOrchestrationService {
     );
   }
 
-  #startAfterProviderSlotWait(run: AgentRun, liveAuthority: AgentRunAuthority): void {
+  #startAfterProviderSlotWait(
+    run: AgentRun,
+    liveAuthority: AgentRunAuthority,
+    input?: {
+      readonly ownerWindowId?: string;
+      readonly onExecutionAccepted?: (run: AgentRun) => void;
+    },
+  ): void {
     const reservation = this.#capacity.tryReserve({
       runId: run.id,
       parentThreadId: run.parentThreadId,
@@ -750,7 +784,7 @@ export class AgentRunOrchestrationService {
     if (reservation.status === "queued") return;
     this.#reservations.set(run.id, reservation.reservationId);
     try {
-      const started = this.start(run.id, run.version, liveAuthority);
+      const started = this.start(run.id, run.version, liveAuthority, input);
       if (started.kind === "run-command-failed") this.#releaseReservation(run.id);
     } catch (error) {
       this.#releaseReservation(run.id);
@@ -789,6 +823,7 @@ export class AgentRunOrchestrationService {
     runId: AgentRunId,
     expectedVersion: number,
     liveAuthority: AgentRunAuthority,
+    input?: { readonly ownerWindowId?: string },
   ): AgentRunCommandResult {
     const retried = this.#persistence.applyCommand({
       kind: "retry-agent-run",
@@ -796,7 +831,7 @@ export class AgentRunOrchestrationService {
       expectedVersion: expectedVersion as never,
     });
     if (retried.kind !== "run-updated") return retried;
-    return this.start(retried.run.id, retried.run.version, liveAuthority);
+    return this.start(retried.run.id, retried.run.version, liveAuthority, input);
   }
 
   async resume(
@@ -805,6 +840,7 @@ export class AgentRunOrchestrationService {
     liveAuthority: AgentRunAuthority,
     input?: {
       readonly message?: string;
+      readonly ownerWindowId?: string;
       readonly resolveLiveAuthority?: () => AgentRunAuthority | undefined;
       readonly onExecutionAccepted?: (run: AgentRun) => void;
     },
@@ -878,7 +914,12 @@ export class AgentRunOrchestrationService {
     if (waitingOnSlot) {
       // A person asking for the child now is asking for one more try; it keeps
       // waiting if the provider is still full.
-      this.#startAfterProviderSlotWait(current, authority);
+      this.#startAfterProviderSlotWait(current, authority, {
+        ...(input?.ownerWindowId === undefined ? {} : { ownerWindowId: input.ownerWindowId }),
+        ...(input?.onExecutionAccepted === undefined
+          ? {}
+          : { onExecutionAccepted: input.onExecutionAccepted }),
+      });
       return { kind: "run-updated", run: this.#persistence.getById(runId) ?? current };
     }
     return this.#start(runId, expectedVersion, authority, input ?? {});
