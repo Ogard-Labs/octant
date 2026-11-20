@@ -211,6 +211,7 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   delegate: "hub-link-delegate",
   delegationStatus: "hub-link-delegation-status",
   delegationCancel: "hub-link-delegation-cancel",
+  delegationProjects: "hub-link-delegation-projects",
   credentialTransfer: "hub-link-credential-transfer",
   threadMoveOffer: "hub-link-thread-move-offer",
   threadMoveChunk: "hub-link-thread-move-chunk",
@@ -695,6 +696,19 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 4_096,
     maxResponseBytes: 4_096,
+  },
+  // The Projects a member may delegate to here, by name: read-only, signed by
+  // the sender, and filtered by the grant this host gave it.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.delegationProjects,
+    match: { kind: "exact", path: "/api/hub/peer/delegations/projects" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 4_096,
+    maxResponseBytes: 131_072,
   },
   // The sending host's half of a sign-in copy an owner device started: the key
   // arrives only against a one-time ticket the owner made on this host.

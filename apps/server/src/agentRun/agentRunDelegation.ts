@@ -100,6 +100,21 @@ export interface RemoteDelegationPort {
     readonly targetProjectId: string;
     readonly task: string;
   }) => Promise<AgentRunDelegationResult>;
+  /**
+   * The members this host may delegate to and each one's Projects, as each
+   * member lists them under the grant it gave this host: names and ids only.
+   */
+  readonly listTargets?: () => Promise<
+    ReadonlyArray<{
+      readonly memberId: string;
+      readonly name: string;
+      readonly projects: ReadonlyArray<{
+        readonly projectId: string;
+        readonly name: string;
+        readonly modes: ReadonlyArray<"work" | "code">;
+      }>;
+    }>
+  >;
 }
 
 export interface AgentRunDelegationRouting {

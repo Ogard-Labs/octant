@@ -132,6 +132,14 @@ export type DelegationRefusal = {
 };
 
 export type DelegationReceipt = DelegationAccepted | DelegationRefusal;
+export interface DelegationProjectList {
+  readonly status: "listed";
+  readonly projects: ReadonlyArray<{
+    readonly projectId: ProjectId;
+    readonly name: string;
+    readonly modes: ReadonlyArray<"work" | "code">;
+  }>;
+}
 export type DelegationStatusReceipt =
   | ({ readonly status: "read" } & { readonly delegation: DelegationStatus })
   | DelegationRefusal;
@@ -148,6 +156,8 @@ export interface PeerDelegationServiceOptions {
   /** The peer as this host holds it right now; undefined once it is out of the roster or has no grant. */
   readonly currentPeer: (memberId: HubMemberId) => AuthorizedPeer | undefined;
   readonly host: PeerDelegationHost;
+  /** This host's active Projects by id and name, for the read-only list a peer asks for. */
+  readonly projects?: () => ReadonlyArray<{ readonly projectId: ProjectId; readonly name: string }>;
   readonly state: DelegationStatePort;
   readonly record: (change: HubDelegationRecordedPayload) => void;
   readonly now: () => number;
@@ -307,6 +317,35 @@ export class PeerDelegationService {
       threadId: started.threadId,
     });
     return { status: "accepted", requestId: request.requestId, authority };
+  }
+
+  /**
+   * The Projects here the sender may delegate to and the modes each takes:
+   * open for delegated work on this host and inside the grant this host gave
+   * the sender. Names only, never a path, so a member learns where it may ask
+   * and nothing about the folders behind it.
+   */
+  listProjects(signed: SignedRequest): DelegationProjectList | DelegationRefusal {
+    const authenticated = this.#options.authenticate(signed);
+    if (authenticated.status === "refused") return refusal(authenticated.kind);
+    const { peer } = authenticated;
+    if (peer.member.role === "guest") return refusal("guest-cannot-delegate");
+    const delegation = peer.grant.delegation;
+    if (delegation === undefined) return refusal("delegation-not-granted");
+    const projects = (this.#options.projects?.() ?? []).flatMap((project) => {
+      if (
+        delegation.projects !== "all" &&
+        !delegation.projects.some((id) => String(id) === String(project.projectId))
+      ) {
+        return [];
+      }
+      const authority = this.#options.host.projectAuthority(project.projectId);
+      const modes = (authority?.modes ?? []).filter((mode) => delegation.modes.includes(mode));
+      return modes.length === 0
+        ? []
+        : [{ projectId: project.projectId, name: project.name, modes }];
+    });
+    return { status: "listed", projects };
   }
 
   async status(signed: SignedRequest): Promise<DelegationStatusReceipt> {

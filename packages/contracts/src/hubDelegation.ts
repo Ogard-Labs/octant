@@ -108,3 +108,20 @@ export const decodeDelegationReference = Schema.decodeUnknownSync(DelegationRefe
 export const decodeDelegationStatus = Schema.decodeUnknownSync(DelegationStatus);
 export const decodeDelegationCancelAnswer = Schema.decodeUnknownSync(DelegationCancelAnswer);
 export const decodeDelegationStartCommand = Schema.decodeUnknownSync(DelegationStartCommand);
+
+/**
+ * The Projects a member may delegate to on another member, as that member
+ * lists them: open for delegated work there and inside the grant it gave the
+ * asker. Names only, never a path.
+ */
+export const DelegationProjectListing = Schema.Struct({
+  projects: Schema.Array(
+    Schema.Struct({
+      projectId: ProjectId,
+      name: Schema.String.pipe(Schema.maxLength(200)),
+      modes: Schema.Array(PeerDelegationMode).pipe(Schema.minItems(1)),
+    }),
+  ).pipe(Schema.maxItems(500)),
+});
+export type DelegationProjectListing = typeof DelegationProjectListing.Type;
+export const decodeDelegationProjectListing = Schema.decodeUnknownSync(DelegationProjectListing);

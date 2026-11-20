@@ -142,6 +142,7 @@ async function threeHosts(
     readonly parent?: ReturnType<typeof parentRules>;
     readonly bProductDispatch?: Parameters<typeof startHubTestHost>[0]["productDispatch"];
     readonly aTransport?: Parameters<typeof startHubTestHost>[0]["delegatingTransport"];
+    readonly bProjects?: Parameters<typeof startHubTestHost>[0]["delegationProjects"];
   } = {},
 ) {
   const network = new HubTestNetwork();
@@ -167,6 +168,7 @@ async function threeHosts(
     network,
     cleanups,
     delegationHost: child.host,
+    ...(options.bProjects === undefined ? {} : { delegationProjects: options.bProjects }),
     ...(options.bProductDispatch === undefined
       ? {}
       : { productDispatch: options.bProductDispatch }),
@@ -540,6 +542,50 @@ describe("a spoke delegating work to another spoke", () => {
     expect(againAnswer?.status).toBe(201);
     expect(await againAnswer?.json()).toEqual(await firstAnswer?.json());
     expect(child.started).toHaveLength(1);
+  });
+
+  it("lists, by name, only the Projects B opened for delegated work within the grant it gave A", async () => {
+    const other = "77777777-7777-4777-8777-777777777777";
+    const { a, b } = await threeHosts({
+      child: fakeChildHost({ modes: ["code"] }),
+      bProjects: () => [
+        { projectId: PROJECT, name: "Service" },
+        { projectId: other as never, name: "Notes" },
+      ],
+    });
+    const listed = await b.hubLink(
+      signedDelegation({
+        signer: a,
+        recipient: b,
+        path: PEER_DELEGATION_ROUTES.projects,
+        body: "{}",
+      }),
+    );
+    expect(listed?.status).toBe(200);
+    expect(await listed?.json()).toEqual({
+      projects: [{ projectId: String(PROJECT), name: "Service", modes: ["code"] }],
+    });
+    // A's agent reads the same list through A's own delegating service.
+    expect(await a.delegating.listTargets()).toEqual([
+      {
+        memberId: b.hostId,
+        name: "Desktop B",
+        projects: [{ projectId: String(PROJECT), name: "Service", modes: ["code"] }],
+      },
+    ]);
+
+    // A grant without delegation lists nothing and says why.
+    setGrantHeldBy(b, a, ({ delegation: _dropped, ...grant }) => grant as PeerGrant);
+    const refused = await b.hubLink(
+      signedDelegation({
+        signer: a,
+        recipient: b,
+        path: PEER_DELEGATION_ROUTES.projects,
+        body: "{}",
+      }),
+    );
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ kind: "delegation-not-granted" });
   });
 
   it("interrupts a child once its start finishes when the sender cancels mid-start, and refuses another sender", async () => {
