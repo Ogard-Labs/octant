@@ -15,6 +15,7 @@ import {
   type CodeProject,
   type CodeProjectAgentDefaultBranchPush,
   type CodeProjectAgentMerge,
+  type CodeProjectDelegatedCode,
   type CodeProjectOwnToolchain,
   type ProjectAgentMemoryWrites,
   type ProjectImageGenerationChoice,
@@ -551,6 +552,31 @@ export function changeCodeProjectAgentMerge(
     reject("invalid-lifecycle", "Code Project agent merge is already selected");
   }
   return { ...project, agentMerge, version: nextVersion(project), updatedAt };
+}
+
+/**
+ * Mark a Code Project as taking delegated Code work from other hub members,
+ * with the delivery target its person confirmed, or take the mark off.
+ * Rejects a non-Code Project and a change that leaves the mark as it was.
+ */
+export function changeCodeProjectDelegatedCode(
+  project: Project,
+  delegatedCode: CodeProjectDelegatedCode | undefined,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects take delegated Code work");
+  }
+  if (delegatedCode === undefined && project.delegatedCode === undefined) {
+    reject("invalid-lifecycle", "This Code Project already takes no delegated Code work");
+  }
+  const { delegatedCode: _previous, ...rest } = project;
+  return {
+    ...rest,
+    ...(delegatedCode === undefined ? {} : { delegatedCode }),
+    version: nextVersion(project),
+    updatedAt,
+  };
 }
 
 /**

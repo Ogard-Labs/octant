@@ -1122,7 +1122,11 @@ Rationale: delegation as a remote child run reuses the existing subagent rule
 path, so B never needs a new authority model. The result coming back as data
 keeps a compromised spoke from steering another spoke's agent.
 
-**Code delegation** ([decision H25](#decisions); designed, not built). Today
+**Code delegation** ([decision H25](#decisions); partly built: the Project
+mark is built, as a `project.code-delegated-code-changed@1` event the
+host's person sets from the Project overview and a device the hub
+introduced is refused; the receiving Code thread and the listing route are
+not built yet). Today
 only a Work Project takes delegated work, because a Code thread needs a
 managed worktree and a delivery target a person confirmed. B offers Code for a
 Code Project only after its person marks that Project as accepting delegated

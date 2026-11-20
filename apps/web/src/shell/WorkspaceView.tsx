@@ -538,6 +538,10 @@ export interface WorkspaceViewProps {
   ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   readonly onOwnToolchainChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  readonly onDelegatedCodeChange?: (
+    projectId: ProjectId,
+    delegatedCode: import("@octant/contracts/projects").CodeProjectDelegatedCode | undefined,
+  ) => Promise<boolean>;
   readonly onWorkDeveloperToolsChange?: (
     projectId: ProjectId,
     enabled: boolean,
@@ -2822,6 +2826,9 @@ function renderNonCodeTab(
         {...(props.onOwnToolchainChange === undefined
           ? {}
           : { onOwnToolchainChange: props.onOwnToolchainChange })}
+        {...(props.onDelegatedCodeChange === undefined
+          ? {}
+          : { onDelegatedCodeChange: props.onDelegatedCodeChange })}
         {...(props.onWorkDeveloperToolsChange === undefined
           ? {}
           : { onWorkDeveloperToolsChange: props.onWorkDeveloperToolsChange })}
