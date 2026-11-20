@@ -236,6 +236,8 @@ describe("shell settings policy", () => {
       pullRequestWatchDays: 3,
       autoFixAttemptsPerFailure: 3,
       threadMessagesPerTurn: 3,
+      siblingThreadReadsPerTurn: 8,
+      siblingThreadWaitsPerTurn: 4,
       browserWaitLimitMinutes: 10,
       childRunWaitLimitSeconds: 120,
       agentRoutinesStartActiveAtFullAccess: false,

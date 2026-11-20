@@ -646,8 +646,8 @@ export class ManagedWorktreeService {
       target.detached ||
       target.locked !== undefined ||
       target.prunable !== undefined ||
-      target.branch !== branchRef(activeReceipt.branchIntent) ||
-      target.head !== activeReceipt.expectedHead
+      target.branch !== branchRef(activeReceipt.currentBranch ?? activeReceipt.branchIntent) ||
+      target.head !== (activeReceipt.currentHead ?? activeReceipt.expectedHead)
     ) {
       return { status: "waiting", receipt };
     }
@@ -796,7 +796,14 @@ export class ManagedWorktreeService {
     if (target.detached || target.locked !== undefined || target.prunable !== undefined) {
       return { status: "refused", reason: "inventory-ambiguous" };
     }
-    if (target.branch !== branchRef(receipt.branchIntent)) {
+    // A clean reclamation accepts the verified current branch — `branchIntent`,
+    // or the branch a host-authorized switch landed on. A discarding cleanup
+    // deletes `branchIntent` itself, so it may only run while this worktree
+    // still holds that exact branch: a switch elsewhere refuses even when the
+    // switch was the host's own and another worktree now holds the original.
+    const expectedBranch =
+      discard === undefined ? (receipt.currentBranch ?? receipt.branchIntent) : discard;
+    if (target.branch !== branchRef(expectedBranch)) {
       return { status: "refused", reason: "mismatched" };
     }
     // The branch is deleted only when this worktree is the one holding it.
@@ -823,7 +830,10 @@ export class ManagedWorktreeService {
       let delivered: Awaited<ReturnType<NonNullable<ManagedWorktreeGitPort["isDelivered"]>>>;
       try {
         delivered = (await this.#git.isDelivered?.(
-          { targetPath: receipt.canonicalWorktreePath, branch: receipt.branchIntent },
+          {
+            targetPath: receipt.canonicalWorktreePath,
+            branch: receipt.currentBranch ?? receipt.branchIntent,
+          },
           signal,
         )) ?? { status: "observed", delivered: false };
       } catch {

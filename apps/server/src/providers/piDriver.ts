@@ -860,6 +860,7 @@ function makeConnection(
           requestId,
           action: toolName,
           description: `Allow Pi ${toolName} for this session?`,
+          toolCallId,
         });
         return;
       }

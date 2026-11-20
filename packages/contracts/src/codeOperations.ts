@@ -15,7 +15,9 @@ import { AccountMoveTextHandoffCause, ContextHandoffOmissions } from "./contextH
 import { ProviderChildActivityEvent } from "./providers";
 import { ProviderNativeSessionId } from "./providerNativeSession";
 import { ThreadPublishedPage } from "./threadToolSteps";
+import { ThreadCallTiming } from "./threadToolStepList";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
+import { ThreadBoardFinishedMark } from "./finishedReceipt";
 import { DescribedImageName, DescribedTurnImages, ImageDescribedBy } from "./imageDescription";
 import { Schema } from "effect";
 import {
@@ -76,8 +78,16 @@ import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention"
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
+import { GithubRepositoryNodeId } from "./githubCatalogue";
+import { GithubPullRequestNodeId } from "./pullRequestIdentity";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 import { StrictKeptProtections } from "./strictNotice";
+import {
+  TurnLoopNotice,
+  TurnLoopNoticeCount,
+  TurnLoopNoticeToolName,
+  TurnStallNotice,
+} from "./turnLoopNotice";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -537,6 +547,12 @@ const ObserveGit = Schema.Struct({
   maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
   /** Read the diff with Git's `-w`; only the diff text changes, never the checkout state. */
   ignoreWhitespace: Schema.optional(Schema.Boolean),
+  /**
+   * Read the porcelain listing with `--untracked-files=all`: every file under
+   * an untracked directory is its own status entry, so the state token a
+   * switch is consented against changes when one nested file is added.
+   */
+  untrackedFiles: Schema.optional(Schema.Literal("all")),
 }).annotations(strict);
 const PrepareGitHunks = Schema.Struct({
   kind: Schema.Literal("prepare-git-hunks"),
@@ -632,6 +648,26 @@ const CommitGit = Schema.Struct({
     Schema.filter((entries) => entries.length <= MAX_CODE_OPERATION_PATHS),
   ),
   expectedStateToken: GitStateToken,
+}).annotations(strict);
+/**
+ * Point this thread's checkout at another local branch.
+ *
+ * Only the person at a window may send it; no agent tool or route reaches it.
+ * The branch must name an exact local ref the host can verify — never a
+ * revision, a remote name or a guessed upstream — and the checkout must be
+ * idle, so the state token binds the switch to the observation the person
+ * saw. `dirty` says what uncommitted work may do: `refuse` lets a dirty tree
+ * stop the switch, and `stash` asks the host to save tracked and untracked
+ * work aside first (never to pop or discard it). Committing belongs to the
+ * ordinary stage/commit form before this command, not to a flag on it.
+ */
+const SwitchGitBranch = Schema.Struct({
+  kind: Schema.Literal("switch-git-branch"),
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  branch: GitBranchName,
+  expectedStateToken: GitStateToken,
+  dirty: Schema.Literal("refuse", "stash"),
 }).annotations(strict);
 const PushGit = Schema.Struct({
   kind: Schema.Literal("push-git"),
@@ -1129,6 +1165,7 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "reverse-git-hunks",
   "stage-git",
   "commit-git",
+  "switch-git-branch",
   "push-git",
   "create-pull-request",
   "update-pull-request",
@@ -1173,6 +1210,7 @@ export const CodeOperationCommand = Schema.Union(
   StageGit,
   DiscardGitChanges,
   CommitGit,
+  SwitchGitBranch,
   PushGit,
   UnstageGit,
   DraftGitText,
@@ -1346,6 +1384,7 @@ const GitMutationResult = Schema.Struct({
     "unstage",
     "discard",
     "commit",
+    "switch-branch",
     "push",
     "revert",
     "restore-checkpoint",
@@ -1375,6 +1414,10 @@ const GitMutationResult = Schema.Struct({
       "invalid-hunks",
       "hunk-offset",
       "read-only",
+      "invalid-branch",
+      "branch-in-use",
+      "dirty-checkout",
+      "unsupported-git",
     ),
   ),
   /**
@@ -1391,6 +1434,11 @@ const GitMutationResult = Schema.Struct({
    */
   unconfirmed: Schema.optional(Schema.Literal(true)),
   headOid: Schema.optional(GitObjectId),
+  /**
+   * The branch the checkout reports after the mutation, read back rather
+   * than echoed from the request. Present on a completed branch switch.
+   */
+  headBranch: Schema.optional(GitBranchName),
   /**
    * The state this mutation replaced, recorded before it ran. Present on a
    * completed restore, which is what makes undoing one possible, and on a
@@ -1422,6 +1470,10 @@ const PullRequestResult = Schema.Union(
     baseBranch: GitBranchName,
     /** Whether GitHub holds it as a draft, when the host knows. */
     draft: Schema.optional(Schema.Boolean),
+    /** GitHub GraphQL node ID of the pull request, when available. */
+    pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
+    /** GitHub GraphQL node ID of the base repository, when available. */
+    baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-request-state"),
@@ -1547,6 +1599,10 @@ const PullRequestReviewResult = Schema.Union(
     checks: boundedReviewArray(CodePullRequestReviewCheck),
     reviews: boundedReviewArray(CodePullRequestReviewOpinion),
     comments: boundedReviewArray(CodePullRequestReviewComment),
+    /** GitHub GraphQL node ID of the pull request, when available. */
+    pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
+    /** GitHub GraphQL node ID of the base repository, when available. */
+    baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-request-review"),
@@ -1847,6 +1903,8 @@ const ToolEvent = Schema.Struct({
   outsideContent: Schema.optional(ToolOutsideContentMark),
   /** The routine the call set up; the transcript shows what was created. */
   routine: Schema.optional(ThreadRoutineReceipt),
+  /** Present only on a terminal state of a call whose bounds were trusted. */
+  timing: Schema.optional(ThreadCallTiming),
 }).annotations(strict);
 /**
  * The bounds a Code approval or question is journaled under. Exported so a
@@ -1898,6 +1956,12 @@ const ApprovalEvent = Schema.Struct({
     "level-change",
   ),
   summary: CodeApprovalSummaryText,
+  /**
+   * The provider's own identity for the call this ask gates, when the runtime
+   * supplied one. It ties the person's wait to that call alone; absent when
+   * the runtime gave none, so no wait is ever attributed by adjacency.
+   */
+  toolCallId: Schema.optional(ProviderRequestId),
   /**
    * With `level-change`: the level the agent asks the thread to move to, and
    * the plan it asks the person to approve when it asks to leave Plan. An
@@ -2088,6 +2152,36 @@ const NativeSessionAdoptedEvent = Schema.Struct({
  */
 const ConversationTurnStopRequestedEvent = Schema.Struct({
   kind: Schema.Literal("conversation-turn-stop-requested"),
+}).annotations(strict);
+
+/**
+ * The turn called the same tool with the same canonical input repeatedly in a
+ * row outside Strict. The turn is not stopped; the thread shows one quiet line
+ * with a Stop button.
+ */
+const TurnLoopNoticedEvent = Schema.Struct({
+  kind: Schema.Literal("turn-loop-noticed"),
+  toolName: TurnLoopNoticeToolName,
+  count: TurnLoopNoticeCount,
+}).annotations(strict);
+
+/**
+ * The turn called the same tool with the same canonical input repeatedly in a
+ * row under Strict and was stopped by Octant.
+ */
+const TurnLoopStoppedEvent = Schema.Struct({
+  kind: Schema.Literal("turn-loop-stopped"),
+  toolName: TurnLoopNoticeToolName,
+  count: TurnLoopNoticeCount,
+}).annotations(strict);
+
+/**
+ * The turn stayed silent past the stalled-turn limit outside Strict. The turn
+ * is not stopped; the thread shows one quiet line with a Stop button.
+ */
+const TurnStallNoticedEvent = Schema.Struct({
+  kind: Schema.Literal("turn-stall-noticed"),
+  idleMs: Schema.Int.pipe(Schema.positive()),
 }).annotations(strict);
 
 const ProviderSessionReadyEvent = Schema.Struct({
@@ -2347,7 +2441,18 @@ const ContextHandoffAttachedEvent = Schema.Union(
   AccountMoveNativeSessionHandoffAttachedEvent,
 );
 
+/**
+ * One operation's cumulative reasoning total, journaled when a span closes —
+ * at the next non-reasoning event or the terminal. Replayed by assignment:
+ * each event carries the latest whole-millisecond total, not a delta, so a
+ * repeated or re-read frame never double-counts.
+ */
+const ReasoningTimeEvent = Schema.Struct({
+  kind: Schema.Literal("reasoning-time"),
+  reasoningMs: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
 export const CodeOperationEvent = Schema.Union(
+  ReasoningTimeEvent,
   ProviderSessionReadyEvent,
   ContextHandoffAttachedEvent,
   ForkContextMergedEvent,
@@ -2376,6 +2481,9 @@ export const CodeOperationEvent = Schema.Union(
   RuntimeTurnStartedEvent,
   NativeSessionAdoptedEvent,
   ConversationTurnStopRequestedEvent,
+  TurnLoopNoticedEvent,
+  TurnLoopStoppedEvent,
+  TurnStallNoticedEvent,
   ResultEvent,
 );
 export type CodeOperationEvent = typeof CodeOperationEvent.Type;
@@ -2429,6 +2537,8 @@ export const CodeConversationStep = Schema.Union(
     published: Schema.optional(ThreadPublishedPage),
     outsideContent: Schema.optional(ToolOutsideContentMark),
     routine: Schema.optional(ThreadRoutineReceipt),
+    /** Present only on a completed step whose bounds were trusted. */
+    timing: Schema.optional(ThreadCallTiming),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("reasoning"),
@@ -2522,6 +2632,12 @@ export const CodeConversationTurn = Schema.Struct({
   /** Whether the turn journaled more steps than `steps` carries. */
   stepsTruncated: Schema.optional(Schema.Boolean),
   /**
+   * Cumulative reasoning-channel span time in whole milliseconds, from the
+   * journaled `reasoning-time` totals. Absent on turns that recorded none and
+   * every turn journaled before them.
+   */
+  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /**
    * What this turn's new provider session started with beyond its own prompt:
    * a provider switch's text handoff, or a fork's text handoff or copied
    * native session. Absent on every turn that continued its session or
@@ -2533,6 +2649,10 @@ export const CodeConversationTurn = Schema.Struct({
    * the launch was not Strict or the host did not record it.
    */
   strictKept: Schema.optional(StrictKeptProtections),
+  /** Repeated identical tool call notice or Strict stop recorded on this turn. */
+  loopNotice: Schema.optional(TurnLoopNotice),
+  /** Silent-turn notice recorded outside Strict when the stalled-turn limit elapsed. */
+  stallNotice: Schema.optional(TurnStallNotice),
   /**
    * Forks of this thread whose conversation this turn carried because a
    * person merged it back, oldest first. Absent on every other turn.
@@ -3115,6 +3235,8 @@ export const CodeBoardCard = Schema.Struct({
    * is never a card.
    */
   coordinatorThreadId: Schema.optional(CodeThreadId),
+  /** Fresh finished-with-proof mark; absent when none exists or when stale. Never moves the column. */
+  finishedReceipt: Schema.optional(ThreadBoardFinishedMark),
 }).annotations(strict);
 export type CodeBoardCard = typeof CodeBoardCard.Type;
 
@@ -3162,6 +3284,7 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   // A rewind that puts files back is approved as the restore it performs.
   "rewind-code-thread",
   "commit-git",
+  "switch-git-branch",
   "push-git",
   "create-pull-request",
   "update-pull-request",

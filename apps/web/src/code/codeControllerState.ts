@@ -29,6 +29,9 @@ import {
   type ProviderContextBreakdown,
   type ProviderExecutionPolicy,
   type StrictKeptProtections,
+  type TurnLoopNotice,
+  type TurnStallNotice,
+  type UtcTimestamp,
 } from "@octant/contracts";
 import { foldCodeTurnUsage } from "@octant/domain";
 import { appendReasoning, applyActivityEvent } from "./transcriptActivity";
@@ -106,6 +109,10 @@ export interface CodeConversationMessage {
   readonly handoff?: CodeConversationTurnHandoff;
   /** What Strict kept for the launch this reply's turn ran on, as the host journaled it. */
   readonly strictKept?: StrictKeptProtections;
+  /** Repeated identical tool call notice or Strict stop recorded on this turn. */
+  readonly loopNotice?: TurnLoopNotice;
+  /** Silent-turn notice recorded outside Strict when the stalled-turn limit elapsed. */
+  readonly stallNotice?: TurnStallNotice;
   /**
    * Forks of this thread whose conversation this reply's turn carried because
    * a person merged it back, as the host journaled them.
@@ -596,11 +603,14 @@ async function projectConversationTurns(
       ...(turn.reviewPreview === undefined ? {} : { reviewPreview: turn.reviewPreview }),
       ...(turn.handoff === undefined ? {} : { handoff: turn.handoff }),
       ...(turn.strictKept === undefined ? {} : { strictKept: turn.strictKept }),
+      ...(turn.loopNotice === undefined ? {} : { loopNotice: turn.loopNotice }),
+      ...(turn.stallNotice === undefined ? {} : { stallNotice: turn.stallNotice }),
       ...(turn.forkMergeBacks === undefined ? {} : { forkMergeBacks: turn.forkMergeBacks }),
       ...(turn.steeredResults === undefined ? {} : { steeredResults: turn.steeredResults }),
     });
     const steps = turn.steps ?? [];
-    if (steps.length === 0 && turn.stepsTruncated !== true) continue;
+    if (steps.length === 0 && turn.stepsTruncated !== true && turn.reasoningMs === undefined)
+      continue;
     let replayed = EMPTY_TURN_ACTIVITY;
     for (const step of steps) {
       if (step.kind === "tool") {
@@ -613,6 +623,7 @@ async function projectConversationTurns(
           ...(step.published === undefined ? {} : { published: step.published }),
           ...(step.outsideContent === undefined ? {} : { outsideContent: step.outsideContent }),
           ...(step.routine === undefined ? {} : { routine: step.routine }),
+          ...(step.timing === undefined ? {} : { timing: step.timing }),
         });
         continue;
       }
@@ -637,6 +648,7 @@ async function projectConversationTurns(
     activity.set(String(turn.operationId), {
       ...replayed,
       ...(turn.stepsTruncated === true ? { truncated: true } : {}),
+      ...(turn.reasoningMs === undefined ? {} : { reasoningMs: turn.reasoningMs }),
     });
   }
   return { messages, activity };
@@ -726,8 +738,29 @@ export {
 /** Only shared reply metadata; stream ownership and terminal states stay with their callers. */
 export function codeReplyMetadataUpdate(
   event: CodeOperationEvent,
+  occurredAt?: UtcTimestamp,
 ): ((message: CodeConversationMessage) => CodeConversationMessage) | undefined {
   switch (event.kind) {
+    case "turn-loop-noticed":
+    case "turn-loop-stopped":
+      return (message) => ({
+        ...message,
+        loopNotice: {
+          kind: event.kind,
+          toolName: event.toolName,
+          count: event.count,
+          occurredAt: occurredAt ?? (new Date().toISOString() as UtcTimestamp),
+        },
+      });
+    case "turn-stall-noticed":
+      return (message) => ({
+        ...message,
+        stallNotice: {
+          kind: "turn-stall-noticed",
+          idleMs: event.idleMs,
+          occurredAt: occurredAt ?? (new Date().toISOString() as UtcTimestamp),
+        },
+      });
     case "conversation-turn-review-preview":
       return (message) => {
         const capture = event.preview.capture ?? message.reviewPreview?.capture;

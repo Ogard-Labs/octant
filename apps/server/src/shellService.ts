@@ -201,10 +201,14 @@ export class ShellService implements ShellServiceApi {
     readonly windowId: WindowId;
     readonly expectedVersion: AggregateVersion;
     readonly origins: ReadonlyArray<string>;
+    readonly deviceActor?: EventActor;
   }): ShellCommandResult {
     this.#assertReady();
     try {
-      if (!this.#registeredWindowIds.has(input.windowId)) {
+      if (
+        !this.#registeredWindowIds.has(input.windowId) &&
+        input.deviceActor?.kind !== "remote-device"
+      ) {
         throw new ShellServiceError({
           category: "invalid",
           message: "Shell command window is not registered with this server session.",
@@ -224,7 +228,7 @@ export class ShellService implements ShellServiceApi {
           aggregateId: SHELL_SETTINGS_AGGREGATE_ID,
         },
         expectedVersion: input.expectedVersion,
-        events: [this.#pendingEvent("shell.settings-replaced", { settings })],
+        events: [this.#pendingEvent("shell.settings-replaced", { settings }, input.deviceActor)],
       });
       return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
     } catch (error) {
@@ -240,10 +244,14 @@ export class ShellService implements ShellServiceApi {
     readonly windowId: WindowId;
     readonly expectedVersion: AggregateVersion;
     readonly transfers: ReadonlyArray<RememberedBrowserTransfer>;
+    readonly deviceActor?: EventActor;
   }): ShellCommandResult {
     this.#assertReady();
     try {
-      if (!this.#registeredWindowIds.has(input.windowId)) {
+      if (
+        !this.#registeredWindowIds.has(input.windowId) &&
+        input.deviceActor?.kind !== "remote-device"
+      ) {
         throw new ShellServiceError({
           category: "invalid",
           message: "Shell command window is not registered with this server session.",
@@ -265,7 +273,7 @@ export class ShellService implements ShellServiceApi {
           aggregateId: SHELL_SETTINGS_AGGREGATE_ID,
         },
         expectedVersion: input.expectedVersion,
-        events: [this.#pendingEvent("shell.settings-replaced", { settings })],
+        events: [this.#pendingEvent("shell.settings-replaced", { settings }, input.deviceActor)],
       });
       return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
     } catch (error) {
@@ -281,10 +289,14 @@ export class ShellService implements ShellServiceApi {
     readonly windowId: WindowId;
     readonly expectedVersion: AggregateVersion;
     readonly sites: ReadonlyArray<RememberedBrowserProfileSite>;
+    readonly deviceActor?: EventActor;
   }): ShellCommandResult {
     this.#assertReady();
     try {
-      if (!this.#registeredWindowIds.has(input.windowId)) {
+      if (
+        !this.#registeredWindowIds.has(input.windowId) &&
+        input.deviceActor?.kind !== "remote-device"
+      ) {
         throw new ShellServiceError({
           category: "invalid",
           message: "Shell command window is not registered with this server session.",
@@ -311,7 +323,7 @@ export class ShellService implements ShellServiceApi {
           aggregateId: SHELL_SETTINGS_AGGREGATE_ID,
         },
         expectedVersion: input.expectedVersion,
-        events: [this.#pendingEvent("shell.settings-replaced", { settings })],
+        events: [this.#pendingEvent("shell.settings-replaced", { settings }, input.deviceActor)],
       });
       return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
     } catch (error) {

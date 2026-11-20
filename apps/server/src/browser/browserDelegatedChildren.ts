@@ -6,6 +6,7 @@ import {
   LOCAL_HOST_ID,
   type AgentRun,
   type BrowserThreadId,
+  type ProjectId,
   type ToolActionAuthority,
   type ProviderInstanceId,
   type ProviderModelId,
@@ -52,6 +53,17 @@ interface BrowserDelegatedChildrenOptions {
   readonly runtime: BrowserRuntimePort;
   readonly agentDownloadsEnabled?: () => boolean;
   readonly downloads?: BrowserDownloadRecorder;
+  /** The longest one wait may last under Strict, in milliseconds, from Settings; absent is ten minutes. */
+  readonly waitLimitMs?: () => number;
+  /**
+   * Whether Strict is on for a delegated execution now, resolved against its
+   * owning/parent thread or Project rather than its synthetic execution id.
+   * Absent reads as Strict.
+   */
+  readonly strict?: (input: {
+    readonly threadId?: string;
+    readonly projectId?: ProjectId;
+  }) => boolean;
   readonly grants: Pick<
     BrowserSessionGrants,
     | "find"
@@ -84,6 +96,8 @@ export class BrowserDelegatedChildren {
     /** A host-proven run/session identity, independent of the reusable recipient. */
     readonly executionId?: string;
     readonly contentThreadId?: BrowserThreadId;
+    /** The owning or parent thread whose Strict posture governs this delegated execution. */
+    readonly strictThreadId?: string;
     readonly executionAuthority?: () => ToolActionAuthority | undefined;
     readonly uploadPermissions?: Pick<BrowserUploadPermissions, "prepare" | "choices">;
     readonly downloadPermissions?: Pick<BrowserDownloadPermissions, "prepare" | "choices">;
@@ -96,6 +110,9 @@ export class BrowserDelegatedChildren {
       throw new Error("A delegated Browser execution needs a host-owned identity.");
     const ownerKey = this.#options.uuid();
     const threadId = decodeBrowserThreadId(id);
+    const strictThreadId =
+      input.strictThreadId ??
+      (input.contentThreadId === undefined ? undefined : String(input.contentThreadId));
     const ownerIsCurrent = async (entry: ChildBrowserEntry): Promise<boolean> => {
       if (entry.executionOwnerId === undefined)
         return (
@@ -343,6 +360,23 @@ export class BrowserDelegatedChildren {
             ...(this.#options.agentDownloadsEnabled === undefined
               ? {}
               : { agentDownloadsEnabled: this.#options.agentDownloadsEnabled }),
+            ...(this.#options.waitLimitMs === undefined
+              ? {}
+              : { waitLimitMs: this.#options.waitLimitMs }),
+            ...(this.#options.strict === undefined
+              ? {}
+              : {
+                  strict: () => {
+                    const live = input.current();
+                    const projectId = live?.authority.projectId ?? current.authority.projectId;
+                    return (
+                      this.#options.strict?.({
+                        ...(strictThreadId === undefined ? {} : { threadId: strictThreadId }),
+                        ...(projectId === undefined ? {} : { projectId }),
+                      }) ?? true
+                    );
+                  },
+                }),
             ...(this.#options.downloads === undefined
               ? {}
               : {

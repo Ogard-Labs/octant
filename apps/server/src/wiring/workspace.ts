@@ -65,6 +65,7 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
     | "bindingReceiptStore"
     | "imageGenerationOffers"
     | "isPairedDeviceScope"
+    | "isRestrictedDeviceScope"
     | "machineChangeFeed"
     | "onThreadArchived"
     | "onWaitingAsk"
@@ -96,6 +97,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     githubIntegrationIsEffective,
     imageGenerationOffers,
     isPairedDeviceScope,
+    isRestrictedDeviceScope,
     machineChangeFeed,
     offeredDesktopProviders,
     onThreadArchived,
@@ -420,7 +422,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       agentsWriteWithoutAsking: (projectId) =>
         persistence.readProject(projectId)?.agentMemoryWrites === "enabled",
       isHostScope: isRoutineHostScope,
-      isPairedDeviceScope,
+      isPairedDeviceScope: isRestrictedDeviceScope,
       outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
       uuid: randomUUID,
       now: Date.now,

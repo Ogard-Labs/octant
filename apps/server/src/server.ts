@@ -57,6 +57,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CANVAS_PREVIEW_ASSET_FOLDER, CANVAS_PREVIEW_PAGE } from "./canvas/canvasPreviewRenderer";
 import { healthResponse, hostActivity } from "./health";
+import { createDesktopAgentWorkRouteHandler } from "./desktopAgentWorkRoutes";
 import {
   Persistence,
   type PersistenceService,
@@ -284,6 +285,7 @@ export function startOctantServer(
       personMemory,
       personMemoryAccess,
       personMemoryRoutes,
+      withholdThreadFromPersonMemory,
       octantInstructions,
       octantInstructionsRoutes,
       protectedFilesRoutes,
@@ -333,6 +335,7 @@ export function startOctantServer(
       agentRunRouteDependencies,
       agentRunSessionStore,
       agentRunSettingsRoutes,
+      keepAwakePolicy,
       hostResourceBudget,
       agentsManagedToolsFor,
       capacityScheduler,
@@ -347,6 +350,7 @@ export function startOctantServer(
       remoteDelegationHolder,
       runtimeOutsideContentMarks,
       sideTasks,
+      finishedReceipts,
       spendCeiling,
       spendCeilingHolder,
       threadAwaitsHarnessApproval,
@@ -357,6 +361,7 @@ export function startOctantServer(
       readResourceMemory,
       agentRunParentAuthority,
       agentRunPersistence,
+      agentRunRequestOwner,
       toolEffectLedger,
       codeBoardEventStore,
       codeParentActiveTurn,
@@ -372,6 +377,7 @@ export function startOctantServer(
       onAgentRunExecutionAccepted,
       options,
       persistence,
+      personMemoryAccess,
       providerRuntimeRegistry,
       selectCodeConversation,
       windowAuthorityStore,
@@ -425,7 +431,6 @@ export function startOctantServer(
       usageDashboardRoutes,
       usageRoutes,
       validationEventStore,
-      validationEvidenceRoutes,
       zenEventStore,
     } = wireUsage({
       cacheStats,
@@ -509,6 +514,7 @@ export function startOctantServer(
     } = yield* wireWorkspace({
       imageGenerationOffers,
       isPairedDeviceScope,
+      isRestrictedDeviceScope,
       machineChangeFeed,
       onThreadArchived,
       onWaitingAsk,
@@ -648,6 +654,7 @@ export function startOctantServer(
       webSearchSettings,
       sideTaskHost,
       sideTaskRoutes,
+      finishedReceiptRoutes,
       hostShield,
       observeTurnEnded,
       threadWork,
@@ -695,6 +702,7 @@ export function startOctantServer(
       runningWorkTurnAccess,
       runningWorkTurnSandbox,
       sideTasks,
+      finishedReceipts,
       threadFollowUpSuggestions,
       toolEgressRules,
       turnMetrics,
@@ -703,6 +711,10 @@ export function startOctantServer(
       workTurnProjection,
     });
     yield* Effect.promise(recoverGoogleCliCommands);
+    const unsubscribeFinishedReceipts = persistence.journal.subscribeCommitted((append) =>
+      finishedReceipts.onCommittedEvents(append.events),
+    );
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeFinishedReceipts));
     const {
       agentProfileRoutes,
       archivedWorktreeRoutes,
@@ -720,6 +732,8 @@ export function startOctantServer(
       isCodeProviderModelAllowed,
       listActivityRepositories,
       onPullRequestSnapshotRefreshed,
+      bindPullRequestSwitchReconciler,
+      pullRequestLinkService,
       projectPullRequestActionService,
       projectPullRequestCadence,
       projectPullRequestService,
@@ -744,6 +758,7 @@ export function startOctantServer(
       refreshStandaloneSkills,
       onGithubPullRequestsUnreadable,
       onWindowRevoked,
+      finishedReceipts,
       threadAwaitsHarnessApproval,
       bindingReceiptStore,
       cacheStats,
@@ -768,6 +783,7 @@ export function startOctantServer(
       artifactLibraryService,
       artifactMirrorRoutes,
       canvasAgentToolPort,
+      canvasChoiceAnswerService,
       canvasCommentService,
       canvasNetworkAccess,
       canvasPublicShareService,
@@ -865,6 +881,8 @@ export function startOctantServer(
     } = yield* wireBrowser({
       browserAuthority,
       providerRuntimeRegistry,
+      resolveProjectStrict,
+      resolveThreadStrict,
       contributeChildTools,
       agentRunInteractions,
       codeSessionAuthority,
@@ -919,9 +937,11 @@ export function startOctantServer(
       imageDescriber,
       resolveThreadStrict,
       isPairedDeviceScope,
+      isRestrictedDeviceScope,
       windowAuthorityStore,
       threadWakeups,
       hostResourceBudget,
+      managedWorktreeReceipts,
       providerAvailabilityMarks,
       providerUsageLimitsService,
       nativeHarnessRoutingStore,
@@ -998,6 +1018,8 @@ export function startOctantServer(
       verifyModelToolsOnFirstUse,
       productFeedbackService,
       resolveFeedbackThread,
+      bindPullRequestSwitchReconciler,
+      pullRequestLinkService,
       projectPullRequestActionService,
       projectPullRequestCadence,
       projectPullRequestService,
@@ -1018,6 +1040,9 @@ export function startOctantServer(
       selectCodeConversation,
       siblingThreadsService,
       sideTasks,
+      finishedReceipts,
+      gitObservationPort,
+      goalService,
       simulatorInputGrants,
       spendCeiling,
       threadMentionService: (): ThreadMentionService => threadMentionService,
@@ -1071,6 +1096,7 @@ export function startOctantServer(
       serverConnection,
       serverProjectStore,
       canAccessCodeProject,
+      codeProjectAccess,
       codeFileWatch,
       codeOperationRuntime,
       codeSessionAuthority,
@@ -1271,6 +1297,9 @@ export function startOctantServer(
       routineProposalService,
       sideTaskHost,
       sideTasks,
+      finishedReceipts,
+      gitObservationPort,
+      nativeHarnessApprovals,
       siblingThreadsService,
       agentMessageService,
       spendCeiling,
@@ -1530,6 +1559,7 @@ export function startOctantServer(
       codeTurnDecisions,
       gitObservationPort,
       goalService,
+      finishedReceipts,
       nativeHarnessApprovals,
       nativeHarnessQuestions,
       nativeHarnessSessions,
@@ -1556,6 +1586,7 @@ export function startOctantServer(
       syncedArtifactRoutes,
     } = wireReplica({
       artifactLibraryService,
+      canvasChoiceAnswerService,
       canvasCommentService,
       canvasService,
       externalContentIngestionStore,
@@ -1925,6 +1956,8 @@ export function startOctantServer(
       providerRoutes,
       providerUsageLimitsRoutes,
       remoteServerGrantLocalRoutes,
+      replicaMembershipRoutes,
+      replicaStoreSettingsRoutes,
       replicaSyncStatusRoutes,
       scaffoldRoutes,
       replyDetailRoutes,
@@ -1932,6 +1965,7 @@ export function startOctantServer(
       shipRoutes,
       sidebarBackgroundRoutes,
       sideTaskRoutes,
+      finishedReceiptRoutes,
       snapshotCanvas,
       speechRoutes,
       spendCeilingRoutes,
@@ -1949,7 +1983,6 @@ export function startOctantServer(
       workSessionRoutes,
       usageDashboardRoutes,
       usageRoutes,
-      validationEvidenceRoutes,
       workFileListingRoutes,
       workMutationRoutes,
       workOverviewRoutes,
@@ -1970,7 +2003,6 @@ export function startOctantServer(
       hostControlRoutes,
       personQuitRoutes,
       supportBundleRoutes,
-      delegationAdministrationRoutes,
       threadMoveAdministrationRoutes,
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
@@ -2022,6 +2054,7 @@ export function startOctantServer(
       automationScheduler,
       browserCaptureStore,
       personMemory,
+      withholdThreadFromPersonMemory,
       octantInstructions,
       canvasRoutes,
       chatAttachmentStore,
@@ -2084,6 +2117,28 @@ export function startOctantServer(
       }
       return "purged";
     };
+
+    const desktopAgentWorkRoutes = createDesktopAgentWorkRouteHandler({
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      keepAwakePolicy,
+      activeTurns: () => liveTurns.activeEntries(),
+      isCoordinatorWorker: (threadId) => {
+        try {
+          return (
+            persistence.readCodeThread(decodeCodeThreadId(threadId))?.coordinatorThreadId !==
+            undefined
+          );
+        } catch {
+          return false;
+        }
+      },
+      runningChildRuns: () => persistence.agentRunProjection.runningCount(),
+      routines: () =>
+        persistence.automationProjection.listDefinitions().map((definition) => ({
+          enabled: definition.lifecycle === "enabled",
+          nextDueAt: definition.nextDueAt,
+        })),
+    });
 
     yield* Effect.addFinalizer(() => Effect.promise(() => ownerBrowserControlService.close()));
     let remoteListenerError: PrivateListenerFailureCode | undefined;
@@ -2154,7 +2209,6 @@ export function startOctantServer(
               return (
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await hubAdministrationRoutes(request)) ??
-                (await delegationAdministrationRoutes(request)) ??
                 (await threadMoveAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await secretStoresRoutes(request)) ??
@@ -2163,11 +2217,10 @@ export function startOctantServer(
                 (await agentAccessAdministrationRoutes(request)) ??
                 (await agentAccessLoopbackRoutes(request)) ??
                 (await personQuitRoutes(request)) ??
+                (await desktopAgentWorkRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await supportBundleRoutes(request)) ??
                 (await externalContentRoutes(request)) ??
-                (await replicaStoreSettingsRoutes(request)) ??
-                (await replicaMembershipRoutes(request)) ??
                 (await dispatchMeasuredProductRoutes(request)) ??
                 (await webAssets(request)) ??
                 new Response("Not Found", { status: 404 })

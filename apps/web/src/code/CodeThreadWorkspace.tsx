@@ -158,7 +158,9 @@ import {
   turnWorkedFor,
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
+import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { SideTaskInline } from "../followUps/SideTaskCards";
+import { FinishedReceiptInline } from "../finishedReceipts/FinishedReceiptCard";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
@@ -2229,6 +2231,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                   })}
                               {...(message.at === undefined ? {} : { at: message.at })}
                             />
+                            <TurnLoopStallNotice
+                              {...(message.loopNotice === undefined
+                                ? {}
+                                : { loopNotice: message.loopNotice })}
+                              {...(message.stallNotice === undefined
+                                ? {}
+                                : { stallNotice: message.stallNotice })}
+                              running={
+                                message.status === "incomplete" &&
+                                props.controller.turnStatus === "running"
+                              }
+                              onStop={() => {
+                                forceStop.requestStop();
+                                void props.controller.cancelTurn();
+                              }}
+                            />
                             {activity?.retrying === undefined ? null : (
                               <HarnessRetryStatus
                                 events={[
@@ -2440,18 +2458,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       steered={message.steeredResults}
                     />
                     {message.role === "assistant" && message.operationId !== undefined ? (
-                      <SideTaskInline
-                        last={message === lastReply}
-                        loadedTurnIds={loadedOperationIds}
-                        // The host refuses a fork through an operation that is still
-                        // incomplete or waiting, whichever reply it is.
-                        running={
-                          message.status === undefined ||
-                          message.status === "incomplete" ||
-                          message.status === "waiting"
-                        }
-                        turnId={String(message.operationId)}
-                      />
+                      <>
+                        <FinishedReceiptInline
+                          last={message === lastReply}
+                          loadedTurnIds={loadedOperationIds}
+                          turnId={String(message.operationId)}
+                        />
+                        <SideTaskInline
+                          last={message === lastReply}
+                          loadedTurnIds={loadedOperationIds}
+                          // The host refuses a fork through an operation that is still
+                          // incomplete or waiting, whichever reply it is.
+                          running={
+                            message.status === undefined ||
+                            message.status === "incomplete" ||
+                            message.status === "waiting"
+                          }
+                          turnId={String(message.operationId)}
+                        />
+                      </>
                     ) : null}
                     {continuedOnFallback?.afterId === message.id ? (
                       <OctantSeparatorWithLabel aria-label="Continued on the fallback">

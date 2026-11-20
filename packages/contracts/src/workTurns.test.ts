@@ -320,6 +320,9 @@ describe("work turn contracts", () => {
     expect(WORK_TURN_EVENT_NAMES).toEqual([
       "work.turn-accepted@1",
       "work.turn-updated@1",
+      "work.turn-loop-noticed@1",
+      "work.turn-loop-stopped@1",
+      "work.turn-stall-noticed@1",
       "work.thread-rewound@1",
     ]);
   });

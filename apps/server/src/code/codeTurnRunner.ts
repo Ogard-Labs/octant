@@ -15,15 +15,23 @@ import {
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   type ProviderUsageLimit,
+  type ThreadCallTiming,
   type ThreadPublishedPage,
   type ThreadRoutineReceipt,
   type ToolOutsideContentMark,
+  type TurnLoopNotice,
+  type TurnStallNotice,
   type TurnStopReason,
   type UsageCost,
+  UtcTimestamp,
 } from "@octant/contracts";
 import {
+  appendRepeatToolWarning,
+  decideTurnStallAction,
+  INITIAL_TURN_LOOP_STATE,
   ledgerUsageCost,
   observeTurnMetrics,
+  observeTurnRuntimeEvent,
   providerAvailabilityFromFailure,
   startTurnMetrics,
   turnRuntimeEventBudget,
@@ -34,7 +42,7 @@ import {
   refusesFullAccessSandbox,
 } from "@octant/domain/guardrail-policy";
 import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
-import { Effect, Fiber, Scope, Stream } from "effect";
+import { Effect, Fiber, Schema, Scope, Stream } from "effect";
 import type {
   ProviderAcquireInput,
   ProviderConnection,
@@ -65,10 +73,12 @@ import {
   makeTurnTextParagraphs,
   MAX_REMEMBERED_ANSWERED_REQUESTS,
   MAX_TURN_STREAMED_OUTPUT_BYTES,
+  sanitizeLoopNoticeToolName,
   STREAMED_OUTPUT_TRUNCATION_MARKER,
 } from "../providers/turnBudget";
 
 export const MAX_CODE_TURN_EVENT_BYTES = 64 * 1024;
+const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const MAX_CODE_TURN_INPUT_BYTES = MAX_CODE_TURN_EVENT_BYTES * 4;
 const MAX_CODE_TURN_FIELD_BYTES = 8 * 1024;
 const MAX_CODE_TURN_INPUT_ITEMS = 64;
@@ -182,6 +192,11 @@ export interface CodeTurnEvent {
   readonly taskIds?: ReadonlyArray<string>;
   readonly toolCallId?: string;
   readonly toolName?: string;
+  /**
+   * Set when the adapter folded stored or replayed output into this event:
+   * `occurredAt` names the batch, not the instant, so timing ignores it.
+   */
+  readonly synthesized?: true;
   /** The provider reviewer's verdict and reason; only on `review`. */
   readonly reason?: string;
   readonly verdict?: "allow" | "deny";
@@ -192,6 +207,13 @@ export interface CodeTurnEvent {
   readonly outsideContent?: ToolOutsideContentMark;
   /** The routine the finished call created. */
   readonly routine?: ThreadRoutineReceipt;
+  /**
+   * The host-measured execute interval for an app-managed call that ended.
+   * Bounds come from the recorded call itself — the interval immediately
+   * around `execute` — never from the provider request or answer stamps,
+   * which sit outside the measured call.
+   */
+  readonly callTiming?: ThreadCallTiming;
   readonly status?: string;
   readonly path?: string;
   readonly change?: string;
@@ -232,6 +254,10 @@ export interface CodeTurnRunnerInput {
   readonly prompt: string;
   readonly resumeCursor?: ProviderResumeCursor;
   readonly onSessionReady?: (handle: ProviderSessionHandle) => Effect.Effect<void, CodeTurnFailure>;
+  /** Journals a repeated-tool loop notice or Strict stop on this turn. */
+  readonly onLoopNotice?: (notice: TurnLoopNotice) => Effect.Effect<void, CodeTurnFailure>;
+  /** Journals a silent-turn stall notice on this turn outside Strict. */
+  readonly onStallNotice?: (notice: TurnStallNotice) => Effect.Effect<void, CodeTurnFailure>;
   readonly provider: CodeProviderPort;
   /** The thread's runtime, for the sandbox-at-Full-access refusal; absent refuses a sandboxed thread. */
   readonly providerDriverKind?: ProviderDriverKind;
@@ -580,15 +606,58 @@ export class CodeTurnRunner {
         return yield* fail("interrupted", "Code turn was cancelled before provider send.");
       }
 
-      const idle = yield* makeIdleTimeout(
-        stalledTurnLimitMs({
-          fullAccess: input.thread.executionPolicy === "full-access",
-          strict: input.strict !== false,
-        }),
-        providerToolCallPauseLimitMs(),
-      );
+      const strict = input.strict !== false;
+      const idleLimitMs = stalledTurnLimitMs({
+        fullAccess: input.thread.executionPolicy === "full-access",
+        strict,
+      });
+      const stallAction = decideTurnStallAction({ strict });
+      const idle = yield* makeIdleTimeout(idleLimitMs, providerToolCallPauseLimitMs());
       const shareEventLoop = makeEventLoopShare();
       const compactions = new TurnCompactions();
+      let loopState = INITIAL_TURN_LOOP_STATE;
+      if (stallAction === "notice" && idleLimitMs !== null) {
+        const noticedIdleMs = idleLimitMs;
+        yield* Effect.forkScoped(
+          idle.expired.pipe(
+            Effect.flatMap(() =>
+              input.onStallNotice === undefined
+                ? Effect.void
+                : input
+                    .onStallNotice({
+                      kind: "turn-stall-noticed",
+                      idleMs: noticedIdleMs,
+                      occurredAt: decodeTimestamp(clock()),
+                    })
+                    .pipe(Effect.catchAll(() => Effect.void)),
+            ),
+          ),
+        );
+      }
+      const handleLoopOutcome = (loop: {
+        readonly kind: "notice" | "stop";
+        readonly toolName: string;
+        readonly count: number;
+      }) =>
+        Effect.gen(function* () {
+          const toolName = sanitizeLoopNoticeToolName(loop.toolName);
+          const notice: TurnLoopNotice = {
+            kind: loop.kind === "stop" ? "turn-loop-stopped" : "turn-loop-noticed",
+            toolName,
+            count: loop.count,
+            occurredAt: decodeTimestamp(clock()),
+          };
+          if (input.onLoopNotice !== undefined) {
+            yield* input.onLoopNotice(notice).pipe(Effect.catchAll(() => Effect.void));
+          }
+          if (loop.kind === "stop") {
+            yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
+            return yield* fail(
+              "interrupted",
+              `Stopped under Strict after ${toolName} ran ${loop.count} times in a row with the same input.`,
+            );
+          }
+        });
       const collected = yield* subscribeThenSend({
         connection,
         consume: (runtimeEvents) =>
@@ -606,6 +675,13 @@ export class CodeTurnRunner {
                 yield* idle.observe(event);
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
+                if (event.kind !== "tool-request") {
+                  const loopCheck = observeTurnRuntimeEvent(loopState, event, { strict });
+                  loopState = loopCheck.next;
+                  if (loopCheck.loop !== undefined) {
+                    yield* handleLoopOutcome(loopCheck.loop);
+                  }
+                }
                 // A tool call's content is for a Chat or Work thread's record.
                 // Code keeps none, so it is dropped before it can be counted,
                 // sanitized, or journaled.
@@ -773,6 +849,20 @@ export class CodeTurnRunner {
                       return yield* fail("failed", "Provider event sanitization failed closed.");
                     }
                     if (!answeredToolRequests.answer(sanitizedEvent.requestId)) return;
+                    const loopCheck = observeTurnRuntimeEvent(
+                      loopState,
+                      {
+                        kind: "tool-request",
+                        requestId: sanitizedEvent.requestId,
+                        toolName: sanitizedEvent.toolName,
+                        inputJson: boundedEvent.inputJson,
+                      },
+                      { strict },
+                    );
+                    loopState = loopCheck.next;
+                    if (loopCheck.loop !== undefined) {
+                      yield* handleLoopOutcome(loopCheck.loop);
+                    }
                     const toolSet = recordedToolSet(
                       input.toolEffects,
                       input.appManagedTools,
@@ -803,11 +893,19 @@ export class CodeTurnRunner {
                     if (executionSignal?.aborted) {
                       yield* input.persistEvent({
                         ...normalized,
+                        occurredAt: clock() as ProviderRuntimeEvent["occurredAt"],
                         status: "interrupted",
                         text: "App-managed action was cancelled.",
                       });
                       return;
                     }
+                    let appToolApprovalWaitMs = 0;
+                    // The interval the host measured, bounded immediately
+                    // around the execute call: the provider's request stamp
+                    // and the answer's delivery both sit outside it, and a
+                    // person wait inside is subtracted only because the
+                    // recorded call measured it.
+                    const appToolStartedAt = clock();
                     const execution = yield* idle.during(
                       Effect.promise(async () => {
                         try {
@@ -816,6 +914,13 @@ export class CodeTurnRunner {
                             inputJson: boundedEvent.inputJson,
                             toolCallId: sanitizedEvent.requestId,
                             ...(executionSignal === undefined ? {} : { signal: executionSignal }),
+                            ...(input.toolEffects === undefined
+                              ? {}
+                              : {
+                                  onApprovalWait: (waitMs: number) => {
+                                    appToolApprovalWaitMs += waitMs;
+                                  },
+                                }),
                           });
                         } catch {
                           return {
@@ -826,15 +931,36 @@ export class CodeTurnRunner {
                         }
                       }),
                     );
+                    const appToolEndedAt = clock();
+                    // Bounds exist only for a recorded call: an unrecorded
+                    // execute offers no interval at all rather than one a
+                    // provider wait could be hiding inside.
+                    const appToolCallTiming: ThreadCallTiming | undefined =
+                      input.toolEffects === undefined
+                        ? undefined
+                        : {
+                            startedAt: appToolStartedAt as ProviderRuntimeEvent["occurredAt"],
+                            endedAt: appToolEndedAt as ProviderRuntimeEvent["occurredAt"],
+                            ...(appToolApprovalWaitMs > 0
+                              ? { approvalWaitMs: appToolApprovalWaitMs }
+                              : {}),
+                          };
                     if (executionSignal?.aborted) {
                       yield* input.persistEvent({
                         ...normalized,
+                        occurredAt: clock() as ProviderRuntimeEvent["occurredAt"],
                         status: "interrupted",
                         text: "App-managed action was cancelled.",
+                        ...(appToolCallTiming === undefined
+                          ? {}
+                          : { callTiming: appToolCallTiming }),
                       });
                       return;
                     }
-                    const answer = boundedToolAnswer(execution.result, execution.isError === true);
+                    const toolResult = loopCheck.earlyWarning
+                      ? appendRepeatToolWarning(execution.result)
+                      : execution.result;
+                    const answer = boundedToolAnswer(toolResult, execution.isError === true);
                     yield* connection.answerTool({
                       sessionId: input.sessionId,
                       requestId: sanitizedEvent.requestId,
@@ -844,6 +970,7 @@ export class CodeTurnRunner {
                     });
                     yield* input.persistEvent({
                       ...normalized,
+                      occurredAt: clock() as ProviderRuntimeEvent["occurredAt"],
                       status: answer.isError ? "failed" : "completed",
                       text: answer.isError
                         ? appManagedActionFailureText(execution.result)
@@ -851,6 +978,7 @@ export class CodeTurnRunner {
                       ...(answer.isError || execution.routine === undefined
                         ? {}
                         : { routine: execution.routine }),
+                      ...(appToolCallTiming === undefined ? {} : { callTiming: appToolCallTiming }),
                       // A refused call carries a mark only when it reached
                       // for a protected secret, which its row then shows.
                       ...(execution.outsideContent === undefined
@@ -953,12 +1081,17 @@ export class CodeTurnRunner {
               ),
               Effect.zipRight(fail("interrupted", "Code turn was cancelled.")),
             );
-      const waitForTimeout = idle.expired.pipe(
-        Effect.flatMap(() =>
-          connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void)),
-        ),
-        Effect.zipRight(fail("interrupted", "Code turn timed out after provider inactivity.")),
-      );
+      const waitForTimeout =
+        stallAction === "stop"
+          ? idle.expired.pipe(
+              Effect.flatMap(() =>
+                connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void)),
+              ),
+              Effect.zipRight(
+                fail("interrupted", "Code turn timed out after provider inactivity."),
+              ),
+            )
+          : Effect.never;
 
       yield* Effect.raceFirst(awaitCollection, Effect.raceFirst(waitForAbort, waitForTimeout));
       if (!providerCompleted && outcome === undefined) {
@@ -1014,9 +1147,16 @@ function claimsMutation(event: ProviderRuntimeEvent): boolean {
  * closes the tool row it opened instead of leaving it forever "started".
  */
 function withToolName(toolNames: Map<string, string>, event: CodeTurnEvent): CodeTurnEvent {
-  if (event.toolCallId === undefined) return event;
-  if (event.category === "tool" && event.status === "started" && event.toolName !== undefined) {
-    toolNames.set(event.toolCallId, event.toolName);
+  // An app-managed request names its tool against a requestId; the frames it
+  // leads to carry that same id as the call's.
+  const callId = event.toolCallId ?? event.requestId;
+  if (callId === undefined) return event;
+  if (
+    event.category === "tool" &&
+    (event.status === "started" || event.status === "app-managed-request") &&
+    event.toolName !== undefined
+  ) {
+    toolNames.set(callId, event.toolName);
     // A turn with no event budget has no end to its calls; the oldest
     // call's name is forgotten past the bound, and its outcome then goes
     // without one, as an outcome for an unseen call does.
@@ -1026,8 +1166,11 @@ function withToolName(toolNames: Map<string, string>, event: CodeTurnEvent): Cod
     }
     return event;
   }
-  if (event.category !== "observation" || event.toolName !== undefined) return event;
-  const toolName = toolNames.get(event.toolCallId);
+  // Progress frames and outcomes arrive without the name the start carried:
+  // without this they would each be re-displayed as a bare "provider-tool".
+  if (event.toolName !== undefined) return event;
+  if (event.category !== "observation" && event.category !== "tool") return event;
+  const toolName = toolNames.get(callId);
   return toolName === undefined ? event : { ...event, toolName };
 }
 
@@ -1053,6 +1196,7 @@ function normalizeProviderEvent(
     sessionId: event.sessionId,
     sequence: event.sequence,
     occurredAt: event.occurredAt,
+    ...(event.synthesized === true ? { synthesized: true as const } : {}),
   } as const;
   const text = (value: string) => boundedUtf8(value, MAX_CODE_TURN_FIELD_BYTES);
   const observation = (claimText?: string) =>
@@ -1156,6 +1300,7 @@ function normalizeProviderEvent(
         category: "approval",
         ...(event.requiresUser === undefined ? {} : { requiresUser: event.requiresUser }),
         requestId: text(event.requestId),
+        ...(event.toolCallId === undefined ? {} : { toolCallId: text(event.toolCallId) }),
         // A description that already names the tool is not prefixed with it
         // again; "Edit: Claude requests permission to use Edit." said the same
         // word twice on every prompt.

@@ -137,6 +137,7 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
   Pick<
     CodeWiring,
     | "canAccessCodeProject"
+    | "codeProjectAccess"
     | "codeFileWatch"
     | "codeWorkingDirectoryProbePath"
     | "listActivityRepositories"
@@ -172,6 +173,9 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     repositoryActivitySource,
     listActivityRepositories,
     canAccessCodeProject,
+    codeProjectAccess,
+    isPairedDeviceScope,
+    isRestrictedDeviceScope,
     serverConnection,
     serverProjectStore,
     codeFileWatch,
@@ -687,7 +691,23 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             : root;
         },
         canAccessProject: canAccessCodeProject,
-        effectiveThread: (scopeId, thread) => codeSessionAuthority.effectiveThread(scopeId, thread),
+        // Independent of any current request's AsyncLocalStorage context so
+        // another window's commit does not drop a live Full-access window's
+        // server, and checks window/device liveness so a closed window or
+        // revoked paired device does not retain an unapproved server.
+        canAccessProjectLive: (scopeId, projectId) =>
+          codeProjectAccess.standingAuthority(projectId, () =>
+            codeProjectAccess.canAccessProject(scopeId, projectId),
+          ) ||
+          (isPairedDeviceScope(scopeId) &&
+            !isRestrictedDeviceScope(scopeId) &&
+            codeProjectAccess.hasActiveCodeProject(projectId)),
+        // Read from the level the turn runs at (window session grant clamped
+        // to any active turn posture), never only the thread's stored level.
+        effectiveThread: (scopeId, thread) => {
+          const session = codeSessionAuthority.effectiveThread(scopeId, thread);
+          return codeOperationRuntime?.threadWithActiveTurnPosture?.(session) ?? session;
+        },
         resolveRoot: resolveRootWithExtraFolders,
       },
       approvals: languageServerApprovals,
@@ -709,6 +729,9 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // A previous run's servers are ended before this run starts any.
     yield* Effect.promise(() => languageServerProcesses.reconcile().catch(() => undefined));
     languageService.startSweeping();
+    // Revoking a window discards its in-memory Full access grants; sweep at
+    // once so an unapproved `repo-tooling` server it kept alive stops too.
+    onWindowRevoked(() => void languageService.sweep().catch(() => undefined));
     // An archived or completed thread, a checkout that went away, the Settings
     // switch turned off, a Project's toolchain setting changed, or a server
     // whose trust or switch was withdrawn stops at once rather than at the
@@ -720,6 +743,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             event.aggregateType === "code-thread" ||
             event.aggregateType === "code-checkout" ||
             event.aggregateType === "code-settings" ||
+            event.aggregateType === "window-workspace" ||
             event.eventName === "project.code-own-toolchain-changed@1" ||
             event.aggregateType === EXTENSION_AGGREGATE_TYPE,
         )

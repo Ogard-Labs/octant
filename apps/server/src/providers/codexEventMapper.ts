@@ -919,11 +919,18 @@ function approval(
       : message.method === "item/fileChange/requestApproval"
         ? "file change"
         : "permissions";
+  // The row's own normalized id, from the parent call the ask names; an ask
+  // with no known call bills nobody's wait.
+  const approvalCall =
+    typeof message.params.itemId === "string"
+      ? context.toolStates.get(message.params.itemId)?.toolCallId
+      : undefined;
   const approvalEvent = mappedEvent(context, {
     kind: "approval-request",
     requestId,
     action,
     description: "Approval is required for this action.",
+    ...(approvalCall === undefined ? {} : { toolCallId: approvalCall }),
   });
   const base = {
     requestId,

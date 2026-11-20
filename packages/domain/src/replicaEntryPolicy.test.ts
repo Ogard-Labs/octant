@@ -4,7 +4,10 @@ import type { HostId } from "@octant/contracts/host";
 import {
   REPLICA_ENTRY_FORMAT,
   decodeReplicaArtifactEntry,
+  decodeReplicaChoiceAnswerChange,
+  decodeReplicaChoiceAnswerEntry,
   decodeReplicaCommentEntry,
+  type ReplicaChoiceAnswerEntry,
   type ReplicaCommentEntry,
   type ReplicaInstanceId,
   type ReplicaSignatureVerdict,
@@ -19,8 +22,10 @@ import {
   replicaArtifactHidden,
   replicaArtifactStanding,
   replicaReconcileCannotOverwrite,
+  resolveReplicaChoiceAnswer,
   type ReplicaAppliedEntry,
   type ReplicaArtifactRecord,
+  type ReplicaChoiceAnswerRecord,
   type ReplicaLocalState,
   type ReplicaReconcileOutcome,
 } from "./replicaEntryPolicy";
@@ -230,6 +235,7 @@ describe("reconciling a replica entry", () => {
     expectTypeOf<ReplicaReconcileOutcome["outcome"]>().toEqualTypeOf<
       | "append-version"
       | "append-comment"
+      | "append-choice-answer"
       | "already-present"
       | "concurrent-head"
       | "tombstone"
@@ -684,6 +690,215 @@ describe("reconciling a comment entry", () => {
       outcome: "refused",
       reason: "names-local-artifact-as-foreign",
     });
+  });
+});
+
+function choiceAnswerEntry(options: {
+  readonly instanceId?: ReplicaInstanceId;
+  readonly sequence?: number;
+  readonly hostId?: string;
+  readonly after?: ReadonlyArray<{
+    readonly instanceId: ReplicaInstanceId;
+    readonly sequence: number;
+  }>;
+  readonly contentHash?: string;
+}): ReplicaChoiceAnswerEntry {
+  return decodeReplicaChoiceAnswerEntry({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "canvas-choice-answer",
+    origin: {
+      instanceId: options.instanceId ?? ids.north,
+      displayName: "North",
+      sequence: options.sequence ?? 1,
+      publicKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
+    },
+    artifact: {
+      canvasId: ids.canvas,
+      hostId: options.hostId ?? "host-north",
+      projectName: "Launch",
+    },
+    after: options.after ?? [],
+    contentHash: options.contentHash ?? hashA,
+    change: {
+      kind: "set",
+      answer: {
+        blockId: "decisions",
+        questionId: "q1",
+        questionFingerprint: "fp1",
+        selectedOptionIds: ["monday"],
+        selectedLabels: ["Monday"],
+        author: { kind: "local-user", actorId: ids.actor },
+        answeredAt: now,
+      },
+    },
+  });
+}
+
+describe("reconciling a choice-answer entry", () => {
+  it("waits on its writer's earlier slots even during a restore, and on every entry its writer saw", () => {
+    const second = choiceAnswerEntry({ sequence: 2 });
+    const restoring = state({
+      listedSlots: [slot(ids.north, 1), slot(ids.north, 2)],
+      restoring: true,
+    });
+    expect(reconcileReplicaEntry(restoring, second)).toEqual({
+      outcome: "refused",
+      reason: "sequence-gap",
+    });
+    expect(
+      reconcileReplicaEntry({ ...restoring, settledSlots: [slot(ids.north, 1)] }, second),
+    ).toEqual({ outcome: "append-choice-answer" });
+
+    const followUp = choiceAnswerEntry({
+      instanceId: ids.south,
+      sequence: 1,
+      after: [slot(ids.north, 4)],
+    });
+    expect(reconcileReplicaEntry(state(), followUp)).toEqual({
+      outcome: "refused",
+      reason: "sequence-gap",
+    });
+    expect(
+      reconcileReplicaEntry(
+        state({
+          applied: [
+            {
+              instanceId: ids.north,
+              sequence: 4,
+              kind: "canvas-choice-answer",
+              contentHash: hashB,
+            },
+          ],
+        }),
+        followUp,
+      ),
+    ).toEqual({ outcome: "append-choice-answer" });
+  });
+
+  it("changes nothing when pulled again, and refuses hash mismatches, strangers, and foreign claims", () => {
+    const answer = choiceAnswerEntry({ sequence: 3 });
+    const applied = state({
+      applied: [
+        {
+          instanceId: ids.north,
+          sequence: 3,
+          kind: "canvas-choice-answer",
+          contentHash: hashA,
+        },
+      ],
+    });
+    expect(reconcileReplicaEntry(applied, answer)).toEqual({ outcome: "already-present" });
+    expect(
+      reconcileReplicaEntry(
+        { ...applied, measuredContentHash: hashB },
+        choiceAnswerEntry({ sequence: 3, contentHash: hashB }),
+      ),
+    ).toEqual({ outcome: "refused", reason: "hash-mismatch" });
+    expect(reconcileReplicaEntry(state(), choiceAnswerEntry({ instanceId: ids.stranger }))).toEqual(
+      { outcome: "refused", reason: "unknown-instance" },
+    );
+    expect(
+      reconcileReplicaEntry(
+        state({
+          artifacts: [
+            { canvasId: ids.canvas, originHostId: localHost, versions: [], tombstones: [] },
+          ],
+        }),
+        choiceAnswerEntry({}),
+      ),
+    ).toEqual({ outcome: "refused", reason: "names-local-artifact-as-foreign" });
+  });
+
+  it("settles concurrent answers to one deterministic winner regardless of arrival order, while causal order beats clock skew", () => {
+    const answerRecord = (input: {
+      readonly instanceId: ReplicaInstanceId;
+      readonly sequence?: number;
+      readonly localOrder?: number;
+      readonly after?: ReadonlyArray<{
+        readonly instanceId: ReplicaInstanceId;
+        readonly sequence: number;
+      }>;
+      readonly option: string;
+      readonly answeredAt: string;
+    }): ReplicaChoiceAnswerRecord => ({
+      instanceId: input.instanceId,
+      ...(input.sequence === undefined ? {} : { sequence: input.sequence }),
+      ...(input.localOrder === undefined ? {} : { localOrder: input.localOrder }),
+      after: input.after ?? [],
+      change: decodeReplicaChoiceAnswerChange({
+        kind: "set",
+        answer: {
+          blockId: "decisions",
+          questionId: "q1",
+          questionFingerprint: "fp1",
+          selectedOptionIds: [input.option],
+          selectedLabels: [input.option],
+          author: { kind: "local-user", actorId: ids.actor },
+          answeredAt: input.answeredAt,
+        },
+      }),
+    });
+
+    // South saw North's answer, then wrote its own with an earlier clock: causal order wins.
+    const north = answerRecord({
+      instanceId: ids.north,
+      sequence: 2,
+      option: "monday",
+      answeredAt: "2026-08-18T10:10:00.000Z",
+    });
+    const southAfterNorth = answerRecord({
+      instanceId: ids.south,
+      sequence: 2,
+      after: [slot(ids.north, 2)],
+      option: "tuesday",
+      answeredAt: "2026-08-18T10:00:00.000Z",
+    });
+    expect(resolveReplicaChoiceAnswer([north, southAfterNorth])).toEqual(southAfterNorth);
+    expect(resolveReplicaChoiceAnswer([southAfterNorth, north])).toEqual(southAfterNorth);
+
+    // Concurrent answers settle identically whether North is still queued or already published.
+    const northQueued = answerRecord({
+      instanceId: ids.north,
+      localOrder: 0,
+      option: "monday",
+      answeredAt: now,
+    });
+    const northPublished = answerRecord({
+      instanceId: ids.north,
+      sequence: 2,
+      option: "monday",
+      answeredAt: now,
+    });
+    const southConcurrent = answerRecord({
+      instanceId: ids.south,
+      sequence: 2,
+      option: "tuesday",
+      answeredAt: now,
+    });
+    const queuedWinner = resolveReplicaChoiceAnswer([northQueued, southConcurrent]);
+    const publishedAB = resolveReplicaChoiceAnswer([northPublished, southConcurrent]);
+    const publishedBA = resolveReplicaChoiceAnswer([southConcurrent, northPublished]);
+    expect(queuedWinner?.change).toEqual(publishedAB?.change);
+    expect(publishedAB?.change).toEqual(publishedBA?.change);
+
+    // Three-way case with clock skew: Local saw North (10:10) and wrote at 10:00,
+    // while South wrote concurrently at 10:05. All permutations settle to South.
+    const localAfterNorth = answerRecord({
+      instanceId: ids.local,
+      sequence: 2,
+      after: [slot(ids.north, 2)],
+      option: "wednesday",
+      answeredAt: "2026-08-18T10:00:00.000Z",
+    });
+    const southMiddle = answerRecord({
+      instanceId: ids.south,
+      sequence: 2,
+      option: "tuesday",
+      answeredAt: "2026-08-18T10:05:00.000Z",
+    });
+    expect(resolveReplicaChoiceAnswer([north, localAfterNorth, southMiddle])).toEqual(southMiddle);
+    expect(resolveReplicaChoiceAnswer([southMiddle, north, localAfterNorth])).toEqual(southMiddle);
+    expect(resolveReplicaChoiceAnswer([localAfterNorth, southMiddle, north])).toEqual(southMiddle);
   });
 });
 

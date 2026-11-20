@@ -264,7 +264,7 @@ restrictive one was taken.
   beyond that read. A device the host's own person paired starts and approves `repo-tooling` as a local window does (D4), and at Full access a `repo-tooling` start needs no
   approval, read from the level the turn runs at and never only the thread's
   stored level (maintainer decision, 2026-11-12; [the Full access
-  rule](../architecture.md#security-and-authority)). Not built yet: today the approval is asked at every level. Built: a device the host's own person paired starts and approves one; there is no remote action for it, so every other device session is refused (`local-host-required`) even with an approval on record.
+  rule](../architecture.md#security-and-authority)). Built: a device the host's own person paired starts and approves one, and at Full access a start needs no approval (read from the window's session grant clamped to any active turn posture); there is no remote action for it, so every other device session is refused (`local-host-required`) even with an approval on record.
 - **Read contracts** (`@octant/contracts/code-language`). A read names a thread,
   checkout, and file reference, never a path. Diagnostics and definitions use
   zero-based lines and UTF-16 character offsets. A result is diagnostics (at
@@ -663,7 +663,7 @@ classes.
 - **Who approves.** Only the person, at a local window or on a device the host's own person paired (maintainer decision, 2026-11-12; built); no agent does. At Full access nothing is
   asked: the server starts under the level the turn runs at, never only the
   thread's stored level, as a command there runs unasked ([the Full access
-  rule](../architecture.md#security-and-authority)). Not built yet: today the approval is asked at every level. Any other device session is refused before anything is read (`local-host-required`); the route has no remote action, so
+  rule](../architecture.md#security-and-authority); built: an unapproved server stops on sweep once no active thread on its checkout still holds Full access). Any other device session is refused before anything is read (`local-host-required`); the route has no remote action, so
   the remote gate denies it, and the route answers 403 to a device that reached
   it anyway. Every check a read makes runs next, then the
   launch decision with the approval granted, so Plan refuses
@@ -937,7 +937,9 @@ design left a choice open.
   an agent's read starts a `repo-tooling` server with no approval, since its
   shell could run the same tooling unasked there ([the Full access
   rule](../architecture.md#security-and-authority); maintainer decision,
-  2026-11-12; not built yet: today it never starts one in any posture). Its code
+  2026-11-12; built: offered when a `repo-tooling` server covers a file of the
+  turn's folders, starts without approval, and marks the answer as outside
+  content). Below Full access, its code
   tool may read through a
   `repo-tooling` server that is already approved and running, which starts
   nothing (maintainer request, 2026-11-12). Built: the read is answered only

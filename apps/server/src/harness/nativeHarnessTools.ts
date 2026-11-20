@@ -91,6 +91,12 @@ export interface NativeHarnessShellPort {
      * a proxied shell reads them, as `call` rules for this launch.
      */
     readonly confirmedHosts?: ToolEgressCallConfirmation;
+    /**
+     * Which end of combined stdout/stderr to keep when output exceeds the
+     * process port's capture cap. Defaults to `"first"`; proof checks pass
+     * `"newest"` so final failure diagnostics survive long logs.
+     */
+    readonly outputRetention?: "first" | "newest";
     readonly signal?: AbortSignal;
   }): Promise<NativeHarnessShellRun>;
 }
