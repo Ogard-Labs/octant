@@ -39,7 +39,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 17        | 10      | 7            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 5         | 2       | 3            | 0                   |
-| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 4            | 0                   |
+| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 7         | 3       | 4            | 0                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 5         | 3       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **287**   | **171** | **109**      | **7**               |
+| **All areas**                                                                         | **288**   | **172** | **109**      | **7**               |
 
 ## Principles and hard lines
 
@@ -1223,6 +1223,20 @@ A Code thread's pull request review carries two switches the person turns on: Me
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes, Merge when ready and Auto-fix](../architecture.md#modes-chat-work-and-code).
 
+### Second-model pull request reviewer
+
+A bundled, switchable first-party pull request reviewer plugin (`octant/second-model-pull-request-reviewer`) inspects pushed pull request heads of linked Code threads strictly through the `pull-request-reviewer` plugin seam and host-mediated review port.
+
+- Off by default, enabled per Code Project with a per-thread override. The reviewer route picks provider instance, model, and optional effort; the picker suggests a provider different from the worker while still allowing the same provider, and has no default model (review stays off until a model is picked).
+- **Post findings as a PR comment** is a per-Project opt-in, off by default; **Send blocking findings to the worker** is a per-PR opt-in, off by default. Every setting may only be changed from a local window or a device paired by the host's own person (`principalActsAsHostPerson`), refusing hub-introduced and restricted devices server-side, and is journaled with `eventActorForPrincipal`.
+- Runs at most once per pushed PR head SHA (deduplicated across repeated pushes and restarts) after the worker turn settles, at Plan's read-only gate (`executionPolicy: "plan"`, zero write/shell/forge/child-run tools) whatever the thread's guardrail level (Full access included). If the head moves while running, the review records `stale` and publishes nothing.
+- Findings use `CodeReviewFinding` with `author.kind = "agent"`, structured `pull-request-reviewer` provenance (reviewer, review id, run id, route, head SHA), severity, digest, and diff anchor; stale anchors stay visible as stale in Review and select into the existing correction-request draft composer.
+- Default posts nothing to GitHub and hands nothing back automatically. With summary comments on, posts at most one plain comment per reviewed head via the person's `gh` login and never approves or requests changes. With blocking-finding hand-back on, marks the thread as having read outside content (`pull-request-review`) and wakes the worker via Auto-fix's wake path; Strict enforces Auto-fix's three-attempt cap while outside Strict there is no attempt cap.
+- Counts toward the parent thread's spend ceiling, usage ledger, and turn metrics. When unavailable (`no-route-configured`, `no-account`, `route-refused`, `capacity`, `spend-ceiling`, `not-effective`), records and displays the explicit reason and never falls back silently to another model.
+- Live maintainer smoke against a real repository and two signed-in providers is owed.
+
+Status: Built. Since: 2026-11-20. Detail: [Architecture: Modes, Merge when ready and Auto-fix](../architecture.md#modes-chat-work-and-code).
+
 ### Delivery to targets the person owns
 
 Octant operates no deployment infrastructure and offers no ship target of its own. Every target is an account, cluster, registry or store the person owns.
@@ -1984,7 +1998,7 @@ Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../arch
 New providers and tools reach the system through the published SDK, API and host seams. They take no shortcut a third-party plugin could not take.
 
 - Plugin ports carry no raw filesystem, shell or credential handles, and plugin state holds only opaque references.
-- Pull request reviewers use a Code-only plugin seam (`pull-request-reviewer` in `@octant/plugin-api/pull-request-reviewer` and `@octant/plugin-host/pull-request-reviewers`). A reviewer is offered only while installed, trusted and enabled, with colliding ids withheld; stored external packages stay host-prohibited pending a confined worker class. The scoped host port enforces effectiveness and PR head currency before and after every await, keeps model review turns at Plan's read-only gate with no silent fallback, verifies run and finding ownership, limits forge publication to at most one summary comment behind a default-off opt-in (formal forge reviews are absent from the port), and gates blocking-finding worker hand-back behind a default-off opt-in. Built: the seam, pure activation gate and host registry; no reviewer plugin ships yet.
+- Pull request reviewers use a Code-only plugin seam (`pull-request-reviewer` in `@octant/plugin-api/pull-request-reviewer` and `@octant/plugin-host/pull-request-reviewers`). A reviewer is offered only while installed, trusted and enabled, with colliding ids withheld; stored external packages stay host-prohibited pending a confined worker class. The scoped host port enforces effectiveness and PR head currency before and after every await, keeps model review turns at Plan's read-only gate with no silent fallback, verifies run and finding ownership, limits forge publication to at most one summary comment behind a default-off opt-in (formal forge reviews are absent from the port), and gates blocking-finding worker hand-back behind a default-off opt-in. Built: the seam, pure activation gate, host registry, and the bundled second-model pull request reviewer.
 - Installed Code tools may declare bounded existing credential-operation or saved-command ids in `extensions.octant.codeTools`. The public turn-scoped port exposes declaration-scoped names and request/run-saved actions, never commands, paths, credentials or host services. Code-only selection and the activation ladder remain separate from person approval; changed package/catalog/task authority invalidates pending use before effects. The core credential family uses that same public port/composer with its existing name, help, schema and host policy; its additional task-owned command presentation remains private to the server adapter.
 - Maintainers decided on 2026-11-07 that GitHub, thread boards and Zen are bundled first-party plugins a person can switch off and on, each on by default. Usage, diagnostics, Navigator, the automations UI, browser and computer use, agent hierarchy, remote and mobile access, the Apple workbench, and the marketplace and plugin registry stay integrated core features and are no longer extraction candidates.
 - The first-party manifests have one definition that the server and the renderer share.

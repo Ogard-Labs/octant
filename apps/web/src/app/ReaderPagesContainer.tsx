@@ -235,6 +235,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     automationNotificationClient,
     chatClient,
     codeClient,
+    pullRequestReviewClient,
     imageGenerationClient,
     pendingRequestClient,
     workRequestClient,
@@ -489,6 +490,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         {...(codeClient.setProjectPullRequestAutoFix === undefined
           ? {}
           : { setAutoFix: codeClient.setProjectPullRequestAutoFix.bind(codeClient) })}
+        pullRequestReviewClient={pullRequestReviewClient}
       />
     );
   };

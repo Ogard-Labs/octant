@@ -29,6 +29,7 @@ describe("first-party plugin catalog", () => {
   it("decodes every bundled first-party manifest on the current version", () => {
     expect(FIRST_PARTY_PLUGIN_CATALOG.map((plugin) => plugin.slug)).toEqual([
       "board",
+      "pull-request-reviewer",
       "github",
       "linear",
       "azure-arm",

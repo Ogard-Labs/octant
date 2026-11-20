@@ -51,6 +51,16 @@ import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
 import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequestSwitchService";
 import { PullRequestReviewerRegistry } from "../pullRequestReviewers/pullRequestReviewerRegistry";
+import { createPullRequestReviewHostRuntime } from "../pullRequestReviewers/pullRequestReviewHostRuntime";
+import { createPullRequestReviewRouteHandler } from "../pullRequestReviewers/pullRequestReviewRoutes";
+import { PullRequestReviewService } from "../pullRequestReviewers/pullRequestReviewService";
+import {
+  SECOND_MODEL_PULL_REQUEST_REVIEWER_DISPLAY_NAME,
+  SECOND_MODEL_PULL_REQUEST_REVIEWER_ID,
+  createSecondModelPullRequestReviewer,
+} from "../pullRequestReviewers/secondModelPullRequestReviewer";
+import { SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID } from "@octant/plugin-host/first-party-plugins";
+import { isFirstPartyIntegrationEffective } from "../github/githubIntegrationEffective";
 import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
@@ -372,6 +382,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "finishedReceipts"
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
+    | "turnMetrics"
   > &
   Pick<
     IntegrationsWiring,
@@ -578,6 +589,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     goalService,
     simulatorInputGrants,
     spendCeiling,
+    turnMetrics,
     threadMentionService,
     threadOutsideContentMarks,
     workRequestRuntime,
@@ -2719,6 +2731,162 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       nativeSessions: () => codeOperationRuntime?.nativeSessions,
     });
     const pullRequestReviewers = new PullRequestReviewerRegistry();
+    pullRequestReviewers.register({
+      reviewerId: SECOND_MODEL_PULL_REQUEST_REVIEWER_ID,
+      displayName: SECOND_MODEL_PULL_REQUEST_REVIEWER_DISPLAY_NAME,
+      activation: () => {
+        const effective = isFirstPartyIntegrationEffective(
+          extensionApiService.snapshot(),
+          SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID,
+          { missingRow: "effective" },
+        );
+        return { installed: true, trusted: true, enabled: effective };
+      },
+      reviewer: createSecondModelPullRequestReviewer(),
+    });
+    const pullRequestReviewHost = createPullRequestReviewHostRuntime({
+      ghExecutable: options.ghExecutable,
+      providerDataDirectory,
+      connection: persistence.connection,
+      journal: persistence.journal,
+      readProviderInstances: () => persistence.readProviderInstances(),
+      observedProviderState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
+      isProviderModelAllowed: isCodeProviderModelAllowed,
+      createDriver: (instance) => makeConfiguredProviderDriver(instance, configuredDriverOptions),
+      executeOperation: async (windowId, command) => {
+        const execute = boardRouteCodeService.executeOperation;
+        if (execute === undefined) {
+          throw new Error("Code operation runtime is unavailable.");
+        }
+        return execute(windowId, command);
+      },
+      readOperationEvidence: async (windowId, threadId, operationId, contentId) => {
+        const read = boardRouteCodeService.readOperationContent;
+        if (read === undefined) {
+          throw new Error("Code operation evidence is unavailable.");
+        }
+        const evidence = await read(windowId, threadId, operationId, contentId);
+        return { text: new TextDecoder().decode(evidence.bytes) };
+      },
+      resolveReviewTarget: async (windowId, input, admissionCurrent) => {
+        const resolve = codeOperationRuntime?.resolveReviewTarget;
+        if (resolve === undefined) {
+          throw new Error("Code review target resolver is unavailable.");
+        }
+        return resolve(windowId, input, admissionCurrent);
+      },
+      retainPullRequestDiff: async (windowId, input) => {
+        const retain = codeOperationRuntime?.retainPullRequestDiff;
+        if (retain === undefined) {
+          throw new Error("Code pull request diff retainer is unavailable.");
+        }
+        return retain(windowId, input);
+      },
+      createFinding: async (input, actor) => {
+        const create = codeOperationRuntime?.createReviewFinding;
+        if (create === undefined) {
+          throw new Error("Code review finding writer is unavailable.");
+        }
+        return create(ROUTINE_HOST_SCOPE_ID, input, undefined, actor);
+      },
+      spendCeiling,
+      turnMetrics,
+    });
+    const pullRequestReviewService = new PullRequestReviewService({
+      registry: pullRequestReviewers,
+      journal: persistence.journal,
+      authority: {
+        canAccessProject: (windowId, projectId) => canAccessCodeProject(windowId, projectId),
+        authorizePullRequest: (windowId, target) =>
+          projectPullRequestService.authorizePullRequest(windowId, target),
+      },
+      threads: {
+        readThread: (threadId) => persistence.readCodeThread(threadId),
+        isWorkerTurnActive: (threadId) => {
+          const compacting = contextHarness.compactionRunning(
+            decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+          );
+          return (
+            compacting ||
+            persistence
+              .readCodeRuntimeWorks(threadId)
+              .some(
+                ({ work }) =>
+                  work.kind === "provider-turn" &&
+                  (work.state === "running" ||
+                    work.state === "waiting" ||
+                    work.state === "ambiguous"),
+              )
+          );
+        },
+        isStrict: (threadId) => resolveThreadStrict(String(threadId)),
+        maxStrictHandBackAttempts: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .autoFixAttemptsPerFailure,
+        markOutsideContent: (threadId, contentReference, sourceLabel) => {
+          const marked = externalContentIngestionStore.record({
+            threadId,
+            provenance: { origin: "external-content", sourceLabel },
+            contentReference,
+            correlationId: randomUUID(),
+            authorized: true,
+          });
+          return marked.kind === "recorded" || marked.kind === "already-recorded";
+        },
+        startWorkerTurn: async (threadId, text) => {
+          const thread = persistence.readCodeThread(threadId);
+          const stage = boardRouteCodeService.stageEvidence;
+          const execute = boardRouteCodeService.executeOperation;
+          if (thread === undefined || stage === undefined || execute === undefined) return false;
+          const prompt = await stage(ROUTINE_HOST_SCOPE_ID, threadId, text);
+          const result = await execute(ROUTINE_HOST_SCOPE_ID, {
+            kind: "start-provider-turn",
+            operationId: decodeCodeOperationId(randomUUID()),
+            threadId,
+            checkoutId: thread.checkoutId,
+            sessionId: decodeProviderSessionId(randomUUID()),
+            prompt,
+          });
+          return (
+            result.kind === "provider-turn-state" &&
+            (result.state === "running" ||
+              result.state === "waiting" ||
+              result.state === "completed")
+          );
+        },
+        notifyPerson: async (threadId, reason) => {
+          const view = codeFollowUpService.read(threadId);
+          await codeFollowUpService.observeTrigger({
+            threadId,
+            sourceEventId: randomUUID(),
+            sourceSequence:
+              Math.max(
+                view.followUp?.triggerSequence ?? 0,
+                view.followUp?.acknowledgedThroughSequence ?? 0,
+              ) + 1,
+            reason,
+            origin: "automatic",
+            triggeredAt: new Date().toISOString(),
+          });
+        },
+      },
+      runtime: pullRequestReviewHost.runtime,
+      uuid: randomUUID,
+    });
+    onPullRequestSnapshotRefreshed((rows) => {
+      void pullRequestReviewHost
+        .observeSnapshotRows(pullRequestReviewService, rows)
+        .catch((error: unknown) => console.error("[pull-request-reviews] pass failed", error));
+    });
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        pullRequestReviewService.dispose();
+      }),
+    );
+    const pullRequestReviewRoutes = createPullRequestReviewRouteHandler({
+      service: pullRequestReviewService,
+      windowAuthorityStore: deps.windowAuthorityStore,
+    });
     return {
       androidToolchainRoutes,
       appleToolchainRoutes,
@@ -2735,6 +2903,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       coordinatorWakes,
       codeThreadWakeupPort,
       pullRequestReviewers,
+      pullRequestReviewRoutes,
+      pullRequestReviewService,
       routeCodeService,
       terminalProcessPort,
     };

@@ -33,6 +33,7 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "runtime-web-fetch": "Web pages the provider fetched with its own tools",
   "runtime-web-search": "Web searches the provider ran with its own tools",
   "product-feedback-comment": "A comment sent as feedback",
+  "pull-request-review": "A second-model pull request review",
   "sibling-thread": "Other threads in this Project",
   "side-chat": "The thread this side chat is about",
   "simulator-screen": "A simulator screen sent as feedback",
