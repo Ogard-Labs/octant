@@ -15,6 +15,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { principalActsAsHostPerson } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -127,6 +128,7 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
                 offers,
                 windowId,
                 decision,
+                actor: eventActorForPrincipal(context.principal),
                 authorize: async (offer) =>
                   (await input.authorizeScope(windowId, offer.threadKind, offer.scopeId)) &&
                   current(),
