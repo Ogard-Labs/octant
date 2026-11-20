@@ -50,17 +50,16 @@ it("opens the phone's own image offer, and sends no paid answer until confirmati
   try {
     await act(async () =>
       root.render(
-        createElement(
-          ThemeProvider,
-          {},
-          createElement(ServiceOfferCard, {
+        createElement(ThemeProvider, {
+          preference: "light",
+          children: createElement(ServiceOfferCard, {
             transport,
             authenticator,
             threadId,
             threadKind: "chat-thread",
             inProject: false,
           }),
-        ),
+        }),
       ),
     );
     expect(authenticatedFetch.mock.calls[0]?.[0]).toMatchObject({
