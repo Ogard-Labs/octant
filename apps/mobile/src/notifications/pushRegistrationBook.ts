@@ -22,6 +22,12 @@ export interface PushRegistrationRecord {
    * deletion again, and is never rotated, so the key is not used again.
    */
   readonly forgetPending?: true;
+  /**
+   * Set when the person turned off hearing about new devices for this
+   * computer; absent, the phone hears of them. Kept so a token rotation
+   * registers the same choice again.
+   */
+  readonly newDevices?: false;
 }
 
 /**
@@ -105,7 +111,8 @@ function isRecord(value: unknown): value is PushRegistrationRecord {
     entry.hostKeyFingerprint.length > 0 &&
     typeof entry.tokenDigest === "string" &&
     entry.tokenDigest.length > 0 &&
-    (entry.forgetPending === undefined || entry.forgetPending === true)
+    (entry.forgetPending === undefined || entry.forgetPending === true) &&
+    (entry.newDevices === undefined || entry.newDevices === false)
   );
 }
 

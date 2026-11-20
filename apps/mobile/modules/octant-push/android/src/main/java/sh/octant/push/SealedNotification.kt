@@ -68,6 +68,11 @@ object SealedNotificationOpener {
         // you list, which reads the threads from the computer itself.
         if (threadId != null || mode != null) return null
         "octant://hosts/$hostId/moves"
+      } else if (kind == "device-joined") {
+        // A new device names no thread: it opens the phone's list of new
+        // devices, which reads each computer's alerts itself.
+        if (threadId != null || mode != null) return null
+        "octant://hosts/$hostId/new-devices"
       } else {
         if (kind !in kinds || threadId == null || !isLinkSegment(threadId)) return null
         if (mode != null && mode !in modes) return null

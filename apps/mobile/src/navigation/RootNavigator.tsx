@@ -37,15 +37,16 @@ import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { useMobileHardwareBack } from "./useMobileHardwareBack";
 import { mobileThreadReturnRouteForDeepLink } from "./navigationState";
-import { deepLinkRefusal, movesLinkOpening } from "./deepLinkNavigation";
-import type { MobileMovesDeepLinkTarget } from "../notifications/deepLinks";
+import { deepLinkRefusal, computersLinkOpening } from "./deepLinkNavigation";
+import { NewDevicesPanel } from "../hosts/NewDevicesPanel";
+import type { MobileComputersDeepLinkTarget } from "../notifications/deepLinks";
 
 export interface RootNavigatorProps {
   readonly activeRoute: MobileRouteId;
   readonly onSelectRoute: (route: MobileRouteId) => void;
   readonly pendingDeepLinkRow?: MobileInboxRow | undefined;
   /** A tapped notification that a move waits for this phone. */
-  readonly pendingMovesLink?: MobileMovesDeepLinkTarget | undefined;
+  readonly pendingComputersLink?: MobileComputersDeepLinkTarget | undefined;
   readonly onDeepLinkConsumed?: (() => void) | undefined;
 }
 
@@ -70,10 +71,15 @@ function HostsBody(props: {
     hub,
     guestHubStore,
     transportForHost,
+    transports,
     placementHostId,
     setPlacementHostId,
   } = useMobileSession();
   const offlineDemo = environment.kind === "mock" && environment.offlineDemo;
+  const computerName = useCallback(
+    (hostId: string) => hosts.find((host) => host.hostId === hostId)?.label ?? "A paired computer",
+    [hosts],
+  );
   const [notAccepted, setNotAccepted] = useState<ReadonlyArray<GuestSpokeRefusal>>([]);
   useEffect(() => {
     // The computers on a joined hub that refused this phone are listed beside the hosts.
@@ -261,6 +267,9 @@ function HostsBody(props: {
                   guestHubStore={guestHubStore}
                   unlockKey={unlockKey}
                 />
+              )}
+              {offlineDemo ? null : (
+                <NewDevicesPanel computerName={computerName} transports={transports} />
               )}
               {offlineDemo || unlockKey === undefined ? null : (
                 <OwnerAlertsPanel
@@ -489,12 +498,12 @@ export function RootNavigator(props: RootNavigatorProps) {
   ]);
 
   useEffect(() => {
-    if (props.pendingMovesLink === undefined) return;
+    if (props.pendingComputersLink === undefined) return;
     // As for a thread link, the paired list must be read before a computer
     // can be called unpaired.
     if (!hostsLoaded) return;
-    const opening = movesLinkOpening(
-      props.pendingMovesLink,
+    const opening = computersLinkOpening(
+      props.pendingComputersLink,
       hosts.map((host) => host.hostId),
       hostsError !== undefined,
     );
@@ -503,7 +512,7 @@ export function RootNavigator(props: RootNavigatorProps) {
     props.onSelectRoute(opening.route);
     props.onDeepLinkConsumed?.();
   }, [
-    props.pendingMovesLink,
+    props.pendingComputersLink,
     props.onDeepLinkConsumed,
     props.onSelectRoute,
     hosts,
