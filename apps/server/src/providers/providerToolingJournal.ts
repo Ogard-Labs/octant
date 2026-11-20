@@ -5,6 +5,7 @@ import {
   PROVIDER_TOOLING_APPLIED,
   UtcTimestamp,
   decodeProviderToolingAppliedRecord,
+  type EventActor,
   type ProviderToolingAppliedRecord,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -26,8 +27,8 @@ export function makeProviderToolingJournalRecorder(options: {
   readonly actorId: string;
   readonly uuid: () => string;
   readonly clock: () => string;
-}): (change: ProviderToolingAppliedRecord) => void {
-  return (change) => {
+}): (change: ProviderToolingAppliedRecord, actor?: EventActor) => void {
+  return (change, actor) => {
     const payload = decodeProviderToolingAppliedRecord(change);
     options.journal.append({
       aggregate: { aggregateType: "provider-tooling", aggregateId: options.uuid() },
@@ -38,7 +39,7 @@ export function makeProviderToolingJournalRecorder(options: {
           eventName: PROVIDER_TOOLING_APPLIED,
           eventVersion: 1,
           correlationId: decodeCorrelationId(options.uuid()),
-          actor: { kind: "local-user", actorId: decodeActorId(options.actorId) },
+          actor: actor ?? { kind: "local-user", actorId: decodeActorId(options.actorId) },
           occurredAt: decodeTimestamp(options.clock()),
           payload,
         },

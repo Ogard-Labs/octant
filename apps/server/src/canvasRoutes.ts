@@ -1584,6 +1584,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               approvalId: requestBody.approvalId,
               decision: requestBody.decision,
               permitted: context.kind === "ok",
+              ...(principal.kind === "remote-device" && principalActsAsHostPerson(principal)
+                ? { personPairedDevice: true }
+                : {}),
               ...(requestBody.visibility === undefined
                 ? {}
                 : { visibility: requestBody.visibility }),

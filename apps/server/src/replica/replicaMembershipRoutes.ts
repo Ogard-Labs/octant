@@ -21,6 +21,7 @@ import {
   type ReplicaRestoreResult,
 } from "@octant/contracts/replica-entry";
 import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal, readPrincipalRouteContext } from "../principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -152,7 +153,14 @@ export function createReplicaMembershipRouteHandler(
 
     let outcome: ReplicaMembershipOutcome;
     try {
-      outcome = await dependencies.service.execute(command);
+      const actor =
+        principal.principal.kind === "remote-device"
+          ? eventActorForPrincipal(principal.principal)
+          : undefined;
+      outcome =
+        actor === undefined
+          ? await dependencies.service.execute(command)
+          : await dependencies.service.execute(command, actor);
     } catch {
       return failure("Replica membership command failed.", 500, origin);
     }

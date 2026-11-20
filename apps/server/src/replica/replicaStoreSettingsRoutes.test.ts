@@ -178,7 +178,20 @@ describe("replica store settings routes", () => {
     });
     const response = await route(paired);
     expect(response?.status).toBe(200);
-    expect(calls).toEqual([{ method: "setSync", input: { syncOn: true, expectedVersion: 0 } }]);
+    expect(calls).toEqual([
+      {
+        method: "setSync",
+        input: {
+          syncOn: true,
+          expectedVersion: 0,
+          actor: {
+            kind: "remote-device",
+            actorId: "00000000-0000-4000-8000-00000000c001",
+            deviceId: "00000000-0000-4000-8000-00000000c001",
+          },
+        },
+      },
+    ]);
   });
 
   it("refuses a read without a window capability", async () => {

@@ -544,7 +544,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     // Taking an edited file back in goes through `revise` — the same path a
     // person or an agent takes — so it is authorized, journaled, and counted
     // as a version like any other. Nothing here can replace a version.
-    appendVersionFromBundle: ({ canvasId, definition }) => {
+    appendVersionFromBundle: ({ canvasId, definition, actor }) => {
       const entry = persistence.canvasProjection.getById(canvasId);
       if (entry === undefined) {
         return { kind: "denied", message: "That artifact is no longer available." };
@@ -578,7 +578,7 @@ export function wireCanvas(deps: CanvasDependencies) {
           workspace,
           originThreadId: provenance.threadId,
           prompt: "Re-imported from the mirrored file.",
-          actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+          actor: actor ?? { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
           providerInstanceId: provenance.providerInstanceId,
           modelId: provenance.modelId,
           requestedAuthority: {

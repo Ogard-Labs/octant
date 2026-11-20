@@ -24,7 +24,7 @@ import type {
   WorkspaceLayoutNode,
 } from "@octant/contracts";
 import type { PreviewPosture } from "@octant/domain";
-import { principalActsAsHostPerson } from "./clientPrincipal";
+import { principalActsAsHostPerson, type ClientPrincipal } from "./clientPrincipal";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -47,6 +47,21 @@ export interface PreviewRouteDependencies {
     windowId: WindowId,
     projectId: ProjectId,
   ) => PreviewPosture | Promise<PreviewPosture>;
+  readonly codeThreadResolver?: (threadId: CodeThreadId) =>
+    | {
+        readonly projectId: ProjectId;
+        readonly lifecycle: string;
+        readonly executionPolicy: string;
+      }
+    | undefined
+    | Promise<
+        | {
+            readonly projectId: ProjectId;
+            readonly lifecycle: string;
+            readonly executionPolicy: string;
+          }
+        | undefined
+      >;
   readonly maxJsonBodySize?: number;
   readonly now?: () => number;
 }
@@ -166,7 +181,12 @@ export function createPreviewRouteHandler(dependencies: PreviewRouteDependencies
               (boundPrincipal !== undefined && !principalActsAsHostPerson(boundPrincipal))
             )
               return undefined;
-            const authority = await resolvePreviewAuthority(dependencies, id, body.target);
+            const authority = await resolvePersonPreviewAuthority(
+              dependencies,
+              boundPrincipal,
+              id,
+              body.target,
+            );
             return authority.kind === "ok" ? authority.context : undefined;
           } catch {
             return undefined;
@@ -184,10 +204,12 @@ export function createPreviewRouteHandler(dependencies: PreviewRouteDependencies
         });
         return jsonResponse(decodePreviewTextReply(reply), 200, origin);
       }
+      const boundPrincipal = readPrincipalRouteContext(request)?.principal;
       if (route === "open") {
         const body = decodePreviewOpenRequest(decoded.value);
-        const authority = await resolvePreviewAuthority(
+        const authority = await resolvePersonPreviewAuthority(
           dependencies,
+          boundPrincipal,
           authenticatedWindowId,
           body.target,
         );
@@ -207,8 +229,9 @@ export function createPreviewRouteHandler(dependencies: PreviewRouteDependencies
       }
       if (route === "refresh") {
         const body = decodePreviewRefreshRequest(decoded.value);
-        const authority = await resolvePreviewAuthority(
+        const authority = await resolvePersonPreviewAuthority(
           dependencies,
+          boundPrincipal,
           authenticatedWindowId,
           body.target,
         );
@@ -228,8 +251,9 @@ export function createPreviewRouteHandler(dependencies: PreviewRouteDependencies
       }
       if (route === "chunks") {
         const body = decodePreviewChunksRequest(decoded.value);
-        const authority = await resolvePreviewAuthority(
+        const authority = await resolvePersonPreviewAuthority(
           dependencies,
+          boundPrincipal,
           authenticatedWindowId,
           body.target,
         );
@@ -252,8 +276,9 @@ export function createPreviewRouteHandler(dependencies: PreviewRouteDependencies
       }
       if (route === "cancel") {
         const cancelBody = decodePreviewCancelRequest(decoded.value);
-        const authority = await resolvePreviewAuthority(
+        const authority = await resolvePersonPreviewAuthority(
           dependencies,
+          boundPrincipal,
           authenticatedWindowId,
           cancelBody.target,
         );
@@ -371,6 +396,67 @@ export async function resolvePreviewAuthority(
         ? {}
         : { activeThreadId: activeContext.activeThreadId }),
       posture,
+    },
+  };
+}
+
+/**
+ * Resolve Preview authority for a local window or a person-paired device. A
+ * device the host's own person paired has no desktop shell workspace on this
+ * host, so when `resolvePreviewAuthority` finds no workspace matching the
+ * target it verifies the target's host, active Project, and bound Code thread
+ * directly. Hub-introduced and restricted devices never use this fallback.
+ */
+async function resolvePersonPreviewAuthority(
+  dependencies: PreviewRouteDependencies,
+  principal: ClientPrincipal | undefined,
+  scopeId: WindowId,
+  target: PreviewTarget,
+): Promise<AuthorityResolution> {
+  if (principal === undefined || principal.kind === "local-window") {
+    return resolvePreviewAuthority(dependencies, scopeId, target);
+  }
+  if (!principalActsAsHostPerson(principal)) {
+    return { kind: "unavailable" };
+  }
+  if (target.hostId !== dependencies.hostId) return { kind: "unavailable" };
+  const bootstrap = await dependencies.projects.bootstrap(scopeId);
+  const project = bootstrap.active.find((candidate) => candidate.id === target.projectId);
+  if (project === undefined || project.type === "chat") return { kind: "unavailable" };
+  if (target.boundCodeThreadId !== undefined) {
+    if (project.type !== "code" || dependencies.codeThreadResolver === undefined) {
+      return { kind: "unavailable" };
+    }
+    const thread = await dependencies.codeThreadResolver(target.boundCodeThreadId);
+    if (thread === undefined || thread.lifecycle !== "active" || thread.projectId !== project.id) {
+      return { kind: "unavailable" };
+    }
+    const posture: PreviewPosture =
+      thread.executionPolicy === "plan"
+        ? "plan"
+        : thread.executionPolicy === "full-access"
+          ? "full"
+          : "approval-gated";
+    return {
+      kind: "ok",
+      context: {
+        mode: "code",
+        projectType: "code",
+        activeProjectId: project.id,
+        activeHostId: dependencies.hostId,
+        activeThreadId: target.boundCodeThreadId,
+        posture,
+      },
+    };
+  }
+  return {
+    kind: "ok",
+    context: {
+      mode: project.type,
+      projectType: project.type,
+      activeProjectId: project.id,
+      activeHostId: dependencies.hostId,
+      posture: "approval-gated",
     },
   };
 }

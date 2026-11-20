@@ -24,6 +24,7 @@ import {
   encodeReplicaEntry,
   isReplicaMembershipEntry,
   replicaEntryRelativePaths,
+  type EventActor,
   type HostId,
   type ReplicaArtifactEntry,
   type ReplicaCanvasEntry,
@@ -315,17 +316,27 @@ export class ReplicaMembershipService {
   #queue: Promise<unknown> = Promise.resolve();
   /** A join confirmation in this process is reading the store now. */
   #joinReading = false;
+  /** The device actor for the currently running serialized command, when remote. */
+  #commandActor: EventActor | undefined;
 
   constructor(ports: ReplicaMembershipPorts) {
     this.#ports = ports;
   }
 
-  execute(command: ReplicaMembershipCommand): Promise<ReplicaMembershipOutcome> {
+  execute(
+    command: ReplicaMembershipCommand,
+    actor?: EventActor,
+  ): Promise<ReplicaMembershipOutcome> {
     return this.#serially(async () => {
-      // A leave finishes its own; finishing it first would refuse it as
-      // "not in a replica" when its record already landed.
-      if (command.kind !== "leave") await this.#finishLeaving();
-      return this.#run(command);
+      this.#commandActor = actor;
+      try {
+        // A leave finishes its own; finishing it first would refuse it as
+        // "not in a replica" when its record already landed.
+        if (command.kind !== "leave") await this.#finishLeaving();
+        return await this.#run(command);
+      } finally {
+        this.#commandActor = undefined;
+      }
     });
   }
 
@@ -1690,7 +1701,11 @@ export class ReplicaMembershipService {
   }
 
   #journal(eventName: string, payload: unknown): void {
-    this.#ports.journal.append({ eventName, payload });
+    this.#ports.journal.append({
+      eventName,
+      payload,
+      ...(this.#commandActor === undefined ? {} : { actor: this.#commandActor }),
+    });
   }
 
   #refuse(

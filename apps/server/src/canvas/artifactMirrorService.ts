@@ -15,7 +15,13 @@ import {
   type ArtifactMirrorSettings,
   type ArtifactMirrorView,
 } from "@octant/contracts/artifact-mirror";
-import type { CanvasId, CanvasVersion, ProjectId, UtcTimestamp } from "@octant/contracts";
+import type {
+  CanvasId,
+  CanvasVersion,
+  EventActor,
+  ProjectId,
+  UtcTimestamp,
+} from "@octant/contracts";
 import {
   artifactBundlePaths,
   decideArtifactReimport,
@@ -85,6 +91,7 @@ export interface ArtifactMirrorServiceDependencies {
   readonly appendVersionFromBundle: (input: {
     readonly canvasId: CanvasId;
     readonly definition: unknown;
+    readonly actor?: EventActor;
   }) =>
     | { readonly kind: "accepted"; readonly versionId: string }
     | { readonly kind: "denied"; readonly message: string };
@@ -106,6 +113,7 @@ export interface ArtifactMirrorServiceDependencies {
       readonly eventName: string;
       readonly payload: unknown;
       readonly expectedVersion?: number;
+      readonly actor?: EventActor;
     }) => void;
     /** One page of an aggregate's frames, oldest first; how settings survive a restart. */
     readonly replay: (input: {
@@ -315,9 +323,9 @@ export class ArtifactMirrorService {
     return decodeArtifactMirrorView({ settings, projects });
   }
 
-  async execute(commandInput: unknown): Promise<ArtifactMirrorResult> {
+  async execute(commandInput: unknown, actor?: EventActor): Promise<ArtifactMirrorResult> {
     const command = decodeArtifactMirrorCommand(commandInput);
-    if (command.kind === "reimport-artifact-from-file") return this.#reimport(command);
+    if (command.kind === "reimport-artifact-from-file") return this.#reimport(command, actor);
 
     // Measured before anything else so the version check and the journal
     // append below run with no await between them.
@@ -368,6 +376,7 @@ export class ArtifactMirrorService {
       eventName: ARTIFACT_MIRROR_EVENT_NAMES.settingChanged,
       expectedVersion: this.#settings.version,
       payload: { settings: next },
+      ...(actor === undefined ? {} : { actor }),
     });
     this.#settings = next;
     return decodeArtifactMirrorResult({ kind: "mirror-settings", settings: next });
@@ -500,10 +509,13 @@ export class ArtifactMirrorService {
     }
   }
 
-  async #reimport(command: {
-    readonly canvasId: CanvasId;
-    readonly expectedVersionId: string;
-  }): Promise<ArtifactMirrorResult> {
+  async #reimport(
+    command: {
+      readonly canvasId: CanvasId;
+      readonly expectedVersionId: string;
+    },
+    actor?: EventActor,
+  ): Promise<ArtifactMirrorResult> {
     const current = this.#dependencies.currentVersion(command.canvasId);
     if (current === undefined) {
       return this.#refused("file-missing", reimportRefusalText("file-missing"));
@@ -543,6 +555,7 @@ export class ArtifactMirrorService {
     const appended = this.#dependencies.appendVersionFromBundle({
       canvasId: command.canvasId,
       definition: parsed?.definition,
+      ...(actor === undefined ? {} : { actor }),
     });
     if (appended.kind === "denied") {
       return this.#refused("file-not-a-bundle", appended.message);
@@ -552,6 +565,7 @@ export class ArtifactMirrorService {
       aggregateId: String(command.canvasId),
       eventName: ARTIFACT_MIRROR_EVENT_NAMES.reimported,
       payload: { canvasId: command.canvasId, versionId: appended.versionId, path: bundlePath },
+      ...(actor === undefined ? {} : { actor }),
     });
     return decodeArtifactMirrorResult({
       kind: "artifact-reimported",

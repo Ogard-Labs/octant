@@ -84,7 +84,10 @@ export class AutomationNotificationPreferencesStore {
     return this.#current;
   }
 
-  update(input: UpdateAutomationNotificationPreferences): AutomationNotificationPreferences {
+  update(
+    input: UpdateAutomationNotificationPreferences,
+    actor?: EventActor,
+  ): AutomationNotificationPreferences {
     let command: UpdateAutomationNotificationPreferences;
     try {
       command = decodeUpdateAutomationNotificationPreferences(input);
@@ -132,7 +135,7 @@ export class AutomationNotificationPreferencesStore {
             eventName: AUTOMATION_NOTIFICATION_PREFERENCES_UPDATED,
             eventVersion: 1,
             correlationId: decodeCorrelationId(this.#uuid()),
-            actor: this.#actor,
+            actor: actor ?? this.#actor,
             occurredAt: updatedAt,
             payload: preferences,
           },

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import type {
+  EventActor,
   ProviderInstance,
   ProviderInstanceId,
   ProviderToolingAppliedRecord,
@@ -45,7 +46,7 @@ export interface ProviderToolingServiceOptions {
   /** Holds a plan's secret until the person confirms it. Absent on a host with no broker. */
   readonly secrets?: ProviderCredentialStore;
   /** Writes the journal record of a change. Receives no secret. */
-  readonly record: (change: ProviderToolingAppliedRecord) => void;
+  readonly record: (change: ProviderToolingAppliedRecord, actor?: EventActor) => void;
   readonly now?: () => number;
   readonly uuid?: () => string;
 }
@@ -68,6 +69,7 @@ interface StoredPlan {
 export interface ProviderToolingCaller {
   readonly kind: "local-window" | "remote-device";
   readonly windowId: string;
+  readonly actor?: EventActor;
 }
 
 /**
@@ -287,13 +289,14 @@ export class ProviderToolingService {
           "The account changed since the command was shown. Review it again.",
         );
       }
-      return this.#run(plan, current);
+      return this.#run(plan, current, caller.actor);
     });
   }
 
   async #run(
     plan: StoredPlan,
     account: ProviderToolingAccount,
+    actor?: EventActor,
   ): Promise<ProviderToolingApplyResult> {
     let secretValue: string | undefined;
     try {
@@ -321,14 +324,17 @@ export class ProviderToolingService {
       });
       const output = scrub(run.output, secretValue);
       const succeeded = run.exitCode === 0 && !run.timedOut && !run.startFailed;
-      this.#options.record({
-        provider: account.provider,
-        providerInstanceId: plan.instanceId,
-        commandKind: plan.command.commandKind,
-        ...(plan.command.name === undefined ? {} : { name: plan.command.name }),
-        outcome: succeeded ? "succeeded" : "failed",
-        usedSecret: plan.hasSecret,
-      });
+      this.#options.record(
+        {
+          provider: account.provider,
+          providerInstanceId: plan.instanceId,
+          commandKind: plan.command.commandKind,
+          ...(plan.command.name === undefined ? {} : { name: plan.command.name }),
+          outcome: succeeded ? "succeeded" : "failed",
+          usedSecret: plan.hasSecret,
+        },
+        actor,
+      );
       if (succeeded) return { status: "applied", output };
       return {
         status: "failed",

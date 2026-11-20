@@ -5,7 +5,8 @@ import {
   type AutomationNotificationDeliveryStatus,
   type AutomationNotificationPreferences,
 } from "@octant/contracts";
-import { principalActsAsHostPerson } from "../clientPrincipal";
+import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -53,11 +54,14 @@ function authorizeRequest(
   request: Request,
   dependencies: AutomationNotificationRouteDependencies,
   now: () => number,
-): { readonly kind: "local-window" | "remote-device" } | Response {
+):
+  | { readonly kind: "local-window" | "remote-device"; readonly principal?: ClientPrincipal }
+  | Response {
   const bound = readPrincipalRouteContext(request);
   if (bound !== undefined) {
     return {
       kind: principalActsAsHostPerson(bound.principal) ? "local-window" : "remote-device",
+      principal: bound.principal,
     };
   }
   try {
@@ -159,7 +163,10 @@ export function createAutomationNotificationRouteHandler(
         return failure("Automation notification preferences body is invalid.", 400, origin);
       }
       try {
-        const preferences = dependencies.preferences.update(command);
+        const preferences =
+          auth.principal?.kind === "remote-device"
+            ? dependencies.preferences.update(command, eventActorForPrincipal(auth.principal))
+            : dependencies.preferences.update(command);
         return json({ preferences }, 200, origin);
       } catch (error) {
         if (error instanceof AutomationNotificationPreferencesStoreError) {

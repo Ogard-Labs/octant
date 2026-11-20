@@ -18,6 +18,7 @@ import {
 import type { ArtifactLibraryService } from "./canvas/artifactLibraryService";
 import type { CanvasTagService } from "./canvas/canvasTagService";
 import { principalActsAsHostPerson, type ClientPrincipal } from "./clientPrincipal";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -201,10 +202,12 @@ export function createArtifactLibraryRouteHandler(deps: ArtifactLibraryRouteDepe
       }
       return json(
         decodeCanvasTagCommandResult(
-          tags.change(
-            body,
-            principalActsAsHostPerson(principal) ? "local-window" : "remote-device",
-          ),
+          principal.kind === "remote-device" && principalActsAsHostPerson(principal)
+            ? tags.change(body, "local-window", eventActorForPrincipal(principal))
+            : tags.change(
+                body,
+                principalActsAsHostPerson(principal) ? "local-window" : "remote-device",
+              ),
         ),
         origin,
       );

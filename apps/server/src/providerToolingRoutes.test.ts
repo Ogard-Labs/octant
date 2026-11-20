@@ -149,7 +149,11 @@ describe("provider tooling routes", () => {
 
     const paired = post("list", { providerInstanceId: ACCOUNT });
     bindPrincipalRouteContext(paired, {
-      principal: { kind: "remote-device", admittedBy: "host-person" } as never,
+      principal: {
+        kind: "remote-device",
+        deviceId: "00000000-0000-4000-8000-00000000d021",
+        admittedBy: "host-person",
+      } as never,
       scopeId: windowId,
     });
     expect((await handler(paired))?.status).toBe(200);

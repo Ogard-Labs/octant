@@ -357,6 +357,8 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
       if (thread.executionPolicy === "full-access") return "full";
       return "approval-gated";
     },
+    codeThreadResolver: (threadId: ReturnType<typeof decodeCodeThreadId>) =>
+      persistence.readCodeThread(threadId),
     hostId: previewHostId,
     maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   };

@@ -15,20 +15,29 @@ const JUDGES_A_DEVICE_AS_THE_PERSON =
  * with a reason a reader can check.
  */
 const NAMES_THE_ACTOR_ELSEWHERE: Readonly<Record<string, string>> = {
+  "archivedWorktreeRoutes.ts": "lists and deletes archived git worktrees on disk; journals nothing",
   "clientPrincipal.ts": "defines the judgement",
   "principalRouteContext.ts": "defines the judgement for a bound request",
   "authenticatedProductRoutes.ts": "dispatches only; each route it hands to resolves its own",
   "automation/automationRoutes.ts": "hands the principal to the command service, which resolves it",
+  "canvas/artifactLibraryService.ts": "reads the artifact library projection; changes nothing",
   "cloudMachines/cloudMachineRoutes.ts":
     "refuses every paired device before anything is journaled; only a window on this computer acts",
   "designSystemRoutes.ts": "reads and saves a file in the person's folder; journals nothing",
+  "diskCleanupRoutes.ts": "reads disk usage and removes caches on disk; journals nothing",
   "externalContentRoutes.ts": "builds the device actor from the principal where it clears a mark",
   "harness/nativeHarnessEgressRoutes.ts": "hands the device to the rules store, which journals it",
+  "integrationRoutes.ts": "checks local tool integrations on this host; journals nothing",
+  "localServerRoutes.ts": "reads server health and starts or stops local servers; journals nothing",
   "localUsageHistoryRoutes.ts": "reads provider history; changes nothing",
   "localWindowReadRoute.ts": "a parameterless read; changes nothing",
+  "previewRoutes.ts": "reads and edits workspace files through PreviewService; journals nothing",
+  "replica/syncedArtifactRoutes.ts":
+    "reads synced artifact status and runs local pull/retry; journals nothing for the caller",
   "serverProjects/serverProjectRoutes.ts":
     "a device only reads the catalog; its changes stay with a local window",
   "serverProjects/serverResourceRoutes.ts": "reads a server's load; changes nothing",
+  "threadExportRoutes.ts": "exports thread content as a download; changes nothing",
   "workFileListingRoutes.ts": "lists a folder's entries; changes nothing",
   "providers/providerUsageLimitsRoutes.ts":
     "reads the limits and asks the providers again; journals nothing",

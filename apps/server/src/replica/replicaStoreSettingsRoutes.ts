@@ -14,13 +14,14 @@
  * request body.
  */
 
-import { LOCAL_HOST_ID, type WindowId } from "@octant/contracts";
+import { LOCAL_HOST_ID, type EventActor, type WindowId } from "@octant/contracts";
 import {
   decodeReplicaStoreSettingsCommand,
   type ReplicaStoreSettingsCommand,
   type ReplicaStoreSettingsResult,
 } from "@octant/contracts/replica-store-settings";
-import { principalActsAsHostPerson } from "../clientPrincipal";
+import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -91,6 +92,7 @@ export function createReplicaStoreSettingsRouteHandler(
     }
 
     let windowId: WindowId;
+    let principal: ClientPrincipal;
     try {
       const context = authenticateRoutePrincipal({
         request,
@@ -102,6 +104,7 @@ export function createReplicaStoreSettingsRouteHandler(
         return failure("Sync settings are host-only.", 403, origin);
       }
       windowId = context.scopeId;
+      principal = context.principal;
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Sync settings are unauthorized.", 401, origin);
@@ -117,7 +120,9 @@ export function createReplicaStoreSettingsRouteHandler(
       } catch {
         return json(replicaStoreRefusal("malformed"), origin);
       }
-      return json(await run(dependencies, windowId, command), origin);
+      const actor =
+        principal.kind === "remote-device" ? eventActorForPrincipal(principal) : undefined;
+      return json(await run(dependencies, windowId, command, actor), origin);
     } catch {
       return failure("Sync settings are unavailable.", 500, origin);
     }
@@ -128,8 +133,10 @@ async function run(
   dependencies: ReplicaStoreSettingsRouteDependencies,
   windowId: WindowId,
   command: ReplicaStoreSettingsCommand,
+  actor?: EventActor,
 ): Promise<ReplicaStoreSettingsResult> {
   const service = dependencies.service;
+  const actorField = actor === undefined ? {} : { actor };
   switch (command.kind) {
     case "choose-synced-folder": {
       let folder: string;
@@ -144,20 +151,26 @@ async function run(
       } catch {
         return replicaStoreRefusal("candidate-unavailable");
       }
-      return service.chooseFolder({ folder, expectedVersion: command.expectedVersion });
+      return service.chooseFolder({
+        folder,
+        expectedVersion: command.expectedVersion,
+        ...actorField,
+      });
     }
     case "configure-s3":
       return service.configureS3({
         settings: command.settings,
         ...(command.credentials === undefined ? {} : { credentials: command.credentials }),
         expectedVersion: command.expectedVersion,
+        ...actorField,
       });
     case "clear-store":
-      return service.clear({ expectedVersion: command.expectedVersion });
+      return service.clear({ expectedVersion: command.expectedVersion, ...actorField });
     case "set-sync":
       return service.setSync({
         syncOn: command.syncOn,
         expectedVersion: command.expectedVersion,
+        ...actorField,
       });
     case "test-connection":
       return service.testConnection();

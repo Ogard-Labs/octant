@@ -492,6 +492,7 @@ export class CanvasExportService {
     readonly decision: "approved" | "denied";
     readonly permitted: boolean;
     readonly actor: EventActor;
+    readonly personPairedDevice?: boolean;
     /**
      * The audience the person chose on the card. Absent keeps whatever the
      * destination described; a destination that offered no audience ignores it.
@@ -541,7 +542,8 @@ export class CanvasExportService {
 
     if (
       pending.confirmedDestination?.linkTerms !== undefined &&
-      input.actor.kind === "remote-device"
+      input.actor.kind === "remote-device" &&
+      input.personPairedDevice !== true
     ) {
       this.#pending.delete(key);
       return decodeCanvasExportDecideResult(

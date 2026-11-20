@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts";
+import { decodeHostId, decodeWindowId, LOCAL_HOST_ID } from "@octant/contracts";
+import { createHostPersonScopes } from "../hostPersonScope";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { ServerBrowserAuthorityResolver, deriveToolHostId } from "./browserAuthorityResolver";
 
@@ -414,5 +415,59 @@ describe("ServerBrowserAuthorityResolver", () => {
       },
     });
     expect(resolver.resolve(threadId as any, "work")).toBeUndefined();
+  });
+
+  it("admits a live person-paired device with no stored desktop workspace while refusing hub-introduced and revoked devices", () => {
+    const personPairedDeviceId = decodeWindowId("90000000-0000-4000-8000-000000000001");
+    const hubIntroducedDeviceId = decodeWindowId("90000000-0000-4000-8000-000000000002");
+    const revokedDeviceId = decodeWindowId("90000000-0000-4000-8000-000000000003");
+    const hostPersonScopes = createHostPersonScopes({
+      localWindows: () => [],
+      devices: () => [
+        { device_id: String(personPairedDeviceId), state: "active" },
+        { device_id: String(hubIntroducedDeviceId), state: "active" },
+        { device_id: String(revokedDeviceId), state: "revoked" },
+      ],
+      approvedByPerson: (deviceId) => deviceId === String(personPairedDeviceId),
+    });
+    const resolver = new ServerBrowserAuthorityResolver({
+      hostId,
+      workspaceHostId: LOCAL_HOST_ID,
+      persistence: {
+        readProject: () => ({ ...baseProject, type: "code" }) as any,
+        readCodeThread: () =>
+          ({
+            id: threadId,
+            projectId,
+            checkoutId,
+            bindingRevisionId: revisionId,
+            lifecycle: "active",
+            providerInstanceId: providerId,
+          }) as any,
+        readChatThread: () =>
+          ({
+            id: threadId,
+            projectId,
+            lifecycle: "active",
+            providerInstanceId: providerId,
+          }) as any,
+        readProviderInstance: () => provider as any,
+        // Remote devices never have a stored desktop shell workspace.
+        readWindowWorkspace: () => undefined,
+      },
+      workThreads: {
+        read: () => undefined,
+      },
+      isPersonPairedDevice: (scopeId) => hostPersonScopes.deviceActor(scopeId) !== undefined,
+    });
+
+    expect(resolver.canAccessWindow(personPairedDeviceId, threadId as any, "code")).toBe(true);
+    expect(resolver.canAccessWindow(personPairedDeviceId, threadId as any, "chat")).toBe(true);
+    // Still fails closed when the thread's authority itself does not resolve.
+    expect(resolver.canAccessWindow(personPairedDeviceId, threadId as any, "work")).toBe(false);
+
+    // Hub-introduced and revoked devices remain refused when they hold no desktop workspace.
+    expect(resolver.canAccessWindow(hubIntroducedDeviceId, threadId as any, "code")).toBe(false);
+    expect(resolver.canAccessWindow(revokedDeviceId, threadId as any, "code")).toBe(false);
   });
 });

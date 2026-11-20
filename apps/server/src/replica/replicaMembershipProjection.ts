@@ -22,6 +22,7 @@ import {
   ReplicaDisplayName,
   ReplicaInstanceId,
   ReplicaMembershipEntry,
+  type EventActor,
   type EventEnvelope,
   type ReplicaJoinRequestEntry,
 } from "@octant/contracts";
@@ -686,7 +687,11 @@ export class ReplicaMembershipProjection implements Projection {
 }
 
 export interface ReplicaMembershipJournal {
-  readonly append: (input: { readonly eventName: string; readonly payload: unknown }) => void;
+  readonly append: (input: {
+    readonly eventName: string;
+    readonly payload: unknown;
+    readonly actor?: EventActor;
+  }) => void;
 }
 
 /**
@@ -716,7 +721,7 @@ export function createReplicaMembershipJournal(options: {
             eventName: input.eventName,
             eventVersion: 1,
             correlationId: options.uuid(),
-            actor: options.actor,
+            actor: input.actor ?? options.actor,
             occurredAt: options.clock(),
             payload: input.payload,
           },

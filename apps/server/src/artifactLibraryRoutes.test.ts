@@ -26,7 +26,7 @@ function route() {
     generatedAt: "2026-08-18T10:00:00.000Z",
   }));
   const change = vi.fn(
-    (_input: unknown, _caller: "local-window" | "remote-device") =>
+    (_input: unknown, _caller: "local-window" | "remote-device", _actor?: unknown) =>
       ({
         kind: "accepted",
         canvasId,
@@ -150,21 +150,35 @@ describe("changing an artifact's tags over the wire", () => {
 
   it("hands a person-paired device's tag command as a host person while keeping hub-introduced devices remote", async () => {
     const { handler, change } = route();
+    const pairedDeviceId = "00000000-0000-4000-8000-00000000d001";
     const paired = post({ kind: "canvas-tag-add", canvasId, tag: "Launch" }, {}, tagUrl);
     bindPrincipalRouteContext(paired, {
-      principal: { kind: "remote-device", admittedBy: "host-person" } as never,
+      principal: {
+        kind: "remote-device",
+        deviceId: pairedDeviceId,
+        admittedBy: "host-person",
+      } as never,
       scopeId: windowId,
     });
     expect((await handler(paired))?.status).toBe(200);
 
     const hub = post({ kind: "canvas-tag-add", canvasId, tag: "Launch" }, {}, tagUrl);
     bindPrincipalRouteContext(hub, {
-      principal: { kind: "remote-device", admittedBy: "hub-roster" } as never,
+      principal: {
+        kind: "remote-device",
+        deviceId: "00000000-0000-4000-8000-00000000d002",
+        admittedBy: "hub-roster",
+      } as never,
       scopeId: windowId,
     });
     expect((await handler(hub))?.status).toBe(200);
 
     expect(change.mock.calls.map((call) => call[1])).toEqual(["local-window", "remote-device"]);
+    expect(change.mock.calls[0]?.[2]).toEqual({
+      kind: "remote-device",
+      actorId: pairedDeviceId,
+      deviceId: pairedDeviceId,
+    });
   });
 
   it("answers a refused command as a result, not an error", async () => {

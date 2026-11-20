@@ -57,7 +57,8 @@ import {
 import { createBrowserCookieReader } from "../browser/cookieImport/browserCookieReader";
 import { readKeychainPasswordWithSecurityTool } from "../browser/cookieImport/keychainPassword";
 import { ProjectBrowserService } from "../browser/projectBrowserService";
-import { OCTANT_LOCAL_ACTOR_ID, ShellServiceError } from "../shellService";
+import { OCTANT_LOCAL_ACTOR_ID, ShellServiceError, type ShellService } from "../shellService";
+import type { PersistenceService } from "../persistence/persistenceService";
 import {
   BrowserAutomationService,
   createBrowserToolCallAuthorityService,
@@ -152,101 +153,6 @@ export function wireBrowser(deps: BrowserDependencies) {
     workThreadProjection,
   } = deps;
   return Effect.gen(function* () {
-    const rememberedBrowserOrigins = () =>
-      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
-        .rememberedBrowserOrigins;
-    // An "always allow" answer journals the origin into shell settings through
-    // the host-owned path — `replace-settings` itself cannot add origins, since
-    // a window capability would let a client grant itself an origin the prompt
-    // never showed. A concurrent settings write can lose the race, so the
-    // append retries on the fresh version once. A window that went away between
-    // prompt and answer cannot journal — its grant is then session-only, like
-    // approve-once.
-    const rememberBrowserOrigin = (windowId: WindowId, origin: string) => {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        const stored = persistence.readShellSettings();
-        const current = stored?.settings ?? defaultShellSettings();
-        if (current.rememberedBrowserOrigins.includes(origin)) return;
-        try {
-          shellService.rememberBrowserOrigins({
-            windowId,
-            expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
-            origins: [origin],
-          });
-          return;
-        } catch (error) {
-          if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
-            console.warn(
-              `Octant could not remember a browser origin approval: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            );
-            return;
-          }
-        }
-      }
-    };
-    const rememberedProfileSites = () =>
-      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
-        .rememberedBrowserProfileSites;
-    // The same journaled path as an origin grant, keyed by the pair so a site
-    // remembered for one profile never covers another.
-    const rememberBrowserProfileSite = (
-      windowId: WindowId,
-      origin: string,
-      profile: StoredBrowserProfile,
-    ) => {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        const stored = persistence.readShellSettings();
-        const current = stored?.settings ?? defaultShellSettings();
-        if (browserProfileSiteListed(current.rememberedBrowserProfileSites, origin, profile)) {
-          return;
-        }
-        try {
-          shellService.rememberBrowserProfileSites({
-            windowId,
-            expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
-            sites: [{ origin, profile }],
-          });
-          return;
-        } catch (error) {
-          if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
-            console.warn(
-              `Octant could not remember a signed-in site approval: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            );
-            return;
-          }
-        }
-      }
-    };
-    // The same journaled path again, for an "Always allow" answer to an upload
-    // or a download save.
-    const rememberBrowserTransfer = (windowId: WindowId, transfer: RememberedBrowserTransfer) => {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        const stored = persistence.readShellSettings();
-        const current = stored?.settings ?? defaultShellSettings();
-        if (browserTransferRemembered(current.rememberedBrowserTransfers, transfer)) return;
-        try {
-          shellService.rememberBrowserTransfers({
-            windowId,
-            expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
-            transfers: [transfer],
-          });
-          return;
-        } catch (error) {
-          if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
-            console.warn(
-              `Octant could not remember a Browser ${transfer.direction} approval: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            );
-            return;
-          }
-        }
-      }
-    };
     // Approvals and session, upload, and download permissions are reviewed by
     // the host's own person: at a live window, or on a device that person
     // paired, whose record then names the device.
@@ -255,6 +161,14 @@ export function wireBrowser(deps: BrowserDependencies) {
       devices: () => readDeviceRegistrations(persistence.connection),
       approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
     });
+    const rememberedBrowserOrigins = () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+        .rememberedBrowserOrigins;
+    const rememberedProfileSites = () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+        .rememberedBrowserProfileSites;
+    const { rememberBrowserOrigin, rememberBrowserProfileSite, rememberBrowserTransfer } =
+      createBrowserRememberCallbacks({ persistence, shellService, hostPersonScopes });
     const browserToolApprovalService = new BrowserToolApprovalService({
       uuid: randomUUID,
       now: processAuthorityTime,
@@ -1071,3 +985,121 @@ export function wireBrowser(deps: BrowserDependencies) {
 }
 
 export type BrowserWiring = Effect.Effect.Success<ReturnType<typeof wireBrowser>>;
+
+/**
+ * Host-owned persistence callbacks for Browser "Always allow" approvals
+ * (origins, signed-in profile sites, and upload/download transfers). A live
+ * local window journals through its registered shell window id; a live device
+ * the host's own person paired has no shell window registration, so its live
+ * device actor is resolved from `hostPersonScopes` and passed to `ShellService`
+ * so the preference persists and is attributed to that device. Hub-introduced,
+ * restricted, and revoked devices are refused before reaching `ShellService`.
+ */
+export function createBrowserRememberCallbacks(input: {
+  readonly persistence: Pick<PersistenceService, "readShellSettings">;
+  readonly shellService: Pick<
+    ShellService,
+    "rememberBrowserOrigins" | "rememberBrowserProfileSites" | "rememberBrowserTransfers"
+  >;
+  readonly hostPersonScopes: ReturnType<typeof createHostPersonScopes>;
+}) {
+  const resolvePersonDeviceActor = (windowId: WindowId) => {
+    if (!input.hostPersonScopes.actsAsHostPerson(windowId)) return { allowed: false as const };
+    return {
+      allowed: true as const,
+      deviceActor: input.hostPersonScopes.deviceActor(windowId),
+    };
+  };
+
+  const rememberBrowserOrigin = (windowId: WindowId, origin: string) => {
+    const scope = resolvePersonDeviceActor(windowId);
+    if (!scope.allowed) return;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const stored = input.persistence.readShellSettings();
+      const current = stored?.settings ?? defaultShellSettings();
+      if (current.rememberedBrowserOrigins.includes(origin)) return;
+      try {
+        input.shellService.rememberBrowserOrigins({
+          windowId,
+          expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
+          origins: [origin],
+          ...(scope.deviceActor === undefined ? {} : { deviceActor: scope.deviceActor }),
+        });
+        return;
+      } catch (error) {
+        if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
+          console.warn(
+            `Octant could not remember a browser origin approval: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return;
+        }
+      }
+    }
+  };
+
+  const rememberBrowserProfileSite = (
+    windowId: WindowId,
+    origin: string,
+    profile: StoredBrowserProfile,
+  ) => {
+    const scope = resolvePersonDeviceActor(windowId);
+    if (!scope.allowed) return;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const stored = input.persistence.readShellSettings();
+      const current = stored?.settings ?? defaultShellSettings();
+      if (browserProfileSiteListed(current.rememberedBrowserProfileSites, origin, profile)) {
+        return;
+      }
+      try {
+        input.shellService.rememberBrowserProfileSites({
+          windowId,
+          expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
+          sites: [{ origin, profile }],
+          ...(scope.deviceActor === undefined ? {} : { deviceActor: scope.deviceActor }),
+        });
+        return;
+      } catch (error) {
+        if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
+          console.warn(
+            `Octant could not remember a signed-in site approval: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return;
+        }
+      }
+    }
+  };
+
+  const rememberBrowserTransfer = (windowId: WindowId, transfer: RememberedBrowserTransfer) => {
+    const scope = resolvePersonDeviceActor(windowId);
+    if (!scope.allowed) return;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const stored = input.persistence.readShellSettings();
+      const current = stored?.settings ?? defaultShellSettings();
+      if (browserTransferRemembered(current.rememberedBrowserTransfers, transfer)) return;
+      try {
+        input.shellService.rememberBrowserTransfers({
+          windowId,
+          expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
+          transfers: [transfer],
+          ...(scope.deviceActor === undefined ? {} : { deviceActor: scope.deviceActor }),
+        });
+        return;
+      } catch (error) {
+        if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
+          console.warn(
+            `Octant could not remember a Browser ${transfer.direction} approval: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return;
+        }
+      }
+    }
+  };
+
+  return { rememberBrowserOrigin, rememberBrowserProfileSite, rememberBrowserTransfer };
+}

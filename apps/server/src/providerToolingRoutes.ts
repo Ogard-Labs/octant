@@ -5,6 +5,7 @@ import {
   decodeProviderToolingPlanRequest,
 } from "@octant/contracts";
 import { principalActsAsHostPerson } from "./clientPrincipal";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -68,7 +69,13 @@ export function createProviderToolingRouteHandler(deps: ProviderToolingRouteDepe
         body,
       });
       caller = principalActsAsHostPerson(context.principal)
-        ? ({ kind: "local-window", windowId: String(context.scopeId) } as const)
+        ? ({
+            kind: "local-window",
+            windowId: String(context.scopeId),
+            ...(context.principal.kind === "remote-device"
+              ? { actor: eventActorForPrincipal(context.principal) }
+              : {}),
+          } as const)
         : ({ kind: "remote-device", windowId: String(context.scopeId) } as const);
     } catch (error) {
       return error instanceof WindowAuthorityError

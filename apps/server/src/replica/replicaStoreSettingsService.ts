@@ -189,6 +189,7 @@ export class ReplicaStoreSettingsService {
   chooseFolder(input: {
     readonly folder: string;
     readonly expectedVersion: number;
+    readonly actor?: EventActor;
   }): Promise<ReplicaStoreSettingsResult> {
     return this.#serially(async () => {
       if (input.expectedVersion !== this.#settings.version) {
@@ -201,7 +202,11 @@ export class ReplicaStoreSettingsService {
       ) {
         return replicaStoreRefusal("outside-home");
       }
-      return this.#replaceStore({ kind: "synced-folder", folder: input.folder }, false);
+      return this.#replaceStore(
+        { kind: "synced-folder", folder: input.folder },
+        false,
+        input.actor,
+      );
     });
   }
 
@@ -223,6 +228,7 @@ export class ReplicaStoreSettingsService {
     readonly settings: ReplicaStoreS3Settings;
     readonly credentials?: ReplicaStoreS3Credentials;
     readonly expectedVersion: number;
+    readonly actor?: EventActor;
   }): Promise<ReplicaStoreSettingsResult> {
     return this.#serially(async () => {
       if (input.expectedVersion !== this.#settings.version) {
@@ -246,6 +252,7 @@ export class ReplicaStoreSettingsService {
         return this.#replaceStore(
           { kind: "s3", settings: input.settings, credentialRef: saved.credentialRef },
           syncOn,
+          input.actor,
         );
       }
       const credentials = this.#dependencies.credentials;
@@ -270,6 +277,7 @@ export class ReplicaStoreSettingsService {
         result = await this.#replaceStore(
           { kind: "s3", settings: input.settings, credentialRef },
           syncOn,
+          input.actor,
         );
       } catch (error) {
         await credentials.delete(credentialRef).catch(() => undefined);
@@ -285,13 +293,16 @@ export class ReplicaStoreSettingsService {
   }
 
   /** Choose no store. Sync turns off with it. */
-  clear(input: { readonly expectedVersion: number }): Promise<ReplicaStoreSettingsResult> {
+  clear(input: {
+    readonly expectedVersion: number;
+    readonly actor?: EventActor;
+  }): Promise<ReplicaStoreSettingsResult> {
     return this.#serially(async () => {
       if (input.expectedVersion !== this.#settings.version) {
         return replicaStoreRefusal("stale-version");
       }
       if (this.#dependencies.memberOfReplica()) return replicaStoreRefusal("member-of-replica");
-      return this.#replaceStore({ kind: "none" }, false);
+      return this.#replaceStore({ kind: "none" }, false, input.actor);
     });
   }
 
@@ -299,6 +310,7 @@ export class ReplicaStoreSettingsService {
   setSync(input: {
     readonly syncOn: boolean;
     readonly expectedVersion: number;
+    readonly actor?: EventActor;
   }): Promise<ReplicaStoreSettingsResult> {
     return this.#serially(async () => {
       if (input.expectedVersion !== this.#settings.version) {
@@ -308,7 +320,7 @@ export class ReplicaStoreSettingsService {
         return replicaStoreRefusal("not-configured");
       }
       if (input.syncOn === this.#settings.syncOn) return this.view();
-      return this.#commit(this.#settings.store, input.syncOn);
+      return this.#commit(this.#settings.store, input.syncOn, input.actor);
     });
   }
 
@@ -419,9 +431,10 @@ export class ReplicaStoreSettingsService {
   async #replaceStore(
     store: ReplicaStoreChoice,
     syncOn: boolean,
+    actor?: EventActor,
   ): Promise<ReplicaStoreSettingsResult> {
     const previous = this.#settings.store;
-    const result = await this.#commit(store, syncOn);
+    const result = await this.#commit(store, syncOn, actor);
     if (
       result.kind === "replica-store-settings-view" &&
       previous.kind === "s3" &&
@@ -435,7 +448,11 @@ export class ReplicaStoreSettingsService {
     return result;
   }
 
-  async #commit(store: ReplicaStoreChoice, syncOn: boolean): Promise<ReplicaStoreSettingsResult> {
+  async #commit(
+    store: ReplicaStoreChoice,
+    syncOn: boolean,
+    actor?: EventActor,
+  ): Promise<ReplicaStoreSettingsResult> {
     const next = decodeReplicaStoreSettings({
       kind: "replica-store-settings",
       store,
@@ -444,7 +461,7 @@ export class ReplicaStoreSettingsService {
       updatedAt: this.#dependencies.clock(),
     });
     try {
-      this.#append(next);
+      this.#append(next, actor);
     } catch (error) {
       if (error instanceof ConcurrencyConflict) return replicaStoreRefusal("stale-version");
       throw error;
@@ -453,7 +470,7 @@ export class ReplicaStoreSettingsService {
     return this.view();
   }
 
-  #append(settings: ReplicaStoreSettings): void {
+  #append(settings: ReplicaStoreSettings, actor?: EventActor): void {
     this.#dependencies.journal.append({
       aggregate: {
         aggregateType: REPLICA_STORE_SETTINGS_AGGREGATE_TYPE,
@@ -466,7 +483,7 @@ export class ReplicaStoreSettingsService {
           eventName: REPLICA_STORE_SETTINGS_CHANGED,
           eventVersion: 1,
           correlationId: this.#dependencies.uuid(),
-          actor: this.#dependencies.actor,
+          actor: actor ?? this.#dependencies.actor,
           occurredAt: this.#dependencies.clock(),
           payload: { settings },
         },

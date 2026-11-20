@@ -1,6 +1,8 @@
 import { decodeArtifactMirrorCommand } from "@octant/contracts/artifact-mirror";
 import type { ArtifactMirrorService } from "./canvas/artifactMirrorService";
-import { authenticateRouteWindowId, boundPrincipalIsRestricted } from "./principalRouteContext";
+import type { ClientPrincipal } from "./clientPrincipal";
+import { eventActorForPrincipal } from "./principalEventActor";
+import { authenticateRoutePrincipal, boundPrincipalIsRestricted } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -46,8 +48,13 @@ export function createArtifactMirrorRouteHandler(deps: ArtifactMirrorRouteDepend
     if (boundPrincipalIsRestricted(request)) {
       return failure("Artifact mirroring is settled on the host.", 403, origin);
     }
+    let principal: ClientPrincipal;
     try {
-      authenticateRouteWindowId({ request, store: deps.windowAuthorityStore, now: now() });
+      principal = authenticateRoutePrincipal({
+        request,
+        store: deps.windowAuthorityStore,
+        now: now(),
+      }).principal;
     } catch (error) {
       return error instanceof WindowAuthorityError
         ? failure("Artifact mirror request is unauthorized.", 401, origin)
@@ -70,7 +77,14 @@ export function createArtifactMirrorRouteHandler(deps: ArtifactMirrorRouteDepend
       return failure("Artifact mirror command is invalid.", 400, origin);
     }
     try {
-      return json(await deps.mirror.execute(command), origin);
+      const actor =
+        principal.kind === "remote-device" ? eventActorForPrincipal(principal) : undefined;
+      return json(
+        actor === undefined
+          ? await deps.mirror.execute(command)
+          : await deps.mirror.execute(command, actor),
+        origin,
+      );
     } catch {
       return failure("Artifact mirror command failed.", 500, origin);
     }

@@ -31,6 +31,8 @@ import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { readShellSettings } from "./persistence/shellProjection";
 import { openSqlite } from "./persistence/sqlitePort";
 import { retimeDeviceRegistrations } from "./remote/deviceRegistrationLifetime";
+import { createHostPersonScopes } from "./hostPersonScope";
+import { createBrowserRememberCallbacks } from "./wiring/browser";
 import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalErrors";
 import type { PersistenceService } from "./persistence/persistenceService";
 import { SHELL_SETTINGS_AGGREGATE_ID } from "./persistence/shellProjection";
@@ -2097,6 +2099,94 @@ describe("ShellService", () => {
         }),
       ),
     ).toMatchObject({ kind: "settings-replaced", settings: { rememberedBrowserTransfers: [] } });
+  });
+
+  it("persists remembered Browser transfers, origins, and profile sites for an unregistered person-paired deviceId with device attribution while refusing hub-introduced devices", () => {
+    const personPairedDeviceId = decodeWindowId("90000000-0000-4000-8000-0000000000d1");
+    const hubIntroducedDeviceId = decodeWindowId("90000000-0000-4000-8000-0000000000d2");
+    let storedSettings = defaultShellSettings();
+    let storedVersion = 0;
+    const appended: Array<{ readonly actor: unknown; readonly settings: unknown }> = [];
+    const { persistence } = persistenceStub();
+    const livePersistence: PersistenceService = {
+      ...persistence,
+      readShellSettings: () => ({
+        settings: storedSettings,
+        aggregateVersion: storedVersion as never,
+        updatedAt: now as never,
+      }),
+      journal: {
+        ...persistence.journal,
+        append: vi.fn((command) => {
+          const event = command.events[0] as {
+            readonly actor: unknown;
+            readonly payload: { readonly settings: typeof storedSettings };
+          };
+          storedSettings = event.payload.settings;
+          storedVersion += 1;
+          appended.push({ actor: event.actor, settings: storedSettings });
+          return { aggregateVersion: storedVersion, events: [] } as never;
+        }),
+      } as unknown as PersistenceService["journal"],
+    };
+    // Never call service.bootstrap(personPairedDeviceId): the device has no desktop shell registration.
+    const service = new ShellService({
+      persistence: livePersistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    const hostPersonScopes = createHostPersonScopes({
+      localWindows: () => [],
+      devices: () => [
+        { device_id: String(personPairedDeviceId), state: "active" },
+        { device_id: String(hubIntroducedDeviceId), state: "active" },
+      ],
+      approvedByPerson: (deviceId) => deviceId === String(personPairedDeviceId),
+    });
+    const callbacks = createBrowserRememberCallbacks({
+      persistence: livePersistence,
+      shellService: service,
+      hostPersonScopes,
+    });
+    const transfer = {
+      direction: "download" as const,
+      origin: "https://files.example",
+      workspaceRoot: "/Users/example/Work/Reports",
+      privatePage: true as const,
+    };
+
+    // Hub-introduced device is refused before touching ShellService or the journal.
+    callbacks.rememberBrowserTransfer(hubIntroducedDeviceId, transfer);
+    callbacks.rememberBrowserOrigin(hubIntroducedDeviceId, "https://docs.example");
+    callbacks.rememberBrowserProfileSite(hubIntroducedDeviceId, "https://app.example", {
+      kind: "personal",
+    });
+    expect(appended).toHaveLength(0);
+
+    // Person-paired device persists all three without desktop window registration,
+    // journaled with its remote-device actor.
+    callbacks.rememberBrowserTransfer(personPairedDeviceId, transfer);
+    callbacks.rememberBrowserOrigin(personPairedDeviceId, "https://docs.example");
+    callbacks.rememberBrowserProfileSite(personPairedDeviceId, "https://app.example", {
+      kind: "personal",
+    });
+    expect(storedSettings.rememberedBrowserTransfers).toEqual([transfer]);
+    expect(storedSettings.rememberedBrowserOrigins).toEqual(["https://docs.example"]);
+    expect(storedSettings.rememberedBrowserProfileSites).toEqual([
+      { origin: "https://app.example", profile: { kind: "personal" } },
+    ]);
+    expect(appended).toHaveLength(3);
+    expect(
+      appended.every(
+        (entry) =>
+          JSON.stringify(entry.actor) ===
+          JSON.stringify({
+            kind: "remote-device",
+            actorId: String(personPairedDeviceId),
+            deviceId: String(personPairedDeviceId),
+          }),
+      ),
+    ).toBe(true);
   });
 
   it("keeps reporting a folder stored under Documents after the host default moved", () => {

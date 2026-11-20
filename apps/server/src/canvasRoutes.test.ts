@@ -2716,6 +2716,165 @@ describe("paired device Canvas reads", () => {
     });
   });
 
+  it("lets a person-paired device with no desktop workspace mint and revoke a share and approve a public-link export end-to-end", async () => {
+    const publicLinkTarget = {
+      contribution: {
+        schemaVersion: 1 as const,
+        kind: "canvas-export-contribution" as const,
+        targetId: "public-link" as never,
+        label: "Public link",
+        formats: ["html"] as const,
+      },
+      describeDestination: async () => ({
+        linkTerms: {
+          defaultExpiryDays: 7,
+          allowsPassword: true,
+        },
+      }),
+      exportDocument: async () => ({
+        kind: "receipt" as const,
+        receipt: { kind: "remote-id" as const, remoteId: "link-1" },
+      }),
+    };
+    const exportDir = mkdtempSync(join(tmpdir(), "octant-canvas-export-route-"));
+    directories.push(exportDir);
+    const exportConnection = openSqlite(join(exportDir, "export.sqlite3"));
+    applyMigrations(exportConnection, MIGRATIONS, () => now);
+    const exportJournal = new Journal({
+      connection: exportConnection,
+      registry: registerCanvasExportEvents(new EventRegistry()),
+      projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+      clock: () => now as never,
+    });
+    let exportUuidCounter = 0;
+    const nextUuid = () =>
+      `e9e9e9e9-e9e9-4e9e-8e9e-${(exportUuidCounter += 1).toString(16).padStart(12, "0")}`;
+    const exportEventStore = new CanvasExportEventStore({
+      journal: exportJournal,
+      uuid: nextUuid,
+    });
+    const exportProjection = new CanvasProjection();
+    seedProjection(exportProjection);
+    const canvasExportService = new CanvasExportService({
+      load: (id) => {
+        const version = exportProjection.getById(id)?.currentVersion;
+        return version === undefined
+          ? undefined
+          : {
+              canvasId: version.canvasId,
+              versionId: version.versionId,
+              sequence: version.sequence,
+              title: version.definition.title,
+              blocks: version.definition.blocks,
+              definition: version.definition,
+            };
+      },
+      targets: () => [
+        {
+          target: publicLinkTarget as never,
+          facts: {
+            installed: true,
+            trusted: true,
+            desiredEnabled: true,
+            effectiveState: { kind: "effective" as const },
+            connected: true,
+          },
+          identity: "public-link-v1",
+        },
+      ],
+      eventStore: exportEventStore,
+      uuid: nextUuid,
+      clock: () => now as never,
+    });
+    const route = createRevisionRoute(undefined, {
+      activeContextResolver: pairedReaderContexts,
+      threadReadAuthority: threadReads(),
+      canvasExportService,
+    });
+    const personPaired = (path: string, body: unknown) => {
+      const request = new Request(`http://127.0.0.1/api/canvas/${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "17171717-1717-4171-8171-171717171717" as never,
+          admittedBy: "host-person",
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return request;
+    };
+
+    // Share creation and revocation succeed through the real CanvasShareService with no desktop workspace.
+    const shared = decodeCanvasShareResult(
+      JSON.parse(await (await route(personPaired("share", shareBody())))!.text()),
+    );
+    expect(shared).toMatchObject({ kind: "accepted" });
+    if (shared.kind !== "accepted") throw new Error("expected share accepted");
+    const revoked = decodeCanvasShareResult(
+      JSON.parse(
+        await (await route(
+          personPaired("share-revoke", {
+            schemaVersion: 1,
+            kind: "canvas-share-snapshot-revoke",
+            snapshotId: shared.snapshot.snapshotId,
+            canvasId: String(canvasId),
+            hostId: "local",
+            projectId: String(projectId),
+            actor: { kind: "local-user", actorId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+            revokedAt: now,
+          }),
+        ))!.text(),
+      ),
+    );
+    expect(revoked).toMatchObject({ kind: "accepted", snapshot: { status: "revoked" } });
+
+    // Public-link export preparation and approval succeed through the real CanvasExportService
+    // and record the remote device actor in the export journal.
+    const prepared = JSON.parse(
+      await (await route(
+        personPaired("export-prepare", {
+          schemaVersion: 1,
+          kind: "canvas-export-prepare",
+          canvasId: String(canvasId),
+          versionId: "22222222-2222-4222-8222-222222222222",
+          expectedSequence: 1,
+          targetId: "public-link",
+          format: "html",
+        }),
+      ))!.text(),
+    );
+    expect(prepared).toMatchObject({ kind: "approval" });
+    const decided = JSON.parse(
+      await (await route(
+        personPaired("export-decide", {
+          schemaVersion: 1,
+          kind: "canvas-export-decision",
+          canvasId: String(canvasId),
+          approvalId: prepared.card.approvalId,
+          decision: "approved",
+        }),
+      ))!.text(),
+    );
+    expect(decided).toMatchObject({ kind: "exported" });
+    const exportEvents = exportJournal.replayAggregateType({
+      aggregateType: "canvas-export",
+      afterSequence: 0,
+      limit: 10,
+    });
+    expect(exportEvents.length).toBeGreaterThan(0);
+    expect(exportEvents.every((event) => event.actor.kind === "remote-device")).toBe(true);
+    exportConnection.close();
+  });
+
   it("keeps a window on this host to its active Project even for a thread it could open", async () => {
     const route = createRevisionRoute(undefined, {
       activeContextResolver: async () => ({ mode: "chat", projectId: otherProjectId }),

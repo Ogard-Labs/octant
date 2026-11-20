@@ -22,6 +22,11 @@ import { readCodeSessionConversation } from "../code/codeSessionConversation";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { createHostPersonScopes } from "../hostPersonScope";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistrations,
+} from "../persistence/remoteAccessProjection";
 import { HostMemoryGuard } from "../hostMemoryGuard";
 import { readSystemMemory, type SystemMemorySample } from "../hostMemorySignal";
 import { readHostMemoryLimits } from "../persistence/hostMemoryLimitsProjection";
@@ -174,11 +179,17 @@ export function wireFoundations(deps: FoundationsDependencies) {
     },
   });
 
+  const hostPersonDeviceScopes = createHostPersonScopes({
+    localWindows: () => [],
+    devices: () => readDeviceRegistrations(persistence.connection),
+    approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
+  });
   const browserAuthority = new ServerBrowserAuthorityResolver({
     hostId: deriveToolHostId(persistence.dataDirectory),
     workspaceHostId: LOCAL_HOST_ID,
     persistence,
     workThreads: workThreadProjection,
+    isPersonPairedDevice: (scopeId) => hostPersonDeviceScopes.deviceActor(scopeId) !== undefined,
   });
 
   const codeEvidence = new CodeEvidenceStore({ connection: persistence.connection });

@@ -32,6 +32,12 @@ export interface BrowserAuthorityResolverOptions {
   > &
     Partial<Pick<PersistenceService, "readWindowWorkspace">>;
   readonly workThreads: Pick<WorkThreadProjection, "read">;
+  /**
+   * True when `scopeId` is a live device directly paired by the host's own
+   * person (no desktop shell workspace is stored for it). Hub-introduced and
+   * restricted devices must return false.
+   */
+  readonly isPersonPairedDevice?: (scopeId: WindowId) => boolean;
 }
 
 export class ServerBrowserAuthorityResolver implements BrowserAuthorityResolver {
@@ -112,11 +118,15 @@ export class ServerBrowserAuthorityResolver implements BrowserAuthorityResolver 
     mode: ToolActionAuthority["mode"],
   ): boolean {
     const authority = this.resolve(threadId, mode);
+    if (authority === undefined) return false;
     // A routine's turn runs as the host, which owns every Project; its thread
     // is still bound to the routine's Project by the authority resolved above.
-    if (authority !== undefined && isRoutineHostScope(windowId)) return true;
+    if (isRoutineHostScope(windowId)) return true;
+    // A device the host's own person paired holds no desktop window workspace,
+    // and reaches any active thread whose authority resolved above.
+    if (this.#options.isPersonPairedDevice?.(windowId) === true) return true;
     const readWindowWorkspace = this.#options.persistence.readWindowWorkspace;
-    if (authority === undefined || readWindowWorkspace === undefined) return false;
+    if (readWindowWorkspace === undefined) return false;
     const projected = readWindowWorkspace(windowId);
     if (projected === undefined) return false;
     const workspace = projected.workspace;

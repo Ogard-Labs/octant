@@ -5,6 +5,7 @@ import {
   ArtifactMirrorSettings,
   CanvasId,
   CanvasVersionId,
+  type EventActor,
   type UtcTimestamp,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -74,6 +75,7 @@ export class ArtifactMirrorEventStore {
     readonly payload: unknown;
     /** Set by a frame that is a transition (settings): a conflict then surfaces. */
     readonly expectedVersion?: number;
+    readonly actor?: EventActor;
   }): void {
     if (input.expectedVersion !== undefined) {
       this.#appendAfter(input, input.expectedVersion);
@@ -125,6 +127,7 @@ export class ArtifactMirrorEventStore {
       readonly aggregateId: string;
       readonly eventName: string;
       readonly payload: unknown;
+      readonly actor?: EventActor;
     },
     expectedVersion: number,
   ): void {
@@ -142,7 +145,7 @@ export class ArtifactMirrorEventStore {
           // The journal requires one on every frame; a mirror frame starts its
           // own chain, so it correlates with nothing but itself.
           correlationId: this.#options.uuid(),
-          actor: this.#options.actor,
+          actor: input.actor ?? this.#options.actor,
           occurredAt: this.#options.clock(),
           payload: input.payload,
         },

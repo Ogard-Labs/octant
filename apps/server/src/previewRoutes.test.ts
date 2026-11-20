@@ -606,6 +606,133 @@ describe("Preview routes", () => {
     );
     expect(await (await route(pairedHandoff))?.json()).toMatchObject({ kind: "unauthorized" });
   });
+
+  it("resolves Preview open, chunks, and text editing for a person-paired deviceId with no desktop workspace while refusing hub-introduced devices and Plan writes", async () => {
+    const remoteDeviceId = decodeWindowId("90000000-0000-4000-8000-000000000899");
+    let projectType: "work" | "code" = "work";
+    let threadPolicy: "approval-gated" | "plan" = "approval-gated";
+    const remoteRoute = createPreviewRouteHandler({
+      service,
+      windowAuthorityStore: new WindowAuthorityStore(),
+      projects: {
+        bootstrap: async () => ({
+          active: [{ id: projectId, type: projectType, lifecycle: "active" }],
+        }),
+      } as never,
+      // Simulates production `shellService.bootstrap(deviceId)`: default Chat workspace with no Project.
+      activeContextResolver: async () => ({ mode: "chat", projectId: null }),
+      codeThreadResolver: async (threadId) =>
+        threadId === codeThreadId
+          ? { projectId, lifecycle: "active", executionPolicy: threadPolicy }
+          : undefined,
+      hostId,
+      now: () => 50,
+    });
+    const sendAs = (
+      path: string,
+      body: unknown,
+      admittedBy: "host-person" | "hub-roster" | undefined,
+    ) => {
+      const request = new Request(`http://127.0.0.1/api/preview/${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: String(remoteDeviceId) as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000899" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        }),
+        // Remote device scopeId is its deviceId (not registered in windowAuthorityStore).
+        scopeId: remoteDeviceId,
+      });
+      return remoteRoute(request);
+    };
+
+    // Person-paired device reads and edits a Work file without any desktop workspace.
+    const opened = await (await sendAs("open", { target: makeTarget() }, "host-person"))?.json();
+    expect(opened).toMatchObject({ kind: "ready" });
+    const chunks = await (
+      await sendAs(
+        "chunks",
+        { target: makeTarget(), sourceVersion: opened.manifest.sourceVersion, afterSequence: 0 },
+        "host-person",
+      )
+    )?.json();
+    expect(chunks).toMatchObject({ kind: "chunks" });
+    const readText = await (await sendAs("text", { target: makeTarget() }, "host-person"))?.json();
+    expect(readText).toMatchObject({ kind: "ready", text: "# Title\nbody line\n" });
+    const saved = await (
+      await sendAs(
+        "text",
+        {
+          target: makeTarget(),
+          change: { revision: readText.revision, text: "# Title\nedited remotely\n" },
+        },
+        "host-person",
+      )
+    )?.json();
+    expect(saved).toMatchObject({ kind: "saved", text: "# Title\nedited remotely\n" });
+    expect(readFileSync(join(root, "notes.md"), "utf8")).toBe("# Title\nedited remotely\n");
+
+    // Code thread-bound target resolves through codeThreadResolver and refuses archived/other-project threads.
+    projectType = "code";
+    const codeTarget = makeTarget({ boundCodeThreadId: codeThreadId });
+    const codeOpened = await (await sendAs("open", { target: codeTarget }, "host-person"))?.json();
+    expect(codeOpened).toMatchObject({ kind: "ready" });
+    expect(
+      await (
+        await sendAs(
+          "chunks",
+          {
+            target: codeTarget,
+            sourceVersion: codeOpened.manifest.sourceVersion,
+            afterSequence: 0,
+          },
+          "host-person",
+        )
+      )?.json(),
+    ).toMatchObject({ kind: "chunks" });
+    // Foreign host and unknown thread remain refused even for a person-paired device.
+    expect(
+      await (
+        await sendAs("open", { target: makeTarget({ hostId: otherHostId }) }, "host-person")
+      )?.json(),
+    ).toMatchObject({ kind: "unauthorized" });
+    expect(
+      await (
+        await sendAs(
+          "open",
+          { target: makeTarget({ boundCodeThreadId: "00000000-0000-4000-8000-000000000999" }) },
+          "host-person",
+        )
+      )?.json(),
+    ).toMatchObject({ kind: "unauthorized" });
+
+    // Hub-introduced and restricted devices remain refused on both open and text.
+    projectType = "work";
+    for (const admittedBy of [undefined, "hub-roster"] as const) {
+      expect(
+        await (await sendAs("open", { target: makeTarget() }, admittedBy))?.json(),
+      ).toMatchObject({ kind: "unauthorized" });
+      expect(await (await sendAs("text", { target: makeTarget() }, admittedBy))?.json()).toEqual({
+        kind: "unauthorized",
+      });
+    }
+
+    // Finder handoff stays local-window-only even for a person-paired device.
+    expect(
+      await (
+        await sendAs("handoff", { target: makeTarget(), kind: "reveal-in-finder" }, "host-person")
+      )?.json(),
+    ).toMatchObject({ kind: "unauthorized" });
+  });
 });
 
 describe("resolvePreviewActiveContext", () => {
