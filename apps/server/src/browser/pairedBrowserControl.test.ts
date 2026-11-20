@@ -526,8 +526,9 @@ describe("PairedBrowserControlService", () => {
     const connection = openSqlite(join(dir, "octant.db"));
     try {
       const createdIso = "2026-11-20T10:00:00.000Z";
-      let wallMs = Date.parse(createdIso);
-      const steadyMs = 10_000;
+      const initialWallMs = Date.parse(createdIso);
+      let wallMs = initialWallMs;
+      let steadyMs = 10_000;
       applyMigrations(connection, MIGRATIONS, () => new Date(wallMs).toISOString());
 
       const hostId = "10000000-0000-4000-8000-000000000001";
@@ -614,14 +615,27 @@ describe("PairedBrowserControlService", () => {
 
         // Jump wall clock 20 minutes forward (past the 15-minute idle_expires_at)
         // without advancing steady monotonic time.
-        wallMs += 20 * 60_000;
+        wallMs = initialWallMs + 20 * 60_000;
         expect(isPairedDeviceSessionCurrent(connection, principal, wallMs)).toBe(false);
         expect(proofService.describeSession(sessionId)).toBeDefined();
         expect(isPairedDeviceSessionCurrent(connection, principal, guardedNow())).toBe(true);
+        const boundedMarkAfterJump = monotonicClock.highWaterMarkMs();
 
-        // Stream stays alive and delivers multiple frames instead of ending prematurely.
-        const events = await readNdjsonLines(streamRes.stream, 2);
-        expect(events.map((event) => event.kind)).toEqual(["frame", "frame"]);
+        // Stream stays alive across >=10 frames (>20 sessionNow checks) without
+        // ratcheting the shared monotonic clock past idle_expires_at.
+        const events = await readNdjsonLines(streamRes.stream, 12);
+        expect(events).toHaveLength(12);
+        expect(events.every((event) => event.kind === "frame")).toBe(true);
+        expect(monotonicClock.highWaterMarkMs()).toBe(boundedMarkAfterJump);
+        expect(proofService.describeSession(sessionId)).toBeDefined();
+        expect(isPairedDeviceSessionCurrent(connection, principal, guardedNow())).toBe(true);
+
+        // Correcting wall clock back to true elapsed time recovers the clock cleanly.
+        wallMs = initialWallMs + 1_000;
+        steadyMs += 1_000;
+        expect(monotonicClock.posture().posture).toBe("ok");
+        expect(proofService.describeSession(sessionId)).toBeDefined();
+        expect(isPairedDeviceSessionCurrent(connection, principal, guardedNow())).toBe(true);
       } finally {
         await f.service.close();
       }

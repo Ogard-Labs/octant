@@ -1732,7 +1732,14 @@ describe("RemoteGateway — approval for a window that never finished", () => {
       expect(isPairedDeviceSessionCurrent(connection, principal, wallMs)).toBe(false);
       const boundedNow = capturedSessionNow();
       expect(boundedNow).toBeLessThan(nowMs + 15 * 60_000);
-      expect(isPairedDeviceSessionCurrent(connection, principal, boundedNow)).toBe(true);
+      // Repeated Browser frame-poll checks during the jump must not ratchet the
+      // gateway's monotonic clock forward past idle_expires_at.
+      for (let i = 0; i < 20; i++) {
+        expect(capturedSessionNow()).toBe(boundedNow);
+        expect(isPairedDeviceSessionCurrent(connection, principal, capturedSessionNow())).toBe(
+          true,
+        );
+      }
 
       // Calling the handed-off sessionNow observed the forward jump on the
       // gateway's own monotonic clock (not a second clock), putting the gateway
@@ -1751,15 +1758,32 @@ describe("RemoteGateway — approval for a window that never finished", () => {
       );
       expect(challengeDuringJump.status).toBe(503);
 
-      // Once wall time recovers alongside steady time, the gateway still
-      // dispatches the session as active (matching Browser session checks).
-      wallMs = nowMs + 10 * 60_000;
-      steadyMs += 10 * 60_000;
-      const second = await fetch(
-        signedProductRequest("nonce-2", "77777777-7777-4777-8777-777777777777", wallMs),
+      // Even while wall time is still jumped, the gateway's bounded clock has
+      // not ratcheted, so product dispatch and Browser checks agree the session
+      // is still active.
+      const secondDuringJump = await fetch(
+        signedProductRequest("nonce-2", "77777777-7777-4777-8777-777777777777", boundedNow),
         lanFacts,
       );
-      expect(second.status).toBe(200);
+      expect(secondDuringJump.status).toBe(200);
+
+      // Correcting wall time back to true elapsed time recovers gateway posture
+      // immediately (without leaving the high-water mark 16+ minutes ahead).
+      wallMs = nowMs + 5_000;
+      steadyMs += 5_000;
+      const challengeAfterCorrection = await fetch(
+        new Request(`${ORIGIN}/api/remote/auth/challenge`, {
+          method: "POST",
+          headers: {
+            host: "192.168.1.20:9443",
+            origin: ORIGIN,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ hostId, deviceId, credentialGeneration: 1 }),
+        }),
+        lanFacts,
+      );
+      expect(challengeAfterCorrection.status).toBe(200);
     } finally {
       await gateway.stop();
     }
