@@ -7709,8 +7709,13 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   an enabled image profile exists; every
   provider is also told, in the turn's tool host lines, to call it for a
   picture instead of drawing one as SVG or HTML. A call spends nothing by
-  itself: the host holds an image offer for the window whose turn asked, and
-  the thread shows it as a card where the person picks the profile and model,
+  itself: the host's shared service holds the offer for the window whose turn
+  asked. It pairs each kind of offer with its own card and decision rule. A
+  local window or a device paired by the host's person sees only its own
+  offers, and the host checks that it can still open the thread before
+  accepting one answer that fits the offer's kind. Waiting offers are held
+  only in host memory and are never replayed after a restart. The image card
+  is where the person picks the profile and model,
   lets the agent draw the visual itself, or cancels. Generate runs only a
   profile and model the host can run when the answer arrives, checked again
   before the job is queued. The "do not ask again" choice keeps that
@@ -7722,9 +7727,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   without a card at every level, and Project Overview names the kept model
   with "Ask again", which drops it. A local window or a paired device sets
   or drops it and answers the card (maintainer decision, 2026-11-12). Not
-  built yet: today the Project command that sets or drops it is refused from
-  a paired device, and the card itself is answered only at a window on the
-  host. A Chat thread
+  built yet: the Project command that drops the choice is refused from a
+  paired device, and the native phone app does not render the offer card.
+  A Chat thread
   outside a Project has no Project to hold a choice and keeps it for that
   thread in host memory, so a restart asks again there. At Full access a
   call with no kept choice also skips the card when exactly one image

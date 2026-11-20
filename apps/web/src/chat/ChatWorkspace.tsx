@@ -1,3 +1,4 @@
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   ProjectMemoryProposalPrompt,
@@ -89,7 +90,7 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
-import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
+import { ServiceOfferPrompt } from "../offers/ServiceOfferPrompt";
 import {
   decodeBrowserThreadId,
   decodeImageGenerationScopeId,
@@ -148,6 +149,7 @@ export interface ChatWorkspaceProps {
   readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly serviceOfferClient?: ServiceOfferClient;
   /** Every image profile, custom image sources included, computed once by the shell. */
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly hostId?: HostId;
@@ -1537,9 +1539,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
             turnActive={turnActive}
           />
-          <ImageGenerationOfferPrompt
+          <ServiceOfferPrompt
             className="chat-workspace__tool-approval thread-column"
-            client={props.imageGenerationClient}
+            client={props.serviceOfferClient}
             keptIn={view?.thread.projectId === undefined ? "thread" : "project"}
             profiles={props.imageGenerationProfiles ?? []}
             scopeId={

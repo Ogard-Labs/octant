@@ -189,6 +189,7 @@ export * from "./usageDashboard";
 export * from "./spendCeiling";
 export * from "./providerUsageHistory";
 export * from "./imageGeneration";
+export * from "./serviceOffers";
 export * from "./agentProfile";
 export * from "./agentRun";
 export * from "./agentRunCanvas";

@@ -1,3 +1,4 @@
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import { TurnSubagentRows } from "../agents/threadSubagents";
 import { attachAllowingFiles, attachmentMediaType } from "../composer/attachmentMediaType";
@@ -129,7 +130,7 @@ import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
-import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
+import { ServiceOfferPrompt } from "../offers/ServiceOfferPrompt";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
@@ -603,6 +604,7 @@ export interface WorkThreadWorkspaceProps {
   readonly fileMentionClient?: FileMentionClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly serviceOfferClient?: ServiceOfferClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly onOpenSettings?: () => void;
   /** Opens Settings at Image generation, where an image profile is added. */
@@ -931,6 +933,7 @@ function withoutHostTools(props: WorkThreadWorkspaceProps): WorkThreadWorkspaceP
     extensionClient: _extensions,
     fileMentionClient: _files,
     imageGenerationClient: _images,
+    serviceOfferClient: _offers,
     mutationClient: _mutations,
     ...rest
   } = props;
@@ -3127,9 +3130,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           threadId={String(props.threadId)}
           turnActive={turnRunning}
         />
-        <ImageGenerationOfferPrompt
+        <ServiceOfferPrompt
           className="thread-column"
-          client={props.imageGenerationClient}
+          client={props.serviceOfferClient}
           keptIn="project"
           profiles={props.imageGenerationProfiles ?? []}
           scopeId={decodeImageGenerationScopeId(String(props.threadId))}

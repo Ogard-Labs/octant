@@ -1,3 +1,4 @@
+import { createServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import {
   createSandboxRestrictionsClient,
   type SandboxRestrictionsClient,
@@ -231,6 +232,7 @@ export interface LaunchedShellClients {
   readonly threadSearchClient: ThreadSearchClient;
   readonly hostControlClient: ReturnType<typeof createHostControlClient>;
   readonly safeNetworksClient: ReturnType<typeof createSafeNetworksClient>;
+  readonly serviceOfferClient: ReturnType<typeof createServiceOfferClient>;
   readonly imageGenerationClient: ReturnType<typeof createImageGenerationClient>;
   readonly speechClient: ReturnType<typeof createSpeechClient>;
   readonly linearTransport: ReturnType<typeof createIntegrationClient>;
@@ -424,6 +426,7 @@ export function createLaunchedShellClients(
     hostControlClient: createHostControlClient(port),
     safeNetworksClient: createSafeNetworksClient(port),
     imageGenerationClient: createImageGenerationClient(port),
+    serviceOfferClient: createServiceOfferClient(port),
     speechClient: createSpeechClient(port),
     linearTransport: createIntegrationClient({ ...port, slug: "linear" }),
     machineChangeClient: createMachineChangeClient(port),
