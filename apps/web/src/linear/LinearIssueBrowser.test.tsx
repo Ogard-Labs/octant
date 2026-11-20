@@ -13,7 +13,10 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { LinearIssueBrowser } from "./LinearIssueBrowser";
 
-const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
+const stylesheet = readFileSync(
+  resolve(import.meta.dirname, "../styles/linear-issues.css"),
+  "utf8",
+);
 
 function ruleBody(css: string, selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

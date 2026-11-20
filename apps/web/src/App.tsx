@@ -27,7 +27,7 @@ import {
   discardNewTaskDraftForPane,
   NewTaskDraftsContext,
 } from "./composer/useNewTaskPrompt";
-import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
+import { StreamRepliesContext } from "./transcript/streamReplies";
 import { NextMessageSuggestionsContext } from "./followUps/FollowUpSuggestionChips";
 import {
   REPLY_DETAIL_DESCRIPTIONS,
@@ -97,9 +97,8 @@ import { createLaunchedShellClients } from "./app/createLaunchedShellClients";
 import { DockContainer, type DockOverviewThread } from "./app/DockContainer";
 import { dockToolReads } from "./shell/dockModuleRegistry";
 import { useHomeStart } from "./app/homeStart";
-import { ReaderPagesContainer } from "./app/ReaderPagesContainer";
-import { SettingsContainer } from "./app/SettingsContainer";
 import { OctantSheet } from "./ui/base/OctantSheet";
+import { SurfaceLoading } from "./surface/SurfaceLoading";
 import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
@@ -150,7 +149,11 @@ import {
   type WorkThreadCommand,
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
-import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
+import {
+  markInteraction,
+  markInteractionAfterPaint,
+  traceLaunchControl,
+} from "./polling/interactionTrace";
 import { useSnoozeClock } from "./polling/useSnoozeClock";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import { ThreadActivityRevisionsContext } from "./polling/ThreadActivityRevisions";
@@ -211,6 +214,7 @@ import { assertCreateDestinationFromHosts } from "./shell/assertCreateDestinatio
 import { resolveSidebarBackground } from "@octant/theme/backgrounds";
 import {
   Suspense,
+  lazy,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -225,7 +229,6 @@ import "./styles/shell.css";
 import "./styles/dock.css";
 import "./styles/panels.css";
 import "./styles/environment.css";
-import { PrepareToShutDownHost } from "./environment/threadMove/PrepareToShutDownHost";
 import { threadMoveClientForBridge } from "./environment/threadMove/threadMoveClient";
 // The shared component/material layer loads last so its assignments win.
 import "./styles/components.css";
@@ -255,7 +258,7 @@ import {
   openDedicatedBrowserContext,
   releaseBrowserContext,
 } from "./browser/dedicatedBrowserContext";
-import { MarkdownLinkActionsContext } from "./markdown/Markdown";
+import { MarkdownLinkActionsContext } from "./markdown/markdownLinkActions";
 import { useDesktopWindowAuthority } from "./shell/useDesktopWindowAuthority";
 import { buildInboxAttentionItems, inboxWaitingThreadIds } from "./inbox/inboxModel";
 import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";
@@ -374,7 +377,7 @@ import {
   useFirstRunOnboardingController,
   type FirstRunOnboardingOutcome,
 } from "./onboarding/useFirstRunOnboardingController";
-import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
+import { projectPullRequestKey } from "./code/projectPullRequestKey";
 import { OctantToast } from "./ui/base/OctantToast";
 import { OctantDialogPresence } from "./ui/base/OctantDialogPresence";
 import { useProjectController } from "./projects/useProjectController";
@@ -410,7 +413,6 @@ import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
 import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
-import { MoveThreadToProjectDialog } from "./projects/MoveThreadToProjectDialog";
 import {
   ProjectActionRunDialog,
   type ProjectActionTarget,
@@ -692,6 +694,26 @@ const NO_IMAGE_PROFILES: ReadonlyArray<never> = [];
 const NO_CODE_THREADS: ReadonlyArray<never> = [];
 const NO_CODE_CHECKOUTS: ReadonlyArray<never> = [];
 const NO_COMPUTER_SNAPSHOTS: ReadonlyArray<never> = [];
+const PrepareToShutDownHost = lazy(() =>
+  import("./environment/threadMove/PrepareToShutDownHost").then((module) => ({
+    default: module.PrepareToShutDownHost,
+  })),
+);
+const ReaderPagesContainer = lazy(() =>
+  import("./app/ReaderPagesContainer").then(({ ReaderPagesContainer }) => ({
+    default: ReaderPagesContainer,
+  })),
+);
+const SettingsContainer = lazy(() =>
+  import("./app/SettingsContainer").then(({ SettingsContainer }) => ({
+    default: SettingsContainer,
+  })),
+);
+const MoveThreadToProjectDialog = lazy(() =>
+  import("./projects/MoveThreadToProjectDialog").then(({ MoveThreadToProjectDialog }) => ({
+    default: MoveThreadToProjectDialog,
+  })),
+);
 
 // Matches the desktop's double-press window for ⌘Q.
 const QUIT_HINT_VISIBLE_MS = 1500;
@@ -932,6 +954,9 @@ function LaunchedShell(
       delete root.dataset.octantHostVibrancy;
     };
   }, [hostSidebarVibrancyActive]);
+  // First committed paint of the launched shell; the opt-in launch benchmark
+  // reads `shell-committed-painted` off the host's mark stream.
+  useEffect(() => markInteractionAfterPaint("shell-committed"), []);
   const viewportIsNarrow = useNarrowViewport();
   const isNarrow = props.isNarrow ?? viewportIsNarrow;
   // Whether the workspace holds the Environment section beside a tool column.
@@ -3976,6 +4001,10 @@ function LaunchedShell(
     resolve: recordFirstRunOutcome,
     concealed: controller.settingsOpen || createOpen,
   });
+  useEffect(() => {
+    if (controller.status !== "ready" || chatController.status !== "ready" || draftCreating) return;
+    return traceLaunchControl(firstRunController.visible ? "setup" : "composer");
+  }, [controller.status, chatController.status, draftCreating, firstRunController.visible]);
   const whatsNew = useWhatsNewAfterUpdate({
     hostBridge: props.hostBridge,
     firstRunVisible: firstRunController.visible,
@@ -8506,43 +8535,51 @@ function LaunchedShell(
   // body does not keep that narrowing.
   const loadedSettings = controller.settings;
   const settingsContainer = (surface: "settings" | "usage", presentation: "page" | "sheet") => (
-    <SettingsContainer
-      onOpenServerProject={(project) => {
-        controller.closeSettings();
-        void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
-      }}
-      projectTerminalClient={projectTerminalClient}
-      projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
-      actions={actions}
-      allProjects={projectController.allProjects}
-      {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
-      backgroundImageLibrary={backgroundImageLibrary}
-      {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
-      chatController={chatController}
-      clients={launchedClients}
-      codeController={codeController}
-      controller={controller}
-      discoveryController={discoveryController}
-      githubClient={githubClient}
-      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-      {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
-      hostReservesTitlebarInset={(presentation === "page" || isNarrow) && hostReservesTitlebarInset}
-      isNarrow={isNarrow}
-      linearClient={linearClient}
-      nativeBoundsAvailable={nativeHost !== undefined}
-      {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
-      projectNamesById={projectNamesById}
-      providerController={providerController}
-      settings={loadedSettings}
-      presentation={presentation}
-      surface={surface}
-      glassOffNote={glassOffNote(glassRefusal, props.hostBridge !== undefined)}
-      sidebarVibrancySupported={sidebarVibrancySupported}
-      themeController={themeController}
-      {...(props.typography === undefined ? {} : { typography: props.typography })}
-      workNavigation={workNavigation}
-      workSettings={workSettings}
-    />
+    <Suspense
+      fallback={
+        <SurfaceLoading label={surface === "settings" ? "Opening Settings" : "Opening Usage"} />
+      }
+    >
+      <SettingsContainer
+        onOpenServerProject={(project) => {
+          controller.closeSettings();
+          void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
+        }}
+        projectTerminalClient={projectTerminalClient}
+        projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
+        actions={actions}
+        allProjects={projectController.allProjects}
+        {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
+        backgroundImageLibrary={backgroundImageLibrary}
+        {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
+        chatController={chatController}
+        clients={launchedClients}
+        codeController={codeController}
+        controller={controller}
+        discoveryController={discoveryController}
+        githubClient={githubClient}
+        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+        {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
+        hostReservesTitlebarInset={
+          (presentation === "page" || isNarrow) && hostReservesTitlebarInset
+        }
+        isNarrow={isNarrow}
+        linearClient={linearClient}
+        nativeBoundsAvailable={nativeHost !== undefined}
+        {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
+        projectNamesById={projectNamesById}
+        providerController={providerController}
+        settings={loadedSettings}
+        presentation={presentation}
+        surface={surface}
+        glassOffNote={glassOffNote(glassRefusal, props.hostBridge !== undefined)}
+        sidebarVibrancySupported={sidebarVibrancySupported}
+        themeController={themeController}
+        {...(props.typography === undefined ? {} : { typography: props.typography })}
+        workNavigation={workNavigation}
+        workSettings={workSettings}
+      />
+    </Suspense>
   );
 
   const shell = (
@@ -8719,71 +8756,77 @@ function LaunchedShell(
           <ThreadNativeSetupProvider services={threadNativeSetupServices}>
             <ThreadNotesProvider services={launchedClients.threadNotesClient}>
               <div className="primary-workspace-layer">
-                <ReaderPagesContainer
-                  actions={actions}
-                  activeMode={activeMode}
-                  {...(activeProjectId === undefined ? {} : { activeProjectId })}
-                  agentsCenterVisible={agentsCenterVisible}
-                  allProjects={projectController.allProjects}
-                  archiveOpen={archiveOpen}
-                  artifactLibraryOpen={artifactLibraryOpen}
-                  automationCenterVisible={automationCenterVisible}
-                  {...(automationCenterFocusId === undefined ? {} : { automationCenterFocusId })}
-                  automationEditorCatalog={automationEditorCatalog}
-                  availabilityByProject={projectController.availabilityByProject}
-                  boundCodeProjectId={controller.boundCodeProjectId}
-                  clients={launchedClients}
-                  codeBoardOpen={codeBoardOpen}
-                  threadBoardAvailable={threadBoardAvailable}
-                  codeBoardProjects={codeBoardProjects}
-                  codeNavigationRows={codeController.navigation}
-                  {...(codeController.bootstrap?.settings === undefined
-                    ? {}
-                    : { codeWorkerListingSettings: codeController.bootstrap.settings })}
-                  codePullRequestsOpen={codePullRequestsOpen}
-                  codeProviderGroups={codeProviderGroups}
-                  codeThreads={codeController.bootstrap?.threads}
-                  environmentNames={environmentNames}
-                  githubClient={githubClient}
-                  githubIssuesOpen={githubIssuesOpen}
-                  githubIssuesReadAvailable={githubIssuesReadAvailable}
-                  {...(githubPullRequestCapability.login === undefined
-                    ? {}
-                    : { githubViewerLogin: githubPullRequestCapability.login })}
-                  {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                  imageLibraryOpen={imageLibraryOpen}
-                  imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}
-                  inboxAttentionItems={inboxAttentionItems}
-                  inboxOpen={inboxOpen}
-                  {...(todosOpen ? { todosPage } : {})}
-                  isNarrow={isNarrow}
-                  linearClient={linearClient}
-                  linearIssuesOpen={linearIssuesOpen}
-                  linearIssuesRead={linearIssuesRead}
-                  loadAssignedGithubWork={loadAssignedGithubWork}
-                  loadAssignedLinearIssues={loadAssignedLinearIssues}
-                  navigationRevision={pendingRequestFeedRevision}
-                  needsYouAskClients={needsYouAskClients}
-                  projectNames={workingNowProjectNames}
-                  projects={projectController.projects}
-                  projectsListOpen={projectsListOpen}
-                  {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
-                  reviewEntries={reviewEntries}
-                  reviewOpen={reviewOpen}
-                  reviewSource={reviewSource}
-                  {...(selectedProjectPullRequestKey === undefined
-                    ? {}
-                    : { selectedProjectPullRequestKey })}
-                  serverUrl={props.launch.serverUrl}
-                  settings={controller.settings}
-                  windowCapability={props.projectWindowCapability}
-                  workBoardOpen={workBoardOpen}
-                  workBoardProjects={workBoardProjects}
-                  workNavigationRows={workNavigation.navigation}
-                  workProviderGroups={workProviderGroups}
-                  workThreads={workNavigation.bootstrap?.threads}
-                  workspace={controller.workspace}
-                />
+                {readerOpen ? (
+                  <Suspense fallback={<SurfaceLoading label="Opening page" />}>
+                    <ReaderPagesContainer
+                      actions={actions}
+                      activeMode={activeMode}
+                      {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                      agentsCenterVisible={agentsCenterVisible}
+                      allProjects={projectController.allProjects}
+                      archiveOpen={archiveOpen}
+                      artifactLibraryOpen={artifactLibraryOpen}
+                      automationCenterVisible={automationCenterVisible}
+                      {...(automationCenterFocusId === undefined
+                        ? {}
+                        : { automationCenterFocusId })}
+                      automationEditorCatalog={automationEditorCatalog}
+                      availabilityByProject={projectController.availabilityByProject}
+                      boundCodeProjectId={controller.boundCodeProjectId}
+                      clients={launchedClients}
+                      codeBoardOpen={codeBoardOpen}
+                      threadBoardAvailable={threadBoardAvailable}
+                      codeBoardProjects={codeBoardProjects}
+                      codeNavigationRows={codeController.navigation}
+                      {...(codeController.bootstrap?.settings === undefined
+                        ? {}
+                        : { codeWorkerListingSettings: codeController.bootstrap.settings })}
+                      codePullRequestsOpen={codePullRequestsOpen}
+                      codeProviderGroups={codeProviderGroups}
+                      codeThreads={codeController.bootstrap?.threads}
+                      environmentNames={environmentNames}
+                      githubClient={githubClient}
+                      githubIssuesOpen={githubIssuesOpen}
+                      githubIssuesReadAvailable={githubIssuesReadAvailable}
+                      {...(githubPullRequestCapability.login === undefined
+                        ? {}
+                        : { githubViewerLogin: githubPullRequestCapability.login })}
+                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                      imageLibraryOpen={imageLibraryOpen}
+                      imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}
+                      inboxAttentionItems={inboxAttentionItems}
+                      inboxOpen={inboxOpen}
+                      {...(todosOpen ? { todosPage } : {})}
+                      isNarrow={isNarrow}
+                      linearClient={linearClient}
+                      linearIssuesOpen={linearIssuesOpen}
+                      linearIssuesRead={linearIssuesRead}
+                      loadAssignedGithubWork={loadAssignedGithubWork}
+                      loadAssignedLinearIssues={loadAssignedLinearIssues}
+                      navigationRevision={pendingRequestFeedRevision}
+                      needsYouAskClients={needsYouAskClients}
+                      projectNames={workingNowProjectNames}
+                      projects={projectController.projects}
+                      projectsListOpen={projectsListOpen}
+                      {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
+                      reviewEntries={reviewEntries}
+                      reviewOpen={reviewOpen}
+                      reviewSource={reviewSource}
+                      {...(selectedProjectPullRequestKey === undefined
+                        ? {}
+                        : { selectedProjectPullRequestKey })}
+                      serverUrl={props.launch.serverUrl}
+                      settings={controller.settings}
+                      windowCapability={props.projectWindowCapability}
+                      workBoardOpen={workBoardOpen}
+                      workBoardProjects={workBoardProjects}
+                      workNavigationRows={workNavigation.navigation}
+                      workProviderGroups={workProviderGroups}
+                      workThreads={workNavigation.bootstrap?.threads}
+                      workspace={controller.workspace}
+                    />
+                  </Suspense>
+                ) : null}
                 <ThreadPaneContainer
                   actions={actions}
                   onOpenWorktrees={setPreparationTarget}
@@ -9186,74 +9229,78 @@ function LaunchedShell(
           projectAnnouncementSequence={projectController.announcementSequence}
         />
       </ShellFrame>
-      <PrepareToShutDownHost
-        hostBridge={props.hostBridge}
-        onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
-      />
+      <Suspense fallback={null}>
+        <PrepareToShutDownHost
+          hostBridge={props.hostBridge}
+          onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
+        />
+      </Suspense>
       <OctantDialogPresence>
         <FilesClosePrompt />
       </OctantDialogPresence>
-      <OctantDialogPresence>
-        {moveRequest === undefined ? null : (
-          // The one Move to Project dialog lives above the shell frame so it
-          // stays mounted and reachable wherever the asking surface is —
-          // including when the sidebar that used to host it is hidden.
-          <MoveThreadToProjectDialog
-            {...(moveRequest.busy === true ||
-            (moveRequest.mode === "code" &&
-              navigationModel.codeSidebarThreads.some(
-                (thread) =>
-                  String(thread.threadId) === moveRequest.threadId &&
-                  (thread.activity === "working" || thread.activity === "attention"),
-              ))
-              ? { busy: true }
-              : {})}
-            currentProjectId={moveRequest.projectId}
-            mode={moveRequest.mode}
-            onClose={() => setMoveRequest(undefined)}
-            {...(() => {
-              const moveProvider = providerController.instances.find(
-                (instance) => String(instance.id) === moveRequest.providerInstanceId,
-              );
-              const moveModel =
-                moveProvider === undefined || moveRequest.modelId === undefined
-                  ? undefined
-                  : providerController.observedByInstance
-                      .get(moveProvider.id)
-                      ?.models.find((listed) => String(listed.id) === moveRequest.modelId);
-              return {
-                ...(moveProvider === undefined ? {} : { threadProvider: moveProvider }),
-                ...(moveModel === undefined ? {} : { threadModel: moveModel }),
-                ...(moveRequest.workingFolderId === undefined
-                  ? {}
-                  : { threadWorkingFolderId: moveRequest.workingFolderId }),
-                ...(moveRequest.checkoutKind === undefined
-                  ? {}
-                  : { threadCheckoutKind: moveRequest.checkoutKind }),
-                ...(moveRequest.checkoutAvailability === undefined
-                  ? {}
-                  : { threadCheckoutAvailability: moveRequest.checkoutAvailability }),
-              };
-            })()}
-            onMove={async (projectId: string, when?: "after-turn" | "stop-now") =>
-              moveRequest.mode === "code"
-                ? actions.moveCodeThread(
-                    decodeCodeThreadId(moveRequest.threadId),
-                    decodeProjectId(projectId),
-                    { when },
-                  )
-                : actions.tryWorkRestCommand(moveRequest.threadId, (expectedVersion) => ({
-                    kind: "move-work-thread",
-                    threadId: decodeWorkThreadId(moveRequest.threadId),
-                    expectedVersion,
-                    projectId: decodeProjectId(projectId),
-                  }))
-            }
-            projects={projectController.allProjects}
-            threadTitle={moveRequest.title}
-          />
-        )}
-      </OctantDialogPresence>
+      <Suspense fallback={null}>
+        <OctantDialogPresence>
+          {moveRequest === undefined ? null : (
+            // The one Move to Project dialog lives above the shell frame so it
+            // stays mounted and reachable wherever the asking surface is —
+            // including when the sidebar that used to host it is hidden.
+            <MoveThreadToProjectDialog
+              {...(moveRequest.busy === true ||
+              (moveRequest.mode === "code" &&
+                navigationModel.codeSidebarThreads.some(
+                  (thread) =>
+                    String(thread.threadId) === moveRequest.threadId &&
+                    (thread.activity === "working" || thread.activity === "attention"),
+                ))
+                ? { busy: true }
+                : {})}
+              currentProjectId={moveRequest.projectId}
+              mode={moveRequest.mode}
+              onClose={() => setMoveRequest(undefined)}
+              {...(() => {
+                const moveProvider = providerController.instances.find(
+                  (instance) => String(instance.id) === moveRequest.providerInstanceId,
+                );
+                const moveModel =
+                  moveProvider === undefined || moveRequest.modelId === undefined
+                    ? undefined
+                    : providerController.observedByInstance
+                        .get(moveProvider.id)
+                        ?.models.find((listed) => String(listed.id) === moveRequest.modelId);
+                return {
+                  ...(moveProvider === undefined ? {} : { threadProvider: moveProvider }),
+                  ...(moveModel === undefined ? {} : { threadModel: moveModel }),
+                  ...(moveRequest.workingFolderId === undefined
+                    ? {}
+                    : { threadWorkingFolderId: moveRequest.workingFolderId }),
+                  ...(moveRequest.checkoutKind === undefined
+                    ? {}
+                    : { threadCheckoutKind: moveRequest.checkoutKind }),
+                  ...(moveRequest.checkoutAvailability === undefined
+                    ? {}
+                    : { threadCheckoutAvailability: moveRequest.checkoutAvailability }),
+                };
+              })()}
+              onMove={async (projectId: string, when?: "after-turn" | "stop-now") =>
+                moveRequest.mode === "code"
+                  ? actions.moveCodeThread(
+                      decodeCodeThreadId(moveRequest.threadId),
+                      decodeProjectId(projectId),
+                      { when },
+                    )
+                  : actions.tryWorkRestCommand(moveRequest.threadId, (expectedVersion) => ({
+                      kind: "move-work-thread",
+                      threadId: decodeWorkThreadId(moveRequest.threadId),
+                      expectedVersion,
+                      projectId: decodeProjectId(projectId),
+                    }))
+              }
+              projects={projectController.allProjects}
+              threadTitle={moveRequest.title}
+            />
+          )}
+        </OctantDialogPresence>
+      </Suspense>
       {(() => {
         const coordinator = codeController.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(coordinatorBoundsThreadId),

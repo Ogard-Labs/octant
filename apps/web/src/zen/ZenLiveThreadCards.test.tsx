@@ -7,7 +7,7 @@ import {
 } from "@octant/contracts/chat";
 import type { ZenSourceContext, ZenThreadCatalogEntry } from "@octant/contracts/zen";
 import type { ZenLiveCardActivity } from "@octant/domain";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { createChatReadCursorStore } from "../chat/useChatController";
 import { resolveZenLiveThreadCard } from "./ZenLiveThreadCards";
@@ -131,6 +131,7 @@ describe("resolveZenLiveThreadCard", () => {
     render(<>{card?.status === "streaming" ? card.surface : null}</>);
 
     await waitFor(() => expect(requested).toEqual([String(cardThreadId)]));
+    await act(() => vi.dynamicImportSettled());
     expect(await screen.findByRole("textbox", { name: "Message" })).toBeInTheDocument();
   });
 

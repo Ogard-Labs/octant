@@ -1,3 +1,5 @@
+import "../styles/code-overview.css";
+import "../styles/project-overview.css";
 import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
 import type { DesignSystemChoice } from "@octant/contracts/design-systems";
 import type { AutoReviewer } from "@octant/contracts/shield";

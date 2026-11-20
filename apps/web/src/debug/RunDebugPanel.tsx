@@ -1,3 +1,4 @@
+import "../styles/debug.css";
 import {
   CodeDebugClientFailure,
   type CodeDebugClient,

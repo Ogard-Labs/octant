@@ -116,13 +116,13 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
       }}
       zen={
         zen.space === null ? (
-          <div className="zen-surface zen-surface--loading" role="status">
+          <div className="zen-surface-fallback" role="status">
             Opening Zen…
           </div>
         ) : (
           <Suspense
             fallback={
-              <div className="zen-surface zen-surface--loading" role="status">
+              <div className="zen-surface-fallback" role="status">
                 Opening Zen…
               </div>
             }

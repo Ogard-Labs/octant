@@ -409,14 +409,14 @@ const harnessDesignAssets: DesignAssetRuntime = {
 
 const designBlocks = [
   articleBlock,
-  searchSpecExampleBlock,
-  onboardingFlowExampleBlock,
+  searchSpecExampleBlock(),
+  onboardingFlowExampleBlock(),
   assetMockupBlock,
 ];
 
 const mockupBlocks = [
-  settingsScreenExampleBlock,
-  notificationStatesExampleBlock,
+  settingsScreenExampleBlock(),
+  notificationStatesExampleBlock(),
   membersMockup,
   dashboardMockup,
 ];
@@ -487,10 +487,10 @@ const longFunnel = chart({
   ],
 });
 
-const dashboardBlocks = [...opsDashboardExampleBlocks, ...releaseHealthBoardExampleBlocks];
+const dashboardBlocks = [...opsDashboardExampleBlocks(), ...releaseHealthBoardExampleBlocks()];
 
 const flowBlocks = [
-  ...chartExampleBlocks.filter(
+  ...chartExampleBlocks().filter(
     (block) =>
       block.chartType === "funnel" || block.chartType === "radar" || block.chartType === "sankey",
   ),
@@ -658,23 +658,23 @@ const definition =
                     area,
                     scatter,
                     distribution,
-                    ...chartExampleBlocks,
+                    ...chartExampleBlocks(),
                     budgetSankey,
                     loneRadar,
                     longFunnel,
-                    ...treemapExampleBlocks,
-                    ...heatmapExampleBlocks,
-                    ...barListExampleBlocks,
+                    ...treemapExampleBlocks(),
+                    ...heatmapExampleBlocks(),
+                    ...barListExampleBlocks(),
                     hotFiles,
-                    ...comparisonMatrixExampleBlocks,
-                    ...mathExampleBlocks,
-                    ...metricExampleBlocks,
+                    ...comparisonMatrixExampleBlocks(),
+                    ...mathExampleBlocks(),
+                    ...metricExampleBlocks(),
                     metric,
                     table,
                     timeline,
-                    orderSchemaBlock,
-                    supportFlowBlock,
-                    releaseMindmapBlock,
+                    orderSchemaBlock(),
+                    supportFlowBlock(),
+                    releaseMindmapBlock(),
                     ...mockupBlocks,
                     ...dashboardBlocks,
                   ],

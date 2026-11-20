@@ -1,3 +1,4 @@
+import "../styles/ship-panel.css";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
 import { InfoTip, PaneBar } from "../shell/PaneBar";
 import type { ShipPlan, ShipTarget } from "@octant/contracts";

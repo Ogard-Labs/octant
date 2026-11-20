@@ -1,3 +1,4 @@
+import "../styles/device.css";
 import { X } from "../ui/icons";
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { thisComputerName, useHostPlatform } from "../platform";

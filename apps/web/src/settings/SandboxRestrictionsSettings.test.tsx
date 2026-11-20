@@ -103,7 +103,11 @@ describe("sandbox restrictions settings", () => {
         }),
       }),
     );
-    expect(await screen.findByText("Settings changed. Reload before saving.")).toBeVisible();
+    expect(
+      await screen.findByText(
+        "Settings changed. Reload before saving. Reload discards your draft.",
+      ),
+    ).toBeVisible();
     expect(screen.getByText("127.0.0.1:5173")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Remove local service 127.0.0.1:5173" }));
     expect(screen.queryByText("127.0.0.1:5173")).not.toBeInTheDocument();
@@ -169,7 +173,11 @@ describe("sandbox restrictions settings", () => {
     await user.type(input, "/shared/new-folder");
     await user.click(screen.getByRole("button", { name: "Add" }));
     await user.click(screen.getByRole("button", { name: "Save sandbox restrictions" }));
-    expect(await screen.findByText("Settings changed. Reload before saving.")).toBeVisible();
+    expect(
+      await screen.findByText(
+        "Settings changed. Reload before saving. Reload discards your draft.",
+      ),
+    ).toBeVisible();
     expect(screen.getByText("/shared/new-folder")).toBeVisible();
     expect(client.change).toHaveBeenCalledWith(
       expect.objectContaining({

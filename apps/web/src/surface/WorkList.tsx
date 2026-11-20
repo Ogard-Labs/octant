@@ -1,3 +1,4 @@
+import "../styles/work-list.css";
 import type { PullRequestStateKind } from "../code/pullRequestState";
 import type { IconComponent } from "../ui/icons";
 import { memo, type ReactNode } from "react";

@@ -1,0 +1,572 @@
+/* ─── repository file tree ─────────────────────────────────────────────
+   The Files dock is 320px wide, so every row spends its width the same
+   way: one fixed indent step for files and folders alike, one row height,
+   a name that keeps its start and its extension, and one trailing note.
+   Rows mirror the system's .tree-item states (soft hover wash, primary
+   ink) and the selected file takes the selection fill and hairline edge
+   the sidebar and dock tabs draw, so pointing and being there never share
+   one tint. The class stays off the .tree-item recipe because a row
+   carries a filter hint and an availability note the plain tree item has
+   no slot for. The head carries its own compact bar, which dock.css
+   refines onto the dock head's rail when the tool lives there. */
+
+/* A name that keeps its start and its extension: the head yields to an
+   ellipsis, the tail never does. Shared by the tree and the Work list so
+   both Files tools truncate the same way. */
+.file-name {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  /* The name owns the leftover width: the trailing notes that follow it are
+     the secondary reading, and the head yields before they disappear. */
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.file-name__head {
+  min-width: 4ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-name__tail {
+  flex: none;
+}
+
+.code-file-explorer {
+  --oct-file-row-h: 28px;
+  --oct-tree-indent: var(--oct-space-3);
+  --oct-file-inset: 8px;
+  --oct-file-depth-max: 10;
+  --oct-file-depth: 0;
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  background: transparent;
+}
+
+.code-file-explorer-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+/* The head stands on its own so the bottom panel, which has no right-dock
+   rail, keeps a padded bar and its hairline; dock.css refines it to the
+   dock head's rail when Files is the right dock's tool. The baseline matches
+   the other complete work surfaces that own a head (the delivery toolbar). */
+.code-file-explorer__head {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2) 12px;
+  background: var(--oct-surface);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-file-explorer__search {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.code-file-explorer__search > svg {
+  position: absolute;
+  z-index: 1;
+  left: 9px;
+  pointer-events: none;
+}
+
+.code-file-explorer__search input {
+  height: 28px;
+  padding: 0 32px 0 var(--oct-space-8);
+  border-color: var(--input);
+  background: var(--oct-surface);
+}
+
+.code-file-explorer__search-clear {
+  position: absolute;
+  right: 1px;
+}
+
+.code-file-explorer__status,
+.code-file-explorer__empty {
+  margin: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
+}
+
+.code-file-explorer__error {
+  margin: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  color: var(--oct-danger-fg);
+  font-size: var(--oct-text-detail);
+  line-height: var(--oct-leading-snug);
+}
+
+/* An extra folder sits under the checkout's tree, set off by a hairline and
+   named by its last component. */
+.code-file-explorer-panel__folder {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--octant-border-subtle);
+}
+
+.code-file-explorer-panel__folder-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 12px 4px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-weight: 600;
+}
+
+.code-file-explorer__tree {
+  min-height: 0;
+  overflow: auto;
+  padding: 2px var(--oct-space-2) var(--oct-space-3);
+}
+
+.code-file-explorer__virtual {
+  position: relative;
+  min-width: 0;
+}
+
+.code-file-explorer__entry {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--oct-file-row-h);
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding-block: 2px;
+  padding-inline-end: var(--oct-space-2);
+  /* One step per level, capped where a name would otherwise have nothing
+     left; files and folders hang from the same anchor. */
+  padding-inline-start: calc(
+    var(--oct-file-inset) + min(var(--oct-file-depth), var(--oct-file-depth-max)) *
+      var(--oct-tree-indent)
+  );
+  overflow: hidden;
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  text-align: left;
+}
+
+/* Dotfolders, dotfiles and ignored folders are quiet: the muted ink, for the
+   row and what it holds. */
+.code-file-explorer__entry[data-muted="true"] {
+  color: var(--oct-muted);
+}
+
+/* A guide down each ancestor level, under the row's own fill. */
+.code-file-explorer__entry::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--oct-file-inset);
+  width: calc(min(var(--oct-file-depth), var(--oct-file-depth-max)) * var(--oct-tree-indent));
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--oct-hairline) 0 1px,
+    transparent 1px var(--oct-tree-indent)
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.code-file-explorer__entry > svg {
+  flex: 0 0 auto;
+  color: var(--oct-muted);
+}
+
+.code-file-explorer__entry:hover,
+.code-file-explorer__entry:focus-visible {
+  background: var(--oct-fg-soft);
+  color: var(--oct-fg);
+}
+.code-file-explorer__entry:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
+/* The file the editor is showing takes the selection fill and the hairline
+   edge the sidebar and dock tabs draw. */
+.code-file-explorer__entry--file[aria-selected="true"] {
+  background: var(--oct-selection);
+  color: var(--oct-fg);
+}
+
+/* The folder that tells a row apart: a filtered match is flat, and two
+   files sharing one basename are otherwise the same row at this width. It
+   is already in the row's accessible name and hover title, so it appears
+   only where the tree cannot show the folder itself. */
+.code-file-explorer__hint {
+  /* The hint is one short folder name; below this it would read as an
+     ellipsis, so the name above it yields instead. */
+  min-width: 6ch;
+  max-width: 40%;
+  flex: 0 2 auto;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-file-explorer__detail {
+  min-width: 0;
+  max-width: 55%;
+  flex: 0 3 auto;
+  overflow: hidden;
+  margin-inline-start: auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A file row holds the chevron's place, so a file's glyph stands under its
+   sibling folders' glyphs. */
+.code-file-explorer__chevron-slot {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+}
+
+.code-file-explorer__entry > svg[data-file-kind="code"] {
+  color: var(--oct-muted);
+}
+
+/* A changed file: one small dot at the row's end, in the status tokens the
+   review surfaces use. The row's title names the change in words. */
+.code-file-explorer__mark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-inline-start: auto;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-warn);
+}
+
+.code-file-explorer__mark[data-change="added"] {
+  background: var(--oct-success);
+}
+
+.code-file-explorer__chevron {
+  color: var(--oct-muted);
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.code-file-explorer__entry--directory[aria-expanded="true"] .code-file-explorer__chevron {
+  transform: rotate(90deg);
+}
+
+.code-file-explorer__entry--file,
+.code-file-explorer__entry--directory {
+  cursor: default;
+}
+
+.code-file-explorer__entry--file:disabled {
+  cursor: default;
+  opacity: var(--oct-disabled-opacity);
+}
+
+/* ─── Work files panel ─────────────────────────────────────────────────
+   Work's Files tool is a grouped list, not a repository tree: it answers
+   "what did this produce" first and "what else is in the folder" second,
+   so it wears the surface language's section labels and row roles rather
+   than the explorer's tree recipe. */
+.work-files-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-3) var(--oct-space-4) var(--oct-space-5);
+  overflow: auto;
+}
+
+/* Hosted, the panel's first text stands on the bar's 12px edge. */
+.work-files-panel[data-bar-hosted="true"] {
+  padding-inline: var(--oct-space-3);
+}
+
+.work-files-panel__toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.work-files-panel__heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.work-files-panel__status,
+.work-files-panel__error {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+}
+
+.work-files-panel__error {
+  color: var(--oct-danger-fg);
+}
+
+.work-files-panel__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
+.work-files-panel__list {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+/* The hairline belongs to the list item, not the row inside it: an openable
+   row is a button and an inert row is the item itself, and both must draw
+   the same line at the same place. */
+.work-files-panel__list > li + li {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+/* One row height for folders and files. A long name stays on one line and
+   yields to an ellipsis, so the size column never steps down the list. */
+.work-files-panel__row {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-4);
+  padding-block: var(--oct-space-2);
+  text-align: left;
+}
+
+.work-files-panel__row .oct-row-detail {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A row is a control only when the host gave it a target to open. The button
+   recipe is card-shaped, so it needs the height release the fixed control
+   height would otherwise clip; hover keeps the app list's soft ink wash. */
+.work-files-panel__row--openable {
+  width: 100%;
+  height: auto;
+  min-height: 40px;
+  padding-inline: 0;
+  border-radius: var(--oct-radius-sm);
+}
+
+.work-files-panel__row--openable:hover,
+.work-files-panel__row--openable:focus-visible {
+  background: var(--oct-fg-soft);
+}
+.work-files-panel__row--openable:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
+/* Size and clip only: the panel already carries the elevation, so the tree
+   inside it draws no border or fill of its own. */
+.environment-group .code-file-explorer {
+  max-height: 46vh;
+  overflow: hidden;
+}
+
+.environment-group .code-file-explorer__search {
+  padding: 8px;
+}
+
+.environment-group .code-file-explorer__tree {
+  overflow-y: auto;
+}
+
+/* The Files tool in a Code thread: the open files are the pane bar's tabs, the
+   editor fills the pane and the tree is a 260px column at the right with its
+   filter on top. The container is sized by the dock, so the editor has its
+   final size from the first frame whatever is open. */
+.code-files-viewer {
+  container: files-viewer / inline-size;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--octant-pane-fill, var(--oct-bg));
+}
+
+.code-files-viewer__frame {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+.code-files-viewer__main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  flex-direction: column;
+}
+
+/* Where no pane bar hosts the tabs (the bottom panel), the viewer draws the
+   same 36px row itself. */
+.code-files-viewer__strip {
+  display: flex;
+  height: 36px;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-2) 0 0;
+  background: var(--octant-sidebar-fill);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
+}
+
+/* The strip row draws the bar's background and hairline itself; the tab list
+   inside it is only the scrolling run of tabs. */
+.code-files-viewer__strip > .panel-tabs {
+  min-width: 0;
+  flex: 1 1 auto;
+  background: transparent;
+  box-shadow: none;
+}
+
+.code-files-viewer__strip-fill {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.code-files-viewer__tree-toggle {
+  flex: none;
+}
+
+.code-files-viewer__body {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  flex-direction: column;
+}
+
+.code-files-viewer__body > .code-editor-pane {
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+/* Nothing open: one quiet line in the middle of the editor's place. */
+.code-files-viewer__empty {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 0;
+  /* The panes' one empty pattern: the mark over its line. */
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  text-align: center;
+}
+
+.code-files-viewer__tree {
+  display: flex;
+  width: 260px;
+  min-width: 0;
+  min-height: 0;
+  flex: 0 0 260px;
+  flex-direction: column;
+  box-shadow: inset 1px 0 0 var(--octant-pane-line, var(--octant-border-soft));
+}
+
+.code-files-viewer__frame[data-tree="closed"] > .code-files-viewer__tree {
+  display: none;
+}
+
+/* The checkout cannot be read and no file is open: there is no tree to browse
+   and no file to choose, so the pane is the one state, in its middle. The
+   split drew "Choose a file to open it here." beside "Code checkout is
+   unavailable.", under a tab row with nothing in it. */
+.code-files-viewer[data-unavailable="true"] > .code-files-viewer__strip,
+.code-files-viewer[data-unavailable="true"] .code-files-viewer__main {
+  display: none;
+}
+
+.code-files-viewer[data-unavailable="true"] .code-files-viewer__tree {
+  display: flex;
+  width: auto;
+  flex: 1 1 0;
+  box-shadow: none;
+}
+
+.code-files-viewer__tree .code-file-explorer-panel {
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The tree column: 28px rows hung from the pane's 12px inset, under a 32px
+   filter row on the same inset. */
+.code-files-viewer__tree .code-file-explorer {
+  --oct-file-inset: 4px;
+}
+
+/* Too narrow for both (under 480px): the tree and the editor take turns. With
+   the tree open it fills the pane, and choosing a file closes it. The rule
+   used to restyle the query container itself, which a container query cannot
+   do: the editor's column collapsed to the 40px of its toggle and stood as an
+   empty gutter left of the tree. */
+@container files-viewer (max-width: 479px) {
+  .code-files-viewer__frame[data-tree="open"] > .code-files-viewer__main {
+    display: none;
+  }
+
+  .code-files-viewer__frame[data-tree="open"] > .code-files-viewer__tree {
+    width: auto;
+    flex: 1 1 0;
+    box-shadow: none;
+  }
+}
+
+/* A capped tree ends in one muted row, not a paragraph above the list. */
+.code-file-explorer__more {
+  display: flex;
+  min-height: var(--oct-file-row-h);
+  align-items: center;
+  padding-inline: var(--oct-file-inset);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}

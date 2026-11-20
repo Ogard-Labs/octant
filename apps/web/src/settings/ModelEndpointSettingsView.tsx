@@ -1,3 +1,4 @@
+import "../styles/provider-settings.css";
 import {
   decodeProviderInstanceId,
   type HiddenProviderModelRef,

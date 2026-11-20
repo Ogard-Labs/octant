@@ -142,8 +142,14 @@ export async function acquireHostRuntimeOwner(
     }
     const attached = await tryAttach(options.paths, expectedOwner);
     if (attached !== undefined) return attached;
-    const initializingOwner = await waitForAttachment(options.paths, expectedOwner);
-    if (initializingOwner !== undefined) return initializingOwner;
+    // The attachment wait exists for an owner still initializing. A new owner
+    // listens before it writes its secret, and quarantine moves the receipt
+    // first, so a contender that finds the receipt missing still waits and
+    // attaches to the winner — only a socket already proven dead skips it.
+    if (!(await ownerIsProvablyDead(options.paths, expectedOwner, processAlive))) {
+      const initializingOwner = await waitForAttachment(options.paths, expectedOwner);
+      if (initializingOwner !== undefined) return initializingOwner;
+    }
     const staleReceipt = await readVerifiedStaleReceipt(options.paths, expectedOwner);
     if (staleReceipt === undefined) {
       throw new HostRuntimeOwnershipError(
@@ -361,6 +367,47 @@ async function waitForAttachment(
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   return undefined;
+}
+
+/**
+ * True only when every artifact agrees the recorded owner is gone: the secret
+ * it wrote is still there, the socket refuses connections rather than timing
+ * out, its receipt verifies, and its pid is dead. Anything less could be an
+ * owner mid-initialization and still deserves the attachment wait.
+ */
+async function ownerIsProvablyDead(
+  paths: HostRuntimePaths,
+  expected: ExpectedOwnerFacts,
+  processAlive: ProcessAlive,
+): Promise<boolean> {
+  if ((await safeLstat(paths.controlSecretPath)) === undefined) return false;
+  if (!(await ownerSocketRefusesConnections(paths.socketPath))) return false;
+  const stale = await readVerifiedStaleReceipt(paths, expected);
+  if (stale === undefined) return false;
+  return !(await processAlive(stale.receipt.pid, stale.receipt.processStart));
+}
+
+/**
+ * True only when the kernel reports nothing listening on the socket —
+ * connection refused, or the path gone between stat and connect — as distinct
+ * from a timeout or any other failure, where a listener could still appear.
+ */
+async function ownerSocketRefusesConnections(path: string): Promise<boolean> {
+  return await new Promise((resolve) => {
+    const socket = createConnection(path);
+    let settled = false;
+    const finish = (refused: boolean) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(refused);
+    };
+    socket.setTimeout(1_000, () => finish(false));
+    socket.once("error", (error: { readonly code?: unknown }) => {
+      finish(error.code === "ECONNREFUSED" || error.code === "ENOENT");
+    });
+    socket.once("connect", () => finish(false));
+  });
 }
 
 function createControlServer(

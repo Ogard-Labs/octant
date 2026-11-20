@@ -83,10 +83,9 @@ import type {
 import { OctantButton } from "../ui/base/OctantButton";
 import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
 import { SplitWorkspace, type PaneFacts, type SplitWorkspaceProps } from "./SplitWorkspace";
-import { ProjectOverview } from "../projects/ProjectOverview";
 import type { ExtraFolderChange, ProjectChange } from "../projects/useProjectController";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
-import { CoordinatorProposalCards } from "../code/CoordinatorProposalCards";
+
 import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
 import { EnvironmentFoldScope } from "../environment/environmentSections";
 import { hubAdministrationOf, ownerUnlockOf, type OctantHostBridge } from "./hostBridge";
@@ -101,7 +100,6 @@ import {
 } from "../harness/modelRoleOptions";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
-import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
 import { observeCodeBranchState, switchCodeBranch } from "../code/switchCodeBranch";
 import { nativeCodeWorkspaceApprovals } from "../code/codeWorkspaceApprovals";
 import type { ThreadMoveRequest } from "../app/shellActions";
@@ -124,19 +122,15 @@ import type { ChatThread, ChatThreadId, ChatTurnId } from "@octant/contracts/cha
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useChatController } from "../chat/useChatController";
 import type { ChatController, ChatReadCursorStore } from "../chat/useChatController";
-import { ChatWorkspace } from "../chat/ChatWorkspace";
 import { ChatWelcome } from "../chat/ChatWelcome";
-import { ChatProjectOverview } from "../chat/ChatProjectOverview";
 import type { CodeController } from "../code/useCodeController";
 import { useCodeThreadController, type CodeThreadControllers } from "../code/codeThreadControllers";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { CodeOverview } from "../code/CodeOverview";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
 import type { WorkTurnId } from "@octant/contracts/work-turns";
 import type { CodeOverviewSurfaceKind } from "../code/CodeOverview";
 import { codeSurfaceTitle } from "../code/codeSurfaces";
-import { WorkOverview } from "../work/WorkOverview";
 import { buildWorkOverviewModel } from "../work/buildWorkOverviewModel";
 import type { WorkOverviewModel } from "../work/WorkOverview";
 import { useWorkOverviewController } from "../work/useWorkOverviewController";
@@ -146,7 +140,6 @@ import type { GoalClient } from "@octant/client-runtime/goal-client";
 import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import type { AutomationClient, UsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
-import { WorkResearchPanel } from "../work/WorkResearchPanel";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
@@ -179,29 +172,79 @@ import type { ComputerUseClient } from "@octant/client-runtime/computer-use-clie
 import type { BrowserContextId, BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { LocalServerOpenTarget } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
-import { BrowserWorkspace } from "../browser/BrowserWorkspace";
 import {
   openDedicatedBrowserContext,
   releaseBrowserContext,
 } from "../browser/dedicatedBrowserContext";
-import { MarkdownLinkActionsContext } from "../markdown/Markdown";
+import { MarkdownLinkActionsContext } from "../markdown/markdownLinkActions";
 import { openExternalUrl } from "./openExternalUrl";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
-import { WorkPromotionFlow } from "../work/WorkPromotionFlow";
 import type { WorkPromotionController } from "../work/useWorkPromotionController";
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
-import { ProjectCanvasInventory } from "../projects/ProjectCanvasInventory";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
 import type { DraftRecentThread } from "./DraftThreadWorkspace";
 import type { OctantMode } from "@octant/contracts/modes";
-import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
-import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
-import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
 import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivityPictureInPicture";
 import { threadHasBrowserSurface } from "./browserActivityReveal";
 import type { ThreadProviderIdentity } from "./navigationModel";
 
+const CoordinatorProposalCards = lazy(() =>
+  import("../code/CoordinatorProposalCards").then((module) => ({
+    default: module.CoordinatorProposalCards,
+  })),
+);
+const ChatWorkspace = lazy(() =>
+  import("../chat/ChatWorkspace").then((module) => ({ default: module.ChatWorkspace })),
+);
+const WorkThreadWorkspace = lazy(() =>
+  import("../work/WorkThreadWorkspace").then((module) => ({
+    default: module.WorkThreadWorkspace,
+  })),
+);
+const BrowserWorkspace = lazy(() =>
+  import("../browser/BrowserWorkspace").then((module) => ({ default: module.BrowserWorkspace })),
+);
+const ChatThreadEnvironment = lazy(() =>
+  import("../environment/ChatThreadEnvironment").then((module) => ({
+    default: module.ChatThreadEnvironment,
+  })),
+);
+const CodeThreadEnvironment = lazy(() =>
+  import("../environment/CodeThreadEnvironment").then((module) => ({
+    default: module.CodeThreadEnvironment,
+  })),
+);
+const WorkThreadEnvironment = lazy(() =>
+  import("../environment/WorkThreadEnvironment").then((module) => ({
+    default: module.WorkThreadEnvironment,
+  })),
+);
+const ChatProjectOverview = lazy(() =>
+  import("../chat/ChatProjectOverview").then(({ ChatProjectOverview }) => ({
+    default: ChatProjectOverview,
+  })),
+);
+const CodeOverview = lazy(() =>
+  import("../code/CodeOverview").then(({ CodeOverview }) => ({ default: CodeOverview })),
+);
+const ProjectCanvasInventory = lazy(() =>
+  import("../projects/ProjectCanvasInventory").then(({ ProjectCanvasInventory }) => ({
+    default: ProjectCanvasInventory,
+  })),
+);
+const ProjectOverview = lazy(() =>
+  import("../projects/ProjectOverview").then((module) => ({ default: module.ProjectOverview })),
+);
+const WorkOverview = lazy(() =>
+  import("../work/WorkOverview").then((module) => ({ default: module.WorkOverview })),
+);
+const WorkResearchPanel = lazy(() =>
+  import("../work/WorkResearchPanel").then((module) => ({ default: module.WorkResearchPanel })),
+);
+const WorkPromotionFlow = lazy(() =>
+  import("../work/WorkPromotionFlow").then((module) => ({ default: module.WorkPromotionFlow })),
+);
 const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
 const CanvasWorkspaceTab = lazy(() =>
   import("../canvas/CanvasWorkspaceTab").then((module) => ({
@@ -1767,222 +1810,232 @@ function renderCodeTab(
           {...threadBrowserPreview(props, paneId, String(tab.threadId))}
           threadId={tab.threadId as never}
         >
-          <CodeThreadEnvironment
-            active={paneIsActive(props, paneId)}
-            threadMove={threadMoveEnvironmentFor(props, "code")}
-            observe={codeController.conversationHistory === "loaded"}
-            checkoutAvailability={checkoutAvailability}
-            {...(props.environmentDockOpen === undefined
-              ? {}
-              : { environmentOpen: props.environmentDockOpen })}
-            {...(props.agentRunClient === undefined
-              ? {}
-              : { agentRunClient: props.agentRunClient })}
-            {...(props.goalClient === undefined ? {} : { goalClient: props.goalClient })}
-            {...(codeController.activeView?.thread.deliveryTarget.outcomeKind === undefined
-              ? {}
-              : { deliveryOutcome: codeController.activeView.thread.deliveryTarget.outcomeKind })}
-            {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
-            {...(props.automationClient === undefined
-              ? {}
-              : { automationClient: props.automationClient })}
-            {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
-            {...worktreeSetupFor(props.onOpenWorktrees, codeController.activeView, tab.threadId)}
-            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-            {...(props.openInApplications === undefined
-              ? {}
-              : { openInApplications: props.openInApplications })}
-            {...(project === undefined ? {} : { project })}
-            {...(props.onNewThreadInProject === undefined
-              ? {}
-              : { onNewThreadInProject: props.onNewThreadInProject })}
-            {...(project === undefined || props.onNewThreadInProject === undefined
-              ? {}
-              : {
-                  onNewTaskOnBranch: () =>
-                    props.onNewThreadInProject?.(project.id, { startFrom: true }),
-                })}
-            {...(project === undefined || activeThread === undefined
-              ? {}
-              : {
-                  onObserveBranchState: () =>
-                    observeCodeBranchState(
-                      codeController.client,
-                      () => globalThis.crypto.randomUUID(),
-                      { threadId: tab.threadId, checkoutId: activeThread.checkoutId },
-                    ),
-                  onSwitchBranch: (request) =>
-                    switchCodeBranch(
-                      codeController.client,
-                      () => globalThis.crypto.randomUUID(),
-                      { threadId: tab.threadId, checkoutId: activeThread.checkoutId },
-                      request,
-                      {
-                        executionPolicy: activeThread.executionPolicy,
-                        ...(workspaceGitApproval === undefined
-                          ? {}
-                          : { requestApproval: workspaceGitApproval }),
-                      },
-                    ),
-                })}
-            {...(project === undefined || props.onRequestMoveToProject === undefined
-              ? {}
-              : {
-                  onMoveToProject: () =>
-                    props.onRequestMoveToProject?.({
-                      mode: "code",
-                      threadId: String(tab.threadId),
-                      title: tab.title,
-                      projectId: String(project.id),
-                      ...(activeThread === undefined
-                        ? {}
-                        : {
-                            providerInstanceId: String(activeThread.providerInstanceId),
-                            modelId: String(activeThread.modelId),
-                            ...(activeThread.workingFolderId === undefined
-                              ? {}
-                              : { workingFolderId: String(activeThread.workingFolderId) }),
-                          }),
-                      ...(activeCheckout === undefined
-                        ? {}
-                        : {
-                            checkoutKind: activeCheckout.kind,
-                            checkoutAvailability: activeCheckout.availability,
-                          }),
-                    }),
-                })}
-            checkoutKind={activeCheckout?.kind}
-            projects={props.projects}
-            {...(props.runningThreadIds?.has(String(tab.threadId)) === true ||
-            props.waitingThreadIds?.has(String(tab.threadId)) === true
-              ? { threadBusy: true }
-              : {})}
-            {...(activeThread === undefined ? {} : { threadPolicy: activeThread.executionPolicy })}
-            {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
-            {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-            {...(props.projectWindowCapability === undefined
-              ? {}
-              : { windowCapability: props.projectWindowCapability })}
-            {...(props.localServerClient === undefined
-              ? {}
-              : { localServerClient: props.localServerClient })}
-            {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
-            pullRequestClient={codeController.client}
-            {...threadPullRequestProps(props, codeController, String(tab.threadId))}
-            {...(props.onOpenPullRequests === undefined
-              ? {}
-              : { onOpenPullRequests: props.onOpenPullRequests })}
-            {...(props.onSelectPullRequest === undefined
-              ? {}
-              : {
-                  onSelectPullRequest: (row: CodeProjectPullRequestRow) =>
-                    props.onSelectPullRequest?.({
-                      projectId: row.projectId,
-                      repositoryOwner: row.repositoryOwner,
-                      repositoryName: row.repositoryName,
-                      number: row.number,
-                    }),
-                })}
-            {...(browserAutomationClient === undefined || onOpenSurface === undefined
-              ? {}
-              : {
-                  onOpenLocalServer: async (target: LocalServerOpenTarget) => {
-                    const browserThreadId = tab.threadId as unknown as BrowserThreadId;
-                    const contextId = await openDedicatedBrowserContext(
-                      browserAutomationClient,
-                      browserThreadId,
-                      "code",
-                      {
-                        allowedOrigin: target.allowedOrigin,
-                        url: String(target.url),
-                        ...(target.acceptsLocalCertificate
-                          ? { acceptsLocalCertificate: true }
-                          : {}),
-                      },
-                    );
-                    // Named by the context it just created, so this Open gets its
-                    // own tab instead of taking over the thread's Browser tab.
-                    // The shell recovers a rejected tab mutation rather than
-                    // throwing, so only its adoption answer proves the context
-                    // gained a close path; without one it is released here and
-                    // the Open is reported as the failure it was.
-                    const adopted = await onOpenSurface("browser", paneId, contextId);
-                    if (adopted) return;
-                    await releaseBrowserContext(
-                      browserAutomationClient,
-                      browserThreadId,
-                      contextId,
-                    );
-                    throw new Error("No Browser tab adopted the context opened for this server.");
-                  },
-                })}
-            {...(globalThis.navigator?.clipboard === undefined
-              ? {}
-              : {
-                  onCopyLocalServerUrl: (url: string) => navigator.clipboard.writeText(url),
-                })}
-            tab={tab}
-            latestSettledTurn={
-              codeController.conversationHistory === "loaded"
-                ? latestSettledTurn(codeController.conversation)
-                : undefined
+          <Suspense
+            fallback={
+              <OctantEmpty message="Loading workspace." state="loading" title="Loading workspace" />
             }
-            sources={
-              codeController.conversationHistory !== "loaded"
-                ? []
-                : [
-                    ...new Map(
-                      codeController.conversation
-                        .flatMap((message) => message.attachments ?? [])
-                        .map((attachment) => [String(attachment.attachmentId), attachment]),
-                    ).values(),
-                  ]
-            }
-            sourceClient={codeController.client}
-            onOpenGit={() => props.onOpenCodeSurface("code-git", tab.threadId, "Git")}
-            onCreatePullRequest={() =>
-              props.onOpenCodeSurface("code-pr", tab.threadId, "Pull request")
-            }
-            onExecute={codeController.execute}
-            {...(props.onOpenReview === undefined
-              ? {}
-              : { onOpenChanges: () => props.onOpenReview?.(tab.threadId) })}
-            {...(props.usageDashboardClient === undefined
-              ? {}
-              : { usageDashboardClient: props.usageDashboardClient })}
-            {...(props.spendCeilingClient === undefined
-              ? {}
-              : { spendCeilingClient: props.spendCeilingClient })}
-            {...(props.pullRequestReviewClient === undefined
-              ? {}
-              : {
-                  pullRequestReviewClient: props.pullRequestReviewClient,
-                  ...(props.providerController.snapshot === undefined
-                    ? {}
-                    : { providerSnapshot: props.providerController.snapshot }),
-                  ...(activeThread?.providerInstanceId === undefined
-                    ? {}
-                    : { workerProviderInstanceId: activeThread.providerInstanceId }),
-                })}
-            {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
-            {...(props.onOpenUsageDashboard === undefined
-              ? {}
-              : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
           >
-            {content}
-            {coordinatorWorkers === undefined ? null : (
-              <CoordinatorWorkersPanelSlot
-                coordinatorThreadId={String(tab.threadId)}
-                coordinatorTitle={activeThread?.title ?? tab.title}
-                onSelectPullRequest={(row) =>
-                  row.pullRequest === undefined
-                    ? undefined
-                    : props.onSelectPullRequest?.(row.pullRequest.identity)
-                }
-                source={coordinatorWorkers}
-              />
-            )}
-          </CodeThreadEnvironment>
+            <CodeThreadEnvironment
+              active={paneIsActive(props, paneId)}
+              threadMove={threadMoveEnvironmentFor(props, "code")}
+              observe={codeController.conversationHistory === "loaded"}
+              checkoutAvailability={checkoutAvailability}
+              {...(props.environmentDockOpen === undefined
+                ? {}
+                : { environmentOpen: props.environmentDockOpen })}
+              {...(props.agentRunClient === undefined
+                ? {}
+                : { agentRunClient: props.agentRunClient })}
+              {...(props.goalClient === undefined ? {} : { goalClient: props.goalClient })}
+              {...(codeController.activeView?.thread.deliveryTarget.outcomeKind === undefined
+                ? {}
+                : { deliveryOutcome: codeController.activeView.thread.deliveryTarget.outcomeKind })}
+              {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
+              {...(props.automationClient === undefined
+                ? {}
+                : { automationClient: props.automationClient })}
+              {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
+              {...worktreeSetupFor(props.onOpenWorktrees, codeController.activeView, tab.threadId)}
+              {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+              {...(props.openInApplications === undefined
+                ? {}
+                : { openInApplications: props.openInApplications })}
+              {...(project === undefined ? {} : { project })}
+              {...(props.onNewThreadInProject === undefined
+                ? {}
+                : { onNewThreadInProject: props.onNewThreadInProject })}
+              {...(project === undefined || props.onNewThreadInProject === undefined
+                ? {}
+                : {
+                    onNewTaskOnBranch: () =>
+                      props.onNewThreadInProject?.(project.id, { startFrom: true }),
+                  })}
+              {...(project === undefined || activeThread === undefined
+                ? {}
+                : {
+                    onObserveBranchState: () =>
+                      observeCodeBranchState(
+                        codeController.client,
+                        () => globalThis.crypto.randomUUID(),
+                        { threadId: tab.threadId, checkoutId: activeThread.checkoutId },
+                      ),
+                    onSwitchBranch: (request) =>
+                      switchCodeBranch(
+                        codeController.client,
+                        () => globalThis.crypto.randomUUID(),
+                        { threadId: tab.threadId, checkoutId: activeThread.checkoutId },
+                        request,
+                        {
+                          executionPolicy: activeThread.executionPolicy,
+                          ...(workspaceGitApproval === undefined
+                            ? {}
+                            : { requestApproval: workspaceGitApproval }),
+                        },
+                      ),
+                  })}
+              {...(project === undefined || props.onRequestMoveToProject === undefined
+                ? {}
+                : {
+                    onMoveToProject: () =>
+                      props.onRequestMoveToProject?.({
+                        mode: "code",
+                        threadId: String(tab.threadId),
+                        title: tab.title,
+                        projectId: String(project.id),
+                        ...(activeThread === undefined
+                          ? {}
+                          : {
+                              providerInstanceId: String(activeThread.providerInstanceId),
+                              modelId: String(activeThread.modelId),
+                              ...(activeThread.workingFolderId === undefined
+                                ? {}
+                                : { workingFolderId: String(activeThread.workingFolderId) }),
+                            }),
+                        ...(activeCheckout === undefined
+                          ? {}
+                          : {
+                              checkoutKind: activeCheckout.kind,
+                              checkoutAvailability: activeCheckout.availability,
+                            }),
+                      }),
+                  })}
+              checkoutKind={activeCheckout?.kind}
+              projects={props.projects}
+              {...(props.runningThreadIds?.has(String(tab.threadId)) === true ||
+              props.waitingThreadIds?.has(String(tab.threadId)) === true
+                ? { threadBusy: true }
+                : {})}
+              {...(activeThread === undefined
+                ? {}
+                : { threadPolicy: activeThread.executionPolicy })}
+              {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
+              {...(props.projectServerUrl === undefined
+                ? {}
+                : { serverUrl: props.projectServerUrl })}
+              {...(props.projectWindowCapability === undefined
+                ? {}
+                : { windowCapability: props.projectWindowCapability })}
+              {...(props.localServerClient === undefined
+                ? {}
+                : { localServerClient: props.localServerClient })}
+              {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
+              pullRequestClient={codeController.client}
+              {...threadPullRequestProps(props, codeController, String(tab.threadId))}
+              {...(props.onOpenPullRequests === undefined
+                ? {}
+                : { onOpenPullRequests: props.onOpenPullRequests })}
+              {...(props.onSelectPullRequest === undefined
+                ? {}
+                : {
+                    onSelectPullRequest: (row: CodeProjectPullRequestRow) =>
+                      props.onSelectPullRequest?.({
+                        projectId: row.projectId,
+                        repositoryOwner: row.repositoryOwner,
+                        repositoryName: row.repositoryName,
+                        number: row.number,
+                      }),
+                  })}
+              {...(browserAutomationClient === undefined || onOpenSurface === undefined
+                ? {}
+                : {
+                    onOpenLocalServer: async (target: LocalServerOpenTarget) => {
+                      const browserThreadId = tab.threadId as unknown as BrowserThreadId;
+                      const contextId = await openDedicatedBrowserContext(
+                        browserAutomationClient,
+                        browserThreadId,
+                        "code",
+                        {
+                          allowedOrigin: target.allowedOrigin,
+                          url: String(target.url),
+                          ...(target.acceptsLocalCertificate
+                            ? { acceptsLocalCertificate: true }
+                            : {}),
+                        },
+                      );
+                      // Named by the context it just created, so this Open gets its
+                      // own tab instead of taking over the thread's Browser tab.
+                      // The shell recovers a rejected tab mutation rather than
+                      // throwing, so only its adoption answer proves the context
+                      // gained a close path; without one it is released here and
+                      // the Open is reported as the failure it was.
+                      const adopted = await onOpenSurface("browser", paneId, contextId);
+                      if (adopted) return;
+                      await releaseBrowserContext(
+                        browserAutomationClient,
+                        browserThreadId,
+                        contextId,
+                      );
+                      throw new Error("No Browser tab adopted the context opened for this server.");
+                    },
+                  })}
+              {...(globalThis.navigator?.clipboard === undefined
+                ? {}
+                : {
+                    onCopyLocalServerUrl: (url: string) => navigator.clipboard.writeText(url),
+                  })}
+              tab={tab}
+              latestSettledTurn={
+                codeController.conversationHistory === "loaded"
+                  ? latestSettledTurn(codeController.conversation)
+                  : undefined
+              }
+              sources={
+                codeController.conversationHistory !== "loaded"
+                  ? []
+                  : [
+                      ...new Map(
+                        codeController.conversation
+                          .flatMap((message) => message.attachments ?? [])
+                          .map((attachment) => [String(attachment.attachmentId), attachment]),
+                      ).values(),
+                    ]
+              }
+              sourceClient={codeController.client}
+              onOpenGit={() => props.onOpenCodeSurface("code-git", tab.threadId, "Git")}
+              onCreatePullRequest={() =>
+                props.onOpenCodeSurface("code-pr", tab.threadId, "Pull request")
+              }
+              onExecute={codeController.execute}
+              {...(props.onOpenReview === undefined
+                ? {}
+                : { onOpenChanges: () => props.onOpenReview?.(tab.threadId) })}
+              {...(props.usageDashboardClient === undefined
+                ? {}
+                : { usageDashboardClient: props.usageDashboardClient })}
+              {...(props.spendCeilingClient === undefined
+                ? {}
+                : { spendCeilingClient: props.spendCeilingClient })}
+              {...(props.pullRequestReviewClient === undefined
+                ? {}
+                : {
+                    pullRequestReviewClient: props.pullRequestReviewClient,
+                    ...(props.providerController.snapshot === undefined
+                      ? {}
+                      : { providerSnapshot: props.providerController.snapshot }),
+                    ...(activeThread?.providerInstanceId === undefined
+                      ? {}
+                      : { workerProviderInstanceId: activeThread.providerInstanceId }),
+                  })}
+              {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
+              {...(props.onOpenUsageDashboard === undefined
+                ? {}
+                : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
+            >
+              {content}
+              {coordinatorWorkers === undefined ? null : (
+                <CoordinatorWorkersPanelSlot
+                  coordinatorThreadId={String(tab.threadId)}
+                  coordinatorTitle={activeThread?.title ?? tab.title}
+                  onSelectPullRequest={(row) =>
+                    row.pullRequest === undefined
+                      ? undefined
+                      : props.onSelectPullRequest?.(row.pullRequest.identity)
+                  }
+                  source={coordinatorWorkers}
+                />
+              )}
+            </CodeThreadEnvironment>
+          </Suspense>
         </ThreadActivityPictureInPicture>
       </ThreadPlanProvider>
     </CodeWorkspaceErrorBoundary>
@@ -2378,142 +2431,160 @@ function renderNonCodeTab(
     return (
       <WorkThreadDisplayBoundary key={tab.id}>
         {({ displayReady, onDisplayReadyChange }) => (
-          <WorkThreadEnvironment
-            active={paneIsActive(props, paneId)}
-            threadMove={threadMoveEnvironmentFor(props, "work")}
-            {...(props.environmentDockOpen === undefined
-              ? {}
-              : { environmentOpen: props.environmentDockOpen })}
-            {...(!displayReady || props.agentRunClient === undefined
-              ? {}
-              : { agentRunClient: props.agentRunClient })}
-            {...(!displayReady || props.onOpenAgents === undefined
-              ? {}
-              : { onOpenAgents: props.onOpenAgents })}
-            {...(!displayReady || props.automationClient === undefined
-              ? {}
-              : { automationClient: props.automationClient })}
-            {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
-            {...(initialThread === undefined ? {} : { initialThread })}
-            {...(props.goalClient === undefined ? {} : { goalClient: props.goalClient })}
-            {...(props.goalLoopClient === undefined
-              ? {}
-              : { goalLoopClient: props.goalLoopClient })}
-            {...(props.usageDashboardClient === undefined
-              ? {}
-              : { usageDashboardClient: props.usageDashboardClient })}
-            {...(props.spendCeilingClient === undefined
-              ? {}
-              : { spendCeilingClient: props.spendCeilingClient })}
-            {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
-            {...(props.onOpenUsageDashboard === undefined
-              ? {}
-              : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
-            projects={props.projects}
-            tab={tab}
-            threadClient={workThreadClient}
+          <Suspense
+            fallback={
+              <OctantEmpty message="Loading workspace." state="loading" title="Loading workspace" />
+            }
           >
-            <ThreadActivityPictureInPicture
-              enabled={displayReady}
-              {...(props.browserAutomationClient === undefined
+            <WorkThreadEnvironment
+              active={paneIsActive(props, paneId)}
+              threadMove={threadMoveEnvironmentFor(props, "work")}
+              {...(props.environmentDockOpen === undefined
                 ? {}
-                : { browserClient: props.browserAutomationClient })}
-              {...(props.computerUseClient === undefined
+                : { environmentOpen: props.environmentDockOpen })}
+              {...(!displayReady || props.agentRunClient === undefined
                 ? {}
-                : { computerUseClient: props.computerUseClient })}
-              {...(props.onComputerUseSessionChange === undefined
+                : { agentRunClient: props.agentRunClient })}
+              {...(!displayReady || props.onOpenAgents === undefined
                 ? {}
-                : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
-              {...threadBrowserReveal(props.onRevealBrowserActivity, paneId, String(tab.threadId))}
-              {...threadBrowserPreview(props, paneId, String(tab.threadId))}
-              threadId={tab.threadId as never}
+                : { onOpenAgents: props.onOpenAgents })}
+              {...(!displayReady || props.automationClient === undefined
+                ? {}
+                : { automationClient: props.automationClient })}
+              {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
+              {...(initialThread === undefined ? {} : { initialThread })}
+              {...(props.goalClient === undefined ? {} : { goalClient: props.goalClient })}
+              {...(props.goalLoopClient === undefined
+                ? {}
+                : { goalLoopClient: props.goalLoopClient })}
+              {...(props.usageDashboardClient === undefined
+                ? {}
+                : { usageDashboardClient: props.usageDashboardClient })}
+              {...(props.spendCeilingClient === undefined
+                ? {}
+                : { spendCeilingClient: props.spendCeilingClient })}
+              {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
+              {...(props.onOpenUsageDashboard === undefined
+                ? {}
+                : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
+              projects={props.projects}
+              tab={tab}
+              threadClient={workThreadClient}
             >
-              <WorkThreadWorkspace
-                projects={props.projects}
-                {...(props.workDefaultStrict === true ? { workDefaultStrict: true } : {})}
-                {...(props.revealTurn?.mode === "work" &&
-                String(props.revealTurn.threadId) === String(tab.threadId)
-                  ? {
-                      revealTurnId: props.revealTurn.turnId,
-                      ...(props.onTurnRevealed === undefined
-                        ? {}
-                        : { onTurnRevealed: props.onTurnRevealed }),
-                    }
-                  : {})}
+              <ThreadActivityPictureInPicture
+                enabled={displayReady}
                 {...(props.browserAutomationClient === undefined
                   ? {}
-                  : { browserAutomationClient: props.browserAutomationClient })}
-                {...(props.workChangeRevision === undefined
+                  : { browserClient: props.browserAutomationClient })}
+                {...(props.computerUseClient === undefined
                   ? {}
-                  : { changeRevision: props.workChangeRevision })}
-                {...(initialThread === undefined ? {} : { initialThread })}
-                onDisplayReadyChange={onDisplayReadyChange}
-                {...(props.workMutationClient === undefined
+                  : { computerUseClient: props.computerUseClient })}
+                {...(props.onComputerUseSessionChange === undefined
                   ? {}
-                  : { mutationClient: props.workMutationClient })}
-                {...(props.workTurnClient === undefined
-                  ? {}
-                  : { turnClient: props.workTurnClient })}
-                {...(props.workRequestClient === undefined
-                  ? {}
-                  : { requestClient: props.workRequestClient })}
-                threadClient={workThreadClient}
-                threadId={tab.threadId}
-                title={tab.title}
-                providerGroups={props.workProviderGroups ?? []}
-                {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
-                {...(props.onCanvasReferencesObserved === undefined
-                  ? {}
-                  : {
-                      onCanvasReferencesObserved: (threadId, cards) =>
-                        props.onCanvasReferencesObserved?.("work", threadId, cards),
-                    })}
-                {...(props.imageGenerationClient === undefined
-                  ? {}
-                  : { imageGenerationClient: props.imageGenerationClient })}
-                {...(props.imageGenerationProfiles === undefined
-                  ? {}
-                  : { imageGenerationProfiles: props.imageGenerationProfiles })}
-                {...(openProviderSettings === undefined
-                  ? {}
-                  : { onOpenSettings: openProviderSettings })}
-                {...(props.onOpenImageSettings === undefined
-                  ? {}
-                  : { onOpenImageSettings: props.onOpenImageSettings })}
-                {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
-                {...(props.projectServerUrl === undefined
-                  ? {}
-                  : { serverUrl: props.projectServerUrl })}
-                {...(props.projectWindowCapability === undefined
-                  ? {}
-                  : { windowCapability: props.projectWindowCapability })}
-                {...(props.extensionClient === undefined
-                  ? {}
-                  : { extensionClient: props.extensionClient })}
-                {...(props.automationClient === undefined
-                  ? {}
-                  : { automationClient: props.automationClient })}
-                {...(props.projectClient === undefined
-                  ? {}
-                  : { memoryProposalClient: props.projectClient })}
-                {...(props.onOpenCanvasReference === undefined
-                  ? {}
-                  : { onOpenCanvas: props.onOpenCanvasReference })}
-                {...(props.onOpenCanvasInSidebar === undefined
-                  ? {}
-                  : { onOpenCanvasInSidebar: props.onOpenCanvasInSidebar })}
-                {...(props.onWorkThreadUpdated === undefined
-                  ? {}
-                  : { onThreadUpdated: props.onWorkThreadUpdated })}
-                {...(props.onOpenWorkThread === undefined
-                  ? {}
-                  : {
-                      onOpenWorkThread: (opened) =>
-                        props.onOpenWorkThread?.(opened.id, opened.projectId, opened.title),
-                    })}
-              />
-            </ThreadActivityPictureInPicture>
-          </WorkThreadEnvironment>
+                  : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
+                {...threadBrowserReveal(
+                  props.onRevealBrowserActivity,
+                  paneId,
+                  String(tab.threadId),
+                )}
+                {...threadBrowserPreview(props, paneId, String(tab.threadId))}
+                threadId={tab.threadId as never}
+              >
+                <Suspense
+                  fallback={
+                    <OctantEmpty message="Loading work." state="loading" title="Loading work" />
+                  }
+                >
+                  <WorkThreadWorkspace
+                    projects={props.projects}
+                    {...(props.workDefaultStrict === true ? { workDefaultStrict: true } : {})}
+                    {...(props.revealTurn?.mode === "work" &&
+                    String(props.revealTurn.threadId) === String(tab.threadId)
+                      ? {
+                          revealTurnId: props.revealTurn.turnId,
+                          ...(props.onTurnRevealed === undefined
+                            ? {}
+                            : { onTurnRevealed: props.onTurnRevealed }),
+                        }
+                      : {})}
+                    {...(props.browserAutomationClient === undefined
+                      ? {}
+                      : { browserAutomationClient: props.browserAutomationClient })}
+                    {...(props.workChangeRevision === undefined
+                      ? {}
+                      : { changeRevision: props.workChangeRevision })}
+                    {...(initialThread === undefined ? {} : { initialThread })}
+                    onDisplayReadyChange={onDisplayReadyChange}
+                    {...(props.workMutationClient === undefined
+                      ? {}
+                      : { mutationClient: props.workMutationClient })}
+                    {...(props.workTurnClient === undefined
+                      ? {}
+                      : { turnClient: props.workTurnClient })}
+                    {...(props.workRequestClient === undefined
+                      ? {}
+                      : { requestClient: props.workRequestClient })}
+                    threadClient={workThreadClient}
+                    threadId={tab.threadId}
+                    title={tab.title}
+                    providerGroups={props.workProviderGroups ?? []}
+                    {...(props.canvasClient === undefined
+                      ? {}
+                      : { canvasClient: props.canvasClient })}
+                    {...(props.onCanvasReferencesObserved === undefined
+                      ? {}
+                      : {
+                          onCanvasReferencesObserved: (threadId, cards) =>
+                            props.onCanvasReferencesObserved?.("work", threadId, cards),
+                        })}
+                    {...(props.imageGenerationClient === undefined
+                      ? {}
+                      : { imageGenerationClient: props.imageGenerationClient })}
+                    {...(props.imageGenerationProfiles === undefined
+                      ? {}
+                      : { imageGenerationProfiles: props.imageGenerationProfiles })}
+                    {...(openProviderSettings === undefined
+                      ? {}
+                      : { onOpenSettings: openProviderSettings })}
+                    {...(props.onOpenImageSettings === undefined
+                      ? {}
+                      : { onOpenImageSettings: props.onOpenImageSettings })}
+                    {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
+                    {...(props.projectServerUrl === undefined
+                      ? {}
+                      : { serverUrl: props.projectServerUrl })}
+                    {...(props.projectWindowCapability === undefined
+                      ? {}
+                      : { windowCapability: props.projectWindowCapability })}
+                    {...(props.extensionClient === undefined
+                      ? {}
+                      : { extensionClient: props.extensionClient })}
+                    {...(props.automationClient === undefined
+                      ? {}
+                      : { automationClient: props.automationClient })}
+                    {...(props.projectClient === undefined
+                      ? {}
+                      : { memoryProposalClient: props.projectClient })}
+                    {...(props.onOpenCanvasReference === undefined
+                      ? {}
+                      : { onOpenCanvas: props.onOpenCanvasReference })}
+                    {...(props.onOpenCanvasInSidebar === undefined
+                      ? {}
+                      : { onOpenCanvasInSidebar: props.onOpenCanvasInSidebar })}
+                    {...(props.onWorkThreadUpdated === undefined
+                      ? {}
+                      : { onThreadUpdated: props.onWorkThreadUpdated })}
+                    {...(props.onOpenWorkThread === undefined
+                      ? {}
+                      : {
+                          onOpenWorkThread: (opened) =>
+                            props.onOpenWorkThread?.(opened.id, opened.projectId, opened.title),
+                        })}
+                  />
+                </Suspense>
+              </ThreadActivityPictureInPicture>
+            </WorkThreadEnvironment>
+          </Suspense>
         )}
       </WorkThreadDisplayBoundary>
     );
@@ -2581,48 +2652,54 @@ function renderNonCodeTab(
         title="Browser is unavailable"
       />
     ) : (
-      <BrowserWorkspace
-        key={tab.id}
-        canDrawOnPage
-        client={props.browserAutomationClient}
-        onAgentBrowserRecovery={(reason) => {
-          if (tab.threadId === undefined) return;
-          if (reason === "host-lends-no-browser") {
-            props.onOpenSettings?.();
-            return;
-          }
-          requestThreadControl(
-            String(tab.threadId),
-            reason === "no-tool-transport" ? "provider" : "access",
-          );
-          if (tab.mode === "code") {
-            const thread = props.codeController.bootstrap?.threads.find(
-              (candidate) => String(candidate.id) === String(tab.threadId),
+      <Suspense
+        fallback={
+          <OctantEmpty message="Loading browser." state="loading" title="Loading browser" />
+        }
+      >
+        <BrowserWorkspace
+          key={tab.id}
+          canDrawOnPage
+          client={props.browserAutomationClient}
+          onAgentBrowserRecovery={(reason) => {
+            if (tab.threadId === undefined) return;
+            if (reason === "host-lends-no-browser") {
+              props.onOpenSettings?.();
+              return;
+            }
+            requestThreadControl(
+              String(tab.threadId),
+              reason === "no-tool-transport" ? "provider" : "access",
             );
-            props.onOpenCodeThread(
-              decodeCodeThreadId(String(tab.threadId)),
-              thread?.title ?? "Code task",
-              thread?.projectId,
-            );
-          } else if (tab.mode === "work") {
-            const thread = props.workThreads?.find(
-              (candidate) => String(candidate.id) === String(tab.threadId),
-            );
-            if (thread !== undefined)
-              props.onOpenWorkThread?.(thread.id, thread.projectId, thread.title);
-          }
-        }}
-        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-        {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-        {...(props.projectWindowCapability === undefined
-          ? {}
-          : { windowCapability: props.projectWindowCapability })}
-        {...(props.onDockResearch === undefined ? {} : { onDockResearch: props.onDockResearch })}
-        {...(props.onOpenSettings === undefined
-          ? {}
-          : { onManageExtensions: props.onOpenSettings })}
-        tab={tab}
-      />
+            if (tab.mode === "code") {
+              const thread = props.codeController.bootstrap?.threads.find(
+                (candidate) => String(candidate.id) === String(tab.threadId),
+              );
+              props.onOpenCodeThread(
+                decodeCodeThreadId(String(tab.threadId)),
+                thread?.title ?? "Code task",
+                thread?.projectId,
+              );
+            } else if (tab.mode === "work") {
+              const thread = props.workThreads?.find(
+                (candidate) => String(candidate.id) === String(tab.threadId),
+              );
+              if (thread !== undefined)
+                props.onOpenWorkThread?.(thread.id, thread.projectId, thread.title);
+            }
+          }}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+          {...(props.projectWindowCapability === undefined
+            ? {}
+            : { windowCapability: props.projectWindowCapability })}
+          {...(props.onDockResearch === undefined ? {} : { onDockResearch: props.onDockResearch })}
+          {...(props.onOpenSettings === undefined
+            ? {}
+            : { onManageExtensions: props.onOpenSettings })}
+          tab={tab}
+        />
+      </Suspense>
     );
   }
   if (tab.kind === "files") {
@@ -2665,96 +2742,151 @@ function renderNonCodeTab(
     }
     const availability = props.availabilityByProject.get(project.id);
     return (
-      <ProjectOverview
-        {...(props.onOpenSandboxRestrictionsSettings === undefined
-          ? {}
-          : {
-              onOpenSandboxRestrictions: () =>
-                props.onOpenSandboxRestrictionsSettings?.({
-                  kind: "project",
-                  projectId: project.id,
-                }),
-            })}
-        {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
-        {...(props.octantInstructionsClient === undefined
-          ? {}
-          : { octantInstructionsClient: props.octantInstructionsClient })}
-        memoryProjects={props.projects}
-        {...(props.nativeHarnessClient === undefined
-          ? {}
-          : {
-              modelRoles: {
-                client: props.nativeHarnessClient,
-                groups: modelRolePickerGroups(props.providerController),
-                hostId: LOCAL_HOST_ID,
-                readiness: nativeHarnessReadinessById(
-                  modelRoleProviderOptions(props.providerController),
+      <Suspense
+        fallback={
+          <OctantEmpty message="Loading workspace." state="loading" title="Loading workspace" />
+        }
+      >
+        <ProjectOverview
+          {...(props.onOpenSandboxRestrictionsSettings === undefined
+            ? {}
+            : {
+                onOpenSandboxRestrictions: () =>
+                  props.onOpenSandboxRestrictionsSettings?.({
+                    kind: "project",
+                    projectId: project.id,
+                  }),
+              })}
+          {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
+          {...(props.octantInstructionsClient === undefined
+            ? {}
+            : { octantInstructionsClient: props.octantInstructionsClient })}
+          memoryProjects={props.projects}
+          {...(props.nativeHarnessClient === undefined
+            ? {}
+            : {
+                modelRoles: {
+                  client: props.nativeHarnessClient,
+                  groups: modelRolePickerGroups(props.providerController),
+                  hostId: LOCAL_HOST_ID,
+                  readiness: nativeHarnessReadinessById(
+                    modelRoleProviderOptions(props.providerController),
+                  ),
+                },
+              })}
+          {...(props.spendCeilingClient === undefined
+            ? {}
+            : { spendCeilingClient: props.spendCeilingClient })}
+          {...(props.pullRequestReviewClient === undefined
+            ? {}
+            : {
+                pullRequestReviewClient: props.pullRequestReviewClient,
+                ...(props.providerController.snapshot === undefined
+                  ? {}
+                  : { providerSnapshot: props.providerController.snapshot }),
+              })}
+          {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
+          {...(props.onMemoryChanged === undefined
+            ? {}
+            : { onMemoryChanged: props.onMemoryChanged })}
+          {...(props.onNewThreadInProject === undefined || project.lifecycle !== "active"
+            ? {}
+            : { onNewThread: () => props.onNewThreadInProject?.(project.id) })}
+          {...(project.type === "chat"
+            ? {
+                chatOverview: (
+                  <NewTaskDraftScopeContext.Provider value={`chat-overview:${String(project.id)}`}>
+                    <ChatProjectOverview
+                      client={props.chatClient}
+                      controller={props.chatController}
+                      {...(project.lifecycle === "active" &&
+                      props.chatController.status === "ready" &&
+                      props.onCreateChatProjectThread !== undefined
+                        ? {
+                            onCreateThread: (draft, modelOptionValues) =>
+                              props.onCreateChatProjectThread?.(
+                                project.id,
+                                draft,
+                                modelOptionValues,
+                              ) ?? false,
+                          }
+                        : {})}
+                      {...(props.onOpenChatThread === undefined
+                        ? {}
+                        : {
+                            onOpenThread: (threadId: string) => {
+                              const thread = props.chatController.bootstrap?.threads.find(
+                                (candidate) => String(candidate.id) === threadId,
+                              );
+                              if (thread !== undefined) {
+                                props.onOpenChatThread?.(thread.id, thread.title, project.id);
+                              }
+                            },
+                          })}
+                      {...(project.lifecycle !== "active" ||
+                      props.onViewAllChatProjectThreads === undefined
+                        ? {}
+                        : {
+                            onViewAllProjectThreads: () =>
+                              props.onViewAllChatProjectThreads?.(project.id),
+                          })}
+                      {...(props.projectClient === undefined
+                        ? {}
+                        : { projectClient: props.projectClient })}
+                      {...(props.memoryRevision === undefined
+                        ? {}
+                        : { memoryRevision: props.memoryRevision })}
+                      {...(props.draftProviderGroups === undefined
+                        ? {}
+                        : { providerGroups: props.draftProviderGroups })}
+                      {...(props.draftSelectedProviderInstanceId === undefined
+                        ? {}
+                        : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+                      {...(props.draftSelectedModelId === undefined
+                        ? {}
+                        : { selectedModelId: props.draftSelectedModelId })}
+                      {...(props.onDraftSelectProvider === undefined
+                        ? {}
+                        : { onSelectProvider: props.onDraftSelectProvider })}
+                      {...(openProviderSettings === undefined
+                        ? {}
+                        : { onOpenSettings: openProviderSettings })}
+                      projectId={project.id}
+                    />
+                  </NewTaskDraftScopeContext.Provider>
                 ),
-              },
-            })}
-        {...(props.spendCeilingClient === undefined
-          ? {}
-          : { spendCeilingClient: props.spendCeilingClient })}
-        {...(props.pullRequestReviewClient === undefined
-          ? {}
-          : {
-              pullRequestReviewClient: props.pullRequestReviewClient,
-              ...(props.providerController.snapshot === undefined
-                ? {}
-                : { providerSnapshot: props.providerController.snapshot }),
-            })}
-        {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
-        {...(props.onMemoryChanged === undefined ? {} : { onMemoryChanged: props.onMemoryChanged })}
-        {...(props.onNewThreadInProject === undefined || project.lifecycle !== "active"
-          ? {}
-          : { onNewThread: () => props.onNewThreadInProject?.(project.id) })}
-        {...(project.type === "chat"
-          ? {
-              chatOverview: (
-                <NewTaskDraftScopeContext.Provider value={`chat-overview:${String(project.id)}`}>
-                  <ChatProjectOverview
-                    client={props.chatClient}
-                    controller={props.chatController}
-                    {...(project.lifecycle === "active" &&
-                    props.chatController.status === "ready" &&
-                    props.onCreateChatProjectThread !== undefined
-                      ? {
-                          onCreateThread: (draft, modelOptionValues) =>
-                            props.onCreateChatProjectThread?.(
-                              project.id,
-                              draft,
-                              modelOptionValues,
-                            ) ?? false,
-                        }
-                      : {})}
-                    {...(props.onOpenChatThread === undefined
+              }
+            : {})}
+          {...(project.type === "code" && availability?.status !== "unavailable"
+            ? {
+                codeOverview: (
+                  <CodeOverview
+                    controller={props.codeController}
+                    {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+                    onOpenThread={(threadId) => {
+                      const thread = props.codeController.bootstrap?.threads.find(
+                        (candidate) => candidate.id === threadId,
+                      );
+                      // A planner result can precede the navigation refresh.
+                      // The host still resolves this id and its Project on open.
+                      props.onOpenCodeThread(threadId, thread?.title ?? "Code task", project.id);
+                    }}
+                    projectId={project.id}
+                    projectName={project.name}
+                    projectRoot={project.binding.canonicalRoot}
+                    showQuickStart={false}
+                    {...(props.onNewThreadInProject === undefined || project.lifecycle !== "active"
+                      ? {}
+                      : { onNewThread: () => props.onNewThreadInProject?.(project.id) })}
+                    {...(project.connectedRepository === undefined
                       ? {}
                       : {
-                          onOpenThread: (threadId: string) => {
-                            const thread = props.chatController.bootstrap?.threads.find(
-                              (candidate) => String(candidate.id) === threadId,
-                            );
-                            if (thread !== undefined) {
-                              props.onOpenChatThread?.(thread.id, thread.title, project.id);
-                            }
-                          },
+                          baseRepository: `${project.connectedRepository.owner}/${project.connectedRepository.repository}`,
                         })}
-                    {...(project.lifecycle !== "active" ||
-                    props.onViewAllChatProjectThreads === undefined
-                      ? {}
-                      : {
-                          onViewAllProjectThreads: () =>
-                            props.onViewAllChatProjectThreads?.(project.id),
-                        })}
-                    {...(props.projectClient === undefined
-                      ? {}
-                      : { projectClient: props.projectClient })}
-                    {...(props.memoryRevision === undefined
-                      ? {}
-                      : { memoryRevision: props.memoryRevision })}
-                    {...(props.draftProviderGroups === undefined
-                      ? {}
-                      : { providerGroups: props.draftProviderGroups })}
+                    providerGroups={providerGroupsForProject(
+                      project,
+                      props.codeProviderGroups ?? props.draftProviderGroups ?? [],
+                    )}
                     {...(props.draftSelectedProviderInstanceId === undefined
                       ? {}
                       : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
@@ -2764,240 +2896,200 @@ function renderNonCodeTab(
                     {...(props.onDraftSelectProvider === undefined
                       ? {}
                       : { onSelectProvider: props.onDraftSelectProvider })}
+                    {...(props.onDraftCreateCodeThread === undefined
+                      ? {}
+                      : { onCreateThread: props.onDraftCreateCodeThread })}
+                    {...(props.onChangeCodeNewThreadWorkspace === undefined
+                      ? {}
+                      : { onChangeNewThreadWorkspace: props.onChangeCodeNewThreadWorkspace })}
+                    {...(project.type !== "code" || project.newThreadWorkspace === undefined
+                      ? {}
+                      : { newThreadWorkspace: project.newThreadWorkspace })}
+                    {...(props.onDraftCreating === undefined
+                      ? {}
+                      : { creating: props.onDraftCreating })}
+                    {...(props.onDraftError === undefined
+                      ? {}
+                      : { errorMessage: props.onDraftError })}
+                    {...(props.onDraftPendingMessage === undefined
+                      ? {}
+                      : { pendingMessage: props.onDraftPendingMessage })}
+                  />
+                ),
+              }
+            : {})}
+          {...(project.type === "work"
+            ? {
+                workOverview: (
+                  <WorkProjectOverviewSlot
+                    {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+                    {...(props.selectedCreateHostId === undefined
+                      ? {}
+                      : { selectedHostId: props.selectedCreateHostId })}
+                    {...(props.selectedCreateHostId === undefined
+                      ? {}
+                      : { fixedHostId: props.selectedCreateHostId })}
+                    {...(props.lastSelectedHealthyHostId === undefined
+                      ? {}
+                      : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+                    {...(props.createHostViewScope === undefined
+                      ? {}
+                      : { viewScope: props.createHostViewScope })}
+                    {...(availability === undefined ? {} : { availability })}
+                    {...(props.workOverviewClient === undefined
+                      ? {}
+                      : { client: props.workOverviewClient })}
+                    {...(props.workResearchClient === undefined
+                      ? {}
+                      : { researchClient: props.workResearchClient })}
+                    {...(props.workMutationClient === undefined
+                      ? {}
+                      : { mutationClient: props.workMutationClient })}
+                    createStarterArtifactAvailable={
+                      availability?.status === "available" && project.lifecycle === "active"
+                    }
+                    createThreadAvailable={
+                      props.workCreateThreadAvailable === true &&
+                      props.onCreateWorkThread !== undefined &&
+                      availability?.status === "available" &&
+                      project.lifecycle === "active"
+                    }
+                    onReloadPromotion={props.workPromotionController.reload}
+                    onCreateThread={(draft, images, modelOptionValues) =>
+                      modelOptionValues !== undefined
+                        ? (props.onCreateWorkThread?.(
+                            project.id,
+                            draft,
+                            images,
+                            modelOptionValues,
+                          ) ?? false)
+                        : images === undefined
+                          ? (props.onCreateWorkThread?.(project.id, draft) ?? false)
+                          : (props.onCreateWorkThread?.(project.id, draft, images) ?? false)
+                    }
                     {...(openProviderSettings === undefined
                       ? {}
                       : { onOpenSettings: openProviderSettings })}
+                    onOpenThread={(threadId) => {
+                      props.onOpenWorkThread?.(threadId as WorkThreadId, project.id);
+                    }}
+                    {...(props.onDraftSelectProvider === undefined
+                      ? {}
+                      : { onSelectProvider: props.onDraftSelectProvider })}
                     projectId={project.id}
-                  />
-                </NewTaskDraftScopeContext.Provider>
-              ),
-            }
-          : {})}
-        {...(project.type === "code" && availability?.status !== "unavailable"
-          ? {
-              codeOverview: (
-                <CodeOverview
-                  controller={props.codeController}
-                  {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-                  onOpenThread={(threadId) => {
-                    const thread = props.codeController.bootstrap?.threads.find(
-                      (candidate) => candidate.id === threadId,
-                    );
-                    // A planner result can precede the navigation refresh.
-                    // The host still resolves this id and its Project on open.
-                    props.onOpenCodeThread(threadId, thread?.title ?? "Code task", project.id);
-                  }}
-                  projectId={project.id}
-                  projectName={project.name}
-                  projectRoot={project.binding.canonicalRoot}
-                  showQuickStart={false}
-                  {...(props.onNewThreadInProject === undefined || project.lifecycle !== "active"
-                    ? {}
-                    : { onNewThread: () => props.onNewThreadInProject?.(project.id) })}
-                  {...(project.connectedRepository === undefined
-                    ? {}
-                    : {
-                        baseRepository: `${project.connectedRepository.owner}/${project.connectedRepository.repository}`,
-                      })}
-                  providerGroups={providerGroupsForProject(
-                    project,
-                    props.codeProviderGroups ?? props.draftProviderGroups ?? [],
-                  )}
-                  {...(props.draftSelectedProviderInstanceId === undefined
-                    ? {}
-                    : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-                  {...(props.draftSelectedModelId === undefined
-                    ? {}
-                    : { selectedModelId: props.draftSelectedModelId })}
-                  {...(props.onDraftSelectProvider === undefined
-                    ? {}
-                    : { onSelectProvider: props.onDraftSelectProvider })}
-                  {...(props.onDraftCreateCodeThread === undefined
-                    ? {}
-                    : { onCreateThread: props.onDraftCreateCodeThread })}
-                  {...(props.onChangeCodeNewThreadWorkspace === undefined
-                    ? {}
-                    : { onChangeNewThreadWorkspace: props.onChangeCodeNewThreadWorkspace })}
-                  {...(project.type !== "code" || project.newThreadWorkspace === undefined
-                    ? {}
-                    : { newThreadWorkspace: project.newThreadWorkspace })}
-                  {...(props.onDraftCreating === undefined
-                    ? {}
-                    : { creating: props.onDraftCreating })}
-                  {...(props.onDraftError === undefined
-                    ? {}
-                    : { errorMessage: props.onDraftError })}
-                  {...(props.onDraftPendingMessage === undefined
-                    ? {}
-                    : { pendingMessage: props.onDraftPendingMessage })}
-                />
-              ),
-            }
-          : {})}
-        {...(project.type === "work"
-          ? {
-              workOverview: (
-                <WorkProjectOverviewSlot
-                  {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-                  {...(props.selectedCreateHostId === undefined
-                    ? {}
-                    : { selectedHostId: props.selectedCreateHostId })}
-                  {...(props.selectedCreateHostId === undefined
-                    ? {}
-                    : { fixedHostId: props.selectedCreateHostId })}
-                  {...(props.lastSelectedHealthyHostId === undefined
-                    ? {}
-                    : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-                  {...(props.createHostViewScope === undefined
-                    ? {}
-                    : { viewScope: props.createHostViewScope })}
-                  {...(availability === undefined ? {} : { availability })}
-                  {...(props.workOverviewClient === undefined
-                    ? {}
-                    : { client: props.workOverviewClient })}
-                  {...(props.workResearchClient === undefined
-                    ? {}
-                    : { researchClient: props.workResearchClient })}
-                  {...(props.workMutationClient === undefined
-                    ? {}
-                    : { mutationClient: props.workMutationClient })}
-                  createStarterArtifactAvailable={
-                    availability?.status === "available" && project.lifecycle === "active"
-                  }
-                  createThreadAvailable={
-                    props.workCreateThreadAvailable === true &&
-                    props.onCreateWorkThread !== undefined &&
-                    availability?.status === "available" &&
-                    project.lifecycle === "active"
-                  }
-                  onReloadPromotion={props.workPromotionController.reload}
-                  onCreateThread={(draft, images, modelOptionValues) =>
-                    modelOptionValues !== undefined
-                      ? (props.onCreateWorkThread?.(project.id, draft, images, modelOptionValues) ??
-                        false)
-                      : images === undefined
-                        ? (props.onCreateWorkThread?.(project.id, draft) ?? false)
-                        : (props.onCreateWorkThread?.(project.id, draft, images) ?? false)
-                  }
-                  {...(openProviderSettings === undefined
-                    ? {}
-                    : { onOpenSettings: openProviderSettings })}
-                  onOpenThread={(threadId) => {
-                    props.onOpenWorkThread?.(threadId as WorkThreadId, project.id);
-                  }}
-                  {...(props.onDraftSelectProvider === undefined
-                    ? {}
-                    : { onSelectProvider: props.onDraftSelectProvider })}
-                  projectId={project.id}
-                  projectName={project.name}
-                  {...(pickerHasReadyInstance(
-                    props.workProviderGroups ?? props.draftProviderGroups ?? [],
-                  )
-                    ? { providersReady: true }
-                    : {})}
-                  providerGroups={providerGroupsForProject(
-                    project,
-                    props.workProviderGroups ?? props.draftProviderGroups ?? [],
-                  )}
-                  {...(props.draftSelectedModelId === undefined
-                    ? {}
-                    : { selectedModelId: props.draftSelectedModelId })}
-                  {...(props.draftSelectedProviderInstanceId === undefined
-                    ? {}
-                    : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-                />
-              ),
-            }
-          : {})}
-        {...(project.type === "work" && availability?.status !== "unavailable"
-          ? {
-              workPromotion: (
-                <WorkPromotionFlow
-                  controller={props.workPromotionController}
-                  originProjectName={project.name}
-                  targetCodeProjectLabels={props.projects
-                    .filter(
-                      (candidate) => candidate.type === "code" && candidate.lifecycle === "active",
+                    projectName={project.name}
+                    {...(pickerHasReadyInstance(
+                      props.workProviderGroups ?? props.draftProviderGroups ?? [],
                     )
-                    .map((candidate) => ({ id: candidate.id, name: candidate.name }))}
-                  providerChoices={props.codeProviderChoices}
-                  onOpenLinkedCodeThread={props.onOpenCodeThread}
-                />
-              ),
-            }
-          : {})}
-        key={project.id}
-        {...(availability === undefined ? {} : { availability })}
-        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-        {...(props.folderBrowseClient === undefined
-          ? {}
-          : { folderBrowseClient: props.folderBrowseClient })}
-        {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
-        onArchive={props.onArchiveProject}
-        {...(props.onProviderPolicyChange === undefined
-          ? {}
-          : { onProviderPolicyChange: props.onProviderPolicyChange })}
-        {...(props.onNativeProvidersChange === undefined
-          ? {}
-          : { onNativeProvidersChange: props.onNativeProvidersChange })}
-        {...(props.onProjectPermissionModeChange === undefined
-          ? {}
-          : { onPermissionModeChange: props.onProjectPermissionModeChange })}
-        {...(props.onProjectAutoReviewerChange === undefined
-          ? {}
-          : { onAutoReviewerChange: props.onProjectAutoReviewerChange })}
-        {...(props.onAgentMemoryWritesChange === undefined
-          ? {}
-          : { onAgentMemoryWritesChange: props.onAgentMemoryWritesChange })}
-        {...(props.onImageGenerationAskAgain === undefined
-          ? {}
-          : { onImageGenerationAskAgain: props.onImageGenerationAskAgain })}
-        {...(props.onBrandKitChange === undefined
-          ? {}
-          : { onBrandKitChange: props.onBrandKitChange })}
-        {...(props.onDesignSystemChange === undefined
-          ? {}
-          : { onDesignSystemChange: props.onDesignSystemChange })}
-        {...(props.onWorkStatusFileChange === undefined
-          ? {}
-          : { onWorkStatusFileChange: props.onWorkStatusFileChange })}
-        {...(props.onOwnToolchainChange === undefined
-          ? {}
-          : { onOwnToolchainChange: props.onOwnToolchainChange })}
-        {...(props.onWorkDeveloperToolsChange === undefined
-          ? {}
-          : { onWorkDeveloperToolsChange: props.onWorkDeveloperToolsChange })}
-        {...(props.onDesktopRecipeChange === undefined
-          ? {}
-          : { onDesktopRecipeChange: props.onDesktopRecipeChange })}
-        {...(props.onActionsChange === undefined ? {} : { onActionsChange: props.onActionsChange })}
-        {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-        {...(props.projectWindowCapability === undefined
-          ? {}
-          : { windowCapability: props.projectWindowCapability })}
-        providerInstances={props.providerController.instances ?? []}
-        {...(props.onAddProjectExtraFolder === undefined
-          ? {}
-          : { onAddExtraFolder: props.onAddProjectExtraFolder })}
-        {...(props.onRemoveProjectExtraFolder === undefined
-          ? {}
-          : { onRemoveExtraFolder: props.onRemoveProjectExtraFolder })}
-        onRelink={props.onRelinkProject}
-        onRename={props.onRenameProject}
-        {...(props.onProjectColorChange === undefined
-          ? {}
-          : { onColorChange: props.onProjectColorChange })}
-        project={project}
-        canvasInventory={
-          props.canvasClient !== undefined && props.onOpenCanvas !== undefined ? (
-            <ProjectCanvasInventory
-              client={props.canvasClient}
-              onOpenCanvas={props.onOpenCanvas}
-              projectId={project.id}
-            />
-          ) : undefined
-        }
-      />
+                      ? { providersReady: true }
+                      : {})}
+                    providerGroups={providerGroupsForProject(
+                      project,
+                      props.workProviderGroups ?? props.draftProviderGroups ?? [],
+                    )}
+                    {...(props.draftSelectedModelId === undefined
+                      ? {}
+                      : { selectedModelId: props.draftSelectedModelId })}
+                    {...(props.draftSelectedProviderInstanceId === undefined
+                      ? {}
+                      : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+                  />
+                ),
+              }
+            : {})}
+          {...(project.type === "work" && availability?.status !== "unavailable"
+            ? {
+                workPromotion: (
+                  <WorkPromotionFlow
+                    controller={props.workPromotionController}
+                    originProjectName={project.name}
+                    targetCodeProjectLabels={props.projects
+                      .filter(
+                        (candidate) =>
+                          candidate.type === "code" && candidate.lifecycle === "active",
+                      )
+                      .map((candidate) => ({ id: candidate.id, name: candidate.name }))}
+                    providerChoices={props.codeProviderChoices}
+                    onOpenLinkedCodeThread={props.onOpenCodeThread}
+                  />
+                ),
+              }
+            : {})}
+          key={project.id}
+          {...(availability === undefined ? {} : { availability })}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          {...(props.folderBrowseClient === undefined
+            ? {}
+            : { folderBrowseClient: props.folderBrowseClient })}
+          {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
+          onArchive={props.onArchiveProject}
+          {...(props.onProviderPolicyChange === undefined
+            ? {}
+            : { onProviderPolicyChange: props.onProviderPolicyChange })}
+          {...(props.onNativeProvidersChange === undefined
+            ? {}
+            : { onNativeProvidersChange: props.onNativeProvidersChange })}
+          {...(props.onProjectPermissionModeChange === undefined
+            ? {}
+            : { onPermissionModeChange: props.onProjectPermissionModeChange })}
+          {...(props.onProjectAutoReviewerChange === undefined
+            ? {}
+            : { onAutoReviewerChange: props.onProjectAutoReviewerChange })}
+          {...(props.onAgentMemoryWritesChange === undefined
+            ? {}
+            : { onAgentMemoryWritesChange: props.onAgentMemoryWritesChange })}
+          {...(props.onImageGenerationAskAgain === undefined
+            ? {}
+            : { onImageGenerationAskAgain: props.onImageGenerationAskAgain })}
+          {...(props.onBrandKitChange === undefined
+            ? {}
+            : { onBrandKitChange: props.onBrandKitChange })}
+          {...(props.onDesignSystemChange === undefined
+            ? {}
+            : { onDesignSystemChange: props.onDesignSystemChange })}
+          {...(props.onWorkStatusFileChange === undefined
+            ? {}
+            : { onWorkStatusFileChange: props.onWorkStatusFileChange })}
+          {...(props.onOwnToolchainChange === undefined
+            ? {}
+            : { onOwnToolchainChange: props.onOwnToolchainChange })}
+          {...(props.onWorkDeveloperToolsChange === undefined
+            ? {}
+            : { onWorkDeveloperToolsChange: props.onWorkDeveloperToolsChange })}
+          {...(props.onDesktopRecipeChange === undefined
+            ? {}
+            : { onDesktopRecipeChange: props.onDesktopRecipeChange })}
+          {...(props.onActionsChange === undefined
+            ? {}
+            : { onActionsChange: props.onActionsChange })}
+          {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+          {...(props.projectWindowCapability === undefined
+            ? {}
+            : { windowCapability: props.projectWindowCapability })}
+          providerInstances={props.providerController.instances ?? []}
+          {...(props.onAddProjectExtraFolder === undefined
+            ? {}
+            : { onAddExtraFolder: props.onAddProjectExtraFolder })}
+          {...(props.onRemoveProjectExtraFolder === undefined
+            ? {}
+            : { onRemoveExtraFolder: props.onRemoveProjectExtraFolder })}
+          onRelink={props.onRelinkProject}
+          onRename={props.onRenameProject}
+          {...(props.onProjectColorChange === undefined
+            ? {}
+            : { onColorChange: props.onProjectColorChange })}
+          project={project}
+          canvasInventory={
+            props.canvasClient !== undefined && props.onOpenCanvas !== undefined ? (
+              <ProjectCanvasInventory
+                client={props.canvasClient}
+                onOpenCanvas={props.onOpenCanvas}
+                projectId={project.id}
+              />
+            ) : undefined
+          }
+        />
+      </Suspense>
     );
   }
   // Every other surface returned above, and Code's and Work's welcome tabs became
@@ -3122,49 +3214,51 @@ function coordinatorProposalsFor(
   );
   if (coordinator === undefined) return undefined;
   return (
-    <CoordinatorProposalCards
-      controller={codeController}
-      coordinatorThreadId={coordinator.threadId}
-      {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-      onOpenThread={(threadId) => {
-        const thread = codeController.bootstrap?.threads.find(
-          (candidate) => candidate.id === threadId,
-        );
-        props.onOpenCodeThread(threadId, thread?.title ?? "Code task", project.id);
-      }}
-      projectId={project.id}
-      projectName={project.name}
-      projectRoot={project.binding.canonicalRoot}
-      {...(project.connectedRepository === undefined
-        ? {}
-        : {
-            baseRepository: `${project.connectedRepository.owner}/${project.connectedRepository.repository}`,
-          })}
-      providerGroups={providerGroupsForProject(
-        project,
-        props.codeProviderGroups ?? props.draftProviderGroups ?? [],
-      )}
-      {...(props.draftSelectedProviderInstanceId === undefined
-        ? {}
-        : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-      {...(props.draftSelectedModelId === undefined
-        ? {}
-        : { selectedModelId: props.draftSelectedModelId })}
-      {...(props.onDraftSelectProvider === undefined
-        ? {}
-        : { onSelectProvider: props.onDraftSelectProvider })}
-      {...(props.onDraftCreateCodeThread === undefined
-        ? {}
-        : { onCreateThread: props.onDraftCreateCodeThread })}
-      {...(project.newThreadWorkspace === undefined
-        ? {}
-        : { newThreadWorkspace: project.newThreadWorkspace })}
-      {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
-      {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
-      {...(props.onDraftPendingMessage === undefined
-        ? {}
-        : { pendingMessage: props.onDraftPendingMessage })}
-    />
+    <Suspense fallback={null}>
+      <CoordinatorProposalCards
+        controller={codeController}
+        coordinatorThreadId={coordinator.threadId}
+        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+        onOpenThread={(threadId) => {
+          const thread = codeController.bootstrap?.threads.find(
+            (candidate) => candidate.id === threadId,
+          );
+          props.onOpenCodeThread(threadId, thread?.title ?? "Code task", project.id);
+        }}
+        projectId={project.id}
+        projectName={project.name}
+        projectRoot={project.binding.canonicalRoot}
+        {...(project.connectedRepository === undefined
+          ? {}
+          : {
+              baseRepository: `${project.connectedRepository.owner}/${project.connectedRepository.repository}`,
+            })}
+        providerGroups={providerGroupsForProject(
+          project,
+          props.codeProviderGroups ?? props.draftProviderGroups ?? [],
+        )}
+        {...(props.draftSelectedProviderInstanceId === undefined
+          ? {}
+          : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+        {...(props.draftSelectedModelId === undefined
+          ? {}
+          : { selectedModelId: props.draftSelectedModelId })}
+        {...(props.onDraftSelectProvider === undefined
+          ? {}
+          : { onSelectProvider: props.onDraftSelectProvider })}
+        {...(props.onDraftCreateCodeThread === undefined
+          ? {}
+          : { onCreateThread: props.onDraftCreateCodeThread })}
+        {...(project.newThreadWorkspace === undefined
+          ? {}
+          : { newThreadWorkspace: project.newThreadWorkspace })}
+        {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
+        {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
+        {...(props.onDraftPendingMessage === undefined
+          ? {}
+          : { pendingMessage: props.onDraftPendingMessage })}
+      />
+    </Suspense>
   );
 }
 
@@ -3403,88 +3497,106 @@ function ChatThreadWorkspace(props: {
     ],
   );
   return (
-    <ChatThreadEnvironment
-      {...(props.threadMove === undefined ? {} : { threadMove: props.threadMove })}
-      {...(props.active === undefined ? {} : { active: props.active })}
-      {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
-      {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
-      controller={controller}
-      {...(props.environmentOpen === undefined ? {} : { environmentOpen: props.environmentOpen })}
-      {...(props.usageDashboardClient === undefined
-        ? {}
-        : { usageDashboardClient: props.usageDashboardClient })}
-      {...(props.spendCeilingClient === undefined
-        ? {}
-        : { spendCeilingClient: props.spendCeilingClient })}
-      {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
-      {...(props.onOpenUsageDashboard === undefined
-        ? {}
-        : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
-      projects={props.projects}
-      tab={props.tab}
+    <Suspense
+      fallback={
+        <OctantEmpty message="Loading workspace." state="loading" title="Loading workspace" />
+      }
     >
-      <ChatWorkspace
+      <ChatThreadEnvironment
+        {...(props.threadMove === undefined ? {} : { threadMove: props.threadMove })}
+        {...(props.active === undefined ? {} : { active: props.active })}
+        {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
+        {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
         controller={controller}
-        providerGroups={providerGroups}
-        {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
-        {...(props.onTurnRevealed === undefined ? {} : { onTurnRevealed: props.onTurnRevealed })}
-        {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
-        onClearCanvasSelections={props.onClearCanvasSelections}
-        onRemoveCanvasSelection={props.onRemoveCanvasSelection}
-        pendingCanvasSelections={props.pendingCanvasSelections}
-        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        {...(props.memoryProposalClient === undefined
+        {...(props.environmentOpen === undefined ? {} : { environmentOpen: props.environmentOpen })}
+        {...(props.usageDashboardClient === undefined
           ? {}
-          : { memoryProposalClient: props.memoryProposalClient })}
-        {...(props.browserAutomationClient === undefined
+          : { usageDashboardClient: props.usageDashboardClient })}
+        {...(props.spendCeilingClient === undefined
           ? {}
-          : { browserAutomationClient: props.browserAutomationClient })}
-        {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-        {...(props.projectWindowCapability === undefined
+          : { spendCeilingClient: props.spendCeilingClient })}
+        {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
+        {...(props.onOpenUsageDashboard === undefined
           ? {}
-          : { windowCapability: props.projectWindowCapability })}
-        {...(props.providerController.snapshot === undefined
-          ? {}
-          : { providerSnapshot: props.providerController.snapshot })}
-        {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
-        {...(props.imageGenerationClient === undefined
-          ? {}
-          : { imageGenerationClient: props.imageGenerationClient })}
-        {...(props.imageGenerationProfiles === undefined
-          ? {}
-          : { imageGenerationProfiles: props.imageGenerationProfiles })}
-        {...(props.onOpenImageSettings === undefined
-          ? {}
-          : { onOpenImageSettings: props.onOpenImageSettings })}
-        {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
-        {...(props.onOpenCanvasReference === undefined
-          ? {}
-          : { onOpenCanvas: props.onOpenCanvasReference })}
-        {...(props.onCanvasReferencesObserved === undefined
-          ? {}
-          : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
-        {...(props.onThreadHandedOff === undefined
-          ? {}
-          : { onThreadHandedOff: props.onThreadHandedOff })}
-        {...(props.onOpenThread === undefined
-          ? {}
-          : {
-              onThreadBranched: (thread: ChatThread) =>
-                props.onOpenThread?.(thread.id, thread.title, thread.projectId),
-            })}
-        {...(props.onOpenSideChat === undefined ? {} : { onOpenSideChat: props.onOpenSideChat })}
-        moveToProject={{
-          projects: props.projects.flatMap((project) =>
-            project.type === "chat" && project.lifecycle === "active"
-              ? [{ id: project.id, name: project.name }]
-              : [],
-          ),
-          ...(createProject === undefined
-            ? {}
-            : { onCreateProject: (name: string) => createProject("chat", name) }),
-        }}
-      />
-    </ChatThreadEnvironment>
+          : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
+        projects={props.projects}
+        tab={props.tab}
+      >
+        <Suspense
+          fallback={<OctantEmpty message="Loading chat." state="loading" title="Loading chat" />}
+        >
+          <ChatWorkspace
+            controller={controller}
+            providerGroups={providerGroups}
+            {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
+            {...(props.onTurnRevealed === undefined
+              ? {}
+              : { onTurnRevealed: props.onTurnRevealed })}
+            {...(props.onOpenSettings === undefined
+              ? {}
+              : { onOpenSettings: props.onOpenSettings })}
+            onClearCanvasSelections={props.onClearCanvasSelections}
+            onRemoveCanvasSelection={props.onRemoveCanvasSelection}
+            pendingCanvasSelections={props.pendingCanvasSelections}
+            {...(props.extensionClient === undefined
+              ? {}
+              : { extensionClient: props.extensionClient })}
+            {...(props.memoryProposalClient === undefined
+              ? {}
+              : { memoryProposalClient: props.memoryProposalClient })}
+            {...(props.browserAutomationClient === undefined
+              ? {}
+              : { browserAutomationClient: props.browserAutomationClient })}
+            {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+            {...(props.projectWindowCapability === undefined
+              ? {}
+              : { windowCapability: props.projectWindowCapability })}
+            {...(props.providerController.snapshot === undefined
+              ? {}
+              : { providerSnapshot: props.providerController.snapshot })}
+            {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+            {...(props.imageGenerationClient === undefined
+              ? {}
+              : { imageGenerationClient: props.imageGenerationClient })}
+            {...(props.imageGenerationProfiles === undefined
+              ? {}
+              : { imageGenerationProfiles: props.imageGenerationProfiles })}
+            {...(props.onOpenImageSettings === undefined
+              ? {}
+              : { onOpenImageSettings: props.onOpenImageSettings })}
+            {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
+            {...(props.onOpenCanvasReference === undefined
+              ? {}
+              : { onOpenCanvas: props.onOpenCanvasReference })}
+            {...(props.onCanvasReferencesObserved === undefined
+              ? {}
+              : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
+            {...(props.onThreadHandedOff === undefined
+              ? {}
+              : { onThreadHandedOff: props.onThreadHandedOff })}
+            {...(props.onOpenThread === undefined
+              ? {}
+              : {
+                  onThreadBranched: (thread: ChatThread) =>
+                    props.onOpenThread?.(thread.id, thread.title, thread.projectId),
+                })}
+            {...(props.onOpenSideChat === undefined
+              ? {}
+              : { onOpenSideChat: props.onOpenSideChat })}
+            moveToProject={{
+              projects: props.projects.flatMap((project) =>
+                project.type === "chat" && project.lifecycle === "active"
+                  ? [{ id: project.id, name: project.name }]
+                  : [],
+              ),
+              ...(createProject === undefined
+                ? {}
+                : { onCreateProject: (name: string) => createProject("chat", name) }),
+            }}
+          />
+        </Suspense>
+      </ChatThreadEnvironment>
+    </Suspense>
   );
 }
 
@@ -3667,53 +3779,61 @@ function WorkProjectOverviewSlot(props: {
   );
   return (
     <NewTaskDraftScopeContext.Provider value={`work-overview:${String(props.projectId)}`}>
-      <WorkOverview
-        projectId={props.projectId}
-        {...(props.researchClient === undefined
-          ? {}
-          : {
-              research: (
-                <WorkResearchPanel
-                  briefs={researchController.briefs}
-                  status={researchController.status}
-                  onRetry={researchController.reload}
-                  onCreateBrief={researchController.createBrief}
-                  onAddSource={researchController.addSource}
-                  onRevokeSource={researchController.revokeSource}
-                  onRecordEvidence={researchController.recordEvidence}
-                  onRecordClaim={researchController.recordClaim}
-                  {...(props.mutationClient === undefined
-                    ? {}
-                    : { onFinalizeReport: researchController.finalizeReport })}
-                />
-              ),
-            })}
-        createStarterArtifactAvailable={createStarterArtifactAvailable}
-        createThreadAvailable={props.createThreadAvailable}
-        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-        {...(props.selectedHostId === undefined ? {} : { selectedHostId: props.selectedHostId })}
-        {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-        {...(props.lastSelectedHealthyHostId === undefined
-          ? {}
-          : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-        {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-        {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
-        model={model}
-        onCreateStarterArtifact={handleCreateStarterArtifact}
-        onCreateThread={props.onCreateThread}
-        {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
-        {...(props.providersReady === undefined ? {} : { providersReady: props.providersReady })}
-        {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
-        {...(props.onSelectProvider === undefined
-          ? {}
-          : { onSelectProvider: props.onSelectProvider })}
-        projectName={props.projectName}
-        providerGroups={props.providerGroups}
-        {...(props.selectedModelId === undefined ? {} : { selectedModelId: props.selectedModelId })}
-        {...(props.selectedProviderInstanceId === undefined
-          ? {}
-          : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-      />
+      <Suspense
+        fallback={
+          <OctantEmpty message="Loading workspace." state="loading" title="Loading workspace" />
+        }
+      >
+        <WorkOverview
+          projectId={props.projectId}
+          {...(props.researchClient === undefined
+            ? {}
+            : {
+                research: (
+                  <WorkResearchPanel
+                    briefs={researchController.briefs}
+                    status={researchController.status}
+                    onRetry={researchController.reload}
+                    onCreateBrief={researchController.createBrief}
+                    onAddSource={researchController.addSource}
+                    onRevokeSource={researchController.revokeSource}
+                    onRecordEvidence={researchController.recordEvidence}
+                    onRecordClaim={researchController.recordClaim}
+                    {...(props.mutationClient === undefined
+                      ? {}
+                      : { onFinalizeReport: researchController.finalizeReport })}
+                  />
+                ),
+              })}
+          createStarterArtifactAvailable={createStarterArtifactAvailable}
+          createThreadAvailable={props.createThreadAvailable}
+          {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+          {...(props.selectedHostId === undefined ? {} : { selectedHostId: props.selectedHostId })}
+          {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+          {...(props.lastSelectedHealthyHostId === undefined
+            ? {}
+            : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+          {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+          {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
+          model={model}
+          onCreateStarterArtifact={handleCreateStarterArtifact}
+          onCreateThread={props.onCreateThread}
+          {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+          {...(props.providersReady === undefined ? {} : { providersReady: props.providersReady })}
+          {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
+          {...(props.onSelectProvider === undefined
+            ? {}
+            : { onSelectProvider: props.onSelectProvider })}
+          projectName={props.projectName}
+          providerGroups={props.providerGroups}
+          {...(props.selectedModelId === undefined
+            ? {}
+            : { selectedModelId: props.selectedModelId })}
+          {...(props.selectedProviderInstanceId === undefined
+            ? {}
+            : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+        />
+      </Suspense>
     </NewTaskDraftScopeContext.Provider>
   );
 }

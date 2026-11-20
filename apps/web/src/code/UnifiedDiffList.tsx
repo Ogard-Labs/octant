@@ -1,3 +1,4 @@
+import "../styles/unified-diff.css";
 import { useVirtualizer, type VirtualItem, type Virtualizer } from "@tanstack/react-virtual";
 import {
   Fragment,

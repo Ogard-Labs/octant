@@ -5,7 +5,8 @@ import userEvent from "@testing-library/user-event";
 import { useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ContextEntryId } from "@octant/contracts/context";
-import { ComposerContextMeter, ComposerContextMeterShortcut } from "./ComposerContextMeter";
+import { ComposerContextMeter } from "./ComposerContextMeter";
+import { ComposerContextMeterShortcut } from "./composerContextMeterReading";
 import {
   ComposerContextMeterGate,
   ComposerContextMeterProvider,
@@ -1253,9 +1254,11 @@ describe("Compact session", () => {
     );
 
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
-    expect(screen.getByText("Compacting session")).toBeVisible();
-    expect(document.querySelector(".composer-context-meter [aria-live]")).toHaveTextContent(
-      "Compacting session.",
+    expect(await screen.findByText("Compacting session")).toBeVisible();
+    await waitFor(() =>
+      expect(document.querySelector(".composer-context-meter [aria-live]")).toHaveTextContent(
+        "Compacting session.",
+      ),
     );
     await openPopover(user);
     const popover = screen.getByRole("dialog", { name: "Context window" });

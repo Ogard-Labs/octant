@@ -138,7 +138,7 @@ describe("the public-block visual language", () => {
 
   it("fades the transcript at its edges and keeps the rail's foot on screen", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const code = readFileSync(join(webRoot, "styles/code.css"), "utf8");
+    const code = readFileSync(join(webRoot, "styles/code-thread.css"), "utf8");
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
     const rail = readFileSync(join(webRoot, "shell/SidebarRail.tsx"), "utf8");
     // Chat, Work, and Code share one frame, so one fade: text under the title
@@ -306,10 +306,15 @@ describe("the public-block visual language", () => {
 
   it("draws the sidebar and the stage as one framed panel on the window's ground, split by lines that meet its outline", () => {
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8").replace(/\s+/g, " ");
+    const browserWorkspace = readFileSync(
+      join(webRoot, "styles/browser-workspace.css"),
+      "utf8",
+    ).replace(/\s+/g, " ");
     const panel = (selector: string) => {
-      const start = shell.indexOf(`${selector} {`);
+      const source = shell.includes(`${selector} {`) ? shell : browserWorkspace;
+      const start = source.indexOf(`${selector} {`);
       expect(start, `${selector} has a rule`).toBeGreaterThanOrEqual(0);
-      return shell.slice(start, shell.indexOf("}", start));
+      return source.slice(start, source.indexOf("}", start));
     };
     // The thread's pane follows its grid column and stops where the bottom
     // panel starts; every pane draws the shared fill, never a literal colour.

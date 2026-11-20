@@ -1,3 +1,4 @@
+import "../styles/files-viewer.css";
 /**
  * File-name presentation shared by the Files dock tools.
  *

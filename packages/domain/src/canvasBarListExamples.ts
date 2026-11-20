@@ -56,6 +56,9 @@ function barListBlock(value: unknown): CanvasBarListBlock {
   return block;
 }
 
-export const barListExampleBlocks: ReadonlyArray<CanvasBarListBlock> =
-  barListExamples.map(barListBlock);
-export const hottestFilesBlock = barListBlock(hottestFilesExample);
+export function barListExampleBlocks(): ReadonlyArray<CanvasBarListBlock> {
+  return barListExamples.map(barListBlock);
+}
+export function hottestFilesBlock() {
+  return barListBlock(hottestFilesExample);
+}

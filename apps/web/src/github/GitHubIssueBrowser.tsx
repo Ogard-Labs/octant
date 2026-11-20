@@ -1,3 +1,4 @@
+import "../styles/github.css";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {

@@ -1,3 +1,4 @@
+import "../styles/thread-goal.css";
 import type { ThreadGoalCriterion, ThreadGoalEvidenceRef } from "@octant/contracts";
 import { Check, Circle } from "../ui/icons";
 

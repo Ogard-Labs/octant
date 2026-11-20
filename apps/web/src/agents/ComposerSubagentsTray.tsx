@@ -11,7 +11,7 @@ import {
   type AgentHierarchyInputEntry,
 } from "./buildAgentHierarchyModel";
 import { SubagentStatusIcon, subagentStatusWord } from "./subagentStatus";
-import { AgentResultPreview, latestResultPacket } from "./AgentRunResults";
+import { AgentResultPreview, latestResultPacket } from "./AgentResultPreview";
 import { ObservedChildRow, type ObservedChildClient } from "./ObservedChildActivity";
 import type { SubagentProviderIdentity } from "./AgentRunDependencyGraph";
 import { SubagentProviderMark, useSubagentProviders } from "./subagentProviders";

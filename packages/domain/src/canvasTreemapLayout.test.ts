@@ -18,14 +18,14 @@ const SIZE = { width: 320, height: 200 } as const;
 
 describe("treemap layout", () => {
   it("lays a repository map out the same way every time", () => {
-    const layout = layoutCanvasTreemap(repositoryMapBlock, SIZE);
+    const layout = layoutCanvasTreemap(repositoryMapBlock(), SIZE);
 
     expect(layout).toEqual(snapshot.repository);
-    expect(layoutCanvasTreemap(repositoryMapBlock, SIZE)).toEqual(layout);
+    expect(layoutCanvasTreemap(repositoryMapBlock(), SIZE)).toEqual(layout);
   });
 
   it("sizes a group by the sum of the leaves it holds", () => {
-    const totals = treemapTotals(repositoryMapBlock, "loc");
+    const totals = treemapTotals(repositoryMapBlock(), "loc");
 
     expect(totals.get("packages")).toBe(38_400 + 52_100 + 9_400);
     expect(totals.get("octant")).toBe(
@@ -34,7 +34,7 @@ describe("treemap layout", () => {
   });
 
   it("gives a larger reading a larger area and tiles the whole frame", () => {
-    const layout = layoutCanvasTreemap(repositoryMapBlock, SIZE);
+    const layout = layoutCanvasTreemap(repositoryMapBlock(), SIZE);
     const web = layout.nodes.find((rect) => rect.nodeId === "web");
     const server = layout.nodes.find((rect) => rect.nodeId === "server");
 
@@ -47,7 +47,7 @@ describe("treemap layout", () => {
   });
 
   it("lays out from a chosen group so a zoom shows only that subtree", () => {
-    const layout = layoutCanvasTreemap(repositoryMapBlock, { ...SIZE, rootId: "packages" });
+    const layout = layoutCanvasTreemap(repositoryMapBlock(), { ...SIZE, rootId: "packages" });
 
     expect(layout.rootId).toBe("packages");
     expect(layout.nodes[0]?.nodeId).toBe("packages");
@@ -55,11 +55,11 @@ describe("treemap layout", () => {
   });
 
   it("names the full path from the root to a leaf", () => {
-    expect(treemapPath(repositoryMapBlock, "web")).toEqual(["octant", "apps", "web"]);
+    expect(treemapPath(repositoryMapBlock(), "web")).toEqual(["octant", "apps", "web"]);
   });
 
   it("reads a measure's range across the leaves", () => {
-    const domain = treemapMeasureDomain(repositoryMapBlock, "edits60");
+    const domain = treemapMeasureDomain(repositoryMapBlock(), "edits60");
 
     expect(domain.min).toBe(4);
     expect(domain.max).toBe(120);

@@ -203,8 +203,8 @@ import { SideTaskInline, sideTasksAfterTurn, useThreadSideTasks } from "../follo
 import {
   FinishedReceiptInline,
   finishedReceiptsAfterTurn,
-  useThreadFinishedReceipts,
 } from "../finishedReceipts/FinishedReceiptCard";
+import { useThreadFinishedReceipts } from "../finishedReceipts/FinishedReceiptProvider";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TurnActions } from "../transcript/TurnActions";

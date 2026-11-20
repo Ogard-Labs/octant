@@ -1,3 +1,4 @@
+import "../styles/agents-center.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type {
   AgentRunCenterSummary,

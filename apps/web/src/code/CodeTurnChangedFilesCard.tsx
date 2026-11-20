@@ -1,3 +1,4 @@
+import "../styles/code-thread.css";
 import type { CodeTurnChangedFiles } from "@octant/contracts/code-operations";
 import { ChevronDown, FileText } from "../ui/icons";
 import { useId, useState } from "react";

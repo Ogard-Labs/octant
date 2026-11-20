@@ -1,5 +1,5 @@
 import type { AutomationClient } from "@octant/client-runtime";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
@@ -267,6 +267,9 @@ describe("WorkspaceRailLayers", () => {
     // fallback is an OctantEmpty state heading titled with the tab name, so a heading
     // probe would pass on the fallback before the chunk settled.
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     expect(await screen.findByRole("region", { name: "Code thread" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "More destinations" }));
     await user.click(await screen.findByRole("menuitem", { name: "Automations" }));

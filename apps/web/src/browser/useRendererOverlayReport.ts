@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
-import { RENDERER_OVERLAY_SELECTOR } from "./BrowserWorkspace";
+import { RENDERER_OVERLAY_SELECTOR } from "./rendererOverlaySelector";
 
 /**
  * Tells the desktop host whenever renderer chrome that native views must not

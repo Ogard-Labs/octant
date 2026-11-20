@@ -1,3 +1,4 @@
+import "../styles/thread-plan.css";
 import { useThreadPlan } from "./ThreadPlanContext";
 import { ThreadTaskViewer, type ThreadTaskChangedFiles } from "./ThreadTaskViewer";
 

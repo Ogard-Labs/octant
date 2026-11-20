@@ -1,3 +1,4 @@
+import "../styles/preview.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { PaneBar } from "./PaneBar";
 import type { CodeClient } from "@octant/client-runtime/code-client";

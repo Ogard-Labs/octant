@@ -505,15 +505,6 @@
   overflow: hidden;
 }
 
-.context-health-warning {
-  display: inline-flex;
-  min-height: 24px;
-  align-items: center;
-  gap: 4px;
-  padding: 2px var(--oct-space-2);
-  font-size: var(--oct-text-xs);
-}
-
 .context-inspector {
   display: grid;
   width: 100%;
@@ -690,8 +681,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-context-meter *,
-  .context-health-warning {
+  .composer-context-meter * {
     transition: none;
   }
 }

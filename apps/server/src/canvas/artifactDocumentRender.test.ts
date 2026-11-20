@@ -206,7 +206,7 @@ describe("rendering a canvas as a document", () => {
 
   it("writes a sankey as its flows and a funnel or radar as every reading", () => {
     const blocks = ["sankey", "funnel", "radar"].map((chartType) => {
-      const block = chartExampleBlocks.find((candidate) => candidate.chartType === chartType);
+      const block = chartExampleBlocks().find((candidate) => candidate.chartType === chartType);
       if (block === undefined) throw new Error(`${chartType} example is missing.`);
       return block;
     });
@@ -222,7 +222,7 @@ describe("rendering a canvas as a document", () => {
 
   it("writes a chart's title, subtitle, and callouts into the file and onto its picture", () => {
     const blocks = ["line", "bar"].map((chartType) => {
-      const block = chartExampleBlocks.find((candidate) => candidate.chartType === chartType);
+      const block = chartExampleBlocks().find((candidate) => candidate.chartType === chartType);
       if (block === undefined) throw new Error(`${chartType} example is missing.`);
       return block;
     });
@@ -838,8 +838,8 @@ describe("rendering a canvas as a document", () => {
   });
 
   it("writes a mockup as an outline of its component tree, per variant, with its callouts", () => {
-    const markdown = renderArtifactMarkdown(definition([notificationStatesExampleBlock]));
-    const html = renderArtifactHtml(definition([notificationStatesExampleBlock]));
+    const markdown = renderArtifactMarkdown(definition([notificationStatesExampleBlock()]));
+    const html = renderArtifactHtml(definition([notificationStatesExampleBlock()]));
 
     expect(markdown.kind).toBe("rendered");
     expect(html.kind).toBe("rendered");
@@ -862,7 +862,7 @@ describe("rendering a canvas as a document", () => {
   });
 
   it("writes a single-screen wireframe without variant headings, nesting the tree", () => {
-    const markdown = renderArtifactMarkdown(definition([settingsScreenExampleBlock]));
+    const markdown = renderArtifactMarkdown(definition([settingsScreenExampleBlock()]));
     expect(markdown.kind).toBe("rendered");
     if (markdown.kind !== "rendered") return;
     expect(markdown.body).toContain("Desktop mockup, wireframe.");
@@ -872,7 +872,7 @@ describe("rendering a canvas as a document", () => {
   });
 
   it("writes a dashboard in reading order where it sits, each placed block once", () => {
-    const [board, ...placed] = opsDashboardExampleBlocks;
+    const [board, ...placed] = opsDashboardExampleBlocks();
     if (board === undefined) throw new Error("missing dashboard");
     // Placed blocks listed before the dashboard still read inside it.
     const source = definition([prose, ...placed.slice(0, 2), board, ...placed.slice(2), heading]);
@@ -1213,7 +1213,7 @@ describe("a Canvas as one HTML file", () => {
     sourceId: "44444444-4444-4444-8444-444444444444",
     label: "/Users/ada/Projects/octant-secret/plan.md",
   });
-  const chart = chartExampleBlocks[2];
+  const chart = chartExampleBlocks()[2];
   if (chart === undefined) throw new Error("missing chart example");
   const source = { title: "Launch review", blocks: [chart, phone, prototype, link, hostPath] };
   const resolved = new Map([
@@ -1364,7 +1364,7 @@ describe("a Canvas as one HTML file", () => {
 });
 
 describe("a destination export near the approval card's limit", () => {
-  const sankey = chartExampleBlocks.find((candidate) => candidate.chartType === "sankey");
+  const sankey = chartExampleBlocks().find((candidate) => candidate.chartType === "sankey");
   if (sankey === undefined) throw new Error("missing sankey example");
   const charts = Array.from({ length: 120 }, (_, index) =>
     decodeCanvasBlock({ ...sankey, blockId: `flows-${String(index)}` }),
@@ -1538,7 +1538,9 @@ describe("a destination export near the approval card's limit", () => {
 
 describe("a Canvas that follows a design system", () => {
   it("draws its charts in the design system's colours in an HTML export", () => {
-    const blocks = chartExampleBlocks.filter((block) => block.series.length > 1).slice(0, 1);
+    const blocks = chartExampleBlocks()
+      .filter((block) => block.series.length > 1)
+      .slice(0, 1);
     const plain = renderArtifactHtml(definition(blocks));
     const branded = renderArtifactHtml({
       ...definition(blocks),

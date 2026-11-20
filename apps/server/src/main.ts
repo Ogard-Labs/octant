@@ -180,19 +180,19 @@ try {
       }
       // Dynamically import server and persistence modules only after the control socket is bound.
       // Native dependencies and SQLite therefore cannot initialize before runtime ownership.
-      const [{ PersistenceLive }, { fatalStartupOutput, startOctantServer }, { loadRuntimeServe }] =
-        await Promise.all([
-          import("./persistence/persistenceService"),
-          import("./server"),
-          import("./serveRuntime"),
-        ]);
-      const serve = await loadRuntimeServe();
       // Honest platform capability observation: only tools whose probe succeeded
       // are reported; unavailable native tools fail closed out of the report.
-      const platformCapabilityReport = await probeHostPlatformCapabilities({
-        platform: process.platform,
-        uid: paths.uid,
-      });
+      const [
+        { PersistenceLive },
+        { fatalStartupOutput, startOctantServer },
+        serve,
+        platformCapabilityReport,
+      ] = await Promise.all([
+        import("./persistence/persistenceService"),
+        import("./server"),
+        import("./serveRuntime").then(({ loadRuntimeServe }) => loadRuntimeServe()),
+        probeHostPlatformCapabilities({ platform: process.platform, uid: paths.uid }),
+      ]);
       // Persistence must outlive the server's scoped cancellation and finalizers.
       const program = Effect.scoped(
         Effect.gen(function* () {

@@ -167,17 +167,24 @@ function bundledProviderDriverManifest(spec: BundledDriverSpec) {
   });
 }
 
-export const BUNDLED_PROVIDER_DRIVER_PLUGINS: ReadonlyArray<BundledProviderDriverPlugin> =
-  BUNDLED_PROVIDER_DRIVERS.map((spec) => ({
+// Decoding every manifest takes meaningful module-evaluation time, so the
+// arrays are built on first use: discovery and instances need them after
+// startup, never while the server opens.
+let bundledProviderDriverPluginsCache: ReadonlyArray<BundledProviderDriverPlugin> | undefined;
+export function bundledProviderDriverPlugins(): ReadonlyArray<BundledProviderDriverPlugin> {
+  return (bundledProviderDriverPluginsCache ??= BUNDLED_PROVIDER_DRIVERS.map((spec) => ({
     driverKind: spec.driverKind,
     manifest: bundledProviderDriverManifest(spec),
-  }));
+  })));
+}
 
-export const BUNDLED_IMAGE_DRIVER_PLUGINS: ReadonlyArray<BundledProviderDriverPlugin> =
-  BUNDLED_IMAGE_DRIVERS.map((spec) => ({
+let bundledImageDriverPluginsCache: ReadonlyArray<BundledProviderDriverPlugin> | undefined;
+export function bundledImageDriverPlugins(): ReadonlyArray<BundledProviderDriverPlugin> {
+  return (bundledImageDriverPluginsCache ??= BUNDLED_IMAGE_DRIVERS.map((spec) => ({
     driverKind: spec.driverKind,
     manifest: bundledProviderDriverManifest(spec),
-  }));
+  })));
+}
 
 const defaultActivation: ExtensionActivationState = {
   installed: true,
@@ -282,9 +289,11 @@ export function admittedBundledProviderDriverKinds(
   patches: Readonly<Partial<Record<ProviderDriverKind, BundledProviderDriverActivationPatch>>> = {},
 ): ReadonlySet<ProviderDriverKind> {
   return new Set(
-    BUNDLED_PROVIDER_DRIVER_PLUGINS.filter((plugin) =>
-      isBundledProviderDriverEffective(plugin, patches[plugin.driverKind] ?? {}),
-    ).map((plugin) => plugin.driverKind),
+    bundledProviderDriverPlugins()
+      .filter((plugin) =>
+        isBundledProviderDriverEffective(plugin, patches[plugin.driverKind] ?? {}),
+      )
+      .map((plugin) => plugin.driverKind),
   );
 }
 
@@ -293,16 +302,18 @@ export function admittedBundledImageDriverKinds(
   patches: Readonly<Partial<Record<ProviderDriverKind, BundledProviderDriverActivationPatch>>> = {},
 ): ReadonlySet<ProviderDriverKind> {
   return new Set(
-    BUNDLED_IMAGE_DRIVER_PLUGINS.filter((plugin) =>
-      isBundledProviderDriverEffective(plugin, patches[plugin.driverKind] ?? {}),
-    ).map((plugin) => plugin.driverKind),
+    bundledImageDriverPlugins()
+      .filter((plugin) =>
+        isBundledProviderDriverEffective(plugin, patches[plugin.driverKind] ?? {}),
+      )
+      .map((plugin) => plugin.driverKind),
   );
 }
 
 export function bundledProviderDriverPlugin(
   driverKind: ProviderDriverKind,
 ): BundledProviderDriverPlugin | undefined {
-  return BUNDLED_PROVIDER_DRIVER_PLUGINS.find((plugin) => plugin.driverKind === driverKind);
+  return bundledProviderDriverPlugins().find((plugin) => plugin.driverKind === driverKind);
 }
 
 /**
@@ -325,7 +336,7 @@ export interface ProviderDriverCatalogListing {
 export function bundledProviderDriverCatalog(
   patches: Readonly<Partial<Record<ProviderDriverKind, BundledProviderDriverActivationPatch>>> = {},
 ): ReadonlyArray<ProviderDriverCatalogListing> {
-  return BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => {
+  return bundledProviderDriverPlugins().map((plugin) => {
     const patch = patches[plugin.driverKind] ?? {};
     const activation = bundledProviderDriverActivation(patch);
     return {

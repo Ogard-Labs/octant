@@ -1,9 +1,15 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { HomeCardCustomization } from "@octant/contracts/shell";
-import type { ReactNode } from "react";
-import { CodeHomeActivity, type CodeHomeActivityProps } from "../home/CodeHomeActivity";
+import { lazy, Suspense, type ReactNode } from "react";
+import type { CodeHomeActivityProps } from "../home/CodeHomeActivity";
 import { HomeDashboard } from "../home/HomeDashboard";
 import type { HomeCardDefinition, HomeListContributor } from "../home/homeCards";
+
+const CodeHomeActivity = lazy(() =>
+  import("../home/CodeHomeActivity").then(({ CodeHomeActivity }) => ({
+    default: CodeHomeActivity,
+  })),
+);
 
 export interface HomeStartProps {
   /** The card area (`HomeDashboard`), which owns its own empty states. */
@@ -64,17 +70,19 @@ export function HomeStartList(props: {
             ? {}
             : {
                 activity: (
-                  <CodeHomeActivity
-                    customization={props.homeStart?.cardCustomization ?? NO_HOME_CARD_CHOICE}
-                    onCustomizationChange={
-                      props.homeStart?.onCardCustomizationChange ?? ignoreCardChoice
-                    }
-                    onOpenThread={codeActivity.openThread}
-                    {...(codeActivity.openExternal === undefined
-                      ? {}
-                      : { onOpenExternal: codeActivity.openExternal })}
-                    read={codeActivity.read}
-                  />
+                  <Suspense fallback={null}>
+                    <CodeHomeActivity
+                      customization={props.homeStart?.cardCustomization ?? NO_HOME_CARD_CHOICE}
+                      onCustomizationChange={
+                        props.homeStart?.onCardCustomizationChange ?? ignoreCardChoice
+                      }
+                      onOpenThread={codeActivity.openThread}
+                      {...(codeActivity.openExternal === undefined
+                        ? {}
+                        : { onOpenExternal: codeActivity.openExternal })}
+                      read={codeActivity.read}
+                    />
+                  </Suspense>
                 ),
               })}
           cards={props.homeStart?.cards ?? NO_HOME_CARDS}

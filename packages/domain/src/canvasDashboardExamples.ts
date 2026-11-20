@@ -218,5 +218,9 @@ function decoded(blocks: ReadonlyArray<unknown>): ReadonlyArray<CanvasBlock> {
   return blocks.map((block) => decodeCanvasBlock(block));
 }
 
-export const opsDashboardExampleBlocks = decoded(opsDashboardExample);
-export const releaseHealthBoardExampleBlocks = decoded(releaseHealthBoardExample);
+export function opsDashboardExampleBlocks() {
+  return decoded(opsDashboardExample);
+}
+export function releaseHealthBoardExampleBlocks() {
+  return decoded(releaseHealthBoardExample);
+}

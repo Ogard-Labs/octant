@@ -1,0 +1,40 @@
+.device-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-meta);
+}
+
+.device-dot[data-dot="running"] {
+  background: var(--oct-success);
+  animation: device-dot-pulse var(--oct-motion-pulse) ease-out infinite;
+}
+
+.device-dot[data-dot="busy"] {
+  background: var(--oct-warn);
+}
+
+.device-dot[data-dot="lost"] {
+  background: var(--oct-danger);
+}
+
+@keyframes device-dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--oct-success) 45%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .device-dot[data-dot="running"] {
+    animation: none;
+  }
+}
+
+html[data-octant-reduced-motion="true"] .device-dot[data-dot="running"] {
+  animation: none;
+}

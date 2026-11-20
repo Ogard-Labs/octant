@@ -31,7 +31,7 @@ import {
   useThreadActivityRevision,
 } from "../polling/ThreadActivityRevisions";
 import { SideTaskProvider } from "./SideTaskCards";
-import { FinishedReceiptProvider } from "../finishedReceipts/FinishedReceiptCard";
+import { FinishedReceiptProvider } from "../finishedReceipts/FinishedReceiptProvider";
 import { EnvironmentCard } from "../environment/EnvironmentGroup";
 import "./follow-up-suggestions.css";
 import { OctantAlert } from "../ui/base/OctantAlert";

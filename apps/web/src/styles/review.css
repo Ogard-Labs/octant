@@ -4,14 +4,6 @@
    out the two columns and the rows' own faces. Glyphs and words carry state,
    never hue, and the selected row is raised rather than tinted. */
 
-.review-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  overflow: auto;
-  background: var(--oct-bg);
-}
-
 .review-page {
   container: review / inline-size;
 }

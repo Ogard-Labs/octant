@@ -1,3 +1,4 @@
+import "../../styles/canvas-dashboard.css";
 import { createElement, useId, type ReactNode } from "react";
 import type { CanvasDashboardPlacedCell } from "@octant/domain/canvas-dashboard-layout";
 

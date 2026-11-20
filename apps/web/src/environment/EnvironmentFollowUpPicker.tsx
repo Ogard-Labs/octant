@@ -1,3 +1,4 @@
+import "../styles/environment-details.css";
 import type { AutomationSummary } from "@octant/contracts/automation";
 import { useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";

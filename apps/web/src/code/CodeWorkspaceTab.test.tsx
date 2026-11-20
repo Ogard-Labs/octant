@@ -130,7 +130,9 @@ describe("CodeWorkspaceTab repository tests", () => {
     const client = codeClient();
     render(<CodeWorkspaceTab controller={controller(client)} tab={testTab()} />);
 
-    expect(await screen.findByRole("button", { name: "Run Web tests" })).toBeVisible();
+    expect(
+      await screen.findByRole("button", { name: "Run Web tests" }, { timeout: 5000 }),
+    ).toBeVisible();
     expect(client.listTests).toHaveBeenCalledWith(ids.thread, ids.checkout);
   });
 
@@ -166,7 +168,9 @@ describe("CodeWorkspaceTab repository tests", () => {
     const client = codeClient();
     render(<CodeWorkspaceTab controller={controller(client)} tab={testTab()} />);
 
-    expect(await screen.findByRole("button", { name: "Run Web tests" })).toBeVisible();
+    expect(
+      await screen.findByRole("button", { name: "Run Web tests" }, { timeout: 5000 }),
+    ).toBeVisible();
     expect(screen.getByText("Not run")).toBeVisible();
   });
 

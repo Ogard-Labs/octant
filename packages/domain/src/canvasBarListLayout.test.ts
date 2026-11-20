@@ -33,16 +33,16 @@ function barList(
 
 describe("bar list layout", () => {
   it("ranks the rows largest first, the same way every time", () => {
-    const layout = layoutCanvasBarList(hottestFilesBlock, { limit: 4 });
+    const layout = layoutCanvasBarList(hottestFilesBlock(), { limit: 4 });
 
     expect(layout).toEqual(snapshot.hottestFiles);
-    expect(layoutCanvasBarList(hottestFilesBlock, { limit: 4 })).toEqual(layout);
+    expect(layoutCanvasBarList(hottestFilesBlock(), { limit: 4 })).toEqual(layout);
     expect(layout.rows.map((row) => row.value)).toEqual([41, 33, 27, 19]);
     expect(layout.hiddenCount).toBe(1);
   });
 
   it("gives the largest reading a full bar and the rest their share of it", () => {
-    const layout = layoutCanvasBarList(hottestFilesBlock);
+    const layout = layoutCanvasBarList(hottestFilesBlock());
 
     expect(layout.max).toBe(41);
     expect(layout.rows[0]?.fraction).toBe(1);
@@ -51,7 +51,7 @@ describe("bar list layout", () => {
   });
 
   it("reverses the ranking when asked", () => {
-    const ascending = layoutCanvasBarList(hottestFilesBlock, { direction: "asc" });
+    const ascending = layoutCanvasBarList(hottestFilesBlock(), { direction: "asc" });
 
     expect(ascending.rows.map((row) => row.value)).toEqual([12, 19, 27, 33, 41]);
   });
@@ -83,7 +83,7 @@ describe("bar list layout", () => {
   });
 
   it("reads the value domain from zero so a bar starts where a bar starts", () => {
-    const domain = barListValueDomain(hottestFilesBlock);
+    const domain = barListValueDomain(hottestFilesBlock());
 
     expect(domain).toEqual({ min: 0, max: 41 });
   });

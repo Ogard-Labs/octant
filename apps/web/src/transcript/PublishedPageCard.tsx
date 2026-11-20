@@ -1,7 +1,7 @@
 import type { ThreadPublishedPage } from "@octant/contracts";
 import { ExternalLink } from "../ui/icons";
 import { useContext } from "react";
-import { MarkdownLinkActionsContext } from "../markdown/Markdown";
+import { MarkdownLinkActionsContext } from "../markdown/markdownLinkActions";
 
 /**
  * A page a tool call published outside this host, such as a Claude artifact on

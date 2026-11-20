@@ -1,3 +1,4 @@
+import "../styles/apple.css";
 import type { AppleSimulatorLiveFrame } from "@octant/domain";
 import { canOfferAppleSimulatorFrameInput } from "@octant/domain";
 import { useId, useState } from "react";

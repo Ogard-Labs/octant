@@ -1,0 +1,220 @@
+.canvas-view__denied {
+  border: 1px solid color-mix(in oklab, var(--oct-danger) 60%, transparent);
+  border-radius: var(--oct-radius-md);
+  padding: var(--oct-space-4) var(--oct-space-5);
+  margin: var(--oct-space-6);
+}
+
+.canvas-view__loading {
+  color: var(--oct-muted);
+  padding: var(--oct-space-4) var(--oct-space-5);
+  margin: var(--oct-space-6);
+}
+
+.canvas-workspace-tab .octant-dialog__popup,
+.octant-dialog__popup:has(
+  > .canvas-revise-form,
+  > .canvas-refresh,
+  > .canvas-share,
+  > .canvas-compare
+) {
+  padding: var(--oct-space-4);
+}
+
+.canvas-revise-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
+.canvas-revise-form textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+/* Where a new Canvas starts. Options are cards in a grid that falls to one
+   column in a narrow thread; each draws a miniature of its recipe's sections
+   so the shapes can be compared before the summary is read. */
+
+.canvas-start-from {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+}
+
+.canvas-start-from__label {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+  color: var(--oct-fg);
+}
+
+.canvas-start-from__options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: var(--oct-space-2);
+  align-content: start;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+/* The button recipe fixes a single-line height; a card grows with its text. */
+
+.canvas-start-from__option {
+  display: grid;
+  height: auto;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  padding: var(--oct-space-2);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  text-align: left;
+  white-space: normal;
+}
+
+.canvas-start-from__option:hover {
+  background: color-mix(in oklab, var(--oct-fg) 4%, var(--oct-surface));
+}
+.canvas-start-from__option:active {
+  background: var(--oct-wash-pressed);
+}
+
+/* Focus is a quiet fill, not a drawn halo, like every other ghost control. */
+
+.canvas-start-from__option:focus-visible {
+  background: color-mix(in oklab, var(--oct-fg) 8%, var(--oct-surface));
+}
+
+.canvas-start-from__option[aria-checked="true"] {
+  border-color: var(--oct-accent);
+  background: color-mix(in oklab, var(--oct-accent) 8%, var(--oct-surface));
+}
+
+.canvas-start-from__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.canvas-start-from__title {
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.canvas-start-from__summary {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+.canvas-start-from__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 36px;
+  padding: var(--oct-space-1);
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 10%, transparent);
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-fg) 3%, transparent);
+}
+
+.canvas-start-from__preview-row {
+  display: block;
+  height: 3px;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--oct-fg) 18%, transparent);
+}
+
+.canvas-start-from__preview-row[data-kind="heading"] {
+  width: 60%;
+  background: color-mix(in oklab, var(--oct-fg) 45%, transparent);
+}
+
+.canvas-start-from__note {
+  margin: 0;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+.canvas-start-from__ask {
+  font-size: var(--oct-text-sm);
+}
+
+/* Import HTML sits under the create form as its own small section. A long
+   address in the summary wraps rather than widening the thread column. */
+
+.canvas-html-import {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+  min-width: 0;
+}
+
+.canvas-html-import > [data-testid="canvas-import-html-open"] {
+  align-self: flex-start;
+}
+
+.canvas-html-import__heading {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.canvas-html-import__label {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+.canvas-html-import__paste {
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-html-import__actions {
+  display: flex;
+  gap: var(--oct-space-2);
+}
+
+.canvas-html-import__line {
+  margin: 0;
+}
+
+.canvas-html-import__drop-list {
+  margin: var(--oct-space-1) 0 0;
+  padding-left: var(--oct-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-html-import__drop-count {
+  font-weight: 600;
+}
+
+.canvas-html-import__drop-examples {
+  display: block;
+  color: var(--oct-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Destination export. The approval card shows the payload and the destination
+   before anything leaves. Status is words, not color alone. */
+
+.canvas-export {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.octant-dialog__popup:has(> .canvas-export) {
+  padding: var(--oct-space-4);
+}

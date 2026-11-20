@@ -1,3 +1,4 @@
+import "../styles/artifacts.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type {
   ArtifactKind,

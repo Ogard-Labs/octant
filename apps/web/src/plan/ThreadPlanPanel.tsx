@@ -1,3 +1,4 @@
+import "../styles/thread-plan.css";
 import { useState } from "react";
 import { PaneBar } from "../shell/PaneBar";
 import { AlertTriangle, CloudOff, ListChecks, Loader, ShieldAlert } from "../ui/icons";

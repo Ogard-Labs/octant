@@ -52,6 +52,7 @@ import {
   type TodoStateFilter,
 } from "./todoListModel";
 import type { TodoChangeOutcome, TodoList } from "./useTodoList";
+import "../styles/todo-row-thread.css";
 
 /** A thread started from a to-do whose link the list host has not recorded. */
 export interface TodoUnlinkedStart {

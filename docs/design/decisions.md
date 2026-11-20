@@ -609,6 +609,9 @@ Status: Partly built. Since: 2026-11-16. Detail: [Architecture: Current Release 
   entry evaluation. Chat navigation keeps one in-flight read and one pending
   refresh, pauses hidden windows and cancels obsolete reads. Detail:
   [Process topology](../architecture.md#process-topology).
+- Workspace styles load with their views. Sandbox restrictions share one
+  visible-only poll per client and scope. Detail:
+  [Process topology](../architecture.md#process-topology).
 - Crash recovery retains desktop lifetime through replacement-window preparation;
   last-window quit must not race it. Explicit quit wins and recovery is bounded
   to two replacements per minute.

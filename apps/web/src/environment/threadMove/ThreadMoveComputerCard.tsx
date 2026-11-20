@@ -1,3 +1,4 @@
+import "../../styles/thread-move-computer.css";
 import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 import {
   ProjectId,
@@ -24,6 +25,7 @@ import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { EnvironmentCard, EnvironmentTile } from "../EnvironmentGroup";
 import type { ThreadMoveClient } from "./threadMoveClient";
+import { percent } from "./threadMoveProgress";
 import { partsLeftBehindSentence } from "./ThreadMoveTombstone";
 import {
   BULK_PART_KINDS,
@@ -332,12 +334,6 @@ function computerPill(status: ThreadMoveThreadStatus | undefined): {
   if (status?.handedOver !== undefined) return { label: "Handed over", tone: "outline" };
   if (status?.failure !== undefined) return { label: "Can't move", tone: "warning" };
   return { label: "This computer", tone: "secondary" };
-}
-
-export function percent(sending: NonNullable<ThreadMoveThreadStatus["sending"]>): number {
-  if (sending.state === "arrived" || sending.state === "committed") return 100;
-  if (sending.bytesTotal === 0) return 0;
-  return Math.min(99, Math.floor((sending.bytesSent / sending.bytesTotal) * 100));
 }
 
 /** One sentence per reason, in the words the design gives each. */

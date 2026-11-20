@@ -27,7 +27,7 @@ import type { CoordinatorWorkerRequestSource } from "../code/CoordinatorWorkerRe
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
 import type { CodeController } from "../code/useCodeController";
 import type { useContinueCards } from "../code/useContinueCards";
-import { ComposerContextMeterShortcut } from "../context/ComposerContextMeter";
+import { ComposerContextMeterShortcut } from "../context/composerContextMeterReading";
 import {
   ComposerContextMeterProvider,
   type ComposerCompaction,
@@ -61,7 +61,7 @@ import type { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { useZenController } from "../zen/useZenController";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
 import type { ShellActions } from "./shellActions";
-import { RoutineOpenContext } from "../transcript/RoutineReceiptCard";
+import { RoutineOpenContext } from "../transcript/routineOpenContext";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { ThreadCoordinatorMenuItems, threadCoordinatorMenuOffers } from "../projects/ThreadRowMenu";
 import { codeThreadCoordinatorActions } from "./codeThreadCoordinatorActions";

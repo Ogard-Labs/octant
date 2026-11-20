@@ -1511,3 +1511,22 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 .filter-menu__count[data-empty="true"] {
   visibility: hidden;
 }
+
+/* Full-surface layers for the lazily loaded Automation and Agents centers.
+   Their wrappers render before the centers' own chunks arrive, so these few
+   rules stay in the initial cascade. */
+.automation-center-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: auto;
+  background: var(--oct-bg);
+}
+
+.agents-center-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: auto;
+  background: var(--oct-bg);
+}
