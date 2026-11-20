@@ -530,7 +530,7 @@ async function resolveEcsContainerCredentials(
 
 function resolveImdsBaseUrl(ports: AwsProfilePorts): string | undefined {
   const override = ports.metadataEndpoints?.imdsBaseUrl;
-  if (override !== undefined) return override.replace(/\/+$/, "");
+  if (override !== undefined) return stripTrailingSlashes(override);
   const configured = ports.env.AWS_EC2_METADATA_SERVICE_ENDPOINT?.trim();
   if (configured === undefined || configured.length === 0) return IMDS_DEFAULT_BASE_URL;
   let url: URL;
@@ -560,9 +560,9 @@ function resolveEcsCredentialsUrl(ports: AwsProfilePorts): string | undefined {
   if (relative !== undefined && relative.length > 0) {
     if (!relative.startsWith("/") || !/^\/[\x21-\x7e]{0,2048}$/.test(relative)) return undefined;
     if (relative.split(/[/?#]/).some((segment) => segment === "..")) return undefined;
-    const base = (
-      ports.metadataEndpoints?.ecsRelativeBaseUrl ?? ECS_DEFAULT_RELATIVE_BASE_URL
-    ).replace(/\/+$/, "");
+    const base = stripTrailingSlashes(
+      ports.metadataEndpoints?.ecsRelativeBaseUrl ?? ECS_DEFAULT_RELATIVE_BASE_URL,
+    );
     return `${base}${relative}`;
   }
   const full = ports.env.AWS_CONTAINER_CREDENTIALS_FULL_URI?.trim();
@@ -589,6 +589,12 @@ function resolveEcsCredentialsUrl(ports: AwsProfilePorts): string | undefined {
     return url.toString();
   }
   return undefined;
+}
+
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1;
+  return end === value.length ? value : value.slice(0, end);
 }
 
 function isLoopbackHostname(host: string): boolean {

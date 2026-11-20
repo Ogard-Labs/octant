@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, normalize } from "node:path";
 
 /**
  * The host environment a provider runtime receives outside Strict.
@@ -100,17 +100,23 @@ export function awsProfileReadPaths(
   }
   const seen = new Set<string>();
   const existing: string[] = [];
+  const push = (path: string) => {
+    if (!seen.has(path)) {
+      seen.add(path);
+      existing.push(path);
+    }
+  };
   for (const candidate of candidates) {
     if (!existsSync(candidate)) continue;
-    let resolved = candidate;
+    // Preserve the literal configured path so Linux Bubblewrap binds the
+    // resolved source at the exact path the runtime opens (`~/.aws` or the
+    // configured env var path), and also retain the canonical target for
+    // macOS Seatbelt read rules.
+    push(normalize(candidate));
     try {
-      resolved = realpathSync(candidate);
+      push(realpathSync(candidate));
     } catch {
       // Keep the literal path when realpath fails on a transient entry.
-    }
-    if (!seen.has(resolved)) {
-      seen.add(resolved);
-      existing.push(resolved);
     }
   }
   return existing;

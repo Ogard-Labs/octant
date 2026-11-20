@@ -1,10 +1,20 @@
-import { mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { buildBubblewrapLaunch } from "../process/linuxConfinement";
 import {
   ISOLATED_CLAUDE_LAUNCH_GUARDS,
   OPEN_CLAUDE_LAUNCH_GUARDS,
@@ -148,6 +158,58 @@ describe("isolatedClaudeAccountEnvironment", () => {
     for (const key of Object.keys(bedrockVars)) {
       expect(strictEnv).not.toHaveProperty(key);
     }
+  });
+
+  it("preserves literal symlinked ~/.aws and AWS file paths alongside canonical targets so Linux Bubblewrap mounts them at the configured paths", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-aws-symlink-")));
+    const fakeHome = join(root, "home");
+    const dotfiles = join(root, "dotfiles");
+    const realAwsDir = join(dotfiles, "aws");
+    const realConfigFile = join(dotfiles, "shared-aws-config");
+    const symlinkAwsDir = join(fakeHome, ".aws");
+    const symlinkConfigFile = join(fakeHome, "aws-config");
+    const projectRoot = join(root, "project");
+    const tempDir = join(root, "tmp");
+    const bwrapPath = join(root, "bwrap");
+    await mkdir(fakeHome, { recursive: true });
+    await mkdir(realAwsDir, { recursive: true });
+    await mkdir(projectRoot, { recursive: true });
+    await mkdir(tempDir, { recursive: true });
+    await writeFile(join(realAwsDir, "config"), "[profile work]\n");
+    await writeFile(realConfigFile, "[profile custom]\n");
+    await symlink(realAwsDir, symlinkAwsDir);
+    await symlink(realConfigFile, symlinkConfigFile);
+    await writeFile(bwrapPath, '#!/bin/sh\nexec "$@"\n');
+    await chmod(bwrapPath, 0o700);
+
+    const readPaths = awsProfileReadPaths({
+      HOME: fakeHome,
+      AWS_CONFIG_FILE: symlinkConfigFile,
+    });
+    expect(readPaths).toEqual([symlinkAwsDir, realAwsDir, symlinkConfigFile, realConfigFile]);
+
+    const launch = buildBubblewrapLaunch(
+      {
+        executable: "/bin/sh",
+        args: ["-c", "true"],
+        boundRoot: projectRoot,
+        temporaryDirectory: tempDir,
+        readRoots: readPaths,
+        privateHomeAllowPaths: readPaths,
+        protectedFiles: "provider-sign-ins",
+        networkEgress: "allow",
+      },
+      { bwrapPath },
+    );
+
+    const roBinds: Array<readonly [string, string]> = [];
+    for (let i = 0; i < launch.args.length; i += 1) {
+      if (launch.args[i] === "--ro-bind") {
+        roBinds.push([launch.args[i + 1] ?? "", launch.args[i + 2] ?? ""]);
+      }
+    }
+    expect(roBinds).toContainEqual([realAwsDir, symlinkAwsDir]);
+    expect(roBinds).toContainEqual([realConfigFile, symlinkConfigFile]);
   });
 
   it("under Strict keeps the fixed list and every channel off", () => {
