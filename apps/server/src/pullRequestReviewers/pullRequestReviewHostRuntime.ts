@@ -254,6 +254,7 @@ export function createPullRequestReviewHostRuntime(
       const targetRepository =
         `${String(input.target.repositoryOwner)}/${String(input.target.repositoryName)}`.toLowerCase();
       const observedBaseBranch = summary.baseBranch;
+      const authoritativeBaseSha = summary.baseSha ?? input.baseSha;
       const deliveryRepository = input.thread.deliveryTarget.proposedBaseRepository.toLowerCase();
       const deliveryBaseBranch = input.thread.deliveryTarget.proposedBaseBranch;
       const localBindingEligible =
@@ -282,7 +283,7 @@ export function createPullRequestReviewHostRuntime(
               result.outcome.baseRef === expectedRemoteBaseRef);
           const baseShaMatches =
             result.kind === "run-reviewed" &&
-            (input.baseSha === undefined || result.outcome.base === input.baseSha);
+            (authoritativeBaseSha === undefined || result.outcome.base === authoritativeBaseSha);
           if (
             result.kind === "run-reviewed" &&
             result.outcome.head === input.headSha &&
@@ -340,6 +341,14 @@ export function createPullRequestReviewHostRuntime(
       ) {
         return { status: "unavailable" };
       }
+      if (
+        summary.baseSha !== undefined &&
+        observed.pullRequest.baseSha !== undefined &&
+        summary.baseSha !== observed.pullRequest.baseSha
+      ) {
+        return { status: "unavailable" };
+      }
+      const observedBaseSha = observed.pullRequest.baseSha ?? authoritativeBaseSha;
       const { files, truncated } = unifiedDiffToFiles(input.thread, observed.diff);
       const retainedOperationId = decodeCodeOperationId(randomUUID());
       try {
@@ -350,7 +359,7 @@ export function createPullRequestReviewHostRuntime(
           gitOperationId: decodeCodeGitOperationId(randomUUID()),
           baseRef: observed.pullRequest.baseBranch,
           head: observedHeadSha,
-          ...(input.baseSha === undefined ? {} : { base: input.baseSha }),
+          ...(observedBaseSha === undefined ? {} : { base: observedBaseSha }),
           diff: observed.diff,
           diffTruncated: observed.diffTruncated,
           changedPaths: files.map((file) => file.path),
@@ -364,7 +373,7 @@ export function createPullRequestReviewHostRuntime(
           snapshot: decodePullRequestReviewDiffSnapshot({
             headSha: observedHeadSha,
             baseRef: observed.pullRequest.baseBranch,
-            ...(input.baseSha === undefined ? {} : { baseSha: input.baseSha }),
+            ...(observedBaseSha === undefined ? {} : { baseSha: observedBaseSha }),
             reviewOperationId: retainedOperationId,
             files,
             ...(truncated || observed.diffTruncated ? { truncated: true } : {}),
@@ -522,6 +531,7 @@ export function createPullRequestReviewHostRuntime(
         threadId: linked.threadId,
         headSha: summary.headSha,
         baseRef: summary.baseBranch,
+        ...(summary.baseSha === undefined ? {} : { baseSha: summary.baseSha }),
         state: row.draft ? "draft" : "open",
       });
     }

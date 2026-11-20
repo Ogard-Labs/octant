@@ -10,6 +10,7 @@ import {
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceReference,
   decodeCodeOperationEventFrame,
+  decodeCodeOperationId,
   decodeCodeRelativePath,
   decodeCodeRepositoryId,
   decodeCodeThread,
@@ -65,6 +66,7 @@ const CODEX_MODEL_ID = decodeProviderModelId("gpt-5.3-codex");
 const HEAD_SHA = "1".repeat(40);
 const OTHER_LOCAL_HEAD = "2".repeat(40);
 const BASE_SHA = "9".repeat(40);
+const RELEASE_BASE_SHA = "8".repeat(40);
 const LOCAL_ACTOR: EventActor = { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID as never };
 
 const TARGET: PullRequestReviewTarget = {
@@ -186,6 +188,7 @@ function makeCodexObservedState() {
 
 function makeFakeGhCommand(options: {
   readonly baseBranch: string;
+  readonly baseSha?: string;
   readonly headSha: string;
   readonly diff: string;
 }): GhCommandPort {
@@ -195,7 +198,7 @@ function makeFakeGhCommand(options: {
       if (
         args[0] === "pr" &&
         args[1] === "view" &&
-        args.includes("state,headRefName,baseRefName,headRefOid")
+        args.includes("state,headRefName,baseRefName,headRefOid,baseRefOid")
       ) {
         return {
           exitCode: 0,
@@ -204,6 +207,7 @@ function makeFakeGhCommand(options: {
             headRefName: "feature/harden-auth",
             baseRefName: options.baseBranch,
             headRefOid: options.headSha,
+            ...(options.baseSha === undefined ? {} : { baseRefOid: options.baseSha }),
           }),
         };
       }
@@ -218,6 +222,7 @@ function makeFakeGhCommand(options: {
             isDraft: false,
             body: "Tighten check.",
             baseRefName: options.baseBranch,
+            ...(options.baseSha === undefined ? {} : { baseRefOid: options.baseSha }),
             headRefName: "feature/harden-auth",
             headRefOid: options.headSha,
             headRepositoryOwner: { login: "ogard-labs" },
@@ -244,8 +249,10 @@ function makeFakeGhCommand(options: {
 function makeProductionHarness(options: {
   readonly localHeadSha: string;
   readonly localBaseBranch?: string;
+  readonly localBaseShaByRef?: Readonly<Record<string, string>>;
   readonly localDiff?: string;
   readonly ghBaseBranch: string;
+  readonly ghBaseSha?: string;
   readonly ghDiff: string;
   readonly replyText: string;
   readonly reportUsage?: boolean;
@@ -340,10 +347,12 @@ function makeProductionHarness(options: {
       }),
       compareBranch: async ({ baseRef }) => {
         localReviewRunCalls += 1;
+        const resolvedBase =
+          options.localBaseShaByRef !== undefined ? options.localBaseShaByRef[baseRef] : BASE_SHA;
         return {
           status: "ready",
           head: options.localHeadSha,
-          base: BASE_SHA,
+          ...(resolvedBase === undefined ? {} : { base: resolvedBase }),
           baseRef,
           ahead: 1,
           behind: 0,
@@ -377,6 +386,7 @@ function makeProductionHarness(options: {
       observeReview: async () => ({ status: "unavailable" }),
     },
     reviewFindings: {
+      list: async () => [...savedFindings.values()],
       create: async () => {
         throw new Error("unused");
       },
@@ -563,6 +573,7 @@ function makeProductionHarness(options: {
   const host = createPullRequestReviewHostRuntime({
     ghCommand: makeFakeGhCommand({
       baseBranch: options.ghBaseBranch,
+      ...(options.ghBaseSha === undefined ? {} : { baseSha: options.ghBaseSha }),
       headSha: HEAD_SHA,
       diff: options.ghDiff,
     }),
@@ -655,6 +666,7 @@ function makeProductionHarness(options: {
 
   return {
     service,
+    codeOperationService,
     journal,
     savedFindings,
     framesByOperation,
@@ -763,12 +775,18 @@ describe("pull request review host runtime integration with ReviewFindingService
     }
   });
 
-  it("falls back to the retained GitHub PR diff when a PR is retargeted to another base branch with unchanged HEAD", async () => {
+  it("falls back to the retained GitHub PR diff when a PR is retargeted to another base branch with unchanged HEAD and assesses the finding as current", async () => {
     const harness = makeProductionHarness({
       localHeadSha: HEAD_SHA,
       localBaseBranch: "main",
+      localBaseShaByRef: {
+        main: BASE_SHA,
+        "origin/main": BASE_SHA,
+        "origin/release": RELEASE_BASE_SHA,
+      },
       localDiff: MAIN_DIFF,
       ghBaseBranch: "release",
+      ghBaseSha: RELEASE_BASE_SHA,
       ghDiff: RELEASE_DIFF,
       replyText: JSON.stringify({
         findings: [
@@ -787,6 +805,8 @@ describe("pull request review host runtime integration with ReviewFindingService
       modelId: CODEX_MODEL_ID,
     });
 
+    // Omit `baseSha` in the observation (matching `observeSnapshotRows`), so the
+    // host runtime must capture and retain `baseRefOid` from GitHub metadata.
     const record = await harness.service.reviewPullRequestHead({
       target: TARGET,
       threadId: THREAD_ID,
@@ -807,6 +827,23 @@ describe("pull request review host runtime integration with ReviewFindingService
     expect(finding?.anchor?.revision.kind).toBe("branch");
     if (finding?.anchor?.revision.kind === "branch") {
       expect(finding.anchor.revision.baseRef).toBe("release");
+      expect(finding.anchor.revision.base).toBe(RELEASE_BASE_SHA);
+      expect(finding.anchor.revision.head).toBe(HEAD_SHA);
+    }
+
+    // Assessing via the real production `list-review-findings` path must resolve
+    // the retargeted `release` base ref (including `origin/release`) and mark the
+    // finding `current`, not falsely `outdated`.
+    const listed = await harness.codeOperationService.execute(WINDOW_ID, {
+      kind: "list-review-findings",
+      operationId: decodeCodeOperationId(randomUUID()),
+      threadId: THREAD_ID,
+      checkoutId: CHECKOUT_ID,
+    });
+    expect(listed.kind).toBe("review-findings-state");
+    if (listed.kind === "review-findings-state") {
+      expect(listed.findings).toHaveLength(1);
+      expect(listed.findings[0]?.anchorState).toBe("current");
     }
   });
 

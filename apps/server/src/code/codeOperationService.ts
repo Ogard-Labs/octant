@@ -3306,11 +3306,27 @@ export class CodeOperationService {
         "oid" in observed.head &&
         observed.head.oid === revision.head
       ) {
-        const compared = await git.compareBranch({
+        let compared = await git.compareBranch({
           checkoutRoot,
           baseRef: revision.baseRef,
           headRef: "HEAD",
         });
+        if (
+          compared.status === "ready" &&
+          compared.base === undefined &&
+          !revision.baseRef.includes("/") &&
+          threadId !== undefined
+        ) {
+          const remoteName =
+            this.#options.authority.readThread(threadId)?.deliveryTarget.remoteName;
+          if (remoteName !== undefined) {
+            compared = await git.compareBranch({
+              checkoutRoot,
+              baseRef: `${remoteName}/${revision.baseRef}`,
+              headRef: "HEAD",
+            });
+          }
+        }
         current =
           compared.status === "ready" &&
           compared.head === revision.head &&

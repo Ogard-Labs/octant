@@ -46,6 +46,7 @@ export type GhPullRequestSummaryResult =
       headBranch: string;
       baseBranch: string;
       headSha: string;
+      baseSha?: string;
     }>
   | Readonly<{ status: "unavailable" }>;
 
@@ -118,7 +119,7 @@ export class GhPullRequestActionPort {
         "--repo",
         repository,
         "--json",
-        "state,headRefName,baseRefName,headRefOid",
+        "state,headRefName,baseRefName,headRefOid,baseRefOid",
       ],
       undefined,
       signal,
@@ -142,12 +143,18 @@ export class GhPullRequestActionPort {
     ) {
       return { status: "unavailable" };
     }
+    const baseSha =
+      typeof value.baseRefOid === "string" &&
+      /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(value.baseRefOid)
+        ? value.baseRefOid
+        : undefined;
     return {
       status: "read",
       state,
       headBranch: value.headRefName,
       baseBranch: value.baseRefName,
       headSha: value.headRefOid,
+      ...(baseSha === undefined ? {} : { baseSha }),
     };
   }
 

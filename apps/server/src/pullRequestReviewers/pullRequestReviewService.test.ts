@@ -1051,4 +1051,63 @@ describe("second-model pull request reviewer service", () => {
     expect(mixed.recordedFindings).toHaveLength(1);
     expect(mixed.postedComments).toHaveLength(1);
   });
+
+  it("keeps a newer completed review as the latest review on both PR and thread queries after restarting past an earlier interrupted review", async () => {
+    let headSha = HEAD_1;
+    let failOnRunRecorded = true;
+    const h = createHarness({
+      currentHeadSha: () => headSha,
+      failAppendOnEventName: () =>
+        failOnRunRecorded ? "pull-request-review.run-recorded@1" : undefined,
+    });
+    await h.service.updateProjectSettings(
+      WINDOW_ID,
+      { projectId: PROJECT_ID, enabled: true, route: REVIEWER_ROUTE, postSummaryComment: false },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+
+    // Review A starts on HEAD_1 and crashes before recording completion.
+    await expect(
+      h.service.reviewPullRequestHead({
+        target: TARGET,
+        threadId: THREAD_ID,
+        headSha: HEAD_1,
+        baseRef: "origin/main",
+        state: "open",
+      }),
+    ).rejects.toThrow("Simulated crash");
+
+    // First restart: Review A is recovered as failed, then Review B completes on HEAD_2.
+    failOnRunRecorded = false;
+    headSha = HEAD_2;
+    const afterFirstRestart = h.makeService();
+    const reviewB = await afterFirstRestart.reviewPullRequestHead({
+      target: TARGET,
+      threadId: THREAD_ID,
+      headSha: HEAD_2,
+      baseRef: "origin/main",
+      state: "open",
+    });
+    expect(reviewB?.status).toBe("completed");
+    expect(reviewB?.headSha).toBe(HEAD_2);
+
+    // Second restart: hydrating the earlier interrupted Review A must NOT overwrite Review B.
+    const afterSecondRestart = h.makeService();
+    const prView = await afterSecondRestart.queryPullRequestSettings(WINDOW_ID, TARGET, THREAD_ID);
+    expect(prView.status).toBe("ok");
+    if (prView.status === "ok") {
+      expect(prView.view.latestReview?.reviewId).toBe(reviewB?.reviewId);
+      expect(prView.view.latestReview?.headSha).toBe(HEAD_2);
+      expect(prView.view.latestReview?.status).toBe("completed");
+    }
+
+    const threadView = await afterSecondRestart.queryThreadSettings(WINDOW_ID, THREAD_ID);
+    expect(threadView.status).toBe("ok");
+    if (threadView.status === "ok") {
+      expect(threadView.view.latestReview?.reviewId).toBe(reviewB?.reviewId);
+      expect(threadView.view.latestReview?.headSha).toBe(HEAD_2);
+      expect(threadView.view.latestReview?.status).toBe("completed");
+    }
+  });
 });

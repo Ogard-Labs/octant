@@ -1981,7 +1981,15 @@ export class PullRequestReviewService {
       PULL_REQUEST_REVIEW_AGGREGATE_TYPES.pullRequestSettings,
       PULL_REQUEST_REVIEW_AGGREGATE_TYPES.run,
     ]);
+    // Track original journal sequence per review so interrupted runs recovered
+    // on restart keep their chronological place and never overwrite newer runs.
+    const startSequenceByReview = new Map<string, number>();
+    const sequenceByRecord = new Map<PullRequestReviewRunRecord, number>();
+    let replayOrder = 0;
+
     for (const envelope of envelopes) {
+      replayOrder += 1;
+      const sequence = envelope.globalSequence ?? replayOrder;
       if (envelope.eventName === PULL_REQUEST_REVIEW_EVENT_NAMES.projectSettingsUpdated) {
         const payload = envelope.payload as PullRequestReviewProjectSettingsEvent;
         const previous = this.#projectSettings.get(String(payload.projectId));
@@ -2018,19 +2026,24 @@ export class PullRequestReviewService {
         });
       } else if (envelope.eventName === PULL_REQUEST_REVIEW_EVENT_NAMES.runStarted) {
         const payload = envelope.payload as PullRequestReviewRunStartedEvent;
+        startSequenceByReview.set(String(payload.reviewId), sequence);
         this.#applyRunStarted(this.#runFoldFor(payload.target), payload);
       } else if (envelope.eventName === PULL_REQUEST_REVIEW_EVENT_NAMES.publicationRecorded) {
         const payload = envelope.payload as PullRequestReviewPublicationRecordedEvent;
         this.#applyPublication(this.#runFoldFor(payload.target), payload);
       } else if (envelope.eventName === PULL_REQUEST_REVIEW_EVENT_NAMES.runRecorded) {
         const payload = envelope.payload as PullRequestReviewRunRecordedEvent;
+        sequenceByRecord.set(payload.record, sequence);
         this.#applyRunRecord(this.#runFoldFor(payload.record.target), payload.record);
       }
     }
 
     // Any started invocation left open across a host restart is treated as
     // interrupted/uncertain: never auto-repeat the review or external
-    // publication/hand-back on the next observation.
+    // publication/hand-back on the next observation, and keep each recovered
+    // record at its original start position so it never supersedes a newer run.
+    const latestThreadSequence = new Map<string, number>();
+    this.#latestByThread.clear();
     for (const fold of this.#runs.values()) {
       for (const pending of fold.pendingStarts.values()) {
         fold.reviewedHeadShas.add(pending.headSha);
@@ -2049,10 +2062,20 @@ export class PullRequestReviewService {
             "The host restarted while this pull request review was in progress; Octant did not repeat external publication or hand-back.",
           startedAt: pending.startedAt,
         });
+        sequenceByRecord.set(recovered, startSequenceByReview.get(String(pending.reviewId)) ?? 0);
         fold.records.push(recovered);
-        this.#latestByThread.set(String(recovered.threadId), recovered);
       }
       fold.pendingStarts.clear();
+      fold.records.sort((a, b) => (sequenceByRecord.get(a) ?? 0) - (sequenceByRecord.get(b) ?? 0));
+      for (const record of fold.records) {
+        const seq = sequenceByRecord.get(record) ?? 0;
+        const threadKey = String(record.threadId);
+        const currentLatestSeq = latestThreadSequence.get(threadKey) ?? -1;
+        if (seq >= currentLatestSeq) {
+          latestThreadSequence.set(threadKey, seq);
+          this.#latestByThread.set(threadKey, record);
+        }
+      }
     }
   }
 
