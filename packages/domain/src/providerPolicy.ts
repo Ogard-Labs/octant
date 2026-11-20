@@ -76,7 +76,6 @@ import type {
   ProviderDefaults,
   ProviderDataTags,
   ProviderDriverKind,
-  ProviderExecutionPolicy,
   ProviderInstance,
   ProviderInstanceId,
   ProviderModelId,
@@ -757,11 +756,6 @@ export function effectiveClaudeAccountConfigDirectory(
   return claudeAccountUsesStoredKey(instance.configuration.authentication)
     ? assignedClaudeAccountConfigDirectory(homeDirectory, instance.id)
     : undefined;
-}
-
-/** Unmodified Claude CLI sign-in. Octant never wraps or replaces this flow. */
-export function claudeAuthLoginArgv(binaryPath: string): ReadonlyArray<string> {
-  return [normalizeBinaryPath(binaryPath), ...CLAUDE_ACCOUNT_PROFILE.signInArgv];
 }
 
 export function formatClaudeAuthLoginCommand(input: {
@@ -2291,26 +2285,4 @@ export function updateProviderDefaults(
     ...(hiddenModels === undefined || hiddenModels.length === 0 ? {} : { hiddenModels }),
     version: nextVersion(defaults.version),
   };
-}
-
-interface EffectiveProviderAuthorityInput {
-  readonly allowed: ProviderExecutionPolicy;
-  readonly requested: ProviderExecutionPolicy;
-  readonly enabled?: boolean;
-}
-
-export function effectiveProviderAuthority(
-  input: EffectiveProviderAuthorityInput,
-): ProviderExecutionPolicy {
-  if (input.enabled === false) {
-    reject("disabled-provider", "Enable this provider before starting a session.");
-  }
-  const authorityOrder: ReadonlyArray<ProviderExecutionPolicy> = [
-    "plan",
-    "approval-gated",
-    "full-access",
-  ];
-  return authorityOrder[
-    Math.min(authorityOrder.indexOf(input.allowed), authorityOrder.indexOf(input.requested))
-  ]!;
 }

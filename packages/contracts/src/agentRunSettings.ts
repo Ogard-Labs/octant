@@ -81,11 +81,6 @@ export type AgentRunSelectableCreationPosture = typeof AgentRunSelectableCreatio
 
 export const DEFAULT_AGENT_RUN_CREATION_POSTURE: AgentRunSelectableCreationPosture = "automatic";
 
-export const DEFAULT_AGENT_RUN_POLICY_SETTINGS: Omit<AgentRunPolicySettings, "updatedAt"> = {
-  creationPosture: DEFAULT_AGENT_RUN_CREATION_POSTURE,
-  version: 0 as AggregateVersion,
-};
-
 export const UpdateAgentRunPolicySettings = Schema.Struct({
   workingTimeLimitMinutes: Schema.optional(AgentRunWorkingTimeLimit),
   /** Absent keeps the current choice. */

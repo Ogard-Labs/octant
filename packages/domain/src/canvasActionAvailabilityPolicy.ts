@@ -1,6 +1,5 @@
 import {
   type CanvasActionBlock,
-  type CanvasActionCommand,
   type CanvasActionDenialCode,
 } from "@octant/contracts/canvas-actions";
 import { type OctantMode } from "@octant/contracts/modes";
@@ -106,11 +105,4 @@ export function evaluateCanvasActionAvailability(
     return { ...base, state: "unavailable", reason: safeCanvasActionDenialReason("unavailable") };
   }
   return { ...base, state: "available" };
-}
-
-/** Convenience classifier re-exported for renderers that only have a command. */
-export function classifyCanvasActionAvailabilityCommand(
-  command: CanvasActionCommand,
-): CanvasActionCapability {
-  return classifyCanvasActionCommand(command);
 }

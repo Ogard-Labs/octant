@@ -35,23 +35,6 @@ const ids = {
 const occurredAt = "2026-07-14T10:00:00.000Z";
 
 describe("provider registry contracts", () => {
-  it("publishes the durable provider event vocabulary without entity actor provenance", () => {
-    expect((providerContracts as Record<string, unknown>).PROVIDER_EVENT_NAMES).toEqual([
-      "provider.instance-created@1",
-      "provider.instance-renamed@1",
-      "provider.instance-binary-changed@1",
-      "provider.instance-configuration-changed@1",
-      "provider.instance-driver-rebound@1",
-      "provider.instance-driver-quarantined@1",
-      "provider.instance-data-tags-changed@1",
-      "provider.instance-enabled-changed@1",
-      "provider.instance-native-setup-changed@1",
-      "provider.instance-own-memory-changed@1",
-      "provider.instance-removed@1",
-      "provider.defaults-updated@1",
-      "provider.catalog-updated@1",
-    ]);
-  });
   it.each([
     "codex",
     "claude",

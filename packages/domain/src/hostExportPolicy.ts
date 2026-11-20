@@ -168,10 +168,6 @@ export function encodeHostExportPage(page: unknown): EncodedHostExportPage {
   }
 }
 
-export function hostExportPageContainsForbiddenKey(page: unknown): boolean {
-  return threadExportContainsForbiddenKey(page);
-}
-
 /**
  * Slice a resident identity list into a bounded page. The cursor is the next
  * index; an unreadable cursor yields nothing rather than restarting.

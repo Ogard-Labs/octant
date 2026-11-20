@@ -11,7 +11,6 @@ import {
   deriveReplicaMembership,
   replicaApprovalOf,
   replicaDescendants,
-  replicaEntryCounts,
   replicaFounderReachedFrom,
   replicaJoinRequestIsFresh,
   replicaMembershipNode,
@@ -20,6 +19,18 @@ import {
   type ReplicaDerivedMembership,
   type ReplicaHeldRecord,
 } from "./replicaMembershipPolicy";
+
+function entryCounts(
+  membership: ReplicaDerivedMembership,
+  instanceId: ReplicaInstanceId,
+  sequence: number,
+): boolean {
+  const node = replicaMembershipNode(membership, instanceId);
+  if (node === undefined || !node.admitted) return false;
+  if (node.cut !== undefined && sequence > node.cut) return false;
+  if (node.kept === undefined) return true;
+  return node.kept.some((run) => sequence >= run.from && sequence <= run.to);
+}
 
 const ids = {
   founder: "11111111-1111-8111-8111-111111111111" as ReplicaInstanceId,
@@ -264,9 +275,9 @@ describe("replica membership derivation", () => {
       revocation(ids.founder, 4, ids.west, 2),
     ]);
     expect(standing(westCut, ids.other)).toBe("not admitted");
-    expect(replicaEntryCounts(westCut, ids.west, 2)).toBe(true);
-    expect(replicaEntryCounts(westCut, ids.west, 3)).toBe(false);
-    expect(replicaEntryCounts(westCut, ids.other, 1)).toBe(false);
+    expect(entryCounts(westCut, ids.west, 2)).toBe(true);
+    expect(entryCounts(westCut, ids.west, 3)).toBe(false);
+    expect(entryCounts(westCut, ids.other, 1)).toBe(false);
   });
 
   it("caps a computer just before a slot it signed two different records into", () => {
@@ -324,8 +335,8 @@ describe("replica membership derivation", () => {
     ]);
     expect(standing(membership, ids.south)).toBe("left@3");
     expect(standing(membership, ids.west)).toBe("member");
-    expect(replicaEntryCounts(membership, ids.south, 3)).toBe(true);
-    expect(replicaEntryCounts(membership, ids.south, 4)).toBe(false);
+    expect(entryCounts(membership, ids.south, 3)).toBe(true);
+    expect(entryCounts(membership, ids.south, 4)).toBe(false);
     expect(decideReplicaJoinApproval({ membership, local: ids.south, subject: ids.other })).toEqual(
       { status: "refused", reason: "not-a-member" },
     );
@@ -394,9 +405,9 @@ describe("replica membership derivation", () => {
       ]);
       expect(standing(committed, ids.south)).toBe("cut@5");
       expect(standing(committed, ids.other)).toBe("not admitted");
-      expect(replicaEntryCounts(committed, ids.south, 3)).toBe(true);
-      expect(replicaEntryCounts(committed, ids.south, 4)).toBe(false);
-      expect(replicaEntryCounts(committed, ids.south, 5)).toBe(true);
+      expect(entryCounts(committed, ids.south, 3)).toBe(true);
+      expect(entryCounts(committed, ids.south, 4)).toBe(false);
+      expect(entryCounts(committed, ids.south, 5)).toBe(true);
       // Without the slots, the cut alone keeps slot 4, as before.
       const cutOnly = deriveReplicaMembership(ids.founder, [...records, revokeSouth(undefined)]);
       expect(standing(cutOnly, ids.other)).toBe("member");
@@ -466,7 +477,7 @@ describe("replica membership derivation", () => {
       const expected = deriveReplicaMembership(ids.founder, all);
       expect(replicaMembershipNode(expected, ids.west)?.kept).toEqual([{ from: 1, to: 2 }]);
       for (const sequence of [3, 4]) {
-        expect(replicaEntryCounts(expected, ids.west, sequence)).toBe(false);
+        expect(entryCounts(expected, ids.west, sequence)).toBe(false);
       }
       expect(deriveReplicaMembership(ids.founder, [...all].reverse())).toEqual(expected);
     });

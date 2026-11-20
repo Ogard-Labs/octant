@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentRunWorkingTimeLimitMinutes,
-  DEFAULT_AGENT_RUN_POLICY_SETTINGS,
+  DEFAULT_AGENT_RUN_CREATION_POSTURE,
   decodeAgentRunPolicySettings,
   decodeUpdateAgentRunPolicySettings,
 } from "./agentRunSettings";
@@ -28,7 +28,7 @@ describe("AgentRunPolicySettings", () => {
   });
 
   it("lets the thread's agent start subagents unless a person turned them off", () => {
-    expect(DEFAULT_AGENT_RUN_POLICY_SETTINGS.creationPosture).toBe("automatic");
+    expect(DEFAULT_AGENT_RUN_CREATION_POSTURE).toBe("automatic");
   });
 });
 

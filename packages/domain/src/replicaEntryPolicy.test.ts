@@ -16,9 +16,7 @@ import {
   mergeReplicaArtifactBlocks,
   reconcileReplicaEntry,
   replicaArtifactHeads,
-  replicaArtifactHidden,
   replicaArtifactStanding,
-  replicaReconcileCannotOverwrite,
   type ReplicaAppliedEntry,
   type ReplicaArtifactRecord,
   type ReplicaLocalState,
@@ -226,7 +224,6 @@ function noteApplied(
 
 describe("reconciling a replica entry", () => {
   it("cannot express overwrite", () => {
-    expect(replicaReconcileCannotOverwrite).toBe(true);
     expectTypeOf<ReplicaReconcileOutcome["outcome"]>().toEqualTypeOf<
       | "append-version"
       | "append-comment"
@@ -713,12 +710,11 @@ describe("the heads of a replicated artifact", () => {
       { kind: "version", versionId: ids.version },
       { kind: "version", versionId: ids.otherVersion },
     ]);
-    expect(replicaArtifactHidden(record)).toBe(false);
   });
 
-  it("hides an artifact only while a tombstone is its only head", () => {
+  it("keeps a revision standing beside a deletion from the same parent", () => {
     const deleted = { versions: [version(ids.parent, [])], tombstones: [tombstone([ids.parent])] };
-    expect(replicaArtifactHidden(deleted)).toBe(true);
+    expect(replicaArtifactStanding(deleted).status).toBe("deleted");
     // A revision from the same parent stands beside the deletion, which stays.
     const revised = {
       versions: [...deleted.versions, version(ids.version, [ids.parent])],
@@ -728,7 +724,7 @@ describe("the heads of a replicated artifact", () => {
       { kind: "version", versionId: ids.version },
       { kind: "tombstone", originInstanceId: ids.north, originSequence: 4 },
     ]);
-    expect(replicaArtifactHidden(revised)).toBe(false);
+    expect(replicaArtifactStanding(revised).status).toBe("current");
   });
 });
 

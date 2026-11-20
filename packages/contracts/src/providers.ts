@@ -1478,22 +1478,6 @@ export const ProviderDefaultsUpdated = Schema.Struct({ defaults: ProviderDefault
 );
 export type ProviderDefaultsUpdated = typeof ProviderDefaultsUpdated.Type;
 
-export const PROVIDER_EVENT_NAMES = [
-  "provider.instance-created@1",
-  "provider.instance-renamed@1",
-  "provider.instance-binary-changed@1",
-  "provider.instance-configuration-changed@1",
-  "provider.instance-driver-rebound@1",
-  "provider.instance-driver-quarantined@1",
-  "provider.instance-data-tags-changed@1",
-  "provider.instance-enabled-changed@1",
-  "provider.instance-native-setup-changed@1",
-  "provider.instance-own-memory-changed@1",
-  "provider.instance-removed@1",
-  "provider.defaults-updated@1",
-  "provider.catalog-updated@1",
-] as const;
-
 /**
  * Whether a model can read image input, as a driver-reported fact.
  *

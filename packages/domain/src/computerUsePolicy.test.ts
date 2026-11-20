@@ -1,15 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  evaluateComputerUseAction,
-  isSessionExpired,
-  canRecordComputerUseObservation,
-  isSensitiveFieldProtectionEnabled,
-  requiresVisibleStop,
-  requiresProcessOwnership,
-} from "./computerUsePolicy";
+import { evaluateComputerUseAction, isSensitiveFieldProtectionEnabled } from "./computerUsePolicy";
 import type {
   ComputerUseActionRequest,
-  ComputerUseObservation,
   ComputerUseSessionRecord,
   ToolActionAuthority,
 } from "@octant/contracts";
@@ -145,50 +137,6 @@ describe("evaluateComputerUseAction", () => {
   });
 });
 
-describe("isSessionExpired", () => {
-  it("returns false within timeout", () => {
-    const createdAt = new Date("2026-07-24T12:00:00.000Z").getTime();
-    expect(isSessionExpired(activeSession, createdAt + 60_000)).toBe(false);
-  });
-
-  it("returns true after timeout", () => {
-    const createdAt = new Date("2026-07-24T12:00:00.000Z").getTime();
-    expect(isSessionExpired(activeSession, createdAt + 300_001)).toBe(true);
-  });
-
-  it("returns false for stopped session", () => {
-    expect(isSessionExpired({ ...activeSession, state: "stopped" as const }, Date.now())).toBe(
-      false,
-    );
-  });
-});
-
-describe("canRecordComputerUseObservation", () => {
-  it("returns true for matching observation", () => {
-    const obs: ComputerUseObservation = {
-      sessionId: activeSession.sessionId,
-      actionId: activeSession.actionId,
-      correlationId: activeSession.correlationId,
-      authority,
-      observedAt: "2026-07-24T12:01:00.000Z" as any,
-      stale: false,
-    };
-    expect(canRecordComputerUseObservation(obs, activeSession)).toBe(true);
-  });
-
-  it("returns false for mismatched session", () => {
-    const obs: ComputerUseObservation = {
-      sessionId: "00000000-0000-4000-8000-000000000099" as any,
-      actionId: activeSession.actionId,
-      correlationId: activeSession.correlationId,
-      authority,
-      observedAt: "2026-07-24T12:01:00.000Z" as any,
-      stale: false,
-    };
-    expect(canRecordComputerUseObservation(obs, activeSession)).toBe(false);
-  });
-});
-
 describe("isSensitiveFieldProtectionEnabled", () => {
   it("returns true when policy enables protection", () => {
     expect(isSensitiveFieldProtectionEnabled(activeSession, "password")).toBe(true);
@@ -200,17 +148,5 @@ describe("isSensitiveFieldProtectionEnabled", () => {
       policy: { ...activeSession.policy, sensitiveFieldProtection: false },
     };
     expect(isSensitiveFieldProtectionEnabled(noProtection, "password")).toBe(false);
-  });
-});
-
-describe("requiresVisibleStop", () => {
-  it("returns true when policy requires it", () => {
-    expect(requiresVisibleStop(activeSession)).toBe(true);
-  });
-});
-
-describe("requiresProcessOwnership", () => {
-  it("returns true when policy requires it", () => {
-    expect(requiresProcessOwnership(activeSession)).toBe(true);
   });
 });

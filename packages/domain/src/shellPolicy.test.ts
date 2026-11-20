@@ -44,7 +44,6 @@ import {
   browserTransferRemembered,
   replaceShellSettings,
   resolveFirstRunOnboarding,
-  resolveEffectivePresentation,
   resolveSurfaceDescriptors,
   resolveWorkspaceContext,
   sameWorkspaceSurface,
@@ -2084,21 +2083,6 @@ describe("environment presentation policy", () => {
     expect(state.byTab).toEqual([]);
   });
 
-  it("resolves the per-mode default when no tab override exists", () => {
-    const state = defaultEnvironmentPresentationState();
-    expect(resolveEffectivePresentation(state, "code", ids.tabA)).toBe("floating");
-    expect(resolveEffectivePresentation(state, "chat", ids.tabA)).toBe("hidden");
-    expect(resolveEffectivePresentation(state, "work", ids.tabA)).toBe("floating");
-  });
-
-  it("resolves a tab override over the mode default", () => {
-    const state = replaceEnvironmentPresentation(defaultEnvironmentPresentationState(), {
-      tabId: ids.tabA,
-      presentation: "hidden",
-    });
-    expect(resolveEffectivePresentation(state, "code", ids.tabA)).toBe("hidden");
-  });
-
   it("replaces an existing tab override instead of duplicating", () => {
     const base = replaceEnvironmentPresentation(defaultEnvironmentPresentationState(), {
       tabId: ids.tabA,
@@ -2108,17 +2092,16 @@ describe("environment presentation policy", () => {
       tabId: ids.tabA,
       presentation: "hidden",
     });
-    expect(updated.byTab).toHaveLength(1);
-    expect(resolveEffectivePresentation(updated, "code", ids.tabA)).toBe("hidden");
+    expect(updated.byTab).toEqual([{ tabId: ids.tabA, presentation: "hidden" }]);
   });
 
-  it("removes a tab override so the mode default applies again", () => {
+  it("removes a tab override", () => {
     const withOverride = replaceEnvironmentPresentation(defaultEnvironmentPresentationState(), {
       tabId: ids.tabA,
       presentation: "floating",
     });
     const removed = removeEnvironmentPresentation(withOverride, ids.tabA);
-    expect(resolveEffectivePresentation(removed, "code", ids.tabA)).toBe("floating");
+    expect(removed.byTab).toEqual([]);
   });
 
   it("normalizes a full presentation state by keeping the first entry per tab", () => {

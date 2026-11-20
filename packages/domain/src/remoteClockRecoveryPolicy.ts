@@ -1,5 +1,3 @@
-import { REMOTE_REQUEST_CLOCK_SKEW_MS } from "./remoteAccessPolicy";
-
 /**
  * Phase 14H — monotonic remote expiry and clock recovery.
  *
@@ -197,33 +195,4 @@ export function deriveClockHighWaterMark(input: {
     }
   }
   return mark;
-}
-
-export type ClientTimestampTrust =
-  | { readonly kind: "accepted" }
-  | { readonly kind: "rejected"; readonly reason: "future-skew" | "past-skew" | "malformed" };
-
-/**
- * A client-supplied timestamp is only ever used to bound freshness, never to
- * extend trust. A future timestamp beyond the skew window is rejected so a
- * client clock ahead of the host cannot keep authority alive.
- */
-export function evaluateClientTimestampTrust(input: {
-  readonly clientTimestampMs: number;
-  readonly serverNowMs: number;
-  readonly skewToleranceMs?: number;
-}): ClientTimestampTrust {
-  if (!Number.isFinite(input.clientTimestampMs) || !Number.isFinite(input.serverNowMs)) {
-    return { kind: "rejected", reason: "malformed" };
-  }
-  const skew =
-    input.skewToleranceMs !== undefined &&
-    Number.isFinite(input.skewToleranceMs) &&
-    input.skewToleranceMs >= 0
-      ? input.skewToleranceMs
-      : REMOTE_REQUEST_CLOCK_SKEW_MS;
-  const delta = input.clientTimestampMs - input.serverNowMs;
-  if (delta > skew) return { kind: "rejected", reason: "future-skew" };
-  if (-delta > skew) return { kind: "rejected", reason: "past-skew" };
-  return { kind: "accepted" };
 }

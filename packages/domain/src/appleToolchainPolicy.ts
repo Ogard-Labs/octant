@@ -1,7 +1,6 @@
 import type {
   AppleBuildEvidence,
   AppleBuildRequest,
-  ApplePlatform,
   AppleRuntimeSnapshot,
   AppleSimulatorRecord,
   AppleSimulatorRequest,
@@ -227,47 +226,8 @@ function evaluateIdentity(
   return { kind: "allowed" };
 }
 
-export function canUseSimulator(simulator: AppleSimulatorRecord, platform: ApplePlatform): boolean {
-  if (simulator.platform !== platform) return false;
-  if (simulator.state === "unavailable") return false;
-  return true;
-}
-
-export function isSimulatorReady(simulator: AppleSimulatorRecord): boolean {
-  return simulator.state === "booted";
-}
-
-export function canRecordAppleBuildEvidence(
-  evidence: AppleBuildEvidence,
-  request: AppleBuildRequest,
-): boolean {
-  return (
-    evidence.actionId === request.actionId &&
-    evidence.correlationId === request.correlationId &&
-    sameToolActionAuthority(evidence.authority, request.authority) &&
-    evidence.kind === request.kind
-  );
-}
-
-export function requiresSimulatorForAction(
-  kind: "build" | "test" | "run" | "clean" | "archive",
-  platform: ApplePlatform,
-): boolean {
-  if (platform === "macos") return false;
-  return kind === "run" || kind === "test";
-}
-
 export function isCoreAppleCapability(): boolean {
   return true;
-}
-
-/** Returns whether the toolchain can build for any Apple platform.
- *  On macOS a single Xcode install supports all 5 platforms (iOS, macOS,
- *  watchOS, tvOS, visionOS), so platform filtering is unnecessary at the
- *  policy level. Platform-specific SDK availability is checked by the
- *  adapter at build time. */
-export function isToolchainAvailable(toolchain: AppleToolchainDiscovery): boolean {
-  return toolchain.available;
 }
 
 /**

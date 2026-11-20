@@ -37,7 +37,6 @@ import {
   decodePaneId,
   decodeWorkspaceTabId,
   type EnvironmentCompactIdentity,
-  type EnvironmentPresentation,
   type EnvironmentPresentationByMode,
   type EnvironmentPresentationState,
   type EnvironmentSectionDescriptor,
@@ -280,15 +279,6 @@ export function defaultEnvironmentPresentationByMode(): EnvironmentPresentationB
 
 export function defaultEnvironmentPresentationState(): EnvironmentPresentationState {
   return { byTab: [], byMode: defaultEnvironmentPresentationByMode() };
-}
-
-export function resolveEffectivePresentation(
-  state: EnvironmentPresentationState,
-  mode: OctantMode,
-  tabId: WorkspaceTabId,
-): EnvironmentPresentation {
-  const override = state.byTab.find((entry) => entry.tabId === tabId);
-  return override?.presentation ?? state.byMode[mode];
 }
 
 export type EnvironmentPresentationInput = EnvironmentTabPresentation;
