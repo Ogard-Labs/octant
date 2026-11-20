@@ -293,6 +293,18 @@ export type CodeLanguageAgentReadResult =
   | { readonly status: "too-large" }
   | { readonly status: "unsaved-edits" };
 
+/** Optional timing and cancellation bounds for an agent's language read. */
+export interface CodeLanguageAgentReadOptions {
+  /** Maximum time to wait for server startup and diagnostics, in milliseconds. */
+  readonly deadlineMs?: number;
+  /**
+   * Wait for a push-only server to publish diagnostics for the updated document
+   * instead of answering `starting` immediately.
+   */
+  readonly waitForPushed?: boolean;
+  readonly signal?: AbortSignal;
+}
+
 /**
  * Marks a document hold as an agent's, beside the editor's file references
  * (which are UUIDs), so a hold can tell whether an editor still has the text.
@@ -402,6 +414,7 @@ interface ServerRecord {
   watch: AbortController | undefined;
   readonly documents: Map<string, OpenDocument>;
   readonly pushed: Map<string, ReadonlyArray<unknown>>;
+  readonly pushedWaiters: Map<string, Set<() => void>>;
   /**
    * Window/thread pairs that authorized this `repo-tooling` server at Full
    * access without a recorded approval. Re-checked against live effective
@@ -1109,7 +1122,21 @@ export class CodeLanguageService {
   async readForAgent(
     scopeId: WindowId,
     request: CodeLanguageAgentRead,
+    options?: CodeLanguageAgentReadOptions,
   ): Promise<CodeLanguageAgentReadResult> {
+    if (options?.signal?.aborted === true) return { status: "unavailable", reason: "timed-out" };
+    const deadline =
+      options?.deadlineMs === undefined
+        ? undefined
+        : performance.now() + Math.max(0, options.deadlineMs);
+    const wait =
+      deadline === undefined && options?.waitForPushed !== true && options?.signal === undefined
+        ? undefined
+        : {
+            ...(deadline === undefined ? {} : { deadline }),
+            ...(options?.waitForPushed === true ? { waitForPushed: true as const } : {}),
+            ...(options?.signal === undefined ? {} : { signal: options.signal }),
+          };
     const caller: CodeLanguageCaller = { scopeId, principal: "remote-device" };
     const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
     if (authorized.status === "refused") return authorized;
@@ -1144,8 +1171,14 @@ export class CodeLanguageService {
       return { status: "too-large" };
     }
     const local = pathInResolvedRoot(root, request.path);
-    const served = await this.#serve(caller, authorized, request.path, "agent-read", root);
+    const served = await this.#serve(caller, authorized, request.path, "agent-read", root, wait);
     if (served.status !== "served") return served;
+    if (
+      wait?.signal?.aborted === true ||
+      (wait?.deadline !== undefined && performance.now() >= wait.deadline)
+    ) {
+      return { status: "unavailable", reason: "timed-out" };
+    }
     const { record } = served;
     const uri = pathToFileURL(join(record.rootPath, local)).href;
     const holder = `${AGENT_HOLDER_PREFIX}${String(request.threadId)}`;
@@ -1184,11 +1217,17 @@ export class CodeLanguageService {
       document.lastTouched = now;
     }
     const version = document.version;
-    const answer = await this.#answer(record, document, request, {
-      threadId: request.threadId,
-      checkoutId: request.checkoutId,
-      fileId: root.fileId,
-    });
+    const answer = await this.#answer(
+      record,
+      document,
+      request,
+      {
+        threadId: request.threadId,
+        checkoutId: request.checkoutId,
+        fileId: root.fileId,
+      },
+      wait,
+    );
     // An editor that changed the text while the server answered may have had
     // the answer computed from its draft; that answer never reaches the agent.
     if (document.version !== version && editorHolds(document)) {
@@ -1220,6 +1259,11 @@ export class CodeLanguageService {
       readonly checkoutId: CodeCheckoutId;
       readonly fileId: CodeFileId;
     },
+    wait?: {
+      readonly deadline?: number;
+      readonly waitForPushed?: true;
+      readonly signal?: AbortSignal;
+    },
   ): Promise<CodeLanguageReadResult> {
     const connection = record.connection;
     if (connection === undefined) return { status: "unavailable", reason: "starting" };
@@ -1227,19 +1271,44 @@ export class CodeLanguageService {
     record.lastActivity = this.#now();
 
     if (request.kind === "diagnostics") {
+      if (wait?.signal?.aborted === true) return { status: "unavailable", reason: "timed-out" };
+      const remainingMs =
+        wait?.deadline === undefined ? undefined : wait.deadline - performance.now();
+      if (remainingMs !== undefined && remainingMs <= 0) {
+        return { status: "unavailable", reason: "timed-out" };
+      }
       let items: ReadonlyArray<unknown>;
       if (record.pullsDiagnostics) {
-        const response = await connection.request("textDocument/diagnostic", {
-          textDocument: { uri: document.uri },
-        });
+        const response = await raceWithAbort(
+          connection.request(
+            "textDocument/diagnostic",
+            { textDocument: { uri: document.uri } },
+            remainingMs === undefined ? undefined : Math.max(1, remainingMs),
+          ),
+          wait?.signal,
+        );
+        if (response === undefined) return { status: "unavailable", reason: "timed-out" };
         if (response.status !== "answered") return unavailable(response);
         items =
           isRecord(response.result) && Array.isArray(response.result.items)
             ? response.result.items
             : [];
       } else {
-        const pushed = record.pushed.get(document.uri);
-        if (pushed === undefined) return { status: "unavailable", reason: "starting" };
+        let pushed = record.pushed.get(document.uri);
+        if (pushed === undefined && wait?.waitForPushed === true) {
+          pushed = await this.#waitForPushedDiagnostics(
+            record,
+            document.uri,
+            remainingMs ?? this.#requestDeadlineMs,
+            wait.signal,
+          );
+        }
+        if (pushed === undefined) {
+          return {
+            status: "unavailable",
+            reason: wait?.waitForPushed === true ? "timed-out" : "starting",
+          };
+        }
         items = pushed;
       }
       const mapped = toDiagnostics({
@@ -1577,6 +1646,7 @@ export class CodeLanguageService {
     path: CodeRelativePath,
     intent: "open" | "existing" | "agent-read",
     resolved?: CodeFolderRootResolution,
+    wait?: { readonly deadline?: number; readonly signal?: AbortSignal },
   ): Promise<Served> {
     const rootPath = resolved?.rootPath;
     const extraFolder = resolved?.relativePath !== undefined;
@@ -1673,6 +1743,7 @@ export class CodeLanguageService {
         watch: undefined,
         documents: new Map(),
         pushed: new Map(),
+        pushedWaiters: new Map(),
         fullAccessScopes: new Map(),
         crashTimes: [],
         lastActivity: this.#now(),
@@ -1704,7 +1775,12 @@ export class CodeLanguageService {
       record.state = "stopped";
     }
     if (record.state === "ready") return { status: "served", record };
-    const outcome = await this.#ensureStarted(record);
+    const started = this.#ensureStarted(record);
+    const outcome =
+      wait === undefined
+        ? await started
+        : await raceWithDeadlineAndAbort(started, wait.deadline, wait.signal);
+    if (outcome === undefined) return { status: "unavailable", reason: "timed-out" };
     if (outcome === "confinement-unavailable") {
       return { status: "refused", reason: "confinement-unavailable" };
     }
@@ -1952,9 +2028,14 @@ export class CodeLanguageService {
       requestDeadlineMs: this.#requestDeadlineMs,
       // A frame over the cap, or one that is not a frame, ends the server.
       onViolation: () => void this.#crash(record, generation),
-      onPublishedDiagnostics: (uri, diagnostics) => {
+      onPublishedDiagnostics: (uri, diagnostics, version) => {
         const document = [...record.documents.values()].find((entry) => sameUri(entry.uri, uri));
-        if (document !== undefined) record.pushed.set(document.uri, diagnostics);
+        if (document === undefined) return;
+        // Ignore stale publications from an earlier document version so a slow
+        // push-only server never caches old diagnostics or wakes a newer waiter.
+        if (version !== undefined && version < document.version) return;
+        record.pushed.set(document.uri, diagnostics);
+        wakePushedWaiters(record, document.uri);
       },
     });
     record.connection = connection;
@@ -2012,6 +2093,7 @@ export class CodeLanguageService {
     record.generation += 1;
     record.connection?.close();
     record.connection = undefined;
+    wakeAllPushedWaiters(record);
     record.watch?.abort();
     record.watch = undefined;
     const child = record.process;
@@ -2048,6 +2130,7 @@ export class CodeLanguageService {
     record.documents.clear();
     record.generation += 1;
     record.state = "stopped";
+    wakeAllPushedWaiters(record);
     record.watch?.abort();
     record.watch = undefined;
     const connection = record.connection;
@@ -2161,6 +2244,134 @@ export class CodeLanguageService {
       }
     })();
   }
+
+  /**
+   * Waits for a push-only server to publish diagnostics for `uri` within the
+   * caller's remaining budget, waking immediately on publish, abort, or stop.
+   */
+  #waitForPushedDiagnostics(
+    record: ServerRecord,
+    uri: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<ReadonlyArray<unknown> | undefined> {
+    const existing = record.pushed.get(uri);
+    if (existing !== undefined) return Promise.resolve(existing);
+    if (timeoutMs <= 0 || signal?.aborted === true || record.connection?.closed !== false) {
+      return Promise.resolve(undefined);
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", finish);
+        const set = record.pushedWaiters.get(uri);
+        if (set !== undefined) {
+          set.delete(finish);
+          if (set.size === 0) record.pushedWaiters.delete(uri);
+        }
+        resolve(record.pushed.get(uri));
+      };
+      let waiters = record.pushedWaiters.get(uri);
+      if (waiters === undefined) {
+        waiters = new Set();
+        record.pushedWaiters.set(uri, waiters);
+      }
+      waiters.add(finish);
+      const timer = setTimeout(finish, timeoutMs);
+      timer.unref?.();
+      signal?.addEventListener("abort", finish, { once: true });
+      if (signal?.aborted === true || record.pushed.has(uri)) finish();
+    });
+  }
+}
+
+function wakePushedWaiters(record: ServerRecord, uri: string): void {
+  const waiters = record.pushedWaiters.get(uri);
+  if (waiters === undefined) return;
+  record.pushedWaiters.delete(uri);
+  for (const wake of waiters) wake();
+}
+
+function wakeAllPushedWaiters(record: ServerRecord): void {
+  const all = [...record.pushedWaiters.values()];
+  record.pushedWaiters.clear();
+  for (const waiters of all) {
+    for (const wake of waiters) wake();
+  }
+}
+
+function raceWithAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T | undefined> {
+  if (signal === undefined) return promise;
+  if (signal.aborted) return Promise.resolve(undefined);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      resolve(undefined);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function raceWithDeadlineAndAbort<T>(
+  promise: Promise<T>,
+  deadline: number | undefined,
+  signal: AbortSignal | undefined,
+): Promise<T | undefined> {
+  if (signal?.aborted === true) return Promise.resolve(undefined);
+  const remainingMs = deadline === undefined ? undefined : deadline - performance.now();
+  if (remainingMs !== undefined && remainingMs <= 0) return Promise.resolve(undefined);
+  if (remainingMs === undefined) return raceWithAbort(promise, signal);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cancel = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
+      resolve(undefined);
+    };
+    const timer = setTimeout(cancel, remainingMs);
+    timer.unref?.();
+    signal?.addEventListener("abort", cancel, { once: true });
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", cancel);
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", cancel);
+        reject(error);
+      },
+    );
+  });
 }
 
 function isAgentHolder(holder: string): boolean {
@@ -2244,7 +2455,7 @@ function initializeParams(rootPath: string) {
       textDocument: {
         synchronization: { dynamicRegistration: false, didSave: false },
         diagnostic: { dynamicRegistration: false },
-        publishDiagnostics: {},
+        publishDiagnostics: { versionSupport: true },
         definition: { dynamicRegistration: false, linkSupport: true },
         references: { dynamicRegistration: true },
         rename: { dynamicRegistration: false },

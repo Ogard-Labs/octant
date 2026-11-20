@@ -387,6 +387,8 @@ export interface NativeHarnessComposition {
      * what it returns; without them the lead is not offered `journal-lookup`.
      */
     readonly secrets?: ReadonlyArray<string>;
+    /** Language-server errors checked after a successful `write`, `edit`, or `editFiles`. */
+    readonly editDiagnostics?: NativeHarnessToolPorts["editDiagnostics"];
   }) => AppManagedToolSet | undefined;
   /**
    * A Code thread's tools in a server Project: the same tools as `forCode`,
@@ -1283,7 +1285,7 @@ export function createNativeHarnessComposition(
         fullAccess: () => options.readWorkExecutionPolicy?.(threadId) === "full-access",
       });
     },
-    forCode: ({ thread, checkoutRoot, extraFolders, windowId, secrets }) => {
+    forCode: ({ thread, checkoutRoot, extraFolders, windowId, secrets, editDiagnostics }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       const shell = codeShell({ threadId, projectId: String(thread.projectId) }, windowId);
@@ -1318,6 +1320,7 @@ export function createNativeHarnessComposition(
             fullAccess: () =>
               options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
           }),
+          ...(editDiagnostics === undefined ? {} : { editDiagnostics }),
           readsImages: () => options.readsImages?.(thread) === true,
           ...(shell === undefined ? {} : { shell }),
           ...webPorts(),

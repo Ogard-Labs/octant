@@ -31,7 +31,10 @@ import {
   LOCAL_TOOL_HOST_ID,
   THREAD_RETENTION_EVENT_NAMES,
   type CodeOperationId,
+  type CodeThread,
+  type WindowId,
 } from "@octant/contracts";
+import type { NativeHarnessEditDiagnosticsPort } from "../harness/nativeHarnessTools";
 import { Effect } from "effect";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
@@ -654,6 +657,24 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     ): void => {
       codeToolContributors.push(contributor);
     };
+    let codeEditDiagnosticsFactory:
+      | ((input: {
+          readonly windowId: WindowId;
+          readonly thread: CodeThread;
+          readonly harnessRoot: string;
+          readonly mainCheckoutRoot: string;
+        }) => NativeHarnessEditDiagnosticsPort | undefined)
+      | undefined;
+    const registerCodeEditDiagnostics = (
+      factory: (input: {
+        readonly windowId: WindowId;
+        readonly thread: CodeThread;
+        readonly harnessRoot: string;
+        readonly mainCheckoutRoot: string;
+      }) => NativeHarnessEditDiagnosticsPort | undefined,
+    ): void => {
+      codeEditDiagnosticsFactory = factory;
+    };
     // The few sets a server Project's turn is offered beside its server
     // tools: each acts only on this host's records, never on a folder here.
     const serverCodeToolContributors: Array<
@@ -1158,7 +1179,18 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             projectId: input.thread.projectId,
             ...(input.ask === undefined ? {} : { ask: input.ask }),
           }),
-        nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
+        nativeHarnessTools: (input) => {
+          const editDiagnostics = codeEditDiagnosticsFactory?.({
+            windowId: input.windowId,
+            thread: input.thread,
+            harnessRoot: input.checkoutRoot,
+            mainCheckoutRoot: input.mainCheckoutRoot ?? input.checkoutRoot,
+          });
+          return nativeHarnessComposition.forCode({
+            ...input,
+            ...(editDiagnostics === undefined ? {} : { editDiagnostics }),
+          });
+        },
         holdsServerThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
         transferServerAttachments: (thread, files) => {
           const place = serverThreadOf(serverProjectStore, thread);
@@ -2697,6 +2729,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeService,
       codeTurnDecisions,
       contributeCodeTools,
+      registerCodeEditDiagnostics,
       contributeServerCodeTools,
       coordinatorService,
       coordinatorWakes,
