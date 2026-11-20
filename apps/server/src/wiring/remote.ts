@@ -323,7 +323,7 @@ export type RemoteDependencies = {
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection" | "resolveThreadStrict"> &
   Pick<FoundationsWiring, "hostMemoryGuard" | "providerRuntimeRegistry"> &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService"> &
+  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService" | "onCodeTurnCancelled"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime" | "workRequestService"> & {
     readonly chatService: ChatService;
     /** The Code route service a delegated Code thread is created and started through. */
@@ -1092,10 +1092,12 @@ export function wireRemote(deps: RemoteDependencies) {
   // delegation now and then. With none sent, a pass reads nothing.
   setInterval(() => void delegatingSpoke.trackOpen().catch(() => undefined), 5_000).unref();
   // A person stopping the parent thread's turn asks each target to stop the
-  // children that thread started there. Only Work parents have remote children:
-  // a Code request is refused by the target.
+  // children that thread started there, a Work parent's and a Code parent's.
   onWorkTurnCancelled((threadId) => {
     void delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
+  });
+  deps.onCodeTurnCancelled((threadId) => {
+    void delegatingSpoke.cancelParent(threadId).catch(() => undefined);
   });
   const delegationAdministrationRoutes = createDelegationAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
@@ -1312,6 +1314,8 @@ export function wireRemote(deps: RemoteDependencies) {
   };
   const codeThreadMoveHost = createCodeThreadMoveHost({
     readThread: (threadId) => persistence.readCodeThread(threadId),
+    isDelegated: (threadId) =>
+      delegationState.load().received.some((received) => received.threadId === String(threadId)),
     isBusy: (threadId) =>
       deps.liveTurns.read(String(threadId)) !== undefined || childWorkGoing(String(threadId)),
     checkoutRoot: codeCheckoutRoot,

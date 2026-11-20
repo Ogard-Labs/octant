@@ -1125,9 +1125,10 @@ keeps a compromised spoke from steering another spoke's agent.
 **Code delegation** ([decision H25](#decisions); partly built: the Project
 mark is built, as a `project.code-delegated-code-changed@1` event the
 host's person sets from the Project overview and a device the hub
-introduced is refused; the receiving Code thread and the listing route
-are built; a Code parent on the delegating member does not send Code work
-yet, so today a Work parent delegates). A delegated Code thread runs on the first
+introduced is refused; the receiving Code thread, the listing route, a
+Code parent sending Code work, Stop reaching the remote child, and the
+refusal to move a delegated Code thread are built; the three-host smoke
+for a Code delegation and a real-provider run are not yet exercised). A delegated Code thread runs on the first
 provider in the person's provider order that the Project allows, at the
 first model that provider's catalog lists, as the composer preselects, and
 a request naming a provider profile is refused. Its branch is
@@ -3566,7 +3567,8 @@ a numbered slice. Built, with these narrower readings:
     refuses the next create. Verification: server tests and a three-host
     loopback smoke.
 17. **Code delegation.** The Project mark, the receiving Code host, the
-    member and Project list route, cancel and move as above. Acceptance: B
+    member and Project list route, cancel and move as above. Built, with server tests; the three-host smoke and a real
+    provider run are not yet exercised. Acceptance: B
     refuses Code into an unmarked Project; a delegated Code thread is
     approval-gated, on its own branch, marked as outside content, and its
     approvals cannot be answered from A or the hub. Verification: server

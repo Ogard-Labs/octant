@@ -20,7 +20,7 @@ export interface AgentRemoteDelegationOptions {
 }
 
 const WORK_ONLY_MESSAGE =
-  "Only a Work thread in a Work Project can start a helper on another member.";
+  "Only a Work thread in a Work Project, or a Code thread in a Code Project, can start a helper on another member.";
 
 function refusal(reason: string, message?: string): AgentRunDelegationResult {
   return { status: "refused", reason, ...(message === undefined ? {} : { message }) };
@@ -32,26 +32,31 @@ export function createAgentRemoteDelegation(
   return {
     listTargets: () => options.delegation.listTargets(),
     start: async (input) => {
-      if (input.mode !== "work" || input.projectId === undefined) {
+      // A Work thread in a Work Project sends Work; a Code thread in a Code
+      // Project sends Code, which the member takes only into a Project its
+      // person marked for it.
+      const mode = input.mode === "work" || input.mode === "code" ? input.mode : undefined;
+      if (
+        mode === undefined ||
+        input.projectId === undefined ||
+        options.readProject(input.projectId)?.type !== mode
+      ) {
         return refusal("remote-delegation-work-only", WORK_ONLY_MESSAGE);
       }
-      if (options.readProject(input.projectId)?.type !== "work") {
-        return refusal("remote-delegation-work-only", WORK_ONLY_MESSAGE);
-      }
-      if (!options.isWorkEnabled()) {
+      if (mode === "work" && !options.isWorkEnabled()) {
         return refusal("work-disabled", "Work is turned off on this host.");
       }
       let command: ReturnType<typeof decodeDelegationStartCommand>;
       try {
-        // Work asks first and has no read-only posture, so the request is always
-        // approval-gated: the parent's ceiling and the member's grant clamp it
-        // further, and a request above either is refused, never run narrower.
+        // Always approval-gated: the parent's ceiling and the member's grant
+        // clamp it further, and a request above either is refused, never run
+        // narrower.
         command = decodeDelegationStartCommand({
-          parent: { mode: "work", threadId: input.parentThreadId },
+          parent: { mode, threadId: input.parentThreadId },
           targetMemberId: input.targetMemberId,
           projectId: input.targetProjectId,
           task: input.task,
-          authority: { mode: "work", posture: "approval-gated" },
+          authority: { mode, posture: "approval-gated" },
         });
       } catch {
         return refusal("not-in-roster", "No member of this hub has that id.");
