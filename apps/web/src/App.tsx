@@ -608,6 +608,11 @@ import {
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { createPairedComputerFetch } from "./host/pairedComputerFetch";
 import { PairedComputerCodeSurface } from "./host/PairedComputerCodeSurface";
+import { usePairedComputerReads } from "./host/usePairedComputerReads";
+import {
+  isPairedComputerAsk,
+  isPairedComputerThread,
+} from "@octant/client-runtime/paired-computer-reads";
 import { NeedsYouProvider, OctantCommandProvider } from "./palette/CommandRegistry";
 import {
   buildOctantCommands,
@@ -2450,6 +2455,45 @@ function LaunchedShell(
     pairedComputerCodeSlot?.kind === "remote" && pairedComputerCodeSlot.state.kind === "ready"
       ? pairedComputerCodeSlot.bridge
       : undefined;
+  // Every paired computer's Code threads and asks, listed in this window and
+  // each opened on its own computer through that computer's start screen.
+  const pairedComputerReads = usePairedComputerReads({
+    transports: hostFederationTransports,
+    cache: federation?.cache,
+  });
+  const pairedComputerThreads = useMemo(
+    () => pairedComputerReads.filter(isPairedComputerThread),
+    [pairedComputerReads],
+  );
+  const pairedComputerAsks = useMemo(
+    () => pairedComputerReads.filter(isPairedComputerAsk),
+    [pairedComputerReads],
+  );
+  // The start screen and sidebar keep their inputs' identity between renders,
+  // so they get one opener that always calls the latest one.
+  const openPairedComputerThreadRef = useRef(openPairedComputerThread);
+  openPairedComputerThreadRef.current = openPairedComputerThread;
+  const openPairedComputerThreadLatest = useCallback(
+    (hostId: string, threadId: string) => openPairedComputerThreadRef.current(hostId, threadId),
+    [],
+  );
+  const otherComputerAsks = useMemo(
+    () =>
+      pairedComputerAsks.map((item) => ({
+        hostId: String(item.ref.hostId),
+        computer: item.hostDisplayName,
+        request: item.payload.request,
+        readOnly: item.readOnly,
+      })),
+    [pairedComputerAsks],
+  );
+  const [pairedThreadToOpen, setPairedThreadToOpen] = useState<
+    { readonly hostId: string; readonly threadId: CodeThreadId } | undefined
+  >(undefined);
+  const pairedThreadToOpenHere =
+    pairedThreadToOpen !== undefined && pairedThreadToOpen.hostId === String(createHostId)
+      ? pairedThreadToOpen.threadId
+      : undefined;
   const renderPairedComputerCodeStart =
     pairedComputerCodeBridge === undefined
       ? undefined
@@ -2461,6 +2505,9 @@ function LaunchedShell(
             selectedHostId={createHostId}
             onSelectHost={handleSelectCreateHost}
             viewScope={createHostViewScope}
+            {...(pairedThreadToOpenHere === undefined
+              ? {}
+              : { initialThreadId: pairedThreadToOpenHere })}
           />
         );
   function refuseUnlessCreatableDestination(input: {
@@ -5970,6 +6017,8 @@ function LaunchedShell(
     needsYouCoordinatorTitles,
     needsYouThreadProviders,
     needsYouAskClients,
+    otherComputerAsks,
+    onOpenOtherComputerAsk: openPairedComputerThreadLatest,
     now: snoozeClockNow.getTime(),
     openRunningServiceLive,
     pendingRequestClient,
@@ -6837,6 +6886,15 @@ function LaunchedShell(
   // The global New thread action starts a clean draft. Project-scoped actions
   // still call `openDraftInProject`, but a failed folder must never become the
   // sticky default for every later draft opened from the sidebar.
+  // A thread listed from another computer opens in that computer's Code start
+  // screen, the same surface the picker shows, so every act on it goes to that
+  // computer over its session and none is aimed at this one.
+  function openPairedComputerThread(hostId: string, threadId: string) {
+    handleSelectCreateHost(decodeHostId(hostId));
+    setPairedThreadToOpen({ hostId, threadId: decodeCodeThreadId(threadId) });
+    openDraftInActiveProject("code");
+  }
+
   function openDraftInActiveProject(mode: "work" | "code") {
     closeWorkspaceReaders();
     setDraftError(undefined);
@@ -8568,6 +8626,12 @@ function LaunchedShell(
               codeStatus={codeController.status}
               contextHealthByProject={contextHealthByProject}
               environmentSelection={environmentSelection}
+              {...(hostFederationTransports === undefined
+                ? {}
+                : {
+                    pairedComputerThreads,
+                    onOpenPairedComputerThread: openPairedComputerThreadLatest,
+                  })}
               federatedHostStates={federatedHostStates}
               githubIssuesReadAvailable={githubIssuesReadAvailable}
               {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}

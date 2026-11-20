@@ -36,6 +36,21 @@ export interface NeedsYouCardSource extends PendingRequestRowsSource {
   readonly onOpenAsk?: ((ask: WaitingAsk) => void) | undefined;
   /** Opens the Inbox, which holds every row the card cannot fit. */
   readonly onOpenInbox: () => void;
+  /**
+   * What the person's other computers hold for them. Each is answered on its
+   * own computer, in its thread there, so its row opens that thread and holds
+   * no answer here.
+   */
+  readonly otherComputerAsks?: ReadonlyArray<OtherComputerAsk>;
+  readonly onOpenOtherComputerAsk?: (hostId: string, threadId: string) => void;
+}
+
+export interface OtherComputerAsk {
+  readonly hostId: string;
+  readonly computer: string;
+  readonly request: PendingRequest;
+  /** True while that computer is not connected: listed, but not openable. */
+  readonly readOnly: boolean;
 }
 
 /**
@@ -123,6 +138,23 @@ function useNeedsYouListRows(source: NeedsYouCardSource): HomeListRead {
           />
         ),
       })),
+      ...(source.otherComputerAsks ?? []).map((ask) => {
+        const open = source.onOpenOtherComputerAsk;
+        return {
+          id: `other-computer:${ask.hostId}:${pendingRequestKey(ask.request)}`,
+          section: "needs-you" as const,
+          glyph: "ask" as const,
+          tone: "warning" as const,
+          label: "Waiting for you",
+          title: ask.request.threadTitle,
+          meta: [ask.readOnly ? `${ask.computer} · not connected` : ask.computer],
+          trailing: "Waiting",
+          at: String(ask.request.requestedAt),
+          ...(ask.readOnly || open === undefined
+            ? {}
+            : { onOpen: () => open(ask.hostId, String(ask.request.threadId)) }),
+        };
+      }),
     ],
   };
 }

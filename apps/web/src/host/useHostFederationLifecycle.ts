@@ -11,7 +11,10 @@ import {
   createHostFederationLifecycle,
   type HostFederationLifecycle,
 } from "@octant/client-runtime/host-federation-lifecycle";
-import { createHostReadModelCache } from "@octant/client-runtime/host-federation-merged-reads";
+import {
+  createHostReadModelCache,
+  type HostReadModelCache,
+} from "@octant/client-runtime/host-federation-merged-reads";
 import {
   createDefaultDeviceKeyStore,
   type RemoteDeviceKeyStore,
@@ -32,6 +35,8 @@ export interface HostFederationStack {
   readonly registry: ClientHostRegistry;
   /** The device keys the paired sessions sign with. */
   readonly deviceKeyStore: RemoteDeviceKeyStore;
+  /** Each paired computer's last reading of its threads and asks, kept stale when it stops answering. */
+  readonly cache: HostReadModelCache;
 }
 
 export function useHostFederationLifecycle(
@@ -94,6 +99,7 @@ export function useHostFederationLifecycle(
         transports,
         registry,
         deviceKeyStore,
+        cache,
       };
     } catch {
       return undefined;

@@ -444,6 +444,12 @@ export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "client
    * address names a thread on this computer, never on the other one.
    */
   readonly followsContinuationLink?: boolean;
+  /**
+   * A thread on this host to open, as chosen in a desktop window's list of its
+   * other computers' threads. A new value opens that thread; the person can
+   * still pick another one here.
+   */
+  readonly initialThreadId?: CodeThreadId;
 }
 
 /**
@@ -453,10 +459,15 @@ export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "client
  */
 export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
   const [activeThreadId, setActiveThreadId] = useState<CodeThreadId | undefined>(() => {
+    if (props.initialThreadId !== undefined) return props.initialThreadId;
     if (props.followsContinuationLink === false) return undefined;
     const link = readContinuationLink(globalThis.location?.href ?? "");
     return link?.mode === "code" ? decodeCodeThreadId(link.threadId) : undefined;
   });
+  const { initialThreadId } = props;
+  useEffect(() => {
+    if (initialThreadId !== undefined) setActiveThreadId(initialThreadId);
+  }, [initialThreadId]);
   const controller = useCodeController({
     client: props.clients.code,
     ...(activeThreadId === undefined ? {} : { activeThreadId }),
