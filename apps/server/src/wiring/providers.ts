@@ -150,6 +150,14 @@ import { makePiProcessLive, type PiProcessPort } from "../providers/piProcess";
 import { createProviderRouteHandler } from "../providers/providerRoutes";
 import { ThreadNativeSetupStore } from "../providers/threadNativeSetupStore";
 import { readThreadProjectCode } from "../providers/threadProjectCode";
+import {
+  createThreadProviderMentionsAccess,
+  readThreadProviderMentions,
+} from "../providers/threadProviderMentions";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistrations,
+} from "../persistence/remoteAccessProjection";
 import { createDiscoveryRouteHandler } from "../providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "../providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "../providers/discoveryService";
@@ -727,7 +735,7 @@ export type ProvidersDependencies = Pick<
     | "managedWorktreeReceipts"
     | "nativeHarnessRouter"
   > &
-  Pick<HarnessStateWiring, "nativeHarnessSessions" | "serverRegistry"> &
+  Pick<HarnessStateWiring, "nativeHarnessSessions" | "serverProjectStore" | "serverRegistry"> &
   Pick<IntegrationsWiring, "githubExtensionSnapshot" | "providerRuntimeNetwork"> &
   Pick<ComputerUseWiring, "computerUseProcess"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
@@ -755,6 +763,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     processAuthorityTime,
     providerRuntimeNetwork,
     providerRuntimeRegistry,
+    serverProjectStore,
     serverRegistry,
     version,
     windowAuthorityStore,
@@ -2129,33 +2138,6 @@ export function wireProviders(deps: ProvidersDependencies) {
       clock: () => new Date().toISOString(),
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
-    const providerRoutes = createProviderRouteHandler({
-      threadNativeSetup: {
-        get: (threadId) => threadNativeSetupStore.get(threadId),
-        set: (request, actor) => {
-          const instance = persistence.readProviderInstance(request.providerInstanceId);
-          if (instance === undefined || !isKeyProviderDriverKind(instance.driverKind)) {
-            return "refused";
-          }
-          return threadNativeSetupStore.set(request.threadId, request.choice, actor);
-        },
-        projectCode: (request) =>
-          readThreadProjectCode(
-            {
-              readWorkThread: (threadId) => workThreadProjection.read(threadId),
-              readCodeThread: (threadId) => persistence.readCodeThread(threadId),
-              readProject: (projectId) => persistence.readProject(projectId),
-              readProviderInstance: (id) => persistence.readProviderInstance(id),
-              readStrict: (threadId) => deps.resolveThreadStrict(threadId),
-            },
-            request,
-          ),
-      },
-      service: providerService,
-      windowAuthorityStore,
-      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
-      packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
-    });
     // A cloud sign-in shares the host's terms record and sign-in journal.
     const cloudIamSignIn: CloudIamSignInDependencies | undefined =
       cloudIamBroker === undefined || hostOAuth === undefined || oauthJournal === undefined
@@ -2355,6 +2337,73 @@ export function wireProviders(deps: ProvidersDependencies) {
         return persistence.readProviderInstances();
       },
     };
+    const canAccessMentionProject = createThreadProviderMentionsAccess({
+      listLiveWindowIds: () => windowAuthorityStore.listWindowIds(),
+      readWorkspace: (windowId) => persistence.readWindowWorkspace(windowId)?.workspace,
+      readProject: (projectId) => persistence.readProject(projectId),
+      readDevices: () => readDeviceRegistrations(persistence.connection),
+      approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
+      isRestrictedDeviceScope,
+    });
+    const providerRoutes = createProviderRouteHandler({
+      threadNativeSetup: {
+        get: (threadId) => threadNativeSetupStore.get(threadId),
+        set: (request, actor) => {
+          const instance = persistence.readProviderInstance(request.providerInstanceId);
+          if (instance === undefined || !isKeyProviderDriverKind(instance.driverKind)) {
+            return "refused";
+          }
+          return threadNativeSetupStore.set(request.threadId, request.choice, actor);
+        },
+        projectCode: (request) =>
+          readThreadProjectCode(
+            {
+              readWorkThread: (threadId) => workThreadProjection.read(threadId),
+              readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+              readProject: (projectId) => persistence.readProject(projectId),
+              readProviderInstance: (id) => persistence.readProviderInstance(id),
+              readStrict: (threadId) => deps.resolveThreadStrict(threadId),
+            },
+            request,
+          ),
+        mentions: (windowId, request) =>
+          readThreadProviderMentions(
+            {
+              canAccessProject: canAccessMentionProject,
+              readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+              readCodeCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+              readWorkThread: (threadId) => workThreadProjection.read(threadId),
+              readProject: (projectId) => persistence.readProject(projectId),
+              readProviderInstance: (id) => persistence.readProviderInstance(id),
+              readThreadNativeSetup: (threadId) => persistence.readThreadNativeSetup(threadId),
+              readStrict: (threadId) => deps.resolveThreadStrict(threadId),
+              isServerProject: (projectId) =>
+                serverProjectStore.project(String(projectId)) !== undefined,
+              resolveManagedWorktreePath: async (receiptId) => {
+                const receipt = await managedWorktreeReceipts.load(receiptId);
+                return receipt?.state === "ready" ? receipt.canonicalWorktreePath : undefined;
+              },
+              observedMentions: (instanceId) =>
+                providerRuntimeRegistry.observedState(instanceId)?.mentions,
+              resolveDriver: (instanceId) => {
+                const instance = persistence.readProviderInstance(instanceId);
+                if (instance === undefined || !instance.enabled) return undefined;
+                try {
+                  return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+                } catch {
+                  return undefined;
+                }
+              },
+            },
+            windowId,
+            request,
+          ),
+      },
+      service: providerService,
+      windowAuthorityStore,
+      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+      packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
+    });
     // Where a harness lead goes when its own model stays down. It builds
     // drivers from the options above, whose lead hook asks it in turn; both
     // only run once a turn is under way.

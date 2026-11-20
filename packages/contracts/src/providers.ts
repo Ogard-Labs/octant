@@ -2281,6 +2281,10 @@ export const ProviderSlashCommand = Schema.Struct({
 export type ProviderSlashCommand = typeof ProviderSlashCommand.Type;
 export const MAX_PROVIDER_SLASH_COMMANDS = 256;
 
+/** Where a provider's own skill or plugin lives: `project` for a thread's folder, `account` (or absent) for the account. */
+export const ProviderMentionScope = Schema.Literal("account", "project");
+export type ProviderMentionScope = typeof ProviderMentionScope.Type;
+
 /**
  * One of the provider's own skills or plugins a composer's `@` menu offers,
  * as its runtime listed it: Codex's `skills/list` and `plugin/installed`.
@@ -2292,6 +2296,7 @@ export const ProviderMention = Schema.Struct({
   kind: Schema.Literal("skill", "plugin"),
   name: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9:_.-]*$/u), Schema.maxLength(128)),
   description: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+  scope: Schema.optional(ProviderMentionScope),
 }).annotations(strict);
 export type ProviderMention = typeof ProviderMention.Type;
 export const MAX_PROVIDER_MENTIONS = 256;

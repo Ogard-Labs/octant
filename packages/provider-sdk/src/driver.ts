@@ -8,6 +8,7 @@ import type {
   ProviderInstanceId,
   ProjectId,
   ProviderAuthenticationAttempt,
+  ProviderMention,
   ProviderModelId,
   ProviderModelOptionValues,
   ProviderNativeSetup,
@@ -512,6 +513,18 @@ export interface ProviderDriver {
   readonly probe: (
     input: ProviderProbeInput,
   ) => Effect.Effect<ProviderProbeResult, ProviderFailure, Scope.Scope>;
+  /**
+   * The provider's own skills and plugins available for a thread in one
+   * folder, for the composer's `@` menu. `nativeSetup` is what the thread's
+   * launch actually loads: a driver lists a Project's skills only when
+   * `nativeSetup?.skills === true` and omits them otherwise. Absent, the menu
+   * offers only the account-level `mentions` the driver's `probe` reported.
+   */
+  readonly listMentions?: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly projectRoot?: string;
+    readonly nativeSetup?: ProviderNativeSetup;
+  }) => Effect.Effect<ReadonlyArray<ProviderMention>, ProviderFailure>;
   /**
    * Optional per-model tool-capability verification. Used by drivers whose
    * Connection Check is non-generating (the direct-endpoint profiles) so a

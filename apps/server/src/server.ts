@@ -601,6 +601,7 @@ export function startOctantServer(
       resolveThreadStrict,
       resolveHostStrict,
       hostResourceBudget,
+      serverProjectStore,
       serverRegistry,
       providerRuntimeNetwork,
       providerRuntimeRegistry,

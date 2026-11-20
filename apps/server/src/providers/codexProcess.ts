@@ -89,6 +89,11 @@ export type CodexLaunchAuthority =
   | {
       readonly kind: "catalog";
       /**
+       * Folders granted read-only access for a short-lived catalog read (such
+       * as listing a Project's Codex skills for the `@` menu). Never writable.
+       */
+      readonly readOnlyFolders?: ReadonlyArray<string>;
+      /**
        * Read for a Windows host whose new threads run with no Octant sandbox
        * (`hostReadsProviderCatalogUnconfined`). There the catalog read runs
        * unconfined, as the turns it serves do; without it Windows refuses the
@@ -951,9 +956,14 @@ export function prepareCodexLaunch(input: {
     const root = authority.kind === "thread" ? realpathSync(authority.root) : temporaryDirectory;
     if (!statSync(root).isDirectory()) throw new Error("Codex root is not a directory.");
     // A folder removed from disk since it was added is left out rather than
-    // failing the launch; the main folder above must still exist.
+    // failing the launch; the main folder above must still exist. A catalog
+    // launch's read-only Project folders pass through `extraBoundRoots` (with
+    // `writeBoundRoot: false`) rather than `readRoots`, because `readRoots`
+    // feeds `processConfinementAccountRoots` as own-account credential exemptions.
     const extraFolders =
-      authority.kind === "thread" ? existingRealPaths(authority.extraFolders ?? []) : [];
+      authority.kind === "thread"
+        ? existingRealPaths(authority.extraFolders ?? [])
+        : existingRealPaths(authority.readOnlyFolders ?? []);
     const readOnlyFolders =
       authority.kind === "thread" ? existingRealPaths(authority.readOnlyFolders ?? []) : [];
     const mode = authority.kind === "thread" ? authority.mode : "chat";
@@ -1344,7 +1354,7 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
           requested.kind === "catalog" &&
           platform === "win32" &&
           options.windowsCatalogUnconfined?.() === true
-            ? { kind: "catalog", unconfinedOnWindows: true }
+            ? { ...requested, unconfinedOnWindows: true }
             : requested;
         // A native launch probes its executable natively. Metadata and version
         // results never authorize a restricted launch; Strict admits it afresh.
