@@ -664,7 +664,7 @@ export function buildBubblewrapLaunch(
       input.additionalWriteRoots ?? [],
     ),
     withinRoots: [
-      input.boundRoot,
+      ...boundRoots,
       input.temporaryDirectory,
       ...(input.readRoots ?? []),
       ...(input.additionalWriteRoots ?? []),

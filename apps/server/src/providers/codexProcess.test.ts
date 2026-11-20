@@ -37,7 +37,9 @@ import {
   type CodexProcessOptions,
 } from "./codexProcess";
 import {
+  buildDenyDefaultSeatbeltProfile,
   makeProcessConfinementLive,
+  ownAccountRoots,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 
@@ -948,15 +950,22 @@ describe("Codex launch confinement", () => {
     expect(captured[1]).not.toHaveProperty("protectedFiles");
   });
 
-  it("grants a Project mentions catalog launch read-only access to the folder without widening writes", () => {
-    const projectFolder = realpathSync(mkdtempSync(join(tmpdir(), "octant-codex-mentions-root-")));
+  it("grants a Project mentions catalog launch read-only access without widening writes or exempting other providers' credentials", () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "octant-codex-mentions-base-")));
+    const fakeHome = join(base, "home");
+    const codexHome = join(fakeHome, ".codex");
+    const claudeCreds = join(fakeHome, ".claude", ".credentials.json");
+    const openCodeAuth = join(fakeHome, ".local", "share", "opencode", "auth.json");
+    mkdirSync(codexHome, { recursive: true });
+    mkdirSync(join(fakeHome, ".claude"), { recursive: true });
+    mkdirSync(join(fakeHome, ".local", "share", "opencode"), { recursive: true });
     try {
       const captured: Array<Parameters<ProcessConfinementPort["prepare"]>[0]> = [];
       const prepared = prepareCodexLaunch({
         binaryPath: "/bin/sh",
         args: ["-c", "true"],
-        authority: { kind: "catalog", readOnlyFolders: [projectFolder] },
-        environment: { HOME: homedir() },
+        authority: { kind: "catalog", readOnlyFolders: [fakeHome] },
+        environment: { HOME: fakeHome, CODEX_HOME: codexHome },
         confinement: {
           prepare: (input) => {
             captured.push(input);
@@ -967,13 +976,38 @@ describe("Codex launch confinement", () => {
       });
       if (prepared.status === "prepared") prepared.launch.release();
       expect(captured).toHaveLength(1);
-      expect(captured[0]?.writeBoundRoot).toBe(false);
-      expect(captured[0]?.boundRoot).not.toBe(projectFolder);
-      expect(captured[0]?.readRoots).toContain(projectFolder);
-      expect(captured[0]?.privateHomeAllowPaths).toContain(projectFolder);
-      expect(captured[0]?.additionalWriteRoots).not.toContain(projectFolder);
+      const launchInput = captured[0];
+      expect(launchInput).toBeDefined();
+      if (launchInput === undefined) return;
+      expect(launchInput.writeBoundRoot).toBe(false);
+      expect(launchInput.boundRoot).not.toBe(fakeHome);
+      expect(launchInput.extraBoundRoots).toContain(fakeHome);
+      expect(launchInput.privateHomeAllowPaths).toContain(fakeHome);
+      // Must NOT enter readRoots or additionalWriteRoots, which feed own-account exemptions.
+      expect(launchInput.readRoots).not.toContain(fakeHome);
+      expect(launchInput.additionalWriteRoots).not.toContain(fakeHome);
+      const accountRoots = ownAccountRoots(
+        launchInput,
+        launchInput.readRoots ?? [],
+        launchInput.additionalWriteRoots ?? [],
+      );
+      expect(accountRoots).not.toContain(fakeHome);
+      expect(accountRoots).toContain(codexHome);
+
+      const profile = buildDenyDefaultSeatbeltProfile({
+        ...launchInput,
+        homeDirectory: fakeHome,
+        usersDirectory: base,
+      });
+      // Project folder is read-only (denied write) and other providers' credentials stay denied.
+      expect(profile).toContain(`(allow file-read* (subpath "${fakeHome}"))`);
+      expect(profile).toContain(`(deny file-write* (subpath "${fakeHome}"))`);
+      expect(profile).toContain(`(deny file-read* file-write* (subpath "${claudeCreds}"))`);
+      expect(profile).not.toContain(`(allow file-read* (subpath "${claudeCreds}"))`);
+      expect(profile).toContain(`(deny file-read* file-write* (subpath "${openCodeAuth}"))`);
+      expect(profile).not.toContain(`(allow file-read* (subpath "${openCodeAuth}"))`);
     } finally {
-      rmSync(projectFolder, { recursive: true, force: true });
+      rmSync(base, { recursive: true, force: true });
     }
   });
 

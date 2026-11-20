@@ -956,10 +956,16 @@ export function prepareCodexLaunch(input: {
     const root = authority.kind === "thread" ? realpathSync(authority.root) : temporaryDirectory;
     if (!statSync(root).isDirectory()) throw new Error("Codex root is not a directory.");
     // A folder removed from disk since it was added is left out rather than
-    // failing the launch; the main folder above must still exist.
+    // failing the launch; the main folder above must still exist. A catalog
+    // launch's read-only Project folders pass through `extraBoundRoots` (with
+    // `writeBoundRoot: false`) rather than `readRoots`, because `readRoots`
+    // feeds `processConfinementAccountRoots` as own-account credential exemptions.
     const extraFolders =
-      authority.kind === "thread" ? existingRealPaths(authority.extraFolders ?? []) : [];
-    const readOnlyFolders = existingRealPaths(authority.readOnlyFolders ?? []);
+      authority.kind === "thread"
+        ? existingRealPaths(authority.extraFolders ?? [])
+        : existingRealPaths(authority.readOnlyFolders ?? []);
+    const readOnlyFolders =
+      authority.kind === "thread" ? existingRealPaths(authority.readOnlyFolders ?? []) : [];
     const mode = authority.kind === "thread" ? authority.mode : "chat";
     const executionPolicy = authority.kind === "thread" ? authority.executionPolicy : "plan";
     const home = input.environment.HOME ?? homedir();
