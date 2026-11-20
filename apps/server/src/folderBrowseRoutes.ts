@@ -1,5 +1,7 @@
 import type { FolderBrowseFailure } from "@octant/contracts/folder-browse";
+import { isAgentGrantSession, principalActsAsHostPerson } from "./clientPrincipal";
 import { FolderBrowseServiceError, type FolderBrowseService } from "./folderBrowseService";
+import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -94,10 +96,25 @@ export function createFolderBrowseRouteHandler(dependencies: FolderBrowseRouteDe
 
     let windowId;
     try {
-      windowId = dependencies.windowAuthorityStore.authenticate(
-        request.headers.get("x-octant-window-capability") ?? "",
-        now(),
-      );
+      // A window, or a device the host's own person paired, which chooses a
+      // folder on this computer as that person would (maintainer decision,
+      // 2026-11-20). A hub-introduced device or an agent grant is refused:
+      // binding a folder is the person's act.
+      const context = authenticateRoutePrincipal({
+        request,
+        store: dependencies.windowAuthorityStore,
+        now: now(),
+      });
+      if (!principalActsAsHostPerson(context.principal) || isAgentGrantSession(context.principal)) {
+        return Response.json(
+          {
+            category: "unauthorized",
+            message: "Folders on this computer are chosen by its own person.",
+          } satisfies FolderBrowseFailure,
+          { status: 403, headers: corsHeaders(origin) },
+        );
+      }
+      windowId = context.scopeId;
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failureResponse(

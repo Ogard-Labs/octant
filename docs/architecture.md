@@ -17952,9 +17952,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
       `GET /api/code/bootstrap`, `/api/code/navigation`,
       `/api/code/threads/:id`, `.../conversation`, `.../conversation/window`,
       `.../operations/:id/events`, and `.../events` only with `wait=0`;
-      `POST /api/code/commands`; `PUT /api/code/evidence`; and
+      `POST /api/code/commands`; `PUT /api/code/evidence`;
       `GET /api/projects/bootstrap`, `/api/providers/bootstrap` and
-      `/api/pending-requests`. An `:id` segment matches only a lowercase UUID.
+      `/api/pending-requests`; and `POST /api/folders/browse`,
+      `/api/folders/select` and `/api/projects/commands`, so the window can
+      choose a folder on that computer and make it a Code Project there. An
+      `:id` segment matches only a lowercase UUID.
       Thread events are carried only with `wait=0` because without it the
       computer holds the read open until the next change, past this channel's
       time limit; with it the computer answers once it has caught up, and the

@@ -54,6 +54,7 @@ function workClients(
     code: unused<CodeClient>("code"),
     syncStatus: unused<ReplicaSyncStatusClient>("syncStatus"),
     project: unused<ProjectClient>("project"),
+    folderBrowse: unused<RemoteProductClients["folderBrowse"]>("folderBrowse"),
     provider: {
       bootstrap: async () => ({
         instances: [],

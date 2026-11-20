@@ -83,7 +83,6 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/shell/commands",
   "/api/shell/launch-session",
   "/api/shell/local-session",
-  "/api/folders",
   // Pointing a runtime at an executable goes through the host's native file
   // picker and the desktop broker. Scanning and connecting are forwarded below.
   "/api/providers/discovery/locate-binary",
@@ -106,6 +105,11 @@ const LOCAL_ONLY_PREFIXES = [
  * none of these is an action, and each route refuses such a principal itself.
  */
 const PERSON_PAIRED_DEVICE_ROUTES = [
+  // Browsing this computer's folders and choosing one for a Project: the
+  // receipt is bound to the device's own scope, and the route refuses every
+  // principal that is not the host's person.
+  "/api/folders/browse",
+  "/api/folders/select",
   // Installing, trusting, enabling, and removing a package; remembered tool
   // approvals; adding, pinning, signing in to, and reconnecting a server.
   "/api/extensions/lifecycle",

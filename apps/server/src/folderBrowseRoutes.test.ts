@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WindowId } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
+import { AGENT_ACCESS_ORIGIN, createRemoteDevicePrincipal } from "./clientPrincipal";
 import { createFolderBrowseRouteHandler } from "./folderBrowseRoutes";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { FolderBrowseService, FolderBrowseServiceError } from "./folderBrowseService";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -135,7 +138,76 @@ describe("folder browse routes", () => {
     );
     expect(foreignHost?.status).toBe(400);
   });
+
+  it("lets a device the host's own person paired browse that computer's folders, as that device", async () => {
+    const { handle, issued } = await liveHarness();
+    const response = await handle(
+      fromDevice({ hostId: "local", mode: "code" }, { admittedBy: "host-person" }),
+    );
+    expect(response?.status).toBe(200);
+    const listed = (await response?.json()) as {
+      candidates: ReadonlyArray<{ candidateId: string; displayName: string }>;
+    };
+    expect(names(listed).sort()).toEqual(["alpha", "beta"]);
+    const alpha = listed.candidates.find((candidate) => candidate.displayName === "alpha");
+    if (alpha === undefined) throw new Error("No alpha candidate.");
+    const selection = { hostId: "local", mode: "code", candidateId: alpha.candidateId };
+    // A candidate the device was given is not a window's to choose.
+    const fromWindow = await handle(
+      new Request("http://127.0.0.1/api/folders/select", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        body: JSON.stringify(selection),
+      }),
+    );
+    expect(fromWindow?.status).not.toBe(200);
+    const chosen = await handle(
+      fromDevice(selection, { admittedBy: "host-person" }, "/api/folders/select"),
+    );
+    expect(chosen?.status).toBe(200);
+    // The receipt chosen from it belongs to the device's own scope.
+    expect(issued.at(-1)?.windowId).toBe(deviceScope);
+  });
+
+  it("refuses a hub-introduced device and an agent grant", async () => {
+    const { handle } = await liveHarness();
+    for (const principal of [
+      { admittedBy: "hub-roster" as const },
+      { admittedBy: "host-person" as const, origin: AGENT_ACCESS_ORIGIN },
+    ]) {
+      const response = await handle(fromDevice({ hostId: "local", mode: "code" }, principal));
+      expect(response?.status).toBe(403);
+    }
+  });
 });
+
+const deviceScope = "22222222-2222-4222-8222-222222222222";
+
+function fromDevice(
+  body: unknown,
+  input: { readonly admittedBy: "host-person" | "hub-roster"; readonly origin?: string },
+  path = "/api/folders/browse",
+): Request {
+  const request = new Request(`http://127.0.0.1${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  bindPrincipalRouteContext(request, {
+    principal: createRemoteDevicePrincipal({
+      hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
+      deviceId: deviceScope as DeviceId,
+      credentialGeneration: 1,
+      origin: input.origin ?? "https://octant.example",
+      protocolVersion: 1,
+      capabilityDigest: "b".repeat(64),
+      sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
+      admittedBy: input.admittedBy,
+    }),
+    scopeId: deviceScope as WindowId,
+  });
+  return request;
+}
 
 async function liveHarness() {
   const home = await mkdtemp(join(tmpdir(), "octant-folder-routes-"));
@@ -144,13 +216,17 @@ async function liveHarness() {
   });
   await mkdir(join(home, "alpha"));
   await mkdir(join(home, "beta"));
+  const issued: Array<{ readonly windowId: string }> = [];
   const service = new FolderBrowseService({
     bindingReceiptStore: {
-      issue: (input) => ({
-        receiptId: `receipt-${input.now}` as never,
-        projectType: input.projectType,
-        expiresAt: input.now + 60_000,
-      }),
+      issue: (input) => {
+        issued.push({ windowId: String(input.windowId) });
+        return {
+          receiptId: `receipt-${input.now}` as never,
+          projectType: input.projectType,
+          expiresAt: input.now + 60_000,
+        };
+      },
     },
     projectRootPort: {
       validate: async (_type, candidate) => ({ canonicalRoot: candidate }),
@@ -164,7 +240,7 @@ async function liveHarness() {
     windowAuthorityStore: registeredStore(),
     now: () => 1,
   });
-  return { handle };
+  return { handle, issued };
 }
 
 function registeredStore(): WindowAuthorityStore {
