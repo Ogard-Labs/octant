@@ -564,6 +564,8 @@ describe("a spoke delegating work to another spoke", () => {
     expect(listed?.status).toBe(200);
     expect(await listed?.json()).toEqual({
       projects: [{ projectId: String(PROJECT), name: "Service", modes: ["code"] }],
+      accepting: true,
+      load: "busy",
     });
     // A's agent reads the same list through A's own delegating service.
     expect(await a.delegating.listTargets()).toEqual([
@@ -571,6 +573,8 @@ describe("a spoke delegating work to another spoke", () => {
         memberId: b.hostId,
         name: "Desktop B",
         projects: [{ projectId: String(PROJECT), name: "Service", modes: ["code"] }],
+        accepting: true,
+        load: "busy",
       },
     ]);
 
@@ -586,6 +590,29 @@ describe("a spoke delegating work to another spoke", () => {
     );
     expect(refused?.status).toBe(403);
     expect(await refused?.json()).toMatchObject({ kind: "delegation-not-granted" });
+  });
+
+  it("refuses every new request once B's person stops accepting delegated work, and lists B as not accepting", async () => {
+    const { a, b, child } = await threeHosts({
+      bProjects: () => [{ projectId: PROJECT, name: "Service" }],
+    });
+    b.setDelegationAccepting(false);
+
+    const refused = await b.hubLink(
+      signedDelegation({ signer: a, recipient: b, body: requestBody(a) }),
+    );
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ kind: "not-accepting" });
+    expect(child.started).toHaveLength(0);
+    expect(await a.delegating.listTargets()).toEqual([
+      { memberId: b.hostId, name: "Desktop B", projects: [], accepting: false, load: "busy" },
+    ]);
+
+    b.setDelegationAccepting(true);
+    const accepted = await b.hubLink(
+      signedDelegation({ signer: a, recipient: b, body: requestBody(a) }),
+    );
+    expect(accepted?.status).toBe(201);
   });
 
   it("interrupts a child once its start finishes when the sender cancels mid-start, and refuses another sender", async () => {

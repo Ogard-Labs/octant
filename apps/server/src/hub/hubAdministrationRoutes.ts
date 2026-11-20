@@ -10,6 +10,7 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
+  decodeDelegationAcceptingRequest,
   decodeConfirmNewMembersRequest,
   decodeHubAcceptNewHubRequest,
   decodeHubGrant,
@@ -74,6 +75,8 @@ export const HUB_ADMINISTRATION_ROUTES = {
   ownersAdd: "/api/desktop/hub/owners/add",
   ownersRemove: "/api/desktop/hub/owners/remove",
   confirmNewMembers: "/api/desktop/hub/confirm-new-members",
+  /** Whether this member takes delegated work from other members: a window turns it on or off. */
+  delegationAccepting: "/api/desktop/hub/delegation-accepting",
   /** Whether a paired phone or web client's merge needs an owner unlock: only a window on this host turns it on or off. */
   pairedMergeUnlock: "/api/desktop/hub/paired-merge-unlock",
   ownerApprovalAnswerUnlock: "/api/desktop/hub/owner-approval-answer-unlock",
@@ -131,6 +134,11 @@ export interface HubAdministrationRouteOptions {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
+  /** This member's switch for taking delegated work; absent where delegation is not composed. */
+  readonly delegationAccepting?: {
+    readonly read: () => boolean;
+    readonly set: (accepting: boolean) => void;
+  };
   readonly pairedMergeUnlock: PairedMergeUnlockService;
   readonly ownerApprovalAnswerUnlock: OwnerApprovalAnswerUnlock;
   readonly failover: FailoverService;
@@ -192,6 +200,9 @@ export function createHubAdministrationRouteHandler(
           acceptMovedThreads: options.hub.acceptsMovedThreads(),
         },
         spoke: options.spoke.status(),
+        ...(options.delegationAccepting === undefined
+          ? {}
+          : { delegation: { accepting: options.delegationAccepting.read() } }),
         failover: options.failover.status(),
         wake: { hub: options.wake.status(), spoke: options.spokeWake.status() },
         push: { hub: options.push.status(), spoke: { handing: options.spokePush.granted() } },
@@ -294,6 +305,12 @@ export function createHubAdministrationRouteHandler(
         case HUB_ADMINISTRATION_ROUTES.confirmNewMembers: {
           const value = decodeConfirmNewMembersRequest(parseJson(request, body.text));
           return outcome(options.spoke.setConfirmNewMembers(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.delegationAccepting: {
+          if (options.delegationAccepting === undefined) return failure("invalid", 404);
+          const value = decodeDelegationAcceptingRequest(parseJson(request, body.text));
+          options.delegationAccepting.set(value.accepting);
+          return outcome({ status: "changed" });
         }
         case HUB_ADMINISTRATION_ROUTES.confirmMember: {
           const value = decodeOwnerMemberRequest(parseJson(request, body.text));

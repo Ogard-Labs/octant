@@ -623,6 +623,9 @@ export class DelegatingSpokeService {
       readonly memberId: string;
       readonly name: string;
       readonly projects: DelegationProjectListing["projects"];
+      /** False when that member's person stopped accepting delegated work. */
+      readonly accepting?: boolean;
+      readonly load?: NonNullable<DelegationProjectListing["load"]>;
     }>
   > {
     const listed = await Promise.all(
@@ -633,8 +636,19 @@ export class DelegatingSpokeService {
         const answer = await this.#send(target, origin, PEER_DELEGATION_ROUTES.projects, {});
         if (answer.status === "unreachable" || !answer.response.ok) return [];
         try {
-          const { projects } = decodeDelegationProjectListing(await answer.response.json());
-          return projects.length === 0 ? [] : [{ memberId, name: target.member.name, projects }];
+          const listing = decodeDelegationProjectListing(await answer.response.json());
+          // A member that stopped accepting stays listed, so the agent knows why
+          // it cannot place work there.
+          if (listing.projects.length === 0 && listing.accepting !== false) return [];
+          return [
+            {
+              memberId,
+              name: target.member.name,
+              projects: listing.projects,
+              ...(listing.accepting === undefined ? {} : { accepting: listing.accepting }),
+              ...(listing.load === undefined ? {} : { load: listing.load }),
+            },
+          ];
         } catch {
           return [];
         }

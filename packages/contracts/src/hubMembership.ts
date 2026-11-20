@@ -230,6 +230,10 @@ export const HubSpokeStatus = Schema.Struct({
   name: bounded(128),
   serverBuildVersion: bounded(128),
   rosterSequence: Schema.Int.pipe(Schema.positive()),
+  /** How busy the spoke is, changed only once a new level has held. Absent from a spoke before load levels. */
+  load: Schema.optional(Schema.Literal("light", "busy", "heavy")),
+  /** False once the spoke's person stopped accepting delegated work. */
+  acceptingDelegatedWork: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type HubSpokeStatus = typeof HubSpokeStatus.Type;
 

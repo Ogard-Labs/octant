@@ -3581,7 +3581,11 @@ a numbered slice. Built, with these narrower readings:
     maintainer gate.
 19. **Placement advice.** Each member reports a load level that changes
     only after it holds, beside the roster, and a member can stop accepting
-    delegated work with one switch. Verification: server tests.
+    delegated work with one switch. Verification: server tests. Built: the
+    level (light, busy, heavy) comes from memory pressure and live turns and
+    changes after holding two minutes; the hub's status read and the
+    member's Project list carry it with whether the member accepts
+    delegated work, and the switch is in the hub settings.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

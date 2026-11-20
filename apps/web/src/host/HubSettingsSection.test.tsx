@@ -218,6 +218,27 @@ describe("HubSettingsSection", () => {
     );
   });
 
+  it("stops and resumes taking delegated work with one switch", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: { ...linkedStatus({ items: ["roster"] }), delegation: { accepting: true } },
+      },
+      "delegation-accepting": { status: 200, body: { status: "changed" } },
+    });
+    const toggle = await screen.findByRole("switch", {
+      name: "Take delegated work from other members",
+    });
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "delegation-accepting")?.body).toEqual({
+        accepting: false,
+      }),
+    );
+  });
+
   it("makes the Mac's unlock key when joining and presents only its public half", async () => {
     const user = userEvent.setup();
     const fixture = harness({

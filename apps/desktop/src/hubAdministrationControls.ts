@@ -12,6 +12,7 @@
 
 import {
   decodeConfirmNewMembersRequest,
+  decodeDelegationAcceptingRequest,
   decodeHubAcceptMovedThreadsRequest,
   decodeHubGrant,
   decodeHubAutoApplyRequest,
@@ -125,6 +126,11 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/confirm-new-members",
     decodeBody: decodeConfirmNewMembersRequest,
+  },
+  "delegation-accepting": {
+    method: "POST",
+    path: "/api/desktop/hub/delegation-accepting",
+    decodeBody: decodeDelegationAcceptingRequest,
   },
   "paired-merge-unlock": {
     method: "POST",

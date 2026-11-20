@@ -122,6 +122,19 @@ export const DelegationProjectListing = Schema.Struct({
       modes: Schema.Array(PeerDelegationMode).pipe(Schema.minItems(1)),
     }),
   ).pipe(Schema.maxItems(500)),
+  /** False once the member's person stopped accepting delegated work; it then lists no Projects. */
+  accepting: Schema.optional(Schema.Boolean),
+  /** How busy the member is, changed only once a new level has held, for placing work. */
+  load: Schema.optional(Schema.Literal("light", "busy", "heavy")),
 });
 export type DelegationProjectListing = typeof DelegationProjectListing.Type;
 export const decodeDelegationProjectListing = Schema.decodeUnknownSync(DelegationProjectListing);
+
+/** A window's switch for whether this member takes delegated work from other members. */
+export const DelegationAcceptingRequest = Schema.Struct({ accepting: Schema.Boolean }).annotations(
+  strict,
+);
+export type DelegationAcceptingRequest = typeof DelegationAcceptingRequest.Type;
+export const decodeDelegationAcceptingRequest = Schema.decodeUnknownSync(
+  DelegationAcceptingRequest,
+);

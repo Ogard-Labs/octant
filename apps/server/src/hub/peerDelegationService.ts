@@ -27,12 +27,14 @@ import {
 import {
   clampDelegation,
   type AuthorizedPeer,
+  type MemberLoadLevel,
   type DelegationProjectAuthority,
 } from "@octant/domain";
 import { Schema } from "effect";
 import {
   MAX_OPEN_DELEGATIONS,
   MAX_REMEMBERED_SETTLED,
+  delegationAcceptingSwitch,
   type DelegationStatePort,
   type ReceivedDelegation,
 } from "./delegationStateStore";
@@ -119,6 +121,7 @@ export type DelegationRefusalKind =
   | "above-granted-authority"
   | "request-id-in-use"
   | "too-many-open-delegations"
+  | "not-accepting"
   | "unknown-request"
   | "thread-unavailable"
   | "start-failed"
@@ -134,6 +137,8 @@ export type DelegationRefusal = {
 export type DelegationReceipt = DelegationAccepted | DelegationRefusal;
 export interface DelegationProjectList {
   readonly status: "listed";
+  readonly accepting: boolean;
+  readonly load?: MemberLoadLevel;
   readonly projects: ReadonlyArray<{
     readonly projectId: ProjectId;
     readonly name: string;
@@ -159,6 +164,8 @@ export interface PeerDelegationServiceOptions {
   /** This host's active Projects by id and name, for the read-only list a peer asks for. */
   readonly projects?: () => ReadonlyArray<{ readonly projectId: ProjectId; readonly name: string }>;
   readonly state: DelegationStatePort;
+  /** This member's load level, reported with its list of Projects for placing work. */
+  readonly load?: () => MemberLoadLevel;
   readonly record: (change: HubDelegationRecordedPayload) => void;
   readonly now: () => number;
 }
@@ -217,6 +224,8 @@ export class PeerDelegationService {
     const { peer, principal } = authenticated;
     // A guest runs no agents and neither sends nor receives delegated work.
     if (peer.member.role === "guest") return refusal("guest-cannot-delegate");
+    // This member's person stopped accepting delegated work: nothing new starts.
+    if (!this.accepting()) return refusal("not-accepting");
     let request;
     try {
       request = decodeDelegationRequest(JSON.parse(signed.body));
@@ -332,6 +341,10 @@ export class PeerDelegationService {
     if (peer.member.role === "guest") return refusal("guest-cannot-delegate");
     const delegation = peer.grant.delegation;
     if (delegation === undefined) return refusal("delegation-not-granted");
+    const load = this.#options.load?.();
+    const placement = load === undefined ? {} : { load };
+    if (!this.accepting())
+      return { status: "listed", projects: [], accepting: false, ...placement };
     const projects = (this.#options.projects?.() ?? []).flatMap((project) => {
       if (
         delegation.projects !== "all" &&
@@ -345,7 +358,12 @@ export class PeerDelegationService {
         ? []
         : [{ projectId: project.projectId, name: project.name, modes }];
     });
-    return { status: "listed", projects };
+    return { status: "listed", projects, accepting: true, ...placement };
+  }
+
+  /** Whether this member takes delegated work now; on unless its person turned it off. */
+  accepting(): boolean {
+    return delegationAcceptingSwitch(this.#options.state).read();
   }
 
   async status(signed: SignedRequest): Promise<DelegationStatusReceipt> {

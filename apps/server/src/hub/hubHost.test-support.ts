@@ -40,7 +40,11 @@ import {
 } from "../remote/remoteGateway";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
 import { DelegatingSpokeService, type DelegatingParentPort } from "./delegatingSpokeService";
-import { createDelegationStateStore, type DelegationStatePort } from "./delegationStateStore";
+import {
+  createDelegationStateStore,
+  delegationAcceptingSwitch,
+  type DelegationStatePort,
+} from "./delegationStateStore";
 import { FailoverService } from "./failoverService";
 import { createHubLinkRouteHandler } from "./hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
@@ -230,6 +234,8 @@ export interface HubTestHost {
   readonly delegationRecords: HubDelegationRecordedPayload[];
   /** The delegating side of this host: what its agents' remote child runs go through. */
   readonly delegating: DelegatingSpokeService;
+  /** This host's switch for taking delegated work, as its window turns it. */
+  readonly setDelegationAccepting: (accepting: boolean) => void;
   /** This host's credential broker: the sign-ins it holds and the provider rows that take one. */
   readonly credentials: TestCredentialBroker;
   /** This host's Code postures, as the owner posture routes read and change them. */
@@ -818,6 +824,7 @@ export async function startHubTestHost(input: {
       currentPeer: (memberId) => spoke.currentPeer(memberId),
       host: input.delegationHost ?? NO_DELEGATION_HOST,
       ...(input.delegationProjects === undefined ? {} : { projects: input.delegationProjects }),
+      load: () => "busy",
       state: delegationState,
       record: (change) => delegationRecords.push(change),
       now: Date.now,
@@ -953,6 +960,8 @@ export async function startHubTestHost(input: {
     delegationState,
     delegationRecords,
     delegating,
+    setDelegationAccepting: (accepting: boolean) =>
+      delegationAcceptingSwitch(delegationState).set(accepting),
     credentials,
     postures,
     threadWakes,

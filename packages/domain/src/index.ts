@@ -118,6 +118,7 @@ export * from "./threadPlanPolicy";
 export * from "./hostControlPolicy";
 export * from "./hostExportPolicy";
 export * from "./hostMemoryPolicy";
+export * from "./memberLoadPolicy";
 export * from "./hostPolicy";
 export * from "./hostCreateSelectionPolicy";
 export * from "./debugLaunchFileImport";
