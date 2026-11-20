@@ -2,6 +2,9 @@ import { createProductFeedbackThreadScope } from "../browser/productFeedbackThre
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { HubMemberId, ProductFeedbackUpdated, decodeProject } from "@octant/contracts";
 import { providerApprovalCall } from "../providers/providerApprovalCall";
+import { makeCodexDriver, type CodexClientPort } from "../providers/codexDriver";
+import type { CodexAppServerConnection } from "../providers/codexProcess";
+import type { CodexServerMessage } from "../providers/codexProtocol";
 import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
 import { createExistingWorktreeCodeFileRootAuthority } from "../wiring/code";
@@ -10982,6 +10985,456 @@ describe("provider switch handoff", () => {
     } finally {
       await fixture.runtime.close();
       fixture.close();
+    }
+  });
+
+  function codexRewindHarness(options: {
+    readonly version: string;
+    readonly failFork?: boolean;
+    readonly omitFirstTurnAnchor?: boolean;
+    readonly rewriteFirstCursorMode?: "work";
+  }) {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    const listeners = new Set<(message: CodexServerMessage) => void>();
+    const calls: Array<{ readonly method: string; readonly input: unknown }> = [];
+    let startedThreads = 0;
+    let startedTurns = 0;
+    let startedProcesses = 0;
+    let closedProcesses = 0;
+    let workingDirectory: string | undefined;
+    const emit = (message: CodexServerMessage) => {
+      for (const listener of listeners) listener(message);
+    };
+    const codexThread = (id: string, cwd: string) => ({
+      thread: { id },
+      model: "gpt-5.4",
+      modelProvider: "openai",
+      serviceTier: null,
+      cwd,
+      approvalPolicy: "on-request" as const,
+      sandbox: { type: "workspaceWrite" as const },
+      reasoningEffort: null,
+    });
+    const client: CodexClientPort = {
+      accountRead: async () => ({ account: { type: "chatgpt" }, requiresOpenaiAuth: true }),
+      rateLimitsRead: async () => ({ rateLimits: { rateLimitReachedType: null } }),
+      modelList: async () => ({
+        data: [
+          {
+            id: "gpt-5.4",
+            model: "gpt-5.4",
+            displayName: "GPT-5.4",
+            hidden: false,
+            defaultReasoningEffort: "medium",
+            supportedReasoningEfforts: [],
+            defaultServiceTier: null,
+            serviceTiers: [],
+            inputModalities: ["text"],
+            isDefault: true,
+          },
+        ],
+        nextCursor: null,
+      }),
+      configRead: async () => ({ config: {} }),
+      skillsList: async () => ({ data: [{ skills: [], errors: [] }] }),
+      threadStart: async (input) => {
+        calls.push({ method: "thread/start", input });
+        return codexThread(`thread-${++startedThreads}`, input.cwd);
+      },
+      threadResume: async (input) => {
+        calls.push({ method: "thread/resume", input });
+        return codexThread(input.threadId, workingDirectory ?? "/private/exact");
+      },
+      threadFork: async (input) => {
+        calls.push({ method: "thread/fork", input });
+        if (options.failFork === true) throw new Error("Codex fork failed");
+        return {
+          thread: { id: `copy-of-${input.threadId}` },
+          model: "gpt-5.4",
+          modelProvider: "openai",
+          serviceTier: null,
+          cwd: input.cwd,
+        };
+      },
+      turnStart: async (input) => {
+        calls.push({ method: "turn/start", input });
+        const turnNumber = ++startedTurns;
+        const turnId = `turn-${turnNumber}`;
+        const reply =
+          turnNumber === 1 ? "First reply." : turnNumber === 2 ? "Second reply." : "Third reply.";
+        queueMicrotask(() => {
+          emit({
+            kind: "notification",
+            method: "turn/started",
+            params: {
+              threadId: input.threadId,
+              turn: { id: turnId, status: "inProgress" },
+            },
+          });
+          emit({
+            kind: "notification",
+            method: "item/agentMessage/delta",
+            params: {
+              threadId: input.threadId,
+              turnId,
+              itemId: `msg-${turnNumber}`,
+              delta: reply,
+            },
+          });
+          emit({
+            kind: "notification",
+            method: "turn/completed",
+            params: {
+              threadId: input.threadId,
+              turn: { id: turnId, status: "completed" },
+            },
+          });
+        });
+        return { turn: { id: turnId, status: "inProgress" } };
+      },
+      turnInterrupt: async () => undefined,
+      respondApproval: async () => undefined,
+      respondTool: async () => undefined,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const driver = makeCodexDriver({
+      instanceId: providerInstance,
+      binaryPath: "/usr/local/bin/codex",
+      process: {
+        start: () =>
+          Effect.acquireRelease(
+            Effect.sync(() => {
+              startedProcesses += 1;
+              return {
+                version: options.version,
+                pid: 400 + startedProcesses,
+                rpc: {} as CodexAppServerConnection["rpc"],
+                exited: new Promise<void>(() => undefined),
+              };
+            }),
+            () =>
+              Effect.sync(() => {
+                closedProcesses += 1;
+              }),
+          ),
+      },
+      runtimeRegistry,
+      clientFactory: () => client,
+      idleLeaseMs: 0,
+      clock: () => now,
+      correlationId: () => "80000000-0000-4000-8000-000000000313",
+      requestId: () => "request-1",
+      taskId: () => "task-1",
+      toolCallId: () => "tool-1",
+    });
+    let omittedAnchor = false;
+    let rewroteFirstStart = false;
+    const rewriteMode = options.rewriteFirstCursorMode;
+    const fixture = runtimeFixture({
+      resolveProviderDriver: async () =>
+        rewriteMode === undefined && options.omitFirstTurnAnchor !== true
+          ? driver
+          : {
+              ...driver,
+              acquire: (acquireInput) =>
+                driver.acquire(acquireInput).pipe(
+                  Effect.map((connection) => ({
+                    ...connection,
+                    ...(options.omitFirstTurnAnchor !== true
+                      ? {}
+                      : {
+                          subscribe: connection.subscribe.pipe(
+                            Effect.map((stream) =>
+                              Stream.map(stream, (event) => {
+                                if (event.kind === "completed" && !omittedAnchor) {
+                                  omittedAnchor = true;
+                                  const { nativeAnchor: _dropped, ...withoutAnchor } = event;
+                                  return withoutAnchor;
+                                }
+                                return event;
+                              }),
+                            ),
+                          ),
+                        }),
+                    ...(rewriteMode === undefined
+                      ? {}
+                      : {
+                          start: (startInput) =>
+                            connection.start(startInput).pipe(
+                              Effect.map((handle) => {
+                                const cursor = handle.resumeCursor;
+                                const binding = cursor?.binding;
+                                if (
+                                  rewroteFirstStart ||
+                                  cursor === undefined ||
+                                  binding === undefined
+                                )
+                                  return handle;
+                                rewroteFirstStart = true;
+                                return {
+                                  ...handle,
+                                  resumeCursor: {
+                                    ...cursor,
+                                    binding: {
+                                      ...binding,
+                                      mode: rewriteMode,
+                                    },
+                                  },
+                                };
+                              }),
+                            ),
+                        }),
+                  })),
+                ),
+            },
+      resolveCheckoutRoot: async () => ({
+        checkoutRoot: "/private/exact",
+        ...(workingDirectory === undefined ? {} : { workingDirectory }),
+        shell: "/bin/zsh",
+        credentialReferences: [],
+        environment: {},
+      }),
+      supportsSessionRollback: (current) =>
+        runtimeRegistry.observedState(current.providerInstanceId)?.capabilities.sessionRollback ===
+        "supported",
+    });
+    fixture.setThread(onProvider(providerInstance, "gpt-5.4"));
+    const runTurn = async (
+      op: number,
+      sid: ProviderSessionId,
+      text: string,
+      extra: { readonly toolCatalogHandoff?: boolean } = {},
+    ) => {
+      const promptRef = storedEvidence(op + 200, text);
+      fixture.evidenceValues.set(promptRef.contentId, text);
+      const started = await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(op),
+        threadId,
+        checkoutId,
+        sessionId: sid,
+        prompt: promptRef,
+        ...(extra.toolCatalogHandoff === true ? { toolCatalogHandoff: true as const } : {}),
+      });
+      expect(started).not.toMatchObject({ kind: "operation-failed" });
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(op), 0, 50);
+        expect(frames.map((frame) => frame.event)).toContainEqual(
+          expect.objectContaining({ kind: "operation-state", state: "completed" }),
+        );
+      });
+    };
+    return {
+      fixture,
+      driver,
+      runtimeRegistry,
+      calls,
+      setWorkingDirectory: (next: string) => {
+        workingDirectory = next;
+        fixture.setThread(
+          decodeCodeThread({
+            ...onProvider(providerInstance, "gpt-5.4", 2),
+            workingFolderId: `folder_${"a".repeat(64)}`,
+          }),
+        );
+      },
+      processCounts: () => ({ started: startedProcesses, closed: closedProcesses }),
+      probe: () => Effect.runPromise(Effect.scoped(driver.probe({ instanceId: providerInstance }))),
+      runTwoTurns: async () => {
+        await runTurn(84, sessionId, "Implement this.");
+        if (options.rewriteFirstCursorMode !== undefined) {
+          await runTurn(85, switchSession, "Carry on.", { toolCatalogHandoff: true });
+        } else {
+          await runTurn(85, sessionId, "Carry on.");
+        }
+      },
+      runTurnAfterRewind: () =>
+        runTurn(87, decodeProviderSessionId("90000000-0000-4000-8000-000000000089"), "Try again."),
+      close: async () => {
+        await fixture.runtime.close();
+        fixture.close();
+      },
+    };
+  }
+
+  it("rewinds a Codex 0.143.0+ Code thread onto its own session copy and resumes that copy on the next turn", async () => {
+    const codex = codexRewindHarness({ version: "0.170.0" });
+    try {
+      const probed = await codex.probe();
+      expect(probed.capabilities.sessionRollback).toBe("supported");
+      await codex.runTwoTurns();
+
+      expect(await previewRollback(codex.fixture, 85)).toBe("native");
+      await codex.fixture.runtime.execute(windowId, rewindFrom(85));
+      await codex.runTurnAfterRewind();
+
+      expect(codex.calls).toContainEqual({
+        method: "thread/fork",
+        input: {
+          threadId: "thread-1",
+          lastTurnId: "turn-1",
+          cwd: "/private/exact",
+          excludeTurns: true,
+        },
+      });
+      // The third turn resumes the copied session, leaving thread-1 untouched, and sends no text handoff.
+      const resumes = codex.calls.filter((call) => call.method === "thread/resume");
+      expect(resumes.at(-1)?.input).toMatchObject({ threadId: "copy-of-thread-1" });
+      const turnStarts = codex.calls.filter((call) => call.method === "turn/start");
+      expect(turnStarts.at(-1)?.input).toMatchObject({ threadId: "copy-of-thread-1" });
+      expect(JSON.stringify(turnStarts.at(-1)?.input)).not.toContain("rewound the thread");
+
+      const frames = await codex.fixture.runtime.subscribe(
+        windowId,
+        threadId,
+        operationId(87),
+        0,
+        50,
+      );
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({
+        reason: "rewind-native-session",
+        throughOperationId: operationId(84),
+        nativeSessionTransferred: true,
+      });
+    } finally {
+      await codex.close();
+    }
+  });
+
+  it("reports sessionRollback unsupported and falls back to text handoff on Codex releases older than 0.143.0", async () => {
+    const codex = codexRewindHarness({ version: "0.142.5" });
+    try {
+      const probed = await codex.probe();
+      expect(probed.capabilities.sessionRollback).toBe("unsupported");
+      await codex.runTwoTurns();
+
+      expect(await previewRollback(codex.fixture, 85)).toBe("handoff");
+      await codex.fixture.runtime.execute(windowId, rewindFrom(85));
+      await codex.runTurnAfterRewind();
+
+      expect(codex.calls.some((call) => call.method === "thread/fork")).toBe(false);
+      expect(codex.calls.filter((call) => call.method === "thread/start")).toHaveLength(2);
+      const turnStarts = codex.calls.filter((call) => call.method === "turn/start");
+      expect(JSON.stringify(turnStarts.at(-1)?.input)).toContain("rewound the thread");
+      const frames = await codex.fixture.runtime.subscribe(
+        windowId,
+        threadId,
+        operationId(87),
+        0,
+        50,
+      );
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind" });
+    } finally {
+      await codex.close();
+    }
+  });
+
+  it("falls back cleanly to text handoff when a Codex rewind lacks an anchor, changes folder or mode, or fails to copy", async () => {
+    // 1. Missing turn anchor.
+    const noAnchor = codexRewindHarness({ version: "0.170.0", omitFirstTurnAnchor: true });
+    try {
+      await noAnchor.probe();
+      await noAnchor.runTwoTurns();
+      expect(await previewRollback(noAnchor.fixture, 85)).toBe("handoff");
+      await noAnchor.fixture.runtime.execute(windowId, rewindFrom(85));
+      await noAnchor.runTurnAfterRewind();
+      expect(noAnchor.calls.some((call) => call.method === "thread/fork")).toBe(false);
+      const frames = await noAnchor.fixture.runtime.subscribe(
+        windowId,
+        threadId,
+        operationId(87),
+        0,
+        50,
+      );
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind" });
+    } finally {
+      await noAnchor.close();
+    }
+
+    // 2. Folder changed between the kept turn and the rewind.
+    const movedFolder = codexRewindHarness({ version: "0.170.0" });
+    try {
+      await movedFolder.probe();
+      await movedFolder.runTwoTurns();
+      movedFolder.setWorkingDirectory("/private/other-folder");
+      expect(await previewRollback(movedFolder.fixture, 85)).toBe("handoff");
+      await movedFolder.fixture.runtime.execute(windowId, rewindFrom(85));
+      await movedFolder.runTurnAfterRewind();
+      expect(movedFolder.calls.some((call) => call.method === "thread/fork")).toBe(false);
+      const frames = await movedFolder.fixture.runtime.subscribe(
+        windowId,
+        threadId,
+        operationId(87),
+        0,
+        50,
+      );
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind" });
+    } finally {
+      await movedFolder.close();
+    }
+
+    // 3. Cursor bound to a different mode than Code.
+    const differentMode = codexRewindHarness({
+      version: "0.170.0",
+      rewriteFirstCursorMode: "work",
+    });
+    try {
+      await differentMode.probe();
+      await differentMode.runTwoTurns();
+      expect(await previewRollback(differentMode.fixture, 85)).toBe("handoff");
+      await differentMode.fixture.runtime.execute(windowId, rewindFrom(85));
+      await differentMode.runTurnAfterRewind();
+      expect(differentMode.calls.some((call) => call.method === "thread/fork")).toBe(false);
+      const frames = await differentMode.fixture.runtime.subscribe(
+        windowId,
+        threadId,
+        operationId(87),
+        0,
+        50,
+      );
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind" });
+    } finally {
+      await differentMode.close();
+    }
+
+    // 4. Fork copy failure falls back to text handoff and closes the copy process.
+    const copyFailed = codexRewindHarness({ version: "0.170.0", failFork: true });
+    try {
+      await copyFailed.probe();
+      await copyFailed.runTwoTurns();
+      expect(await previewRollback(copyFailed.fixture, 85)).toBe("native");
+      await copyFailed.fixture.runtime.execute(windowId, rewindFrom(85));
+      await copyFailed.runTurnAfterRewind();
+      expect(copyFailed.calls.some((call) => call.method === "thread/fork")).toBe(true);
+      expect(copyFailed.calls.filter((call) => call.method === "thread/start")).toHaveLength(2);
+      const turnStarts = copyFailed.calls.filter((call) => call.method === "turn/start");
+      expect(JSON.stringify(turnStarts.at(-1)?.input)).toContain("rewound the thread");
+      const frames = await copyFailed.fixture.runtime.subscribe(
+        windowId,
+        threadId,
+        operationId(87),
+        0,
+        50,
+      );
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind" });
+      expect(copyFailed.processCounts().closed).toBe(copyFailed.processCounts().started);
+    } finally {
+      await copyFailed.close();
     }
   });
 

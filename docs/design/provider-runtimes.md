@@ -1666,24 +1666,29 @@ no rule about an Octant tool reaches its model. A session still open in the
 person's own Codex keeps its writer there, and the resume reports that
 another Codex process is using the thread until it closes.
 
-**Codex fork and rewind** (maintainer request, 2026-11-18; built for fork).
-A Code fork continues a copy of Codex's own thread rather than a text
-handoff where it can, as Claude Code's does ([Fork and rewind](#fork-and-rewind)).
-Each completed turn journals its Codex turn id as its native anchor, and the
-driver's `forkSession` calls `thread/fork` with `lastTurnId` set to it,
-`cwd` set to the Project's folder and `excludeTurns`. The copy keeps the
-source's app tools (measured with codex-cli 0.170.0), so its cursor carries
-the source's tool record and `adopted` mark. Codex leaves the copy loaded in
-the app-server that made it, and another app-server's resume refuses a
-loaded thread, so the copy is made on a short-lived catalog process of its
-own that closes as soon as the copy exists; the fork's first turn then
-resumes it on its own lease, and the journal holds the copy from then on.
-Each copy has a process of its own, so two forks at once never leave one
-copy loaded while the other is made. A copy is made only into the source's own folder and
-mode, and only by a release whose fork cuts at a turn (`lastTurnId`, from
-codex-cli 0.143.0); a fork onto its own worktree, a turn with no anchor, an
-older Codex and a failed copy go back with the text handoff. Codex still
-reports `sessionRollback` unsupported, so a rewind keeps the text handoff.
+**Codex fork and rewind** (maintainer request, 2026-11-18; built for fork and
+rewind, maintainer decision 2026-11-19). A Code fork or rewind continues a copy
+of Codex's own thread rather than a text handoff where it can, as Claude Code's
+does ([Fork and rewind](#fork-and-rewind)). Each completed turn journals its
+Codex turn id as its native anchor, and the driver's `forkSession` calls
+`thread/fork` with `lastTurnId` set to it, `cwd` set to the Project's folder
+and `excludeTurns`. The copy keeps the source's app tools (measured with
+codex-cli 0.170.0), so its cursor carries the source's tool record and
+`adopted` mark. Codex leaves the copy loaded in the app-server that made it,
+and another app-server's resume refuses a loaded thread, so the copy is made on
+a short-lived catalog process of its own that closes as soon as the copy
+exists; the fork's first turn or the rewound thread's next turn then resumes it
+on its own lease, leaving the source thread untouched, and the journal holds
+the copy from then on. Each copy has a process of its own, so two concurrent
+copies never leave one loaded while the other is made. Codex reports
+`sessionRollback` supported from `0.143.0` (the first release whose
+`thread/fork` cuts at `lastTurnId`) and `unsupported` on older releases; the
+rewind preview promises a native copy only when Codex is `0.143.0` or later,
+the folder and mode match the kept turn's session binding, and the last kept
+turn journaled its Codex turn anchor. A fork onto its own worktree, a different
+folder or mode, a turn with no anchor, a Codex release older than `0.143.0`, or
+a failed copy goes back cleanly with the text handoff. Files come back only
+through Octant's checkpoints.
 
 **Codex skills and plugins in `@`** (maintainer request, 2026-11-18; built).
 The composer's `@` menu lists Codex's own skills and plugins after Octant's,
