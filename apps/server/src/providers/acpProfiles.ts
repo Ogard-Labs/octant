@@ -1817,7 +1817,7 @@ const antigravityProfile: AcpProviderProfile = {
   authenticateOnProbe: false,
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
-    "Google Antigravity is not signed in. Run agy in your terminal and sign in with your Google account, then retry.",
+    "Google Antigravity is not signed in. Run agy (or agy acp --login) in your terminal and sign in with your Google account, then retry.",
   // Nothing of its own setup is held back, so no switch reports anything.
   nativeSetupSupport: acpOwnSetupSupport([]),
   process: {
@@ -1837,7 +1837,11 @@ const antigravityProfile: AcpProviderProfile = {
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     guards: { NO_COLOR: "1", AGY_CLI_DISABLE_AUTO_UPDATE: "1" },
     environment: () => ({}),
-    args: () => ["acp", "--disable-telemetry"],
+    // Google's ACP guide: `--process-per-session` serves each session from an
+    // isolated worker and is required for HTTP MCP servers the client
+    // configures, which is how Octant offers its tools; `--disable-telemetry`
+    // is the CLI's own switch.
+    args: () => ["acp", "--process-per-session", "--disable-telemetry"],
     managedFiles: () => [],
     readsLoginKeychain: true,
     // The CLI keeps its settings, conversations, instructions and skills
@@ -1845,7 +1849,8 @@ const antigravityProfile: AcpProviderProfile = {
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".gemini"),
-      loginHint: "Run agy in your terminal and sign in with your Google account, then retry.",
+      loginHint:
+        "Run agy (or agy acp --login) in your terminal and sign in with your Google account, then retry.",
       environment: (path) => ({ GEMINI_HOME: path }),
     },
     confinement: { kind: "provider-approvals-outside-strict" },

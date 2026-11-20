@@ -2614,8 +2614,30 @@ threads stay.
 
 Built (maintainer decision, 2026-11-20): Google Antigravity is a shipped ACP
 profile, `antigravity`, on Google's official CLI, `agy`, run unmodified as
-`agy acp --disable-telemetry` with `AGY_CLI_DISABLE_AUTO_UPDATE=1`, under the
-same rules other ACP clients of the CLI apply. Discovery finds `agy` on the
+`agy acp --process-per-session --disable-telemetry` with
+`AGY_CLI_DISABLE_AUTO_UPDATE=1`, in the project directory.
+
+It stays inside Google's terms (read 2026-11-20). The Antigravity Additional
+Terms of Service (`antigravity.google/terms`) make "using third party
+software, tools, or services to access the Service (e.g. using OpenClaw with
+Antigravity OAuth)" a breach that may suspend the account. Google's own
+guide (`antigravity.google/docs/ide/extensions/acp`) is the sanctioned path:
+"Any ACP client can launch Antigravity CLI. Configure it to run this command
+with the project directory as the working directory: `agy acp`", with the
+agent, its tools, sign-in and settings coming from the CLI itself. Octant is
+that ACP client and does nothing outside the guide: it never reads, copies or
+replays the CLI's OAuth credentials, sends no other client's identity (the
+guide offers third-party models only to some named editors, so Octant gets
+Gemini models alone), passes only flags the guide lists, and never uses
+`--dangerously-skip-permissions`. The FAQ (`antigravity.google/docs/faq`)
+says headless mode (`agy -p`) "is intended for direct scripting and CI
+workflows. Wrapping agy inside third-party coding agents or applications, or
+automating account rotation, is not supported under consumer plans", so
+Octant never runs `agy -p` (not even for `/usage`) and never rotates or
+switches Antigravity accounts by itself; one person's own sign-in serves
+their own threads. `--process-per-session` is the guide's flag "required for
+HTTP MCP servers that your editor configures", which is how Octant offers its
+tools. Discovery finds `agy` on the
 PATH. It speaks standard ACP over stdio, and Octant does nothing to the CLI's
 identity or sign-in: no spoofed `clientInfo`, no faked environment that moves
 where the CLI keeps its sign-in, and no call to Google's internal endpoints
@@ -2706,11 +2728,10 @@ with the person's token. The CLI talks to Google itself.
 - **Usage and limits.** The `session/prompt` reply's `usage` is that turn's
   own; its `inputTokens` leaves out cached reads, so Octant's input is input
   plus `cachedReadTokens`, kept also as cache reads (`reportsTurnUsage`). The
-  account's windows come from the CLI's own `agy -p /usage --output-format
-json`: each enabled bucket's share used of its window (5-hour, weekly, per
-  model group) and reset, read in the background at most every five minutes
-  and on demand; a disabled bucket is left out, and an answer that is not a
-  successful reading is refused rather than read as unused.
+  account's 5-hour and weekly windows are not read: the CLI answers `/usage`
+  only through headless mode, which Google does not support wrapping inside
+  another application on consumer plans, so its limits report as
+  `runtime-does-not-report`.
 
 Kept, where other ACP clients of the CLI differ: the self-update guard (other
 clients both set and leave it), `--disable-telemetry`, Strict and Network
@@ -2722,7 +2743,11 @@ Not built yet, each pending the signed-in probe on a Mac with a personal
 subscription: whether the sandboxed keychain read signs in as measured for
 Claude Code, the model and thinking option ids, the exact shape of a question
 and of `session/list`, the `/usage` answer on a real account, mid-turn
-steering, and a pinned compaction release.
+steering, and a pinned compaction release. Google's guide says the server
+speaks protocol version 1, offers elicitation forms for questions, supports
+`session/close`, and treats a prompt sent during a turn as steering; Octant
+asks questions through the permission channel, sends no `session/close`, and
+refuses a mid-turn prompt until each is built against a live run.
 
 ### Any ACP agent
 
