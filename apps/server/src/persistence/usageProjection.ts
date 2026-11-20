@@ -7,6 +7,8 @@ import {
   DECISION_REVIEW_USAGE_AGGREGATE_TYPE,
   PERSON_MEMORY_REQUEST_SHAPE,
   PERSON_MEMORY_USAGE_AGGREGATE_TYPE,
+  PULL_REQUEST_REVIEW_REQUEST_SHAPE,
+  PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE,
   SHIELD_REVIEW_REQUEST_SHAPE,
   SHIELD_REVIEW_USAGE_AGGREGATE_TYPE,
   PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE,
@@ -67,7 +69,8 @@ export class UsageProjection implements Projection {
       event.aggregateType !== SHIELD_REVIEW_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== PERSON_MEMORY_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== DECISION_REVIEW_USAGE_AGGREGATE_TYPE &&
-      event.aggregateType !== IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE
+      event.aggregateType !== IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE &&
+      event.aggregateType !== PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE
     )
       return;
     this.#applyUsageReconciled(connection, event);
@@ -94,7 +97,8 @@ export class UsageProjection implements Projection {
     // person-memory distillation is the distilled thread's.
     const subject = manifest?.subject ?? {
       aggregateType:
-        event.aggregateType === PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE
+        event.aggregateType === PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE ||
+        event.aggregateType === PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE
           ? "code-thread"
           : event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE
             ? "agent-run"
@@ -223,7 +227,8 @@ export class UsageProjection implements Projection {
           reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
           reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE ||
           reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE ||
-          reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE
+          reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE ||
+          reconciliation.requestShape === PULL_REQUEST_REVIEW_REQUEST_SHAPE
           ? 0
           : 1,
       );

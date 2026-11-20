@@ -54,6 +54,7 @@ import {
 } from "../process/threadEgressPolicy";
 import { secretGuardRefusal } from "../process/secretGuard";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
+import { awsProfileReadPaths } from "./providerHostEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import {
   acquireProviderRuntimeNetwork,
@@ -1404,6 +1405,11 @@ function prepareOpenCodeLaunch(
       if (loopbackPorts.some((port) => !Number.isInteger(port) || port < 1 || port > 65_535)) {
         throw new Error("OpenCode app-managed tool bridge port is invalid.");
       }
+      const openProfile =
+        input.strict === false &&
+        input.fullAccessSandbox !== true &&
+        input.sandboxPolicy === undefined;
+      const awsReadPaths = openProfile ? awsProfileReadPaths(profile.environment) : [];
       const readRoots = existingAbsolutePaths([
         root,
         temporaryDirectory,
@@ -1413,6 +1419,7 @@ function prepareOpenCodeLaunch(
         cacheHome,
         stateHome,
         providerDataDirectory,
+        ...awsReadPaths,
         ...(input.readOnlyFolders ?? []),
       ]);
       const globalClaudeInstructions = openCodeGlobalClaudeInstructionFile(
@@ -1431,6 +1438,7 @@ function prepareOpenCodeLaunch(
         cacheHome,
         stateHome,
         providerDataDirectory,
+        ...awsReadPaths,
         ...(input.readOnlyFolders ?? []),
         // Bubblewrap binds this one file read-only. Seatbelt keeps `~/.claude`
         // denied as a whole and reopens the file by literal rule below: as an

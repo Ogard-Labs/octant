@@ -11,11 +11,14 @@ import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import {
   decodeCodeThread,
+  decodeProviderInstance,
+  decodeProviderObservedState,
   decodeWorkThread,
   decodeWorkThreadBootstrap,
   type CodeBootstrap,
 } from "@octant/contracts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { RemoteWorkspace } from "./RemoteWorkspace";
 import type { RemoteProductClients } from "./remoteProductClients";
@@ -274,5 +277,188 @@ describe("RemoteWorkspace", () => {
     );
     // The coordinator stays idle: nothing offers to stop it, and its composer sends.
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Stop/ })).toBeNull());
+  });
+
+  it("provides ThreadNativeSetupProvider to a paired browser so @ loads and labels Project Codex skills", async () => {
+    const user = userEvent.setup();
+    const projectId = "30000000-0000-4000-8000-000000000011";
+    const checkoutId = "31000000-0000-4000-8000-000000000011";
+    const instanceId = "10000000-0000-4000-8000-000000000011";
+    const thread = decodeCodeThread({
+      id: "21000000-0000-4000-8000-000000000011",
+      projectId,
+      bindingRevisionId: "32000000-0000-4000-8000-000000000011",
+      repositoryId: `repo_${"b".repeat(64)}`,
+      checkoutId,
+      title: "Codex remote thread",
+      lifecycle: "active",
+      providerInstanceId: instanceId,
+      modelId: "gpt-5.4",
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+      deliveryTarget: {
+        branchIntent: "feature/remote-skills",
+        remoteName: "origin",
+        proposedBaseRepository: "octant/octant",
+        proposedBaseBranch: "main",
+        outcomeKind: "local-implementation",
+        confirmedAt: now,
+      },
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const checkout = {
+      id: checkoutId,
+      repositoryId: thread.repositoryId,
+      kind: "existing-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "main", oid: "b".repeat(40) },
+      observedAt: now,
+    };
+    const bootstrap = {
+      checkouts: [checkout],
+      settings: {
+        defaultExecutionPolicy: "approval-gated",
+        defaultPermissionPersistence: "current-session",
+        requireGitRepository: true,
+        defaultDiffLayout: "unified",
+        updatedAt: now,
+        version: 1,
+      },
+      threads: [thread],
+      activity: [],
+      runtime: [],
+    } as unknown as CodeBootstrap;
+    const codexInstance = decodeProviderInstance({
+      id: instanceId,
+      displayName: "Codex",
+      driverKind: "codex",
+      configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex" },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      nativeSetup: true,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const codexObserved = decodeProviderObservedState({
+      instanceId,
+      readiness: "ready",
+      processState: "running",
+      models: [
+        {
+          id: "gpt-5.4",
+          displayName: "GPT 5.4",
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+      capabilities: {
+        streaming: "supported",
+        resume: "supported",
+        interruption: "supported",
+        approvals: "supported",
+        userQuestions: "supported",
+        reasoning: "supported",
+        usage: "supported",
+        toolActivity: "supported",
+        fileChanges: "supported",
+        diffs: "supported",
+        taskProgress: "supported",
+        nativeChildAgents: "unsupported",
+        harnessAutoReview: "supported",
+        nativeAttachments: "supported",
+        nativeWebResearch: "unsupported",
+        appManagedTools: "supported",
+        citations: "unsupported",
+      },
+      mentions: [{ kind: "skill", name: "tidy", description: "Tidy the code" }],
+      observedAt: now,
+    });
+    const threadProviderMentions = vi.fn(async () => ({
+      mentions: [
+        {
+          kind: "skill" as const,
+          name: "local",
+          scope: "project" as const,
+          description: "Deploy this Project",
+        },
+        { kind: "skill" as const, name: "tidy", description: "Tidy the code" },
+      ],
+    }));
+    const code = {
+      ...unused<CodeClient>("code"),
+      bootstrap: vi.fn(async () => bootstrap),
+      navigation: vi.fn(async () => ({ threads: [thread], activity: [], runtime: [] })),
+      thread: vi.fn(async () => ({ thread, checkout, lastSequence: 0 })),
+      conversation: vi.fn(async () => ({
+        version: 1,
+        threadId: thread.id,
+        turns: [],
+        nextCursor: 0,
+        hasMore: false,
+      })),
+      subscribe: vi.fn(async function* (_id: unknown, _cursor: unknown, signal: AbortSignal) {
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+        yield* [];
+      }),
+      readFollowUp: vi.fn(async (threadId: string) => ({ threadId, followUpVersion: 0 })),
+      readPlanner: vi.fn(async () => ({
+        designation: { kind: "none", projectId, updatedAt: now },
+        designationVersion: 0,
+        proposals: [],
+      })),
+    } as unknown as CodeClient;
+    const baseClients = workClients({
+      bootstrap: async () => decodeWorkThreadBootstrap({ threads: [] }),
+      navigation: async () => ({ threads: [], runtime: [] }),
+    });
+    const clients: RemoteProductClients = {
+      ...baseClients,
+      provider: {
+        ...baseClients.provider,
+        bootstrap: async () => ({
+          instances: [codexInstance],
+          defaults: { permissionPersistence: "current-session", version: 1 as never },
+          observedStates: [codexObserved],
+        }),
+        threadNativeSetup: vi.fn(async () => ({
+          threadId: String(thread.id),
+          choice: "inherit" as const,
+        })),
+        threadProjectCode: vi.fn(async () => ({
+          threadId: String(thread.id),
+          projectCode: { status: "none" as const },
+        })),
+        threadProviderMentions,
+      },
+      canvas: {
+        ...unused<RemoteProductClients["canvas"]>("canvas"),
+        threadReferenceCards: async () => ({ cards: [] }) as never,
+      },
+      code,
+    };
+
+    render(<RemoteWorkspace actsAsHostPerson clients={clients} connected mode="code" />);
+    await user.click(await screen.findByRole("button", { name: "Codex remote thread" }));
+    const composer = await screen.findByRole("textbox");
+    await user.type(composer, "@");
+
+    await waitFor(() =>
+      expect(threadProviderMentions).toHaveBeenCalledWith({
+        kind: "mentions",
+        mode: "code",
+        threadId: String(thread.id),
+      }),
+    );
+    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toContain(
+      "$localProject · Codex's own skill · Deploy this Project",
+    );
   });
 });

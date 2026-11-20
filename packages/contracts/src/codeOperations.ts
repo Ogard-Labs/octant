@@ -353,6 +353,16 @@ export const CodeReviewProvenance = Schema.Union(
     kind: Schema.Literal("provider", "test", "git"),
     sourceId: boundedNonEmptyText(512),
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("pull-request-reviewer"),
+    reviewerId: boundedNonEmptyText(128),
+    reviewId: boundedNonEmptyText(128),
+    runId: Schema.optional(boundedNonEmptyText(128)),
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+    effort: Schema.optional(boundedNonEmptyText(64)),
+    headSha: GitObjectId,
+  }).annotations(strict),
 );
 export type CodeReviewProvenance = typeof CodeReviewProvenance.Type;
 

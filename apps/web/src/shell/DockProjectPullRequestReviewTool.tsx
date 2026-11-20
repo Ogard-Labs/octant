@@ -1,6 +1,6 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
-import type { OwnerUnlockNotGiven } from "@octant/client-runtime";
+import type { OwnerUnlockNotGiven, PullRequestReviewClient } from "@octant/client-runtime";
 import type {
   CodeProjectPullRequestActionCommand,
   CodeProjectPullRequestActionContext,
@@ -56,6 +56,7 @@ export interface DockProjectPullRequestReviewToolProps {
   readonly setAutoFix?: (
     command: CodeProjectPullRequestAutoFixCommand,
   ) => Promise<CodeProjectPullRequestSwitchOutcome>;
+  readonly pullRequestReviewClient?: PullRequestReviewClient;
 }
 
 /**
@@ -288,6 +289,17 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
       ) : null}
       <ProjectPullRequestReviewPane
         detail={view.detail}
+        {...(props.pullRequestReviewClient === undefined
+          ? {}
+          : {
+              pullRequestReviewClient: props.pullRequestReviewClient,
+              pullRequestTarget: {
+                projectId: props.query.projectId,
+                repositoryOwner: props.query.repositoryOwner,
+                repositoryName: props.query.repositoryName,
+                number: props.query.number,
+              },
+            })}
         {...(props.layout === undefined ? {} : { layout: props.layout })}
         {...(props.updatedAt === undefined ? {} : { updatedAt: props.updatedAt })}
         freshness={view.freshness}

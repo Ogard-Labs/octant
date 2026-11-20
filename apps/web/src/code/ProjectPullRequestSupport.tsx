@@ -1,4 +1,8 @@
-import { ownerMergeUnlockCopy, type OwnerUnlockNotGiven } from "@octant/client-runtime";
+import {
+  ownerMergeUnlockCopy,
+  type OwnerUnlockNotGiven,
+  type PullRequestReviewClient,
+} from "@octant/client-runtime";
 import {
   CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
   type CodeProjectPullRequestDetailObserved,
@@ -9,11 +13,13 @@ import {
   type CodeProjectPullRequestSwitchOutcome,
   type CodeProjectPullRequestSwitchesView,
   type CodeThreadId,
+  type PullRequestReviewTarget,
 } from "@octant/contracts";
 import { useState } from "react";
 import { type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { PullRequestHandBackSwitch } from "./PullRequestReviewerSettings";
 
 /** What the dock's review and the page's reading pane both say about a pull request. */
 
@@ -55,6 +61,8 @@ export function PullRequestSwitches(props: {
     enabled: boolean,
     threadId: CodeThreadId,
   ) => Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven>;
+  readonly pullRequestReviewClient?: PullRequestReviewClient;
+  readonly pullRequestTarget?: PullRequestReviewTarget;
 }) {
   const { detail, switches } = props;
   const [pending, setPending] = useState<"merge-when-ready" | "auto-fix">();
@@ -224,6 +232,15 @@ export function PullRequestSwitches(props: {
           }}
         />
       </div>
+      {props.pullRequestReviewClient === undefined ||
+      props.pullRequestTarget === undefined ? null : (
+        <PullRequestHandBackSwitch
+          client={props.pullRequestReviewClient}
+          disabled={!open}
+          target={props.pullRequestTarget}
+          threadId={autoFixThread?.threadId}
+        />
+      )}
       {refusal === undefined ? null : (
         /* ui-boundary-exception: compact-status */
         <p

@@ -2,7 +2,7 @@ import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { createHash } from "node:crypto";
 import { stopWindowsProcessTree } from "../process/windowsProcessTree";
-import { providerHostEnvironment } from "./providerHostEnvironment";
+import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   accessSync,
@@ -1010,6 +1010,11 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 temporaryDirectoryPath,
                 ...credentialPaths,
                 ...ownSetupPaths,
+                ...(input.strict === false &&
+                input.fullAccessSandbox !== true &&
+                input.sandboxPolicy === undefined
+                  ? awsProfileReadPaths(input.environment ?? {})
+                  : []),
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
                 ...(input.readOnlyFolders ?? []),
               ],
@@ -1021,6 +1026,11 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 ...(packageRoot === undefined ? [] : [packageRoot]),
                 ...credentialPaths,
                 ...ownSetupPaths,
+                ...(input.strict === false &&
+                input.fullAccessSandbox !== true &&
+                input.sandboxPolicy === undefined
+                  ? awsProfileReadPaths(input.environment ?? {})
+                  : []),
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
                 ...(input.readOnlyFolders ?? []),
               ],

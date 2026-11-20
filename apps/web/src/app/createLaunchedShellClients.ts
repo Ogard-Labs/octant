@@ -8,6 +8,7 @@ import {
   createBenchmarksClient,
   createAutomationClient,
   createUsageDashboardClient,
+  createPullRequestReviewClient,
   createSpendCeilingClient,
   createLocalUsageHistoryClient,
   createRequestCoordinator,
@@ -262,6 +263,7 @@ export interface LaunchedShellClients {
   readonly localUsageHistoryClient: ReturnType<typeof createLocalUsageHistoryClient> | undefined;
   readonly usageDashboardClient: ReturnType<typeof createUsageDashboardClient>;
   readonly spendCeilingClient: ReturnType<typeof createSpendCeilingClient>;
+  readonly pullRequestReviewClient: ReturnType<typeof createPullRequestReviewClient>;
   readonly agentGrantClient: ReturnType<typeof createAgentGrantClient>;
   readonly protectedFilesClient: ProtectedFilesClient;
   readonly blockedToolsClient: BlockedToolsClient;
@@ -443,6 +445,7 @@ export function createLaunchedShellClients(
     benchmarksClient: createBenchmarksClient(port),
     usageDashboardClient: createUsageDashboardClient(port),
     spendCeilingClient: createSpendCeilingClient(port),
+    pullRequestReviewClient: createPullRequestReviewClient(port),
     agentGrantClient: createAgentGrantClient(port),
     protectedFilesClient: createProtectedFilesClient(port),
     blockedToolsClient: createBlockedToolsClient(port),

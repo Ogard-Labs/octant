@@ -15,6 +15,7 @@ type Props = Pick<
   | "codeThreadView"
   | "hostBridge"
   | "onOpenFile"
+  | "pullRequestReviewClient"
   | "serverUrl"
   | "subject"
   | "windowCapability"
@@ -118,6 +119,9 @@ export default function ReviewModule(props: Props) {
           : { checkoutId: props.subject.checkoutId })}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         onOpenFile={props.onOpenFile}
+        {...(props.pullRequestReviewClient === undefined
+          ? {}
+          : { pullRequestReviewClient: props.pullRequestReviewClient })}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
         {...(props.windowCapability === undefined
           ? {}

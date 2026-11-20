@@ -1,4 +1,4 @@
-import { nodeAwsProfilePorts } from "./awsProfileCredentials";
+import { nodeAwsProfilePorts, type AwsProfilePorts } from "./awsProfileCredentials";
 import { Schema } from "effect";
 import { CredentialRequestReference } from "@octant/contracts/credential-request";
 import { decodeCommandCredentialHostRequest } from "@octant/contracts/command-credentials";
@@ -177,6 +177,10 @@ export async function startCredentialBroker(
     readonly now?: () => number;
     readonly timeoutMs?: number;
     readonly sleep?: (ms: number) => Promise<void>;
+    readonly awsProfiles?: Omit<
+      AwsProfilePorts,
+      "mintSsoRoleCredentials" | "assumeRole" | "assumeRoleWithWebIdentity" | "now"
+    >;
   },
   /**
    * Replica device signing keys, in their own credential namespace. They are
@@ -272,7 +276,7 @@ export async function startCredentialBroker(
   // OAuth runner: a cloud grant is one more entry the raw resolve refuses.
   const cloudIam = createCloudIamRuntime({
     store,
-    profiles: nodeAwsProfilePorts(),
+    profiles: oauth?.awsProfiles ?? nodeAwsProfilePorts(),
     ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
     ...(oauth?.now === undefined ? {} : { now: oauth.now }),
     ...(oauth?.sleep === undefined ? {} : { sleep: oauth.sleep }),

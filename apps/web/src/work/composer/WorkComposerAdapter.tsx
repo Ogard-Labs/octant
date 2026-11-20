@@ -20,8 +20,8 @@ import {
 } from "../../composer/useComposerSlashCommands";
 import {
   ComposerAtTypeahead,
-  composerProviderMentions,
   useComposerAtMenu,
+  useThreadProviderMentions,
 } from "../../composer/useComposerAtMenu";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type {
@@ -155,8 +155,14 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     onDraftChange: setPrompt,
     provider: composerProviderCommands(props.providerGroups, props.selectedProviderInstanceId),
   });
+  const providerMentions = useThreadProviderMentions(props.providerGroups, {
+    kind: "draft",
+    mode: "work",
+    projectId: props.projectId,
+    providerInstanceId: props.selectedProviderInstanceId,
+  });
   const atMenu = useComposerAtMenu({
-    provider: composerProviderMentions(props.providerGroups, props.selectedProviderInstanceId),
+    provider: providerMentions,
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,

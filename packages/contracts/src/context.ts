@@ -539,6 +539,14 @@ export const DECISION_REVIEW_USAGE_AGGREGATE_TYPE = "decision-review-usage";
 export const IMAGE_DESCRIPTION_REQUEST_SHAPE = "image-description";
 export const IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE = "image-description-usage";
 
+/**
+ * One second-model pull request review turn. Like a Shield review or second
+ * opinion it has no context plan, and it is recorded under the reviewed Code
+ * thread so the thread's and its Project's spend ceilings count it.
+ */
+export const PULL_REQUEST_REVIEW_REQUEST_SHAPE = "pull-request-review";
+export const PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE = "pull-request-review-usage";
+
 export const UsageReconciliation = Schema.Struct({
   id: UsageReconciliationId,
   planId: Schema.optional(ContextPlanId),
@@ -581,7 +589,8 @@ export const UsageReconciliation = Schema.Struct({
         reconciliation.requestShape === PROVIDER_CLOUD_TURN_REQUEST_SHAPE ||
         reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE ||
         reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE ||
-        reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE
+        reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE ||
+        reconciliation.requestShape === PULL_REQUEST_REVIEW_REQUEST_SHAPE
       ) {
         return reconciliation.planId === undefined && reconciliation.imageUnits === undefined;
       }

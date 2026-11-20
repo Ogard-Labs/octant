@@ -3871,6 +3871,61 @@ CI or reviewers should be woken, not left polling; maintainer request,
   switch or a watch is on, through the host's `gh` login. It is not a routine
   and needs no hosted service; a stopped host observes nothing.
 
+**Second-model pull request reviewer.** Octant ships a bundled, switchable
+first-party pull request reviewer plugin (`pull-request-reviewer`, component
+`second-model-pull-request-reviewer`, registered under
+`octant/second-model-pull-request-reviewer`) built strictly on top of the
+`@octant/plugin-api/pull-request-reviewer` and
+`@octant/plugin-host/pull-request-reviewers` seams, taking no shortcut a
+third-party reviewer plugin could not take.
+
+- **Settings and authority.** Off by default. Turned on per Code Project in the
+  Project overview (`POST /api/code/pull-request-reviews/project`), with a
+  per-thread override in Code thread Environment
+  (`POST /api/code/pull-request-reviews/thread`). The reviewer route specifies
+  provider instance, model, and optional effort; the picker suggests providers
+  different from the worker while still allowing the same provider, and carries
+  **no default model** (review stays off and refuses `no-route-configured` until
+  a model is explicitly picked). **Post findings as a PR comment** is a
+  per-Project opt-in, off by default; **Send blocking findings to the worker**
+  is a per-PR opt-in on the pull request review surface
+  (`POST /api/code/pull-request-reviews/pr`), off by default. Every mutation
+  requires `principalActsAsHostPerson` (a local window or a device the host's
+  own person paired); hub-introduced and restricted devices are refused 403
+  server-side. Every setting change and run record is journaled with
+  `eventActorForPrincipal` on `pull-request-review-*` aggregates and rebuilt by
+  replay on restart.
+- **Trigger, read-only gate, and staleness.** Runs at most once per pushed PR
+  head SHA (deduplicated across repeated pushes, refreshes, and restarts) after
+  the linked Code thread's worker turn settles. Executes as a host-scope
+  (`ROUTINE_HOST_SCOPE_ID`), research-only, read-only review turn at Plan's
+  read-only gate (`executionPolicy: "plan"`, zero tools, no child-run tool),
+  whatever the parent thread's guardrail level (Full access included): file
+  edits, shell writes, Git mutations, forge writes/reviews, and child-run
+  spawns are all refused. Bound to the exact PR head SHA it read; if the head
+  moves while running, the review settles as `stale`, records no current
+  findings, posts no comment, and wakes no worker.
+- **Findings, comments, and hand-back.** Recorded findings use the existing
+  `CodeReviewFinding` contract with `author.kind = "agent"`, structured
+  `provenance.kind = "pull-request-reviewer"` (reviewer id, review id, run id,
+  provider instance, model, optional effort, head SHA), severity, file digest,
+  and diff anchor; stale anchors stay visible as stale in Review and support
+  selection into the existing correction-request draft composer. By default,
+  nothing is posted to GitHub and hand-back is the person's own act. When
+  **Post findings as a PR comment** is on, the host posts at most one plain
+  summary comment for that head via the person's own `gh` login and never
+  approves or requests changes. When **Send blocking findings to the worker** is
+  on for the PR, blocking (`error`) findings wake the linked thread through
+  Auto-fix's wake path after recording an outside-content mark (source label
+  `pull-request-review`; a refused mark sends nothing); under Strict, Auto-fix's
+  three-attempt cap applies, while outside Strict there is no attempt cap.
+- **Spend and unavailable state.** Every review turn counts toward the parent
+  Code thread's spend ceiling (`SpendCeilingService`), usage ledger
+  (`pull-request-review-usage`), and `TurnMetricsStore`. When no reviewer can
+  run (`no-route-configured`, `no-account`, `route-refused`, `capacity`,
+  `spend-ceiling`, `not-effective`), the host records and the Review pane shows
+  the explicit reason and never falls back silently to another model.
+
 **The GitHub plugin switch.** GitHub is a bundled first-party plugin
 (component `github-integration`) a person can switch off; it is on by default,
 and a missing store row counts as on. Switching it off removes the GitHub
@@ -4594,7 +4649,10 @@ picker in every composer: it lists the effective snapshot's available skills,
 effective plugin MCP servers, and connectors the person added (a disabled or
 untrusted item is absent), then the thread's provider's own skills and plugins
 its runtime listed on the observation (`mentions`; Codex's account skills and
-installed plugins), labelled as the provider's, plus the thread's files in Work
+installed plugins) and, for a local Work or Code thread whose launch loads
+Project skills (`nativeSetup.skills === true`), the thread's folder skills
+labelled **Project** beside them (with zero Project or greyed rows when
+Project skills are off), labelled as the provider's, plus the thread's files in Work
 and Code. Choosing an Octant row makes a structured selection chip that the
 host re-resolves at send; choosing a provider's row writes the runtime's own
 reference (`$name`, `@name`), which its driver resolves against its own listing
@@ -7900,22 +7958,26 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   stays Azure AI Foundry's opt-in.
   Amazon Bedrock speaks `cloud-iam`: the person signs in at the organization's
   single sign-on portal with a device code from the host-local
-  `octant provider sign-in` command, or, at a window on this host, opts in to
-  "Use my AWS profile" or long-lived access keys (maintainer request,
-  2026-11-12, and decision, 2026-11-16; built), and the broker keeps that
-  session and the temporary credentials it mints for the instance's one
-  account and role. A profile is read in place by the broker on every
-  renewal, the way the AWS CLI reads it (`AWS_CONFIG_FILE` and
+  `octant provider sign-in` command, or, at a local window or a device the
+  host's own person paired (refusing hub-introduced and restricted remote
+  devices), opts in to "Use my AWS profile" or long-lived access keys
+  (maintainer request, 2026-11-12, and decision, 2026-11-16; built), and the
+  broker keeps that session and the temporary credentials it mints for the
+  instance's one account and role. A profile is read in place by the broker on
+  every renewal, the way the AWS CLI reads it (`AWS_CONFIG_FILE` and
   `AWS_SHARED_CREDENTIALS_FILE` honoured): shared-file keys, the single
   sign-on token `aws sso login` cached under `~/.aws/sso/cache`, then
   `credential_process` run through the platform shell. A profile with a
   `role_arn` first assumes that role at the token service (built): from its
   `source_profile`'s credentials (chained up to five roles), from the
-  broker's environment for `credential_source = Environment`, or with its
-  `web_identity_token_file`, honouring `role_session_name`, `external_id`,
-  `duration_seconds` and `region`; the broker signs `AssumeRole` itself, and
-  a role asking for an MFA code is refused, as Connect has no place to type
-  one. A key pair goes
+  broker's environment for `credential_source = Environment`, from EC2 IMDSv2
+  for `credential_source = Ec2InstanceMetadata`, from ECS container metadata
+  for `credential_source = EcsContainer`, or with its `web_identity_token_file`,
+  honouring `role_session_name`, `external_id`, `duration_seconds` and
+  `region`; the broker signs `AssumeRole` itself, and for a role declaring
+  `mfa_serial` the sign-in panel asks for a six-digit MFA code (from a local
+  window or person-paired device) and keeps the temporary session credentials
+  in broker memory only for the role session's lifetime. A key pair goes
   to the broker's `/v1/cloud-iam/connect` route once and is kept there; the
   card warns that long-lived keys work until revoked. Either grant is cloud
   material the raw resolve refuses, and the server stores only the pointer
@@ -14207,8 +14269,8 @@ schema, offered-side rules and task-owned command presentation are unchanged.
 The core's additional command presentation stays in a private server adapter;
 it is not added to the installed-plugin port's fixed metadata types.
 
-**Pull request reviewers** (seam built; no reviewer plugin ships yet). A plugin
-may contribute a Code-only `pull-request-reviewer` component through
+**Pull request reviewers** (seam and bundled second-model reviewer built). A
+plugin may contribute a Code-only `pull-request-reviewer` component through
 `@octant/plugin-api/pull-request-reviewer` and `@octant/plugin-host/pull-request-reviewers`.
 Installation, trust, and enablement stay separate preconditions evaluated on
 every lookup, and colliding reviewer ids are withheld together. Stored
@@ -15641,9 +15703,23 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
       over it is refused rather than cut short. Any other file (an archive,
       a binary) is refused before the turn is accepted, naming a Work or Code
       thread as where it can go, and the composer refuses it when it is
-      chosen. The file stays on the turn for the record; as with an image sent
-      natively, its text reaches later turns where the provider keeps its own
-      session, and a host-built history carries only the person's message.
+      chosen. The file stays on the turn for the record; its text reaches
+      later turns both where the provider keeps its own session and when
+      Octant rebuilds the conversation history itself. On a host-built history
+      rebuild, Octant reads finalized non-image attachments owned by the thread
+      back through its confined, digest-verified attachment store, extracts
+      document or UTF-8 text under the same rules, and frames each file ahead
+      of its turn's message while keeping the journaled context manifest label
+      limited to the person's message. Attached text across the rebuilt history
+      and the current turn shares the 400,000-character limit, prioritizing
+      newer turns first, truncating cleanly on a UTF-16 boundary with an honest
+      limit notice when the budget runs out, and skipping older files once
+      exhausted. Missing, purged, tampered, binary, or unreadable attachments
+      are skipped without blocking later turns; already-compacted turns and
+      attachments delivered natively or explicitly excluded by a `text-only`
+      continuation receipt are not re-inlined. Requested compaction receives
+      the same bounded, policy-filtered attachment text when generating its
+      summary so summarized turns retain their attached file content.
       Rationale: a read-only tool scoped to the one attachment was the other
       design. It changes the session's tool catalog on the turn a file
       arrives, which a resumed native session refuses, it needs app-managed

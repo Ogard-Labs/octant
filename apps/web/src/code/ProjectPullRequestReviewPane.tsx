@@ -1,4 +1,4 @@
-import type { OwnerUnlockNotGiven } from "@octant/client-runtime";
+import type { OwnerUnlockNotGiven, PullRequestReviewClient } from "@octant/client-runtime";
 import {
   type CodeProjectPullRequestActionContext,
   type CodeProjectPullRequestActionOutcome,
@@ -11,6 +11,7 @@ import {
   type CodeProjectPullRequestSwitchOutcome,
   type CodeProjectPullRequestSwitchesView,
   type CodeThreadId,
+  type PullRequestReviewTarget,
 } from "@octant/contracts";
 import { Activity, GitBranch, MessageSquare, RefreshCw } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
@@ -70,6 +71,8 @@ export interface ProjectPullRequestReviewPaneProps {
     enabled: boolean,
     threadId: CodeThreadId,
   ) => Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven>;
+  readonly pullRequestReviewClient?: PullRequestReviewClient;
+  readonly pullRequestTarget?: PullRequestReviewTarget;
   /**
    * "page" is the destination's reading pane (tabs, a status column); the
    * default is the dock's one column. Both hold the same actions and refusals.
@@ -345,6 +348,12 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
             ? {}
             : { onMergeWhenReady: props.onMergeWhenReady })}
           {...(props.onAutoFix === undefined ? {} : { onAutoFix: props.onAutoFix })}
+          {...(props.pullRequestReviewClient === undefined
+            ? {}
+            : { pullRequestReviewClient: props.pullRequestReviewClient })}
+          {...(props.pullRequestTarget === undefined
+            ? {}
+            : { pullRequestTarget: props.pullRequestTarget })}
         />
       )}
 
