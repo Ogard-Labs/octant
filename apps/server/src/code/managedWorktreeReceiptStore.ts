@@ -55,6 +55,15 @@ export interface ManagedWorktreeReceipt extends CreateManagedWorktreeReceiptInpu
   readonly version: 1;
   readonly receiptId: string;
   readonly state: ManagedWorktreeReceiptState;
+  /**
+   * The branch and head the host last verified this worktree sits on. Both
+   * start as the creation intent and change only when a host-authorized
+   * branch switch reports the branch it actually landed on — never by an
+   * external read, and never by rewriting `branchIntent`, which is the
+   * branch this receipt owns and may delete.
+   */
+  readonly currentBranch?: string;
+  readonly currentHead?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -143,14 +152,16 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
   if (
     !isRecord(value) ||
     Object.keys(value).length < requiredReceiptFields.length ||
-    Object.keys(value).length > requiredReceiptFields.length + 3 ||
+    Object.keys(value).length > requiredReceiptFields.length + 5 ||
     requiredReceiptFields.some((field) => !(field in value)) ||
     Object.keys(value).some(
       (field) =>
         !requiredReceiptFields.includes(field as (typeof requiredReceiptFields)[number]) &&
         field !== "source" &&
         field !== "setupRecipe" &&
-        field !== "seed",
+        field !== "seed" &&
+        field !== "currentBranch" &&
+        field !== "currentHead",
     ) ||
     value.version !== RECEIPT_VERSION ||
     !isUuid(value.receiptId) ||
@@ -167,7 +178,11 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
     !isState(value.state) ||
     !isTimestamp(value.createdAt) ||
     !isTimestamp(value.updatedAt) ||
-    (value.source !== undefined && !isSource(value.source))
+    (value.source !== undefined && !isSource(value.source)) ||
+    (value.currentBranch !== undefined && !isIntent(value.currentBranch, 255)) ||
+    (value.currentHead !== undefined &&
+      (typeof value.currentHead !== "string" ||
+        !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value.currentHead)))
   ) {
     throw invalidReceipt();
   }
@@ -193,6 +208,8 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
     ...(value.source === undefined
       ? {}
       : { source: value.source as ManagedWorktreeSourceProvenance }),
+    ...(value.currentBranch === undefined ? {} : { currentBranch: value.currentBranch as string }),
+    ...(value.currentHead === undefined ? {} : { currentHead: value.currentHead as string }),
   };
 }
 
@@ -296,6 +313,37 @@ export class ManagedWorktreeReceiptStore {
     if (current.state === state) return current;
 
     const next = decodeReceipt({ ...current, state, updatedAt: this.#clock() });
+    await this.#ensureRoot();
+    const temporaryPath = await this.#writeTemporary(next);
+    try {
+      await rename(temporaryPath, this.#receiptPath(receiptId));
+      await this.#syncRoot();
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined);
+    }
+    return next;
+  }
+
+  /**
+   * Records the branch and head a host-authorized switch verified the
+   * worktree now sits on. `branchIntent` — the branch this receipt owns and
+   * may delete — never moves with it.
+   */
+  async recordVerifiedBranch(
+    receiptId: string,
+    branch: string,
+    head: string,
+  ): Promise<ManagedWorktreeReceipt> {
+    const current = await this.load(receiptId);
+    if (current === undefined || current.state === "removed") {
+      throw new Error("invalid managed worktree receipt");
+    }
+    const next = decodeReceipt({
+      ...current,
+      currentBranch: branch,
+      currentHead: head,
+      updatedAt: this.#clock(),
+    });
     await this.#ensureRoot();
     const temporaryPath = await this.#writeTemporary(next);
     try {

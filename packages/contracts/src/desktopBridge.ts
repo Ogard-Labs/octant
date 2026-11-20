@@ -302,6 +302,34 @@ export interface BrowserSurfaceRequest {
   };
 }
 
+/**
+ * One tab's icon as the owning window reads it for its tab strip. The image is
+ * display-only: it crosses the window's own IPC and never joins a shared
+ * observation, a journal entry, or an agent's tool result.
+ */
+export interface BrowserSurfaceTabIcon {
+  readonly tabId: string;
+  readonly revision: number;
+  readonly active: boolean;
+  /** The changed image; absent while the page has declared none or unchanged. */
+  readonly dataUrl?: string;
+  /**
+   * The context answered without waking: its windows are closed and this is
+   * the icon the tab went to sleep with, so the strip shows it dimmed.
+   */
+  readonly sleeping?: boolean;
+}
+
+/** What the owning window asks for its tabs' icons: what it already holds. */
+export interface BrowserSurfaceTabIconsRequest {
+  readonly contextId: string;
+  readonly threadId: string;
+  readonly known: ReadonlyArray<{
+    readonly tabId: string;
+    readonly revision: number;
+  }>;
+}
+
 export type CanvasPrototypeSurfacePreparation =
   | { readonly status: "ready" }
   | { readonly status: "unavailable"; readonly reason: string };

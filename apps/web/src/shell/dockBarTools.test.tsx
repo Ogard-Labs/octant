@@ -175,7 +175,7 @@ describe("a device's state kept visible in a bar", () => {
     expect(state).toMatchObject({ kind: "text", dot: "running" });
   });
 
-  it("keeps View only in words, and the status dot, when the actions have folded into More", async () => {
+  it("reads the device's state first in the badged More menu at the dock's minimum, View only beside the folded actions", async () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
       function (this: HTMLElement) {
         return this.classList.contains("dock-tile__bar") ? 280 : 0;
@@ -243,11 +243,20 @@ describe("a device's state kept visible in a bar", () => {
     );
     const toolbar = screen.getByRole("toolbar", { name: "Simulator controls" });
     expect(screen.queryByRole("button", { name: "Home" })).toBeNull();
-    const chip = within(toolbar).getByRole("button", { name: "View only" });
-    expect(chip).toHaveTextContent("View only");
-    await userEvent.click(chip);
+    // At the dock's minimum even the state cue folds: the More button wears
+    // its badge and reads it as the menu's first rows, still whole.
+    const more = within(toolbar).getByRole("button", { name: "More Simulator actions" });
+    expect(more).toHaveAttribute("data-cue");
+    await userEvent.click(more);
+    const popup = await screen.findByRole("menu", { name: "More Simulator actions" });
+    const rows = popup.querySelectorAll(".dock-bar-cue-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("Phone");
+    expect(rows[0]?.querySelector('[data-dot="busy"]')).not.toBeNull();
+    expect(rows[1]).toHaveTextContent("iOS 27.0 · Booting");
+    // View only is a named control: folded with the actions, same callback.
+    await userEvent.click(within(popup).getByRole("menuitem", { name: "View only" }));
     expect(onShowApproval).toHaveBeenCalledTimes(1);
-    expect(toolbar.querySelector('[data-dot="busy"]')).not.toBeNull();
     await userEvent.click(within(toolbar).getByRole("button", { name: "More Simulator actions" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Home" }));
     expect(onKey).toHaveBeenCalledWith("home");

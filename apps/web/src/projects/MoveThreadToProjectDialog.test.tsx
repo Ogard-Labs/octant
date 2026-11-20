@@ -5,13 +5,20 @@ import { MoveThreadToProjectDialog } from "./MoveThreadToProjectDialog";
 import { ProjectIconContext } from "./ProjectIcon";
 import { iconSourceFor } from "./projectIcon.test-support";
 
-const project = (id: string, name: string, folder: string, type: "work" | "code" = "work") =>
+const project = (
+  id: string,
+  name: string,
+  folder: string,
+  type: "work" | "code" = "work",
+  extra?: object,
+) =>
   ({
     id,
     name,
     type,
     lifecycle: "active",
     binding: { canonicalRoot: folder },
+    ...extra,
   }) as never;
 
 const projects = [
@@ -123,9 +130,168 @@ describe("moving a Work or Code thread to another Project", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("says so when no other Project can take the thread", () => {
+  it("says so when no other Project can take the thread, naming the one it is in", () => {
     open({ projects: [projects[0]!, projects[5]!] });
 
+    expect(screen.getByText(/belongs to .Reports.\./i)).toBeVisible();
     expect(screen.getByText(/no other Work Project/i)).toBeVisible();
+  });
+
+  it("greys every Project with the bound-folder refusal once the thread has a working folder", () => {
+    open({
+      projects: [projects[0]!, projects[1]!],
+      threadWorkingFolderId: `folder_${"b".repeat(64)}`,
+    });
+
+    expect(screen.getByRole("button", { name: /Reports/ })).toBeDisabled();
+    expect(
+      screen.getByText(
+        /working folder is bound to its current Project\. Start a new task in the destination Project/,
+      ),
+    ).toBeVisible();
+  });
+
+  it("greys every destination while a remote-root checkout cannot move", () => {
+    open({
+      mode: "code",
+      projects: [projects[0]!, projects[5]!],
+      threadCheckoutKind: "remote-root",
+      threadCheckoutAvailability: "available",
+    });
+
+    expect(screen.getByRole("button", { name: /App/ })).toBeDisabled();
+    expect(screen.getByText(/Code thread checkout is unavailable\./)).toBeVisible();
+  });
+
+  it("greys every destination while the checkout is unavailable", () => {
+    open({
+      mode: "code",
+      projects: [projects[0]!, projects[5]!],
+      threadCheckoutKind: "managed-worktree",
+      threadCheckoutAvailability: "unavailable",
+    });
+
+    expect(screen.getByRole("button", { name: /App/ })).toBeDisabled();
+    expect(screen.getByText(/Code thread checkout is unavailable\./)).toBeVisible();
+  });
+
+  it("does not refuse a plain-folder checkout on its own", () => {
+    open({
+      mode: "code",
+      projects: [projects[0]!, projects[5]!],
+      threadCheckoutKind: "plain-folder",
+      threadCheckoutAvailability: "available",
+    });
+
+    expect(screen.getByRole("button", { name: /App/ })).toBeEnabled();
+  });
+
+  it("says the model is unknown instead of claiming a policy refusal", () => {
+    const restricted = project("p-locked", "Locked", "/Users/me/Docs/Reports", "work", {
+      providerPolicy: { mode: "whitelist" as const, providerInstanceIds: [] },
+    });
+    open({
+      projects: [projects[0]!, restricted],
+      threadProvider: {
+        id: "80000000-0000-4000-8000-0000000000aa",
+        displayName: "Acme",
+      } as never,
+    });
+
+    expect(screen.getByRole("button", { name: /Locked/ })).toBeDisabled();
+    expect(screen.getByText(/model is not known here/)).toBeVisible();
+  });
+
+  it("greys a Project whose provider policy does not allow the thread's provider", () => {
+    const restricted = project("p-locked", "Locked", "/Users/me/Docs/Reports", "work", {
+      providerPolicy: { mode: "whitelist" as const, providerInstanceIds: [] },
+    });
+    open({
+      projects: [projects[0]!, restricted],
+      threadProvider: {
+        id: "80000000-0000-4000-8000-0000000000aa",
+        displayName: "Acme",
+      } as never,
+      threadModel: {
+        id: "80000000-0000-4000-8000-0000000000bb",
+        displayName: "Acme 1",
+      } as never,
+    });
+
+    expect(screen.getByRole("button", { name: /Locked/ })).toBeDisabled();
+    expect(screen.getByText(/does not allow this thread's provider or model/)).toBeVisible();
+  });
+});
+
+describe("moving a busy thread", () => {
+  it("defaults to moving after the current turn and sends that choice", async () => {
+    const onMove = vi.fn(async () => ({ status: "ok" }) as const);
+    open({ busy: true, onMove });
+
+    expect(screen.getByRole("radio", { name: "Move after this turn" })).toBeChecked();
+    await userEvent.click(screen.getByRole("button", { name: /All docs/ }));
+
+    expect(onMove).toHaveBeenCalledWith("p-parent", "after-turn");
+  });
+
+  it("sends stop-now only when the person picks it", async () => {
+    const onMove = vi.fn(async () => ({ status: "ok" }) as const);
+    open({ busy: true, onMove });
+
+    await userEvent.click(screen.getByRole("radio", { name: "Stop and move now" }));
+    await userEvent.click(screen.getByRole("button", { name: /All docs/ }));
+
+    expect(onMove).toHaveBeenCalledWith("p-parent", "stop-now");
+  });
+
+  it("keeps the queued move visible, drops it on Cancel, and shows a refusal on dispatch", async () => {
+    let resolveSettled: (outcome: never) => void = () => undefined;
+    const cancel = vi.fn(() => resolveSettled({ status: "cancelled" } as never));
+    const settled = new Promise((resolve) => {
+      resolveSettled = resolve as never;
+    });
+    const onMove = vi.fn(async () => ({ status: "deferred", settled, cancel }) as never);
+    const { onClose } = open({ busy: true, onMove });
+
+    await userEvent.click(screen.getByRole("button", { name: /All docs/ }));
+    expect(await screen.findByText(/queued for when this turn finishes/)).toBeVisible();
+    expect(screen.getByRole("button", { name: /All docs/ })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel move" }));
+    expect(cancel).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("drops the queued move when the dialog is dismissed without cancelling first", async () => {
+    const cancel = vi.fn();
+    const onMove = vi.fn(
+      async () => ({ status: "deferred", settled: new Promise(() => {}), cancel }) as never,
+    );
+    const { onClose } = open({ busy: true, onMove });
+
+    await userEvent.click(screen.getByRole("button", { name: /All docs/ }));
+    expect(await screen.findByText(/queued for when this turn finishes/)).toBeVisible();
+
+    await userEvent.keyboard("{Escape}");
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("surfaces the host's refusal when the deferred move dispatches", async () => {
+    let resolveSettled: (outcome: never) => void = () => undefined;
+    const settled = new Promise((resolve) => {
+      resolveSettled = resolve as never;
+    });
+    const onMove = vi.fn(async () => ({ status: "deferred", settled, cancel: vi.fn() }) as never);
+    const { onClose } = open({ busy: true, onMove });
+
+    await userEvent.click(screen.getByRole("button", { name: /All docs/ }));
+    resolveSettled({
+      status: "refused",
+      message: "The thread started another turn; move it when it is idle.",
+    } as never);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/started another turn/);
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
