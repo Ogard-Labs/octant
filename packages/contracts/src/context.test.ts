@@ -290,6 +290,18 @@ describe("context contracts", () => {
         imageUnits: { count: 1, quality: "exact", size: "1024x1024", outputQuality: "high" },
       }).imageUnits?.count,
     ).toBe(1);
+    // A job that failed after its provider answered made no image to count.
+    expect(
+      decodeUsageReconciliation({
+        ...reconciliationWithoutPlan,
+        requestShape: "image-generation",
+        plannedInputTokens: 0,
+        actualInputTokens: 0,
+        actualOutputTokens: 0,
+        varianceTokens: 0,
+        providerReported: false,
+      }).imageUnits,
+    ).toBeUndefined();
     expect(() =>
       decodeUsageReconciliation({
         ...reconciliation,
