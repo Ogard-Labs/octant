@@ -600,7 +600,8 @@ async function projectConversationTurns(
       ...(turn.steeredResults === undefined ? {} : { steeredResults: turn.steeredResults }),
     });
     const steps = turn.steps ?? [];
-    if (steps.length === 0 && turn.stepsTruncated !== true) continue;
+    if (steps.length === 0 && turn.stepsTruncated !== true && turn.reasoningMs === undefined)
+      continue;
     let replayed = EMPTY_TURN_ACTIVITY;
     for (const step of steps) {
       if (step.kind === "tool") {
@@ -613,6 +614,7 @@ async function projectConversationTurns(
           ...(step.published === undefined ? {} : { published: step.published }),
           ...(step.outsideContent === undefined ? {} : { outsideContent: step.outsideContent }),
           ...(step.routine === undefined ? {} : { routine: step.routine }),
+          ...(step.timing === undefined ? {} : { timing: step.timing }),
         });
         continue;
       }
@@ -637,6 +639,7 @@ async function projectConversationTurns(
     activity.set(String(turn.operationId), {
       ...replayed,
       ...(turn.stepsTruncated === true ? { truncated: true } : {}),
+      ...(turn.reasoningMs === undefined ? {} : { reasoningMs: turn.reasoningMs }),
     });
   }
   return { messages, activity };

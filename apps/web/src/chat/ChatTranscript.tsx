@@ -899,7 +899,11 @@ const AttemptBlock = memo(function AttemptBlock(props: {
     responseContents.length === 0 || responseContents.some((content) => content === undefined)
       ? undefined
       : responseContents.map((content) => content!.body).join("");
-  const toolActivity = toolStepsActivity(props.attempt.toolSteps, props.attempt.toolStepsTruncated);
+  const toolActivity = toolStepsActivity(
+    props.attempt.toolSteps,
+    props.attempt.toolStepsTruncated,
+    props.attempt.reasoningMs,
+  );
   const workedFor = turnWorkedFor(
     props.attempt.outcome,
     props.attempt.createdAt,

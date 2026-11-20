@@ -315,6 +315,12 @@ export const WorkTurnState = Schema.Struct({
   toolSteps: Schema.optional(ThreadToolStepList),
   /** Whether the turn called more tools than `toolSteps` keeps. */
   toolStepsTruncated: Schema.optional(Schema.Boolean),
+  /**
+   * The turn's cumulative time in private reasoning, measured from the
+   * provider's own event stamps and restated as the running total. A re-read
+   * never sees reasoning text — only the number.
+   */
+  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   childObservations: Schema.optional(ProviderChildObservationState),
   /**
    * Set only on a turn the host started to deliver a finished subagent run's
@@ -507,6 +513,8 @@ export const WorkTurnStreamFrame = Schema.Union(
     requestId: WorkTurnRequestId,
     toolStep: Schema.optional(ThreadToolStep),
     toolStepsTruncated: Schema.Boolean,
+    /** The turn's cumulative reasoning total, restated; never reasoning text. */
+    reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("turn-settled"),
@@ -600,6 +608,8 @@ export const WorkTurnUpdated = Schema.Struct({
   tasks: Schema.optional(ThreadTaskProgressList),
   toolSteps: Schema.optional(ThreadToolStepList),
   toolStepsTruncated: Schema.optional(Schema.Boolean),
+  /** The turn's cumulative reasoning total, restated; never reasoning text. */
+  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   childObservations: Schema.optional(ProviderChildObservationState),
   /** What Strict kept for this turn's launch; journaled once, as the launch starts. */
   strictKept: Schema.optional(StrictKeptProtections),

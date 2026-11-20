@@ -976,6 +976,97 @@ describe("activity row marks and names", () => {
     expect(screen.queryByText("provider-tool")).not.toBeInTheDocument();
   });
 
+  it("shows the measured reasoning total without a disclosure when no text was kept", () => {
+    const { container } = render(
+      <TurnActivityRows
+        activity={{ reasoning: "", reasoningMs: 12_000, rows: [] }}
+        running={false}
+        settled
+      />,
+    );
+    expect(screen.getByText("Thought for 12s")).toBeInTheDocument();
+    // No button, no empty disclosure: there is nothing to open onto.
+    expect(container.querySelector("details.turn-activity__disclosure--thinking")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Thought/ })).toBeNull();
+  });
+
+  it("draws the timed reasoning row beside the turn's tool rows", () => {
+    const { container } = render(
+      <TurnActivityRows
+        activity={{
+          reasoning: "",
+          reasoningMs: 3_000,
+          rows: [{ kind: "tool", id: "r", toolName: "Read", state: "completed" }],
+        }}
+        running={false}
+        settled
+      />,
+    );
+    expect(screen.getByText("Thought for 3s")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Read, done" })).toBeInTheDocument();
+    expect(container.querySelector("details.turn-activity__disclosure--thinking")).toBeNull();
+  });
+
+  it("says how long a call waited and ran when the turn recorded it", () => {
+    render(
+      <TurnActivityRows
+        activity={{
+          reasoning: "",
+          rows: [
+            {
+              kind: "tool",
+              id: "w",
+              toolName: "Read",
+              state: "completed",
+              durationMs: 2_000,
+              waitedMs: 240_000,
+            },
+          ],
+        }}
+        running={false}
+        settled
+      />,
+    );
+    expect(screen.getByText("waited 4m · ran 2s")).toBeInTheDocument();
+  });
+
+  it("keeps a call's time on the row's own line, timed or not", () => {
+    const timed = render(
+      <TurnActivityRows
+        activity={{
+          reasoning: "",
+          rows: [
+            { kind: "tool", id: "a", toolName: "Read", state: "completed", durationMs: 2_000 },
+          ],
+        }}
+        running={false}
+        settled
+      />,
+    );
+    const timedRow = timed.container.querySelector(".turn-activity__disclosure");
+    expect(timedRow).not.toBeNull();
+    // The suffix is inline text inside the row's existing line, so a call
+    // gaining a duration adds no second line and can never grow its height.
+    expect(timed.container.querySelector(".turn-activity__duration")).toHaveTextContent("2.0 s");
+    const untimed = render(
+      <TurnActivityRows
+        activity={{
+          reasoning: "",
+          rows: [{ kind: "tool", id: "a", toolName: "Read", state: "completed" }],
+        }}
+        running={false}
+        settled
+      />,
+    );
+    // Same disclosure structure either way: no extra block beside the row.
+    expect(untimed.container.querySelectorAll("details")).toHaveLength(
+      timed.container.querySelectorAll("details").length,
+    );
+    expect(untimed.container.querySelectorAll("summary")).toHaveLength(
+      timed.container.querySelectorAll("summary").length,
+    );
+  });
+
   it("says how long thinking took when the turn recorded it", () => {
     render(
       <TurnActivityRows

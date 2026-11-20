@@ -8,6 +8,8 @@ import { OctantPopover } from "../../ui/base/OctantPopover";
 import { moveWithinRadioGroup } from "../../ui/base/radioGroupKeys";
 
 export interface CodeWhereControlProps {
+  /** Opens the menu on first draw — the Environment's branch-switching entry. */
+  readonly startOpen?: boolean;
   readonly workspace: CodeNewThreadWorkspace;
   readonly onWorkspaceChange: (workspace: CodeNewThreadWorkspace) => void;
   /** The branch the Project's checkout is on, or the base a new worktree starts from. */
@@ -58,7 +60,7 @@ const CHOICES: ReadonlyArray<{
  * a worktree; that happens when the thread is created.
  */
 export function CodeWhereControl(props: CodeWhereControlProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(props.startOpen === true);
   const [dialog, setDialog] = useState<"worktree" | undefined>(undefined);
   const [subfolderOpen, setSubfolderOpen] = useState(false);
   const headingId = useId();

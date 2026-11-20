@@ -1,5 +1,5 @@
 import { X } from "../ui/icons";
-import { useRef, type CSSProperties, type ReactNode } from "react";
+import { useContext, useEffect, useId, useRef, type CSSProperties, type ReactNode } from "react";
 import { DockUtilityLauncher } from "./DockUtilityLauncher";
 import { IconButton } from "./IconButton";
 import { ShellResizeHandle } from "./ShellResizeHandle";
@@ -10,7 +10,7 @@ import type {
 } from "./rightUtilityDockModel";
 import { DockToolStrip } from "./DockToolStrip";
 import { DockBarRow, useFoldedControls } from "./DockBarRow";
-import { DockBarContext, useDockBarSlot } from "./dockBarControls";
+import { DockBarContext, FocusedDockToolContext, useDockBarSlot } from "./dockBarControls";
 
 export interface BottomUtilityPanelProps {
   readonly height: number;
@@ -37,11 +37,44 @@ export function BottomUtilityPanel(props: BottomUtilityPanelProps) {
   const { host, items } = useDockBarSlot("bottom");
   const controls = useRef<HTMLDivElement>(null);
   const fold = useFoldedControls(controls, items ?? [], 0);
+  const panel = useRef<HTMLElement>(null);
+  // The same publication a focused tile makes: the panel's tool is the
+  // palette's source while the person is working in it, and unmounting drops
+  // only this publication so a tile's own commands stand back up.
+  const focusedDockTool = useContext(FocusedDockToolContext);
+  const commandOwner = useId();
+  // Content updates publish without promoting: fresh items cannot steal the
+  // palette from a tile the person is in.
+  useEffect(() => {
+    if (focusedDockTool === undefined) return;
+    // A tool that drops its controls publishes an empty source, not silence:
+    // while it is the addressed owner its former commands leave the palette.
+    focusedDockTool.set(commandOwner, {
+      toolLabel: props.activeSurface.label,
+      items: items ?? [],
+    });
+  }, [commandOwner, focusedDockTool, items, props.activeSurface.label]);
+  // Only the person's own pointer or focus promotes this panel to the
+  // palette's source; unmount clears this publication and nothing else, so a
+  // control refresh never re-asserts it.
+  useEffect(() => {
+    if (focusedDockTool === undefined) return;
+    const promote = () => focusedDockTool.focus(commandOwner);
+    const node = panel.current;
+    node?.addEventListener("pointerdown", promote, true);
+    node?.addEventListener("focusin", promote, true);
+    return () => {
+      node?.removeEventListener("pointerdown", promote, true);
+      node?.removeEventListener("focusin", promote, true);
+      focusedDockTool.set(commandOwner, undefined);
+    };
+  }, [commandOwner, focusedDockTool]);
   return (
     <section
       aria-label="Bottom panel"
       className="bottom-utility-panel window-no-drag"
       id="bottom-utility-panel"
+      ref={panel}
       style={{ "--octant-bottom-panel-height": `${props.height}px` } as CSSProperties}
     >
       <ShellResizeHandle
@@ -80,7 +113,7 @@ export function BottomUtilityPanel(props: BottomUtilityPanelProps) {
         </div>
         <div className="bottom-utility-panel__controls" ref={controls}>
           <DockBarRow
-            fold={fold === "row" ? "menu" : fold}
+            fold={fold}
             items={items ?? []}
             scrollCues
             toolLabel={props.activeSurface.label}

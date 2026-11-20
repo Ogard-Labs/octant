@@ -33,7 +33,7 @@ import {
 } from "@octant/domain/shell-policy";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { compactionStateFixture, contextFixture } from "./context/contextFixtures";
@@ -1059,8 +1059,13 @@ export function canvasFetchPassthrough(url: string): Response | undefined {
 
 export async function openSidebarProject(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(await screen.findByRole("button", { name: "Projects" }));
-  const directory = document.querySelector<HTMLElement>(".projects-directory");
-  if (directory === null) throw new Error("Expected the Projects directory.");
+  const directory = await waitFor(() => {
+    const candidate = screen
+      .getAllByRole("navigation", { name: "Projects" })
+      .find((nav) => within(nav).queryByRole("button", { name: new RegExp(`^${name},`) }) !== null);
+    if (candidate === undefined) throw new Error("Expected the Projects directory.");
+    return candidate;
+  });
   await user.click(within(directory).getByRole("button", { name: new RegExp(`^${name},`) }));
 }
 
