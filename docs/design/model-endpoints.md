@@ -303,22 +303,37 @@ names only the reference, and a refusal names its cause (no such profile,
 no current single sign-on session, a `credential_process` that printed no
 credentials, a role that asks for an MFA code, a role AWS refused to let
 the source assume, or a source Octant does not read). A profile with a
-`role_arn` is built (maintainer request, 2026-11-18): the broker assumes
+`role_arn` is built (maintainer requests, 2026-11-18 and 2026-11-19): the broker assumes
 the role at the token service, from the credentials of its
 `source_profile` (which may itself assume a role, up to five in a row, a
 cycle refused), from the broker's environment keys for
-`credential_source = Environment`, or with `AssumeRoleWithWebIdentity` and
-the token in `web_identity_token_file`. It honours `role_session_name`,
+`credential_source = Environment`, from EC2 IMDSv2 for
+`credential_source = Ec2InstanceMetadata` (`PUT /latest/api/token` with
+`X-aws-ec2-metadata-token-ttl-seconds`, then role discovery and
+`GET /latest/meta-data/iam/security-credentials/<role>` with
+`X-aws-ec2-metadata-token`), from ECS container metadata for
+`credential_source = EcsContainer` (`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`
+against `169.254.170.2`, or a validated `AWS_CONTAINER_CREDENTIALS_FULL_URI`
+allowing HTTPS or plain HTTP on loopback and AWS link-local container
+endpoints, with `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE` or
+`AWS_CONTAINER_AUTHORIZATION_TOKEN`), or with `AssumeRoleWithWebIdentity` and
+the token in `web_identity_token_file`. Each metadata fetch is bounded by a
+one-second timeout; if metadata cannot be reached, the refusal is
+`"This profile reads credentials from EC2/ECS metadata, which this computer can't reach."`
+The broker honours `role_session_name`,
 `external_id`, `duration_seconds` and the profile's `region` (the regional
 token service, else the global one), signs `AssumeRole` with its own
-Signature Version 4 signer, and keeps the role's credentials in the grant
-until five minutes before they expire, then assumes the role again. A role
-with `mfa_serial` is refused with a sentence saying so, since Connect
-profile has no place to type a code; `credential_source` of instance or
-container metadata stays unsupported, as those answer only on that
-machine's own network. Strict changes nothing here. Codex's own Bedrock
-providers resolve the profile in the Codex runtime and do not use this
-path. Add endpoint's Amazon Bedrock card opens its
+Signature Version 4 signer, and keeps non-MFA role credentials in the grant
+until five minutes before they expire, then assumes the role again. For a role
+profile declaring `mfa_serial`, the existing sign-in panel asks for the
+person's six-digit MFA code when connecting and again when the role session
+expires; the broker passes `SerialNumber` and `TokenCode` to STS `AssumeRole`,
+refuses a missing, malformed, or STS-rejected code with a clear sentence, and
+keeps the assumed temporary session credentials in broker memory only (never in
+the Keychain or journal) for the role session's lifetime (default one hour).
+Strict changes nothing here. Provider runtimes on Bedrock (such as Claude Code
+and Codex with their own Bedrock settings) read the person's profile,
+environment, and refresh settings directly and do not use this path. Add endpoint's Amazon Bedrock card opens its
 own Connect: Name, Region (where the models run), Access portal, Portal
 region, Account ID, Role (the permission set), and Model IDs (1 to 64, since
 Bedrock lists none a role may use), each with a one-line hint, and no key or

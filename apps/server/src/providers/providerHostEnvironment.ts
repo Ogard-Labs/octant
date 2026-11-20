@@ -1,3 +1,6 @@
+import { existsSync, realpathSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+
 /**
  * The host environment a provider runtime receives outside Strict.
  *
@@ -63,4 +66,52 @@ export function providerHostEnvironment(
           ownCredentials.has(key.toUpperCase())),
     ),
   );
+}
+
+const AWS_PROFILE_FILE_VARIABLES = [
+  "AWS_CONFIG_FILE",
+  "AWS_SHARED_CREDENTIALS_FILE",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+  "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+] as const;
+
+/**
+ * Existing AWS profile and credential-file paths a provider runtime outside
+ * Strict may read directly (as it does in its own CLI). Octant never opens,
+ * reads, copies, or replaces these files; it only passes their paths to a
+ * confined Plan/Chat launch outside Strict so the runtime can read its own
+ * Bedrock profile and refresh settings.
+ */
+export function awsProfileReadPaths(
+  hostEnvironment: Readonly<Record<string, string | undefined>>,
+): readonly string[] {
+  const home = hostEnvironment.HOME?.trim();
+  const hasHome = home !== undefined && home.length > 0 && isAbsolute(home);
+  const candidates: string[] = [];
+  if (hasHome) candidates.push(join(home, ".aws"));
+  for (const name of AWS_PROFILE_FILE_VARIABLES) {
+    const raw = hostEnvironment[name]?.trim();
+    if (raw === undefined || raw.length === 0) continue;
+    if (raw.startsWith("~/") && hasHome) {
+      candidates.push(join(home, raw.slice(2)));
+    } else if (isAbsolute(raw)) {
+      candidates.push(raw);
+    }
+  }
+  const seen = new Set<string>();
+  const existing: string[] = [];
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    let resolved = candidate;
+    try {
+      resolved = realpathSync(candidate);
+    } catch {
+      // Keep the literal path when realpath fails on a transient entry.
+    }
+    if (!seen.has(resolved)) {
+      seen.add(resolved);
+      existing.push(resolved);
+    }
+  }
+  return existing;
 }

@@ -296,6 +296,8 @@ export interface ConfiguredProviderDriverOptions {
   readonly planMcpServers?: (provider: McpPlanServerProvider) => ReadonlyArray<string>;
   /** The tools the person blocked for a provider in Settings, read at each launch. */
   readonly blockedTools?: (provider: BlockableToolProvider) => ReadonlyArray<string>;
+  /** Whether the host enforces Strict; read on Claude probes so Bedrock/custom routing works outside Strict. */
+  readonly hostStrict?: () => boolean;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
@@ -487,6 +489,7 @@ export function makeConfiguredProviderDriver(
         : { isProjectConfinedPath: options.isProjectConfinedPath }),
       ...(options.protectedPaths === undefined ? {} : { protectedPaths: options.protectedPaths }),
       ...(options.planMcpServers === undefined ? {} : { planMcpServers: options.planMcpServers }),
+      ...(options.hostStrict === undefined ? {} : { hostStrict: options.hostStrict }),
       ...(options.claudeInstances === undefined
         ? {}
         : { claudeInstances: options.claudeInstances }),
@@ -1995,6 +1998,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       driver: (instance) =>
         attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, {
+            hostStrict: () => deps.resolveHostStrict(),
             openCodeProcess,
             codexProcess,
             acpProcess,

@@ -73,11 +73,20 @@ afterEach(async () => {
  * Every answer the broker gives the server is kept, so a test can show what
  * the server process ever held.
  */
-async function host(options: { readonly instance?: () => ProviderInstance | undefined } = {}) {
+async function host(
+  options: {
+    readonly instance?: () => ProviderInstance | undefined;
+    readonly brokerFetch?: typeof fetch;
+    readonly now?: () => number;
+    readonly awsProfiles?: NonNullable<Parameters<typeof startCredentialBroker>[2]>["awsProfiles"];
+  } = {},
+) {
   const cloud = new FakeBedrockCloud();
   const store = memoryStore();
   const broker = await startCredentialBroker(store, undefined, {
-    fetch: cloud.fetch as typeof fetch,
+    fetch: options.brokerFetch ?? (cloud.fetch as typeof fetch),
+    ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.awsProfiles === undefined ? {} : { awsProfiles: options.awsProfiles }),
     sleep: () => new Promise((resolve) => setTimeout(resolve, 1)),
   });
   open.push(broker);
@@ -647,6 +656,192 @@ describe("Amazon Bedrock with cloud single sign-on, end to end", () => {
       ).toEqual({ kind: "refused", reason: `aws-${reason}` });
     }
     await expect(scene.credentials.resolve(String(instanceId))).rejects.toBeDefined();
+  });
+
+  it("prompts for MFA on an mfa_serial profile, keeps temporary credentials out of the journal and Keychain, expires cleanly, and refuses non-local devices", async () => {
+    let clock = Date.parse("2026-11-19T12:00:00Z");
+    const stsRequests: Array<Record<string, string>> = [];
+    const files: Record<string, string> = {
+      "/home/person/.aws/config": [
+        "[profile mfa-bedrock]",
+        "role_arn = arn:aws:iam::123456789012:role/BedrockInvoke",
+        "source_profile = base",
+        "mfa_serial = arn:aws:iam::123456789012:mfa/person",
+        "region = us-west-2",
+        "[profile metadata-bedrock]",
+        "role_arn = arn:aws:iam::123456789012:role/BedrockInvoke",
+        "credential_source = Ec2InstanceMetadata",
+      ].join("\n"),
+      "/home/person/.aws/credentials":
+        "[base]\naws_access_key_id = AKIAEXAMPLEKEY000009\naws_secret_access_key = wJalrXUtnFEMIexampleSECRETkey0000000009\n",
+    };
+    const brokerFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      if (url.startsWith("https://sts.")) {
+        const body = Object.fromEntries(new URLSearchParams(String(init?.body)));
+        stsRequests.push(body);
+        if (body.TokenCode !== "654321") {
+          return new Response(
+            `<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code><Message>bad mfa</Message></Error></ErrorResponse>`,
+            { status: 403, headers: { "content-type": "text/xml" } },
+          );
+        }
+        const expiration = new Date(clock + 3_600_000).toISOString();
+        return new Response(
+          `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>ASIAMFASESSION000001</AccessKeyId><SecretAccessKey>mfa-ephemeral-secret-sentinel</SecretAccessKey><SessionToken>mfa-ephemeral-token-sentinel</SessionToken><Expiration>${expiration}</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>`,
+          { status: 200, headers: { "content-type": "text/xml" } },
+        );
+      }
+      throw new Error("metadata unreachable");
+    };
+    const scene = await host({
+      brokerFetch: brokerFetch as typeof fetch,
+      now: () => clock,
+      awsProfiles: {
+        readFile: async (path) => files[path],
+        runCredentialProcess: async () => ({ exitCode: 1, stdout: "" }),
+        homeDirectory: "/home/person",
+        env: {},
+      },
+    });
+    scene.terms.acknowledgeTerms({
+      principalKind: "local-window",
+      actorId: String(windowId),
+      descriptor: {
+        descriptorId: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.descriptorId,
+        termsId: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.termsId,
+      } as never,
+    });
+
+    // Hub-introduced, restricted, and paired devices are refused before touching the broker.
+    for (const principal of ["remote-device", "person-paired-device"] as const) {
+      expect(
+        await answerCloudIamSettingsCommand({
+          dependencies: scene.cloudIam,
+          instanceId,
+          kind: "connect-aws-profile",
+          principal,
+          actorId: String(windowId),
+          awsProfile: "mfa-bedrock",
+          mfaCode: "654321",
+        }),
+      ).toEqual({ kind: "refused", reason: "local-host-required" });
+    }
+    expect(stsRequests).toHaveLength(0);
+
+    // Metadata profile on a computer that cannot reach metadata reports aws-metadata-unreachable.
+    expect(
+      await answerCloudIamSettingsCommand({
+        dependencies: scene.cloudIam,
+        instanceId,
+        kind: "connect-aws-profile",
+        principal: "local-window",
+        actorId: String(windowId),
+        awsProfile: "metadata-bedrock",
+      }),
+    ).toEqual({ kind: "refused", reason: "aws-metadata-unreachable" });
+
+    // Connecting an mfa_serial profile without a code asks for MFA.
+    const needsMfa = await scene.browserRoute(
+      new Request("http://127.0.0.1/api/providers/oauth", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify({
+          kind: "connect-aws-profile",
+          instanceId: String(instanceId),
+          descriptorId: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.descriptorId,
+          awsProfile: "mfa-bedrock",
+        }),
+      }),
+    );
+    expect(await needsMfa?.json()).toEqual({ kind: "refused", reason: "aws-mfa-required" });
+
+    // Malformed code is refused without hitting STS.
+    expect(
+      await answerCloudIamSettingsCommand({
+        dependencies: scene.cloudIam,
+        instanceId,
+        kind: "connect-aws-profile",
+        principal: "local-window",
+        actorId: String(windowId),
+        awsProfile: "mfa-bedrock",
+        mfaCode: "123",
+      }),
+    ).toEqual({ kind: "refused", reason: "aws-mfa-invalid" });
+    expect(stsRequests).toHaveLength(0);
+
+    // Wrong 6-digit code is rejected by STS as aws-mfa-refused.
+    expect(
+      await answerCloudIamSettingsCommand({
+        dependencies: scene.cloudIam,
+        instanceId,
+        kind: "connect-aws-profile",
+        principal: "local-window",
+        actorId: String(windowId),
+        awsProfile: "mfa-bedrock",
+        mfaCode: "000000",
+      }),
+    ).toEqual({ kind: "refused", reason: "aws-mfa-refused" });
+
+    // Valid 6-digit code completes sign-in over the Settings route.
+    const connected = await scene.browserRoute(
+      new Request("http://127.0.0.1/api/providers/oauth", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify({
+          kind: "connect-aws-profile",
+          instanceId: String(instanceId),
+          descriptorId: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.descriptorId,
+          awsProfile: "mfa-bedrock",
+          mfaCode: "654321",
+        }),
+      }),
+    );
+    expect(await connected?.json()).toMatchObject({ kind: "signed-in" });
+    expect(stsRequests.at(-1)).toMatchObject({
+      Action: "AssumeRole",
+      SerialNumber: "arn:aws:iam::123456789012:mfa/person",
+      TokenCode: "654321",
+    });
+
+    // Neither the Keychain store nor the journal holds temporary MFA credentials or the MFA code.
+    const allStored = [...scene.store.values.values()].join("\n");
+    const allJournaled = JSON.stringify(scene.journal);
+    for (const secretValue of [
+      "ASIAMFASESSION000001",
+      "mfa-ephemeral-secret-sentinel",
+      "mfa-ephemeral-token-sentinel",
+      "654321",
+    ]) {
+      expect(allStored).not.toContain(secretValue);
+      expect(allJournaled).not.toContain(secretValue);
+    }
+
+    // Probing signs cleanly during the 1-hour session, then expires cleanly when the hour ends.
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    const driver = makeAmazonBedrockDriver({
+      instanceId,
+      configuration: bedrockConfiguration(),
+      runtimeRegistry,
+      credentialResolver: scene.credentials,
+      cloudIam: scene.cloudHost,
+      fetch: (url, init) => scene.cloud.fetch(url, init),
+    });
+    expect((await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })))).readiness).toBe(
+      "ready",
+    );
+    clock += 60 * 60_000;
+    const expired = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(expired).toMatchObject({
+      readiness: "unauthenticated",
+      unauthenticatedReason: "expired",
+    });
   });
 
   it("never begins a cloud sign-in from Settings' route", async () => {

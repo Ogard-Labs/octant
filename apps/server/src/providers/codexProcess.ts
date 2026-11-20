@@ -62,7 +62,7 @@ import {
   type CodexRpcClient,
   type CodexRpcStderrCapture,
 } from "./codexRpcClient";
-import { providerHostEnvironment } from "./providerHostEnvironment";
+import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
 export interface CodexBinaryProbe {
@@ -986,6 +986,11 @@ export function prepareCodexLaunch(input: {
       input.servers,
     );
     const serverFolder = input.servers === undefined ? [] : [input.servers.folder];
+    const openProfile =
+      authority.kind === "thread" &&
+      authority.strict === false &&
+      authority.sandboxPolicy === undefined;
+    const awsReadPaths = openProfile ? awsProfileReadPaths(input.environment) : [];
     const launch = input.confinement.prepare({
       executable: input.binaryPath,
       args: input.args,
@@ -999,7 +1004,13 @@ export function prepareCodexLaunch(input: {
       networkEgress,
       writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
       additionalWriteRoots: accountRoots,
-      readRoots: [...accountRoots, ...programPaths, ...serverFolder, ...readOnlyFolders],
+      readRoots: [
+        ...accountRoots,
+        ...programPaths,
+        ...serverFolder,
+        ...readOnlyFolders,
+        ...awsReadPaths,
+      ],
       privateHomeAllowPaths: [
         root,
         ...extraFolders,
@@ -1008,6 +1019,7 @@ export function prepareCodexLaunch(input: {
         ...programPaths,
         ...serverFolder,
         ...readOnlyFolders,
+        ...awsReadPaths,
       ],
       allowFileReadStar: true,
       // Outside Strict Codex's own tools may use the protected files inside

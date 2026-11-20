@@ -181,6 +181,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
             principal,
             actor,
             ...(command.awsProfile === undefined ? {} : { awsProfile: command.awsProfile }),
+            ...(command.mfaCode === undefined ? {} : { mfaCode: command.mfaCode }),
             ...(command.accessKeys === undefined ? {} : { accessKeys: command.accessKeys }),
             actorId: windowId,
           }),
@@ -569,6 +570,8 @@ export interface ProviderOAuthCommand {
   readonly attemptId: string;
   /** For `connect-aws-profile`: the person's profile name, read by the broker in place. */
   readonly awsProfile?: string;
+  /** For `connect-aws-profile`: optional one-time 6-digit MFA code for a role declaring `mfa_serial`. */
+  readonly mfaCode?: string;
   /** For `connect-access-keys`: a long-lived key pair, handed to the broker and never stored here. */
   readonly accessKeys?: { readonly accessKeyId: string; readonly secretAccessKey: string };
   /**
@@ -604,12 +607,14 @@ function readCommand(value: unknown): ProviderOAuthCommand | undefined {
   if (kind === "poll" && attemptId.length === 0) return undefined;
   if (kind === "connect-aws-profile") {
     if (typeof value.awsProfile !== "string") return undefined;
+    if (value.mfaCode !== undefined && typeof value.mfaCode !== "string") return undefined;
     return {
       kind,
       instanceId,
       descriptorId: value.descriptorId,
       attemptId,
       awsProfile: value.awsProfile,
+      ...(value.mfaCode === undefined ? {} : { mfaCode: value.mfaCode }),
     };
   }
   if (kind === "connect-access-keys") {

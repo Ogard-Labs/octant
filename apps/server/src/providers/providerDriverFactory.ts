@@ -103,6 +103,8 @@ export interface ProviderDriverFactoryOptions {
   readonly planMcpServers?: (provider: McpPlanServerProvider) => ReadonlyArray<string>;
   /** Host Claude env from the snapshot gate. Omit to use the last gated copy. */
   readonly claudeHostEnvironment?: NodeJS.ProcessEnv;
+  /** Whether the host enforces Strict; read on Claude probes so Bedrock/custom routing works outside Strict. */
+  readonly hostStrict?: () => boolean;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexHostEnvironment?: NodeJS.ProcessEnv;
 }
@@ -336,6 +338,7 @@ export function makeProviderDriver(
       const readArtifactDelivery = options.claudeArtifactDelivery;
       const readClaudeOwnMemory = options.providerOwnMemory;
       const claudeDriver = makeClaudeDriver({
+        ...(options.hostStrict === undefined ? {} : { hostStrict: options.hostStrict }),
         ...(readPlanMcpServers === undefined
           ? {}
           : { planMcpServers: () => readPlanMcpServers("claude") }),

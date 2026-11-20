@@ -244,6 +244,8 @@ export async function answerCloudIamSettingsCommand(input: {
   /** The window that asked, as the broker's actor for a connect. */
   readonly actorId?: string;
   readonly awsProfile?: string;
+  /** One-time 6-digit MFA code for a profile role declaring `mfa_serial`; never persisted. */
+  readonly mfaCode?: string;
   readonly accessKeys?: { readonly accessKeyId: string; readonly secretAccessKey: string };
 }): Promise<ProviderOAuthView> {
   const { dependencies } = input;
@@ -318,6 +320,7 @@ async function connectPersonCloudSource(input: {
   readonly actor?: EventActor | undefined;
   readonly actorId?: string;
   readonly awsProfile?: string;
+  readonly mfaCode?: string;
   readonly accessKeys?: { readonly accessKeyId: string; readonly secretAccessKey: string };
 }): Promise<ProviderOAuthView> {
   const { dependencies } = input;
@@ -356,6 +359,7 @@ async function connectPersonCloudSource(input: {
       scope: target.descriptor.scope,
       actorId: input.actorId,
       termsAcknowledgedAt: new Date().toISOString(),
+      ...(input.mfaCode === undefined ? {} : { mfaCode: input.mfaCode }),
     });
   } catch {
     return { kind: "refused", reason: "unavailable" };
@@ -371,6 +375,9 @@ async function connectPersonCloudSource(input: {
         reason === "unsupported" ||
         reason === "not-authorized" ||
         reason === "mfa-required" ||
+        reason === "mfa-invalid" ||
+        reason === "mfa-refused" ||
+        reason === "metadata-unreachable" ||
         reason === "role-refused"
           ? `aws-${reason}`
           : "invalid",
