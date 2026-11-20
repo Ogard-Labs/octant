@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { AddedAcpAgentConfiguration } from "@octant/contracts";
 import type { AcpRegistryAgent } from "@octant/plugin-host/acp-agents";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +26,7 @@ import {
   installAcpAgent,
   makeAcpAgentInstallPorts,
   runAcpAgentInstallScripts,
+  toolchainReadRoots,
   type AcpAgentInstallPorts,
 } from "./acpAgentInstall";
 
@@ -684,6 +685,139 @@ if (escaped) process.exit(2);
       );
       expect(nativeResult).toMatchObject({ status: "completed", sandboxed: false });
       expect(readFileSync(nativeOutside, "utf8")).toBe("native");
+    },
+  );
+
+  it("never exposes $HOME or shared home directories in Strict toolchain read roots", async () => {
+    const fakeHome = realpathSync(scratch());
+    const voltaBin = join(fakeHome, ".volta", "bin");
+    const localBin = join(fakeHome, ".local", "bin");
+    const directBin = join(fakeHome, "bin");
+    const nvmBin = join(fakeHome, ".nvm", "versions", "node", "v22.0.0", "bin");
+    for (const dir of [voltaBin, localBin, directBin, nvmBin]) {
+      mkdirSync(dir, { recursive: true });
+    }
+    const voltaNode = join(voltaBin, "node");
+    const localNode = join(localBin, "node");
+    const directNode = join(directBin, "node");
+    const nvmNode = join(nvmBin, "node");
+    for (const file of [voltaNode, localNode, directNode, nvmNode]) {
+      writeFileSync(file, agentBytes);
+      chmodSync(file, 0o755);
+    }
+
+    const roots = await toolchainReadRoots([], [voltaNode, localNode, directNode, nvmNode], {
+      homeDirectory: fakeHome,
+    });
+    expect(roots).not.toContain(fakeHome);
+    expect(roots).not.toContain(dirname(fakeHome));
+    expect(roots).not.toContain(join(fakeHome, ".local"));
+    expect(roots).not.toContain("/");
+    expect(roots).toContain(voltaBin);
+    expect(roots).toContain(join(fakeHome, ".volta"));
+    expect(roots).toContain(localBin);
+    expect(roots).toContain(directBin);
+    expect(roots).toContain(nvmBin);
+    expect(roots).toContain(join(fakeHome, ".nvm", "versions", "node", "v22.0.0"));
+  });
+
+  it.skipIf(process.platform !== "darwin")(
+    "keeps unrelated private files in $HOME denied under Strict Seatbelt when node lives under ~/.volta/bin or ~/.local/bin",
+    async () => {
+      const fakeUsers = realpathSync(scratch());
+      const fakeHome = join(fakeUsers, "alice");
+      mkdirSync(fakeHome, { recursive: true });
+      const installFolder = realpathSync(scratch());
+      const tempDir = join(installFolder, ".octant-install-tmp");
+      mkdirSync(tempDir, { recursive: true });
+      const secretFile = join(fakeHome, "private-secret.txt");
+      writeFileSync(secretFile, "top-secret-value");
+      const voltaNode = join(fakeHome, ".volta", "bin", "node");
+      const localNode = join(fakeHome, ".local", "bin", "node");
+      mkdirSync(dirname(voltaNode), { recursive: true });
+      mkdirSync(dirname(localNode), { recursive: true });
+      writeFileSync(voltaNode, agentBytes);
+      writeFileSync(localNode, agentBytes);
+
+      const readRoots = await toolchainReadRoots(
+        [installFolder, tempDir],
+        [voltaNode, localNode, process.execPath],
+        { homeDirectory: fakeHome },
+      );
+      expect(readRoots).not.toContain(fakeHome);
+      expect(readRoots).not.toContain(join(fakeHome, ".local"));
+
+      const confinement = makeProcessConfinementLive({
+        homeDirectory: fakeHome,
+        usersDirectory: fakeUsers,
+      });
+      const launch = confinement.prepare({
+        executable: process.execPath,
+        args: ["-e", `require("node:fs").readFileSync(${JSON.stringify(secretFile)}, "utf8");`],
+        boundRoot: installFolder,
+        temporaryDirectory: tempDir,
+        networkEgress: "allow",
+        writeBoundRoot: true,
+        allowFileReadStar: true,
+        allowProcessExec: true,
+        allowProcessFork: true,
+        readRoots,
+      });
+      const attempt = spawnSync(launch.command, [...launch.args], {
+        cwd: installFolder,
+        env: { ...process.env, HOME: tempDir, TMPDIR: tempDir, ...launch.environment },
+        encoding: "utf8",
+      });
+      expect(attempt.status).not.toBe(0);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "escalates surviving descendants that ignore SIGTERM to SIGKILL before resolving a timed-out run",
+    async () => {
+      const work = realpathSync(scratch());
+      const childPidFile = join(work, "child.pid");
+      const childScript = join(work, "stubborn-child.js");
+      const parentScript = join(work, "exiting-parent.js");
+      writeFileSync(
+        childScript,
+        `const fs = require("node:fs");
+process.on("SIGTERM", () => {});
+fs.writeFileSync(${JSON.stringify(childPidFile)}, String(process.pid));
+setInterval(() => {}, 1000);
+`,
+      );
+      writeFileSync(
+        parentScript,
+        `const { spawn } = require("node:child_process");
+spawn(process.execPath, [${JSON.stringify(childScript)}], { stdio: "ignore" });
+process.on("SIGTERM", () => process.exit(0));
+setInterval(() => {}, 1000);
+`,
+      );
+
+      const livePorts = makeAcpAgentInstallPorts({
+        fetchesAllowed: () => true,
+        killGraceMs: 120,
+      });
+      const result = await livePorts.run(process.execPath, [parentScript], {
+        cwd: work,
+        env: { PATH: process.env.PATH ?? "" },
+        timeoutMs: 300,
+      });
+      expect(result.timedOut).toBe(true);
+      expect(existsSync(childPidFile)).toBe(true);
+      const childPid = Number.parseInt(readFileSync(childPidFile, "utf8").trim(), 10);
+      expect(Number.isInteger(childPid) && childPid > 0).toBe(true);
+      let stillAlive = false;
+      try {
+        process.kill(childPid, 0);
+        stillAlive = true;
+        process.kill(childPid, "SIGKILL");
+      } catch (error) {
+        stillAlive = (error as NodeJS.ErrnoException).code !== "ESRCH";
+      }
+      expect(stillAlive).toBe(false);
     },
   );
 });

@@ -14,7 +14,7 @@
  * install folder under Strict.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { constants, createWriteStream } from "node:fs";
 import {
   access,
@@ -28,7 +28,17 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
-import { delimiter, dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
+import { homedir } from "node:os";
+import {
+  basename,
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+  relative,
+  sep,
+} from "node:path";
 import type {
   AcpAgentInstallIntegrity,
   AcpAgentInstallScriptsFailureReason,
@@ -688,27 +698,82 @@ export async function runAcpAgentInstallScripts(
   };
 }
 
-/** Collects read-only toolchain roots so npm and node remain readable under Strict confinement. */
-async function toolchainReadRoots(
+const SHARED_USER_HOME_CHILDREN = [
+  ".local",
+  ".config",
+  ".cache",
+  "Library",
+  "Documents",
+  "Desktop",
+  "Downloads",
+] as const;
+
+const FORBIDDEN_SYSTEM_TOOLCHAIN_ROOTS: ReadonlyArray<string> = [
+  "/",
+  "/Users",
+  "/home",
+  "/var",
+  "/private",
+  "/private/var",
+  "/tmp",
+  "/private/tmp",
+];
+
+/**
+ * Collects read-only toolchain roots so npm and node remain readable under
+ * Strict confinement without ever climbing into `$HOME`, its ancestors, or
+ * shared user-data directories (`~/.local`, `~/.config`, etc.). Explicit
+ * `readRoots` bypass the private-home boundary, so widening to `$HOME` would
+ * expose private user files to an install script.
+ */
+export async function toolchainReadRoots(
   baseRoots: ReadonlyArray<string>,
   executables: ReadonlyArray<string | undefined>,
+  options?: { readonly homeDirectory?: string },
 ): Promise<ReadonlyArray<string>> {
   const roots = new Set<string>(baseRoots);
-  const addPathAndParents = (path: string, levels: number): void => {
-    let current = path;
-    for (let index = 0; index < levels; index += 1) {
-      current = dirname(current);
-      if (isAbsolute(current) && current !== "/") roots.add(current);
+  const forbidden = new Set<string>(FORBIDDEN_SYSTEM_TOOLCHAIN_ROOTS);
+  const home = options?.homeDirectory ?? homedir();
+  const homeForms = new Set<string>();
+  if (isAbsolute(home)) {
+    homeForms.add(normalize(home));
+    try {
+      homeForms.add(await realpath(home));
+    } catch {
+      // Unresolvable home directory; keep the normalized form.
+    }
+  }
+  for (const homePath of homeForms) {
+    let ancestor = homePath;
+    while (true) {
+      forbidden.add(ancestor);
+      const parent = dirname(ancestor);
+      if (parent === ancestor) break;
+      ancestor = parent;
+    }
+    for (const child of SHARED_USER_HOME_CHILDREN) {
+      forbidden.add(join(homePath, child));
+    }
+  }
+  const addExecutableDirs = (executablePath: string): void => {
+    const dir1 = normalize(dirname(executablePath));
+    if (!isAbsolute(dir1) || forbidden.has(dir1)) return;
+    roots.add(dir1);
+    // Only climb one level past a standard `.../bin/<tool>` folder (for example
+    // `.../npm/bin/npm-cli.js` -> `.../npm` or `~/.volta/bin/node` -> `~/.volta`),
+    // never to `$HOME` or a shared home child such as `~/.local`.
+    if (basename(dir1) === "bin") {
+      const dir2 = normalize(dirname(dir1));
+      if (isAbsolute(dir2) && !forbidden.has(dir2)) roots.add(dir2);
     }
   };
   for (const executable of executables) {
     if (executable === undefined || !isAbsolute(executable)) continue;
-    addPathAndParents(executable, 2);
+    addExecutableDirs(executable);
     try {
-      const resolved = await realpath(executable);
-      addPathAndParents(resolved, 3);
+      addExecutableDirs(await realpath(executable));
     } catch {
-      // Unresolvable symlink target; keep the configured path's ancestors only.
+      // Unresolvable symlink target; keep the configured path's directories only.
     }
   }
   return [...roots];
@@ -782,15 +847,65 @@ function capture(command: string, args: ReadonlyArray<string>): Promise<string |
   });
 }
 
-/** Terminates a spawned package-manager process and any children in its process group. */
-function terminateProcessGroup(pid: number | undefined, signal: NodeJS.Signals): void {
-  if (pid === undefined) return;
+function processGroupExists(pid: number): boolean {
   try {
-    if (process.platform !== "win32") process.kill(-pid, signal);
-    else process.kill(pid, signal);
-  } catch {
-    // Process or group has already exited.
+    process.kill(process.platform === "win32" ? pid : -pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return false;
+    if (code === "EPERM") return true;
+    return false;
   }
+}
+
+/** Terminates a spawned package-manager process and any children in its process group. */
+function signalProcessGroup(child: ChildProcess, pid: number, signal: NodeJS.Signals): void {
+  if (process.platform === "win32") {
+    void spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+      try {
+        child.kill(signal);
+      } catch {
+        // Process has already exited.
+      }
+    }
+  }
+}
+
+async function waitUntilProcessGroupExited(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (processGroupExists(pid)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return true;
+}
+
+/**
+ * Escalates a surviving process group from SIGTERM to SIGKILL and waits for
+ * bounded cleanup. Because stdio is ignored, the leader exiting on SIGTERM
+ * does not prove its lifecycle-script descendants exited, so timeout and close
+ * both await this same cleanup promise.
+ */
+async function ensureProcessGroupExited(
+  child: ChildProcess,
+  pid: number | undefined,
+  graceMs: number,
+): Promise<void> {
+  if (pid === undefined || !processGroupExists(pid)) return;
+  signalProcessGroup(child, pid, "SIGTERM");
+  if (await waitUntilProcessGroupExited(pid, graceMs)) return;
+  signalProcessGroup(child, pid, "SIGKILL");
+  await waitUntilProcessGroupExited(pid, graceMs);
 }
 
 /** The live ports: the host's fetch, PATH and process spawning. */
@@ -798,7 +913,9 @@ export function makeAcpAgentInstallPorts(options: {
   readonly fetchesAllowed: () => boolean;
   readonly confinement?: ProcessConfinementPort;
   readonly clock?: () => string;
+  readonly killGraceMs?: number;
 }): AcpAgentInstallPorts {
+  const killGraceMs = options.killGraceMs ?? PROCESS_GROUP_KILL_GRACE_MS;
   return {
     fetch: (url, init) => fetch(url, init),
     fetchesAllowed: options.fetchesAllowed,
@@ -821,27 +938,41 @@ export function makeAcpAgentInstallPorts(options: {
           stdio: "ignore",
           detached,
         });
+        let settled = false;
         let timedOut = false;
-        let killTimer: ReturnType<typeof setTimeout> | undefined;
+        let cleanup: Promise<void> | undefined;
+        const releaseTree = () =>
+          (cleanup ??= ensureProcessGroupExited(child, child.pid, killGraceMs));
+        const settle = (result: {
+          readonly exitCode: number | null;
+          readonly timedOut?: boolean;
+        }) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(result);
+        };
         const timer = setTimeout(() => {
           timedOut = true;
-          terminateProcessGroup(child.pid, "SIGTERM");
-          killTimer = setTimeout(() => {
-            terminateProcessGroup(child.pid, "SIGKILL");
-          }, PROCESS_GROUP_KILL_GRACE_MS);
-          killTimer.unref();
+          void releaseTree().then(() => settle({ exitCode: null, timedOut: true }));
         }, runOptions.timeoutMs);
-        const clearTimers = () => {
-          clearTimeout(timer);
-          if (killTimer !== undefined) clearTimeout(killTimer);
-        };
         child.once("error", () => {
-          clearTimers();
-          resolve({ exitCode: null, ...(timedOut ? { timedOut: true } : {}) });
+          if (timedOut) return;
+          settle({ exitCode: null });
         });
         child.once("close", (code) => {
-          clearTimers();
-          resolve({ exitCode: code, ...(timedOut ? { timedOut: true } : {}) });
+          clearTimeout(timer);
+          void (async () => {
+            if (timedOut) {
+              await releaseTree();
+              settle({ exitCode: code, timedOut: true });
+              return;
+            }
+            if (detached && child.pid !== undefined && processGroupExists(child.pid)) {
+              await releaseTree();
+            }
+            settle({ exitCode: code, ...(timedOut ? { timedOut: true } : {}) });
+          })();
         });
       }),
   };

@@ -1050,6 +1050,7 @@ export class ProviderService implements ProviderServiceApi {
           command.kind === "create-codex-provider" || command.kind === "change-codex-configuration"
             ? await this.#acquireCodexAccountClaim()
             : undefined;
+        let releaseAcpTrustClaim: (() => void) | undefined;
         try {
           this.#assertReady();
           const current = this.#persistence.readProviderInstance(command.instanceId);
@@ -1701,8 +1702,18 @@ export class ProviderService implements ProviderServiceApi {
             if (!isAddedAcpAgentInstance(current)) {
               throw this.#unsupported("Only an added ACP agent is trusted this way.");
             }
-            // Validate trust preconditions (installed) before running any script.
+            // Validate trust preconditions (installed) before claiming runtime or running scripts.
             let next = setAddedAcpAgentTrust(current, command.trusted, updatedAt);
+            // Reserve runtime quiescence and close idle runtimes BEFORE running
+            // deferred install scripts so active sessions refuse Trust before any
+            // script mutates the installation and no session can start mid-script.
+            const claimKey = `acp-agent-trust:${current.id}`;
+            this.#runtime.claimExecutableUpdate(claimKey, [current.id], {
+              activeSessionMessage: "Stop active sessions before changing trust for this agent.",
+              busyMessage: "Wait for this agent's Trust step to finish before starting a session.",
+            });
+            releaseAcpTrustClaim = () => this.#runtime.releaseExecutableUpdate(claimKey);
+            await this.#runtime.invalidateRuntime(current.id);
             if (command.trusted && this.#acpAgentInstall?.runInstallScripts !== undefined) {
               const scripts = await this.#acpAgentInstall.runInstallScripts(current);
               if (scripts.status === "completed") {
@@ -1722,9 +1733,6 @@ export class ProviderService implements ProviderServiceApi {
               }
             }
             instance = next;
-            // A running process keeps the wall it started with; the next one
-            // starts under the new trust.
-            await this.#runtime.invalidateRuntime(current.id);
             eventName = "provider.instance-configuration-changed@1";
           } else {
             if (command.kind === "set-provider-enabled" && command.enabled) {
@@ -1803,6 +1811,7 @@ export class ProviderService implements ProviderServiceApi {
             instance: authoritative,
           });
         } finally {
+          releaseAcpTrustClaim?.();
           releaseClaudeClaim?.();
           releaseCodexClaim?.();
         }

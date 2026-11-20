@@ -28,7 +28,10 @@ import { rebuildProjection } from "../persistence/projection";
 import type { AcpAgentInstallResult, AcpAgentInstallScriptsResult } from "./acpAgentInstall";
 import { ACP_PACKAGE_NEEDS_INSTALL_SCRIPT_MESSAGE, withAddedAcpAgentLaunch } from "./addedAcpAgent";
 import { ProviderProjection } from "./providerProjection";
-import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import {
+  ProviderExecutableUpdateRejected,
+  ProviderRuntimeRegistry,
+} from "./providerRuntimeRegistry";
 import { ProviderService } from "./providerService";
 
 const tempDirs: string[] = [];
@@ -733,5 +736,156 @@ describe("trusting an added ACP package with install scripts", () => {
       ),
     ).toBe(false);
     expect(fixture.current()).toMatchObject({ configuration: { trusted: true } });
+  });
+
+  it("refuses Trust before running deferred install scripts when an active or leased session is running", async () => {
+    const runInstallScripts = vi.fn(
+      async (): Promise<AcpAgentInstallScriptsResult> => ({
+        status: "completed",
+        sandboxed: false,
+        completedAt: now,
+      }),
+    );
+    const fixture = serviceWith(packageInstalled, { runInstallScripts });
+    await fixture.service.execute(windowId, {
+      kind: "add-acp-agent",
+      instanceId,
+      expectedVersion: 0 as never,
+      source: { kind: "registry", registryId: "factory-droid" },
+    });
+    await fixture.service.execute(windowId, {
+      kind: "install-acp-agent",
+      instanceId,
+      expectedVersion: 1 as never,
+    });
+
+    // Active session prevents Trust before install scripts run.
+    fixture.runtimeRegistry.setActiveSessionCount(instanceId, 1);
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-acp-agent-trust",
+        instanceId,
+        expectedVersion: 2 as never,
+        trusted: true,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message: "Stop active sessions before changing trust for this agent.",
+      },
+    });
+    expect(runInstallScripts).not.toHaveBeenCalled();
+
+    // Leased native session also prevents Trust before install scripts run.
+    fixture.runtimeRegistry.setActiveSessionCount(instanceId, 0);
+    const lease = fixture.runtimeRegistry.claimNativeSession(instanceId, "native-session-1");
+    expect(lease.status).toBe("claimed");
+    if (lease.status !== "claimed") return;
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-acp-agent-trust",
+        instanceId,
+        expectedVersion: 2 as never,
+        trusted: true,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message: "Stop active sessions before changing trust for this agent.",
+      },
+    });
+    expect(runInstallScripts).not.toHaveBeenCalled();
+    expect(
+      fixture.append.mock.calls.some(
+        ([request]) => request.events[0]?.eventName === PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN,
+      ),
+    ).toBe(false);
+
+    // Once sessions stop, Trust runs the script and commits installScriptsCompleted cleanly.
+    lease.release();
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-acp-agent-trust",
+        instanceId,
+        expectedVersion: 2 as never,
+        trusted: true,
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: { trusted: true, install: { installScriptsCompleted: true } },
+      },
+    });
+    expect(runInstallScripts).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks new session and runtime acquisitions while Trust install scripts are running, then releases the hold", async () => {
+    let scriptStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      scriptStarted = resolve;
+    });
+    let finishScript!: (result: AcpAgentInstallScriptsResult) => void;
+    const scriptPromise = new Promise<AcpAgentInstallScriptsResult>((resolve) => {
+      finishScript = resolve;
+    });
+    const fixture = serviceWith(packageInstalled, {
+      runInstallScripts: async () => {
+        scriptStarted();
+        return scriptPromise;
+      },
+    });
+    await fixture.service.execute(windowId, {
+      kind: "add-acp-agent",
+      instanceId,
+      expectedVersion: 0 as never,
+      source: { kind: "registry", registryId: "factory-droid" },
+    });
+    await fixture.service.execute(windowId, {
+      kind: "install-acp-agent",
+      instanceId,
+      expectedVersion: 1 as never,
+    });
+
+    const trustPromise = fixture.service.execute(windowId, {
+      kind: "set-acp-agent-trust",
+      instanceId,
+      expectedVersion: 2 as never,
+      trusted: true,
+    });
+    await started;
+
+    // While deferred install scripts run, starting a session or acquiring a runtime is refused.
+    expect(() => fixture.runtimeRegistry.setActiveSessionCount(instanceId, 1)).toThrow(
+      ProviderExecutableUpdateRejected,
+    );
+    expect(
+      fixture.runtimeRegistry.claimNativeSession(instanceId, "native-session-2"),
+    ).toMatchObject({
+      status: "refused",
+      failure: {
+        category: "unavailable",
+        message: "Wait for this agent's Trust step to finish before starting a session.",
+      },
+    });
+    const acquireExit = await Effect.runPromiseExit(
+      Effect.scoped(
+        fixture.runtimeRegistry.acquireRuntime(instanceId, {
+          idleMs: 0,
+          start: async () => ({ value: {}, close: async () => undefined }),
+        }),
+      ),
+    );
+    expect(acquireExit._tag).toBe("Failure");
+
+    // Completing the script commits Trust and releases the quiescence hold.
+    finishScript({ status: "completed", sandboxed: false, completedAt: now });
+    await expect(trustPromise).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: { trusted: true, install: { installScriptsCompleted: true } },
+      },
+    });
+    expect(() => fixture.runtimeRegistry.setActiveSessionCount(instanceId, 1)).not.toThrow();
+    fixture.runtimeRegistry.setActiveSessionCount(instanceId, 0);
   });
 });
