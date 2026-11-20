@@ -471,7 +471,9 @@ function projectRepositoryGroups(
   // - If multiple active repository node IDs currently claim a name, strip it
   //   from every group so it cannot alias to another name.
   // - If one active repository node ID currently owns a name, strip that name
-  //   from every other group whose baseRepositoryNodeId differs (or is absent).
+  //   from any group with a KNOWN different baseRepositoryNodeId. Keep it on an
+  //   unbackfilled group (`baseRepositoryNodeId === undefined`) unless that
+  //   group's names span two distinct known current repository node IDs.
   // - If a purely historical name was used by multiple distinct repository node
   //   IDs, strip it from every group so equivalence fails closed.
   const allNodeIdsByName = new Map<string, Set<string>>();
@@ -487,6 +489,15 @@ function projectRepositoryGroups(
     }
   }
   for (const group of groups) {
+    const unknownGroupCurrentOwners = new Set<string>();
+    if (group.baseRepositoryNodeId === undefined) {
+      for (const name of group.names) {
+        const currentOwners = currentNodeIdsByName.get(name);
+        if (currentOwners !== undefined) {
+          for (const owner of currentOwners) unknownGroupCurrentOwners.add(owner);
+        }
+      }
+    }
     for (const name of Array.from(group.names)) {
       const currentOwners = currentNodeIdsByName.get(name);
       if (currentOwners !== undefined && currentOwners.size > 1) {
@@ -495,7 +506,12 @@ function projectRepositoryGroups(
       }
       if (currentOwners !== undefined && currentOwners.size === 1) {
         const [soleOwner] = currentOwners;
-        if (soleOwner !== undefined && String(group.baseRepositoryNodeId ?? "") !== soleOwner) {
+        if (
+          soleOwner !== undefined &&
+          ((group.baseRepositoryNodeId !== undefined &&
+            String(group.baseRepositoryNodeId) !== soleOwner) ||
+            (group.baseRepositoryNodeId === undefined && unknownGroupCurrentOwners.size > 1))
+        ) {
           group.names.delete(name);
         }
         continue;
@@ -547,17 +563,26 @@ export function canonicalPullRequestRepositoryInProject(
     }
   | undefined {
   const key = `${candidate.owner.toLowerCase()}/${candidate.name.toLowerCase()}`;
+  let best: RepositoryEquivalenceGroup | undefined;
   for (const group of projectRepositoryGroups(state, projectId)) {
     if (!group.names.has(key)) continue;
-    return {
-      owner: group.canonical.owner,
-      name: group.canonical.name,
-      ...(group.baseRepositoryNodeId === undefined
-        ? {}
-        : { baseRepositoryNodeId: group.baseRepositoryNodeId }),
-    };
+    if (
+      best === undefined ||
+      (best.baseRepositoryNodeId === undefined && group.baseRepositoryNodeId !== undefined) ||
+      (Boolean(best.baseRepositoryNodeId) === Boolean(group.baseRepositoryNodeId) &&
+        group.canonical.order > best.canonical.order)
+    ) {
+      best = group;
+    }
   }
-  return undefined;
+  if (best === undefined) return undefined;
+  return {
+    owner: best.canonical.owner,
+    name: best.canonical.name,
+    ...(best.baseRepositoryNodeId === undefined
+      ? {}
+      : { baseRepositoryNodeId: best.baseRepositoryNodeId }),
+  };
 }
 
 /**
