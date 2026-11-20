@@ -1804,7 +1804,16 @@ describe("an agent's helper request that names another member", () => {
     expect(parent.ingested).toHaveLength(1);
   });
 
-  it("refuses a Chat or Code parent and a Project that is not a Work Project", async () => {
+  it("sends a Code thread's helper in a Code Project as Code work, approval-gated", async () => {
+    const { a, b, child } = await threeHosts({ child: fakeChildHost({ modes: ["code"] }) });
+
+    const started = await agentPort(a, { projectType: "code" }).start(request(b, { mode: "code" }));
+
+    expect(started).toMatchObject({ status: "delegated-remote" });
+    expect(child.started[0]?.authority).toEqual({ mode: "code", posture: "approval-gated" });
+  });
+
+  it("refuses a Chat parent, and a parent whose Project is not of its own mode", async () => {
     const { a, b, child } = await threeHosts();
 
     const chat = await agentPort(a).start(request(b, { mode: "chat" }));

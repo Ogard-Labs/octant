@@ -910,6 +910,7 @@ export function startOctantServer(
       coordinatorWakes,
       codeThreadWakeupPort,
       routeCodeService,
+      onCodeTurnCancelled,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       imageDescriber,
@@ -1979,6 +1980,7 @@ export function startOctantServer(
       threadRetention,
     } = wireRemote({
       routeCodeService,
+      onCodeTurnCancelled,
       resolveThreadStrict,
       restartRecovery,
       agentGrantRouteSlot,
