@@ -158,6 +158,8 @@ import type { RecordExternalContentIngestion } from "../context/inheritedExterna
 import { createFollowUp } from "../followUps/followUpSuggestionCreation";
 import { rebuildProjection } from "../persistence/projection";
 import { erasePurgedThread } from "../persistence/threadPurge";
+import { buildDocxFixture } from "../preview/previewTestFixtures";
+import { MAX_CHAT_ATTACHED_TEXT_CHARACTERS } from "./chatAttachedFiles";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
 
 const directories: Array<string> = [];
@@ -3260,6 +3262,292 @@ describe("ChatService", () => {
     expect(fileText?.text).toContain("```\nreplicas: 3\n\n```");
     // The file stays on the turn for the record.
     expect(service.read(created.thread.id).turns[0]?.attachmentIds).toEqual([upload.id]);
+  });
+
+  it("carries an earlier turn's attached text and document files when the host rebuilds conversation history", async () => {
+    const textOnly = probeFixture({
+      models: [
+        {
+          id: decodeProviderModelId("model-a"),
+          displayName: "Model A",
+          contextLimit: 200_000,
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+    });
+    const { service, fakeDriver, contextHarness } = openFixture({ probe: textOnly });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Rebuilt history files",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const yamlUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "deploy.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode("replicas: 3\n"),
+    });
+    const docxUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId("84000000-0000-4000-8000-000000000015"),
+      displayName: "notes.docx",
+      mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      bytes: new Uint8Array(buildDocxFixture(["Rollout checklist"])),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Is this right?",
+      attachmentIds: [yamlUpload.id, docxUpload.id],
+    });
+
+    // Turn 2 rebuilds history on the host without a live provider session.
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Now bump replicas to 5.",
+    });
+    const rebuiltTurn = fakeDriver.sentTurns[1];
+    const priorUserBlock = (rebuiltTurn?.context ?? []).find(
+      (block) => block.kind === "user-message" && block.text.includes("Is this right?"),
+    );
+    expect(priorUserBlock?.text).toContain(
+      'The person attached a file, "deploy.yaml" (application/yaml). Its text follows',
+    );
+    expect(priorUserBlock?.text).toContain("replicas: 3");
+    expect(priorUserBlock?.text).toContain("Rollout checklist");
+    // The journaled context manifest label keeps only the person's words, not file contents.
+    const snapshot = contextHarness.inspect(
+      decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: created.thread.id }),
+    );
+    const turnOneEntry = snapshot.next.manifest.entries.find(
+      (entry) =>
+        entry.category === "conversation" &&
+        entry.source.kind === "message" &&
+        entry.source.referenceId ===
+          String(service.read(created.thread.id).turns[0]?.userMessageRef.contentId),
+    );
+    expect(turnOneEntry?.label).toBe("Is this right?");
+  });
+
+  it("caps rebuilt history attached text at the character limit while prioritizing newer turns", async () => {
+    const textOnly = probeFixture({
+      models: [
+        {
+          id: decodeProviderModelId("model-a"),
+          displayName: "Model A",
+          contextLimit: 250_000,
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+    });
+    const { service, fakeDriver } = openFixture({ probe: textOnly });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Bounded rebuilt files",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const olderText = `OLDER-START-${"a".repeat(249_978)}-OLDER-END`;
+    const newerText = `NEWER-START-${"b".repeat(249_978)}-NEWER-END`;
+    expect(olderText.length).toBe(250_000);
+    expect(newerText.length).toBe(250_000);
+    const olderUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "older.log",
+      mediaType: "application/x-log",
+      bytes: new TextEncoder().encode(olderText),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "First log",
+      attachmentIds: [olderUpload.id],
+    });
+    const newerUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId("84000000-0000-4000-8000-000000000016"),
+      displayName: "newer.log",
+      mediaType: "application/x-log",
+      bytes: new TextEncoder().encode(newerText),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Second log",
+      attachmentIds: [newerUpload.id],
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Compare both",
+    });
+
+    const rebuiltContext = fakeDriver.sentTurns[2]?.context ?? [];
+    const firstHistory = rebuiltContext.find(
+      (block) => block.kind === "user-message" && block.text.includes("First log"),
+    );
+    const secondHistory = rebuiltContext.find(
+      (block) => block.kind === "user-message" && block.text.includes("Second log"),
+    );
+    expect(secondHistory?.text).toContain("NEWER-START-");
+    expect(secondHistory?.text).toContain("-NEWER-END");
+    expect(secondHistory?.text).not.toContain("stopped at a limit");
+    expect(firstHistory?.text).toContain("OLDER-START-");
+    expect(firstHistory?.text).toContain("stopped at a limit");
+    expect(firstHistory?.text).not.toContain("-OLDER-END");
+    // Combined file payload stays within the 400,000-character cap plus framing.
+    expect((firstHistory?.text.length ?? 0) + (secondHistory?.text.length ?? 0)).toBeLessThan(
+      MAX_CHAT_ATTACHED_TEXT_CHARACTERS + 2_000,
+    );
+  });
+
+  it("degrades cleanly when an earlier turn's attachment file is missing from storage during history rebuild", async () => {
+    const textOnly = probeFixture({
+      models: [
+        {
+          id: decodeProviderModelId("model-a"),
+          displayName: "Model A",
+          contextLimit: 200_000,
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+    });
+    const { service, fakeDriver, attachmentStore } = openFixture({ probe: textOnly });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Missing file rebuild",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "deploy.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode("replicas: 3\n"),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Check this config",
+      attachmentIds: [upload.id],
+    });
+
+    // Remove the file from disk before Turn 2 rebuilds history.
+    await attachmentStore.remove(created.thread.id, upload.id);
+
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Follow up anyway",
+    });
+    const priorUserBlock = (fakeDriver.sentTurns[1]?.context ?? []).find(
+      (block) => block.kind === "user-message" && block.text.includes("Check this config"),
+    );
+    expect(priorUserBlock?.text).toBe("Check this config");
+  });
+
+  it("carries earlier attached text without duplicating the retried turn's own attachment on a host-rebuilt retry", async () => {
+    const textOnly = probeFixture({
+      models: [
+        {
+          id: decodeProviderModelId("model-a"),
+          displayName: "Model A",
+          contextLimit: 200_000,
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+    });
+    const { service, fakeDriver } = openFixture({
+      probe: textOnly,
+      resumableHostConversation: true,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Retry attached files",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const firstUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "first.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode("stage: first\n"),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "First step",
+      attachmentIds: [firstUpload.id],
+    });
+    const secondUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId("84000000-0000-4000-8000-000000000017"),
+      displayName: "second.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode("stage: second\n"),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Second step",
+      attachmentIds: [secondUpload.id],
+    });
+    const view = service.read(created.thread.id);
+    const secondTurn = view.turns[1];
+    const secondAttempt = secondTurn?.attempts[0];
+    if (secondTurn === undefined || secondAttempt === undefined) {
+      throw new Error("Expected second turn attempt.");
+    }
+    await service.execute({
+      kind: "retry-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: view.thread.version,
+      turnId: secondTurn.id,
+      attemptId: secondAttempt.id,
+    });
+
+    const retriedContext = fakeDriver.sentTurns[2]?.context ?? [];
+    const firstHistory = retriedContext.find(
+      (block) => block.kind === "user-message" && block.text.includes("First step"),
+    );
+    expect(firstHistory?.text).toContain("stage: first");
+    const secondFileBlocks = retriedContext.filter((block) => block.text.includes("stage: second"));
+    expect(secondFileBlocks).toHaveLength(1);
   });
 
   it("refuses a binary file the model cannot read before any turn is journaled", async () => {
