@@ -16835,9 +16835,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   that file to every process but the runtime (and the file to `security`),
   so the grant serves the runtime's sign-in read and not the model. A
   launch on an API key takes none of it. Google Antigravity's ACP launch
-  takes the same four below Full access to read its own keychain sign-in
+  takes the same four when it is sandboxed, to read its own keychain sign-in
   (maintainer decision, 2026-11-20), but commands the agent runs in-process
-  share that launch's sandbox, so they may run `security` too; see
+  share that launch's sandbox, so they may run `security` too. In Work and
+  Code outside Strict it starts with no sandbox at all, as Windows starts ACP
+  agents below Full access; see
   [Provider runtimes: Google Antigravity](design/provider-runtimes.md#google-antigravity).
   Linux keeps the login in
   a file inside the account directory, which the launch already holds, and
