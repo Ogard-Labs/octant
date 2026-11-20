@@ -1521,9 +1521,13 @@ export class CodeProjectPullRequestSwitchService
           ) {
             pendingReconciliation = undefined;
           }
-          continue;
+          // Fall through so the recorded turn-off `disabled` event applies onto
+          // the surviving link, replacing any prior terminal state (such as
+          // `stopped` or `turned-off-by-forge`) with `off` just like live
+          // duplicate reconciliation.
+        } else {
+          pendingReconciliation = undefined;
         }
-        pendingReconciliation = undefined;
       }
 
       const resolved = resolveReplayIdentity(switchEvent.record.target);

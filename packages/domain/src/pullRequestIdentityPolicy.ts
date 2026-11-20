@@ -422,8 +422,18 @@ function projectRepositoryGroups(
 
   const groups: RepositoryEquivalenceGroup[] = [];
   const byNodeId = new Map<string, RepositoryEquivalenceGroup>();
+  const currentNodeIdsByName = new Map<string, Set<string>>();
   for (const link of state.byId.values()) {
     if (link.status !== "active" || String(link.projectId) !== projectKey) continue;
+    const currentName = `${link.repositoryOwner.toLowerCase()}/${link.repositoryName.toLowerCase()}`;
+    if (link.baseRepositoryNodeId !== undefined) {
+      let currentOwners = currentNodeIdsByName.get(currentName);
+      if (currentOwners === undefined) {
+        currentOwners = new Set<string>();
+        currentNodeIdsByName.set(currentName, currentOwners);
+      }
+      currentOwners.add(String(link.baseRepositoryNodeId));
+    }
     const names = byCanonicalLinkId.get(String(link.linkId)) ?? new Set<string>();
     const existing =
       link.baseRepositoryNodeId === undefined
@@ -454,6 +464,46 @@ function projectRepositoryGroups(
     groups.push(group);
     if (link.baseRepositoryNodeId !== undefined) {
       byNodeId.set(String(link.baseRepositoryNodeId), group);
+    }
+  }
+
+  // Never let a reused repository name bridge two distinct baseRepositoryNodeIds:
+  // - If multiple active repository node IDs currently claim a name, strip it
+  //   from every group so it cannot alias to another name.
+  // - If one active repository node ID currently owns a name, strip that name
+  //   from every other group whose baseRepositoryNodeId differs (or is absent).
+  // - If a purely historical name was used by multiple distinct repository node
+  //   IDs, strip it from every group so equivalence fails closed.
+  const allNodeIdsByName = new Map<string, Set<string>>();
+  for (const group of groups) {
+    if (group.baseRepositoryNodeId === undefined) continue;
+    for (const name of group.names) {
+      let owners = allNodeIdsByName.get(name);
+      if (owners === undefined) {
+        owners = new Set<string>();
+        allNodeIdsByName.set(name, owners);
+      }
+      owners.add(String(group.baseRepositoryNodeId));
+    }
+  }
+  for (const group of groups) {
+    for (const name of Array.from(group.names)) {
+      const currentOwners = currentNodeIdsByName.get(name);
+      if (currentOwners !== undefined && currentOwners.size > 1) {
+        group.names.delete(name);
+        continue;
+      }
+      if (currentOwners !== undefined && currentOwners.size === 1) {
+        const [soleOwner] = currentOwners;
+        if (soleOwner !== undefined && String(group.baseRepositoryNodeId ?? "") !== soleOwner) {
+          group.names.delete(name);
+        }
+        continue;
+      }
+      const historicalOwners = allNodeIdsByName.get(name);
+      if (historicalOwners !== undefined && historicalOwners.size > 1) {
+        group.names.delete(name);
+      }
     }
   }
   return groups;

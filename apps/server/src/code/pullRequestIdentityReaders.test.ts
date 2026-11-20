@@ -1638,4 +1638,275 @@ exit 1
       number: 42,
     });
   });
+
+  it("refuses to authorize an earlier renamed repository when a different repository node ID reuses the old name", async () => {
+    const clock = () => "2026-11-19T10:00:00.000Z";
+    const journal = openJournal(clock);
+    const { repoRoot, gitPort } = createRealGitRepo("https://github.com/acme/reused.git");
+    const forge = createFakeForge({ owner: "acme", name: "reused", nodeId: "R_kgDOnewrepo2" });
+    forge.repo.pullRequests.set(42, defaultPr({ nodeId: "PR_kwDOnew42" }));
+
+    const { links, pullRequestService } = buildStack({
+      journal,
+      repoRoot,
+      gitPort,
+      forge,
+      clock,
+    });
+
+    // Earlier link from R_kgDOoldrepo1 lived at acme/reused and renamed to acme/original-renamed.
+    await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "reused",
+      number: 42,
+      pullRequestNodeId: "PR_kwDOold42",
+      baseRepositoryNodeId: "R_kgDOoldrepo1",
+      threadIds: [threadId],
+    });
+    await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "original-renamed",
+      number: 42,
+      pullRequestNodeId: "PR_kwDOold42",
+      baseRepositoryNodeId: "R_kgDOoldrepo1",
+    });
+
+    // A distinct repository (R_kgDOnewrepo2) now occupies acme/reused.
+    await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "reused",
+      number: 42,
+      pullRequestNodeId: "PR_kwDOnew42",
+      baseRepositoryNodeId: "R_kgDOnewrepo2",
+    });
+
+    expect(
+      links.areSameRepository(
+        projectId,
+        { owner: "acme", name: "reused" },
+        { owner: "acme", name: "original-renamed" },
+      ),
+    ).toBe(false);
+
+    // The project checkout points at acme/reused (R_kgDOnewrepo2), so authorizing
+    // acme/original-renamed (R_kgDOoldrepo1) must fail closed.
+    const refused = await pullRequestService.authorizePullRequest(
+      windowId,
+      decodeCodeProjectPullRequestSwitchTarget({
+        projectId,
+        repositoryOwner: "acme",
+        repositoryName: "original-renamed",
+        number: 42,
+      }),
+    );
+    expect(refused).toEqual({ status: "not-authorized" });
+
+    // Authorizing the actual connected repo acme/reused still succeeds.
+    const allowed = await pullRequestService.authorizePullRequest(
+      windowId,
+      decodeCodeProjectPullRequestSwitchTarget({
+        projectId,
+        repositoryOwner: "acme",
+        repositoryName: "reused",
+        number: 42,
+      }),
+    );
+    expect(allowed.status).toBe("authorized");
+  });
+
+  it("replays recorded turn-off disables onto terminal survivor switch states instead of restoring obsolete stopped or turned-off-by-forge states", async () => {
+    let now = "2026-11-19T10:00:00.000Z";
+    const journal = openJournal(() => now);
+    const threadA = decodeCodeThreadId("20000000-0000-4000-8000-000000000201");
+    const threadB = decodeCodeThreadId("20000000-0000-4000-8000-000000000202");
+    const oldTarget = decodeCodeProjectPullRequestSwitchTarget({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "old-repo",
+      number: 44,
+    });
+    const newTarget = decodeCodeProjectPullRequestSwitchTarget({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "new-repo",
+      number: 44,
+    });
+
+    const createSwitches = (links: PullRequestLinkService) =>
+      new CodeProjectPullRequestSwitchService({
+        authority: {
+          authorizePullRequest: async (_wid, target) => ({
+            status: "authorized",
+            canonicalTarget: target,
+            linkedThreadIds: [String(threadA), String(threadB)],
+          }),
+          linkedPullRequests: async (_wid, tid) =>
+            String(tid) === String(threadA) ? [oldTarget] : [newTarget],
+        },
+        forge: {
+          readAutoMergeSettings: async () => ({
+            status: "read",
+            allowAutoMerge: true,
+            methods: { merge: true, squash: true, rebase: false },
+          }),
+          enableAutoMerge: async () => ({ status: "enabled" }),
+          disableAutoMerge: async () => ({ status: "disabled" }),
+          observe: async () => ({
+            status: "observed",
+            state: "open",
+            headSha: "a".repeat(40),
+            headBranch: "feature/work",
+            baseBranch: "main",
+            autoMergeEnabled: true,
+            waitingOn: [],
+            failures: [],
+            activity: {
+              checks: "passed",
+              failedChecks: [],
+              conflicting: false,
+              reviews: [],
+              comments: [],
+            },
+          }),
+        },
+        threads: {
+          inspect: () => ({ status: "available", turnActive: false }),
+          markOutsideContent: () => true,
+          startTurn: vi.fn(async () => true),
+          notifyPerson: vi.fn(async () => undefined),
+        },
+        journal,
+        pullRequestLinks: links,
+        clock: () => now,
+        uuid: randomUUID,
+      });
+
+    let switchReconciler: PullRequestLinkSwitchReconciler | undefined;
+    const links = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+      switchReconciler: {
+        reconcileDuplicateLinks: (input) => {
+          if (switchReconciler === undefined) {
+            input.commitMerge?.([]);
+            return Promise.resolve({ status: "reconciled" as const, disabledSwitches: [] });
+          }
+          return switchReconciler.reconcileDuplicateLinks(input);
+        },
+      },
+    });
+    const switches = createSwitches(links);
+    switchReconciler = switches;
+
+    await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "old-repo",
+      number: 44,
+      threadIds: [threadA],
+    });
+    now = "2026-11-19T10:01:00.000Z";
+    await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "new-repo",
+      number: 44,
+      threadIds: [threadB],
+    });
+
+    // Put the survivor into terminal states (`turned-off-by-forge` for Merge
+    // when ready, `stopped` for Auto-fix) and keep watch ON on both links.
+    const switchAggregate = {
+      aggregateType: CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE,
+      aggregateId: randomUUID(),
+    };
+    journal.append({
+      aggregate: switchAggregate,
+      expectedVersion: decodeAggregateVersion(0),
+      events: [
+        {
+          eventId: randomUUID(),
+          eventName: CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
+          eventVersion: 1,
+          correlationId: randomUUID(),
+          actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+          occurredAt: "2026-11-19T10:01:10.000Z",
+          payload: { target: oldTarget, change: { kind: "turned-off-by-forge" } },
+        },
+        {
+          eventId: randomUUID(),
+          eventName: CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
+          eventVersion: 1,
+          correlationId: randomUUID(),
+          actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+          occurredAt: "2026-11-19T10:01:20.000Z",
+          payload: {
+            target: oldTarget,
+            threadId: threadA,
+            change: { kind: "stopped", reason: "attempt-limit" },
+          },
+        },
+      ],
+    });
+
+    // Reload switches so the in-memory folds reflect the terminal survivor states.
+    const liveSwitches = createSwitches(links);
+    switchReconciler = liveSwitches;
+    expect((await liveSwitches.query(windowId, oldTarget)).mergeWhenReady.status).toBe(
+      "turned-off-by-forge",
+    );
+    expect((await liveSwitches.query(windowId, oldTarget)).autoFix.status).toBe("stopped");
+
+    // Enable Merge when ready, Auto-fix, and Watch on the duplicate, and Watch on survivor.
+    now = "2026-11-19T10:02:00.000Z";
+    await liveSwitches.setMergeWhenReady(
+      windowId,
+      { kind: "enable", target: newTarget, headSha: "a".repeat(40), method: "squash" },
+      "local-window",
+      signal,
+    );
+    await liveSwitches.setAutoFix(
+      windowId,
+      { kind: "enable", target: newTarget, threadId: threadB },
+      "user",
+    );
+    await liveSwitches.watch({ windowId, threadId: threadA, providerInstanceId, signal });
+    await liveSwitches.watch({ windowId, threadId: threadB, providerInstanceId, signal });
+
+    // Trigger live duplicate reconciliation.
+    now = "2026-11-19T10:05:00.000Z";
+    const merged = await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "new-repo",
+      lookupRepositoryOwner: "acme",
+      lookupRepositoryName: "old-repo",
+      number: 44,
+      pullRequestNodeId: "PR_kwDOterm44",
+      baseRepositoryNodeId: "R_kgDOterm1",
+    });
+    expect(merged.status).toBe("merged");
+
+    const liveView = await liveSwitches.query(windowId, newTarget);
+    expect(liveView.mergeWhenReady.status).toBe("off");
+    expect(liveView.autoFix.status).toBe("off");
+
+    // Cold restart: terminal states must stay `off`, and retained watch on threadA stays ON.
+    const restartedLinks = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    const restartedSwitches = createSwitches(restartedLinks);
+    const restartedView = await restartedSwitches.query(windowId, newTarget);
+    expect(restartedView.mergeWhenReady.status).toBe("off");
+    expect(restartedView.autoFix.status).toBe("off");
+    await expect(
+      restartedSwitches.unwatch({ threadId: threadA, providerInstanceId }),
+    ).resolves.toEqual({ status: "unwatched", target: newTarget });
+  });
 });

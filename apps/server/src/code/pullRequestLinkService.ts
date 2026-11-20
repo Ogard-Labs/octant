@@ -435,9 +435,17 @@ export class PullRequestLinkService implements PullRequestLinkOwner {
     if (areSamePullRequestRepositoryInProject(this.#state, projectId, left, right)) return true;
     const leftKey = `${left.owner.toLowerCase()}/${left.name.toLowerCase()}`;
     const rightKey = `${right.owner.toLowerCase()}/${right.name.toLowerCase()}`;
+    if (leftKey === rightKey) return true;
     for (const entry of this.#repositoryAliases.values()) {
       if (String(entry.projectId) !== String(projectId)) continue;
-      if (entry.names.has(leftKey) && entry.names.has(rightKey)) return true;
+      if (!entry.names.has(leftKey) || !entry.names.has(rightKey)) continue;
+      if (
+        this.#repositoryNameOwnedByDifferentNode(projectId, leftKey, entry.baseRepositoryNodeId) ||
+        this.#repositoryNameOwnedByDifferentNode(projectId, rightKey, entry.baseRepositoryNodeId)
+      ) {
+        continue;
+      }
+      return true;
     }
     return false;
   }
@@ -455,13 +463,15 @@ export class PullRequestLinkService implements PullRequestLinkOwner {
     const key = `${candidate.owner.toLowerCase()}/${candidate.name.toLowerCase()}`;
     for (const entry of this.#repositoryAliases.values()) {
       if (String(entry.projectId) !== String(projectId)) continue;
-      if (entry.names.has(key)) {
-        return {
-          owner: entry.canonicalOwner,
-          name: entry.canonicalName,
-          baseRepositoryNodeId: entry.baseRepositoryNodeId,
-        };
+      if (!entry.names.has(key)) continue;
+      if (this.#repositoryNameOwnedByDifferentNode(projectId, key, entry.baseRepositoryNodeId)) {
+        continue;
       }
+      return {
+        owner: entry.canonicalOwner,
+        name: entry.canonicalName,
+        baseRepositoryNodeId: entry.baseRepositoryNodeId,
+      };
     }
     return canonicalPullRequestRepositoryInProject(this.#state, projectId, candidate);
   }
@@ -474,6 +484,17 @@ export class PullRequestLinkService implements PullRequestLinkOwner {
     readonly aliasOwner: string;
     readonly aliasName: string;
   }): void {
+    const canonicalKey = `${input.canonicalOwner.toLowerCase()}/${input.canonicalName.toLowerCase()}`;
+    const aliasKey = `${input.aliasOwner.toLowerCase()}/${input.aliasName.toLowerCase()}`;
+    for (const existing of this.#repositoryAliases.values()) {
+      if (
+        String(existing.projectId) === String(input.projectId) &&
+        existing.baseRepositoryNodeId !== input.baseRepositoryNodeId
+      ) {
+        existing.names.delete(canonicalKey);
+        existing.names.delete(aliasKey);
+      }
+    }
     const key = `${String(input.projectId)}:${input.baseRepositoryNodeId}`;
     let entry = this.#repositoryAliases.get(key);
     if (entry === undefined) {
@@ -489,8 +510,29 @@ export class PullRequestLinkService implements PullRequestLinkOwner {
       entry.canonicalOwner = input.canonicalOwner;
       entry.canonicalName = input.canonicalName;
     }
-    entry.names.add(`${input.canonicalOwner.toLowerCase()}/${input.canonicalName.toLowerCase()}`);
-    entry.names.add(`${input.aliasOwner.toLowerCase()}/${input.aliasName.toLowerCase()}`);
+    entry.names.add(canonicalKey);
+    entry.names.add(aliasKey);
+  }
+
+  #repositoryNameOwnedByDifferentNode(
+    projectId: ProjectId,
+    nameKey: string,
+    expectedNodeId: string,
+  ): boolean {
+    for (const link of this.#state.byId.values()) {
+      if (
+        link.status !== "active" ||
+        String(link.projectId) !== String(projectId) ||
+        link.baseRepositoryNodeId === undefined
+      ) {
+        continue;
+      }
+      const linkNameKey = `${link.repositoryOwner.toLowerCase()}/${link.repositoryName.toLowerCase()}`;
+      if (linkNameKey === nameKey && String(link.baseRepositoryNodeId) !== expectedNodeId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   listForThread(threadId: CodeThreadId): ReadonlyArray<PullRequestLinkRecord> {
