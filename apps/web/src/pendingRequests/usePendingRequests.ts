@@ -29,6 +29,7 @@ export type PendingRequestRead =
       readonly requests: ReadonlyArray<PendingRequest>;
       /** Every other waiting ask; empty from a host that lists none. */
       readonly asks: ReadonlyArray<WaitingAsk>;
+      readonly offerLostInRestart: boolean;
       /** Counts completed reads, so a caller can tell a fresh answer from the last one. */
       readonly read: number;
     };
@@ -62,14 +63,25 @@ export function usePendingRequests(
       return;
     }
     const controller = new AbortController();
-    queue.current = createReadQueue(client, controller.signal, (list) =>
+    let previous: PendingRequestList | undefined;
+    let offerLostInRestart = false;
+    queue.current = createReadQueue(client, controller.signal, (list) => {
+      if (
+        previous?.offerHostRun !== undefined &&
+        list.offerHostRun !== undefined &&
+        previous.offerHostRun !== list.offerHostRun
+      ) {
+        offerLostInRestart = previous.asks?.some((ask) => ask.kind === "service-offer") ?? false;
+      }
+      previous = list;
       setRead((current) => ({
         status: "ready",
         requests: list.requests,
         asks: list.asks ?? [],
+        offerLostInRestart,
         read: current.status === "ready" ? current.read + 1 : 1,
-      })),
-    );
+      }));
+    });
     return () => {
       controller.abort();
       queue.current = undefined;

@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import {
   decodeWaitingAsk,
+  PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
   TurnDecisionReview,
   type WaitingAsk,
 } from "@octant/contracts/pending-requests";
@@ -136,6 +137,25 @@ const codeDecision = decodePendingRequest({
 });
 
 describe("pending request route", () => {
+  it("keeps offer rows readable by old windows and sends the host-run marker only on opt-in", async () => {
+    const offer = decodeWaitingAsk({
+      ...chatSignIn,
+      kind: "service-offer",
+      text: "Generate an image?",
+    });
+    const offerHostRun = "00000000-0000-4000-8000-000000000913";
+    const { route } = fixture({ asks: [offer], offerHostRun });
+    expect(await (await route(request()))?.json()).toMatchObject({
+      asks: [{ ...offer, kind: "image-offer" }],
+    });
+    const upgraded = request();
+    upgraded.headers.set("accept", PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE);
+    expect(await (await route(upgraded))?.json()).toMatchObject({
+      asks: [offer],
+      offerHostRun,
+    });
+  });
+
   it("lists a finished turn's decision for a local window, oldest first among requests", async () => {
     const { route } = fixture({ code: [codeApproval, codeDecision] });
     const response = await route(request());
@@ -410,6 +430,7 @@ function fixture(
     readonly chat?: ReadonlyArray<PendingRequest>;
     readonly children?: ReadonlyArray<PendingRequest>;
     readonly asks?: ReadonlyArray<WaitingAsk>;
+    readonly offerHostRun?: string;
   } = {},
 ) {
   const store = new WindowAuthorityStore();
@@ -418,6 +439,7 @@ function fixture(
   const sources = {
     ...(options.deferrals === undefined ? {} : { deferrals: options.deferrals }),
     ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
+    ...(options.offerHostRun === undefined ? {} : { offerHostRun: options.offerHostRun }),
     readSettings: () => options.settings ?? defaultShellSettings(),
     work: vi.fn(async () => [...(options.work ?? [workApproval])]),
     code: vi.fn(typeof code === "function" ? code : async () => code ?? [codeApproval]),
