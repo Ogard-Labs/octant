@@ -59,6 +59,7 @@ export function usePendingRequestRows(source: PendingRequestRowsSource | undefin
   readonly rows: ReadonlyArray<PendingRequestRowEntry> | undefined;
   /** Every other waiting ask of the surface's modes, oldest first. */
   readonly asks: ReadonlyArray<WaitingAsk>;
+  readonly offerLostInRestart: boolean;
   readonly answerAsk: (
     ask: WaitingAsk,
     answer: WaitingAskAnswer,
@@ -178,5 +179,12 @@ export function usePendingRequestRows(source: PendingRequestRowsSource | undefin
     },
     [askClients, refresh],
   );
-  return { rows, answer, defer, asks, answerAsk };
+  return {
+    rows,
+    answer,
+    defer,
+    asks,
+    answerAsk,
+    offerLostInRestart: read.status === "ready" && read.offerLostInRestart,
+  };
 }

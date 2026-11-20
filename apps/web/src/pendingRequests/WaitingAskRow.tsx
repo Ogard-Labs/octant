@@ -24,6 +24,8 @@ export interface WaitingAskRowProps {
   readonly onOpenThread: (ask: WaitingAsk) => void;
 }
 
+export const OFFER_RESTART_NOTICE = "A waiting offer ended when the host restarted.";
+
 /** The words of the two plain answers, as each ask's own card names them. */
 const ANSWER_LABELS: Readonly<
   Partial<Record<WaitingAsk["kind"], { readonly approve: string; readonly decline: string }>>
@@ -34,7 +36,7 @@ const ANSWER_LABELS: Readonly<
 
 /**
  * One ask a thread's agent raised outside its provider's approvals: an MCP
- * tool call, a Project memory or routine proposal, an image offer, a Browser
+ * tool call, a Project memory or routine proposal, a service offer, a Browser
  * approval or sign-in. The row names the thread and how long it has waited and
  * says what is asked. It offers the two plain answers only when the host says
  * the row carries the whole ask (`inPlace`) and this surface holds the ask's

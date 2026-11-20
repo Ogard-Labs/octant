@@ -57,12 +57,15 @@ export interface PendingRequestSources {
   readonly children: (reader: PendingRequestReader) => Promise<ReadonlyArray<PendingRequest>>;
   /**
    * Every other ask waiting on the person that this reader could answer: MCP
-   * tool approvals, Project memory and routine proposals, image offers, and
+   * tool approvals, Project memory and routine proposals, service offers, and
    * Browser approvals and sign-in cards, a host-run turn's among them. Each
    * comes from its holding service's own list for the reader, and is answered
    * through that service's own route.
    */
-  readonly asks?: (reader: PendingRequestReader) => ReadonlyArray<WaitingAsk>;
+  readonly asks?: (
+    reader: PendingRequestReader,
+  ) => ReadonlyArray<WaitingAsk> | Promise<ReadonlyArray<WaitingAsk>>;
+  readonly offerHostRun?: string;
 }
 
 /**
@@ -112,18 +115,20 @@ export class PendingRequestService {
     readerKind: PendingRequestReader["kind"] = "local-window",
   ): Promise<PendingRequestList> {
     const modes = enabledModes(this.#sources.readSettings());
-    const asks = (this.#sources.asks?.({ kind: readerKind, scopeId: windowId }) ?? [])
+    const reader = { kind: readerKind, scopeId: windowId };
+    const [work, code, children, waiting] = await Promise.all([
+      modes.includes("work") ? this.#sources.work(windowId) : [],
+      this.#sources.code(windowId),
+      this.#sources.children(reader),
+      this.#sources.asks?.(reader) ?? [],
+    ]);
+    const asks = waiting
       .filter((ask) => modes.includes(ask.mode))
       .toSorted(
         (left, right) =>
           left.requestedAt.localeCompare(right.requestedAt) ||
           left.askId.localeCompare(right.askId),
       );
-    const [work, code, children] = await Promise.all([
-      modes.includes("work") ? this.#sources.work(windowId) : [],
-      this.#sources.code(windowId),
-      this.#sources.children({ kind: readerKind, scopeId: windowId }),
-    ]);
     const chat = modes.includes("chat") ? this.#sources.chat() : [];
     const oldestFirst = [
       ...work,
@@ -160,6 +165,9 @@ export class PendingRequestService {
       truncated: oldestFirst.length > MAX_PENDING_REQUESTS,
       // Absent when nothing waits, so the list reads as it did before asks.
       ...(asks.length === 0 ? {} : { asks: asks.slice(0, MAX_PENDING_REQUESTS) }),
+      ...(this.#sources.offerHostRun === undefined
+        ? {}
+        : { offerHostRun: this.#sources.offerHostRun }),
     });
   }
 }

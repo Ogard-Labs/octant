@@ -434,7 +434,7 @@ export const MAX_WAITING_ASK_DETAIL_LENGTH = 4_000;
 /**
  * Which host service holds the ask, and so which of its own routes answers
  * it: an MCP or connector tool approval, a Project memory proposal, a routine
- * proposal or change request, an image generation or save offer, a Browser
+ * proposal or change request, a service offer, a Browser
  * site, upload, download or script approval, or the Browser sign-in card.
  */
 export const WaitingAskKind = Schema.Literal(
@@ -442,10 +442,15 @@ export const WaitingAskKind = Schema.Literal(
   "memory-proposal",
   "routine-proposal",
   "image-offer",
+  "service-offer",
   "browser-approval",
   "browser-sign-in",
 );
 export type WaitingAskKind = typeof WaitingAskKind.Type;
+
+/** Opt in to shared offer rows without breaking older clients' closed ask-kind list. */
+export const PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE =
+  "application/vnd.octant.service-offers+json";
 
 /**
  * An ask a thread's agent raised outside its provider's own approvals and
@@ -494,6 +499,7 @@ export const PendingRequestList = Schema.Struct({
   requests: Schema.Array(PendingRequest).pipe(Schema.maxItems(MAX_PENDING_REQUESTS)),
   truncated: Schema.Boolean,
   asks: Schema.optional(Schema.Array(WaitingAsk).pipe(Schema.maxItems(MAX_PENDING_REQUESTS))),
+  offerHostRun: Schema.optional(Schema.UUID),
 }).annotations(strict);
 export type PendingRequestList = typeof PendingRequestList.Type;
 

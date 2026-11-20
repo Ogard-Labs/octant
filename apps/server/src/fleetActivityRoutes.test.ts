@@ -8,6 +8,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
+import { decodeWaitingAsk, type WaitingAsk } from "@octant/contracts/pending-requests";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { contextKeyForProject, defaultShellSettings, defaultWindowWorkspace } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
@@ -27,6 +28,38 @@ const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000801");
 const projectId = decodeProjectId("00000000-0000-4000-8000-000000000901");
 const codeThread = "00000000-0000-4000-8000-000000000904";
+
+it("marks an offer's thread as needing you without listing the offer itself", async () => {
+  const offer = decodeWaitingAsk({
+    kind: "service-offer",
+    askId: "00000000-0000-4000-8000-000000000919",
+    mode: "code",
+    projectId,
+    threadId: codeThread,
+    threadTitle: "Fix the parser",
+    text: "Generate an image?",
+    requestedAt: "2026-10-06T08:03:00.000Z",
+  });
+  const { route } = fixture({
+    pending: [],
+    asks: [offer],
+    code: [{ threadId: codeThread, title: "Fix the parser", projectId }],
+  });
+  expect(await (await route(request()))?.json()).toEqual({
+    threads: [
+      {
+        mode: "code",
+        threadId: codeThread,
+        title: "Fix the parser",
+        projectName: "Reports",
+        state: "needs-you",
+        activitySource: "session",
+        since: offer.requestedAt,
+      },
+    ],
+    truncated: false,
+  });
+});
 
 const codeApproval = decodePendingRequest({
   mode: "code",
@@ -211,7 +244,7 @@ describe("fleet activity route", () => {
         since: "2026-10-06T08:04:00.000Z",
       },
     ]);
-    expect(sources.pending).toHaveBeenCalledExactlyOnceWith(windowId);
+    expect(sources.pending).toHaveBeenCalledExactlyOnceWith(windowId, "local-window");
     expect(sources.childPending).toHaveBeenNthCalledWith(1, boundWindow);
     expect(sources.childPending).toHaveBeenNthCalledWith(2, otherWindow);
     expect(sources.codePending).not.toHaveBeenCalled();
@@ -344,6 +377,39 @@ describe("fleet activity route", () => {
     expect(sources.pending).not.toHaveBeenCalled();
   });
 
+  it("does not include other windows' bound waits for a device the person paired", async () => {
+    const bound = decodeWindowId("00000000-0000-4000-8000-000000000802");
+    const { route, sources } = fixture({
+      pending: [],
+      boundCodeWindows: [bound],
+      codePending: async () => [codeApproval],
+      boundProjectWindows: [bound],
+      childPending: async () => [waitingChild("child-approval", "2026-10-06T08:02:00.000Z")],
+    });
+    const remote = new Request("http://127.0.0.1/api/fleet-activity");
+    const deviceId = "22222222-2222-4222-8222-222222222222" as DeviceId;
+    const scopeId = decodeWindowId(deviceId);
+    bindPrincipalRouteContext(remote, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
+        deviceId,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
+        admittedBy: "host-person",
+      }),
+      scopeId,
+    });
+    const response = await route(remote);
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ threads: [], truncated: false });
+    expect(sources.pending).toHaveBeenCalledExactlyOnceWith(scopeId, "person-paired-device");
+    expect(sources.codePending).not.toHaveBeenCalled();
+    expect(sources.childPending).not.toHaveBeenCalled();
+  });
+
   it("refuses a read that is not on loopback or that names a parameter", async () => {
     const { route } = fixture();
     const remoteHost = await route(
@@ -380,6 +446,7 @@ function fixture(
   options: {
     readonly settings?: ProductSurfaceSettings;
     readonly pending?: ReadonlyArray<PendingRequest>;
+    readonly asks?: ReadonlyArray<WaitingAsk>;
     readonly chat?: ReadonlyArray<FleetRunningThread>;
     readonly code?:
       | ReadonlyArray<FleetRunningThread>
@@ -398,6 +465,7 @@ function fixture(
     pending: vi.fn(async () => ({
       requests: [...(options.pending ?? [workApproval, codeApproval])],
       truncated: false,
+      ...(options.asks === undefined ? {} : { asks: options.asks }),
     })),
     chat: vi.fn(() => options.chat ?? []),
     work: vi.fn(async () => []),

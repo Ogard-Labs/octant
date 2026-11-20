@@ -19,7 +19,7 @@ export interface LocalWindowReadRouteOptions<T> {
   readonly noun: string;
   /** The plural that opens an unavailable sentence, such as "Pending requests". */
   readonly plural: string;
-  readonly read: (windowId: WindowId, reader: PrincipalKind) => Promise<T>;
+  readonly read: (windowId: WindowId, reader: PrincipalKind, request: Request) => Promise<T>;
   readonly decodeFailure: (failure: LocalWindowReadFailure) => unknown;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
@@ -98,7 +98,7 @@ export function createLocalWindowReadRoute<T>(options: LocalWindowReadRouteOptio
 
     let body: T;
     try {
-      body = await options.read(windowId, reader);
+      body = await options.read(windowId, reader, request);
     } catch {
       return fail(
         { code: "unavailable", message: `${options.plural} are unavailable.` },

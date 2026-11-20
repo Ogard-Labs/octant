@@ -4,14 +4,25 @@ import {
   SERVICE_OFFERS_PATH,
   ServiceOfferDecisionResult,
   ServiceOffersResponse,
+  type ImageGenerationGenerateOffer,
+  type ImageGenerationProfileView,
   type ServiceOffer,
   type ServiceOfferDecision,
 } from "@octant/contracts";
+import type { MobileRemoteTransport } from "./mobileInboxClient";
 
 export interface ServiceOfferClient {
   offers(scope: Pick<ServiceOffer, "threadKind" | "scopeId">): Promise<ServiceOffersResponse>;
   decide(decision: ServiceOfferDecision): Promise<ServiceOfferDecisionResult>;
 }
+
+type OfferRequest = {
+  readonly method: "GET" | "POST";
+  readonly path: string;
+  readonly query?: string;
+  readonly body?: string;
+  readonly contentType?: string;
+};
 
 export function createServiceOfferClient(options: {
   readonly baseUrl: string;
@@ -26,30 +37,78 @@ export function createServiceOfferClient(options: {
     throw new Error("Service offers require a loopback server URL.");
   }
   const headers = { "x-octant-window-capability": options.windowCapability };
+  return serviceOfferClient(({ method, path, query, body }) =>
+    options.fetch(new URL(`${path}${query ?? ""}`, baseUrl).toString(), {
+      method,
+      headers: body === undefined ? headers : { ...headers, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body }),
+    }),
+  );
+}
+
+export function createMobileServiceOfferClient(
+  transport: MobileRemoteTransport,
+): ServiceOfferClient {
+  return serviceOfferClient((request) => transport.authenticatedFetch(request));
+}
+
+function serviceOfferClient(
+  send: (request: OfferRequest) => Promise<Response>,
+): ServiceOfferClient {
   const decodeOffers = decodeHostAnswer(ServiceOffersResponse);
   const decodeResult = decodeHostAnswer(ServiceOfferDecisionResult);
   return {
     async offers({ threadKind, scopeId }) {
-      const url = new URL(SERVICE_OFFERS_PATH, baseUrl);
-      url.searchParams.set("threadKind", threadKind);
-      url.searchParams.set("scopeId", String(scopeId));
-      return decodeOffers(await request(url, { method: "GET", headers }));
+      return decodeOffers(
+        await request({
+          method: "GET",
+          path: SERVICE_OFFERS_PATH,
+          query: `?${new URLSearchParams({ threadKind, scopeId: String(scopeId) }).toString()}`,
+        }),
+      );
     },
     async decide(decision) {
-      const url = new URL(SERVICE_OFFERS_DECIDE_PATH, baseUrl);
       return decodeResult(
-        await request(url, {
+        await request({
           method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
+          path: SERVICE_OFFERS_DECIDE_PATH,
+          contentType: "application/json",
           body: JSON.stringify(decision),
         }),
       );
     },
   };
 
-  async function request(url: URL, init: RequestInit): Promise<unknown> {
-    const response = await options.fetch(url.toString(), init);
+  async function request(input: Parameters<typeof send>[0]): Promise<unknown> {
+    const response = await send(input);
     if (!response.ok) throw new Error(`Offer request failed (${String(response.status)}).`);
     return response.json();
   }
+}
+
+/** The agent's suggestion first, followed by the models the host has listed. */
+export function imageOfferModelChoices(
+  profiles: ReadonlyArray<ImageGenerationProfileView>,
+  suggested: ImageGenerationGenerateOffer["suggested"],
+) {
+  const choices = profiles.flatMap((profile) =>
+    profile.modelAllowlist.map((modelId) => {
+      const source = profile.sourceLabels?.find(
+        (candidate) => String(candidate.modelId) === String(modelId),
+      )?.label;
+      return {
+        id: `${String(profile.instanceId)}::${String(modelId)}`,
+        label: `${profile.displayName} · ${source ?? String(modelId)}`,
+        profileInstanceId: profile.instanceId,
+        modelId,
+      };
+    }),
+  );
+  const suggestedId = `${String(suggested.profileInstanceId)}::${String(suggested.modelId)}`;
+  const first = choices.find((choice) => choice.id === suggestedId);
+  // The profile list can lag; the host validates the choice again before taking it.
+  return [
+    first ?? { ...suggested, id: suggestedId, label: String(suggested.modelId) },
+    ...choices.filter((choice) => choice.id !== suggestedId),
+  ];
 }
