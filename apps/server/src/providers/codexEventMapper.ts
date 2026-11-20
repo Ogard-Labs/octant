@@ -1212,6 +1212,9 @@ function mapNotification(
       return results;
     }
     case "thread/tokenUsage/updated": {
+      // The turn's terminal event has gone out, and the ledger keeps the last
+      // report the turn sent before it; a later one has no turn to join.
+      if (context.terminal) return [{ kind: "ignored" }];
       if (message.params.threadId !== context.threadId) return correlationFailure();
       // Usage can arrive after a resumed thread has advanced to its next turn.
       // Stale telemetry neither belongs in the new totals nor fails that turn.
@@ -1429,13 +1432,16 @@ export function mapCodexMessage(
   message: CodexServerMessage,
 ): ReadonlyArray<CodexMappedMessage> {
   // Account usage is not turn activity: it may land after the turn ended
-  // and still describes the account truthfully.
+  // and still describes the account truthfully. A token report is telemetry
+  // too, not activity; one that lands late is ignored below rather than
+  // failing a turn that already ended.
   if (
     context.terminal &&
     (message.kind === "request" ||
       (message.kind === "notification" &&
         message.method !== "turn/completed" &&
-        message.method !== "account/rateLimits/updated"))
+        message.method !== "account/rateLimits/updated" &&
+        message.method !== "thread/tokenUsage/updated"))
   ) {
     return protocolFailure("Provider emitted runtime activity after the terminal event.");
   }
