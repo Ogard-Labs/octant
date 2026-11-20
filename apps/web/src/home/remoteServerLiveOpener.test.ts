@@ -53,7 +53,13 @@ describe("opening another computer's server live from this window", () => {
   it("asks the host for the grant, then has the desktop show it, and signs the page's requests", async () => {
     const desktop = bridge();
     const opener = createRemoteServerLiveOpener(desktop, async () => granted());
-    expect(await opener.openLive(HOST, SERVICE, "octant-browser")).toEqual({ kind: "opened" });
+    expect(
+      await opener.openLive(
+        HOST,
+        { surface: "running-services", listenerId: SERVICE.listenerId },
+        "octant-browser",
+      ),
+    ).toEqual({ kind: "opened" });
     expect(desktop.openRemoteServerPage).toHaveBeenCalledWith({
       hostId: HOST.hostId,
       hostName: "Studio Mac",
@@ -77,9 +83,13 @@ describe("opening another computer's server live from this window", () => {
     const hostFetch = vi.fn<typeof globalThis.fetch>(async () => granted());
     const opener = createRemoteServerLiveOpener(desktop, pageFetch);
 
-    expect(await opener.openLive({ ...HOST, fetch: hostFetch }, SERVICE, "octant-browser")).toEqual(
-      { kind: "opened" },
-    );
+    expect(
+      await opener.openLive(
+        { ...HOST, fetch: hostFetch },
+        { surface: "running-services", listenerId: SERVICE.listenerId },
+        "octant-browser",
+      ),
+    ).toEqual({ kind: "opened" });
 
     expect(hostFetch).toHaveBeenCalledOnce();
     expect(String(hostFetch.mock.calls[0]?.[0])).toBe(`${HOST.origin}/api/server-proxy/grants`);
@@ -98,7 +108,13 @@ describe("opening another computer's server live from this window", () => {
         },
       }),
     );
-    expect(await opener.openLive(HOST, SERVICE, "default-browser")).toEqual({
+    expect(
+      await opener.openLive(
+        HOST,
+        { surface: "running-services", listenerId: SERVICE.listenerId },
+        "default-browser",
+      ),
+    ).toEqual({
       kind: "refused",
       message: "This device can't open servers in that thread.",
     });
@@ -108,7 +124,11 @@ describe("opening another computer's server live from this window", () => {
   it("signs nothing for a host it holds no grant from, or after it is disposed", async () => {
     const desktop = bridge();
     const opener = createRemoteServerLiveOpener(desktop, async () => granted());
-    await opener.openLive(HOST, SERVICE, "octant-browser");
+    await opener.openLive(
+      HOST,
+      { surface: "running-services", listenerId: SERVICE.listenerId },
+      "octant-browser",
+    );
     const request = {
       hostId: "99999999-9999-4999-8999-999999999999",
       grantId: GRANT_ID,

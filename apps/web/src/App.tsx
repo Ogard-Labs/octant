@@ -88,6 +88,7 @@ import {
   localHostDisplayName,
   readPairingFragment,
   type AgentProfileClient,
+  type RemoteSessionBridge,
   type AutomationClient,
   type OwnerUnlockNotGiven,
 } from "@octant/client-runtime";
@@ -168,6 +169,7 @@ import type {
   CodeProjectPullRequestRow,
   LocalServerOpenTarget,
   RunningService,
+  RemoteServerGrantSource,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import {
@@ -2378,14 +2380,27 @@ function LaunchedShell(
         : createPairedComputerFetch({ requestPairedComputer }),
     [requestPairedComputer],
   );
-  const openRunningServiceLive = useMemo(() => {
-    const host = runningServicesRemoteHost;
+  // Opens one server another computer lists, in Octant's own window or the
+  // default browser: the start screen's Running services row, or a row of a
+  // thread on that computer. The host grants it again each time, and this
+  // device's key proves who asked.
+  const openPairedComputerServer = useMemo(() => {
     const opener = remoteServerLiveOpener;
     const registry = federation?.registry;
     const deviceKeyStore = federation?.deviceKeyStore;
-    if (host === undefined || host.status !== "ready" || opener === undefined) return undefined;
-    if (registry === undefined || deviceKeyStore === undefined) return undefined;
-    return async (service: RunningService, mode: RemoteOpenMode): Promise<RemoteOpenOutcome> => {
+    if (opener === undefined || registry === undefined || deviceKeyStore === undefined) {
+      return undefined;
+    }
+    return async (
+      host: {
+        readonly hostId: string;
+        readonly hostName: string;
+        readonly origin: string;
+        readonly bridge: RemoteSessionBridge;
+      },
+      source: RemoteServerGrantSource,
+      mode: RemoteOpenMode,
+    ): Promise<RemoteOpenOutcome> => {
       const credential = (await registry.get(host.hostId))?.credential;
       const connection = host.bridge.connection();
       if (credential === undefined || connection === undefined) {
@@ -2409,11 +2424,23 @@ function LaunchedShell(
             ? {}
             : { fetch: pairedComputerFetch }),
         },
-        service,
+        source,
         mode,
       );
     };
-  }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
+  }, [remoteServerLiveOpener, federation, pairedComputerFetch]);
+  const openRunningServiceLive = useMemo(() => {
+    const host = runningServicesRemoteHost;
+    if (host === undefined || host.status !== "ready" || openPairedComputerServer === undefined) {
+      return undefined;
+    }
+    return (service: RunningService, mode: RemoteOpenMode) =>
+      openPairedComputerServer(
+        host,
+        { surface: "running-services", listenerId: service.listenerId },
+        mode,
+      );
+  }, [runningServicesRemoteHost, openPairedComputerServer]);
   useEffect(() => {
     if (hosts.length === 0) return;
     const result = preselectCreateHost({
@@ -2450,6 +2477,29 @@ function LaunchedShell(
     pairedComputerCodeSlot?.kind === "remote" && pairedComputerCodeSlot.state.kind === "ready"
       ? pairedComputerCodeSlot.bridge
       : undefined;
+  // A thread's servers on that computer open through a grant for that thread's
+  // listing, in Octant's own window or the default browser.
+  const pairedComputerOrigin =
+    pairedComputerCodeSlot?.kind === "remote" ? pairedComputerCodeSlot.origin : undefined;
+  const pairedComputerName =
+    pairedComputerCodeSlot?.kind === "remote" ? pairedComputerCodeSlot.displayName : undefined;
+  const pairedComputerServerOpener =
+    openPairedComputerServer === undefined ||
+    pairedComputerCodeBridge === undefined ||
+    pairedComputerOrigin === undefined ||
+    pairedComputerName === undefined
+      ? undefined
+      : (source: RemoteServerGrantSource, mode: RemoteOpenMode) =>
+          openPairedComputerServer(
+            {
+              hostId: String(createHostId),
+              hostName: pairedComputerName,
+              origin: pairedComputerOrigin,
+              bridge: pairedComputerCodeBridge,
+            },
+            source,
+            mode,
+          );
   const renderPairedComputerCodeStart =
     pairedComputerCodeBridge === undefined
       ? undefined
@@ -2461,6 +2511,9 @@ function LaunchedShell(
             selectedHostId={createHostId}
             onSelectHost={handleSelectCreateHost}
             viewScope={createHostViewScope}
+            {...(pairedComputerServerOpener === undefined
+              ? {}
+              : { openServer: pairedComputerServerOpener })}
           />
         );
   function refuseUnlessCreatableDestination(input: {

@@ -1,10 +1,13 @@
 import {
+  createLocalServerClient,
+  createRemoteProductFetch,
   canExecuteRemoteProductMutation,
   readRemoteSessionStanding,
   RESTRICTED_REMOTE_SESSION,
   type RemoteSessionBridge,
   type RemoteSessionStanding,
 } from "@octant/client-runtime";
+import type { CodeThread } from "@octant/contracts/code";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import { buildModelPickerGroups, type CreateHostViewScope } from "@octant/domain";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
@@ -12,6 +15,9 @@ import { useProviderController } from "../providers/useProviderController";
 import { RemoteCodeSurface } from "../remote/RemoteWorkspace";
 import { HostSelector } from "../shell/HostSelector";
 import { createPairedComputerCodeClients } from "./pairedComputerCodeClients";
+import { PairedComputerThreadServers } from "./PairedComputerThreadServers";
+import type { RemoteServerGrantSource } from "@octant/contracts";
+import type { RemoteOpenMode, RemoteOpenOutcome } from "../home/runningServices";
 
 export interface PairedComputerCodeSurfaceProps {
   /** The paired computer's session, already ready. */
@@ -20,6 +26,14 @@ export interface PairedComputerCodeSurfaceProps {
   readonly selectedHostId: HostId;
   readonly onSelectHost: (hostId: HostId) => void;
   readonly viewScope?: CreateHostViewScope;
+  /**
+   * Opens one of a thread's servers on that computer, in Octant's own window or
+   * the default browser. Absent where this window cannot show such a page.
+   */
+  readonly openServer?: (
+    source: RemoteServerGrantSource,
+    mode: RemoteOpenMode,
+  ) => Promise<RemoteOpenOutcome>;
 }
 
 /**
@@ -32,6 +46,20 @@ export interface PairedComputerCodeSurfaceProps {
 export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps) {
   const { bridge } = props;
   const clients = useMemo(() => createPairedComputerCodeClients(bridge), [bridge]);
+  const localServers = useMemo(
+    () =>
+      createLocalServerClient({
+        // The session owns the destination; the base URL only shapes the path.
+        baseUrl: "http://127.0.0.1",
+        fetch: createRemoteProductFetch({ bridge }),
+        windowCapability: "",
+      }),
+    [bridge],
+  );
+  const hostName =
+    props.hosts.find((host) => String(host.hostId) === String(props.selectedHostId))?.displayName ??
+    "that computer";
+  const { openServer } = props;
   const state = useSyncExternalStore(
     (onChange) => bridge.subscribe(onChange),
     () => bridge.getState(),
@@ -92,6 +120,19 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
         connected={connected}
         providerGroups={providerGroups}
         followsContinuationLink={false}
+        {...(openServer === undefined
+          ? {}
+          : {
+              renderThreadExtras: (thread: CodeThread) => (
+                <PairedComputerThreadServers
+                  client={localServers}
+                  hostName={hostName}
+                  open={openServer}
+                  projectId={thread.projectId}
+                  threadId={thread.id}
+                />
+              ),
+            })}
         onNavigate={() => undefined}
         onOpenCanvas={() => undefined}
       />
