@@ -62,6 +62,7 @@ import {
   claudeWithheldTools,
   CLAUDE_LEVEL_CHANGE_REFUSAL,
   CLAUDE_WAKEUP_UNAVAILABLE,
+  claudeSessionMessages,
   makeClaudeDriver,
 } from "./claudeDriver";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
@@ -10120,5 +10121,34 @@ describe("Claude artifacts outside Strict", () => {
       publishes: false,
     });
     expect(claudeArtifactCall({ type_url: "not a url" })).toEqual({ publishes: true });
+  });
+});
+
+describe("Claude native session history", () => {
+  it("imports the person's text and the agent's replies with their tool calls named, and leaves tool results and thinking out", () => {
+    expect(
+      claudeSessionMessages([
+        { type: "user", message: { role: "user", content: "Add a retry" } },
+        {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "plan" },
+              { type: "text", text: "Adding it." },
+              { type: "tool_use", id: "t1", name: "Edit", input: {} },
+            ],
+          },
+        },
+        {
+          type: "user",
+          message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1" }] },
+        },
+        { type: "system", message: { content: "compacted" } },
+      ]),
+    ).toEqual([
+      { role: "person", text: "Add a retry" },
+      { role: "agent", text: "Adding it.", tools: ["Edit"] },
+    ]);
   });
 });

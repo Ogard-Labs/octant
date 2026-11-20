@@ -142,6 +142,18 @@ export interface OpenCodeClientPort {
       >)
     | undefined;
   /**
+   * A session's messages, oldest first, each with its role and its parts as
+   * OpenCode keeps them. Absent on a runtime whose message route was not
+   * read (OpenCode 2's message shape is not one Octant reads).
+   */
+  readonly sessionMessages?:
+    | ((
+        sessionId: string,
+      ) => Promise<
+        ReadonlyArray<{ readonly role: string; readonly parts: ReadonlyArray<unknown> }>
+      >)
+    | undefined;
+  /**
    * OpenCode's own fork: a new session holding the source's history before
    * `before`, or all of it when `before` is absent. The source is not changed.
    */
@@ -1556,6 +1568,14 @@ export function makeOfficialOpenCodeClient(
       }
       return { status: "missing" as const };
     },
+    ...(beta
+      ? {}
+      : {
+          sessionMessages: async (sessionId: string) =>
+            resultData(
+              await client.session.messages({ sessionID: sessionId }, { throwOnError: true }),
+            ).map((message) => ({ role: message.info.role, parts: message.parts })),
+        }),
     forkSession: async (sessionId, before) => {
       if (!beta)
         return resultData(

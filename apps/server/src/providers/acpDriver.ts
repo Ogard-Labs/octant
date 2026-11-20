@@ -3,6 +3,8 @@ import { compactAcpConversation } from "./acpCompaction";
 import {
   readAcpSessionPages,
   makeAcpNativeSessions,
+  MAX_ACP_REPLAYED_UPDATES,
+  type AcpSessionHistoryReader,
   type AcpSessionLister,
 } from "./acpNativeSessions";
 import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
@@ -998,6 +1000,40 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
         ),
       ),
     );
+  // A session's earlier conversation, read by loading it in a readiness-check
+  // process of its own: `session/load` replays the history as session
+  // updates before it answers (the ACP session setup reference), and the
+  // process closes with the read, so nothing runs a turn in it.
+  const readAgentSessionHistory: AcpSessionHistoryReader = (projectRoot, sessionId) =>
+    Effect.runPromise(
+      Effect.scoped(
+        managedHomeClient.pipe(
+          Effect.flatMap(({ connection, client }) =>
+            Effect.tryPromise({
+              try: async () => {
+                if (connection.initialized.agentCapabilities.loadSession !== true)
+                  return "unsupported" as const;
+                const replayed: Array<Readonly<Record<string, unknown>>> = [];
+                const stop = client.onNotification((notification) => {
+                  if (
+                    notification.params.sessionId === sessionId &&
+                    replayed.length < MAX_ACP_REPLAYED_UPDATES
+                  )
+                    replayed.push(notification.params.update);
+                });
+                try {
+                  await client.loadSession(sessionId, projectRoot);
+                } finally {
+                  stop();
+                }
+                return replayed;
+              },
+              catch: (error) => providerFailure(profile, error),
+            }),
+          ),
+        ),
+      ),
+    );
   const sessionOwnership = options.sessionOwnership;
 
   return {
@@ -1011,6 +1047,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
             displayName: name,
             heldSessions: () => sessionOwnership.held(profile.kind),
             listSessions: listAgentSessions,
+            readHistory: readAgentSessionHistory,
           }),
         }
       : {}),

@@ -2165,9 +2165,10 @@ const ResultEvent = Schema.Struct({
  * The person started this thread from a provider session begun outside
  * Octant, on the same account and folder. Journaled ahead of the
  * `provider-session-ready` that records its resume cursor, in an operation
- * of its own that holds no turn. Only the runtime's own session id is kept,
- * never its title or history. Absent from every thread journaled before
- * adoption existed.
+ * of its own that holds no turn. Only the runtime's own session id is kept
+ * here, never its title; the session's earlier conversation is journaled in
+ * the same unit as a `native-session.history-imported@1` record of its own.
+ * Absent from every thread journaled before adoption existed.
  */
 const NativeSessionAdoptedEvent = Schema.Struct({
   kind: Schema.Literal("native-session-adopted"),

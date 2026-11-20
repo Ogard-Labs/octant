@@ -167,6 +167,8 @@ import {
   NavigatorAssistantThreadBound,
   OllamaHistoryRecorded,
   ClaudeResumeIdentityRecorded,
+  NATIVE_SESSION_HISTORY_IMPORTED_EVENT,
+  NativeSessionHistoryImported,
   ProjectBindingRelinked,
   ProjectCreated,
   ProjectLifecycleChanged,
@@ -660,6 +662,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
+    .register(NATIVE_SESSION_HISTORY_IMPORTED_EVENT, 1, NativeSessionHistoryImported)
     .register("context.manifest-created@1", 1, ContextManifestCreated)
     .register("context.overrides-updated@1", 1, ContextOverridesUpdated)
     .register("context.plan-created@1", 1, ContextPlanCreated)
