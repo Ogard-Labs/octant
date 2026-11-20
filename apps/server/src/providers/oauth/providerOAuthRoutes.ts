@@ -170,7 +170,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
     if (command === undefined) return json({ kind: "refused", reason: "invalid" }, 400, origin);
     // A cloud portal sign-in begins only from the host's terminal; Settings
     // reads whether one is held, signs it out, and connects the person's own
-    // AWS profile or key pair at a window on this host.
+    // AWS profile or key pair from a local window or a person-paired device.
     if (command.descriptorId === AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.descriptorId) {
       try {
         return json(

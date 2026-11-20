@@ -294,8 +294,9 @@ when the endpoint is signed out, the detail page's Sign-in section also offers
 "Use my AWS profile" (a profile name and Connect profile) and long-lived
 access keys (Access key ID, Secret access key and Connect keys) beneath a
 warning that such keys work until someone revokes them and that a profile
-with single sign-on is preferred. Only a window on this host connects
-either, after the sign-in terms were accepted once. The host's credential
+with single sign-on is preferred. A local window or a device the host's own
+person paired connects either (hub-introduced and restricted remote devices
+are refused), after the sign-in terms were accepted once. The host's credential
 broker reads the profile in place on each renewal as the AWS CLI does
 (shared-file keys, the token `aws sso login` cached, `credential_process`)
 and keeps the key pair; the server stores only the pointer, the journal

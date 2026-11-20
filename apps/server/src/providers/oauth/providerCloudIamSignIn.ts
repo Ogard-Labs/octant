@@ -307,10 +307,10 @@ export async function answerCloudIamSettingsCommand(input: {
 
 /**
  * Connect the person's own AWS profile, or a long-lived key pair they entered,
- * in place of the portal sign-in. Only a window on this host connects one, as
- * only the host begins a portal sign-in; the profile is read and the keys are
- * kept by the broker alone, so the server stores only the pointer and the
- * journal names only the reference.
+ * in place of the portal sign-in. A local window or a device the host's own
+ * person paired connects one (hub-introduced and restricted remote devices are
+ * refused); the profile is read and the keys are kept by the broker alone, so
+ * the server stores only the pointer and the journal names only the reference.
  */
 async function connectPersonCloudSource(input: {
   readonly dependencies: CloudIamSignInDependencies | undefined;
