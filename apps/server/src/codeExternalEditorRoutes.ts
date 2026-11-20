@@ -1,6 +1,32 @@
+import { lstat, realpath } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { CodeCheckoutIdentity, CodeFileReference, CodeThread } from "@octant/contracts";
 import { admitDesktopBroker, admitsWindow } from "./desktopBrokerAdmission";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
+
+/**
+ * Resolves a candidate file inside an authorized root to its canonical host
+ * path, failing closed if traversal, a symlink, or a non-file target escapes
+ * the root.
+ */
+export async function resolveConfinedDesktopFilePath(input: {
+  readonly rootPath: string;
+  readonly relativePath: string;
+  readonly isConfined: (root: string, candidate: string) => boolean;
+}): Promise<string | undefined> {
+  try {
+    const canonicalRoot = await realpath(input.rootPath);
+    const candidate = resolve(canonicalRoot, input.relativePath);
+    if (!input.isConfined(canonicalRoot, candidate)) return undefined;
+    const file = await realpath(candidate);
+    if (!input.isConfined(canonicalRoot, file)) return undefined;
+    const metadata = await lstat(file);
+    if (!metadata.isFile()) return undefined;
+    return file;
+  } catch {
+    return undefined;
+  }
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

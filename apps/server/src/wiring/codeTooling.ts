@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { lstat, realpath, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import {
   decodeBrowserThreadId,
   decodeChatThreadId,
@@ -77,6 +77,7 @@ import {
   createCodeExternalEditorRouteHandler,
   isCodeCheckoutOpenTargetCurrent,
   isCodeExternalEditorTargetCurrent,
+  resolveConfinedDesktopFilePath,
 } from "../codeExternalEditorRoutes";
 import { createCodeOperationApprovalRouteHandler } from "../codeOperationApprovalRoutes";
 import { suggestProjectActions } from "../code/projectActionSuggestions";
@@ -104,7 +105,7 @@ import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { WorkspaceWiring } from "./workspace";
 import { stableCodeFileId, type CodeWiring } from "./code";
-import { withProjectExtraFolders } from "../code/codeProjectFolderRoot";
+import { pathInResolvedRoot, withProjectExtraFolders } from "../code/codeProjectFolderRoot";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessStateWiring } from "./harnessState";
 import { serverCodeCheckout, serverThreadOf } from "../serverProjects/serverProjectThreads";
@@ -1147,24 +1148,52 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             : persistence.readCodeSettings()?.settings.externalEditor;
         if (input.defaultApplication !== true && editor === undefined) return undefined;
         const windowId = decodeWindowId(input.windowId);
-        const thread = persistence.readCodeThread(decodeCodeThreadId(input.threadId));
-        const checkout = persistence.readCodeCheckout(decodeCodeCheckoutId(input.checkoutId));
-        const reference = persistence.readCodeFileReference(decodeCodeFileId(input.fileId));
-        if (
-          thread === undefined ||
-          checkout === undefined ||
-          reference === undefined ||
-          !isCodeExternalEditorTargetCurrent({ thread, checkout, reference })
-        ) {
-          return undefined;
-        }
+        const threadId = decodeCodeThreadId(input.threadId);
+        const checkoutId = decodeCodeCheckoutId(input.checkoutId);
+        const fileId = decodeCodeFileId(input.fileId);
         try {
-          const relativePath = reference.relativePath;
-          if (relativePath === undefined) return undefined;
-          const root = await roots.resolve(windowId, thread, checkout, relativePath);
-          if (root === undefined || root.fileId !== reference.id) return undefined;
-          const file = await realpath(resolve(root.rootPath, relativePath));
-          if (!pathIsProjectConfined(root.rootPath, file)) return undefined;
+          let target: { readonly rootPath: string; readonly relativePath: string } | undefined;
+          if (routeCodeService.resolveDesktopFileTarget !== undefined) {
+            target = await routeCodeService.resolveDesktopFileTarget(windowId, {
+              threadId,
+              checkoutId,
+              fileId,
+            });
+          } else {
+            const thread = persistence.readCodeThread(threadId);
+            const checkout = persistence.readCodeCheckout(checkoutId);
+            const reference = persistence.readCodeFileReference(fileId);
+            if (
+              thread === undefined ||
+              checkout === undefined ||
+              checkout.kind === "remote-root" ||
+              reference === undefined ||
+              !isCodeExternalEditorTargetCurrent({ thread, checkout, reference }) ||
+              reference.relativePath === undefined
+            ) {
+              return undefined;
+            }
+            const root = await resolveRootWithExtraFolders(
+              windowId,
+              thread,
+              checkout,
+              reference.relativePath,
+            );
+            if (root === undefined || String(root.fileId) !== String(reference.id)) {
+              return undefined;
+            }
+            target = {
+              rootPath: root.rootPath,
+              relativePath: pathInResolvedRoot(root, reference.relativePath),
+            };
+          }
+          if (target === undefined) return undefined;
+          const file = await resolveConfinedDesktopFilePath({
+            rootPath: target.rootPath,
+            relativePath: target.relativePath,
+            isConfined: pathIsProjectConfined,
+          });
+          if (file === undefined) return undefined;
           return editor === undefined ? { file } : { file, editor };
         } catch {
           return undefined;
