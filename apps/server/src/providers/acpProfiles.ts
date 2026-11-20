@@ -268,6 +268,18 @@ export interface AcpProviderProfile {
   /** What a turn the agent ends with `refusal` says. */
   readonly refusalMessage?: string;
   /**
+   * A prompt that opens with `/` is the agent's own command, which it runs
+   * only from the start of the prompt: the command goes first and Octant's
+   * context in the following text block.
+   */
+  readonly commandLeadsPrompt?: true;
+  /**
+   * Octant does not offer the agent its `fs/write_text_file`: offered it, the
+   * agent rewrites whole files through it instead of making its own edits,
+   * which its own edit approvals already ask for.
+   */
+  readonly withholdsClientWrites?: true;
+  /**
    * The agent answers a mode it does not offer with success and keeps its
    * previous mode, so a renamed or dropped mode would leave a turn running
    * under whatever mode the session already had. Octant then refuses a mode
@@ -1783,6 +1795,8 @@ const antigravityProfile: AcpProviderProfile = {
   // Each launch unpacks the CLI again before it answers, so a cold start per
   // turn costs far more than for any other agent; other clients keep it open.
   retainsSessions: true,
+  commandLeadsPrompt: true,
+  withholdsClientWrites: true,
   // The CLI ends a turn with `refusal` when the account's quota is used up.
   refusalMessage:
     "Google Antigravity stopped: your account's usage limit may be reached. Check your plan, then retry.",

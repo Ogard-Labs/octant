@@ -48,6 +48,7 @@ import { ACP_CLIENT_TERMINAL_TOOL_NAMES, ACP_CLIENT_TOOL_NAMES } from "@octant/p
 import {
   attachmentMediaTypeToModality,
   rejectUnsupportedChatTurn,
+  renderProviderContextSections,
   renderProviderTurnPrompt,
   textOnlyInputModalities,
   unsupportedChatCapabilities,
@@ -114,7 +115,7 @@ export interface AcpClientPort {
   readonly closeSession: (sessionId: string) => Promise<void>;
   readonly prompt: (
     sessionId: string,
-    prompt: string,
+    prompt: string | ReadonlyArray<string>,
     attachments?: ReadonlyArray<AcpPromptAttachment>,
   ) => Promise<AcpPromptResult>;
   readonly setConfigOption: (
@@ -1565,7 +1566,9 @@ function makeConnection(
     }> => {
       const clientCapabilities = {
         readTextFile: tools.some((tool) => tool.name === ACP_CLIENT_TOOL_NAMES.readTextFile),
-        writeTextFile: tools.some((tool) => tool.name === ACP_CLIENT_TOOL_NAMES.writeTextFile),
+        writeTextFile:
+          profile.withholdsClientWrites !== true &&
+          tools.some((tool) => tool.name === ACP_CLIENT_TOOL_NAMES.writeTextFile),
         terminal: ACP_CLIENT_TERMINAL_TOOL_NAMES.every((name) =>
           tools.some((tool) => tool.name === name),
         ),
@@ -2374,6 +2377,16 @@ function makeConnection(
             }).pipe(
               Effect.flatMap(() => {
                 const prompt = renderProviderTurnPrompt(input);
+                // An agent command must open the prompt to run: the command
+                // goes as its own first text block and Octant's context as
+                // the next, instead of the command following the context.
+                const promptBlocks =
+                  profile.commandLeadsPrompt === true &&
+                  input.prompt.trimStart().startsWith("/") &&
+                  input.context !== undefined &&
+                  input.context.length > 0
+                    ? [input.prompt, renderProviderContextSections(input.context)]
+                    : prompt;
                 // An agent with a reviewed inventory runs only a command on
                 // that inventory, and one its session listed once it has
                 // listed any, so an unreviewed command cannot run. It does so
@@ -2423,7 +2436,7 @@ function makeConnection(
                 if (state.runtime.usage !== undefined) beginAcpUsageTurn(state.runtime.usage);
                 state.promptActive = true;
                 void state.client
-                  .prompt(state.sourceSessionId, prompt, attachments)
+                  .prompt(state.sourceSessionId, promptBlocks, attachments)
                   .then((result) => {
                     state.promptActive = false;
                     void cancelForms(state);

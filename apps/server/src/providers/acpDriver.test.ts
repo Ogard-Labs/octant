@@ -4489,6 +4489,60 @@ describe("an added ACP agent's model selection", () => {
   });
 });
 
+it("offers Google Antigravity no client file writes, while still offering reads and the terminal", async () => {
+  const nativeTools = Object.values(ACP_CLIENT_TOOL_NAMES).map((name) => ({
+    name,
+    inputSchema: { type: "object" },
+  }));
+  const { driver, starts } = fixture(acpProviderProfiles.antigravity, {
+    runtimeVersion: "1.5.12",
+  });
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+        yield* connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          tools: nativeTools,
+        });
+        expect(starts[0]).toMatchObject({
+          clientCapabilities: { readTextFile: true, writeTextFile: false, terminal: true },
+        });
+      }),
+    ),
+  );
+});
+
+it("sends Google Antigravity its own command first and Octant's context after it", async () => {
+  const { driver, client } = fixture(acpProviderProfiles.antigravity, {
+    runtimeVersion: "1.5.12",
+  });
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+        yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+        const events = yield* connection.subscribe;
+        const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+        yield* connection.send({
+          sessionId,
+          prompt: "/compact",
+          context: [{ kind: "instructions", text: "Octant's standing instructions." }],
+          attachments: [],
+          tools: [],
+        });
+        yield* Fiber.join(terminal);
+      }),
+    ),
+  );
+  const [, blocks] = client.prompt.mock.calls[0] ?? [];
+  expect(Array.isArray(blocks)).toBe(true);
+  expect((blocks as ReadonlyArray<string>)[0]).toBe("/compact");
+  expect((blocks as ReadonlyArray<string>)[1]).toContain("Octant's standing instructions.");
+});
+
 describe("ACP Chat on Windows", () => {
   it("starts an ACP agent Chat session on Windows outside Strict without confinement and refuses Strict", async () => {
     const { driver, starts } = fixture(kilo);
