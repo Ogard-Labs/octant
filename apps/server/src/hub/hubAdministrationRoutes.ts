@@ -78,8 +78,6 @@ export const HUB_ADMINISTRATION_ROUTES = {
   pairedMergeUnlock: "/api/desktop/hub/paired-merge-unlock",
   ownerApprovalAnswerUnlock: "/api/desktop/hub/owner-approval-answer-unlock",
   confirmMember: "/api/desktop/hub/members/confirm",
-  /** GET: the members this host holds status-only under Confirm new members. */
-  heldMembers: "/api/desktop/hub/members/held",
   alertDismiss: "/api/desktop/hub/alerts/dismiss",
   alertRemove: "/api/desktop/hub/alerts/remove",
   /** The `*.ts.net` certificate for the web app: GET reads it, POST turns it on or off or renews it. */
@@ -201,13 +199,6 @@ export function createHubAdministrationRouteHandler(
         pairedMergeUnlock: options.pairedMergeUnlock.required(),
         ownerApprovalAnswerUnlock: options.ownerApprovalAnswerUnlock.required(),
       });
-    }
-    if (route === HUB_ADMINISTRATION_ROUTES.heldMembers) {
-      if (request.method !== "GET") return failure("invalid", 400);
-      return Response.json(
-        { members: options.spoke.heldMembers() },
-        { headers: { "cache-control": "no-store" } },
-      );
     }
     if (route === HUB_ADMINISTRATION_ROUTES.certificate && request.method === "GET") {
       return Response.json(options.certificate.status(), {

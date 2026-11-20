@@ -12,6 +12,7 @@ import { findPickerModel, type PickerGroup } from "@octant/domain";
 import { ComposerModelPicker, isComposerReasoningOption } from "../providers/ComposerModelPicker";
 import { isConstrained, roomOf } from "../usage/providerRoom";
 import { useProviderRooms } from "../usage/useProviderRooms";
+import { formatClockTime } from "../theme/timestampFormat";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -66,7 +67,7 @@ function when(isoTime: string | undefined): string | undefined {
   const at = new Date(isoTime);
   return Number.isNaN(at.getTime())
     ? undefined
-    : at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    : formatClockTime(at, { hour: "2-digit", minute: "2-digit" });
 }
 
 /**

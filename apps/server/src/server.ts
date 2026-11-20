@@ -425,7 +425,6 @@ export function startOctantServer(
       usageDashboardRoutes,
       usageRoutes,
       validationEventStore,
-      validationEvidenceRoutes,
       zenEventStore,
     } = wireUsage({
       cacheStats,
@@ -1947,7 +1946,6 @@ export function startOctantServer(
       workSessionRoutes,
       usageDashboardRoutes,
       usageRoutes,
-      validationEvidenceRoutes,
       workFileListingRoutes,
       workMutationRoutes,
       workOverviewRoutes,
@@ -1968,7 +1966,6 @@ export function startOctantServer(
       hostControlRoutes,
       personQuitRoutes,
       supportBundleRoutes,
-      delegationAdministrationRoutes,
       threadMoveAdministrationRoutes,
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
@@ -2152,7 +2149,6 @@ export function startOctantServer(
               return (
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await hubAdministrationRoutes(request)) ??
-                (await delegationAdministrationRoutes(request)) ??
                 (await threadMoveAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await secretStoresRoutes(request)) ??

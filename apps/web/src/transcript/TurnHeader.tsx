@@ -1,4 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
+import type { ThemeTimestampFormat } from "@octant/contracts/theme";
+import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
+import { formatClockTime, formatDateTime } from "../theme/timestampFormat";
 import {
   Ban,
   Circle,
@@ -205,7 +208,8 @@ export function TurnTime(props: {
   readonly onFork?: (() => void) | undefined;
   readonly forkDisabled?: boolean | undefined;
 }) {
-  const label = turnTimeLabel(props.at);
+  const timestampFormat = useTimestampFormat();
+  const label = turnTimeLabel(props.at, timestampFormat);
 
   return (
     <span className="turn-message-meta">
@@ -244,7 +248,7 @@ export function TurnTime(props: {
         <time
           className="oct-activity-line turn-time"
           dateTime={props.at}
-          title={turnTimeTitle(props.at)}
+          title={turnTimeTitle(props.at, timestampFormat)}
         >
           {label}
         </time>
@@ -273,11 +277,14 @@ export function turnWorkedFor(
 }
 
 /** Clock time for today, date and time for anything older. */
-export function turnTimeLabel(at: string | undefined): string | undefined {
+export function turnTimeLabel(
+  at: string | undefined,
+  timestampFormat?: ThemeTimestampFormat,
+): string | undefined {
   if (at === undefined) return undefined;
   const date = new Date(at);
   if (Number.isNaN(date.getTime())) return undefined;
-  const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const time = formatClockTime(date, { hour: "2-digit", minute: "2-digit" }, timestampFormat);
   const now = new Date();
   const sameDay =
     date.getFullYear() === now.getFullYear() &&
@@ -288,8 +295,13 @@ export function turnTimeLabel(at: string | undefined): string | undefined {
     : `${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${time}`;
 }
 
-export function turnTimeTitle(at: string | undefined): string | undefined {
+export function turnTimeTitle(
+  at: string | undefined,
+  timestampFormat?: ThemeTimestampFormat,
+): string | undefined {
   if (at === undefined) return undefined;
   const date = new Date(at);
-  return Number.isNaN(date.getTime()) ? undefined : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? undefined
+    : formatDateTime(date, undefined, timestampFormat);
 }

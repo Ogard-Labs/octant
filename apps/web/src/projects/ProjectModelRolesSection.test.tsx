@@ -72,7 +72,7 @@ function groups() {
       id,
       displayName: id,
       reasoning: "unsupported",
-      inputModalities: ["text"],
+      inputModalities: ["text", "image"],
       options: [],
       source: "discovered",
       verification: "verified",
@@ -150,7 +150,7 @@ describe("ProjectModelRolesSection", () => {
     expect(within(builder).getByText("scribe-2")).toBeVisible();
     expect(within(builder).queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
     expect(within(builder).getByRole("checkbox", { name: "Ask before using" })).toBeDisabled();
-    for (const role of ["Planner", "Scout", "Quick edit", "Hard problems", "Reviewer"]) {
+    for (const role of ["Scout", "Quick edit", "Hard problems", "Reviewer"]) {
       expect(screen.getByRole("combobox", { name: `${role} for this Project` })).toHaveTextContent(
         "Use Settings",
       );
@@ -159,7 +159,7 @@ describe("ProjectModelRolesSection", () => {
 
   it("starts a chosen role from Settings' own and leaves the other roles to Settings", async () => {
     const user = userEvent.setup();
-    const host = configuration({ default: ["scribe-1", "scribe-2"], plan: ["scribe-3"] });
+    const host = configuration({ default: ["scribe-1", "scribe-2"], task: ["scribe-3"] });
     const setProjectRouting = savedOverride(configuration({ default: ["scribe-1", "scribe-2"] }));
     const client = renderSection({ host, setProjectRouting });
 
@@ -173,7 +173,7 @@ describe("ProjectModelRolesSection", () => {
       configuration: configuration({ default: ["scribe-1", "scribe-2"] }),
       expectedVersion: 0,
     });
-    expect(screen.getByRole("combobox", { name: "Planner for this Project" })).toHaveTextContent(
+    expect(screen.getByRole("combobox", { name: "Scout for this Project" })).toHaveTextContent(
       "Use Settings",
     );
   });
@@ -310,30 +310,30 @@ describe("ProjectModelRolesSection", () => {
 
   it("suggests only for a role the Project chose, and only from the models Settings lists for it", async () => {
     const user = userEvent.setup();
-    const host = configuration({ smol: ["scribe-1", "scribe-2"], quick: ["scribe-1"] });
-    const setProjectRouting = savedOverride(configuration({ smol: ["scribe-2", "scribe-1"] }), 2);
+    const host = configuration({ vision: ["scribe-1", "scribe-2"], quick: ["scribe-1"] });
+    const setProjectRouting = savedOverride(configuration({ vision: ["scribe-2", "scribe-1"] }), 2);
     const client = renderSection({
       host,
-      project: configuration({ smol: ["scribe-1"] }),
+      project: configuration({ vision: ["scribe-1"] }),
       setProjectRouting,
     });
 
-    // Quick edit uses Settings, so it offers no Suggest; Small jobs is the Project's own.
-    await screen.findByRole("button", { name: "Suggest a model for Small jobs" });
+    // Quick edit uses Settings, so it offers no Suggest; Sees images is the Project's own.
+    await screen.findByRole("button", { name: "Suggest a model for Sees images" });
     expect(
       screen.queryByRole("button", { name: "Suggest a model for Quick edit" }),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Suggest a model for Small jobs" }));
+    await user.click(screen.getByRole("button", { name: "Suggest a model for Sees images" }));
     const dialog = await screen.findByRole("dialog", { name: "Suggested models" });
-    expect(dialog).toHaveTextContent(/Small jobs → scribe-2 \(Scribe Local\)/);
-    // scribe-3 is connected but not in Settings' Small jobs list.
+    expect(dialog).toHaveTextContent(/Sees images → scribe-2 \(Scribe Local\)/);
+    // scribe-3 is connected but not in Settings' Sees images list.
     expect(dialog).not.toHaveTextContent(/scribe-3/);
     expect(client.setProjectRouting).not.toHaveBeenCalled();
 
     await user.click(within(dialog).getByRole("button", { name: "Use these" }));
     expect(client.setProjectRouting).toHaveBeenCalledWith(projectId, {
-      configuration: configuration({ smol: ["scribe-2", "scribe-1"] }),
+      configuration: configuration({ vision: ["scribe-2", "scribe-1"] }),
       expectedVersion: 1,
     });
   });
@@ -341,10 +341,12 @@ describe("ProjectModelRolesSection", () => {
   it("leaves the Project's role as it is when the person cancels", async () => {
     const user = userEvent.setup();
     const client = renderSection({
-      host: configuration({ smol: ["scribe-1", "scribe-2"] }),
-      project: configuration({ smol: ["scribe-1"] }),
+      host: configuration({ vision: ["scribe-1", "scribe-2"] }),
+      project: configuration({ vision: ["scribe-1"] }),
     });
-    await user.click(await screen.findByRole("button", { name: "Suggest a model for Small jobs" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Suggest a model for Sees images" }),
+    );
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(client.setProjectRouting).not.toHaveBeenCalled();
   });

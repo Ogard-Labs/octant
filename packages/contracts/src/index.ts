@@ -196,7 +196,6 @@ export * from "./automationNotifications";
 export * from "./linkedThread";
 export * from "./linkedThreadPrompt";
 export * from "./linkedThreadAggregation";
-export * from "./validationRpc";
 export * from "./zen";
 export * from "./githubCatalogue";
 export * from "./githubIssueContext";

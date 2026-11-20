@@ -14,15 +14,29 @@ export interface ModelRolePresentation {
 }
 
 /**
- * The roles a person sees, in the order the work gets harder. Each is a slot in
- * the routing table; the CLI and the guide still call them slots.
+ * Built-in slots kept in the wire schema for saved settings, but hidden from
+ * Settings while no server caller resolves them.
  */
-export const MODEL_ROLES: ReadonlyArray<ModelRolePresentation> = [
+export const UNRESOLVED_BUILT_IN_SLOT_IDS: ReadonlySet<string> = new Set(["plan", "smol"]);
+
+const HIDDEN_ROLE_PRESENTATIONS: ReadonlyArray<ModelRolePresentation> = [
   {
     id: "plan",
     label: "Planner",
     meaning: "Plans the work, splits it up and reads what comes back.",
   },
+  {
+    id: "smol",
+    label: "Small jobs",
+    meaning: "Titles, summaries and shortening long threads. A small, fast model is enough.",
+  },
+];
+
+/**
+ * The server-resolved roles a person sees, in the order the work gets harder.
+ * Each is a slot in the routing table; the CLI and the guide still call them slots.
+ */
+export const MODEL_ROLES: ReadonlyArray<ModelRolePresentation> = [
   {
     id: "task",
     label: "Scout",
@@ -51,11 +65,6 @@ export const MODEL_ROLES: ReadonlyArray<ModelRolePresentation> = [
     meaning:
       "Describes an attached image, or one a thread asks about, for a model that cannot read images. Empty, such images are refused. It needs a model that reads images on a connection that takes images from Octant.",
   },
-  {
-    id: "smol",
-    label: "Small jobs",
-    meaning: "Titles, summaries and shortening long threads. A small, fast model is enough.",
-  },
 ];
 
 export const ADVISOR_ROLE: ModelRolePresentation = {
@@ -68,7 +77,12 @@ export const ADVISOR_ROLE: ModelRolePresentation = {
 export function rolePresentation(id: string): ModelRolePresentation {
   return (
     MODEL_ROLES.find((role) => role.id === id) ??
-    (id === ADVISOR_ROLE.id ? ADVISOR_ROLE : { id, label: id, meaning: "A custom role." })
+    (id === ADVISOR_ROLE.id ? ADVISOR_ROLE : undefined) ??
+    HIDDEN_ROLE_PRESENTATIONS.find((role) => role.id === id) ?? {
+      id,
+      label: id,
+      meaning: "A custom role.",
+    }
   );
 }
 

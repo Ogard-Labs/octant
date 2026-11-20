@@ -258,42 +258,79 @@ describe("NativeHarnessRoutingPanel roles", () => {
       .map((group) => group.getAttribute("aria-labelledby"))
       .filter((id): id is string => id?.startsWith("model-role-") === true)
       .map((id) => document.getElementById(id)?.textContent)
-      .slice(0, 8);
+      .slice(0, 6);
     expect(names).toEqual([
-      "Planner",
       "Scout",
       "Quick edit",
       "Builder",
       "Hard problems",
       "Reviewer",
       "Sees images",
-      "Small jobs",
     ]);
-    for (const role of [
-      "Planner",
-      "Scout",
-      "Quick edit",
-      "Hard problems",
-      "Reviewer",
-      "Small jobs",
-    ]) {
+    for (const role of ["Scout", "Quick edit", "Hard problems", "Reviewer"]) {
       expect(screen.getByRole("button", { name: `${role} model` })).toHaveTextContent(
         "Same as Builder",
       );
     }
     expect(screen.getByRole("button", { name: "Sees images model" })).toHaveTextContent("Off");
+    expect(screen.queryByRole("group", { name: "Planner" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Small jobs" })).not.toBeInTheDocument();
     expect(screen.getByText(/Coordinator workers and helper agents use these roles/)).toBeVisible();
     await openOtherRoles(user);
     expect(screen.getByRole("button", { name: "Advisor model" })).toHaveTextContent("Off");
   });
 
+  it("hides slots and jobs the server does not resolve even when saved routing carries them", async () => {
+    const user = userEvent.setup();
+    const saved = settings({
+      slots: [
+        { id: "plan" as never, candidates: [candidate(endpointA, "scribe-2")] },
+        { id: "smol" as never, candidates: [candidate(endpointA, "scribe-2-mini")] },
+        { id: "default" as never, candidates: [candidate(endpointA, "scribe-2")] },
+      ],
+      jobSlots: [
+        { job: "planner", slotId: "plan" as never },
+        { job: "title", slotId: "smol" as never },
+      ],
+    });
+    renderPanel({ routing: async () => saved, fixtures: [local, router] });
+
+    await screen.findByRole("button", { name: "Builder, main" });
+    expect(screen.queryByRole("group", { name: "Planner" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Small jobs" })).not.toBeInTheDocument();
+
+    await openOtherRoles(user);
+    expect(screen.queryByRole("group", { name: "Planner" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Small jobs" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByText(/Which job uses which role/));
+    for (const resolved of [
+      "Research role",
+      "Implementing role",
+      "Reviewing finished work role",
+      "Reading images role",
+      "Custom helper agents role",
+    ]) {
+      expect(screen.getByRole("combobox", { name: resolved })).toBeInTheDocument();
+    }
+    for (const unresolved of [
+      "Planning role",
+      "Exploring the code role",
+      "Thread titles role",
+      "Summaries role",
+      "Shortening long threads role",
+    ]) {
+      expect(screen.queryByRole("combobox", { name: unresolved })).not.toBeInTheDocument();
+    }
+  });
+
   it("saves a chosen model at once, with the version it was read at", async () => {
     const user = userEvent.setup();
-    const next = roles({ plan: [candidate(endpointB, "router-text")] });
+    const next = roles({ task: [candidate(endpointB, "router-text")] });
     const updateRouting = savedAs(settings(next.configuration, 2));
     renderPanel({ routing: async () => settings(), updateRouting, fixtures: [local, router] });
 
-    await user.click(await screen.findByRole("button", { name: "Planner model" }));
+    await user.click(await screen.findByRole("button", { name: "Scout model" }));
     await user.click(await screen.findByRole("option", { name: "Router Text" }));
 
     expect(updateRouting).toHaveBeenCalledWith({
@@ -302,16 +339,14 @@ describe("NativeHarnessRoutingPanel roles", () => {
     });
     expect(screen.queryByRole("button", { name: /Save/ })).not.toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Planner, main" })).toHaveTextContent(
-        "Router Text",
-      ),
+      expect(screen.getByRole("button", { name: "Scout, main" })).toHaveTextContent("Router Text"),
     );
     expect(screen.getByText("No fallback")).toBeVisible();
   });
 
   it("says a change made elsewhere won, and reloads the roles", async () => {
     const user = userEvent.setup();
-    const elsewhere = roles({ smol: [candidate(endpointA, "scribe-2-mini")] });
+    const elsewhere = roles({ quick: [candidate(endpointA, "scribe-2-mini")] });
     let reads = 0;
     const updateRouting = vi.fn(async () => ({
       kind: "routing-refused" as const,
@@ -324,17 +359,17 @@ describe("NativeHarnessRoutingPanel roles", () => {
       fixtures: [local, router],
     });
 
-    await user.click(await screen.findByRole("button", { name: "Planner model" }));
+    await user.click(await screen.findByRole("button", { name: "Scout model" }));
     await user.click(await screen.findByRole("option", { name: "Router Text" }));
 
     expect(
       await screen.findByText("Changed elsewhere. Reloaded; make your change again."),
     ).toBeVisible();
     expect(routing).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole("button", { name: "Small jobs, main" })).toHaveTextContent(
+    expect(screen.getByRole("button", { name: "Quick edit, main" })).toHaveTextContent(
       "Scribe 2 Mini",
     );
-    expect(screen.getByRole("button", { name: "Planner model" })).toHaveTextContent(
+    expect(screen.getByRole("button", { name: "Scout model" })).toHaveTextContent(
       "Same as Builder",
     );
   });
@@ -342,14 +377,14 @@ describe("NativeHarnessRoutingPanel roles", () => {
   it("turns a role back to the Builder by removing its only model, and the advisor off", async () => {
     const user = userEvent.setup();
     const both = roles({
-      plan: [candidate(endpointA, "scribe-2")],
+      task: [candidate(endpointA, "scribe-2")],
       advisor: [candidate(endpointA, "scribe-2-mini")],
     });
     const advisorOnly = roles({ advisor: [candidate(endpointA, "scribe-2-mini")] });
     const updateRouting = savedAs(advisorOnly);
     renderPanel({ routing: async () => both, updateRouting, fixtures: [local] });
 
-    await user.click(await screen.findByRole("button", { name: "Remove scribe-2 from Planner" }));
+    await user.click(await screen.findByRole("button", { name: "Remove scribe-2 from Scout" }));
     expect(updateRouting).toHaveBeenLastCalledWith({
       configuration: advisorOnly.configuration,
       expectedVersion: 1,
@@ -437,7 +472,7 @@ describe("NativeHarnessRoutingPanel role choices", () => {
     ).toBeChecked();
     // A role with no model has nothing to attach a choice to.
     expect(
-      within(screen.getByRole("group", { name: "Planner" })).queryByRole("checkbox"),
+      within(screen.getByRole("group", { name: "Scout" })).queryByRole("checkbox"),
     ).not.toBeInTheDocument();
   });
 
@@ -722,7 +757,7 @@ describe("NativeHarnessRoutingPanel jobs", () => {
     expect(screen.queryByRole("combobox", { name: "Lead role" })).not.toBeInTheDocument();
     // The advisor runs only on its own role, so its Off cannot be bypassed here.
     expect(screen.queryByRole("combobox", { name: "Advisor role" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("combobox", { name: / role$/ })).toHaveLength(10);
+    expect(screen.getAllByRole("combobox", { name: / role$/ })).toHaveLength(5);
 
     await chooseSelectFieldOption(
       user,
@@ -751,7 +786,17 @@ describe("NativeHarnessRoutingPanel with providers that are not harness endpoint
       kind: "routing-settings" as const,
       settings: settings(),
     }));
-    renderPanel({ routing: async () => settings(), updateRouting, fixtures: [claude, local] });
+    const visionLocal: EndpointFixture = {
+      ...local,
+      models: local.models.map((model) =>
+        model.id === "scribe-2-mini" ? { ...model, images: true } : model,
+      ),
+    };
+    renderPanel({
+      routing: async () => settings(),
+      updateRouting,
+      fixtures: [claude, visionLocal],
+    });
 
     await user.click(await screen.findByRole("button", { name: "Suggest roles" }));
     const dialog = await screen.findByRole("dialog", { name: "Suggested models" });
@@ -801,8 +846,10 @@ describe("NativeHarnessRoutingPanel with providers that are not harness endpoint
     const builder = sent[0].configuration.slots.find((slot) => String(slot.id) === "default");
     expect(String(builder?.candidates[0]?.modelId)).toBe("sonnet-5-5");
     expect(builder?.askBeforeUsing).toBe(true);
-    const planner = sent[0].configuration.slots.find((slot) => String(slot.id) === "plan");
-    expect(String(planner?.candidates[0]?.modelId)).toBe("opus-5-5");
+    const deep = sent[0].configuration.slots.find((slot) => String(slot.id) === "deep");
+    expect(String(deep?.candidates[0]?.modelId)).toBe("opus-5-5");
+    expect(sent[0].configuration.slots.find((slot) => String(slot.id) === "plan")).toBeUndefined();
+    expect(sent[0].configuration.slots.find((slot) => String(slot.id) === "smol")).toBeUndefined();
   });
 
   it("previews one role from its own Suggest button and leaves the others alone", async () => {
@@ -812,7 +859,7 @@ describe("NativeHarnessRoutingPanel with providers that are not harness endpoint
     await user.click(await screen.findByRole("button", { name: "Suggest a model for Scout" }));
     const dialog = await screen.findByRole("dialog", { name: "Suggested models" });
     expect(dialog).toHaveTextContent(/Scout → Haiku 5.5 \(Claude\)/);
-    expect(dialog).not.toHaveTextContent(/Planner/);
+    expect(dialog).not.toHaveTextContent(/Hard problems/);
   });
 
   it("offers Suggest only on the roles suggestions know, never on the Advisor", async () => {

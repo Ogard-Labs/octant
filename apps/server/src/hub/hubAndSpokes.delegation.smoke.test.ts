@@ -13,18 +13,12 @@ import {
   ProjectId,
   UtcTimestamp,
   decodeDelegationStartCommand,
-  decodeWindowId,
   type DelegationStartCommand,
   type PeerGrant,
 } from "@octant/contracts";
 import type { DelegationProjectAuthority } from "@octant/domain";
 import { createAgentRemoteDelegation } from "./agentRemoteDelegation";
 import { EXTERNAL_CONTENT_FRAME_CLOSE } from "../context/externalContentFraming";
-import { WindowAuthorityStore } from "../windowAuthorityStore";
-import {
-  DELEGATION_ADMINISTRATION_ROUTES,
-  createDelegationAdministrationRouteHandler,
-} from "./delegationAdministrationRoutes";
 import type { DelegatingParentPort, ParentCheck } from "./delegatingSpokeService";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, signHubLinkRequest } from "./hubLink";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
@@ -1578,139 +1572,6 @@ describe("delegation memory limits", () => {
     const kept = b.delegationState.load().received;
     expect(kept.length).toBeLessThanOrEqual(MAX_REMEMBERED_SETTLED);
     expect(kept.some((entry) => String(entry.requestId) === String(running))).toBe(true);
-  });
-});
-
-describe("delegation administration on the delegating spoke", () => {
-  const windowId = decodeWindowId("44444444-4444-4444-8444-444444444444");
-  const capability = "A".repeat(43);
-  const secret = "desktop-secret";
-
-  const otherWindowId = decodeWindowId("55555555-5555-4555-8555-555555555555");
-  const otherCapability = `${"A".repeat(42)}E`;
-
-  /** Only the first window holds the parent thread on its Project; the second is live but holds nothing. */
-  async function setup() {
-    const hosts = await threeHosts();
-    const authority = new WindowAuthorityStore();
-    authority.register({ windowId, capability, now: Date.now() });
-    authority.register({
-      windowId: otherWindowId,
-      capability: otherCapability,
-      now: Date.now(),
-    });
-    const handle = createDelegationAdministrationRouteHandler({
-      desktopBridgeSecret: secret,
-      windowAuthorityStore: authority,
-      delegation: hosts.a.delegating,
-      authorizeParent: (input) =>
-        input.threadId === PARENT_THREAD && input.windowId === String(windowId),
-    });
-    return { ...hosts, handle };
-  }
-
-  function post(path: string, body: unknown, headers: Record<string, string> = {}) {
-    return new Request(`http://127.0.0.1${path}`, {
-      method: "POST",
-      headers: {
-        "x-octant-desktop-secret": secret,
-        "x-octant-window-capability": capability,
-        "content-type": "application/json",
-        ...headers,
-      },
-      body: JSON.stringify(body),
-    });
-  }
-
-  it("answers every route it registers and no other", async () => {
-    const { handle, b } = await setup();
-
-    for (const path of Object.values(DELEGATION_ADMINISTRATION_ROUTES)) {
-      const response = await handle(
-        post(
-          path,
-          path === DELEGATION_ADMINISTRATION_ROUTES.start
-            ? startCommand(b)
-            : { requestId: randomUUID() },
-        ),
-      );
-      expect(response, path).toBeDefined();
-    }
-    expect(await handle(post("/api/desktop/hub/delegations/other", {}))).toBeUndefined();
-  });
-
-  it("starts, reads, and cancels a remote child run for a person at a window", async () => {
-    const { handle, b, child } = await setup();
-
-    const started = await handle(post(DELEGATION_ADMINISTRATION_ROUTES.start, startCommand(b)));
-    const body = (await started?.json()) as { status: string; requestId: string };
-    expect(body.status).toBe("delegated");
-    expect(child.started).toHaveLength(1);
-
-    const read = await handle(
-      post(DELEGATION_ADMINISTRATION_ROUTES.read, { requestId: body.requestId }),
-    );
-    expect(await read?.json()).toMatchObject({ status: "in-progress", state: "running" });
-
-    const cancelled = await handle(
-      post(DELEGATION_ADMINISTRATION_ROUTES.cancel, { requestId: body.requestId }),
-    );
-    expect(await cancelled?.json()).toMatchObject({ status: "cancelled" });
-    expect(child.interrupted).toHaveLength(1);
-  });
-
-  it("refuses a window that does not hold the parent thread from reading or cancelling its child", async () => {
-    const { handle, b, child } = await setup();
-    const started = await handle(post(DELEGATION_ADMINISTRATION_ROUTES.start, startCommand(b)));
-    const { requestId } = (await started!.json()) as { requestId: string };
-    const asOtherWindow = { "x-octant-window-capability": otherCapability };
-
-    for (const path of [
-      DELEGATION_ADMINISTRATION_ROUTES.read,
-      DELEGATION_ADMINISTRATION_ROUTES.cancel,
-    ]) {
-      const response = await handle(post(path, { requestId }, asOtherWindow));
-      expect(response?.status, path).toBe(409);
-      expect(await response?.json(), path).toEqual({
-        status: "refused",
-        kind: "parent-unavailable",
-      });
-    }
-    expect(child.interrupted).toHaveLength(0);
-
-    const stillOwned = await handle(post(DELEGATION_ADMINISTRATION_ROUTES.cancel, { requestId }));
-    expect(await stillOwned?.json()).toMatchObject({ status: "cancelled" });
-    expect(child.interrupted).toHaveLength(1);
-  });
-
-  it("refuses a request without the desktop secret, a window capability, or with an Origin", async () => {
-    const { handle, b, child } = await setup();
-    const command = startCommand(b);
-
-    const noSecret = await handle(
-      post(DELEGATION_ADMINISTRATION_ROUTES.start, command, { "x-octant-desktop-secret": "wrong" }),
-    );
-    const noCapability = await handle(
-      post(DELEGATION_ADMINISTRATION_ROUTES.start, command, {
-        "x-octant-window-capability": `${"A".repeat(42)}Q`,
-      }),
-    );
-    const withOrigin = await handle(
-      post(DELEGATION_ADMINISTRATION_ROUTES.start, command, { origin: "https://example.com" }),
-    );
-    const overTheListener = await handle(
-      new Request(`https://100.101.102.105:8443${DELEGATION_ADMINISTRATION_ROUTES.start}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(command),
-      }),
-    );
-
-    expect(noSecret?.status).toBe(401);
-    expect(noCapability?.status).toBe(401);
-    expect(withOrigin?.status).toBe(401);
-    expect(overTheListener?.status).toBe(401);
-    expect(child.started).toHaveLength(0);
   });
 });
 

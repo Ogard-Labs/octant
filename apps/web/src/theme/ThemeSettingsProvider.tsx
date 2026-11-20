@@ -4,6 +4,7 @@ import {
   GLASS_TINT_FLOOR,
   GLASS_TINT_SECONDARY_FLOOR,
   type ThemeSettings,
+  type ThemeTimestampFormat,
 } from "@octant/contracts/theme";
 import { enforceSidebarBackgroundAccessibility } from "@octant/domain/theme-policy";
 import {
@@ -221,10 +222,16 @@ export function ThemeSettingsProvider(props: {
       const thin = thinGlassLevels(resolved.mode, accessible.glassTint);
       if (thin === "") delete root.dataset.octantGlassThin;
       else root.dataset.octantGlassThin = thin;
-      // Density and smoothing are plain attributes the stylesheets read; the
-      // contrast step scales the derived washes only for a Custom preset.
+      // Density, smoothing, and timestamp clock format are plain attributes the
+      // stylesheets and shared time formatter read; the contrast step scales
+      // the derived washes only for a Custom preset.
       root.dataset.octantDensity = accessible.density ?? "comfortable";
       root.dataset.octantFontSmoothing = accessible.fontSmoothing === "off" ? "off" : "on";
+      if (accessible.timestampFormat === undefined) {
+        delete root.dataset.octantTimestampFormat;
+      } else {
+        root.dataset.octantTimestampFormat = accessible.timestampFormat;
+      }
       const customId =
         resolved.mode === "light" ? accessible.lightPresetId : accessible.darkPresetId;
       const customSeeds =
@@ -273,6 +280,7 @@ export function ThemeSettingsProvider(props: {
       delete root.dataset.octantGlassThin;
       delete root.dataset.octantDensity;
       delete root.dataset.octantFontSmoothing;
+      delete root.dataset.octantTimestampFormat;
       root.style.removeProperty("--oct-contrast-scale");
       delete root.dataset.octantReducedMotion;
       delete root.dataset.octantReducedTransparency;
@@ -297,15 +305,29 @@ export function ThemeSettingsProvider(props: {
         : resolveTerminalColorProjection(resolved, { increasedContrast }),
     [resolved, increasedContrast],
   );
+  const timestampFormat = applied?.accessible.timestampFormat;
   return (
     <IncreasedContrastContext.Provider value={increasedContrast}>
-      <EditorColorContext.Provider value={editorColors}>
-        <TerminalColorContext.Provider value={terminalColors}>
-          {props.children}
-        </TerminalColorContext.Provider>
-      </EditorColorContext.Provider>
+      <TimestampFormatContext.Provider value={timestampFormat}>
+        <EditorColorContext.Provider value={editorColors}>
+          <TerminalColorContext.Provider value={terminalColors}>
+            {props.children}
+          </TerminalColorContext.Provider>
+        </EditorColorContext.Provider>
+      </TimestampFormatContext.Provider>
     </IncreasedContrastContext.Provider>
   );
+}
+
+const TimestampFormatContext = createContext<ThemeTimestampFormat | undefined>(undefined);
+
+/**
+ * The theme's configured timestamp clock format (`12h` or `24h`), or
+ * `undefined` to follow the locale default. Components subscribing to this
+ * hook re-render immediately when the theme setting changes.
+ */
+export function useTimestampFormat(): ThemeTimestampFormat | undefined {
+  return useContext(TimestampFormatContext);
 }
 
 const EditorColorContext = createContext<EditorColorProjection | undefined>(undefined);

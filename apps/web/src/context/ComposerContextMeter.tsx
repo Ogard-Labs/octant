@@ -10,6 +10,7 @@ import { matchKeybinding } from "@octant/domain";
 import { ChevronDown, ChevronRight } from "../ui/icons";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { isApplePlatform } from "../platform";
+import { formatDateTime } from "../theme/timestampFormat";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import type { ContextCompactionExecutor } from "@octant/contracts/context";
 import { ContextInspector } from "./ContextInspector";
@@ -1280,13 +1281,8 @@ function quotaLabel(quota: ContextInspectorSnapshot["serviceLimits"]["quota"]): 
         : "Unknown";
 }
 
-const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "short",
-  timeStyle: "short",
-});
-
 function formatTime(timestamp: string): string {
-  return dateTimeFormat.format(new Date(timestamp));
+  return formatDateTime(timestamp, { dateStyle: "short", timeStyle: "short" });
 }
 
 function formatRelativeTime(timestamp: string): string {

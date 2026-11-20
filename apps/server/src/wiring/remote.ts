@@ -97,7 +97,6 @@ import { HostMemoryLimitsService } from "../hostMemoryLimitsService";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
 import { createAgentRemoteDelegation } from "../hub/agentRemoteDelegation";
-import { createDelegationAdministrationRouteHandler } from "../hub/delegationAdministrationRoutes";
 import { createDelegationJournal } from "../hub/delegationJournal";
 import { createDelegationStateStore } from "../hub/delegationStateStore";
 import { DelegatingSpokeService } from "../hub/delegatingSpokeService";
@@ -1054,18 +1053,6 @@ export function wireRemote(deps: RemoteDependencies) {
   // a Code request is refused by the target.
   onWorkTurnCancelled((threadId) => {
     void delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
-  });
-  const delegationAdministrationRoutes = createDelegationAdministrationRouteHandler({
-    desktopBridgeSecret: options.desktopBridgeSecret,
-    windowAuthorityStore,
-    delegation: delegatingSpoke,
-    authorizeParent: ({ threadId, windowId }) =>
-      authorizeAgentRunParentThread({
-        persistence,
-        workThreadProjection,
-        parentThreadId: decodeAgentRunParentThreadId(threadId),
-        windowId,
-      }),
   });
   // A host with no credential broker has no sign-in to copy from or to.
   const ownerCredentialCopy = new OwnerCredentialCopyService({
@@ -2580,7 +2567,6 @@ export function wireRemote(deps: RemoteDependencies) {
   return {
     ownerBrowserControlService,
     composeHostDiagnostics,
-    delegationAdministrationRoutes,
     threadMoveAdministrationRoutes,
     externalContentRoutes,
     hostControlRoutes,

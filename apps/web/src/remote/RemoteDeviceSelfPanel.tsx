@@ -7,6 +7,7 @@ import {
   remoteSignOut,
 } from "@octant/client-runtime";
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { formatDateTime } from "../theme/timestampFormat";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -23,7 +24,7 @@ function formatTimestamp(value: string | undefined): string {
   if (value === undefined) return "Unavailable";
   const parsed = Date.parse(value);
   if (Number.isNaN(parsed)) return "Unavailable";
-  return new Date(parsed).toLocaleString();
+  return formatDateTime(parsed);
 }
 
 const ROTATE_LABEL = "Rotate this device's key";

@@ -734,6 +734,7 @@ failed, never painted.
 | Density               | Comfortable (default), Compact                                                 | Below                                                           |
 | Interface font        | System (default), Geist, a custom stack; size 12 to 16 in steps, 14 by default | `--octant-ui-font-*`, `--oct-text-step`                         |
 | Smooth text           | On (default), off; hidden off a Mac                                            | `data-octant-font-smoothing`; grayscale smoothing only when on  |
+| Timestamp format      | Optional `12h` or `24h` in saved/imported themes (unset uses locale default)   | `data-octant-timestamp-format`; shared clock/date-time format   |
 | Transcript            | Small, Medium, Large; Narrow, Medium, Wide                                     | `--oct-transcript-font-size`; the column measure                |
 | Code, terminal        | Family, size, line height, ligatures                                           | `--octant-editor-*`, `--octant-terminal-*`                      |
 | Background            | A ground, its options, and where it shows                                      | [Home with the drawn ground](#home-with-the-drawn-ground)       |

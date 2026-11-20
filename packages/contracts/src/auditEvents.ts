@@ -56,14 +56,9 @@ export const AuditActingPrincipal = Schema.Union(
 export type AuditActingPrincipal = typeof AuditActingPrincipal.Type;
 
 export const AUDIT_EVENT_NAMES = [
-  "tool-call-requested",
-  "tool-call-authorized",
   "tool-call-denied",
   "policy-decision-recorded",
-  "approval-granted",
   "approval-denied",
-  "approval-expired",
-  "thread-elevation-changed",
   "authority-transition-recorded",
 ] as const;
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];
@@ -99,17 +94,6 @@ const ToolCallAuditFields = {
   turnReference: Schema.optional(AuditOpaqueReference),
 };
 
-export const ToolCallRequestedPayload = Schema.Struct({
-  ...ToolCallAuditFields,
-}).annotations(strict);
-export type ToolCallRequestedPayload = typeof ToolCallRequestedPayload.Type;
-
-export const ToolCallAuthorizedPayload = Schema.Struct({
-  ...ToolCallAuditFields,
-  resolutionStep: Schema.optional(PolicyResolutionStep),
-}).annotations(strict);
-export type ToolCallAuthorizedPayload = typeof ToolCallAuthorizedPayload.Type;
-
 export const ToolCallDeniedPayload = Schema.Struct({
   ...ToolCallAuditFields,
   denialReason: AuditBoundedToken,
@@ -133,18 +117,6 @@ export type PolicyDecisionRecordedPayload = typeof PolicyDecisionRecordedPayload
 const ApprovalScope = Schema.Literal("action", "session", "project");
 const ApprovalClass = AuditBoundedToken;
 
-export const ApprovalGrantedPayload = Schema.Struct({
-  approvalId: ToolApprovalId,
-  approvalClass: ApprovalClass,
-  scope: ApprovalScope,
-  ttlMs: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  promptingActionId: Schema.optional(ToolActionId),
-  correlationId: CorrelationId,
-  actingPrincipal: AuditActingPrincipal,
-  expiresAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
-export type ApprovalGrantedPayload = typeof ApprovalGrantedPayload.Type;
-
 export const ApprovalDeniedPayload = Schema.Struct({
   approvalId: Schema.optional(ToolApprovalId),
   approvalClass: ApprovalClass,
@@ -155,28 +127,6 @@ export const ApprovalDeniedPayload = Schema.Struct({
   denialReason: AuditBoundedToken,
 }).annotations(strict);
 export type ApprovalDeniedPayload = typeof ApprovalDeniedPayload.Type;
-
-export const ApprovalExpiredPayload = Schema.Struct({
-  approvalId: ToolApprovalId,
-  approvalClass: ApprovalClass,
-  scope: ApprovalScope,
-  promptingActionId: Schema.optional(ToolActionId),
-  correlationId: CorrelationId,
-  actingPrincipal: AuditActingPrincipal,
-  expiredAt: UtcTimestamp,
-}).annotations(strict);
-export type ApprovalExpiredPayload = typeof ApprovalExpiredPayload.Type;
-
-export const ThreadElevationChangedPayload = Schema.Struct({
-  correlationId: CorrelationId,
-  actingPrincipal: AuditActingPrincipal,
-  threadReference: AuditOpaqueReference,
-  fromPosture: AuditBoundedToken,
-  toPosture: AuditBoundedToken,
-  /** e.g. remembered-full-access, plan-to-execution, session-elevation */
-  changeKind: AuditBoundedToken,
-}).annotations(strict);
-export type ThreadElevationChangedPayload = typeof ThreadElevationChangedPayload.Type;
 
 export const AuthorityTransitionRecordedPayload = Schema.Struct({
   correlationId: CorrelationId,
@@ -192,14 +142,6 @@ export type AuthorityTransitionRecordedPayload = typeof AuthorityTransitionRecor
 
 export const AuditEventPayload = Schema.Union(
   Schema.Struct({
-    eventName: Schema.Literal("tool-call-requested"),
-    payload: ToolCallRequestedPayload,
-  }).annotations(strict),
-  Schema.Struct({
-    eventName: Schema.Literal("tool-call-authorized"),
-    payload: ToolCallAuthorizedPayload,
-  }).annotations(strict),
-  Schema.Struct({
     eventName: Schema.Literal("tool-call-denied"),
     payload: ToolCallDeniedPayload,
   }).annotations(strict),
@@ -208,20 +150,8 @@ export const AuditEventPayload = Schema.Union(
     payload: PolicyDecisionRecordedPayload,
   }).annotations(strict),
   Schema.Struct({
-    eventName: Schema.Literal("approval-granted"),
-    payload: ApprovalGrantedPayload,
-  }).annotations(strict),
-  Schema.Struct({
     eventName: Schema.Literal("approval-denied"),
     payload: ApprovalDeniedPayload,
-  }).annotations(strict),
-  Schema.Struct({
-    eventName: Schema.Literal("approval-expired"),
-    payload: ApprovalExpiredPayload,
-  }).annotations(strict),
-  Schema.Struct({
-    eventName: Schema.Literal("thread-elevation-changed"),
-    payload: ThreadElevationChangedPayload,
   }).annotations(strict),
   Schema.Struct({
     eventName: Schema.Literal("authority-transition-recorded"),

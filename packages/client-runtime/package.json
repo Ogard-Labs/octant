@@ -114,7 +114,6 @@
     "./use-connection-status": "./src/useConnectionStatus.ts",
     "./theme-client": "./src/themeClient.ts",
     "./usage-client": "./src/usageClient.ts",
-    "./validation-evidence-client": "./src/validationEvidenceClient.ts",
     "./expo-secure-device-key-store": "./src/expoSecureDeviceKeyStore.ts",
     "./mobile-inbox-client": "./src/mobileInboxClient.ts",
     "./mobile-todo-client": "./src/mobileTodoClient.ts",

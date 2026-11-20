@@ -15,15 +15,12 @@ import {
   type ContextCompositionEntry,
 } from "./contextInspectorModel";
 import type { CompactionOffer } from "./sessionCompactionPresentation";
+import { formatDateTime } from "../theme/timestampFormat";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import "./context.css";
 
 const numberFormat = new Intl.NumberFormat("en");
-const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
 
 export interface ContextInspectorProps {
   readonly busy: boolean;
@@ -391,7 +388,7 @@ function formatNumber(value: number): string {
 }
 
 function formatTime(timestamp: string): string {
-  return dateTimeFormat.format(new Date(timestamp));
+  return formatDateTime(timestamp, { dateStyle: "medium", timeStyle: "short" });
 }
 
 function signed(value: number): string {

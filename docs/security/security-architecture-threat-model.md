@@ -635,29 +635,34 @@ or the renderer.
 ## Journal Audit Events
 
 **Exists today:** every committed event envelope carries event, aggregate, sequence, correlation,
-causation, actor, and timestamp identity (`packages/contracts/src/events.ts`); tool actions,
-approvals, extension lifecycle, remote credential lifecycle, and AgentRun lifecycle are journaled
-by their owning services.
+causation, actor, and timestamp identity (`packages/contracts/src/events.ts`), and each owning
+service journals its own authority-relevant acts directly:
 
-**Newly specified:** a consolidated audit taxonomy so a reviewer can reconstruct every
-authority-relevant decision from the journal alone:
+- Tool calls and tool effects: `code.operation-event-recorded@1`, `chat.attempt-tool-step@1`,
+  native harness tool-call and approval records, and tool-effect records.
+- Approvals and grants: `thread.standing-answer-recorded@1`, `code.language-server-approval-granted@1`,
+  `code.debug-configuration-approved@1`, `extension.tool-grant-recorded@1` / `revoked@1`,
+  `browser.session-granted@1` / `revoked@1` / `expired@1`, and owner approval audit records.
+- Thread and Project access or posture changes: `code.thread-updated@1`, `work.thread-updated@1`,
+  `project.code-access-changed@1`, `project.code-permission-mode-changed@1`,
+  `project.work-permission-mode-changed@1`, and `remote-access.security-audit-recorded@1`.
 
-- `tool-call-requested`, `tool-call-authorized`, `tool-call-denied` (with the structured denial
-  reason and the resolution step that denied), correlated to the turn that proposed the call.
+**Structured denial and transition audit records (`packages/contracts/src/auditEvents.ts`):**
+used by the escape suite and acting-principal contracts for redacted failure-path records:
+
+- `tool-call-denied` (with the structured denial reason and the resolution step that denied),
+  correlated to the turn that proposed the call.
 - `policy-decision-recorded` for engine resolutions that did not reach execution (for example a
   denied capability or taint-forced prompt).
-- `approval-granted`, `approval-denied`, `approval-expired` with approval class, scope
-  (action/session/project), TTL, and the prompting tool action id.
-- `thread-elevation-changed` (posture transitions, remembered Full access changes,
-  Plan-to-execution) and `authority-transition-recorded` (Project attach, worktree bind, child
-  clamp results).
-- Actor attribution: `EventActor` is extended with `remote-device` and agent-attribution kinds
-  (maintainer decision 2026-08-12 — prefer an explicit union over payload-only fields). Audit events
-  additionally record the acting principal (`local-window`, `remote-device` with device id) and, for
-  agent-initiated petitions, the provider instance and thread identity, so a remote approval is
-  never indistinguishable from a local one. Contract change in `packages/contracts/src/events.ts`
-  (versioned, with consumer migration). Identity is server-resolved, never client-supplied
-  (`assertNoPrincipalIdentityInPayload`).
+- `approval-denied` with approval class, scope (action/session/project), and the prompting tool
+  action id.
+- `authority-transition-recorded` (Project attach, worktree bind, child clamp results).
+- Actor attribution: `EventActor` carries `local-user`, `remote-device`, and `agent` attribution
+  kinds (maintainer decision 2026-08-12 — prefer an explicit union over payload-only fields). Audit
+  events additionally record the acting principal (`local-window`, `remote-device` with device id,
+  hub/peer/owner principals) and, for agent-initiated petitions, the provider instance and thread
+  identity, so a remote approval is never indistinguishable from a local one. Identity is
+  server-resolved, never client-supplied (`assertNoPrincipalIdentityInPayload`).
 
 Audit events follow the existing redaction rules: no secrets, no absolute private paths, no raw
 tool output — bounded references only.

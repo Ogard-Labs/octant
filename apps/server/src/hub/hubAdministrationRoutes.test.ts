@@ -629,27 +629,6 @@ describe("who may administer the hub role", () => {
       expect(await response?.json()).toMatchObject({ status: "refused", kind: "not-a-spoke" });
     }
   });
-
-  it("lists no held members on a host that is not a spoke, and only reads them with a window", async () => {
-    const { handle } = await setup();
-    const read = (headers: Record<string, string>) =>
-      new Request(`http://127.0.0.1${HUB_ADMINISTRATION_ROUTES.heldMembers}`, { headers });
-    const window = {
-      "x-octant-desktop-secret": secret,
-      "x-octant-window-capability": capability,
-    };
-
-    const held = await handle(read(window));
-    const unauthenticated = await handle(
-      read({ ...window, "x-octant-window-capability": "B".repeat(43) }),
-    );
-    const posted = await handle(post(HUB_ADMINISTRATION_ROUTES.heldMembers));
-
-    expect(held?.status).toBe(200);
-    expect(await held?.json()).toEqual({ members: [] });
-    expect(unauthenticated?.status).toBe(401);
-    expect(posted?.status).toBe(400);
-  });
 });
 
 describe("who may set the standby order, promote a standby, and accept a new hub", () => {

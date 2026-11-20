@@ -7,6 +7,7 @@ import {
 import type { ThreadNotesClient } from "@octant/client-runtime/thread-notes-client";
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { formatDateTime } from "../theme/timestampFormat";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import "./thread-notes.css";
@@ -157,10 +158,7 @@ function RecapFacts(props: { readonly recap: ThreadRecap }) {
 }
 
 function formatTime(iso: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime())
-    ? iso
-    : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return formatDateTime(iso, { dateStyle: "medium", timeStyle: "short" });
 }
 
 function NotesRow(props: {

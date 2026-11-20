@@ -15,6 +15,7 @@ import type {
   ReplicaSyncStatusView,
 } from "@octant/contracts/replica-entry";
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { formatDateTime } from "../theme/timestampFormat";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -1247,6 +1248,6 @@ function errorSentence(error: NonNullable<ReplicaSyncStatus["lastError"]>): stri
 function formatTime(value: string | number): string {
   const date = new Date(value);
   return Number.isFinite(date.getTime())
-    ? date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+    ? formatDateTime(date, { dateStyle: "medium", timeStyle: "short" })
     : "at an unknown time";
 }

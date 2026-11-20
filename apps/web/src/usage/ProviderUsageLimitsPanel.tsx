@@ -9,6 +9,7 @@ import type {
   ServiceLimitBucket,
 } from "@octant/contracts";
 import { SurfaceSection } from "../surface/SurfaceHeader";
+import { formatDateTime } from "../theme/timestampFormat";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { driverLabel } from "../providers/providerSettingsPresentation";
@@ -471,7 +472,5 @@ function capitalize(value: string): string {
 }
 
 function formatTime(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
-    new Date(value),
-  );
+  return formatDateTime(value, { dateStyle: "medium", timeStyle: "short" });
 }

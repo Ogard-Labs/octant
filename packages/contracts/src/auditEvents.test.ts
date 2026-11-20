@@ -31,41 +31,16 @@ const agentActor = {
 };
 
 describe("audit event taxonomy", () => {
-  it("enumerates the authority-relevant audit event names", () => {
+  it("enumerates the structured denial and transition audit event names", () => {
     expect(AUDIT_EVENT_NAMES).toEqual([
-      "tool-call-requested",
-      "tool-call-authorized",
       "tool-call-denied",
       "policy-decision-recorded",
-      "approval-granted",
       "approval-denied",
-      "approval-expired",
-      "thread-elevation-changed",
       "authority-transition-recorded",
     ]);
   });
 
   it.each([
-    {
-      eventName: "tool-call-requested" as const,
-      actor: agentActor,
-      payload: {
-        actionId: ids.action,
-        correlationId: ids.correlation,
-        actingPrincipal: { kind: "local-window" as const },
-        turnReference: "turn-1",
-      },
-    },
-    {
-      eventName: "tool-call-authorized" as const,
-      actor: localActor,
-      payload: {
-        actionId: ids.action,
-        correlationId: ids.correlation,
-        actingPrincipal: { kind: "local-window" as const },
-        resolutionStep: "approval" as const,
-      },
-    },
     {
       eventName: "tool-call-denied" as const,
       actor: agentActor,
@@ -90,19 +65,6 @@ describe("audit event taxonomy", () => {
       },
     },
     {
-      eventName: "approval-granted" as const,
-      actor: localActor,
-      payload: {
-        approvalId: ids.approval,
-        approvalClass: "irreversible-shell",
-        scope: "action" as const,
-        promptingActionId: ids.action,
-        correlationId: ids.correlation,
-        actingPrincipal: { kind: "local-window" as const },
-        ttlMs: 60_000,
-      },
-    },
-    {
       eventName: "approval-denied" as const,
       actor: remoteActor,
       payload: {
@@ -111,30 +73,6 @@ describe("audit event taxonomy", () => {
         correlationId: ids.correlation,
         actingPrincipal: { kind: "remote-device" as const, deviceId: ids.device },
         denialReason: "remote-cannot-mint-local-receipt",
-      },
-    },
-    {
-      eventName: "approval-expired" as const,
-      actor: localActor,
-      payload: {
-        approvalId: ids.approval,
-        approvalClass: "session-grant",
-        scope: "session" as const,
-        correlationId: ids.correlation,
-        actingPrincipal: { kind: "local-window" as const },
-        expiredAt: "2026-08-12T12:00:00.000Z",
-      },
-    },
-    {
-      eventName: "thread-elevation-changed" as const,
-      actor: localActor,
-      payload: {
-        correlationId: ids.correlation,
-        actingPrincipal: { kind: "local-window" as const },
-        threadReference: "thread-ref-1",
-        fromPosture: "plan",
-        toPosture: "approval-gated",
-        changeKind: "plan-to-execution",
       },
     },
     {
@@ -169,11 +107,13 @@ describe("audit event taxonomy", () => {
         actor: localActor,
         occurredAt: "2026-08-12T12:00:00.000Z",
         body: {
-          eventName: "tool-call-authorized",
+          eventName: "approval-denied",
           payload: {
-            actionId: ids.action,
+            approvalClass: "local-confirmation",
+            scope: "action",
             correlationId: ids.correlation,
             actingPrincipal: { kind: "local-window" },
+            denialReason: "remote-cannot-mint-local-receipt",
           },
         },
       }),

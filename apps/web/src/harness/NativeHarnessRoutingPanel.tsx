@@ -37,6 +37,7 @@ import { RoleSuggestionPreview } from "./RoleSuggestionPreview";
 import {
   ADVISOR_ROLE,
   MODEL_ROLES,
+  UNRESOLVED_BUILT_IN_SLOT_IDS,
   rolePresentation,
   slotFromSuggestion,
   slotWithCandidates,
@@ -69,33 +70,33 @@ export interface NativeHarnessRoutingPanelProps {
   readonly focused?: boolean;
 }
 
-type EditableJob = Exclude<NativeHarnessJob, "lead">;
-
 /**
- * Plain names for the jobs a role can take. The lead is left out: it runs on
- * the model picked in the thread's composer, and the Builder only takes over
- * when that model stops answering, so offering to rebind it here would
- * describe something the harness does not do.
+ * Editable jobs the server actually resolves through the routing table.
+ *
+ * - `lead` runs on the model picked in the thread's composer, and the Builder
+ *   only takes over when that model stops answering.
+ * - `advisor` runs only on the Advisor role, so the Advisor row's Off and
+ *   removal are the whole truth.
+ * - `planner`, `explorer`, `title`, `summary`, and `compaction` stay in the
+ *   wire schema so saved routing still decodes, but are hidden here while no
+ *   server caller resolves them.
  */
+const EDITABLE_JOBS = [
+  "researcher",
+  "implementer",
+  "reviewer",
+  "image-understanding",
+  "custom",
+] as const satisfies ReadonlyArray<NativeHarnessJob>;
+type EditableJob = (typeof EDITABLE_JOBS)[number];
+
 const JOB_LABELS: Readonly<Record<EditableJob, string>> = {
-  planner: "Planning",
-  explorer: "Exploring the code",
   researcher: "Research",
   implementer: "Implementing",
   reviewer: "Reviewing finished work",
-  title: "Thread titles",
-  summary: "Summaries",
-  compaction: "Shortening long threads",
   "image-understanding": "Reading images",
-  advisor: "Advisor",
   custom: "Custom helper agents",
 };
-// The advisor runs only on the Advisor role, so the role row's Off and
-// "Turn the advisor off" are the whole truth; binding it to another role here
-// would keep it running while the page says it is off.
-const EDITABLE_JOBS = NativeHarnessJob.literals.filter(
-  (job): job is EditableJob => job !== "lead" && job !== "advisor",
-);
 
 const STALE_MESSAGE = "Changed elsewhere. Reloaded; make your change again.";
 
@@ -202,9 +203,14 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
 
   const configuration = pending ?? settings.configuration;
   const saving = pending !== undefined;
-  const shownIds = new Set<string>([...MODEL_ROLES.map((role) => role.id), ADVISOR_ROLE.id]);
+  const shownIds = new Set<string>([
+    ...MODEL_ROLES.map((role) => role.id),
+    ADVISOR_ROLE.id,
+    ...UNRESOLVED_BUILT_IN_SLOT_IDS,
+  ]);
   // A role this page has no name for (a custom slot, saved from the CLI) still
   // shows, under Other roles, so it cannot hide a model Octant would use.
+  // Built-in slots no server caller resolves stay hidden even if saved earlier.
   const otherRoles = [
     ADVISOR_ROLE,
     ...configuration.slots
@@ -212,10 +218,19 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
       .filter((id) => !shownIds.has(id))
       .map(rolePresentation),
   ];
+  const standardSlot = (job: NativeHarnessJob) =>
+    String(DEFAULT_NATIVE_HARNESS_JOB_SLOTS.find((binding) => binding.job === job)?.slotId);
+  const boundSlot = (job: NativeHarnessJob) => {
+    const explicit = configuration.jobSlots.find((binding) => binding.job === job)?.slotId;
+    return explicit === undefined ? standardSlot(job) : String(explicit);
+  };
   const slotIds = [
     ...new Set([
-      ...NATIVE_HARNESS_BUILT_IN_SLOT_IDS,
-      ...configuration.slots.map((slot) => String(slot.id)),
+      ...NATIVE_HARNESS_BUILT_IN_SLOT_IDS.filter((id) => !UNRESOLVED_BUILT_IN_SLOT_IDS.has(id)),
+      ...configuration.slots
+        .map((slot) => String(slot.id))
+        .filter((id) => !UNRESOLVED_BUILT_IN_SLOT_IDS.has(id)),
+      ...EDITABLE_JOBS.map(boundSlot),
     ]),
   ];
   const slotFor = (id: string) => configuration.slots.find((slot) => String(slot.id) === id);
@@ -249,17 +264,13 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
         modelsOf(suggestedGroup)[0]);
   const suggestedCount = suggestedGroup === undefined ? 0 : modelsOf(suggestedGroup).length;
 
-  const standardSlot = (job: NativeHarnessJob) =>
-    String(DEFAULT_NATIVE_HARNESS_JOB_SLOTS.find((binding) => binding.job === job)?.slotId);
-  const boundSlot = (job: NativeHarnessJob) => {
-    const explicit = configuration.jobSlots.find((binding) => binding.job === job)?.slotId;
-    return explicit === undefined ? standardSlot(job) : String(explicit);
-  };
   const standardJobs = EDITABLE_JOBS.every((job) => boundSlot(job) === standardSlot(job));
   // A fresh host stores the standard bindings, so only a chosen model or a
   // changed binding counts as routing someone saved.
   const hasSavedRouting =
-    configuration.slots.some((slot) => slot.candidates.length > 0) || !standardJobs;
+    configuration.slots.some(
+      (slot) => !UNRESOLVED_BUILT_IN_SLOT_IDS.has(String(slot.id)) && slot.candidates.length > 0,
+    ) || !standardJobs;
 
   const readiness = nativeHarnessReadinessById(props.providers);
   const suggest = (roleIds: ReadonlyArray<string>) => {

@@ -100,7 +100,6 @@ const PRODUCT_PROBES = [
   { path: "/api/extensions/snapshot", method: "POST" },
   { path: "/api/extensions/state", method: "POST" },
   { path: "/api/extensions/tool-approvals", method: "POST" },
-  { path: "/api/validation/evidence", method: "POST" },
   { path: "/api/context/inspect", method: "POST" },
   {
     path: "/api/context/compaction?aggregateType=code-thread&aggregateId=00000000-0000-4000-8000-000000000001",

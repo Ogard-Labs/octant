@@ -2,6 +2,7 @@ import { threadStats, threadStatsInputOf, turnDetail, type TurnDetailRow } from 
 import type { TurnMetricsRecord } from "@octant/contracts";
 import { ChevronLeft, ChevronRight } from "../ui/icons";
 import { useEffect, useId, useMemo, useState } from "react";
+import { formatClockTime } from "../theme/timestampFormat";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { useThreadStatsScope } from "./threadStatsScope";
@@ -145,5 +146,5 @@ function DetailSection(props: {
 function formatClock(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return formatClockTime(date, { hour: "2-digit", minute: "2-digit" });
 }
