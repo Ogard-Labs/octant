@@ -113,6 +113,10 @@ export interface RemoteDelegationPort {
         readonly name: string;
         readonly modes: ReadonlyArray<"work" | "code">;
       }>;
+      /** False when that member stopped accepting delegated work. */
+      readonly accepting?: boolean;
+      /** How busy that member is: light, busy or heavy. */
+      readonly load?: "light" | "busy" | "heavy";
     }>
   >;
 }

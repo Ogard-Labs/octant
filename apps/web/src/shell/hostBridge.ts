@@ -261,6 +261,7 @@ export type HubAdministrationOperation =
   | "owners-add"
   | "owners-remove"
   | "confirm-new-members"
+  | "delegation-accepting"
   | "paired-merge-unlock"
   | "owner-approval-answer-unlock"
   | "confirm-member"

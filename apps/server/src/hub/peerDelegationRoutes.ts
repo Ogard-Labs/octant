@@ -104,7 +104,14 @@ export function createPeerDelegationRouteHandler(
     if (route === PEER_DELEGATION_ROUTES.projects) {
       const listed = options.delegation.listProjects(signed);
       return listed.status === "listed"
-        ? Response.json({ projects: listed.projects }, { headers: NO_STORE })
+        ? Response.json(
+            {
+              projects: listed.projects,
+              accepting: listed.accepting,
+              ...(listed.load === undefined ? {} : { load: listed.load }),
+            },
+            { headers: NO_STORE },
+          )
         : refusedWith(listed);
     }
     const receipt = await options.delegation.cancel(signed);

@@ -276,6 +276,8 @@ interface HubStatus {
   readonly directPush?: DirectPushView;
   readonly provision?: ProvisionView;
   readonly signIn?: SignInView;
+  /** Whether this computer takes work other members delegate; absent where delegation is not composed. */
+  readonly delegationAccepting?: boolean;
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
@@ -487,6 +489,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
   const [join, setJoin] = useState<JoinState>({ phase: "idle" });
   const [draft, setDraft] = useState<ReadonlyArray<HubGrantItem>>([]);
   const ownerId = useId();
+  const delegationDescriptionId = useId();
   const codeId = useId();
   const removeOpener = useRef<HTMLButtonElement>(null);
   const leaveOpener = useRef<HTMLButtonElement>(null);
@@ -1085,6 +1088,23 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
       "Octant could not change Confirm new members.",
     );
     if (reply !== undefined) setMessage(`Confirm new members is ${enabled ? "on" : "off"}.`);
+    await refresh();
+  };
+
+  const setDelegationAccepting = async (accepting: boolean) => {
+    const reply = await act(
+      "delegation-accepting",
+      { accepting },
+      "changed",
+      "Octant could not change whether this computer takes delegated work.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        accepting
+          ? "This computer takes delegated work again."
+          : "This computer takes no new delegated work. Work already running carries on.",
+      );
+    }
     await refresh();
   };
 
@@ -1942,6 +1962,22 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
               </SettingsState>
             )}
           </SettingsSection>
+          {status?.delegationAccepting === undefined ? null : (
+            <SettingsSection title="Delegated work">
+              <OctantSwitch
+                checked={status.delegationAccepting}
+                describedBy={delegationDescriptionId}
+                disabled={busy}
+                label="Take delegated work from other members"
+                onCheckedChange={(accepting) => void setDelegationAccepting(accepting)}
+              />
+              <p className="settings-section-line" id={delegationDescriptionId}>
+                Other members of the hub can ask this computer to run work in the Projects you open
+                to them. Turning this off refuses every new request at once; work already running
+                here carries on.
+              </p>
+            </SettingsSection>
+          )}
           <SettingsSection title="New members">
             <NewMemberChecks
               alerts={linked.alerts}
@@ -2345,6 +2381,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const signIn = readSignIn(field(body, "signIn"));
   const pairedMergeUnlock = field(body, "pairedMergeUnlock") === true;
   const ownerApprovalAnswerUnlock = field(body, "ownerApprovalAnswerUnlock") === true;
+  const delegationAccepting = field(field(body, "delegation"), "accepting");
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -2375,6 +2412,7 @@ function readStatus(body: unknown): HubStatus | undefined {
       ...(directPush === undefined ? {} : { directPush }),
       ...(provision === undefined ? {} : { provision }),
       ...(signIn === undefined ? {} : { signIn }),
+      ...(typeof delegationAccepting === "boolean" ? { delegationAccepting } : {}),
       link: {
         membership,
         hubName,

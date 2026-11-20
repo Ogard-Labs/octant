@@ -99,11 +99,12 @@ import { createLiveHostExportService } from "../hostExportService";
 import { createAgentRemoteDelegation } from "../hub/agentRemoteDelegation";
 import { createDelegationAdministrationRouteHandler } from "../hub/delegationAdministrationRoutes";
 import { createDelegationJournal } from "../hub/delegationJournal";
-import { createDelegationStateStore } from "../hub/delegationStateStore";
+import { createDelegationStateStore, delegationAcceptingSwitch } from "../hub/delegationStateStore";
 import { DelegatingSpokeService } from "../hub/delegatingSpokeService";
 import { PeerDelegationService } from "../hub/peerDelegationService";
 import { createPeerDelegationRouteHandler } from "../hub/peerDelegationRoutes";
 import { createWorkDelegationHost } from "../hub/workDelegationHost";
+import { MemberLoad } from "../hub/memberLoad";
 import { createCodeDelegationHost, delegationHostByProjectType } from "../hub/codeDelegationHost";
 import { createCodeDelegationServices } from "../hub/codeDelegationServices";
 import type { CodeRouteService } from "../codeRoutes";
@@ -678,6 +679,15 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordHubMembership,
     now: Date.now,
   });
+  // Read every half minute; a new level shows only once it has held.
+  const memberLoad = new MemberLoad({
+    read: () => ({
+      memoryPressure: hostMemoryGuard.report().pressure,
+      liveTurns: deps.liveTurns.count(),
+    }),
+    now: Date.now,
+  });
+  setInterval(() => memberLoad.sample(), 30_000).unref();
   const spokeLinkService = new SpokeLinkService({
     state: hubStateStore,
     identity: resolveHubIdentity,
@@ -699,6 +709,12 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     record: recordHubMembership,
     serverBuildVersion: version,
+    // Placement advice: the load level the status read and the Project list
+    // report, and whether this member takes delegated work.
+    placement: {
+      load: () => memberLoad.level(),
+      accepting: () => delegationAcceptingSwitch(delegationState).read(),
+    },
     now: Date.now,
   });
   // A member that cannot reach the hub for the failover time tries the standbys,
@@ -927,6 +943,11 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordHubMembership,
   });
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({
+    // Read at each request: the delegation state is opened below.
+    delegationAccepting: {
+      read: () => delegationAcceptingSwitch(delegationState).read(),
+      set: (accepting) => delegationAcceptingSwitch(delegationState).set(accepting),
+    },
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     hub: hubService,
@@ -1029,6 +1050,7 @@ export function wireRemote(deps: RemoteDependencies) {
           .filter((project) => project.lifecycle === "active")
           .map((project) => ({ projectId: project.id, name: project.name })),
       state: delegationState,
+      load: () => memberLoad.level(),
       record: recordDelegation,
       now: Date.now,
     }),

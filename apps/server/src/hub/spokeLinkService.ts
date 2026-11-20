@@ -31,6 +31,7 @@ import {
   type SignedHubRoster,
 } from "@octant/contracts";
 import {
+  type MemberLoadLevel,
   admitNewMember,
   authorizeHubRequest,
   authorizePeer,
@@ -206,6 +207,11 @@ export interface SpokeLinkOptions {
     readonly followReason?: HubFollowReason;
   }) => void;
   readonly serverBuildVersion: string;
+  /** What the spoke's status read says about placing work here: its load, and whether it takes delegated work. */
+  readonly placement?: {
+    readonly load: () => MemberLoadLevel;
+    readonly accepting: () => boolean;
+  };
   readonly now: () => number;
 }
 
@@ -1757,6 +1763,12 @@ export class SpokeLinkService {
       name: this.#options.identity().displayName,
       serverBuildVersion: this.#options.serverBuildVersion,
       rosterSequence: link.roster.roster.sequence,
+      ...(this.#options.placement === undefined
+        ? {}
+        : {
+            load: this.#options.placement.load(),
+            acceptingDelegatedWork: this.#options.placement.accepting(),
+          }),
     };
   }
 }
