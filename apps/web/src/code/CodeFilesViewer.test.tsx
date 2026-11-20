@@ -1,17 +1,34 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { CodeCheckoutId, CodeFileListingResult, CodeThreadId } from "@octant/contracts";
+import type {
+  CodeCheckoutId,
+  CodeFileId,
+  CodeFileListingResult,
+  CodeThreadId,
+} from "@octant/contracts";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CodeFilesViewer, type CodeFilesViewerProps } from "./CodeFilesViewer";
+import { FilesClosePrompt } from "./FilesClosePrompt";
+import {
+  filesClosePromptSnapshot,
+  filesCloseScope,
+  modelUri,
+  registerFilesCloseEntry,
+} from "./filesCloseGuard";
 
 const editorSave = vi.fn(async () => true);
 const editorDiscard = vi.fn();
 
 vi.mock("./useCodeEditorFile", () => ({
   useCodeEditorFile: (options: { readonly relativePath?: string }) => ({
-    file: { path: options.relativePath, state: "available" },
+    file: {
+      path: options.relativePath,
+      state: "available",
+      fileId: `mock-${options.relativePath}`,
+      checkoutId: "00000000-0000-4000-8000-000000000912",
+    },
     refresh: vi.fn(),
   }),
 }));
@@ -20,14 +37,12 @@ vi.mock("./MonacoEditorPane", () => ({
   MonacoEditorPane: (props: {
     readonly file: { readonly path: string };
     readonly onDirtyChange?: (dirty: boolean) => void;
-    readonly onRegisterActions?: (actions: unknown) => void;
     readonly onOpenInMainArea?: () => void;
   }) => (
     <section aria-label={`Code editor for ${props.file.path}`}>
       <button
         onClick={() => {
           props.onDirtyChange?.(true);
-          props.onRegisterActions?.({ save: editorSave, discard: editorDiscard });
         }}
         type="button"
       >
@@ -42,6 +57,41 @@ vi.mock("./MonacoEditorPane", () => ({
 
 const threadId = "00000000-0000-4000-8000-000000000911" as CodeThreadId;
 const checkoutId = "00000000-0000-4000-8000-000000000912" as CodeCheckoutId;
+const scope = filesCloseScope(undefined, String(threadId));
+
+const dirtyPaths = new Set<string>();
+const releases: Array<() => void> = [];
+
+function dirty(path: string) {
+  dirtyPaths.add(path);
+  releases.push(
+    registerFilesCloseEntry({
+      scope,
+      key: modelUri(checkoutId, `mock-${path}` as CodeFileId),
+      name: path,
+      isDirty: () => dirtyPaths.has(path),
+      save: async () => {
+        const ok = await editorSave();
+        if (ok) dirtyPaths.delete(path);
+        return ok;
+      },
+      discard: () => {
+        editorDiscard();
+        dirtyPaths.delete(path);
+      },
+    }),
+  );
+}
+
+afterEach(() => {
+  // A question nobody answered stays open and shades the next test's screen.
+  filesClosePromptSnapshot()?.answer("cancel");
+  dirtyPaths.clear();
+  while (releases.length > 0) releases.pop()?.();
+  editorSave.mockReset();
+  editorSave.mockResolvedValue(true);
+  editorDiscard.mockReset();
+});
 
 function file(path: string, index: number) {
   return {
@@ -108,9 +158,11 @@ function mount(
             watch: vi.fn(async function* () {}),
           } as never,
         }}
+        filesCloseScope={scope}
         onOpenInMainArea={onOpenInMainArea}
         view={view}
       />
+      <FilesClosePrompt />
     </div>,
   );
   return { onOpenInMainArea };
@@ -237,6 +289,7 @@ describe("CodeFilesViewer", () => {
       mount();
       await user.dblClick(await screen.findByRole("treeitem", { name: "a.ts" }));
       await user.click(await screen.findByRole("button", { name: "Edit a.ts" }));
+      dirty("a.ts");
       return user;
     }
     const closeA = (user: ReturnType<typeof userEvent.setup>) =>
@@ -278,13 +331,26 @@ describe("CodeFilesViewer", () => {
       expect(editorSave).toHaveBeenCalledTimes(1);
     });
 
-    it("keeps the tab open when saving fails", async () => {
+    it("says the save failed, asks again, and keeps the tab when the person cancels", async () => {
       editorSave.mockResolvedValueOnce(false);
       const user = await openDirty();
       await closeA(user);
       await user.click(await screen.findByRole("button", { name: "Save" }));
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(
+        await screen.findByText("a.ts could not be saved. Your edits are still here."),
+      ).toBeVisible();
+      await user.click(await screen.findByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
       expect(tabNames()).toHaveLength(1);
+    });
+
+    it("asks only about the file that is closing, not another dirty one", async () => {
+      const user = await openDirty();
+      dirty("b.ts");
+      await closeA(user);
+      await user.click(await screen.findByRole("button", { name: "Don't save" }));
+      await waitFor(() => expect(tabNames()).toEqual([]));
+      expect(dirtyPaths.has("b.ts")).toBe(true);
     });
 
     it("drops the edits and closes the tab on Don't save", async () => {

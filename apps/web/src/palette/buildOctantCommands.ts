@@ -1,5 +1,6 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ReplyDetailLevel } from "@octant/contracts/shell";
+import type { DockBarItem } from "../shell/dockBarControls";
 import { nextReplyDetailLevel } from "@octant/domain/reply-detail-policy";
 import {
   REPLY_DETAIL_DESCRIPTIONS,
@@ -41,6 +42,15 @@ export interface OctantCommandSources {
   readonly settingsPages?: ReadonlyArray<CommandSettingsPage>;
   /** The tools the dock can open for the thread in front. */
   readonly dockTools?: ReadonlyArray<CommandDockTool>;
+  /**
+   * The bar controls the pane in front offers, so its named commands live in
+   * the palette too — each command runs the exact callback the bar's own
+   * button, switch or menu row invokes.
+   */
+  readonly focusedToolCommands?: {
+    readonly toolLabel: string;
+    readonly items: ReadonlyArray<DockBarItem>;
+  };
   readonly onOpenDockTool?: (tool: CommandDockTool) => void;
   /** Opens the To-dos page. Absent when this window has no to-do list. */
   readonly onOpenTodos?: () => void;
@@ -381,6 +391,48 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
         keywords: ["dock", "tool", "panel", tool.label],
         action: { kind: "run", run: () => openDockTool(tool) },
       });
+    }
+  }
+
+  const focusedTool = sources.focusedToolCommands;
+  if (focusedTool !== undefined) {
+    for (const item of focusedTool.items) {
+      // Text and tool-drawn nodes say or draw something; they are not
+      // commands. A disabled control stays unreachable, as its button is.
+      if (item.kind === "button") {
+        if (item.disabled === true) continue;
+        commands.push({
+          id: `tool-command:${item.id}`,
+          title: item.label,
+          group: "Workspace",
+          detail: focusedTool.toolLabel,
+          keywords: [focusedTool.toolLabel, item.label],
+          action: { kind: "run", run: item.onSelect },
+        });
+      } else if (item.kind === "menu") {
+        for (const entry of item.items) {
+          if (entry.disabled === true) continue;
+          commands.push({
+            id: `tool-command:${item.id}:${entry.id}`,
+            title: entry.label,
+            group: "Workspace",
+            detail: `${focusedTool.toolLabel} — ${item.label}`,
+            keywords: [focusedTool.toolLabel, entry.label],
+            action: { kind: "run", run: () => item.onSelect(entry.id) },
+          });
+        }
+      } else if (item.kind === "choice") {
+        for (const option of item.options) {
+          commands.push({
+            id: `tool-command:${item.id}:${option.id}`,
+            title: option.label,
+            group: "Workspace",
+            detail: `${focusedTool.toolLabel} — ${item.label}`,
+            keywords: [focusedTool.toolLabel, item.label, option.label],
+            action: { kind: "run", run: () => item.onChange(option.id) },
+          });
+        }
+      }
     }
   }
 

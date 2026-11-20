@@ -154,7 +154,11 @@ export class WorkTurnLiveStore {
   appendToolStep(
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
-    change: { readonly step?: ThreadToolStep; readonly truncated: boolean },
+    change: {
+      readonly step?: ThreadToolStep;
+      readonly truncated: boolean;
+      readonly reasoningMs?: number;
+    },
   ): void {
     if (this.#closed) return;
     const state = this.#state(threadId);
@@ -167,6 +171,7 @@ export class WorkTurnLiveStore {
         requestId,
         ...(change.step === undefined ? {} : { toolStep: change.step }),
         toolStepsTruncated: change.truncated,
+        ...(change.reasoningMs === undefined ? {} : { reasoningMs: change.reasoningMs }),
       }),
     );
   }

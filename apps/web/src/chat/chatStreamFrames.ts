@@ -90,6 +90,7 @@ export function applyChatAttemptFrame(
       ...attempt,
       ...(toolSteps.length === 0 ? {} : { toolSteps }),
       ...(event.toolStepsTruncated === true ? { toolStepsTruncated: true } : {}),
+      ...(event.reasoningMs === undefined ? {} : { reasoningMs: event.reasoningMs }),
       updatedAt: event.updatedAt,
     };
     const turns = view.turns.slice();

@@ -40,6 +40,7 @@ import {
   MAX_THREAD_TASKS_PER_TURN,
   restateThreadTaskList,
   upsertThreadTaskProgress,
+  type ThreadCallTiming,
   type ThreadToolStep,
 } from "@octant/contracts";
 import {
@@ -47,6 +48,7 @@ import {
   appendRepeatToolWarning,
   changedThreadToolStep,
   decideTurnStallAction,
+  createTurnActivityTiming,
   INITIAL_TURN_LOOP_STATE,
   isNativeHarnessDriverKind,
   markThreadToolStepOutsideContent,
@@ -476,6 +478,10 @@ export class ChatTurnRunner {
       let contextTokens: number | undefined;
       let contextWindow: number | undefined;
       let reasoningTokens: number | undefined;
+      // One tracker per attempt: reasoning spans and call bounds fold from
+      // the same provider stamps the journal keeps, so live and rebuilt
+      // views show identical measurements.
+      const turnTiming = createTurnActivityTiming();
       let cacheReadInputTokens: number | undefined;
       let cacheWriteInputTokens: number | undefined;
       let providerExecutionDurationMs: number | undefined;
@@ -611,6 +617,7 @@ export class ChatTurnRunner {
       const showAppTool = (
         call: { readonly requestId: string; readonly toolName: string },
         state: "started" | "completed" | "failed",
+        timing?: ThreadCallTiming,
       ) =>
         announcesNoCall
           ? foldToolSteps((before) =>
@@ -618,9 +625,24 @@ export class ChatTurnRunner {
                 before,
                 { toolCallId: call.requestId, toolName: call.toolName, state },
                 stepLimit,
+                timing,
               ),
             )
           : Effect.void;
+      // A span-close restates the attempt's reasoning total: the small step
+      // frame carries it when the host streams those, the whole attempt
+      // otherwise. Never reasoning text — only the measured total.
+      const noteReasoningTotal = (total: number) =>
+        Effect.gen(function* () {
+          if (total === currentAttempt.reasoningMs) return;
+          currentAttempt = {
+            ...currentAttempt,
+            reasoningMs: total,
+            updatedAt: updatedAt(),
+          };
+          if (input.persistToolStep === undefined) yield* input.persistAttempt(currentAttempt);
+          else yield* input.persistToolStep(currentAttempt, undefined);
+        });
       // An earlier attempt's read that could not be marked is still in the
       // session this attempt would resume.
       if (outsideContentMarks.settleOwed(String(input.thread.id)).status === "refused") {
@@ -1187,6 +1209,21 @@ export class ChatTurnRunner {
                 if (event.kind === "liveness") return;
                 input.toolEffects?.observe(event, input.appManagedTools);
                 timing = observeTurnMetrics(timing, event);
+                const eventProvenance =
+                  event.synthesized === true ? ("synthesized" as const) : undefined;
+                const reasoningTotal = turnTiming.observeEvent({
+                  isReasoning: event.kind === "reasoning-delta",
+                  occurredAt: event.occurredAt,
+                  ...(eventProvenance === undefined ? {} : { provenance: eventProvenance }),
+                });
+                if (reasoningTotal !== undefined) yield* noteReasoningTotal(reasoningTotal);
+                if (event.kind === "tool-start") {
+                  turnTiming.callStarted({
+                    toolCallId: event.toolCallId,
+                    occurredAt: event.occurredAt,
+                    ...(eventProvenance === undefined ? {} : { provenance: eventProvenance }),
+                  });
+                }
                 input.liveTurn?.observe(event);
                 const sighting = compactions.observe(event);
                 if (sighting !== undefined) {
@@ -1524,7 +1561,9 @@ export class ChatTurnRunner {
                     executionSignal === undefined
                       ? toolAbort.signal
                       : AbortSignal.any([executionSignal, toolAbort.signal]);
+                  const appToolStartedAt = updatedAt();
                   yield* showAppTool(event, "started");
+                  let appToolApprovalWaitMs = 0;
                   // App-owned work suspends the stalled-turn limit, so the call
                   // gets a deadline of its own: a tool that never returns ends
                   // the turn with a named cause instead of hanging it, whatever
@@ -1538,6 +1577,9 @@ export class ChatTurnRunner {
                             inputJson: event.inputJson,
                             signal: toolSignal,
                             toolCallId: event.requestId,
+                            onApprovalWait: (waitMs) => {
+                              appToolApprovalWaitMs += waitMs;
+                            },
                           }),
                         catch: () =>
                           decodeChatFailure({
@@ -1589,7 +1631,23 @@ export class ChatTurnRunner {
                       execution.outsideContent.labels,
                     );
                   }
-                  yield* showAppTool(event, execution.isError === true ? "failed" : "completed");
+                  // The run time is the actual execute interval minus any
+                  // person wait the recorded call measured inside it. Without
+                  // the recorded-call boundary a wait could sit inside the
+                  // interval unseen, so no bounds are offered at all.
+                  yield* showAppTool(
+                    event,
+                    execution.isError === true ? "failed" : "completed",
+                    input.toolEffects === undefined
+                      ? undefined
+                      : {
+                          startedAt: appToolStartedAt,
+                          endedAt: updatedAt(),
+                          ...(appToolApprovalWaitMs > 0
+                            ? { approvalWaitMs: appToolApprovalWaitMs }
+                            : {}),
+                        },
+                  );
                   const toolResult = loopCheck.earlyWarning
                     ? appendRepeatToolWarning(execution.result)
                     : execution.result;
@@ -1676,10 +1734,22 @@ export class ChatTurnRunner {
                   event.kind === "tool-success" ||
                   event.kind === "tool-failure"
                 ) {
-                  yield* foldToolSteps((before) => recordThreadToolStep(before, event, stepLimit));
+                  const callTiming =
+                    event.kind === "tool-success" || event.kind === "tool-failure"
+                      ? turnTiming.callEnded({
+                          toolCallId: event.toolCallId,
+                          occurredAt: event.occurredAt,
+                          ...(eventProvenance === undefined ? {} : { provenance: eventProvenance }),
+                        })
+                      : undefined;
+                  yield* foldToolSteps((before) =>
+                    recordThreadToolStep(before, event, stepLimit, callTiming),
+                  );
                   return;
                 }
                 if (event.kind === "waiting") {
+                  const closed = turnTiming.closeReasoningAt(event.occurredAt);
+                  if (closed !== undefined) yield* noteReasoningTotal(closed);
                   yield* persistOutcome("waiting");
                   terminalOutcome = "waiting";
                   providerEndedTurn = true;
@@ -1731,6 +1801,8 @@ export class ChatTurnRunner {
                   return;
                 }
                 if (event.kind === "completed") {
+                  const closed = turnTiming.closeReasoningAt(event.occurredAt);
+                  if (closed !== undefined) yield* noteReasoningTotal(closed);
                   if (currentAttempt.outcome === "queued") {
                     yield* persistOutcome("streaming");
                   }
@@ -1765,6 +1837,8 @@ export class ChatTurnRunner {
                   return;
                 }
                 if (event.kind === "interrupted") {
+                  const closed = turnTiming.closeReasoningAt(event.occurredAt);
+                  if (closed !== undefined) yield* noteReasoningTotal(closed);
                   if (
                     !input.signal?.aborted &&
                     terminalOutcome !== "cancelled" &&
@@ -1806,6 +1880,8 @@ export class ChatTurnRunner {
                   );
                 }
                 if (event.kind === "failed") {
+                  const closed = turnTiming.closeReasoningAt(event.occurredAt);
+                  if (closed !== undefined) yield* noteReasoningTotal(closed);
                   return yield* persistProviderFailure(event.failure);
                 }
               }),

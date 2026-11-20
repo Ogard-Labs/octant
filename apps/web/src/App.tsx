@@ -99,7 +99,7 @@ import { useHomeStart } from "./app/homeStart";
 import { ReaderPagesContainer } from "./app/ReaderPagesContainer";
 import { SettingsContainer } from "./app/SettingsContainer";
 import { OctantSheet } from "./ui/base/OctantSheet";
-import type { ShellActions } from "./app/shellActions";
+import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
@@ -159,6 +159,7 @@ import type {
   ProviderInstance,
   VoiceSettings,
 } from "@octant/contracts";
+
 import type {
   CodeBoardQuery,
   CodeProjectPullRequestDetailObserved,
@@ -215,6 +216,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import "./styles.css";
@@ -227,6 +229,7 @@ import { threadMoveClientForBridge } from "./environment/threadMove/threadMoveCl
 // The shared component/material layer loads last so its assignments win.
 import "./styles/components.css";
 import { countSidebarTiles } from "./shell/sidebarTileCounts";
+import { createFocusedDockTool } from "./shell/dockBarControls";
 import { WorkKindChoiceContext, type WorkKindChoice } from "./shell/WorkKindSwitch";
 import {
   enabledWorkKinds,
@@ -406,6 +409,7 @@ import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
 import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
+import { MoveThreadToProjectDialog } from "./projects/MoveThreadToProjectDialog";
 import {
   ProjectActionRunDialog,
   type ProjectActionTarget,
@@ -547,6 +551,9 @@ import { useContextController } from "./context/useContextController";
 import { useSessionCompaction } from "./context/useSessionCompaction";
 import type { ComposerCompaction } from "./context/composerContextMeterScope";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
+import { confirmFilesClose, filesCloseScope } from "./code/filesCloseGuard";
+import { FilesClosePrompt } from "./code/FilesClosePrompt";
+import { useDesktopFilesClose } from "./code/useDesktopFilesClose";
 import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
 import { useContinueCards } from "./code/useContinueCards";
 import { coordinatorTitleByWorker } from "./code/codeBoardGrouping";
@@ -879,6 +886,8 @@ function LaunchedShell(
   // is released for as long as the host reports full screen.
   const hostFullScreen = useHostFullScreen(props.hostBridge);
   useRendererOverlayReport(props.hostBridge);
+  // The desktop asks about unsaved Files drafts before this window closes.
+  useDesktopFilesClose(props.hostBridge);
   const hostReservesTitlebarInset =
     props.hostBridge?.windowChrome === "hidden-inset" && !hostFullScreen;
   useLayoutEffect(() => {
@@ -1198,6 +1207,12 @@ function LaunchedShell(
   // in, and the person sends it like any new thread.
   const [pendingDraftPrompt, setPendingDraftPrompt] = useState<string>();
   const [pendingDraftBranch, setPendingDraftBranch] = useState<string>();
+  const [draftStartFrom, setDraftStartFrom] = useState<{ readonly projectId: string } | undefined>(
+    undefined,
+  );
+  // The Move to Project request the sidebar's dialog answers; the Code
+  // Environment asks through the same action rather than a second surface.
+  const [moveRequest, setMoveRequest] = useState<ThreadMoveRequest | undefined>(undefined);
   // New coordinator opens an ordinary Code draft in its Project; the thread it
   // creates becomes a coordinator before its first message is sent. It holds
   // only for that Project, so choosing another one in the draft drops it.
@@ -1740,7 +1755,7 @@ function LaunchedShell(
             destination.kind === "center"
           )
             return;
-          void controller.closeContentTab(fromTab.paneId, fromTab.tabId);
+          controller.forgetMovedContentTab(fromTab.paneId, fromTab.tabId);
         });
     },
   });
@@ -4697,6 +4712,26 @@ function LaunchedShell(
   function resizeDockTileColumn(columnIndex: number, shares: ReadonlyArray<number>) {
     changeDockTiles((state) => resizeUtilityTileColumn(state, columnIndex, shares));
   }
+  /**
+   * Close a dock or bottom-panel tool tab, asking the Files close coordinator
+   * first when the tool is a Files tool with drafts to lose. Callers that
+   * move the tool (to the bottom panel, back beside the thread, or to the
+   * shelf) close directly: the tool keeps running and nothing is asked.
+   */
+  function closeToolTab(surface: RightUtilityDockSurfaceId | undefined, close: () => void) {
+    if (surface !== "files" || dockThread === undefined || dockThreadKey === undefined) {
+      close();
+      return;
+    }
+    const asked = dockThreadKey;
+    void confirmFilesClose(filesCloseScope(dockThreadHostId, dockThread.threadId)).then(
+      (proceed) => {
+        // Focus may have moved the dock to another thread while the person
+        // answered; that thread's tabs were never asked about.
+        if (proceed && dockThreadKeyRef.current === asked) close();
+      },
+    );
+  }
   function closeDockTab(tabId: string) {
     const closedTab = dockState.tabs.find((tab) => tab.id === tabId);
     changeDockTiles((state) => closeUtilityTabState(state, tabId));
@@ -4978,7 +5013,9 @@ function LaunchedShell(
         changeDockTiles((state) => showUtilityTabStacked(state, press.tabId));
         return;
       case "close":
-        for (const tabId of press.tabIds) closeDockTab(tabId);
+        closeToolTab(surface, () => {
+          for (const tabId of press.tabIds) closeDockTab(tabId);
+        });
         return;
       case "minimise":
         // The tool keeps running, now as a card on the shelf.
@@ -4991,9 +5028,11 @@ function LaunchedShell(
       case "close-bottom":
         // The panel's own close sends focus to its toggle; this press came
         // from the tool's button, which keeps it.
-        closeBottomPanelTab(surface, false);
-        queueMicrotask(() => {
-          if (opener.isConnected) opener.focus();
+        closeToolTab(surface, () => {
+          closeBottomPanelTab(surface, false);
+          queueMicrotask(() => {
+            if (opener.isConnected) opener.focus();
+          });
         });
         return;
       case "select-bottom":
@@ -5056,7 +5095,9 @@ function LaunchedShell(
     }
     if (tabId === undefined) return;
     if (value === "close") {
-      for (const id of surface === "browser" ? button.tabIds : [tabId]) closeDockTab(id);
+      closeToolTab(surface, () => {
+        for (const id of surface === "browser" ? button.tabIds : [tabId]) closeDockTab(id);
+      });
       return;
     }
     if (value === "to-bottom") openBottomTool(surface);
@@ -5692,7 +5733,17 @@ function LaunchedShell(
       markCodeFollowUp: codeController.markFollowUp,
       markCodeThreadRead: codeController.markThreadRead,
       mergeProjectPullRequest,
-      moveCodeThread: codeController.moveThread,
+      moveCodeThread: (threadId, projectId, options) => {
+        // A follow-up started through the thread's own slot is scoped in
+        // that slot's controller — only it names the exact running operation
+        // a Stop and move may end. The window controller stays the route for
+        // a first turn it owns; its own scoped-turn check refuses a stop it
+        // cannot name, so a successor or an unscoped turn is never cancelled
+        // by accident.
+        const slot = codeThreadControllers.get(threadId);
+        return (slot ?? codeController).moveThread(threadId, projectId, options);
+      },
+      requestMoveToProject: setMoveRequest,
       moveProject: projectController.move,
       noteCanvasReferences,
       noteHandedOffDocument,
@@ -6269,6 +6320,30 @@ function LaunchedShell(
     return controller.activateContentTab(place.paneId, place.tabId);
   }
 
+  // The focused pane publishes its bar's controls here so the palette's tool
+  // commands invoke the same registered callbacks the bar itself does.
+  const focusedDockTool = useMemo(() => createFocusedDockTool(), []);
+  const focusedToolSource = useSyncExternalStore(
+    focusedDockTool.subscribe,
+    focusedDockTool.get,
+    focusedDockTool.get,
+  );
+  // Only a Code Project's extra folders are listed by the Files tool; a Work
+  // Project's own Files listing already walks them. Hooks live above the
+  // status early returns, so this stays computed here and keeps a stable
+  // reference while the Project list and selection are unchanged.
+  const activeProjectExtraFolders = useMemo(() => {
+    const project = projectController.projects.find(
+      (candidate) =>
+        candidate.type === "code" &&
+        candidate.lifecycle === "active" &&
+        candidate.id === activeProjectId,
+    );
+    return project?.type === "code"
+      ? (project.extraFolders ?? []).map((folder) => folder.canonicalRoot)
+      : NO_PROJECT_EXTRA_FOLDERS;
+  }, [projectController.projects, activeProjectId]);
+
   if (controller.status === "loading") {
     return (
       <main className="shell-boundary">
@@ -6798,29 +6873,51 @@ function LaunchedShell(
     setPendingDraftCoordinatorChoices({});
   }
 
-  async function openDraftInProject(projectId: ProjectId) {
+  async function openDraftInProject(
+    projectId: ProjectId,
+    options?: { readonly startFrom?: boolean | undefined },
+  ) {
     const serverProject = serverCodeProjectFor(serverCodeProjects.projects, projectId);
     if (serverProject !== undefined) {
-      await openDraftInKnownProject(serverProject.projectId, "code", serverProject.name);
+      await openDraftInKnownProject(
+        serverProject.projectId,
+        "code",
+        serverProject.name,
+        options?.startFrom,
+      );
       return;
     }
     const serverWorkProject = serverCodeProjectFor(serverCodeProjects.workProjects, projectId);
     if (serverWorkProject !== undefined) {
-      await openDraftInKnownProject(serverWorkProject.projectId, "work", serverWorkProject.name);
+      await openDraftInKnownProject(
+        serverWorkProject.projectId,
+        "work",
+        serverWorkProject.name,
+        options?.startFrom,
+      );
       return;
     }
     const project = projectController.allProjects.find((candidate) => candidate.id === projectId);
     if (project === undefined || project.lifecycle !== "active") return;
-    await openDraftInKnownProject(project.id, project.type, project.name);
+    await openDraftInKnownProject(project.id, project.type, project.name, options?.startFrom);
   }
 
   // Used right after creation, when the Project is not yet in this render's
   // snapshot; the dialog already knows the mode and name.
-  async function openDraftInKnownProject(projectId: ProjectId, mode: OctantMode, _name: string) {
+  async function openDraftInKnownProject(
+    projectId: ProjectId,
+    mode: OctantMode,
+    _name: string,
+    startFrom?: boolean,
+  ) {
     // The draft carries its Project itself. Opening the Project first put its
     // overview on screen for a frame before the draft replaced it, which read
     // as an old page flashing past every time a task was started from a row.
     closeWorkspaceReaders();
+    // The branch-start intent belongs to exactly this draft: keyed to the
+    // Project it was opened for and cleared for every other way a draft
+    // opens, so a later same-Project draft does not inherit it.
+    setDraftStartFrom(startFrom === true ? { projectId: String(projectId) } : undefined);
     // A new draft starts clean: a prompt seeded by an earlier PR-review
     // handoff must not reappear as this draft's text.
     setDraftError(undefined);
@@ -6834,6 +6931,7 @@ function LaunchedShell(
   // sticky default for every later draft opened from the sidebar.
   function openDraftInActiveProject(mode: "work" | "code") {
     closeWorkspaceReaders();
+    setDraftStartFrom(undefined);
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
     resetNewTaskDraft(mode);
@@ -8241,12 +8339,6 @@ function LaunchedShell(
         ? undefined
         : { id: serverActionsProject.projectId, name: serverActionsProject.name }
       : { id: actionsProject.id, name: actionsProject.name };
-  // Only a Code Project's extra folders are listed by the Files tool; a Work
-  // Project's own Files listing already walks them.
-  const activeProjectExtraFolders =
-    actionsProject?.type === "code"
-      ? (actionsProject.extraFolders ?? []).map((folder) => folder.canonicalRoot)
-      : NO_PROJECT_EXTRA_FOLDERS;
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
@@ -8284,6 +8376,7 @@ function LaunchedShell(
           true,
         ) === undefined,
     ),
+    ...(focusedToolSource === undefined ? {} : { focusedToolCommands: focusedToolSource }),
     onOpenDockTool: (tool) => {
       const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === tool.id);
       if (surface !== undefined) openDockTab(surface.id);
@@ -8760,6 +8853,7 @@ function LaunchedShell(
                   machineChanges={machineChanges}
                   navigation={navigationModel}
                   {...(pendingDraftBranch === undefined ? {} : { pendingDraftBranch })}
+                  {...(draftStartFrom === undefined ? {} : { draftStartFrom })}
                   {...(pendingDraftCoordinator === undefined ? {} : { pendingDraftCoordinator })}
                   pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
                   {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
@@ -8808,6 +8902,7 @@ function LaunchedShell(
               />
               <TabActivationProvider registry={dockTabActivation}>
                 <DockContainer
+                  focusedTool={focusedDockTool}
                   actions={actions}
                   splitPrimaryMinimum={dockSplitPrimaryMinimum}
                   {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
@@ -8851,6 +8946,7 @@ function LaunchedShell(
                   dockTabs={dockTabs}
                   {...(dockThread === undefined ? {} : { dockThread })}
                   {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
+                  {...(dockThreadHostId === undefined ? {} : { dockThreadHostId })}
                   dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
                   {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
                   {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -8860,6 +8956,8 @@ function LaunchedShell(
                     ? {}
                     : { overviewThread: dockOverviewThread })}
                   projectNames={workingNowProjectNames}
+                  projectClient={projectController.client}
+                  projects={projectController.allProjects}
                   projectPullRequestReviewOpen={projectPullRequestReviewOpen}
                   {...(toolsPresented ? { providerController } : {})}
                   {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}
@@ -9089,6 +9187,70 @@ function LaunchedShell(
         hostBridge={props.hostBridge}
         onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
       />
+      <OctantDialogPresence>
+        <FilesClosePrompt />
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {moveRequest === undefined ? null : (
+          // The one Move to Project dialog lives above the shell frame so it
+          // stays mounted and reachable wherever the asking surface is —
+          // including when the sidebar that used to host it is hidden.
+          <MoveThreadToProjectDialog
+            {...(moveRequest.busy === true ||
+            (moveRequest.mode === "code" &&
+              navigationModel.codeSidebarThreads.some(
+                (thread) =>
+                  String(thread.threadId) === moveRequest.threadId &&
+                  (thread.activity === "working" || thread.activity === "attention"),
+              ))
+              ? { busy: true }
+              : {})}
+            currentProjectId={moveRequest.projectId}
+            mode={moveRequest.mode}
+            onClose={() => setMoveRequest(undefined)}
+            {...(() => {
+              const moveProvider = providerController.instances.find(
+                (instance) => String(instance.id) === moveRequest.providerInstanceId,
+              );
+              const moveModel =
+                moveProvider === undefined || moveRequest.modelId === undefined
+                  ? undefined
+                  : providerController.observedByInstance
+                      .get(moveProvider.id)
+                      ?.models.find((listed) => String(listed.id) === moveRequest.modelId);
+              return {
+                ...(moveProvider === undefined ? {} : { threadProvider: moveProvider }),
+                ...(moveModel === undefined ? {} : { threadModel: moveModel }),
+                ...(moveRequest.workingFolderId === undefined
+                  ? {}
+                  : { threadWorkingFolderId: moveRequest.workingFolderId }),
+                ...(moveRequest.checkoutKind === undefined
+                  ? {}
+                  : { threadCheckoutKind: moveRequest.checkoutKind }),
+                ...(moveRequest.checkoutAvailability === undefined
+                  ? {}
+                  : { threadCheckoutAvailability: moveRequest.checkoutAvailability }),
+              };
+            })()}
+            onMove={async (projectId: string, when?: "after-turn" | "stop-now") =>
+              moveRequest.mode === "code"
+                ? actions.moveCodeThread(
+                    decodeCodeThreadId(moveRequest.threadId),
+                    decodeProjectId(projectId),
+                    { when },
+                  )
+                : actions.tryWorkRestCommand(moveRequest.threadId, (expectedVersion) => ({
+                    kind: "move-work-thread",
+                    threadId: decodeWorkThreadId(moveRequest.threadId),
+                    expectedVersion,
+                    projectId: decodeProjectId(projectId),
+                  }))
+            }
+            projects={projectController.allProjects}
+            threadTitle={moveRequest.title}
+          />
+        )}
+      </OctantDialogPresence>
       {(() => {
         const coordinator = codeController.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(coordinatorBoundsThreadId),

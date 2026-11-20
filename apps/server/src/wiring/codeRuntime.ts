@@ -347,6 +347,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "agentsManagedToolsFor"
     | "coordinatorWorkersHolder"
     | "externalContentIngestionStore"
+    | "managedWorktreeReceipts"
     | "nativeHarnessRoutingStore"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
@@ -563,6 +564,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     } = {};
     // A host started with its own runtime uses it; otherwise it is built below.
     let codeOperationRuntime: CodeOperationRuntime | undefined = options.codeOperationRuntime;
+    // Built after the operation runtime is: its checkout refresh callback
+    // reads the service lazily, and a switch before it exists observes later.
+    let builtCodeService: CodeService | undefined;
     // A Code session whose runtime keeps background work (a dev server, a
     // watch) outlives its turn; a turn the runtime starts by itself later is
     // opened through the thread's ordinary admission, below.
@@ -875,6 +879,26 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
           ),
         moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
+        // A branch switch moves the checkout's journaled head; the service
+        // exists only after this runtime does, so the callback reads it lazily.
+        checkoutObserved: async (checkoutId, head) => {
+          const service = builtCodeService;
+          if (service instanceof CodeService) service.noteCheckoutHead(checkoutId, head);
+          // The only caller is a completed branch switch: a managed worktree
+          // records the verified branch the host just landed it on so cleanup
+          // still recognises the worktree it owns. Its `branchIntent` — the
+          // branch the receipt may delete — never moves with it.
+          if (head.kind === "branch") {
+            const checkout = persistence.readCodeCheckout(checkoutId);
+            if (checkout?.kind === "managed-worktree") {
+              await deps.managedWorktreeReceipts.recordVerifiedBranch(
+                String(checkout.ownershipReceiptId),
+                head.name,
+                head.oid,
+              );
+            }
+          }
+        },
         verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
         prepareWorktree: async (thread, root, current) => {
           const checkout = persistence.readCodeCheckout(thread.checkoutId);
@@ -1863,6 +1887,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       });
     }
     const { codeCompletedThreadSource, codeService } = buildCodeService(codeOperationRuntime);
+    builtCodeService = codeService instanceof CodeService ? codeService : undefined;
     yield* Effect.promise(() => codeOperationRuntime?.reconcile?.() ?? Promise.resolve());
     // A push or pull request step a restart left unknown is settled by looking
     // at the remote now, as the host, rather than when a person next opens

@@ -394,7 +394,11 @@ function WorkTurnHeader(props: {
   const outcome = turnHeaderOutcome(props.turn);
   const usageLimit = props.turn.failure?.usageLimit;
   const workedFor = workTurnWorkedFor(props.turn);
-  const activity = toolStepsActivity(props.turn.toolSteps, props.turn.toolStepsTruncated);
+  const activity = toolStepsActivity(
+    props.turn.toolSteps,
+    props.turn.toolStepsTruncated,
+    props.turn.reasoningMs,
+  );
   return (
     <>
       <TurnHeader
@@ -495,7 +499,11 @@ function WorkToolGroup(props: {
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
 }) {
-  const activity = toolStepsActivity(props.turn.toolSteps, props.turn.toolStepsTruncated);
+  const activity = toolStepsActivity(
+    props.turn.toolSteps,
+    props.turn.toolStepsTruncated,
+    props.turn.reasoningMs,
+  );
   const toolCallRecords = useToolCallRecordsReader({
     serverUrl: props.serverUrl,
     windowCapability: props.windowCapability,
@@ -740,6 +748,7 @@ function applyWorkTurnStreamFrame(
       ...current,
       ...(toolSteps.length === 0 ? {} : { toolSteps }),
       ...(frame.toolStepsTruncated ? { toolStepsTruncated: true } : {}),
+      ...(frame.reasoningMs === undefined ? {} : { reasoningMs: frame.reasoningMs }),
     };
     return next;
   }

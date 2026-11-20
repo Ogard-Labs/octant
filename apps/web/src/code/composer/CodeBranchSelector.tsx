@@ -1,6 +1,6 @@
 import type { CodeWorktreeRef } from "@octant/contracts/code";
 import { Check, ChevronDown, ChevronRight, GitBranch, Search } from "../../ui/icons";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { OctantBadge } from "../../ui/base/OctantBadge";
 import { OctantButton } from "../../ui/base/OctantButton";
@@ -29,6 +29,11 @@ export interface CodeBranchSelectorProps {
   readonly presentation?: "chip" | "row";
   /** The row's name, when drawn as a row. */
   readonly rowLabel?: string;
+  /**
+   * Opens the list on first draw — the Environment's "New task on another
+   * branch" lands the person in the picker itself, not just beside it.
+   */
+  readonly startOpen?: boolean;
 }
 
 /**
@@ -38,9 +43,19 @@ export interface CodeBranchSelectorProps {
  * authoritative fetch and worktree creation stay on the server.
  */
 export function CodeBranchSelector(props: CodeBranchSelectorProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(props.startOpen === true);
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const { onOpen } = props;
+
+  // An open list always loads its refs, whether the person opened it or the
+  // branch intent did — a picker drawn open with nothing in it lies by
+  // emptiness.
+  useEffect(() => {
+    if (!open) return;
+    setQuery("");
+    onOpen?.();
+  }, [open, onOpen]);
 
   const filtered = useMemo(() => {
     const refs = props.refs ?? [];
@@ -56,13 +71,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
     <OctantPopover
       align="start"
       className="code-branch-selector__menu"
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) {
-          setQuery("");
-          props.onOpen?.();
-        }
-      }}
+      onOpenChange={setOpen}
       open={open}
       side={asRow ? "inline-end" : "top"}
       title="Choose base branch"

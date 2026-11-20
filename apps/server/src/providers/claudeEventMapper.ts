@@ -969,7 +969,12 @@ function taskListEvents(context: ClaudeEventContext): ReadonlyArray<ClaudeMapped
 export function claudeStoredTaskListEvents(
   context: ClaudeEventContext,
 ): ReadonlyArray<ClaudeMappedMessage> {
-  return context.taskList.takeSeed() ? taskListEvents(context) : [];
+  if (!context.taskList.takeSeed()) return [];
+  // Stored state restated at session start: every event carries this mapping's
+  // stamp, not the instant the work happened, so nothing may be timed by it.
+  return taskListEvents(context).map((mapped) =>
+    mapped.kind === "event" ? { ...mapped, event: { ...mapped.event, synthesized: true } } : mapped,
+  );
 }
 
 function withoutIgnored(
@@ -2106,6 +2111,9 @@ export function mapClaudeToolRequest(
   if (correlated.kind === "failure") return correlated;
   const normalizedRequestId = correlated.requestId;
   const target = approvalTarget(context, request);
+  // The same normalized id the tool's row carries, so the wait is billed to
+  // that call alone; a request whose call never opened a row gets none.
+  const stepId = claudeToolUseStepId(context, request.toolUseId, request.toolName);
   const levelChange = claudeLevelChangeRequest(request);
   if (levelChange !== undefined) {
     return {
@@ -2121,6 +2129,7 @@ export function mapClaudeToolRequest(
           kind: "approval-request",
           requestId: normalizedRequestId,
           action: toolName,
+          ...(stepId === undefined ? {} : { toolCallId: stepId }),
           description:
             levelChange.kind === "enter-plan"
               ? "Claude asks to plan first: the thread moves to Plan, read-only, from its next turn."
@@ -2134,6 +2143,7 @@ export function mapClaudeToolRequest(
     kind: "approval-request",
     requestId: normalizedRequestId,
     action: toolName,
+    ...(stepId === undefined ? {} : { toolCallId: stepId }),
     // A person can only judge a prompt that says what it is for. "Claude
     // requests permission to use Edit." was approved blind every time.
     description:
