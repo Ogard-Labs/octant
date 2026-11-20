@@ -3488,6 +3488,31 @@ it("keeps a retained native session identity reserved while it is idle", async (
   );
 });
 
+it.each([
+  ["Google Antigravity keeps", acpProviderProfiles.antigravity, "refused"],
+  ["an agent with no reviewed warm release closes", acpProviderProfiles.gemini, "claimed"],
+] as const)("%s its process between turns on any release", async (_label, profile, expected) => {
+  const { driver, registry } = fixture(profile, { runtimeVersion: "9.9.9" });
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, mode: "code", projectRoot });
+        yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+        const events = yield* connection.subscribe;
+        const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+        yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+        yield* Fiber.join(terminal);
+        yield* connection.stop(sessionId);
+        const claim = registry.claimNativeSession(
+          instanceId,
+          JSON.stringify(["acp-native", profile.kind, "agent-session-1"]),
+        );
+        expect(claim.status).toBe(expected);
+      }),
+    ),
+  );
+});
+
 it("never takes up a retained session opened under another reviewer or another of the person's setups", async () => {
   const own = {
     subagents: false,

@@ -191,6 +191,11 @@ export interface AcpProviderProfile {
   readonly compactionVersions?: ReadonlyArray<string>;
   /** Exact releases whose native session lifecycle has passed warm-reuse evidence. */
   readonly retainedSessionVersions?: ReadonlyArray<string>;
+  /**
+   * The process stays open between turns on every release, as other ACP
+   * clients of the agent keep it, without a pinned one.
+   */
+  readonly retainsSessions?: true;
   /** Verified HTTP MCP implementations that omit, rather than deny, negotiation. */
   readonly unadvertisedHttpMcpVersions?: ReadonlyArray<string>;
   readonly kind: AcpProviderKind;
@@ -1775,6 +1780,9 @@ const antigravityProfile: AcpProviderProfile = {
   unnamedPermissionDescription: "Google Antigravity is asking before it continues.",
   toleratesStrayUpdates: true,
   forwardsAllowAlways: true,
+  // Each launch unpacks the CLI again before it answers, so a cold start per
+  // turn costs far more than for any other agent; other clients keep it open.
+  retainsSessions: true,
   // The CLI ends a turn with `refusal` when the account's quota is used up.
   refusalMessage:
     "Google Antigravity stopped: your account's usage limit may be reached. Check your plan, then retry.",
