@@ -60,10 +60,19 @@ export function registerFinishedReceiptEvents(registry: EventRegistry): EventReg
   );
 }
 
+interface WorkFolderScope {
+  readonly projectId: string;
+  /** Approved working folder id when targeting an explicit folder; omitted for the Project's main folder. */
+  readonly workingFolderId?: string | undefined;
+  /** Normalized relative path inside the folder root (`"."` for the root itself). */
+  readonly workingDirectory: string;
+}
+
 interface ThreadReceiptRecord {
   readonly receipts: SequencedFinishedReceipt[];
   readonly receiptIds: Set<string>;
   readonly fileChanges: FinishedReceiptFileChangeSignal[];
+  workFolder?: WorkFolderScope | undefined;
   version: number;
 }
 
@@ -83,8 +92,10 @@ export class ThreadFinishedReceiptStore {
   readonly #actor: typeof EventActor.Type;
   readonly #clock: () => string;
   readonly #threads = new Map<string, ThreadReceiptRecord>();
-  /** Work thread ids indexed by projectId so project-scoped artifact mutations mark them stale. */
-  readonly #workThreadsByProject = new Map<string, Set<string>>();
+  /** Current Work folder scope per Work thread id, populated from work-thread and work-turn journal events. */
+  readonly #workThreadFolders = new Map<string, WorkFolderScope>();
+  /** Work thread ids that currently hold at least one recorded finished receipt. */
+  readonly #workThreadsWithReceipts = new Set<string>();
   /** In-flight file-writing tool calls keyed by `${threadId}:${toolCallId}` until settled. */
   readonly #pendingWriteCalls = new Map<string, PendingWriteCall>();
 
@@ -184,6 +195,8 @@ export class ThreadFinishedReceiptStore {
     for (const envelope of replayAggregateTypesInOrder(this.#journal, [
       THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE,
       "code-operation",
+      "code-file",
+      "work-thread",
       "work-turn",
       "work-artifact",
       TOOL_EFFECT_AGGREGATE_TYPE,
@@ -211,6 +224,30 @@ export class ThreadFinishedReceiptStore {
     thread.fileChanges.push(signal);
   }
 
+  /**
+   * Record a Work file change on the writing thread (preserving same-turn
+   * exclusion when `turnId` is supplied) and also invalidate sibling Work
+   * threads whose receipts share an overlapping Project working folder.
+   */
+  #recordWorkFolderFileChange(
+    writerThreadId: string,
+    signal: FinishedReceiptFileChangeSignal,
+  ): void {
+    this.#recordFileChange(writerThreadId, signal);
+    const writerScope =
+      this.#workThreadFolders.get(writerThreadId) ?? this.#threads.get(writerThreadId)?.workFolder;
+    if (writerScope === undefined) return;
+    for (const siblingThreadId of this.#workThreadsWithReceipts) {
+      if (siblingThreadId === writerThreadId) continue;
+      const siblingScope =
+        this.#threads.get(siblingThreadId)?.workFolder ??
+        this.#workThreadFolders.get(siblingThreadId);
+      if (siblingScope !== undefined && workFoldersOverlap(writerScope, siblingScope)) {
+        this.#recordFileChange(siblingThreadId, { sequence: signal.sequence });
+      }
+    }
+  }
+
   #applyEnvelope(envelope: EventEnvelope): void {
     if (
       envelope.aggregateType === THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE &&
@@ -230,10 +267,15 @@ export class ThreadFinishedReceiptStore {
       thread.receipts.push({ sequence: envelope.globalSequence, receipt });
       thread.version = Math.max(thread.version, envelope.aggregateVersion);
       if (receipt.mode === "work") {
-        const projectKey = String(receipt.projectId);
-        const set = this.#workThreadsByProject.get(projectKey) ?? new Set<string>();
-        set.add(receipt.threadId);
-        this.#workThreadsByProject.set(projectKey, set);
+        const folderScope = this.#workThreadFolders.get(receipt.threadId) ?? {
+          projectId: String(receipt.projectId),
+          workingDirectory: ".",
+        };
+        if (!this.#workThreadFolders.has(receipt.threadId)) {
+          this.#workThreadFolders.set(receipt.threadId, folderScope);
+        }
+        thread.workFolder = folderScope;
+        this.#workThreadsWithReceipts.add(receipt.threadId);
       }
       return;
     }
@@ -253,11 +295,43 @@ export class ThreadFinishedReceiptStore {
       return;
     }
 
+    if (
+      envelope.aggregateType === "code-file" &&
+      envelope.eventName === "code.file-reference-updated@1" &&
+      envelope.eventVersion === 1
+    ) {
+      const classified = classifyCodeFileReferenceUpdated(envelope.payload);
+      if (classified !== undefined) {
+        this.#recordFileChange(classified.threadId, { sequence: envelope.globalSequence });
+      }
+      return;
+    }
+
+    if (
+      envelope.aggregateType === "work-thread" &&
+      (envelope.eventName === "work.thread-created@1" ||
+        envelope.eventName === "work.thread-updated@1") &&
+      envelope.eventVersion === 1
+    ) {
+      const extracted = extractWorkThreadFolder(envelope.payload);
+      if (extracted !== undefined) {
+        this.#workThreadFolders.set(extracted.threadId, extracted.scope);
+      }
+      return;
+    }
+
     if (envelope.aggregateType === "work-turn" && envelope.eventVersion === 1) {
+      if (envelope.eventName === "work.turn-accepted@1") {
+        const extracted = extractWorkTurnAcceptedFolder(envelope.payload);
+        if (extracted !== undefined) {
+          this.#workThreadFolders.set(extracted.threadId, extracted.scope);
+        }
+        return;
+      }
       if (envelope.eventName === "work.turn-updated@1") {
         const classified = classifyWorkTurnUpdated(envelope.payload);
         if (classified !== undefined) {
-          this.#recordFileChange(classified.threadId, {
+          this.#recordWorkFolderFileChange(classified.threadId, {
             sequence: envelope.globalSequence,
             ...(classified.turnId === undefined ? {} : { turnId: classified.turnId }),
           });
@@ -279,11 +353,12 @@ export class ThreadFinishedReceiptStore {
       envelope.eventName === "work.artifact-mutation-recorded@1" &&
       envelope.eventVersion === 1
     ) {
-      const projectId = readStringField(envelope.payload, "projectId");
-      if (projectId !== undefined) {
-        const affected = this.#workThreadsByProject.get(projectId);
-        if (affected !== undefined) {
-          for (const threadId of affected) {
+      const mutationScope = extractWorkArtifactMutationFolder(envelope.payload);
+      if (mutationScope !== undefined) {
+        for (const threadId of this.#workThreadsWithReceipts) {
+          const threadScope =
+            this.#threads.get(threadId)?.workFolder ?? this.#workThreadFolders.get(threadId);
+          if (threadScope !== undefined && workFoldersOverlap(mutationScope, threadScope)) {
             this.#recordFileChange(threadId, { sequence: envelope.globalSequence });
           }
         }
@@ -315,7 +390,13 @@ export class ThreadFinishedReceiptStore {
           const pending = this.#pendingWriteCalls.get(key);
           this.#pendingWriteCalls.delete(key);
           if (pending !== undefined && outcome === "succeeded") {
-            this.#recordFileChange(pending.threadId, { sequence: envelope.globalSequence });
+            if (this.#workThreadFolders.has(pending.threadId)) {
+              this.#recordWorkFolderFileChange(pending.threadId, {
+                sequence: envelope.globalSequence,
+              });
+            } else {
+              this.#recordFileChange(pending.threadId, { sequence: envelope.globalSequence });
+            }
           }
         }
       }
@@ -357,7 +438,7 @@ function classifyCodeOperationEvent(
     }
     return undefined;
   }
-  if (kind === "result") {
+  if (kind === "operation-result") {
     const result = asRecord(event.result);
     if (result === undefined) return undefined;
     if (
@@ -371,11 +452,102 @@ function classifyCodeOperationEvent(
     if (result.kind === "thread-rewound" && result.files === "restored") {
       return { threadId };
     }
-    if (result.kind === "review-correction-result") {
-      return { threadId };
-    }
   }
   return undefined;
+}
+
+/**
+ * Classify `code.file-reference-updated@1` journal events from `CodeService.saveFile`.
+ * Only terminal `state === "completed"` means bytes landed in the checkout;
+ * `"saving"`, `"available"`, `"read-only"`, `"conflict"`, `"failed"`,
+ * `"interrupted"`, `"deleted"`, and `"rescan-required"` do not mark a receipt stale.
+ */
+function classifyCodeFileReferenceUpdated(
+  payload: unknown,
+): { readonly threadId: string } | undefined {
+  const frame = asRecord(payload);
+  if (frame === undefined || frame.kind !== "file-reference-updated") return undefined;
+  const file = asRecord(frame.file);
+  if (file === undefined || file.state !== "completed") return undefined;
+  const threadId = readStringField(file, "threadId");
+  return threadId === undefined ? undefined : { threadId };
+}
+
+function normalizeWorkingDirectory(value: string | undefined): string {
+  if (value === undefined) return ".";
+  const trimmed = value.replace(/^\.\/+/, "").replace(/\/+$/, "");
+  return trimmed.length === 0 ? "." : trimmed;
+}
+
+function workFoldersOverlap(a: WorkFolderScope, b: WorkFolderScope): boolean {
+  if (a.projectId !== b.projectId) return false;
+  if (a.workingFolderId !== b.workingFolderId) return false;
+  if (a.workingDirectory === "." || b.workingDirectory === ".") return true;
+  if (a.workingDirectory === b.workingDirectory) return true;
+  return (
+    a.workingDirectory.startsWith(`${b.workingDirectory}/`) ||
+    b.workingDirectory.startsWith(`${a.workingDirectory}/`)
+  );
+}
+
+function extractWorkThreadFolder(
+  payload: unknown,
+): { readonly threadId: string; readonly scope: WorkFolderScope } | undefined {
+  const frame = asRecord(payload);
+  const thread = asRecord(frame?.thread);
+  if (thread === undefined) return undefined;
+  const threadId = readStringField(thread, "id");
+  const projectId = readStringField(thread, "projectId");
+  if (threadId === undefined || projectId === undefined) return undefined;
+  const workingFolderId = readStringField(thread, "workingFolderId");
+  const workingDirectory = normalizeWorkingDirectory(readStringField(thread, "workingDirectory"));
+  return {
+    threadId,
+    scope: {
+      projectId,
+      ...(workingFolderId === undefined ? {} : { workingFolderId }),
+      workingDirectory,
+    },
+  };
+}
+
+function extractWorkTurnAcceptedFolder(
+  payload: unknown,
+): { readonly threadId: string; readonly scope: WorkFolderScope } | undefined {
+  const frame = asRecord(payload);
+  if (frame === undefined) return undefined;
+  const threadId = readStringField(frame, "threadId");
+  const authority = asRecord(frame.authority);
+  const projectId = readStringField(authority, "projectId") ?? readStringField(frame, "projectId");
+  if (threadId === undefined || projectId === undefined) return undefined;
+  const workingFolderId = readStringField(authority, "workingFolderId");
+  const workingDirectory = normalizeWorkingDirectory(
+    readStringField(authority, "workingDirectory"),
+  );
+  return {
+    threadId,
+    scope: {
+      projectId,
+      ...(workingFolderId === undefined ? {} : { workingFolderId }),
+      workingDirectory,
+    },
+  };
+}
+
+function extractWorkArtifactMutationFolder(payload: unknown): WorkFolderScope | undefined {
+  const frame = asRecord(payload);
+  if (frame === undefined) return undefined;
+  const outcome = asRecord(frame.outcome);
+  const artifact = asRecord(outcome?.artifact);
+  const projectId = readStringField(artifact, "projectId") ?? readStringField(frame, "projectId");
+  if (projectId === undefined) return undefined;
+  const workingFolderId = readStringField(artifact, "workingFolderId");
+  const workingDirectory = normalizeWorkingDirectory(readStringField(artifact, "directory"));
+  return {
+    projectId,
+    ...(workingFolderId === undefined ? {} : { workingFolderId }),
+    workingDirectory,
+  };
 }
 
 function classifyWorkTurnUpdated(

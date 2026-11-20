@@ -1727,4 +1727,113 @@ describe("native harness composition", () => {
       expect(result).toMatchObject({ isError: true, result: { error: "shell-unavailable" } });
     });
   });
+
+  it("keeps finished proof checks inside the thread sandbox and proxied egress under Strict, fullAccessSandbox, and guarded levels", async () => {
+    const calls: string[] = [];
+    const makeSpyShell = (label: string): NativeHarnessShellPort => ({
+      run: async (input) => {
+        calls.push(`${label}:${input.command}`);
+        return { status: "ran", exitCode: 0, output: label, truncated: false };
+      },
+    });
+
+    let codePolicy: ProviderExecutionPolicy = "approval-gated";
+    let workPolicy: ProviderExecutionPolicy = "approval-gated";
+    let keepSandbox = false;
+    let strict = false;
+
+    const composition = createNativeHarnessComposition({
+      isChildAuthorityCurrent: () => true,
+      authority: {
+        resolve: () => authority,
+        service: new ToolCallAuthorityService({
+          resolveGrantedAuthority: () => authority,
+          resolveLiveFacts: () => ({
+            providerAppManagedTools: "supported",
+            host: { computerUseEnabled: false },
+            executionPolicy: codePolicy,
+            approvalSatisfied: true,
+            externalContentIngested: false,
+          }),
+        }),
+      },
+      isHarnessProvider: () => true,
+      hostId: authority.hostId,
+      readThreadTaint: () => false,
+      recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+      shell: makeSpyShell("default"),
+      fullAccessShell: makeSpyShell("full-access"),
+      offlineShell: makeSpyShell("offline"),
+      proxiedShell: () => makeSpyShell("proxied"),
+      readCodeExecutionPolicy: () => codePolicy,
+      readWorkExecutionPolicy: () => workPolicy,
+      readFullAccessSandbox: () => keepSandbox,
+      readStrict: () => strict,
+      uuid: () => "00000000-0000-4000-8000-000000000099",
+      clock: () => "2026-11-20T00:00:00.000Z",
+    });
+
+    const codeShell = composition.shellForCode({
+      windowId: "window-1",
+      threadId: String(thread.id),
+      projectId: String(thread.projectId),
+    });
+    const workShell = composition.shellForWork({
+      threadId: String(thread.id),
+      projectId: String(thread.projectId),
+    });
+    expect(codeShell).toBeDefined();
+    expect(workShell).toBeDefined();
+
+    const run = async (shell: NativeHarnessShellPort | undefined, command: string) =>
+      shell?.run({ command, cwd: "/tmp/repo", timeoutMs: 5_000, outputRetention: "newest" });
+
+    // Below Full access: proxied sandboxed shell for both Code and Work.
+    codePolicy = "approval-gated";
+    workPolicy = "auto-accept-edits";
+    await run(codeShell, "code-guarded");
+    await run(workShell, "work-guarded");
+
+    // Full access with Keep the sandbox (`fullAccessSandbox`): stays on proxied sandboxed shell.
+    codePolicy = "full-access";
+    workPolicy = "full-access";
+    keepSandbox = true;
+    strict = false;
+    await run(codeShell, "code-keep-sandbox");
+    await run(workShell, "work-keep-sandbox");
+
+    // Full access with Strict enabled: stays on proxied sandboxed shell even when fullAccessSandbox is off.
+    keepSandbox = false;
+    strict = true;
+    await run(codeShell, "code-strict");
+    await run(workShell, "work-strict");
+
+    // Plan: offline sandboxed shell.
+    codePolicy = "plan";
+    workPolicy = "plan";
+    strict = false;
+    await run(codeShell, "code-plan");
+    await run(workShell, "work-plan");
+
+    // Full access without Keep the sandbox or Strict: unconfined full-access shell.
+    codePolicy = "full-access";
+    workPolicy = "full-access";
+    keepSandbox = false;
+    strict = false;
+    await run(codeShell, "code-unconfined");
+    await run(workShell, "work-unconfined");
+
+    expect(calls).toEqual([
+      "proxied:code-guarded",
+      "proxied:work-guarded",
+      "proxied:code-keep-sandbox",
+      "proxied:work-keep-sandbox",
+      "proxied:code-strict",
+      "proxied:work-strict",
+      "offline:code-plan",
+      "offline:work-plan",
+      "full-access:code-unconfined",
+      "full-access:work-unconfined",
+    ]);
+  });
 });

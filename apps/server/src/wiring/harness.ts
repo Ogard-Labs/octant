@@ -1109,26 +1109,6 @@ export function wireHarness(deps: HarnessDependencies) {
     branches: (threadId) => codeThreadBranches(persistence, threadId),
     record: (input) => shieldServerStore.recordForgeChange(input),
   });
-  const finishedDefaultShell =
-    windowsHarnessCommandShell ??
-    createNativeHarnessShell({
-      process: harnessProcessPort,
-      scriptDirectory: harnessScriptDirectory,
-      sshAgentSocket,
-      cloudCliEnvironment,
-      googleCliCredentials: googleCliCommands.prepare,
-    });
-  const finishedFullAccessShell =
-    windowsHarnessCommandShell ??
-    createNativeHarnessShell({
-      process: harnessFullAccessProcessPort,
-      scriptDirectory: harnessScriptDirectory,
-      sshAgentSocket,
-      cloudCliEnvironment,
-      googleCliCredentials: googleCliCommands.prepare,
-    });
-  const finishedCheckShell = (fullAccess: boolean) =>
-    fullAccess ? finishedFullAccessShell : finishedDefaultShell;
   const nativeHarnessComposition = createNativeHarnessComposition({
     forgeChanges: {
       branches: (threadId) => codeThreadBranches(persistence, threadId),
@@ -1373,7 +1353,6 @@ export function wireHarness(deps: HarnessDependencies) {
     sideTaskHost,
     sideTaskRoutes,
     finishedReceiptRoutes,
-    finishedCheckShell,
     hostShield,
     threadWork,
   };

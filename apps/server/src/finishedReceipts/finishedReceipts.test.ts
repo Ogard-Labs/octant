@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,6 +10,8 @@ import {
   EventId,
   MAX_FINISHED_CHECK_OUTPUT_TAIL_LENGTH,
   REPORT_FINISHED_TOOL_NAME,
+  TOOL_EFFECT_AGGREGATE_TYPE,
+  TOOL_EFFECT_EVENT_NAMES,
   decodeProjectId,
   decodeThreadGoalId,
   decodeThreadGoalRevisionId,
@@ -21,6 +23,8 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
+import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
 import type { NativeHarnessShellPort, NativeHarnessShellRun } from "../harness/nativeHarnessTools";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -66,8 +70,14 @@ function openTestJournal() {
   applyMigrations(connection, MIGRATIONS, () => "2026-11-19T12:00:00.000Z");
   const registry = registerFinishedReceiptEvents(new EventRegistry())
     .register("code.operation-event-recorded@1", 1, Schema.Unknown)
+    .register("code.file-reference-updated@1", 1, Schema.Unknown)
+    .register("work.thread-created@1", 1, Schema.Unknown)
+    .register("work.thread-updated@1", 1, Schema.Unknown)
+    .register("work.turn-accepted@1", 1, Schema.Unknown)
     .register("work.turn-updated@1", 1, Schema.Unknown)
-    .register("work.artifact-mutation-recorded@1", 1, Schema.Unknown);
+    .register("work.artifact-mutation-recorded@1", 1, Schema.Unknown)
+    .register(TOOL_EFFECT_EVENT_NAMES.intended, 1, Schema.Unknown)
+    .register(TOOL_EFFECT_EVENT_NAMES.settled, 1, Schema.Unknown);
   const journal = new Journal({
     connection,
     registry,
@@ -537,6 +547,531 @@ describe("octant_report_finished tool and receipt store", () => {
       );
       expect(ok?.status).toBe(200);
       expect(await ok?.json()).toEqual({ receipts: [] });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("marks a Code receipt stale on production-shaped operation-result Git mutations and file-restoring rewinds, live and on replay", async () => {
+    const { journal } = openTestJournal();
+    const { store, unsubscribe } = makeStore(journal);
+    try {
+      const { shell } = makeShell(() => ({
+        status: "ran",
+        exitCode: 0,
+        output: "ok",
+        truncated: false,
+      }));
+      const tool = createReportFinishedTool({
+        mode: "code",
+        threadId: THREAD_ID,
+        projectId: String(PROJECT_ID),
+        turnId: "op-1",
+        readPosture: () => "full-access",
+        folder: "/tmp/repo",
+        shell,
+        observeDiff: async () => ({
+          status: "observed",
+          changedFiles: 1,
+          insertions: 4,
+          deletions: 1,
+        }),
+        store,
+        uuid: randomUUID,
+        clock: () => "2026-11-19T12:00:00.000Z",
+      });
+      await tool.execute({
+        name: REPORT_FINISHED_TOOL_NAME,
+        inputJson: JSON.stringify({ summary: "Ready", checks: ["bun run test"] }),
+      });
+      expect(store.latest(THREAD_ID)?.stale).toBe(false);
+
+      // Non-mutating Git action (staging) does not stale proof.
+      journal.append({
+        aggregate: {
+          aggregateType: "code-operation",
+          aggregateId: decodeAggregateId("cccccccc-cccc-4ccc-8ccc-ccccccccccc1"),
+        },
+        expectedVersion: decodeAggregateVersion(0),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: "code.operation-event-recorded@1",
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T12:00:10.000Z",
+            payload: {
+              threadId: THREAD_ID,
+              operationId: "op-stage",
+              event: {
+                kind: "operation-result",
+                result: {
+                  kind: "git-mutation-state",
+                  mutation: "stage",
+                  state: "completed",
+                },
+              },
+            },
+          },
+        ],
+      });
+      expect(store.latest(THREAD_ID)?.stale).toBe(false);
+
+      // Mutating Git operation (`discard`) with production `operation-result` discriminator marks stale.
+      journal.append({
+        aggregate: {
+          aggregateType: "code-operation",
+          aggregateId: decodeAggregateId("cccccccc-cccc-4ccc-8ccc-ccccccccccc2"),
+        },
+        expectedVersion: decodeAggregateVersion(0),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: "code.operation-event-recorded@1",
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T12:00:20.000Z",
+            payload: {
+              threadId: THREAD_ID,
+              operationId: "op-discard",
+              event: {
+                kind: "operation-result",
+                result: {
+                  kind: "git-mutation-state",
+                  mutation: "discard",
+                  state: "completed",
+                },
+              },
+            },
+          },
+        ],
+      });
+      expect(store.latest(THREAD_ID)?.stale).toBe(true);
+      expect(store.boardMark(THREAD_ID)).toBeUndefined();
+
+      // Record a fresh receipt, then restore files via `thread-rewound`.
+      await tool.execute({
+        name: REPORT_FINISHED_TOOL_NAME,
+        inputJson: JSON.stringify({ summary: "Ready again", checks: ["bun run test"] }),
+      });
+      expect(store.latest(THREAD_ID)?.stale).toBe(false);
+
+      journal.append({
+        aggregate: {
+          aggregateType: "code-operation",
+          aggregateId: decodeAggregateId("cccccccc-cccc-4ccc-8ccc-ccccccccccc3"),
+        },
+        expectedVersion: decodeAggregateVersion(0),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: "code.operation-event-recorded@1",
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T12:00:30.000Z",
+            payload: {
+              threadId: THREAD_ID,
+              operationId: "op-rewind",
+              event: {
+                kind: "operation-result",
+                result: {
+                  kind: "thread-rewound",
+                  files: "restored",
+                },
+              },
+            },
+          },
+        ],
+      });
+      expect(store.latest(THREAD_ID)?.stale).toBe(true);
+
+      const replayed = new ThreadFinishedReceiptStore({
+        journal,
+        uuid: randomUUID,
+        actor: ACTOR,
+        clock: () => "2026-11-19T12:01:00.000Z",
+      });
+      expect(replayed.read(THREAD_ID)).toEqual(store.read(THREAD_ID));
+      expect(replayed.boardMark(THREAD_ID)).toBeUndefined();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("marks a Code receipt stale when an editor save completes, while ignoring in-progress, read, and failed file updates", async () => {
+    const { journal } = openTestJournal();
+    const { store, unsubscribe } = makeStore(journal);
+    try {
+      const { shell } = makeShell(() => ({
+        status: "ran",
+        exitCode: 0,
+        output: "ok",
+        truncated: false,
+      }));
+      const tool = createReportFinishedTool({
+        mode: "code",
+        threadId: THREAD_ID,
+        projectId: String(PROJECT_ID),
+        turnId: "op-1",
+        readPosture: () => "full-access",
+        folder: "/tmp/repo",
+        shell,
+        observeDiff: async () => ({
+          status: "observed",
+          changedFiles: 1,
+          insertions: 2,
+          deletions: 0,
+        }),
+        store,
+        uuid: randomUUID,
+        clock: () => "2026-11-19T12:00:00.000Z",
+      });
+      await tool.execute({
+        name: REPORT_FINISHED_TOOL_NAME,
+        inputJson: JSON.stringify({ summary: "Verified", checks: ["bun run test"] }),
+      });
+      expect(store.latest(THREAD_ID)?.stale).toBe(false);
+
+      const fileId = decodeAggregateId("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+      let version = 0;
+      const appendFileState = (state: string) => {
+        journal.append({
+          aggregate: { aggregateType: "code-file", aggregateId: fileId },
+          expectedVersion: decodeAggregateVersion(version),
+          events: [
+            {
+              eventId: decodeEventId(randomUUID()),
+              eventName: "code.file-reference-updated@1",
+              eventVersion: 1,
+              correlationId: decodeCorrelationId(randomUUID()),
+              actor: ACTOR,
+              occurredAt: "2026-11-19T12:00:05.000Z",
+              payload: {
+                kind: "file-reference-updated",
+                file: {
+                  id: String(fileId),
+                  threadId: THREAD_ID,
+                  checkoutId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                  relativePath: "src/index.ts",
+                  digest: "a".repeat(64),
+                  byteLength: 42,
+                  state,
+                  version: version + 1,
+                  updatedAt: "2026-11-19T12:00:05.000Z",
+                },
+              },
+            },
+          ],
+        });
+        version += 1;
+      };
+
+      // Non-completed states (reads, in-progress saves, conflicts, failures) do not stale proof.
+      for (const state of [
+        "available",
+        "read-only",
+        "saving",
+        "conflict",
+        "failed",
+        "interrupted",
+      ]) {
+        appendFileState(state);
+        expect(store.latest(THREAD_ID)?.stale).toBe(false);
+        expect(store.boardMark(THREAD_ID)?.provenCount).toBe(1);
+      }
+
+      // A completed editor save marks the receipt stale immediately and on replay.
+      appendFileState("completed");
+      expect(store.latest(THREAD_ID)?.stale).toBe(true);
+      expect(store.boardMark(THREAD_ID)).toBeUndefined();
+
+      const replayed = new ThreadFinishedReceiptStore({
+        journal,
+        uuid: randomUUID,
+        actor: ACTOR,
+        clock: () => "2026-11-19T12:01:00.000Z",
+      });
+      expect(replayed.read(THREAD_ID)).toEqual(store.read(THREAD_ID));
+      expect(replayed.boardMark(THREAD_ID)).toBeUndefined();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("marks a Work receipt stale when a sibling Work thread edits files in the same Project folder, while keeping distinct folders isolated", async () => {
+    const { journal } = openTestJournal();
+    const { store, unsubscribe } = makeStore(journal);
+    try {
+      const workSameFolderA = "33333333-3333-4333-8333-333333333301";
+      const workSameFolderB = "33333333-3333-4333-8333-333333333302";
+      const workExtraFolder = "33333333-3333-4333-8333-333333333303";
+      const workDisjointSubdir = "33333333-3333-4333-8333-333333333304";
+      const workOtherProject = "33333333-3333-4333-8333-333333333305";
+      const otherProjectId = decodeProjectId("11111111-1111-4111-8111-111111111199");
+      const extraFolderId = `folder_${"b".repeat(64)}`;
+
+      const registerWorkThread = (input: {
+        readonly id: string;
+        readonly projectId: string;
+        readonly workingFolderId?: string;
+        readonly workingDirectory?: string;
+      }) => {
+        journal.append({
+          aggregate: { aggregateType: "work-thread", aggregateId: decodeAggregateId(input.id) },
+          expectedVersion: decodeAggregateVersion(0),
+          events: [
+            {
+              eventId: decodeEventId(randomUUID()),
+              eventName: "work.thread-created@1",
+              eventVersion: 1,
+              correlationId: decodeCorrelationId(randomUUID()),
+              actor: ACTOR,
+              occurredAt: "2026-11-19T11:55:00.000Z",
+              payload: {
+                kind: "thread-created",
+                thread: {
+                  id: input.id,
+                  projectId: input.projectId,
+                  ...(input.workingFolderId === undefined
+                    ? {}
+                    : { workingFolderId: input.workingFolderId }),
+                  ...(input.workingDirectory === undefined
+                    ? {}
+                    : { workingDirectory: input.workingDirectory }),
+                },
+              },
+            },
+          ],
+        });
+      };
+
+      registerWorkThread({
+        id: workSameFolderA,
+        projectId: String(PROJECT_ID),
+        workingDirectory: "docs",
+      });
+      registerWorkThread({
+        id: workSameFolderB,
+        projectId: String(PROJECT_ID),
+        workingDirectory: "docs",
+      });
+      registerWorkThread({
+        id: workExtraFolder,
+        projectId: String(PROJECT_ID),
+        workingFolderId: extraFolderId,
+        workingDirectory: "docs",
+      });
+      registerWorkThread({
+        id: workDisjointSubdir,
+        projectId: String(PROJECT_ID),
+        workingDirectory: "notes",
+      });
+      registerWorkThread({
+        id: workOtherProject,
+        projectId: String(otherProjectId),
+        workingDirectory: "docs",
+      });
+
+      const { shell } = makeShell(() => ({
+        status: "ran",
+        exitCode: 0,
+        output: "ok",
+        truncated: false,
+      }));
+      const recordReceiptFor = async (threadId: string, projectId: string) => {
+        const tool = createReportFinishedTool({
+          mode: "work",
+          threadId,
+          projectId,
+          turnId: `turn-${threadId}`,
+          readPosture: () => "full-access",
+          folder: "/tmp/work",
+          shell,
+          observeDiff: async () => ({ status: "unavailable", reason: "Not a Git repo." }),
+          store,
+          uuid: randomUUID,
+          clock: () => "2026-11-19T12:00:00.000Z",
+        });
+        const res = await tool.execute({
+          name: REPORT_FINISHED_TOOL_NAME,
+          inputJson: JSON.stringify({ summary: "Finished draft", checks: ["check-doc"] }),
+        });
+        expect(res.isError).toBeUndefined();
+      };
+
+      await recordReceiptFor(workSameFolderA, String(PROJECT_ID));
+      await recordReceiptFor(workExtraFolder, String(PROJECT_ID));
+      await recordReceiptFor(workDisjointSubdir, String(PROJECT_ID));
+      await recordReceiptFor(workOtherProject, String(otherProjectId));
+
+      // Sibling Work thread B writes a file in the shared Project folder (`docs`).
+      journal.append({
+        aggregate: {
+          aggregateType: "work-turn",
+          aggregateId: decodeAggregateId("ffffffff-ffff-4fff-8fff-fffffffffff1"),
+        },
+        expectedVersion: decodeAggregateVersion(0),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: "work.turn-updated@1",
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T12:01:00.000Z",
+            payload: {
+              kind: "turn-updated",
+              threadId: workSameFolderB,
+              turnId: "sibling-turn-1",
+              status: "completed",
+              wroteFiles: { paths: ["docs/summary.md"], truncated: false },
+            },
+          },
+        ],
+      });
+
+      // Thread A in the same folder is marked stale; distinct folders and projects stay fresh.
+      expect(store.latest(workSameFolderA)?.stale).toBe(true);
+      expect(store.boardMark(workSameFolderA)).toBeUndefined();
+      expect(store.latest(workExtraFolder)?.stale).toBe(false);
+      expect(store.boardMark(workExtraFolder)?.provenCount).toBe(1);
+      expect(store.latest(workDisjointSubdir)?.stale).toBe(false);
+      expect(store.boardMark(workDisjointSubdir)?.provenCount).toBe(1);
+      expect(store.latest(workOtherProject)?.stale).toBe(false);
+      expect(store.boardMark(workOtherProject)?.provenCount).toBe(1);
+
+      // Re-record Thread A, then verify a settled file-write tool effect on sibling B also invalidates A.
+      await recordReceiptFor(workSameFolderA, String(PROJECT_ID));
+      expect(store.latest(workSameFolderA)?.stale).toBe(false);
+      const effectAgg = decodeAggregateId("ffffffff-ffff-4fff-8fff-fffffffffff2");
+      journal.append({
+        aggregate: { aggregateType: TOOL_EFFECT_AGGREGATE_TYPE, aggregateId: effectAgg },
+        expectedVersion: decodeAggregateVersion(0),
+        events: [
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: TOOL_EFFECT_EVENT_NAMES.intended,
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T12:02:00.000Z",
+            payload: {
+              threadId: workSameFolderB,
+              toolCallId: "call-1",
+              toolName: "write",
+            },
+          },
+          {
+            eventId: decodeEventId(randomUUID()),
+            eventName: TOOL_EFFECT_EVENT_NAMES.settled,
+            eventVersion: 1,
+            correlationId: decodeCorrelationId(randomUUID()),
+            actor: ACTOR,
+            occurredAt: "2026-11-19T12:02:01.000Z",
+            payload: {
+              threadId: workSameFolderB,
+              toolCallId: "call-1",
+              outcome: "succeeded",
+            },
+          },
+        ],
+      });
+      expect(store.latest(workSameFolderA)?.stale).toBe(true);
+      expect(store.latest(workExtraFolder)?.stale).toBe(false);
+      expect(store.latest(workDisjointSubdir)?.stale).toBe(false);
+      expect(store.latest(workOtherProject)?.stale).toBe(false);
+
+      // Replay reproduces identical staleness and isolation.
+      const replayed = new ThreadFinishedReceiptStore({
+        journal,
+        uuid: randomUUID,
+        actor: ACTOR,
+        clock: () => "2026-11-19T12:03:00.000Z",
+      });
+      expect(replayed.read(workSameFolderA)).toEqual(store.read(workSameFolderA));
+      expect(replayed.read(workExtraFolder)).toEqual(store.read(workExtraFolder));
+      expect(replayed.read(workDisjointSubdir)).toEqual(store.read(workDisjointSubdir));
+      expect(replayed.read(workOtherProject)).toEqual(store.read(workOtherProject));
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("keeps the final failure diagnostics when a check produces more output than the process capture limit", async () => {
+    const { journal } = openTestJournal();
+    const { store, unsubscribe } = makeStore(journal);
+    try {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-finished-tail-")));
+      tempDirs.push(root);
+      const checkout = join(root, "checkout");
+      const scripts = join(root, "scripts");
+      const work = join(root, "work");
+      mkdirSync(checkout, { recursive: true });
+      mkdirSync(scripts, { recursive: true });
+      mkdirSync(work, { recursive: true });
+
+      const processPort = new RepositoryTestProcessPort({
+        receiptDirectory: join(root, "receipts"),
+        temporaryDirectory: work,
+        networkEgress: "none",
+        harnessShellScriptDirectory: scripts,
+        maxOutputBytes: 4_096,
+      });
+      const baseShell = createNativeHarnessShell({
+        process: processPort,
+        scriptDirectory: scripts,
+      });
+      let observedTruncated: boolean | undefined;
+      const observingShell: NativeHarnessShellPort = {
+        run: async (input) => {
+          const run = await baseShell.run(input);
+          observedTruncated = run.truncated;
+          return run;
+        },
+      };
+
+      const tool = createReportFinishedTool({
+        mode: "code",
+        threadId: THREAD_ID,
+        projectId: String(PROJECT_ID),
+        turnId: "turn-tail",
+        readPosture: () => "full-access",
+        folder: checkout,
+        shell: observingShell,
+        observeDiff: async () => ({ status: "unavailable", reason: "Not a Git repo." }),
+        store,
+        uuid: randomUUID,
+        clock: () => "2026-11-19T12:00:00.000Z",
+      });
+
+      // Emit > 12 KiB of noise (well above the 4 KiB process capture cap) before the final error.
+      const command = `i=0; while [ "$i" -lt 200 ]; do echo "noise-line-$i-0123456789abcdefghijklmnopqrstuvwxyz0123456789"; i=$((i+1)); done; echo "FINAL_ASSERTION_FAILURE_999"; exit 1`;
+      const outcome = await tool.execute({
+        name: REPORT_FINISHED_TOOL_NAME,
+        inputJson: JSON.stringify({ summary: "Attempt", checks: [command] }),
+      });
+
+      expect(outcome.isError).toBe(true);
+      expect(observedTruncated).toBe(true);
+      const failedBody = outcome.result as {
+        readonly status: string;
+        readonly recorded: boolean;
+        readonly failedChecks: ReadonlyArray<{
+          readonly exitCode?: number;
+          readonly outputTail: string;
+        }>;
+      };
+      expect(failedBody.status).toBe("failed");
+      expect(failedBody.recorded).toBe(false);
+      expect(failedBody.failedChecks[0]?.exitCode).toBe(1);
+      expect(failedBody.failedChecks[0]?.outputTail).toContain("FINAL_ASSERTION_FAILURE_999");
+      expect(failedBody.failedChecks[0]?.outputTail.length).toBeLessThanOrEqual(
+        MAX_FINISHED_CHECK_OUTPUT_TAIL_LENGTH,
+      );
+      expect(store.read(THREAD_ID)).toEqual([]);
     } finally {
       unsubscribe();
     }

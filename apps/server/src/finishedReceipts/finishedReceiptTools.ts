@@ -307,6 +307,7 @@ export function createReportFinishedTool(options: ReportFinishedToolOptions): Ap
             : { extraRoots: options.extraFolders }),
           timeoutMs: CHECK_TIMEOUT_MS,
           callId: options.uuid(),
+          outputRetention: "newest",
           ...(signal === undefined ? {} : { signal }),
         });
         const outcome = shellRunToOutcome(run);

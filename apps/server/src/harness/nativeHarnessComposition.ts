@@ -424,6 +424,23 @@ export interface NativeHarnessComposition {
     readonly authority: AgentRunAuthority;
     readonly projectRoot: string;
   }) => AppManagedToolSet | undefined;
+  /**
+   * Posture-, sandbox-, Strict-, and egress-aware shell for a Code thread's
+   * host-run commands (such as `octant_report_finished` proof checks).
+   */
+  readonly shellForCode: (input: {
+    readonly windowId: string;
+    readonly threadId: string;
+    readonly projectId: string;
+  }) => NativeHarnessShellPort | undefined;
+  /**
+   * Posture-, sandbox-, Strict-, and egress-aware shell for a Work thread's
+   * host-run commands (such as `octant_report_finished` proof checks).
+   */
+  readonly shellForWork: (input: {
+    readonly threadId: string;
+    readonly projectId: string;
+  }) => NativeHarnessShellPort | undefined;
 }
 
 /**
@@ -969,7 +986,8 @@ export function createNativeHarnessComposition(
           executionPolicy,
           fullAccessSandbox:
             activeSandboxPolicy(threadId) !== undefined ||
-            options.readFullAccessSandbox?.(threadId),
+            options.readFullAccessSandbox?.(threadId) ||
+            options.readStrict?.(threadId) === true,
         });
   };
   const codeShell = (
@@ -1005,7 +1023,8 @@ export function createNativeHarnessComposition(
           executionPolicy,
           fullAccessSandbox:
             activeSandboxPolicy(threadId) !== undefined ||
-            options.readFullAccessSandbox?.(threadId),
+            options.readFullAccessSandbox?.(threadId) ||
+            options.readStrict?.(threadId) === true,
         });
   };
   // Work and Code share the shell at the thread's level, so a Work thread's
@@ -1589,5 +1608,8 @@ export function createNativeHarnessComposition(
           : { protectedSecretPath: options.protectedSecretPath }),
       });
     },
+    shellForCode: ({ windowId, threadId, projectId }) =>
+      codeShell({ threadId, projectId }, windowId),
+    shellForWork: ({ threadId, projectId }) => workShell({ threadId, projectId }),
   };
 }

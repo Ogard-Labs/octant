@@ -271,7 +271,6 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "onHarnessPausedByPerson"
     | "shieldServerStore"
     | "sideTaskHost"
-    | "finishedCheckShell"
   > &
   Pick<ChatWiring, "chatService" | "guardChatAttachmentPurge" | "threadMentionService"> &
   Pick<CanvasWiring, "canvasAgentToolPort" | "canvasService" | "resolveCanvasWorkspace"> &
@@ -365,7 +364,6 @@ export function wireWork(deps: WorkDependencies) {
     routineProposalService,
     sideTasks,
     finishedReceipts,
-    finishedCheckShell,
     gitObservationPort,
     nativeHarnessApprovals,
     siblingThreadsService,
@@ -986,6 +984,10 @@ export function wireWork(deps: WorkDependencies) {
           const running = runningWorkTurns.get(String(input.thread.id))?.access;
           return workTurnToolLevel(running ?? input.thread.access).posture;
         };
+        const workFinishedShell = nativeHarnessComposition?.shellForWork({
+          threadId: String(input.thread.id),
+          projectId: String(input.thread.projectId),
+        });
         const reportFinishedTools = !browserSupported
           ? undefined
           : createReportFinishedTool({
@@ -998,10 +1000,7 @@ export function wireWork(deps: WorkDependencies) {
               ...(input.extraFolders === undefined || input.extraFolders.length === 0
                 ? {}
                 : { extraFolders: input.extraFolders }),
-              shell: {
-                run: (req) =>
-                  finishedCheckShell(readWorkFinishedPosture() === "full-access").run(req),
-              },
+              ...(workFinishedShell === undefined ? {} : { shell: workFinishedShell }),
               ...(input.routineRun !== undefined || isRoutineHostScope(input.windowId)
                 ? {}
                 : {

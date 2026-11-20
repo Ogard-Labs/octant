@@ -432,7 +432,6 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<CanvasWiring, "canvasAgentToolPort"> &
   Pick<
     HarnessWiring,
-    | "finishedCheckShell"
     | "hostShield"
     | "nativeHarnessComposition"
     | "nativeHarnessHooks"
@@ -555,7 +554,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     shieldServerStore,
     sideTasks,
     finishedReceipts,
-    finishedCheckShell,
     gitObservationPort,
     goalService,
     simulatorInputGrants,
@@ -748,13 +746,18 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         windowId,
       }),
     );
-    contributeCodeTools(({ thread, readThread, folders, operationId, askPerson }) => {
+    contributeCodeTools(({ windowId, thread, readThread, folders, operationId, askPerson }) => {
       const readPosture = () =>
         clampTurnAccessPosture({
           requested: readThread()?.executionPolicy ?? thread.executionPolicy,
           thread: persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
         });
       const folder = folders[0];
+      const shell = nativeHarnessComposition.shellForCode({
+        windowId: String(windowId),
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+      });
       return createReportFinishedTool({
         mode: "code",
         threadId: String(thread.id),
@@ -765,9 +768,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         profileDisplayName: thread.profileDisplayName,
         ...(folder === undefined ? {} : { folder }),
         ...(folders.length > 1 ? { extraFolders: folders.slice(1) } : {}),
-        shell: {
-          run: (input) => finishedCheckShell(readPosture() === "full-access").run(input),
-        },
+        ...(shell === undefined ? {} : { shell }),
         askPerson,
         readGoal: () => goalService.read(String(thread.id)).goal ?? undefined,
         observeDiff: (signal) =>

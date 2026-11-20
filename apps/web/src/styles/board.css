@@ -395,7 +395,7 @@ ul.board-col-body {
   gap: var(--oct-space-1);
   padding: 0 var(--oct-space-2);
   border: 1px solid var(--oct-border-soft);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-success-fg);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
