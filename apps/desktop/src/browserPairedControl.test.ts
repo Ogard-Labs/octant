@@ -188,4 +188,173 @@ describe("BrowserPairedControl", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("serializes input arriving during an in-flight frame capture instead of refusing the lease", async () => {
+    const identity = {};
+    const target = makeTarget();
+    let personInputs = 0;
+    let activeOps = 0;
+    let maxConcurrentOps = 0;
+    let captureCount = 0;
+    const secondCaptureGate = Promise.withResolvers<void>();
+    const secondCaptureStarted = Promise.withResolvers<void>();
+    const dispatched: Array<string> = [];
+
+    const control = new BrowserPairedControl({
+      page: (): PairedControlPage => ({
+        identity,
+        contextId: ids.contextId,
+        target,
+        personInputs,
+        privateCustody: false,
+        nativePromptOpen: false,
+        capture: async () => {
+          captureCount += 1;
+          activeOps += 1;
+          maxConcurrentOps = Math.max(maxConcurrentOps, activeOps);
+          try {
+            if (captureCount === 2) {
+              secondCaptureStarted.resolve();
+              await secondCaptureGate.promise;
+            }
+            return {
+              isEmpty: () => false,
+              getSize: () => ({ width: target.viewport.width, height: target.viewport.height }),
+              toJPEG: () => Uint8Array.from([0xff, 0xd8, 0xff]),
+            };
+          } finally {
+            activeOps -= 1;
+          }
+        },
+        input: async (events) => {
+          activeOps += 1;
+          maxConcurrentOps = Math.max(maxConcurrentOps, activeOps);
+          try {
+            personInputs += 1;
+            for (const event of events) dispatched.push(event.kind);
+          } finally {
+            activeOps -= 1;
+          }
+        },
+        observe: () => () => undefined,
+      }),
+    });
+    const run = (command: Readonly<Record<string, unknown>>, signal?: AbortSignal) =>
+      control.execute(
+        decodePairedBrowserNativeCommand({
+          contextId: ids.contextId,
+          owner: { windowId: ids.windowId, threadId: ids.threadId },
+          ...command,
+        }),
+        signal,
+      );
+
+    expect(await run({ operation: "claim", leaseId: ids.leaseId, target })).toEqual({
+      status: "claimed",
+    });
+    const first = await run({ operation: "frame", leaseId: ids.leaseId });
+    if (first.status !== "frame") throw new Error("Expected initial frame");
+
+    // Start a streamed capture that remains in flight while input arrives.
+    const inFlightFrame = run({ operation: "frame", leaseId: ids.leaseId });
+    await secondCaptureStarted.promise;
+
+    // An aborted queued caller returns promptly without breaking the queue for later input.
+    const cancelled = new AbortController();
+    const abortedInput = run(
+      {
+        operation: "input",
+        leaseId: ids.leaseId,
+        events: [{ kind: "text", text: "cancelled" }],
+      },
+      cancelled.signal,
+    );
+    cancelled.abort();
+    expect(await abortedInput).toEqual({ status: "refused", reason: "unavailable" });
+
+    const queuedTap = run({
+      operation: "input",
+      leaseId: ids.leaseId,
+      events: [{ kind: "tap", frameId: first.frame.frameId, x: 0.5, y: 0.5 }],
+    });
+
+    secondCaptureGate.resolve();
+    const [secondFrame, tapResult] = await Promise.all([inFlightFrame, queuedTap]);
+    expect(secondFrame.status).toBe("frame");
+    expect(tapResult).toEqual({ status: "input", effect: "completed" });
+    expect(maxConcurrentOps).toBe(1);
+    expect(dispatched).toEqual(["tap"]);
+  });
+
+  it("stops remaining batched pointer events when an early event navigates to another document", async () => {
+    const identity = {};
+    let target = makeTarget();
+    let personInputs = 0;
+    const dispatchedCoords: Array<number> = [];
+
+    const control = new BrowserPairedControl({
+      page: (): PairedControlPage => ({
+        identity,
+        contextId: ids.contextId,
+        target,
+        personInputs,
+        privateCustody: false,
+        nativePromptOpen: false,
+        capture: async () => ({
+          isEmpty: () => false,
+          getSize: () => ({ width: target.viewport.width, height: target.viewport.height }),
+          toJPEG: () => Uint8Array.from([0xff, 0xd8, 0xff]),
+        }),
+        input: async (events, _width, _height, canContinue) => {
+          personInputs += 1;
+          for (const event of events) {
+            if (!canContinue()) throw new Error("Paired Browser hold changed during input.");
+            if (event.kind === "tap") {
+              dispatchedCoords.push(event.x);
+              // First tap triggers navigation to a new document on the same tab/origin policy.
+              target = makeTarget({
+                documentVersion: "b".repeat(64) as PairedBrowserNativeTarget["documentVersion"],
+              });
+            }
+          }
+        },
+        observe: () => () => undefined,
+      }),
+    });
+    const run = (command: Readonly<Record<string, unknown>>) =>
+      control.execute(
+        decodePairedBrowserNativeCommand({
+          contextId: ids.contextId,
+          owner: { windowId: ids.windowId, threadId: ids.threadId },
+          ...command,
+        }),
+      );
+
+    expect(await run({ operation: "claim", leaseId: ids.leaseId, target })).toEqual({
+      status: "claimed",
+    });
+    const first = await run({ operation: "frame", leaseId: ids.leaseId });
+    if (first.status !== "frame") throw new Error("Expected frame");
+
+    expect(
+      await run({
+        operation: "input",
+        leaseId: ids.leaseId,
+        events: [
+          { kind: "tap", frameId: first.frame.frameId, x: 0.25, y: 0.25 },
+          { kind: "tap", frameId: first.frame.frameId, x: 0.75, y: 0.75 },
+        ],
+      }),
+    ).toEqual({ status: "input", effect: "possible" });
+    expect(dispatchedCoords).toEqual([0.25]);
+
+    // Subsequent taps aimed at the pre-navigation frame are immediately rejected as stale-frame.
+    expect(
+      await run({
+        operation: "input",
+        leaseId: ids.leaseId,
+        events: [{ kind: "tap", frameId: first.frame.frameId, x: 0.75, y: 0.75 }],
+      }),
+    ).toEqual({ status: "refused", reason: "stale-frame" });
+  });
 });

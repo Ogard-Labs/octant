@@ -92,4 +92,61 @@ describe("PairedBrowserHoldStage", () => {
     emit?.({ kind: "reclaimed-locally" });
     expect(onEnded).toHaveBeenCalledWith("Reclaimed on the computer.");
   });
+
+  it("lets Ctrl+V and Cmd+V reach native paste handling so device clipboard text is sent instead of a remote key", () => {
+    const sendInput = vi.fn(async () => ({
+      status: "input" as const,
+      lastAcceptedSequence: 1,
+      effect: "completed" as const,
+    }));
+    const client: PairedBrowserControlClient = {
+      send: vi.fn(),
+      sendInput,
+      release: vi.fn(async () => ({ status: "released" as const })),
+      handBack: vi.fn(async () => ({ status: "released" as const })),
+      uploadFile: vi.fn(async () => ({ status: "released" as const })),
+      stream: vi.fn(async () => new Promise<{ readonly status: "ended" }>(() => undefined)),
+    };
+    render(
+      <PairedBrowserHoldStage
+        client={client}
+        lease={lease}
+        onEnded={vi.fn()}
+        onHandBack={vi.fn()}
+      />,
+    );
+
+    const stage = screen.getByLabelText("Paired remote Browser control");
+
+    const cmdVNotCancelled = fireEvent.keyDown(stage, { key: "v", code: "KeyV", metaKey: true });
+    expect(cmdVNotCancelled).toBe(true);
+    fireEvent.keyUp(stage, { key: "v", code: "KeyV", metaKey: true });
+
+    const ctrlVNotCancelled = fireEvent.keyDown(stage, { key: "v", code: "KeyV", ctrlKey: true });
+    expect(ctrlVNotCancelled).toBe(true);
+    fireEvent.keyUp(stage, { key: "v", code: "KeyV", ctrlKey: true });
+
+    expect(sendInput).not.toHaveBeenCalled();
+
+    fireEvent.paste(stage, {
+      clipboardData: {
+        getData: (type: string) => (type === "text/plain" ? "pasted-from-device" : ""),
+      },
+    });
+    expect(sendInput).toHaveBeenCalledWith(lease.leaseId, 1, [
+      { kind: "text", text: "pasted-from-device" },
+    ]);
+
+    const enterNotCancelled = fireEvent.keyDown(stage, { key: "Enter", code: "Enter" });
+    expect(enterNotCancelled).toBe(false);
+    expect(sendInput).toHaveBeenCalledWith(lease.leaseId, 2, [
+      {
+        kind: "key",
+        phase: "down",
+        key: "Enter",
+        code: "Enter",
+        modifiers: { alt: false, control: false, meta: false, shift: false },
+      },
+    ]);
+  });
 });

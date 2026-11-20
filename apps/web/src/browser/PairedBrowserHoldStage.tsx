@@ -45,6 +45,20 @@ const WITHHELD_COPY: Readonly<Record<PairedBrowserWithheldReason, string>> = {
   "outside-document": "This tab moved outside the held page. Finish this on the computer.",
 };
 
+function isLocalPasteShortcut(event: {
+  readonly key: string;
+  readonly code: string;
+  readonly metaKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly altKey: boolean;
+}): boolean {
+  return (
+    (event.metaKey || event.ctrlKey) &&
+    !event.altKey &&
+    (event.key.toLowerCase() === "v" || event.code === "KeyV")
+  );
+}
+
 /**
  * Live person-only screencast and touch/scroll/key/text/IME surface for a
  * paired browser holding a desktop Browser page. Never dispatches mouse events,
@@ -196,6 +210,9 @@ export function PairedBrowserHoldStage(props: PairedBrowserHoldStageProps) {
       }}
       onKeyDown={(event) => {
         if (composing.current) return;
+        // Let Ctrl+V / Cmd+V reach the browser's native paste event so onPaste
+        // sends the device's clipboard as text instead of forwarding a host paste key.
+        if (isLocalPasteShortcut(event)) return;
         if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
           event.preventDefault();
           sendEvents([{ kind: "text", text: event.key }]);
@@ -219,6 +236,7 @@ export function PairedBrowserHoldStage(props: PairedBrowserHoldStageProps) {
       }}
       onKeyUp={(event) => {
         if (composing.current) return;
+        if (isLocalPasteShortcut(event)) return;
         if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) return;
         event.preventDefault();
         sendEvents([

@@ -71,8 +71,28 @@ interface ActiveLease {
   frameId: number;
   minValidFrameId: number;
   personInputs: number;
-  busy: boolean;
+  operationChain: Promise<void>;
   pendingChooser: PendingChooser | undefined;
+}
+
+function waitForTurn(previous: Promise<void>, signal: AbortSignal | undefined): Promise<boolean> {
+  if (signal === undefined) return previous.then(() => true);
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      resolve(false);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void previous.finally(() => {
+      signal.removeEventListener("abort", onAbort);
+      if (settled) return;
+      settled = true;
+      resolve(!signal.aborted);
+    });
+  });
 }
 
 /**
@@ -157,7 +177,7 @@ export class BrowserPairedControl {
         frameId: 0,
         minValidFrameId: 1,
         personInputs: page.personInputs,
-        busy: false,
+        operationChain: Promise.resolve(),
         pendingChooser: undefined,
       };
       this.#leases.set(held.id, held);
@@ -185,244 +205,296 @@ export class BrowserPairedControl {
         reason: this.#reclaimedLeases.has(command.leaseId) ? "reclaimed-locally" : "unavailable",
       };
     }
-    if (held.key !== key || held.busy || !this.#isLeaseLiveOnPage(held, page)) {
+    if (held.key !== key || !this.#isLeaseLiveOnPage(held, page)) {
       return { status: "refused", reason: "unavailable" };
     }
 
-    if (command.operation === "file-choice") {
-      const pending = held.pendingChooser;
-      if (pending === undefined || String(pending.view.chooserId) !== String(command.chooserId)) {
-        return { status: "refused", reason: "unavailable" };
-      }
-      for (const filePath of command.paths) {
-        const info = await lstat(filePath).catch(() => undefined);
-        if (info?.isFile() !== true) return { status: "refused", reason: "unavailable" };
-      }
-      held.busy = true;
-      try {
-        held.pendingChooser = undefined;
-        const applied = await pending.resolve(command.paths);
-        if (applied) {
-          // Account for the remote file selection on the lease's input counter
-          // so subsequent frames and inputs stay in lockstep with owned.personInputs.
-          held.personInputs += 1;
-          return { status: "file-chosen" };
-        }
-        return { status: "refused", reason: "unavailable" };
-      } catch {
-        return { status: "refused", reason: "unavailable" };
-      } finally {
-        held.busy = false;
-      }
+    // Serialize frame capture, input dispatch, and file chooser resolution on
+    // the same lease so transient overlap (such as input arriving during a
+    // streamed capture) waits its turn instead of returning unavailable.
+    const previous = held.operationChain;
+    let releaseTurn: () => void = () => undefined;
+    const currentTurn = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    held.operationChain = currentTurn;
+    const acquired = await waitForTurn(previous, signal);
+    if (!acquired) {
+      void previous.finally(releaseTurn);
+      return { status: "refused", reason: "unavailable" };
     }
 
-    const outsideDocument =
-      page.target.tabId !== held.tabId ||
-      page.target.originPolicyVersion !== held.originPolicyVersion;
+    try {
+      const livePage = this.#page(command);
+      if (livePage === undefined || this.#leases.get(command.leaseId) !== held) {
+        return {
+          status: "refused",
+          reason: this.#reclaimedLeases.has(command.leaseId) ? "reclaimed-locally" : "unavailable",
+        };
+      }
+      if (held.key !== key || !this.#isLeaseLiveOnPage(held, livePage)) {
+        return { status: "refused", reason: "unavailable" };
+      }
 
-    if (command.operation === "frame") {
-      const fileChooser = held.pendingChooser?.view;
-      if (outsideDocument) {
-        held.minValidFrameId = held.frameId + 1;
-        return {
-          status: "withheld",
-          reason: "outside-document",
-          ...(fileChooser === undefined ? {} : { fileChooser }),
-        };
+      if (command.operation === "file-choice") {
+        const pending = held.pendingChooser;
+        if (pending === undefined || String(pending.view.chooserId) !== String(command.chooserId)) {
+          return { status: "refused", reason: "unavailable" };
+        }
+        for (const filePath of command.paths) {
+          const info = await lstat(filePath).catch(() => undefined);
+          if (info?.isFile() !== true) return { status: "refused", reason: "unavailable" };
+        }
+        try {
+          held.pendingChooser = undefined;
+          const applied = await pending.resolve(command.paths);
+          if (applied) {
+            // Account for the remote file selection on the lease's input counter
+            // so subsequent frames and inputs stay in lockstep with owned.personInputs.
+            held.personInputs += 1;
+            return { status: "file-chosen" };
+          }
+          return { status: "refused", reason: "unavailable" };
+        } catch {
+          return { status: "refused", reason: "unavailable" };
+        }
       }
-      if (page.nativePromptOpen) {
-        return {
-          status: "withheld",
-          reason: "native-prompt",
-          ...(fileChooser === undefined ? {} : { fileChooser }),
-        };
-      }
-      let checkCustody: () => void;
-      try {
-        if (page.privateCustody) {
+
+      const outsideDocument =
+        livePage.target.tabId !== held.tabId ||
+        livePage.target.originPolicyVersion !== held.originPolicyVersion;
+
+      if (command.operation === "frame") {
+        const fileChooser = held.pendingChooser?.view;
+        if (outsideDocument) {
+          held.minValidFrameId = held.frameId + 1;
+          return {
+            status: "withheld",
+            reason: "outside-document",
+            ...(fileChooser === undefined ? {} : { fileChooser }),
+          };
+        }
+        if (livePage.nativePromptOpen) {
+          return {
+            status: "withheld",
+            reason: "native-prompt",
+            ...(fileChooser === undefined ? {} : { fileChooser }),
+          };
+        }
+        let checkCustody: () => void;
+        try {
+          if (livePage.privateCustody) {
+            return {
+              status: "withheld",
+              reason: "private-custody",
+              ...(fileChooser === undefined ? {} : { fileChooser }),
+            };
+          }
+          checkCustody = livePage.observe();
+        } catch {
           return {
             status: "withheld",
             reason: "private-custody",
             ...(fileChooser === undefined ? {} : { fileChooser }),
           };
         }
-        checkCustody = page.observe();
-      } catch {
-        return {
-          status: "withheld",
-          reason: "private-custody",
-          ...(fileChooser === undefined ? {} : { fileChooser }),
-        };
-      }
-      if (this.#captures.has(page.identity)) return { status: "refused", reason: "unavailable" };
-      held.busy = true;
-      this.#captures.add(page.identity);
-      try {
-        let image = await page.capture();
-        const latestPage = this.#page(command);
-        if (
-          signal?.aborted ||
-          latestPage === undefined ||
-          !this.#isLeaseLiveOnPage(held, latestPage)
-        ) {
-          return {
-            status: "refused",
-            reason: this.#reclaimedLeases.has(held.id) ? "reclaimed-locally" : "unavailable",
-          };
+        if (this.#captures.has(livePage.identity)) {
+          return { status: "refused", reason: "unavailable" };
         }
-        if (
-          latestPage.target.tabId !== held.tabId ||
-          latestPage.target.originPolicyVersion !== held.originPolicyVersion
-        ) {
-          held.minValidFrameId = held.frameId + 1;
-          return { status: "withheld", reason: "outside-document" };
-        }
-        if (latestPage.nativePromptOpen) return { status: "withheld", reason: "native-prompt" };
+        this.#captures.add(livePage.identity);
         try {
-          if (latestPage.privateCustody) return { status: "withheld", reason: "private-custody" };
-          checkCustody();
-        } catch {
-          return { status: "withheld", reason: "private-custody" };
-        }
-        if (image.isEmpty()) return { status: "refused", reason: "unavailable" };
-        let size = image.getSize?.();
-        if (size === undefined || size.width < 1 || size.height < 1) {
-          return { status: "refused", reason: "unavailable" };
-        }
-        const scale = Math.min(
-          1,
-          MAX_PAIRED_BROWSER_FRAME_WIDTH / size.width,
-          MAX_PAIRED_BROWSER_FRAME_HEIGHT / size.height,
-        );
-        if (scale < 1) {
-          if (image.resize === undefined) return { status: "refused", reason: "unavailable" };
-          image = image.resize({ width: Math.max(1, Math.floor(size.width * scale)) });
-          size = image.getSize?.();
-        }
-        if (
-          size === undefined ||
-          size.width > MAX_PAIRED_BROWSER_FRAME_WIDTH ||
-          size.height > MAX_PAIRED_BROWSER_FRAME_HEIGHT
-        ) {
-          return { status: "refused", reason: "unavailable" };
-        }
-        const bytes = image.toJPEG(70);
-        if (bytes.byteLength > MAX_PAIRED_BROWSER_FRAME_BYTES) {
-          return { status: "refused", reason: "unavailable" };
-        }
-        try {
-          checkCustody();
-        } catch {
-          return { status: "withheld", reason: "private-custody" };
-        }
-        if (signal?.aborted || !this.#isLeaseLiveOnPage(held, this.#page(command))) {
-          return {
-            status: "refused",
-            reason: this.#reclaimedLeases.has(held.id) ? "reclaimed-locally" : "unavailable",
-          };
-        }
-        const latestViewport = latestPage.inputViewport ?? latestPage.target.viewport;
-        const nextFrameId = held.frameId + 1;
-        if (
-          latestPage.target.documentVersion !== held.lastDocumentVersion ||
-          latestViewport.width !== held.lastWidth ||
-          latestViewport.height !== held.lastHeight
-        ) {
-          held.lastDocumentVersion = latestPage.target.documentVersion;
-          held.lastWidth = latestViewport.width;
-          held.lastHeight = latestViewport.height;
-          held.minValidFrameId = nextFrameId;
-        }
-        held.frameId = nextFrameId;
-        const latestChooser = held.pendingChooser?.view;
-        return {
-          status: "frame",
-          frame: {
-            frameId: nextFrameId,
-            documentVersion: latestPage.target.documentVersion,
-            viewport: { width: size.width, height: size.height },
-            devicePixelRatio: latestPage.target.devicePixelRatio,
-            jpegBase64: Buffer.from(bytes).toString("base64"),
-          },
-          ...(latestChooser === undefined ? {} : { fileChooser: latestChooser }),
-        };
-      } catch {
-        return { status: "refused", reason: "unavailable" };
-      } finally {
-        this.#captures.delete(page.identity);
-        held.busy = false;
-      }
-    }
-
-    // Input operation
-    if (outsideDocument) {
-      held.minValidFrameId = held.frameId + 1;
-      return { status: "refused", reason: "outside-document" };
-    }
-    if (page.privateCustody || page.nativePromptOpen) {
-      return { status: "refused", reason: "unavailable" };
-    }
-    const inputViewport = page.inputViewport ?? page.target.viewport;
-    if (
-      page.target.documentVersion !== held.lastDocumentVersion ||
-      inputViewport.width !== held.lastWidth ||
-      inputViewport.height !== held.lastHeight
-    ) {
-      held.lastDocumentVersion = page.target.documentVersion;
-      held.lastWidth = inputViewport.width;
-      held.lastHeight = inputViewport.height;
-      held.minValidFrameId = held.frameId + 1;
-    }
-    const frameCheck = evaluatePairedBrowserFrameTarget({
-      events: command.events,
-      minValidFrameId: held.minValidFrameId,
-      latestFrameId: held.frameId,
-    });
-    if (frameCheck.status === "refused") {
-      return { status: "refused", reason: "stale-frame" };
-    }
-    for (const event of command.events) {
-      if (event.kind === "key" && isForbiddenPairedBrowserKey(event)) {
-        return { status: "refused", reason: "unavailable" };
-      }
-    }
-
-    held.busy = true;
-    try {
-      const checkCustody = page.observe();
-      if (!this.#isLeaseLiveOnPage(held, this.#page(command)) || signal?.aborted) {
-        return { status: "refused", reason: "unavailable" };
-      }
-      checkCustody();
-      // Keep the lease's person-input counter in lockstep with remote input
-      // dispatch so remote input does not self-reclaim, while genuine local
-      // input increments page.personInputs independently and triggers reclaim.
-      held.personInputs += 1;
-      this.#pendingInputs.set(held.id, held);
-      this.#inputPages.add(page.identity);
-      try {
-        await page.input(command.events, inputViewport.width, inputViewport.height, () => {
-          checkCustody();
-          const live = this.#page(command);
-          return (
-            !signal?.aborted &&
-            live !== undefined &&
-            this.#isLeaseLiveOnPage(held, live) &&
-            live.target.tabId === held.tabId &&
-            live.target.originPolicyVersion === held.originPolicyVersion
+          let image = await livePage.capture();
+          const latestPage = this.#page(command);
+          if (
+            signal?.aborted ||
+            latestPage === undefined ||
+            !this.#isLeaseLiveOnPage(held, latestPage)
+          ) {
+            return {
+              status: "refused",
+              reason: this.#reclaimedLeases.has(held.id) ? "reclaimed-locally" : "unavailable",
+            };
+          }
+          if (
+            latestPage.target.tabId !== held.tabId ||
+            latestPage.target.originPolicyVersion !== held.originPolicyVersion
+          ) {
+            held.minValidFrameId = held.frameId + 1;
+            return { status: "withheld", reason: "outside-document" };
+          }
+          if (latestPage.nativePromptOpen) return { status: "withheld", reason: "native-prompt" };
+          try {
+            if (latestPage.privateCustody) {
+              return { status: "withheld", reason: "private-custody" };
+            }
+            checkCustody();
+          } catch {
+            return { status: "withheld", reason: "private-custody" };
+          }
+          if (image.isEmpty()) return { status: "refused", reason: "unavailable" };
+          let size = image.getSize?.();
+          if (size === undefined || size.width < 1 || size.height < 1) {
+            return { status: "refused", reason: "unavailable" };
+          }
+          const scale = Math.min(
+            1,
+            MAX_PAIRED_BROWSER_FRAME_WIDTH / size.width,
+            MAX_PAIRED_BROWSER_FRAME_HEIGHT / size.height,
           );
-        });
-      } catch {
-        return { status: "input", effect: "possible" };
-      } finally {
-        this.#pendingInputs.delete(held.id);
-        this.#inputPages.delete(page.identity);
+          if (scale < 1) {
+            if (image.resize === undefined) return { status: "refused", reason: "unavailable" };
+            image = image.resize({ width: Math.max(1, Math.floor(size.width * scale)) });
+            size = image.getSize?.();
+          }
+          if (
+            size === undefined ||
+            size.width > MAX_PAIRED_BROWSER_FRAME_WIDTH ||
+            size.height > MAX_PAIRED_BROWSER_FRAME_HEIGHT
+          ) {
+            return { status: "refused", reason: "unavailable" };
+          }
+          const bytes = image.toJPEG(70);
+          if (bytes.byteLength > MAX_PAIRED_BROWSER_FRAME_BYTES) {
+            return { status: "refused", reason: "unavailable" };
+          }
+          try {
+            checkCustody();
+          } catch {
+            return { status: "withheld", reason: "private-custody" };
+          }
+          if (signal?.aborted || !this.#isLeaseLiveOnPage(held, this.#page(command))) {
+            return {
+              status: "refused",
+              reason: this.#reclaimedLeases.has(held.id) ? "reclaimed-locally" : "unavailable",
+            };
+          }
+          const latestViewport = latestPage.inputViewport ?? latestPage.target.viewport;
+          const nextFrameId = held.frameId + 1;
+          if (
+            latestPage.target.documentVersion !== held.lastDocumentVersion ||
+            latestViewport.width !== held.lastWidth ||
+            latestViewport.height !== held.lastHeight
+          ) {
+            held.lastDocumentVersion = latestPage.target.documentVersion;
+            held.lastWidth = latestViewport.width;
+            held.lastHeight = latestViewport.height;
+            held.minValidFrameId = nextFrameId;
+          }
+          held.frameId = nextFrameId;
+          const latestChooser = held.pendingChooser?.view;
+          return {
+            status: "frame",
+            frame: {
+              frameId: nextFrameId,
+              documentVersion: latestPage.target.documentVersion,
+              viewport: { width: size.width, height: size.height },
+              devicePixelRatio: latestPage.target.devicePixelRatio,
+              jpegBase64: Buffer.from(bytes).toString("base64"),
+            },
+            ...(latestChooser === undefined ? {} : { fileChooser: latestChooser }),
+          };
+        } catch {
+          return { status: "refused", reason: "unavailable" };
+        } finally {
+          this.#captures.delete(livePage.identity);
+        }
       }
-      return { status: "input", effect: "completed" };
-    } catch {
-      return { status: "refused", reason: "unavailable" };
+
+      // Input operation
+      if (outsideDocument) {
+        held.minValidFrameId = held.frameId + 1;
+        return { status: "refused", reason: "outside-document" };
+      }
+      if (livePage.privateCustody || livePage.nativePromptOpen) {
+        return { status: "refused", reason: "unavailable" };
+      }
+      const inputViewport = livePage.inputViewport ?? livePage.target.viewport;
+      if (
+        livePage.target.documentVersion !== held.lastDocumentVersion ||
+        inputViewport.width !== held.lastWidth ||
+        inputViewport.height !== held.lastHeight
+      ) {
+        held.lastDocumentVersion = livePage.target.documentVersion;
+        held.lastWidth = inputViewport.width;
+        held.lastHeight = inputViewport.height;
+        held.minValidFrameId = held.frameId + 1;
+      }
+      const frameCheck = evaluatePairedBrowserFrameTarget({
+        events: command.events,
+        minValidFrameId: held.minValidFrameId,
+        latestFrameId: held.frameId,
+      });
+      if (frameCheck.status === "refused") {
+        return { status: "refused", reason: "stale-frame" };
+      }
+      for (const event of command.events) {
+        if (event.kind === "key" && isForbiddenPairedBrowserKey(event)) {
+          return { status: "refused", reason: "unavailable" };
+        }
+      }
+
+      try {
+        const checkCustody = livePage.observe();
+        if (!this.#isLeaseLiveOnPage(held, this.#page(command)) || signal?.aborted) {
+          return { status: "refused", reason: "unavailable" };
+        }
+        checkCustody();
+        // Keep the lease's person-input counter in lockstep with remote input
+        // dispatch so remote input does not self-reclaim, while genuine local
+        // input increments page.personInputs independently and triggers reclaim.
+        held.personInputs += 1;
+        this.#pendingInputs.set(held.id, held);
+        this.#inputPages.add(livePage.identity);
+        const batchDocumentVersion = livePage.target.documentVersion;
+        let batchStale = false;
+        try {
+          await livePage.input(command.events, inputViewport.width, inputViewport.height, () => {
+            checkCustody();
+            const live = this.#page(command);
+            if (
+              signal?.aborted ||
+              live === undefined ||
+              !this.#isLeaseLiveOnPage(held, live) ||
+              live.privateCustody ||
+              live.nativePromptOpen
+            ) {
+              return false;
+            }
+            if (
+              live.target.tabId !== held.tabId ||
+              live.target.originPolicyVersion !== held.originPolicyVersion
+            ) {
+              held.minValidFrameId = held.frameId + 1;
+              batchStale = true;
+              return false;
+            }
+            const liveViewport = live.inputViewport ?? live.target.viewport;
+            if (
+              live.target.documentVersion !== batchDocumentVersion ||
+              liveViewport.width !== inputViewport.width ||
+              liveViewport.height !== inputViewport.height
+            ) {
+              held.lastDocumentVersion = live.target.documentVersion;
+              held.lastWidth = liveViewport.width;
+              held.lastHeight = liveViewport.height;
+              held.minValidFrameId = held.frameId + 1;
+              batchStale = true;
+              return false;
+            }
+            return true;
+          });
+        } catch {
+          return { status: "input", effect: "possible" };
+        } finally {
+          this.#pendingInputs.delete(held.id);
+          this.#inputPages.delete(livePage.identity);
+        }
+        return { status: "input", effect: batchStale ? "possible" : "completed" };
+      } catch {
+        return { status: "refused", reason: "unavailable" };
+      }
     } finally {
-      held.busy = false;
+      releaseTurn();
     }
   }
 

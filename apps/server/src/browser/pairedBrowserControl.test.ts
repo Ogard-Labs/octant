@@ -672,4 +672,116 @@ describe("PairedBrowserControlService", () => {
       await f.service.close();
     }
   });
+
+  it("serializes input behind an in-flight streamed frame capture so active remote control is not aborted", async () => {
+    const firstFrameStarted = Promise.withResolvers<void>();
+    const releaseFirstFrame = Promise.withResolvers<void>();
+    let frameBusy = false;
+    let frameSeq = 0;
+
+    const f = makeFixture({
+      frame: vi.fn(async () => {
+        frameBusy = true;
+        frameSeq += 1;
+        try {
+          if (frameSeq === 1) {
+            firstFrameStarted.resolve();
+            await releaseFirstFrame.promise;
+          }
+          const found = makeTarget();
+          return {
+            status: "frame" as const,
+            frame: {
+              frameId: frameSeq,
+              documentVersion: found.target.documentVersion,
+              viewport: { width: 1280, height: 800 },
+              devicePixelRatio: 2,
+              jpegBase64: "AAAA",
+            },
+          };
+        } finally {
+          frameBusy = false;
+        }
+      }),
+      input: vi.fn(async () => {
+        if (frameBusy) {
+          return { status: "refused" as const, reason: "unavailable" as const };
+        }
+        return { status: "input" as const, effect: "completed" as const };
+      }),
+    });
+
+    try {
+      const actor = makeActor();
+      const held = await f.service.takeOver(actor, threadOne);
+      if (held.status !== "held") throw new Error("Expected held lease");
+
+      const streamRes = f.service.openStream(actor, held.leaseId);
+      if (streamRes.status !== "stream") throw new Error("Expected stream");
+      const framesPromise = readNdjsonLines(streamRes.stream, 2);
+
+      await firstFrameStarted.promise;
+      const inputPromise = f.service.execute(actor, {
+        kind: "input",
+        leaseId: held.leaseId,
+        sequence: 1,
+        events: [{ kind: "text", text: "hello" }],
+      });
+
+      releaseFirstFrame.resolve();
+      expect(await inputPromise).toEqual({
+        status: "input",
+        lastAcceptedSequence: 1,
+        effect: "completed",
+      });
+
+      const events = await framesPromise;
+      expect(events.every((event) => event.kind === "frame")).toBe(true);
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("refuses concurrent takeovers from the same device on different pages before claim completes", async () => {
+    const threadTwo = decodeBrowserThreadId("11111111-1111-4111-8111-111111111112");
+    const contextTwo = decodeBrowserContextId("22222222-2222-4222-8222-222222222223");
+    const claimStarted = Promise.withResolvers<void>();
+    const finishClaim = Promise.withResolvers<boolean>();
+    let claimCalls = 0;
+
+    const f = makeFixture({
+      claim: vi.fn(async () => {
+        claimCalls += 1;
+        if (claimCalls === 1) {
+          claimStarted.resolve();
+          return finishClaim.promise;
+        }
+        return true;
+      }),
+    });
+    f.targets.set(String(threadTwo), makeTarget(threadTwo, contextTwo));
+
+    try {
+      const actor = makeActor({ deviceId: "device-1" });
+      const firstTakeOver = f.service.takeOver(actor, threadOne);
+      await claimStarted.promise;
+
+      const secondTakeOver = await f.service.takeOver(actor, threadTwo);
+      expect(secondTakeOver).toEqual({
+        status: "refused",
+        reason: "browser-page-held-elsewhere",
+      });
+      expect(claimCalls).toBe(1);
+
+      finishClaim.resolve(false);
+      expect(await firstTakeOver).toEqual({ status: "refused", reason: "page-not-here" });
+
+      // Once a failed claim releases its reservation, the device can take over cleanly.
+      const retry = await f.service.takeOver(actor, threadTwo);
+      expect(retry.status).toBe("held");
+      expect(claimCalls).toBe(2);
+    } finally {
+      await f.service.close();
+    }
+  });
 });

@@ -125,7 +125,8 @@ interface ActivePairedLease {
   frameCount: number;
   lastWithheldReason: PairedBrowserWithheldReason | undefined;
   stream: StreamSink | undefined;
-  inputChain: Promise<void>;
+  hostBusy: boolean;
+  hostChain: Promise<void>;
   disconnectTimer: ReturnType<typeof setTimeout> | undefined;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
   ended: boolean;
@@ -218,6 +219,8 @@ export class PairedBrowserControlService {
   readonly #leases = new Map<string, ActivePairedLease>();
   readonly #byContext = new Map<string, PairedBrowserLeaseId>();
   readonly #byDevice = new Map<string, PairedBrowserLeaseId>();
+  readonly #claimingDevices = new Set<string>();
+  readonly #claimingContexts = new Set<string>();
   readonly #stagedUploads = new Map<string, Array<() => Promise<void>>>();
   readonly #unsubscribes: Array<() => void> = [];
   #closed = false;
@@ -264,8 +267,12 @@ export class PairedBrowserControlService {
       return { status: "refused", reason: "authority-ended" };
     }
     const inspected = await this.#options.host.inspectThread(threadId, signal);
+    if (this.#closed || signal?.aborted || !actor.current()) {
+      return { status: "refused", reason: "authority-ended" };
+    }
+    const contextKey = inspected === undefined ? undefined : String(inspected.target.contextId);
     const existingForContext =
-      inspected === undefined ? undefined : this.#byContext.get(String(inspected.target.contextId));
+      contextKey === undefined ? undefined : this.#byContext.get(contextKey);
     const existingForDevice = this.#byDevice.get(actor.deviceId);
     // Re-asking take-over on the exact page this same device already holds returns its live lease.
     if (
@@ -288,55 +295,72 @@ export class PairedBrowserControlService {
       ...(actor.isAgentGrant === undefined ? {} : { isAgentGrant: actor.isAgentGrant }),
       pagePresent: inspected !== undefined,
       authorityCurrent: inspected?.authorityCurrent === true && actor.current(),
-      pageHeldByAnother: existingForContext !== undefined,
-      deviceHoldsAnotherPage: existingForDevice !== undefined,
-      activeHostLeaseCount: this.#leases.size,
+      pageHeldByAnother:
+        existingForContext !== undefined ||
+        (contextKey !== undefined && this.#claimingContexts.has(contextKey)),
+      deviceHoldsAnotherPage:
+        existingForDevice !== undefined || this.#claimingDevices.has(actor.deviceId),
+      activeHostLeaseCount: this.#leases.size + this.#claimingDevices.size,
     });
     if (admission.status === "refused") return admission;
-    if (inspected === undefined) return { status: "refused", reason: "page-not-here" };
-
-    const leaseId = decodePairedBrowserLeaseId(this.#options.uuid());
-    const expiresAt = this.#nextExpiry();
-    const claimed = await this.#options.host.claim({
-      target: inspected.target,
-      nativeTarget: inspected.nativeTarget,
-      leaseId,
-      deviceId: actor.deviceId,
-      deviceName: actor.deviceName,
-      expiresAt,
-    });
-    if (!claimed || this.#closed || signal?.aborted || !actor.current()) {
-      if (claimed) {
-        await this.#options.host
-          .release(inspected.target, leaseId, "revoke")
-          .catch(() => undefined);
-      }
+    if (inspected === undefined || contextKey === undefined) {
       return { status: "refused", reason: "page-not-here" };
     }
 
-    const lease: ActivePairedLease = {
-      id: leaseId,
-      target: inspected.target,
-      origin: inspected.origin,
-      actor,
-      abort: new AbortController(),
-      eventSamples: [],
-      charSamples: [],
-      announcedChoosers: new Set<string>(),
-      expiresAt,
-      lastAcceptedSequence: 0,
-      eventCount: 0,
-      frameCount: 0,
-      lastWithheldReason: undefined,
-      stream: undefined,
-      inputChain: Promise.resolve(),
-      disconnectTimer: undefined,
-      idleTimer: undefined,
-      ended: false,
-    };
-    this.#leases.set(leaseId, lease);
-    this.#byContext.set(String(inspected.target.contextId), leaseId);
-    this.#byDevice.set(actor.deviceId, leaseId);
+    const leaseId = decodePairedBrowserLeaseId(this.#options.uuid());
+    const expiresAt = this.#nextExpiry();
+    // Reserve the device, context, and host-cap slot synchronously before
+    // awaiting host.claim so concurrent takeovers cannot bypass one-page-per-device
+    // or one-controller-per-page limits.
+    this.#claimingDevices.add(actor.deviceId);
+    this.#claimingContexts.add(contextKey);
+    let lease: ActivePairedLease;
+    try {
+      const claimed = await this.#options.host.claim({
+        target: inspected.target,
+        nativeTarget: inspected.nativeTarget,
+        leaseId,
+        deviceId: actor.deviceId,
+        deviceName: actor.deviceName,
+        expiresAt,
+      });
+      if (!claimed || this.#closed || signal?.aborted || !actor.current()) {
+        if (claimed) {
+          await this.#options.host
+            .release(inspected.target, leaseId, "revoke")
+            .catch(() => undefined);
+        }
+        return { status: "refused", reason: "page-not-here" };
+      }
+
+      lease = {
+        id: leaseId,
+        target: inspected.target,
+        origin: inspected.origin,
+        actor,
+        abort: new AbortController(),
+        eventSamples: [],
+        charSamples: [],
+        announcedChoosers: new Set<string>(),
+        expiresAt,
+        lastAcceptedSequence: 0,
+        eventCount: 0,
+        frameCount: 0,
+        lastWithheldReason: undefined,
+        stream: undefined,
+        hostBusy: false,
+        hostChain: Promise.resolve(),
+        disconnectTimer: undefined,
+        idleTimer: undefined,
+        ended: false,
+      };
+      this.#leases.set(leaseId, lease);
+      this.#byContext.set(contextKey, leaseId);
+      this.#byDevice.set(actor.deviceId, leaseId);
+    } finally {
+      this.#claimingDevices.delete(actor.deviceId);
+      this.#claimingContexts.delete(contextKey);
+    }
     this.#armDisconnectTimer(lease);
     this.#armIdleTimer(lease);
 
@@ -487,7 +511,7 @@ export class PairedBrowserControlService {
           await this.#endLease(lease, "reclaimed-locally", { skipHostRelease: true });
           return { status: "refused", reason: "lease-ended", effect: "none" };
         }
-        if (result.reason === "stale-frame") {
+        if (result.reason === "stale-frame" || result.reason === "outside-document") {
           return { status: "refused", reason: "stale-frame", effect: "none" };
         }
         return { status: "refused", reason: "lease-ended", effect: "none" };
@@ -503,12 +527,7 @@ export class PairedBrowserControlService {
       };
     };
 
-    const pending = lease.inputChain.then(runDispatch, runDispatch);
-    lease.inputChain = pending.then(
-      () => undefined,
-      () => undefined,
-    );
-    return pending;
+    return this.#enqueueHostOp(lease, runDispatch);
   }
 
   openStream(
@@ -602,42 +621,54 @@ export class PairedBrowserControlService {
       }
       inFlight = true;
       try {
-        const opSignal =
-          signal === undefined ? lease.abort.signal : AbortSignal.any([signal, lease.abort.signal]);
-        const result = await this.#options.host.frame(lease.target, lease.id, opSignal);
-        if (closed || lease.ended) return;
-        if (!lease.actor.current()) {
-          await this.#endLease(lease, "revoked");
-          return;
-        }
-        if (result.status === "frame") {
-          lease.lastWithheldReason = undefined;
-          lease.frameCount += 1;
-          this.#armIdleTimer(lease);
-          sink.push({ kind: "frame", ...result.frame });
-          if (
-            result.fileChooser !== undefined &&
-            !lease.announcedChoosers.has(String(result.fileChooser.chooserId))
-          ) {
-            lease.announcedChoosers.add(String(result.fileChooser.chooserId));
-            sink.push({ kind: "file-chooser", ...result.fileChooser });
+        await this.#enqueueHostOp(lease, async () => {
+          if (closed || lease.ended || this.#closed) return;
+          if (!lease.actor.current()) {
+            await this.#endLease(lease, "revoked");
+            return;
           }
-        } else if (result.status === "withheld") {
-          if (lease.lastWithheldReason !== result.reason) {
-            lease.lastWithheldReason = result.reason;
-            sink.push({ kind: "withheld", reason: result.reason });
+          if (!this.#options.host.authorityCurrent(lease.target)) {
+            await this.#endLease(lease, "page-ended");
+            return;
           }
-          if (
-            result.fileChooser !== undefined &&
-            !lease.announcedChoosers.has(String(result.fileChooser.chooserId))
-          ) {
-            lease.announcedChoosers.add(String(result.fileChooser.chooserId));
-            sink.push({ kind: "file-chooser", ...result.fileChooser });
+          const opSignal =
+            signal === undefined
+              ? lease.abort.signal
+              : AbortSignal.any([signal, lease.abort.signal]);
+          const result = await this.#options.host.frame(lease.target, lease.id, opSignal);
+          if (closed || lease.ended) return;
+          if (!lease.actor.current()) {
+            await this.#endLease(lease, "revoked");
+            return;
           }
-        } else if (result.status === "refused" && result.reason === "reclaimed-locally") {
-          await this.#endLease(lease, "reclaimed-locally", { skipHostRelease: true });
-          return;
-        }
+          if (result.status === "frame") {
+            lease.lastWithheldReason = undefined;
+            lease.frameCount += 1;
+            this.#armIdleTimer(lease);
+            sink.push({ kind: "frame", ...result.frame });
+            if (
+              result.fileChooser !== undefined &&
+              !lease.announcedChoosers.has(String(result.fileChooser.chooserId))
+            ) {
+              lease.announcedChoosers.add(String(result.fileChooser.chooserId));
+              sink.push({ kind: "file-chooser", ...result.fileChooser });
+            }
+          } else if (result.status === "withheld") {
+            if (lease.lastWithheldReason !== result.reason) {
+              lease.lastWithheldReason = result.reason;
+              sink.push({ kind: "withheld", reason: result.reason });
+            }
+            if (
+              result.fileChooser !== undefined &&
+              !lease.announcedChoosers.has(String(result.fileChooser.chooserId))
+            ) {
+              lease.announcedChoosers.add(String(result.fileChooser.chooserId));
+              sink.push({ kind: "file-chooser", ...result.fileChooser });
+            }
+          } else if (result.status === "refused" && result.reason === "reclaimed-locally") {
+            await this.#endLease(lease, "reclaimed-locally", { skipHostRelease: true });
+          }
+        });
       } catch {
         /* Transient capture error retries on next tick while lease stays live. */
       } finally {
@@ -707,12 +738,20 @@ export class PairedBrowserControlService {
         input.signal === undefined
           ? lease.abort.signal
           : AbortSignal.any([input.signal, lease.abort.signal]);
-      const result = await this.#options.host.fileChoice(
-        lease.target,
-        lease.id,
-        input.chooserId,
-        [stagedPath],
-        opSignal,
+      const result = await this.#enqueueHostOp(
+        lease,
+        async (): Promise<PairedBrowserNativeResult> => {
+          if (lease.ended || this.#closed || input.signal?.aborted) {
+            return { status: "refused", reason: "unavailable" };
+          }
+          return this.#options.host.fileChoice(
+            lease.target,
+            lease.id,
+            input.chooserId,
+            [stagedPath],
+            opSignal,
+          );
+        },
       );
       if (result.status !== "file-chosen") {
         return { status: "refused", reason: "lease-ended" };
@@ -786,6 +825,32 @@ export class PairedBrowserControlService {
     await Promise.allSettled(
       [...this.#stagedUploads.keys()].map((contextId) => this.#releaseStagedUploads(contextId)),
     );
+  }
+
+  #enqueueHostOp<T>(lease: ActivePairedLease, run: () => Promise<T>): Promise<T> {
+    let pending: Promise<T>;
+    if (!lease.hostBusy) {
+      lease.hostBusy = true;
+      try {
+        pending = run();
+      } catch (error) {
+        lease.hostBusy = false;
+        throw error;
+      }
+    } else {
+      pending = lease.hostChain.then(run, run);
+    }
+    const done = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    lease.hostChain = done;
+    void done.finally(() => {
+      if (lease.hostChain === done) {
+        lease.hostBusy = false;
+      }
+    });
+    return pending;
   }
 
   #keepStagedUpload(contextId: string, cleanup: () => Promise<void>): void {
