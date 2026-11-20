@@ -24,6 +24,7 @@ import {
   decodeBackgroundHostChange,
   type BackgroundHostSettings,
 } from "./backgroundHost";
+import { KeepAwakeController, readDesktopAgentWork } from "./keepAwakeController";
 import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
@@ -94,6 +95,7 @@ import {
   Notification,
   desktopCapturer,
   powerMonitor,
+  powerSaveBlocker,
   screen,
   session,
   shell,
@@ -2415,6 +2417,7 @@ export async function restartDesktopHostAndRefreshWindowAuthorities(options: {
 }
 
 async function restartDesktopHost(): Promise<HostAdmission> {
+  keepAwakeController?.hostStopped();
   const finishRestart = desktopClientLifetime.beginHostRestart();
   const outcome = await restartDesktopHostAndRefreshWindowAuthorities({
     restart: async () => {
@@ -2437,6 +2440,8 @@ async function restartDesktopHost(): Promise<HostAdmission> {
       activityUnconfirmed: true,
     });
     updateHostTray();
+  } else {
+    void keepAwakeController?.pollNow();
   }
   return { status: "running", host: outcome.host };
 }
@@ -2453,6 +2458,7 @@ const desktopBackendSupervisor = createDesktopBackendSupervisor({
     return server;
   },
   reportFatal: (error) => {
+    keepAwakeController?.hostStopped();
     showNoticeWithoutBlocking(
       mainWindow,
       "Octant could not restart its local server",
@@ -2515,6 +2521,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
     await writeDesktopBridgeProjection();
   }
   ensureHostTray();
+  ensureKeepAwake();
   // Host admission already proved readiness. Menu-bar activity and fleet data
   // may refresh beside native state and window authority preparation instead
   // of adding another loopback round trip to first paint.
@@ -3370,6 +3377,7 @@ async function refreshHostActivity(): Promise<void> {
     }
   }
   if (probe === undefined || probe.instanceId !== snapshot.instanceId) {
+    keepAwakeController?.hostStopped();
     hostLifecycle.setActivity({
       activeAgentCount: 0,
       attentionRequired: true,
@@ -3438,6 +3446,7 @@ async function startHostFromMenu(): Promise<void> {
     await writeDesktopBridgeProjection();
   }
   ensureHostTray();
+  ensureKeepAwake();
   await refreshHostActivity();
 }
 
@@ -3446,6 +3455,7 @@ async function stopHostFromMenu(): Promise<void> {
   if (snapshot.ownership !== "desktop-owned") {
     throw new Error("Octant cannot stop a separately managed host.");
   }
+  keepAwakeController?.hostStopped();
   await hostLifecycle.stop();
   updateHostTray();
 }
@@ -3458,6 +3468,7 @@ async function restartHostFromMenu(): Promise<void> {
   serverInstanceId = host.instanceId;
   await writeDesktopBridgeProjection();
   ensureHostTray();
+  ensureKeepAwake();
   await refreshHostActivity();
 }
 
@@ -3825,6 +3836,14 @@ function installIpcHandlers(): void {
     applyAttentionBadge();
   });
   ipcMain.handle(IPC_CHANNELS.minimize, (event) => ownedWindow(event).minimize());
+  const activePreviewHandoffs = new Map<string, AbortController>();
+  const previewHandoffExecutor = createNativePreviewHandoffExecutor({
+    shell,
+    platform: process.platform,
+    ...(process.env.PATH === undefined ? {} : { pathEnv: process.env.PATH }),
+    exists: existsSync,
+    spawn: (command, args) => spawn(command, [...args], { shell: false, stdio: "ignore" }),
+  });
   ipcMain.handle(IPC_CHANNELS.openCodeExternalEditor, async (event, request: unknown) => {
     const context = ownedWindowContext(event);
     if (activeServerUrl === undefined) {
@@ -3843,6 +3862,7 @@ function installIpcHandlers(): void {
       request: editorRequest,
       fetch: globalThis.fetch,
       spawn: (executable, arguments_, options) => spawn(executable, [...arguments_], options),
+      openDefaultApplication: previewHandoffExecutor.openExternal,
     });
   });
   ipcMain.handle(IPC_CHANNELS.listOpenInApplications, () =>
@@ -3882,14 +3902,6 @@ function installIpcHandlers(): void {
           spawn: (executable, arguments_, options) => spawn(executable, [...arguments_], options),
         }),
     });
-  });
-  const activePreviewHandoffs = new Map<string, AbortController>();
-  const previewHandoffExecutor = createNativePreviewHandoffExecutor({
-    shell,
-    platform: process.platform,
-    ...(process.env.PATH === undefined ? {} : { pathEnv: process.env.PATH }),
-    exists: existsSync,
-    spawn: (command, args) => spawn(command, [...args], { shell: false, stdio: "ignore" }),
   });
   ipcMain.handle(IPC_CHANNELS.previewHandoff, async (event, request: unknown) => {
     const context = ownedWindowContext(event);
@@ -4288,6 +4300,14 @@ function installIpcHandlers(): void {
     const change = decodeBackgroundHostChange(value);
     if (change === undefined) throw new Error("Octant rejected an invalid background setting.");
     return backgroundHost().change(change);
+  });
+  ipcMain.handle(IPC_CHANNELS.keepAwakeStatus, (event) => {
+    ownedTopLevelWindowContext(event);
+    return keepAwakeController?.status() ?? { state: "idle", reason: "no-work" };
+  });
+  ipcMain.handle(IPC_CHANNELS.keepAwakeRefresh, (event) => {
+    ownedTopLevelWindowContext(event);
+    return ensureKeepAwake().pollNow();
   });
   ipcMain.handle(IPC_CHANNELS.appUpdateRing, (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
@@ -5166,6 +5186,7 @@ function closeBrowserAdmissionForQuit(): void {
 }
 
 async function stopHostForQuit(): Promise<void> {
+  disposeKeepAwake();
   closeBrowserAdmissionForQuit();
   const browserStopped = browserQuitCleanup;
   const prototypesStopped = canvasPrototypeSurface?.stop();
@@ -5204,6 +5225,11 @@ async function stopHostForQuit(): Promise<void> {
 }
 
 function finishQuit(): void {
+  try {
+    disposeKeepAwake();
+  } catch (error) {
+    logQuitProblem(`Octant could not release sleep prevention at quit: ${String(error)}`);
+  }
   try {
     destroyHostTray();
   } catch (error) {
@@ -5291,6 +5317,38 @@ async function prepareToQuit(stillRequested?: () => boolean): Promise<void> {
     log: logQuitProblem,
   });
   finishQuit();
+}
+
+let keepAwakeController: KeepAwakeController | undefined;
+function ensureKeepAwake(): KeepAwakeController {
+  if (keepAwakeController === undefined) {
+    keepAwakeController = new KeepAwakeController({
+      powerSaveBlocker,
+      powerMonitor,
+      readWork: async () =>
+        await readDesktopAgentWork({
+          host: hostLifecycle.snapshot(),
+          brokerHeaders: desktopBrokerHeaders,
+          fetch: globalThis.fetch,
+          onHostLost: () => keepAwakeController?.hostStopped(),
+        }),
+      onStatusChanged: (status) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) {
+            window.webContents.send(IPC_CHANNELS.keepAwakeStatus, status);
+          }
+        }
+      },
+    });
+    keepAwakeController.start();
+  }
+  return keepAwakeController;
+}
+
+function disposeKeepAwake(): void {
+  const controller = keepAwakeController;
+  keepAwakeController = undefined;
+  controller?.dispose();
 }
 
 let backgroundHostSettings: BackgroundHostSettings | undefined;

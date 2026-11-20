@@ -770,4 +770,21 @@ describe("WorkThreadBoard waiting cards", () => {
     expect(await within(waiting).findByRole("button", { name: "Approve" })).toBeVisible();
     expect(within(waiting).queryByText("Approval: Delete old-draft.md")).toBeNull();
   });
+
+  it("shows a Finished mark with the proven check count on a Work board card without moving its column", async () => {
+    const finishedCard = {
+      ...card({ id: "04", status: "waiting", title: "Draft policy memo" }),
+      finishedReceipt: {
+        receiptId: "11111111-1111-4111-8111-111111111111",
+        provenCount: 2,
+        claimedCount: 1,
+        recordedAt: "2026-11-19T12:00:00.000Z",
+      },
+    } as unknown as WorkBoardCard;
+    renderBoard([finishedCard], boardPendingSource(undefined));
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    expect(within(waiting).getByRole("button", { name: "Draft policy memo" })).toBeVisible();
+    expect(within(waiting).getByText("Finished · 2 proven")).toBeVisible();
+  });
 });

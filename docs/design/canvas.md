@@ -1174,12 +1174,16 @@ it has not read.
 
 ### What leaves the computer
 
-Answers and notes are the person's own and stay on this computer. A share, a
-public link, and the Markdown and HTML export carry the questions, options, and
-sections (share version 17, naming blocks up to Canvas version 29) and never an
-answer or note. Artifact sync does not carry answers in this design; carrying
-them is a follow-up to [Artifact replica sync](artifact-replica-sync.md), as the
-comments' path is.
+Answers and notes are the person's own. A share, a public link, and the
+Markdown and HTML export carry the questions, options, and sections (share
+version 17, naming blocks up to Canvas version 29) and never an answer or note.
+For a Canvas the person's own replica carries, artifact sync carries saved
+answers, notes, and clears between that person's own computers as
+`canvas-choice-answer` entries under the share filter and the same ordering
+rules as comments ([Artifact replica sync](artifact-replica-sync.md)); an
+answer whose question fingerprint no longer matches the Canvas head is still
+carried and reads as stale, never as an answer to the revised question. Writing
+answers stays host-window only.
 
 ### Rejected and deferred
 
@@ -1492,9 +1496,9 @@ artifact sync all leave it here. The pure `admitCanvasTagCommand` policy
 validates shape and budgets, and the refusals are named values
 (`malformed-request`, `oversized-payload`, `duplicate-tag`, `unknown-tag`,
 `tag-budget-exceeded`, `stale-version`). Only the person changes tags, at a
-window on this host or a paired device (maintainer decision, 2026-11-12; not
-built yet: today the command route is host-window only, and a paired device
-reads a listing's tags and changes none), and the host stamps the event's
+window on this host or a paired device (maintainer decision, 2026-11-12; server
+policy admits a person-paired device and refuses hub-introduced devices; paired
+UI follow-up remains), and the host stamps the event's
 timestamp
 and its own person, never a field the request carries. The listing carries
 each entry's tags and a roster of every tag with how many artifacts carry

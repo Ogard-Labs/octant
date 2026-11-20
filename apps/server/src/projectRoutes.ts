@@ -444,12 +444,12 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
         );
       }
       // The Project's own toolchain is a program the repository supplies, so
-      // choosing to run it is the person's act at the machine, as approving
-      // any other repository tooling is.
+      // choosing to run it is the host's own person's act, at a local window
+      // or on a device they paired.
       if (
         command.kind === "change-code-project-own-toolchain" &&
         principal !== undefined &&
-        principal.kind !== "local-window"
+        !principalActsAsHostPerson(principal)
       ) {
         return response(
           {
@@ -490,13 +490,12 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
         );
       }
       // A kept image choice lets every later agent call in the Project spend at
-      // the person's image provider without a card, so it is the person's
-      // standing permission like the ones above. The image card that normally
-      // sets it is answered only at a window on the host.
+      // the person's image provider without a card, so only the host's own
+      // person sets or clears it: at a local window or on a device they paired.
       if (
         command.kind === "change-project-image-generation-choice" &&
         principal !== undefined &&
-        principal.kind !== "local-window"
+        !principalActsAsHostPerson(principal)
       ) {
         return response(
           {

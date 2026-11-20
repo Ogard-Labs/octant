@@ -92,6 +92,7 @@ export class CanvasShareEventStore {
   appendSnapshotCreated(input: {
     readonly record: CanvasShareSnapshotRecord;
     readonly occurredAt: UtcTimestamp;
+    readonly actor?: typeof EventActor.Type;
   }): EventEnvelope {
     const payload = decodeCanvasShareSnapshotCreated({ record: input.record });
     const aggregateId = decodeAggregateId(payload.record.snapshotId);
@@ -104,6 +105,7 @@ export class CanvasShareEventStore {
       occurredAt: input.occurredAt,
       payload,
       label: "Canvas share snapshot create",
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
   }
 
@@ -111,6 +113,7 @@ export class CanvasShareEventStore {
     /** Decoded against the revoked frame contract before it is journaled. */
     readonly revocation: unknown;
     readonly occurredAt: UtcTimestamp;
+    readonly actor?: typeof EventActor.Type;
   }): EventEnvelope {
     const payload = decodeCanvasShareSnapshotRevoked(input.revocation);
     const aggregateId = decodeAggregateId(payload.snapshotId);
@@ -123,6 +126,7 @@ export class CanvasShareEventStore {
       occurredAt: input.occurredAt,
       payload,
       label: "Canvas share snapshot revoke",
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
   }
 
@@ -197,9 +201,11 @@ export class CanvasShareEventStore {
     readonly occurredAt: UtcTimestamp;
     readonly payload: unknown;
     readonly label: string;
+    readonly actor?: typeof EventActor.Type;
   }): EventEnvelope {
     const eventId = decodeEventId(this.#uuid());
     const correlationId = decodeCorrelationId(this.#uuid());
+    const actor = input.actor === undefined ? this.#actor : decodeActor(input.actor);
     let committed;
     try {
       committed = this.#journal.append({
@@ -211,7 +217,7 @@ export class CanvasShareEventStore {
             eventName: input.eventName,
             eventVersion: 1,
             correlationId,
-            actor: this.#actor,
+            actor,
             occurredAt: input.occurredAt,
             payload: input.payload,
           },

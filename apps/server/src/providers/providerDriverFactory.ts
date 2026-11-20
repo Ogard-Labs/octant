@@ -65,6 +65,9 @@ export interface ProviderDriverFactoryOptions {
   /** Shared runtime port for ACP-speaking agents, including the OpenCode 2 preview. */
   readonly acpProcess?: AcpProcessPort;
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
+  readonly hasPendingAcpInstallScripts?: (
+    instance: Extract<ProviderInstance, { readonly driverKind: "acp-agent" }>,
+  ) => Promise<boolean>;
   readonly ohMyPiProcess?: import("./ohMyPiProcess").OhMyPiProcessPort;
   readonly ohMyPiHome?: (instanceId: ProviderInstance["id"]) => string;
   readonly piProcess?: PiProcessPort;
@@ -169,6 +172,7 @@ export function makeProviderDriver(
         install === undefined ? `Install ${instance.displayName} before starting it.` : undefined,
       );
     }
+    const hasPending = options.hasPendingAcpInstallScripts;
     return withAddedAcpAgentLaunch(
       makeAcpDriver({
         profile: addedAcpAgentProfile(instance),
@@ -179,6 +183,11 @@ export function makeProviderDriver(
         runtimeRegistry: options.runtimeRegistry,
       }),
       instance,
+      hasPending === undefined
+        ? undefined
+        : {
+            hasPendingInstallScripts: () => hasPending(instance),
+          },
     );
   }
   const readPlanMcpServers = options.planMcpServers;

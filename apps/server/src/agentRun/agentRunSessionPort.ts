@@ -112,20 +112,29 @@ export interface AgentRunSessionPort {
    * untouched, which is what lets a child wait for a provider slot and ask
    * again without journaling a start each time.
    */
-  readonly prepareStart?: (run: AgentRun) => AgentRunPreparedResume;
+  readonly prepareStart?: (
+    run: AgentRun,
+    input?: { readonly ownerWindowId?: string },
+  ) => AgentRunPreparedResume;
   /** Resolves synchronous execution prerequisites and reserves resources without launching. */
   readonly prepareResume?: (
     run: AgentRun,
-    input?: { readonly message?: string },
+    input?: { readonly message?: string; readonly ownerWindowId?: string },
   ) => AgentRunPreparedResume;
   /**
    * Starts one managed session. Implementations resolve every start-time
    * dependency before returning and throw {@link AgentRunSessionError} when one
    * is missing, so an unstartable child fails closed instead of appearing live.
    */
-  readonly start: (run: AgentRun) => AgentRunSessionHandle;
+  readonly start: (
+    run: AgentRun,
+    input?: { readonly ownerWindowId?: string },
+  ) => AgentRunSessionHandle;
   /** Continues a recorded conversation; refusal must never fall back to start. */
-  readonly resume?: (run: AgentRun, input?: { readonly message?: string }) => AgentRunSessionHandle;
+  readonly resume?: (
+    run: AgentRun,
+    input?: { readonly message?: string; readonly ownerWindowId?: string },
+  ) => AgentRunSessionHandle;
   /**
    * Stops a managed session and resolves only once its execution is confirmed
    * stopped. Cancellation is durable only after that confirmation, so a port

@@ -25,6 +25,7 @@ vi.mock("electron", () => ({
     shouldUseHighContrastColors: false,
   },
   powerMonitor: {},
+  powerSaveBlocker: { start: vi.fn(() => 1), stop: vi.fn(), isStarted: vi.fn(() => true) },
   protocol: { registerSchemesAsPrivileged: vi.fn() },
   screen: {},
   systemPreferences: {},

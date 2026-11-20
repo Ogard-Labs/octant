@@ -530,24 +530,41 @@ describe("Amazon Bedrock with cloud single sign-on, end to end", () => {
     await expect(scene.credentials.resolve(String(instanceId))).resolves.toBeDefined();
   });
 
-  it("connects long-lived keys at a window on this host, keeping them in the broker alone, and refuses any other principal before the broker", async () => {
+  it("connects long-lived keys from a local window or person-paired device, keeping them in the broker alone, and refuses restricted remote devices before the broker", async () => {
     const scene = await host();
     const keys = {
       accessKeyId: "AKIAEXAMPLEKEY000001",
       secretAccessKey: "wJalrXUtnFEMIexampleSECRETkey0000000000",
     };
+    const pairedDeviceId = "90000000-0000-4000-8000-0000000000bd";
     const connect = (principal: "local-window" | "remote-device" | "person-paired-device") =>
       answerCloudIamSettingsCommand({
         dependencies: scene.cloudIam,
         instanceId,
         kind: "connect-access-keys",
         principal,
-        actorId: String(windowId),
+        actorId: principal === "person-paired-device" ? pairedDeviceId : String(windowId),
+        ...(principal === "person-paired-device"
+          ? {
+              actor: {
+                kind: "remote-device" as const,
+                actorId: pairedDeviceId as never,
+                deviceId: pairedDeviceId as never,
+              },
+            }
+          : {}),
         accessKeys: keys,
       });
-    for (const principal of ["remote-device", "person-paired-device"] as const) {
-      expect(await connect(principal)).toEqual({ kind: "refused", reason: "local-host-required" });
-    }
+    expect(await connect("remote-device")).toEqual({
+      kind: "refused",
+      reason: "local-host-required",
+    });
+    // A person-paired device reaches the terms gate rather than local-host-required,
+    // and still never touches the broker before terms are acknowledged.
+    expect(await connect("person-paired-device")).toMatchObject({
+      kind: "signed-out",
+      termsRequired: true,
+    });
     expect(scene.answers).toHaveLength(0);
 
     scene.terms.acknowledgeTerms({
@@ -558,6 +575,7 @@ describe("Amazon Bedrock with cloud single sign-on, end to end", () => {
         termsId: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.termsId,
       } as never,
     });
+    expect(await connect("person-paired-device")).toMatchObject({ kind: "signed-in" });
     expect(await connect("local-window")).toMatchObject({ kind: "signed-in" });
     const pointer = await scene.credentials.resolve(String(instanceId));
     expect(pointer).not.toContain(keys.secretAccessKey);

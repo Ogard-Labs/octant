@@ -1058,8 +1058,8 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       timeoutMs: 1_000,
     });
     expect(inherited.isError).toBe(false);
-    const tooLong = await tool.call({ operation: "wait", selector: "#go", timeoutMs: 3_600_001 });
-    expect(tooLong.result).toEqual({ error: "invalid-browser-input" });
+    const invalidWait = await tool.call({ operation: "wait", selector: "#go", timeoutMs: 0 });
+    expect(invalidWait.result).toEqual({ error: "invalid-browser-input" });
     await tool.stop();
   });
 

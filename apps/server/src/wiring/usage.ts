@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import type { WindowId } from "@octant/contracts";
-import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { createUsageRouteHandler } from "../usageRoutes";
 import { SpendCeilingService } from "../spendCeilingService";
@@ -8,8 +7,6 @@ import { createSpendCeilingRouteHandler } from "../spendCeilingRoutes";
 import { createUsageDashboardRouteHandler } from "../usageDashboardRoutes";
 import { resolveWindowProjectScope, type UsageProjectScope } from "../usageProjectScope";
 import { createDiagnosticsExportRouteHandler } from "../diagnosticsExportRoutes";
-import { createValidationEvidenceRouteHandler } from "../validationEvidenceRoutes";
-import { createValidationEvidenceLoader } from "../validation/validationEvidenceLoader";
 import { ValidationEventStore } from "../validation/validationEventStore";
 import { ZenEventStore } from "../zen/zenEventStore";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -79,25 +76,6 @@ export function wireUsage(deps: UsageDependencies) {
     windowAuthorityStore,
     octantVersion: version,
   });
-  const validationEvidenceRoutes = createValidationEvidenceRouteHandler({
-    windowAuthorityStore,
-    authorize: (windowId, authority) => {
-      const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
-      const context = workspace?.contextByMode[authority.mode];
-      return (
-        workspace !== undefined &&
-        context !== undefined &&
-        authority.projectId !== undefined &&
-        windowAdmitsProject(workspace, authority.mode, authority.projectId) &&
-        String(context.host) === String(authority.hostId)
-      );
-    },
-    maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
-    loadSnapshot: createValidationEvidenceLoader({
-      connection: persistence.connection,
-      clock: () => new Date().toISOString(),
-    }),
-  });
   const validationEventStore = new ValidationEventStore({
     journal: persistence.journal,
     uuid: randomUUID,
@@ -109,7 +87,6 @@ export function wireUsage(deps: UsageDependencies) {
     usageDashboardRoutes,
     usageRoutes,
     validationEventStore,
-    validationEvidenceRoutes,
     zenEventStore,
   };
 }

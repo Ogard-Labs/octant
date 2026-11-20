@@ -1674,4 +1674,60 @@ describe("export package identity", () => {
     expect(calls).toHaveLength(0);
     connection.close();
   });
+
+  it("lets a person-paired device prepare and approve a public-link export journaled as that device while refusing restricted remote devices", async () => {
+    const calls: CanvasExportRenderedOutput[] = [];
+    const original = binding("reading-copy", calls);
+    const publicLinkBinding = {
+      ...original,
+      target: {
+        ...original.target,
+        describeDestination: async () => ({
+          linkTerms: {
+            defaultExpiryDays: 7,
+            allowsPassword: true,
+          },
+        }),
+      },
+    };
+    const { service, connection, envelopes } = harness(() => [publicLinkBinding]);
+
+    // A restricted remote device is refused at prepare and cannot approve a link export.
+    expect(await service.prepare(prepareRequest(), true, "remote-device")).toMatchObject({
+      kind: "refused",
+      code: "unauthorized",
+    });
+
+    const preparedForRestricted = await service.prepare(prepareRequest(), true, "local-window");
+    if (preparedForRestricted.kind !== "approval") throw new Error("expected approval card");
+    expect(
+      await service.decide({
+        canvasId,
+        approvalId: preparedForRestricted.card.approvalId,
+        decision: "approved",
+        permitted: true,
+        actor: remoteActor,
+      }),
+    ).toMatchObject({ kind: "refused", code: "unauthorized" });
+    expect(calls).toHaveLength(0);
+
+    // A person-paired device prepares and approves the public-link export,
+    // keeping its own remote-device actor on the journaled export record.
+    const preparedForPerson = await service.prepare(prepareRequest(), true, "local-window");
+    if (preparedForPerson.kind !== "approval") throw new Error("expected approval card");
+    const approved = await service.decide({
+      canvasId,
+      approvalId: preparedForPerson.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      personPairedDevice: true,
+      actor: remoteActor,
+    });
+    expect(approved).toMatchObject({ kind: "exported" });
+    expect(calls).toHaveLength(1);
+    const recordedActors = envelopes().map((envelope) => envelope.actor);
+    expect(recordedActors.length).toBeGreaterThan(0);
+    expect(recordedActors.every((actor) => actor.kind === "remote-device")).toBe(true);
+    connection.close();
+  });
 });

@@ -109,4 +109,73 @@ describe("Settings' flow for any ACP agent", () => {
       },
     });
   });
+
+  it("explains that trusting a package with install scripts runs them with no further prompt and updates once completed", async () => {
+    const onStep = vi.fn(async () => true);
+    const droid = (install: Record<string, unknown>, trusted = false): ProviderInstance =>
+      decodeProviderInstance({
+        id: "80000000-0000-4000-8000-000000000971",
+        displayName: "Factory Droid",
+        driverKind: "acp-agent",
+        configuration: {
+          kind: "acp-agent",
+          source: {
+            kind: "registry",
+            registryId: "factory-droid",
+            version: "1.12.1",
+            distribution: "npx",
+          },
+          args: ["exec", "--output-format", "acp-daemon"],
+          install,
+          trusted,
+        },
+        enabled: false,
+        environmentPolicy: "inherit-host",
+        version: 2,
+        createdAt: now,
+        updatedAt: now,
+      });
+    const { rerender } = render(
+      <AddedAcpAgentsSection
+        busy={false}
+        instances={[
+          droid({
+            executable: "/data/acp-agent-installs/droid/1.12.1-abcd1234/node_modules/.bin/droid",
+            integrity: "package-manager",
+            hasInstallScripts: true,
+          }),
+        ]}
+        onStep={onStep}
+      />,
+    );
+    const row = () => screen.getByRole("listitem", { name: "Factory Droid" });
+    expect(within(row()).getByRole("group", { name: "Trust step" })).toHaveTextContent(
+      /with install scripts off\. Trusting it runs its install script\./,
+    );
+    await userEvent.click(within(row()).getByRole("button", { name: "Trust" }));
+    expect(onStep).toHaveBeenCalledTimes(1);
+    expect(onStep).toHaveBeenLastCalledWith({
+      kind: "trust",
+      instanceId: "80000000-0000-4000-8000-000000000971",
+    });
+
+    rerender(
+      <AddedAcpAgentsSection
+        busy={false}
+        instances={[
+          droid(
+            {
+              executable: "/data/acp-agent-installs/droid/1.12.1-abcd1234/node_modules/.bin/droid",
+              integrity: "package-manager",
+              hasInstallScripts: true,
+              installScriptsCompleted: true,
+            },
+            true,
+          ),
+        ]}
+        onStep={onStep}
+      />,
+    );
+    expect(row()).toHaveTextContent(/its install scripts ran when you trusted it\./);
+  });
 });
