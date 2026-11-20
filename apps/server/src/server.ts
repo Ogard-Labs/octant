@@ -1978,6 +1978,7 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      routeCodeService,
       resolveThreadStrict,
       restartRecovery,
       agentGrantRouteSlot,

@@ -1125,8 +1125,15 @@ keeps a compromised spoke from steering another spoke's agent.
 **Code delegation** ([decision H25](#decisions); partly built: the Project
 mark is built, as a `project.code-delegated-code-changed@1` event the
 host's person sets from the Project overview and a device the hub
-introduced is refused; the receiving Code thread and the listing route are
-not built yet). Today
+introduced is refused; the receiving Code thread is built; the listing
+route is not built yet). A delegated Code thread runs on the first
+provider in the person's provider order that the Project allows, at the
+first model that provider's catalog lists, as the composer preselects, and
+a request naming a provider profile is refused. Its branch is
+`octant/delegated/<slug>-<request id>`, made from the marked remote and base
+branch. The delegating member reads the thread's state, and on completion
+is told the changes are on the thread's own branch on this computer; the
+thread's text stays here. Today
 only a Work Project takes delegated work, because a Code thread needs a
 managed worktree and a delivery target a person confirmed. B offers Code for a
 Code Project only after its person marks that Project as accepting delegated
