@@ -205,6 +205,16 @@ checks never change registry/configuration or journal state.
   several words because csh refuses one past about 8 KiB.
 - The script's own exit status 255 is reported as 254, so 255 always means
   ssh itself failed.
+- **A stream to a long-running program.** A program that speaks over its
+  standard streams for as long as it runs, such as a provider's app server,
+  is started through the same
+  shared connection, pinned host key, options and encoded `sh` call, with no
+  terminal so bytes pass through unchanged. Its script ends by `exec`-ing the
+  program, so the program reads standard input directly; stopping the stream
+  closes standard input and ends the connection if it is still open two
+  seconds later. Nothing is forwarded, and no secret goes in the command line,
+  which the server's process list shows. Built as the connection's primitive;
+  no provider uses it yet.
 - **Fail closed.** When a call cannot reach the server (the connection drops,
   times out, is refused, or the host key does not match), that call is refused
   with `server-unreachable` and nothing runs anywhere else. There is no local
