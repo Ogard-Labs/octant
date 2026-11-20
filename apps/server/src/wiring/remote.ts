@@ -104,6 +104,9 @@ import { DelegatingSpokeService } from "../hub/delegatingSpokeService";
 import { PeerDelegationService } from "../hub/peerDelegationService";
 import { createPeerDelegationRouteHandler } from "../hub/peerDelegationRoutes";
 import { createWorkDelegationHost } from "../hub/workDelegationHost";
+import { createCodeDelegationHost, delegationHostByProjectType } from "../hub/codeDelegationHost";
+import { createCodeDelegationServices } from "../hub/codeDelegationServices";
+import type { CodeRouteService } from "../codeRoutes";
 import { createHubAdministrationRouteHandler } from "../hub/hubAdministrationRoutes";
 import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
 import { AgentAccessService } from "../agentAccess/agentAccessService";
@@ -323,6 +326,11 @@ export type RemoteDependencies = {
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime" | "workRequestService"> & {
     readonly chatService: ChatService;
+    /** The Code route service a delegated Code thread is created and started through. */
+    readonly routeCodeService: Pick<
+      CodeRouteService,
+      "execute" | "read" | "stageEvidence" | "executeOperation" | "conversationWindow"
+    >;
     readonly liveTurns: LiveTurnRegistry;
     readonly managedWorktreeReceipts: ManagedWorktreeReceiptStore;
     readonly movedThreadHistory: MovedThreadHistory;
@@ -970,25 +978,50 @@ export function wireRemote(deps: RemoteDependencies) {
     delegation: new PeerDelegationService({
       authenticate: (input) => spokeLinkService.authenticatePeer(input),
       currentPeer: (memberId) => spokeLinkService.currentPeer(memberId),
-      host: createWorkDelegationHost({
-        readProject: (projectId) => persistence.readProject(projectId),
-        isWorkEnabled: () =>
-          enabledModes(
-            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
-          ).includes("work"),
-        threads: {
-          execute: async (scope, command) =>
-            workThreadServiceWithWorkflows.execute(scope, command as never),
-          bootstrap: async (scope) => workThreadServiceWithWorkflows.bootstrap(scope),
+      // Each Project goes to the host for its type: Work as before, and Code
+      // only into a Project its person marked as taking delegated Code work.
+      host: delegationHostByProjectType({
+        readType: (projectId) => persistence.readProject(projectId)?.type,
+        work: createWorkDelegationHost({
+          readProject: (projectId) => persistence.readProject(projectId),
+          isWorkEnabled: () =>
+            enabledModes(
+              persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            ).includes("work"),
+          threads: {
+            execute: async (scope, command) =>
+              workThreadServiceWithWorkflows.execute(scope, command as never),
+            bootstrap: async (scope) => workThreadServiceWithWorkflows.bootstrap(scope),
+          },
+          turns: {
+            startFirstTurn: async (scope, command, startOptions) =>
+              workTurnService.startFirstTurn(scope, command, startOptions),
+            turns: async (scope, threadId) => workTurnService.turns(scope, threadId),
+            cancelFirstTurn: async (scope, command) =>
+              workTurnService.cancelFirstTurn(scope, command),
+          },
+          scope: ROUTINE_HOST_SCOPE_ID,
+        }),
+        code: createCodeDelegationHost(
+          createCodeDelegationServices({
+            scope: ROUTINE_HOST_SCOPE_ID,
+            readProject: (projectId) => persistence.readProject(projectId),
+            readProviderInstances: () => persistence.readProviderInstances(),
+            readProviderDefaults: () => persistence.readProviderDefaults(),
+            readProviderCatalogs: () => persistence.readProviderCatalogs?.() ?? [],
+            code: deps.routeCodeService,
+          }),
+        ),
+        // A delegated thread's reads and stops go back to the host that made it.
+        codeThreads: {
+          has: (threadId) => {
+            try {
+              return persistence.readCodeThread(decodeCodeThreadId(threadId)) !== undefined;
+            } catch {
+              return false;
+            }
+          },
         },
-        turns: {
-          startFirstTurn: async (scope, command, startOptions) =>
-            workTurnService.startFirstTurn(scope, command, startOptions),
-          turns: async (scope, threadId) => workTurnService.turns(scope, threadId),
-          cancelFirstTurn: async (scope, command) =>
-            workTurnService.cancelFirstTurn(scope, command),
-        },
-        scope: ROUTINE_HOST_SCOPE_ID,
       }),
       state: delegationState,
       record: recordDelegation,
