@@ -7793,6 +7793,18 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the person a card naming the path (Auto's reviewer does not answer it), and
   Accept edits and Full access write at once; for Code the stricter of the
   journaled and running posture applies, so a session-only grant still asks.
+  Generation can also take up to four reference images, including a combined
+  parent image: pictures attached to the person's latest message, finished
+  images of this thread, and, in Work and Code only, screenshots kept by this
+  thread's Browser or images inside the turn's current folder. The offer
+  lists what the selected image provider will receive, and labels captures
+  made in a signed-in profile. Explicit references always need this answer,
+  even at Full access or with a kept model choice. The host checks ownership,
+  confinement, recorded sizes, count and supported models before offering;
+  it does not read reference bytes until Generate, then rechecks the source,
+  detects PNG, JPEG, WebP or GIF from the bytes, and checks the selected model
+  again before enqueueing. A refused or unreadable reference is not silently
+  dropped. A client that cannot show the disclosure cannot approve the offer.
   The write runs the Work confinement sequence (resolve for create inside the
   folder, then an exclusive create through the proved parent), so a path that
   leaves the folder, a symlinked component, or an existing file is refused.

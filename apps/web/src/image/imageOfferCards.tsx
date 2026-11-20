@@ -69,7 +69,12 @@ export function ImageGenerateOfferCard(props: ImageOfferCardProps) {
   const [remember, setRemember] = useState(false);
   const rememberId = useId();
   if (pending.kind !== "generate") return null;
-  const choices = imageOfferModelChoices(props.profiles, pending.suggested);
+  const references = pending.references;
+  const choices = imageOfferModelChoices(
+    props.profiles,
+    pending.suggested,
+    references !== undefined,
+  );
   const choice = choices.find((candidate) => candidate.id === selected) ?? choices[0];
   const title = pending.revision
     ? "Revise this image with an image model?"
@@ -84,7 +89,8 @@ export function ImageGenerateOfferCard(props: ImageOfferCardProps) {
         decision,
         profileInstanceId: choice.profileInstanceId,
         modelId: choice.modelId,
-        rememberForThread: remember,
+        rememberForThread: references === undefined && remember,
+        ...(references === undefined ? {} : { referenceImagesConfirmed: true }),
       });
     }
   }
@@ -114,6 +120,19 @@ export function ImageGenerateOfferCard(props: ImageOfferCardProps) {
       <p className="follow-up-card__prompt" title={pending.prompt}>
         {pending.prompt}
       </p>
+      {references === undefined ? null : (
+        <div className="follow-up-card__summary">
+          <p>These images will be sent to the selected image provider:</p>
+          <ul>
+            {references.map((reference, index) => (
+              <li key={index}>
+                {reference.label}
+                {reference.signedIn === true ? " (signed-in page)" : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="follow-up-card__confirm">
         <OctantSelectField
           aria-label="Image model"
@@ -122,17 +141,19 @@ export function ImageGenerateOfferCard(props: ImageOfferCardProps) {
           options={choices.map((candidate) => ({ id: candidate.id, label: candidate.label }))}
           value={choice?.id ?? ""}
         />
-        <label className="follow-up-card__summary" htmlFor={rememberId}>
-          <OctantCheckbox
-            checked={remember}
-            disabled={busy}
-            id={rememberId}
-            onChange={(event) => setRemember(event.currentTarget.checked)}
-          />{" "}
-          {props.keptIn === "project"
-            ? "Don't ask again in this Project"
-            : "Don't ask again in this thread"}
-        </label>
+        {references === undefined ? (
+          <label className="follow-up-card__summary" htmlFor={rememberId}>
+            <OctantCheckbox
+              checked={remember}
+              disabled={busy}
+              id={rememberId}
+              onChange={(event) => setRemember(event.currentTarget.checked)}
+            />{" "}
+            {props.keptIn === "project"
+              ? "Don't ask again in this Project"
+              : "Don't ask again in this thread"}
+          </label>
+        ) : null}
       </div>
       <div className="follow-up-card__actions">
         <OctantButton

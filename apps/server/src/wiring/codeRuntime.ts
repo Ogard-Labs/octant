@@ -67,6 +67,7 @@ import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
 import { INHERITED_MARK_REFUSAL } from "../context/inheritedExternalContentMark";
 import {
   createCodeProfileSkillResolver,
@@ -352,6 +353,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,
+    | "browserCaptures"
     | "browserModelBindings"
     | "agentRunPersistence"
     | "androidInputGrants"
@@ -458,7 +460,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "productFeedbackService"
     | "resolveFeedbackThread"
   > &
-  Pick<CanvasWiring, "canvasAgentToolPort"> &
+  Pick<CanvasWiring, "canvasAgentToolPort" | "threadProjectAssetRoot"> &
   Pick<
     HarnessWiring,
     | "hostShield"
@@ -507,6 +509,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     appleToolchainService,
     bindDeviceApprovals,
     browserAuthority,
+    browserCaptures,
     browserModelBindings,
     bindTerminalBrowserSessions,
     terminalBrowserTools,
@@ -517,6 +520,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     buildCodeService,
     canAccessCodeProject,
     canvasAgentToolPort,
+    threadProjectAssetRoot,
     codeActiveTurns,
     codeApprovalStore,
     codeAttachments,
@@ -718,6 +722,42 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         kept: keptImageChoices,
         fullAccess: () => level() === "full-access",
         jobs: imageJobService,
+        imageSources: {
+          latestAttachments: () =>
+            codeAttachments === undefined
+              ? []
+              : attachedImageSources(
+                  codeBoardEventStore.latestPersonTurnAttachments(thread.id),
+                  (attachment) => codeAttachments.read(thread.id, attachment),
+                ),
+          ...workspaceImageSources({
+            threadId: decodeBrowserThreadId(String(thread.id)),
+            browserCaptures,
+            root: async () => {
+              const current = persistence.readCodeThread(thread.id);
+              const checkout = await threadProjectAssetRoot({
+                mode: "code",
+                threadId: String(thread.id),
+                projectId: String(thread.projectId),
+              });
+              const project = persistence.readProject(thread.projectId);
+              if (checkout === undefined || current === undefined || project?.type !== "code") {
+                return undefined;
+              }
+              const selected = approvedWorkingFolderRoot(
+                project,
+                current.workingFolderId,
+                checkout,
+              );
+              if (selected === undefined) return undefined;
+              const root = await resolveThreadWorkingDirectory(
+                selected,
+                current.workingDirectory ?? decodeThreadWorkingDirectory("."),
+              ).catch(() => undefined);
+              return root === checkoutRoot ? root : undefined;
+            },
+          }),
+        },
         listInstances: () => persistence.readProviderInstances(),
         readImageGenerationCustomSources: () =>
           (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration

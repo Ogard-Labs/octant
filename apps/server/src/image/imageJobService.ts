@@ -13,6 +13,7 @@ import {
   IMAGE_JOB_STATUS_CHANGED,
   MAX_GENERATED_IMAGE_BYTES,
   MAX_IMAGE_PROMPT_CHARACTERS,
+  MAX_IMAGE_REFERENCES,
   MAX_IMAGE_VARIANTS,
   decodeImageArtifactId,
   decodeImageGenerationScopeId,
@@ -306,6 +307,9 @@ export class ImageJobService {
       variantCount > MAX_IMAGE_VARIANTS
     ) {
       throw new ImageJobServiceError("invalid", "The requested variant count is not supported.");
+    }
+    if ((input.references?.length ?? 0) > MAX_IMAGE_REFERENCES) {
+      throw new ImageJobServiceError("invalid", "Use at most four image references.");
     }
     const references = (input.references ?? []).map((reference) => ({
       mediaType: reference.mediaType,

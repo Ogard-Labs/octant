@@ -396,6 +396,65 @@ describe("image routes", () => {
       expect(await legacy?.json()).toMatchObject({ kind: "image-offer-gone" });
     });
 
+    it("shows reference offers only to current clients and requires disclosure and a compatible model", async () => {
+      const incompatibleId = decodeProviderInstanceId(attachmentId);
+      const incompatible = {
+        ...imageProfile(),
+        id: incompatibleId,
+        driverKind: "bfl-image",
+        configuration: {
+          kind: "bfl-image-http",
+          modelAllowlist: ["flux-pro" as never],
+          defaultModel: "flux-pro" as never,
+        },
+      } satisfies ProviderInstance;
+      const { handler, offers } = setup({ instances: [imageProfile(), incompatible] });
+      const references = [{ kind: "file", label: "art/logo.png" }] as const;
+      const outcome = offers.offer({
+        windowId: windowId as never,
+        offer: { ...offer, references },
+      });
+      const query = `threadKind=code-thread&scopeId=${scopeId}`;
+      expect(await listed(handler)).toEqual([]);
+      const oldClient = await handler(request(`/api/offers?${query}`));
+      expect(decodeServiceOffersResponse(await oldClient?.json()).offers).toEqual([]);
+      const currentClient = await handler(request(`/api/offers?${query}&referenceImages=1`));
+      const [waiting] = decodeServiceOffersResponse(await currentClient?.json()).offers;
+      expect(waiting).toMatchObject({ references });
+      const body = {
+        offerId: waiting?.offerId,
+        decision: "generate",
+        profileInstanceId: profileId,
+        modelId: "gpt-image-2",
+        rememberForThread: true,
+      };
+      const decide = (answer: Record<string, unknown>) =>
+        handler(request("/api/offers/decide", { method: "POST", body: answer }));
+      expect(await (await decide(body))?.json()).toMatchObject({
+        kind: "offer-refused",
+        reason: expect.stringContaining("shows which images"),
+      });
+      const disclosed = { ...body, referenceImagesConfirmed: true };
+      expect(
+        await (
+          await decide({
+            ...disclosed,
+            profileInstanceId: incompatibleId,
+            modelId: "flux-pro",
+          })
+        )?.json(),
+      ).toMatchObject({
+        kind: "offer-refused",
+        reason: expect.stringContaining("can't use reference images"),
+      });
+      expect(await (await decide(disclosed))?.json()).toEqual({ kind: "offer-answered" });
+      await expect(outcome).resolves.toMatchObject({
+        status: "generate",
+        profileInstanceId: profileId,
+      });
+      expect(offers.remembered(scope)).toBeUndefined();
+    });
+
     it("lets a person-paired device answer only its own offer and rechecks access before claiming", async () => {
       const { handler, offers, authorizeScope, serviceOffers, remember } = setup();
       const dispatch = createAuthenticatedProductDispatch({ dispatch: handler });

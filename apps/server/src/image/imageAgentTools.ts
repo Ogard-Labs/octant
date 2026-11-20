@@ -3,6 +3,7 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
   MAX_IMAGE_PROMPT_CHARACTERS,
+  MAX_IMAGE_REFERENCES,
   MAX_IMAGE_VARIANTS,
   type ImageGenerationCustomSource,
   type ImageGenerationGenerateOffer,
@@ -20,6 +21,7 @@ import {
 import {
   hasEligibleImageProfile,
   imageGenerationWithoutAsking,
+  imageProfileSupportsReferences,
   listEligibleImageProfiles,
 } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -30,6 +32,13 @@ import type {
 } from "./imageGenerationOfferService";
 import type { EnqueueImageJobInput, ImageJobService } from "./imageJobService";
 import type { KeptImageGenerationChoices } from "./keptImageGenerationChoices";
+import {
+  describeImageSources,
+  parseImageSourceRequests,
+  readImageSources,
+  type ImageSourceRequest,
+  type ThreadImageSources,
+} from "./threadImageSources";
 
 export const IMAGE_TOOL_NAME = "octant_create_image";
 
@@ -42,6 +51,21 @@ const imageToolInputSchema = {
     modelId: { type: "string" },
     variantCount: { type: "number" },
     parentAttachmentId: { type: "string" },
+    references: {
+      type: "array",
+      maxItems: MAX_IMAGE_REFERENCES,
+      items: {
+        type: "object",
+        properties: {
+          kind: { enum: ["attachment", "browser-capture", "file", "generated-image"] },
+          captureId: { type: "string" },
+          relativePath: { type: "string" },
+          attachmentId: { type: "string" },
+        },
+        required: ["kind"],
+        additionalProperties: false,
+      },
+    },
     attachmentId: { type: "string" },
     relativePath: { type: "string" },
   },
@@ -67,6 +91,7 @@ export interface ImageAgentToolPort {
   readonly readImageGenerationCustomSources: () => ReadonlyArray<ImageGenerationCustomSource>;
   readonly enqueue: (input: EnqueueImageJobInput) => Promise<ImageJob>;
   readonly listJobs: ImageJobService["listByScope"];
+  readonly imageSources?: ThreadImageSources;
   /**
    * Asks the person in the thread whether to generate, and with which profile
    * and model. A call asks unless a kept choice or Full access already
@@ -135,7 +160,8 @@ interface ImageToolInput {
   readonly profileInstanceId?: ProviderInstanceId;
   readonly modelId?: ProviderModelId;
   readonly variantCount?: number;
-  readonly parentAttachmentId?: string;
+  readonly parentAttachmentId?: ReturnType<typeof decodeImageArtifactId>;
+  readonly references: ReadonlyArray<ImageSourceRequest>;
 }
 
 interface ImageSaveInput {
@@ -145,7 +171,7 @@ interface ImageSaveInput {
 }
 
 const DESCRIPTION =
-  "Generate or revise a picture (a photo, illustration, or rendered scene) with an image model the person set up in Octant. Call it when the person asks for an image instead of drawing one yourself as SVG, HTML, or CSS: a real image model gives a far better result. Keep SVG for logos, icons, and diagrams, or when the person asks for it. Octant shows the person a card in this thread where they pick the model and confirm, because each generation is billed to their image provider; nothing runs until they answer, unless they already said not to ask again or the thread runs at Full access, where it uses the profile the person named in Settings (else the first one set up) on its default model. Describe the image in prompt; profileInstanceId and modelId only suggest what the card preselects. To revise, pass parentAttachmentId from a completed image on this thread. Never pass credentials, endpoints, headers, or filesystem paths. The result says what happened: completed with each image's attachmentId (the images are shown in this thread, and to you when you can read images; use an attachmentId to revise one, to place it in a Canvas design as a generated-image asset, or to save it), failed with the reason, generating with a jobId when it takes longer than the call waits (it appears in this thread when done; do not start another), agent-draws (the person wants you to make the visual yourself), or cancelled (do not ask again unless they do). In a Work or Code thread, operation save with an attachmentId from this thread and a relativePath stores that image as a new file in the folder you work in: it never overwrites a file, Plan refuses it, and at Ask first the person confirms the path. Never invent an image URL.";
+  "Generate or revise a picture (a photo, illustration, or rendered scene) with an image model the person set up in Octant. Call it when the person asks for an image instead of drawing one yourself as SVG, HTML, or CSS: a real image model gives a far better result. Keep SVG for logos, icons, and diagrams, or when the person asks for it. Octant shows the person a card in this thread where they pick the model and confirm, because each generation is billed to their image provider; nothing runs until they answer, unless they already said not to ask again or the thread runs at Full access, where it uses the profile the person named in Settings (else the first one set up) on its default model. Describe the image in prompt; profileInstanceId and modelId only suggest what the card preselects. To revise a generated image, pass its parentAttachmentId. Use references to include up to four images: attachment for the latest photos, generated-image by attachmentId, or in Work and Code browser-capture by captureId or file by relativePath. References always require confirmation. Never pass credentials, endpoints, or absolute paths. The result says what happened: completed with each image's attachmentId (the images are shown in this thread, and to you when you can read images; use an attachmentId to revise one, to place it in a Canvas design as a generated-image asset, or to save it), failed with the reason, generating with a jobId when it takes longer than the call waits (it appears in this thread when done; do not start another), agent-draws (the person wants you to make the visual yourself), or cancelled (do not ask again unless they do). In a Work or Code thread, operation save with an attachmentId from this thread and a relativePath stores that image as a new file in the folder you work in: it never overwrites a file, Plan refuses it, and at Ask first the person confirms the path. Never invent an image URL.";
 
 /**
  * App-managed image generation for a Chat, Work, or Code thread.
@@ -179,18 +205,33 @@ export function createImageAgentTools(options: {
       if ("error" in parsed) return { result: { error: parsed.error }, isError: true };
       if (parsed.operation === "save") return saveImage(options, parsed, signal);
 
-      const profiles = eligibleProfiles(options.port);
+      const needsReferences = parsed.references.length > 0;
+      const profiles = eligibleProfiles(options.port, needsReferences);
       if (profiles.length === 0) {
-        return { result: { error: "No enabled image profile is configured." }, isError: true };
+        return {
+          result: {
+            error: needsReferences
+              ? "No enabled image model can use reference images."
+              : "No enabled image profile is configured.",
+          },
+          isError: true,
+        };
       }
-      const suggested = suggestedChoice(profiles, parsed);
+      const suggested = suggestedChoice(
+        profiles,
+        needsReferences &&
+          parsed.profileInstanceId !== undefined &&
+          !profiles.some((profile) => profile.instanceId === parsed.profileInstanceId)
+          ? {}
+          : parsed,
+      );
       if ("error" in suggested) return { result: { error: suggested.error }, isError: true };
 
       let parentArtifactRef: EnqueueImageJobInput["parentArtifactRef"];
-      if (parsed.parentAttachmentId !== undefined) {
+      if (parsed.parentAttachmentId !== undefined && !needsReferences) {
         const parent = findCompletedArtifact(
           options.port.listJobs(options.scopeId),
-          parsed.parentAttachmentId,
+          String(parsed.parentAttachmentId),
         );
         if (parent === undefined) {
           return {
@@ -201,10 +242,41 @@ export function createImageAgentTools(options: {
         parentArtifactRef = parent;
       }
 
+      const references = needsReferences
+        ? await describeImageSources(
+            parsed.parentAttachmentId === undefined
+              ? parsed.references
+              : [
+                  { kind: "generated-image", attachmentId: parsed.parentAttachmentId },
+                  ...parsed.references,
+                ],
+            options.port.imageSources,
+            (id) => {
+              const found = findCompletedJobArtifact(
+                options.port
+                  .listJobs(options.scopeId)
+                  .filter((job) => job.threadKind === options.threadKind),
+                id,
+              );
+              if (found === undefined) return undefined;
+              return {
+                label: "generated image",
+                size: found.artifact.size,
+                read: async () =>
+                  (await options.port.readArtifact?.(found.job.id, found.artifact.attachmentId))
+                    ?.bytes,
+              };
+            },
+          )
+        : [];
+      if ("error" in references) return { result: { error: references.error }, isError: true };
+      if (signal?.aborted) return { result: { status: "cancelled" } };
+
+      // A remembered model is not permission to share these particular images.
       const unasked = imageGenerationWithoutAsking({
         profiles,
-        kept: options.port.remembered(),
-        fullAccess: options.port.fullAccess?.() === true,
+        kept: needsReferences ? undefined : options.port.remembered(),
+        fullAccess: !needsReferences && options.port.fullAccess?.() === true,
         askAgain: options.port.asksAgain?.() === true,
         defaultProfileInstanceId: options.port.defaultProfileInstanceId?.(),
       });
@@ -230,8 +302,11 @@ export function createImageAgentTools(options: {
             kind: "generate",
             prompt: parsed.prompt,
             variantCount: parsed.variantCount ?? 1,
-            revision: parentArtifactRef !== undefined,
+            revision: parsed.parentAttachmentId !== undefined,
             suggested,
+            ...(needsReferences
+              ? { references: references.map(({ reference }) => reference) }
+              : {}),
           },
           ...(signal === undefined ? {} : { signal }),
         });
@@ -269,7 +344,10 @@ export function createImageAgentTools(options: {
       if (refusalNow !== undefined) return { result: { error: refusalNow }, isError: true };
       // The person's choice is checked again as it runs: a profile turned off
       // while the card was open must not run.
-      if (choice === undefined || !isEligibleChoice(eligibleProfiles(options.port), choice)) {
+      if (
+        choice === undefined ||
+        !isEligibleChoice(eligibleProfiles(options.port, needsReferences), choice)
+      ) {
         return {
           result: { error: "The chosen image model is no longer available." },
           isError: true,
@@ -277,6 +355,20 @@ export function createImageAgentTools(options: {
       }
 
       try {
+        const images = await readImageSources(references, signal);
+        if ("error" in images) return { result: { error: images.error }, isError: true };
+        if (signal?.aborted) return { result: { status: "cancelled" } };
+        if (needsReferences) {
+          const refusalAfterRead = options.port.refusal?.();
+          if (refusalAfterRead !== undefined)
+            return { result: { error: refusalAfterRead }, isError: true };
+          if (!isEligibleChoice(eligibleProfiles(options.port, true), choice)) {
+            return {
+              result: { error: "The chosen image model can no longer use reference images." },
+              isError: true,
+            };
+          }
+        }
         const job = await options.port.enqueue({
           threadKind: options.threadKind,
           scopeId: options.scopeId,
@@ -285,6 +377,7 @@ export function createImageAgentTools(options: {
           prompt: parsed.prompt,
           ...(parsed.variantCount === undefined ? {} : { variantCount: parsed.variantCount }),
           ...(parentArtifactRef === undefined ? {} : { parentArtifactRef }),
+          ...(images.length === 0 ? {} : { references: images }),
         });
         return await settledResult(options.port, job, signal);
       } catch (error) {
@@ -519,6 +612,7 @@ export function createThreadImageAgentTools(input: {
   readonly refusal?: () => string | undefined;
   /** Whether the model driving this turn accepts images in a tool result. */
   readonly readsImages: () => boolean;
+  readonly imageSources?: ThreadImageSources;
   /** Saving under the turn's folder; Work and Code only. */
   readonly save?: ImageAgentToolPort["save"];
 }): AppManagedToolSet | undefined {
@@ -560,14 +654,22 @@ export function createThreadImageAgentTools(input: {
       whenTerminal: (jobId) => input.jobs.whenTerminal(jobId),
       readArtifact: (jobId, attachmentId) => input.jobs.readArtifact(jobId, attachmentId),
       readsImages: input.readsImages,
+      ...(input.imageSources === undefined ? {} : { imageSources: input.imageSources }),
       ...(input.refusal === undefined ? {} : { refusal: input.refusal }),
       ...(input.save === undefined || threadKind === "chat-thread" ? {} : { save: input.save }),
     },
   });
 }
 
-function eligibleProfiles(port: ImageAgentToolPort): ReadonlyArray<ImageGenerationProfileView> {
-  return listEligibleImageProfiles(port.listInstances(), port.readImageGenerationCustomSources());
+function eligibleProfiles(
+  port: ImageAgentToolPort,
+  references: boolean,
+): ReadonlyArray<ImageGenerationProfileView> {
+  const profiles = listEligibleImageProfiles(
+    port.listInstances(),
+    port.readImageGenerationCustomSources(),
+  );
+  return references ? profiles.filter(imageProfileSupportsReferences) : profiles;
 }
 
 function isEligibleChoice(
@@ -584,7 +686,7 @@ function isEligibleChoice(
 /** What the card preselects: the agent's suggestion when the host can run it, else the first profile. */
 function suggestedChoice(
   profiles: ReadonlyArray<ImageGenerationProfileView>,
-  input: ImageToolInput,
+  input: Pick<ImageToolInput, "profileInstanceId" | "modelId">,
 ): ImageGenerationChoice | { readonly error: string } {
   const profile =
     input.profileInstanceId === undefined
@@ -678,17 +780,21 @@ function parseInput(
   const profileInstanceId = record["profileInstanceId"];
   const modelId = record["modelId"];
   const parentAttachmentId = record["parentAttachmentId"];
+  const references =
+    record["references"] === undefined ? [] : parseImageSourceRequests(record["references"]);
+  if ("error" in references) return references;
   try {
     return {
       operation: "generate",
       prompt: prompt.trim(),
+      references,
       ...(profileInstanceId === undefined
         ? {}
         : { profileInstanceId: decodeProviderInstanceId(profileInstanceId) }),
       ...(modelId === undefined ? {} : { modelId: decodeProviderModelId(modelId) }),
       ...(variantCount === undefined ? {} : { variantCount }),
-      ...(typeof parentAttachmentId === "string"
-        ? { parentAttachmentId: String(decodeImageArtifactId(parentAttachmentId)) }
+      ...(parentAttachmentId !== undefined
+        ? { parentAttachmentId: decodeImageArtifactId(parentAttachmentId) }
         : {}),
     };
   } catch {

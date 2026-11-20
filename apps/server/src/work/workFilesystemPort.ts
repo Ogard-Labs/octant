@@ -2,7 +2,6 @@ import {
   constants,
   realpath as nodeRealpath,
   lstat,
-  stat,
   open,
   opendir,
   readlink,
@@ -35,6 +34,7 @@ export interface WorkFileStat {
   readonly isFile: boolean;
   readonly isSymbolicLink: boolean;
   readonly size: number;
+  readonly changedAt?: bigint;
   readonly device: string;
   readonly inode: string;
 }
@@ -52,6 +52,7 @@ export interface WorkFileIdentity {
 export interface WorkOpenFileStat {
   readonly isFile: boolean;
   readonly size: number;
+  readonly changedAt?: bigint;
   readonly device: string;
   readonly inode: string;
 }
@@ -157,7 +158,7 @@ export interface WorkFilesystemPort {
   rename(from: string, to: string): Promise<void>;
 }
 
-type LiveStat = Awaited<ReturnType<typeof stat>> & { readonly dev: bigint; readonly ino: bigint };
+type LiveStat = Awaited<ReturnType<typeof statConfinedPath>>;
 
 // Identity is read as bigint so a large inode keeps every digit; the comparison
 // that uses it is an equality check on the decimal text.
@@ -166,6 +167,7 @@ const toStat = (info: LiveStat): WorkFileStat => ({
   isFile: info.isFile(),
   isSymbolicLink: info.isSymbolicLink(),
   size: Number(info.size),
+  changedAt: info.ctimeNs,
   device: String(info.dev),
   inode: String(info.ino),
 });
@@ -199,6 +201,7 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
         return {
           isFile: info.isFile(),
           size: Number(info.size),
+          changedAt: info.ctimeNs,
           device: String(info.dev),
           inode: String(info.ino),
         };
