@@ -6262,6 +6262,9 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
     expect(f.calls.filter(({ method }) => method === "skills/list")).toEqual([
       { method: "skills/list", input: { cwds: [projectRoot], forceReload: true } },
     ]);
+    // Listing Project skills grants the short-lived runtime read-only access to the folder and closes it right after.
+    expect(f.authorities()).toEqual([{ kind: "catalog", readOnlyFolders: [projectRoot] }]);
+    expect(f.closeCount()).toBe(1);
 
     f.calls.length = 0;
     const withProjectOff = await Effect.runPromise(
@@ -6277,6 +6280,10 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
     ]);
     expect(f.calls.filter(({ method }) => method === "skills/list")).toEqual([
       { method: "skills/list", input: { cwds: [] } },
+    ]);
+    expect(f.authorities()).toEqual([
+      { kind: "catalog", readOnlyFolders: [projectRoot] },
+      { kind: "catalog" },
     ]);
 
     f.calls.length = 0;

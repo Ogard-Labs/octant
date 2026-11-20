@@ -144,7 +144,14 @@ import { makePiProcessLive, type PiProcessPort } from "../providers/piProcess";
 import { createProviderRouteHandler } from "../providers/providerRoutes";
 import { ThreadNativeSetupStore } from "../providers/threadNativeSetupStore";
 import { readThreadProjectCode } from "../providers/threadProjectCode";
-import { readThreadProviderMentions } from "../providers/threadProviderMentions";
+import {
+  createThreadProviderMentionsAccess,
+  readThreadProviderMentions,
+} from "../providers/threadProviderMentions";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistrations,
+} from "../persistence/remoteAccessProjection";
 import { createDiscoveryRouteHandler } from "../providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "../providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "../providers/discoveryService";
@@ -267,7 +274,6 @@ import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkRequestStateWiring } from "./workRequestState";
-import type { WorkspaceWiring } from "./workspace";
 import { protectedAtLevel, secretGuardEntries } from "../process/secretGuard";
 import type { OpenCodeProtectedPaths } from "../providers/openCodeDriver";
 
@@ -715,7 +721,6 @@ export type ProvidersDependencies = Pick<
     | "nativeHarnessRouter"
   > &
   Pick<HarnessStateWiring, "nativeHarnessSessions" | "serverProjectStore" | "serverRegistry"> &
-  Pick<WorkspaceWiring, "projectService"> &
   Pick<IntegrationsWiring, "githubExtensionSnapshot" | "providerRuntimeNetwork"> &
   Pick<ComputerUseWiring, "computerUseProcess"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
@@ -741,7 +746,6 @@ export function wireProviders(deps: ProvidersDependencies) {
     persistence,
     processAuthorityNow,
     processAuthorityTime,
-    projectService,
     providerRuntimeNetwork,
     providerRuntimeRegistry,
     serverProjectStore,
@@ -2294,6 +2298,14 @@ export function wireProviders(deps: ProvidersDependencies) {
         return persistence.readProviderInstances();
       },
     };
+    const canAccessMentionProject = createThreadProviderMentionsAccess({
+      listLiveWindowIds: () => windowAuthorityStore.listWindowIds(),
+      readWorkspace: (windowId) => persistence.readWindowWorkspace(windowId)?.workspace,
+      readProject: (projectId) => persistence.readProject(projectId),
+      readDevices: () => readDeviceRegistrations(persistence.connection),
+      approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
+      isRestrictedDeviceScope,
+    });
     const providerRoutes = createProviderRouteHandler({
       threadNativeSetup: {
         get: (threadId) => threadNativeSetupStore.get(threadId),
@@ -2318,10 +2330,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         mentions: (windowId, request) =>
           readThreadProviderMentions(
             {
-              canAccessProject: async (callerWindowId, projectId) =>
-                (await projectService.bootstrap(callerWindowId)).active.some(
-                  (project) => String(project.id) === String(projectId),
-                ),
+              canAccessProject: canAccessMentionProject,
               readCodeThread: (threadId) => persistence.readCodeThread(threadId),
               readCodeCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
               readWorkThread: (threadId) => workThreadProjection.read(threadId),

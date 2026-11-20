@@ -410,6 +410,76 @@ describe("composer @ menu", () => {
     expect(screen.queryByRole("option", { name: /\$local/ })).toBeNull();
   });
 
+  it("restarts a canceled mentions read when load identity changes while a request is in flight", async () => {
+    const user = userEvent.setup();
+    const first = Promise.withResolvers<
+      ReadonlyArray<{
+        readonly kind: "skill";
+        readonly name: string;
+        readonly scope?: "project";
+        readonly description?: string;
+      }>
+    >();
+    const load1 = vi.fn(() => first.promise);
+    const load2 = vi.fn(async () => [
+      {
+        kind: "skill" as const,
+        name: "local",
+        scope: "project" as const,
+        description: "Deploy this Project",
+      },
+      { kind: "skill" as const, name: "tidy", description: "Tidy the code" },
+    ]);
+    const accountOnly = [{ kind: "skill" as const, name: "tidy", description: "Tidy the code" }];
+    const rendered = render(
+      <OctantCommandProvider commands={[]}>
+        <Harness
+          resolve={vi.fn(async () => true)}
+          mentions={{
+            label: "Codex",
+            mentions: accountOnly,
+            scopeKey: "code:thread-3:on",
+            load: load1,
+          }}
+        />
+      </OctantCommandProvider>,
+    );
+    const message = screen.getByRole("textbox", { name: "Message" });
+    await user.type(message, "@");
+    expect(load1).toHaveBeenCalledTimes(1);
+
+    // Provider groups refresh while `load1` is still pending, rebuilding `load` with the same scopeKey.
+    rendered.rerender(
+      <OctantCommandProvider commands={[]}>
+        <Harness
+          resolve={vi.fn(async () => true)}
+          mentions={{
+            label: "Codex",
+            mentions: accountOnly,
+            scopeKey: "code:thread-3:on",
+            load: load2,
+          }}
+        />
+      </OctantCommandProvider>,
+    );
+    expect(load2).toHaveBeenCalledTimes(1);
+    await screen.findByRole("option", { name: /\$local/ });
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "$localProject · Codex's own skill · Deploy this Project",
+      "$tidyCodex's own skill · Tidy the code",
+    ]);
+
+    // A late resolution of the canceled first request must not overwrite the newer result.
+    await act(async () => {
+      first.resolve(accountOnly);
+      await first.promise;
+    });
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "$localProject · Codex's own skill · Deploy this Project",
+      "$tidyCodex's own skill · Tidy the code",
+    ]);
+  });
+
   it("offers nothing for an at sign inside a word or an unmatched query", async () => {
     const user = userEvent.setup();
     renderComposer(vi.fn(async () => true));

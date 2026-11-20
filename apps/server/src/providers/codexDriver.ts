@@ -2072,13 +2072,26 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           ),
         );
       }
+      const includeProject = input.nativeSetup?.skills === true && input.projectRoot !== undefined;
       return Effect.scoped(
         Effect.gen(function* () {
-          const runtime = yield* acquireRuntime(options, clientFactory, CATALOG_AUTHORITY);
+          // On macOS/Linux the account-only catalog lease runs in a scratch
+          // sandbox with no read grant to the Project folder; listing a
+          // Project's skills uses a short-lived folder-scoped read-only grant.
+          const runtime =
+            includeProject && input.projectRoot !== undefined
+              ? yield* acquireRuntime(
+                  options,
+                  clientFactory,
+                  { kind: "catalog", readOnlyFolders: [input.projectRoot] },
+                  JSON.stringify([CODEX_MENTIONS_LEASE, input.projectRoot]),
+                  0,
+                )
+              : yield* acquireRuntime(options, clientFactory, CATALOG_AUTHORITY);
           return yield* Effect.promise(() =>
             codexMentions(runtime.client, {
               ...(input.projectRoot === undefined ? {} : { projectRoot: input.projectRoot }),
-              includeProjectSkills: input.nativeSetup?.skills === true,
+              includeProjectSkills: includeProject,
             }),
           );
         }),
@@ -2237,6 +2250,8 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
 const CATALOG_AUTHORITY: CodexLaunchAuthority = { kind: "catalog" };
 /** The lease prefix of the short-lived process each session copy is made on. */
 const CODEX_SESSION_COPY_LEASE = "codex-session-copy";
+/** The lease prefix of the short-lived read-only process used to list a Project's Codex skills. */
+const CODEX_MENTIONS_LEASE = "codex-project-mentions";
 /** The first release whose `thread/fork` cuts the copy at a turn (`lastTurnId`). */
 const CODEX_FORK_RELEASE = [0, 143, 0] as const;
 

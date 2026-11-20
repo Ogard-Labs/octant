@@ -12,10 +12,14 @@ import {
   decodeWindowId,
   decodeWorkThreadId,
   decodeWorktreeReceiptId,
+  type CodeThread,
   type ProviderMention,
 } from "@octant/contracts";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import { contextKeyForProject, defaultWindowWorkspace } from "@octant/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createThreadProviderMentionsAccess,
   readThreadProviderMentions,
   type ThreadProviderMentionsSources,
 } from "./threadProviderMentions";
@@ -57,6 +61,7 @@ function fixture(
     readonly worktreePath?: string;
     readonly projectType?: "code" | "work" | "chat";
     readonly checkoutKind?: "existing-worktree" | "managed-worktree" | "remote-root";
+    readonly codeLifecycle?: CodeThread["lifecycle"];
     readonly executionPolicy?: "approval-gated" | "full-access" | "plan";
     readonly workingDirectory?: string;
     readonly accountNativeSetup?: boolean;
@@ -82,7 +87,7 @@ function fixture(
         checkoutId,
         providerInstanceId: instanceId,
         bindingRevisionId: revisionId,
-        lifecycle: "active",
+        lifecycle: overrides.codeLifecycle ?? "active",
         executionPolicy: overrides.executionPolicy ?? "approval-gated",
       }) as never,
     readCodeCheckout: () =>
@@ -256,5 +261,129 @@ describe("reading a thread's provider mentions for the composer @ menu", () => {
       }),
     ).toEqual({ status: "ok", mentions: accountMentions });
     expect(chatProject.listMentions).not.toHaveBeenCalled();
+  });
+
+  it.each(["waiting", "interrupted"] as const)(
+    "lists Project and account mentions for a %s Code thread and omits archived threads",
+    async (lifecycle) => {
+      const openable = fixture({ codeLifecycle: lifecycle });
+      expect(
+        await readThreadProviderMentions(openable.sources, windowId, {
+          kind: "mentions",
+          mode: "code",
+          threadId: String(codeThreadId),
+        }),
+      ).toEqual({ status: "ok", mentions: projectAndAccountMentions });
+      expect(openable.listMentions).toHaveBeenCalledTimes(1);
+
+      const archived = fixture({ codeLifecycle: "archived" });
+      expect(
+        await readThreadProviderMentions(archived.sources, windowId, {
+          kind: "mentions",
+          mode: "code",
+          threadId: String(codeThreadId),
+        }),
+      ).toEqual({ status: "ok", mentions: [] });
+      expect(archived.listMentions).not.toHaveBeenCalled();
+    },
+  );
+
+  it("enforces per-window Project binding and person-paired device policy without leaking another Project's skills", async () => {
+    const projectA = decodeProjectId("80000000-0000-4000-8000-000000000021");
+    const projectB = decodeProjectId("80000000-0000-4000-8000-000000000022");
+    const pairedDevice = decodeWindowId("80000000-0000-4000-8000-000000000023");
+    const hubDevice = decodeWindowId("80000000-0000-4000-8000-000000000024");
+    const rootA = makeFolder();
+    const rootB = makeFolder();
+    const baseWorkspace = defaultWindowWorkspace(windowId);
+    const workspaceA = {
+      ...baseWorkspace,
+      contextByMode: {
+        ...baseWorkspace.contextByMode,
+        code: contextKeyForProject("code", LOCAL_HOST_ID, projectA, rootA),
+      },
+    };
+    const projects = new Map([
+      [
+        String(projectA),
+        {
+          id: projectA,
+          type: "code",
+          lifecycle: "active",
+          binding: { canonicalRoot: rootA },
+          bindingHistory: [{ revisionId }],
+        },
+      ],
+      [
+        String(projectB),
+        {
+          id: projectB,
+          type: "code",
+          lifecycle: "active",
+          binding: { canonicalRoot: rootB },
+          bindingHistory: [{ revisionId }],
+        },
+      ],
+    ]);
+    const canAccessProject = createThreadProviderMentionsAccess({
+      listLiveWindowIds: () => [windowId],
+      readWorkspace: (id) => (String(id) === String(windowId) ? workspaceA : undefined),
+      readProject: (id) => projects.get(String(id)) as never,
+      readDevices: () => [
+        { device_id: String(pairedDevice), state: "active" },
+        { device_id: String(hubDevice), state: "active" },
+      ],
+      approvedByPerson: (deviceId) => deviceId === String(pairedDevice),
+      isRestrictedDeviceScope: (scopeId) => String(scopeId) === String(hubDevice),
+    });
+
+    const f = fixture({ root: rootB });
+    const sources: ThreadProviderMentionsSources = {
+      ...f.sources,
+      canAccessProject,
+      readProject: (id) => projects.get(String(id)) as never,
+    };
+
+    // Window bound to Project A is refused when requesting mentions for Project B.
+    expect(
+      await readThreadProviderMentions(sources, windowId, {
+        kind: "draft-mentions",
+        mode: "code",
+        projectId: projectB,
+        providerInstanceId: instanceId,
+      }),
+    ).toEqual({ status: "unauthorized" });
+    expect(f.listMentions).not.toHaveBeenCalled();
+
+    // Window bound to Project A is allowed for Project A.
+    expect(
+      await readThreadProviderMentions(sources, windowId, {
+        kind: "draft-mentions",
+        mode: "code",
+        projectId: projectA,
+        providerInstanceId: instanceId,
+      }),
+    ).toEqual({ status: "ok", mentions: projectAndAccountMentions });
+    expect(f.listMentions).toHaveBeenCalledTimes(1);
+
+    // Hub-introduced / restricted device is refused for Project B.
+    expect(
+      await readThreadProviderMentions(sources, hubDevice, {
+        kind: "draft-mentions",
+        mode: "code",
+        projectId: projectB,
+        providerInstanceId: instanceId,
+      }),
+    ).toEqual({ status: "unauthorized" });
+
+    // Person-paired device reaches active Project B.
+    expect(
+      await readThreadProviderMentions(sources, pairedDevice, {
+        kind: "draft-mentions",
+        mode: "code",
+        projectId: projectB,
+        providerInstanceId: instanceId,
+      }),
+    ).toEqual({ status: "ok", mentions: projectAndAccountMentions });
   });
 });

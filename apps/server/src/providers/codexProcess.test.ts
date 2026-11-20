@@ -948,6 +948,35 @@ describe("Codex launch confinement", () => {
     expect(captured[1]).not.toHaveProperty("protectedFiles");
   });
 
+  it("grants a Project mentions catalog launch read-only access to the folder without widening writes", () => {
+    const projectFolder = realpathSync(mkdtempSync(join(tmpdir(), "octant-codex-mentions-root-")));
+    try {
+      const captured: Array<Parameters<ProcessConfinementPort["prepare"]>[0]> = [];
+      const prepared = prepareCodexLaunch({
+        binaryPath: "/bin/sh",
+        args: ["-c", "true"],
+        authority: { kind: "catalog", readOnlyFolders: [projectFolder] },
+        environment: { HOME: homedir() },
+        confinement: {
+          prepare: (input) => {
+            captured.push(input);
+            return { command: input.executable, args: input.args };
+          },
+        },
+        platform: "darwin",
+      });
+      if (prepared.status === "prepared") prepared.launch.release();
+      expect(captured).toHaveLength(1);
+      expect(captured[0]?.writeBoundRoot).toBe(false);
+      expect(captured[0]?.boundRoot).not.toBe(projectFolder);
+      expect(captured[0]?.readRoots).toContain(projectFolder);
+      expect(captured[0]?.privateHomeAllowPaths).toContain(projectFolder);
+      expect(captured[0]?.additionalWriteRoots).not.toContain(projectFolder);
+    } finally {
+      rmSync(projectFolder, { recursive: true, force: true });
+    }
+  });
+
   it("launches Full access as the program itself, with no profile around it", () => {
     const prepared = prepareCodexLaunch({
       binaryPath: "/bin/sh",

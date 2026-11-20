@@ -228,13 +228,22 @@ export function useComposerAtMenu(input: {
     if (loadedForOpenRef.current === providerScopeKey) return;
     loadedForOpenRef.current = providerScopeKey;
     let current = true;
+    let settled = false;
     void providerLoad()
       .then((mentions) => {
+        settled = true;
         if (current) setLoadedMentions({ scopeKey: providerScopeKey, mentions });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        settled = true;
+      });
     return () => {
       current = false;
+      // If `load` identity changed before the in-flight request settled, allow
+      // the next effect run for the same scope to start a fresh request.
+      if (!settled && loadedForOpenRef.current === providerScopeKey) {
+        loadedForOpenRef.current = undefined;
+      }
     };
   }, [tokenIsCurrent, providerLoad, providerScopeKey]);
   const providerMentions =

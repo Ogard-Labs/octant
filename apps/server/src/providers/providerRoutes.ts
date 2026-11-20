@@ -208,6 +208,14 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
           );
         }
         if (threadRequest.kind === "mentions" || threadRequest.kind === "draft-mentions") {
+          const caller = readPrincipalRouteContext(request)?.principal;
+          if (caller !== undefined && !principalActsAsHostPerson(caller)) {
+            return response(
+              { category: "unauthorized", message: "Provider request is unauthorized." },
+              401,
+              origin,
+            );
+          }
           if (store.mentions === undefined) {
             return response(
               { category: "unsupported", message: "Thread provider mentions are unavailable." },

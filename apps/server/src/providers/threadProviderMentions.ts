@@ -16,12 +16,15 @@ import {
   type ThreadNativeSetupRequest,
   type ThreadWorkingDirectory,
   type WindowId,
+  type WindowWorkspace,
   type WorkThread,
   type WorkThreadId,
   type WorktreeReceiptId,
 } from "@octant/contracts";
+import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
+import { createHostPersonScopes, createPersonProjectReach } from "../hostPersonScope";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { sessionNativeSetup } from "./providerNativeSetup";
 
@@ -34,8 +37,59 @@ export type ThreadProviderMentionsOutcome =
   | { readonly status: "ok"; readonly mentions: ReadonlyArray<ProviderMention> }
   | { readonly status: "unauthorized" };
 
+export interface ThreadProviderMentionsAccessOptions {
+  readonly listLiveWindowIds: () => ReadonlyArray<WindowId>;
+  readonly readWorkspace: (windowId: WindowId) => WindowWorkspace | undefined;
+  readonly readProject: (projectId: ProjectId) => Project | undefined;
+  readonly readDevices: () => ReadonlyArray<{
+    readonly device_id: string;
+    readonly state: "active" | "revoked" | "expired";
+  }>;
+  readonly approvedByPerson: (deviceId: string) => boolean;
+  readonly isRestrictedDeviceScope: (scopeId: WindowId) => boolean;
+}
+
+/**
+ * Per-window and per-principal Project access check for thread and draft
+ * provider mentions. A live local window may read only Projects bound to its
+ * persisted workspace (lead or visible pane) for that mode; a device the
+ * host's own person paired may read active Projects; any closed window,
+ * hub-introduced device, or restricted device is refused.
+ */
+export function createThreadProviderMentionsAccess(
+  options: ThreadProviderMentionsAccessOptions,
+): (windowId: WindowId, projectId: ProjectId, mode: "work" | "code") => boolean {
+  const hostPersonScopes = createHostPersonScopes({
+    localWindows: options.listLiveWindowIds,
+    devices: options.readDevices,
+    approvedByPerson: options.approvedByPerson,
+  });
+  const isActiveProject = (projectId: ProjectId, mode: "work" | "code"): boolean => {
+    const project = options.readProject(projectId);
+    return project !== undefined && project.type === mode && project.lifecycle === "active";
+  };
+  return createPersonProjectReach<ProjectId, "work" | "code">({
+    windowHoldsProject: (scopeId, projectId, mode) => {
+      const live = options
+        .listLiveWindowIds()
+        .some((windowId) => String(windowId) === String(scopeId));
+      if (!live || !isActiveProject(projectId, mode)) return false;
+      const workspace = options.readWorkspace(scopeId);
+      return workspace !== undefined && windowAdmitsProject(workspace, mode, projectId);
+    },
+    isPersonPairedDevice: (scopeId) =>
+      hostPersonScopes.deviceActor(scopeId) !== undefined &&
+      !options.isRestrictedDeviceScope(scopeId),
+    isActiveProject,
+  });
+}
+
 export interface ThreadProviderMentionsSources {
-  readonly canAccessProject: (windowId: WindowId, projectId: ProjectId) => Promise<boolean>;
+  readonly canAccessProject: (
+    windowId: WindowId,
+    projectId: ProjectId,
+    mode: "work" | "code",
+  ) => Promise<boolean> | boolean;
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly readCodeCheckout: (checkoutId: CodeCheckoutId) => CodeCheckoutIdentity | undefined;
   readonly readWorkThread: (threadId: WorkThreadId) => WorkThread | undefined;
@@ -96,7 +150,7 @@ export async function readThreadProviderMentions(
   let nativeSetup: ReturnType<typeof sessionNativeSetup>;
 
   if (request.kind === "draft-mentions") {
-    if (!(await sources.canAccessProject(windowId, request.projectId))) {
+    if (!(await sources.canAccessProject(windowId, request.projectId, request.mode))) {
       return { status: "unauthorized" };
     }
     instanceId = request.providerInstanceId;
@@ -124,10 +178,10 @@ export async function readThreadProviderMentions(
     });
   } else if (request.mode === "code") {
     const thread = sources.readCodeThread(decodeCodeThreadId(request.threadId));
-    if (thread === undefined || thread.lifecycle !== "active") {
+    if (thread === undefined || thread.lifecycle === "archived") {
       return { status: "ok", mentions: [] };
     }
-    if (!(await sources.canAccessProject(windowId, thread.projectId))) {
+    if (!(await sources.canAccessProject(windowId, thread.projectId, "code"))) {
       return { status: "unauthorized" };
     }
     instanceId = thread.providerInstanceId;
@@ -180,7 +234,7 @@ export async function readThreadProviderMentions(
     if (thread === undefined || thread.lifecycle !== "active") {
       return { status: "ok", mentions: [] };
     }
-    if (!(await sources.canAccessProject(windowId, thread.projectId))) {
+    if (!(await sources.canAccessProject(windowId, thread.projectId, "work"))) {
       return { status: "unauthorized" };
     }
     instanceId = thread.providerInstanceId;

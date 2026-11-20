@@ -457,6 +457,44 @@ describe("ProviderRoutes", () => {
       ),
     );
     expect(chat?.status).toBe(400);
+
+    // A hub-introduced or restricted remote device is refused before mentions are read.
+    const hubDeviceId = "80000000-0000-4000-8000-000000000065";
+    const hubRequest = post({ kind: "mentions", threadId, mode: "code" });
+    bindPrincipalRouteContext(hubRequest, {
+      principal: {
+        kind: "remote-device",
+        hostId: "local",
+        deviceId: hubDeviceId,
+        credentialGeneration: 1,
+        origin: "https://remote.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "80000000-0000-4000-8000-000000000066",
+      } as never,
+      scopeId: hubDeviceId as never,
+    });
+    const callsBeforeHub = mentions.mock.calls.length;
+    expect((await route(hubRequest))?.status).toBe(401);
+    expect(mentions).toHaveBeenCalledTimes(callsBeforeHub);
+
+    // A device the host's person paired is allowed through to the handler.
+    const personPaired = post({ kind: "mentions", threadId, mode: "code" });
+    bindPrincipalRouteContext(personPaired, {
+      principal: {
+        kind: "remote-device",
+        hostId: "local",
+        deviceId: hubDeviceId,
+        credentialGeneration: 1,
+        origin: "https://remote.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "80000000-0000-4000-8000-000000000067",
+        admittedBy: "host-person",
+      } as never,
+      scopeId: hubDeviceId as never,
+    });
+    expect((await route(personPaired))?.status).toBe(200);
   });
 
   it("refuses a paired device turning on Claude artifacts before the service runs", async () => {
