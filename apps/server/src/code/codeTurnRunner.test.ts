@@ -1997,6 +1997,7 @@ describe("CodeTurnRunner", () => {
             outputTokens: 20,
             cacheReadInputTokens: 7,
             cacheWriteInputTokens: 2,
+            reasoningTokens: 4,
           }),
           event({
             kind: "child-agent-activity",
@@ -2048,6 +2049,7 @@ describe("CodeTurnRunner", () => {
     expect(observed.find((entry) => entry.category === "usage")).toMatchObject({
       cacheReadInputTokens: 7,
       cacheWriteInputTokens: 2,
+      reasoningTokens: 4,
     });
     expect(observed.find((entry) => entry.category === "question")?.options).toEqual(["A", "B"]);
     expect(

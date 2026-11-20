@@ -7847,6 +7847,7 @@ function normalizedOperationEvent(
       ...(event.cacheWriteInputTokens === undefined
         ? {}
         : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
+      ...(event.reasoningTokens === undefined ? {} : { reasoningTokens: event.reasoningTokens }),
 
       ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
       ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),
