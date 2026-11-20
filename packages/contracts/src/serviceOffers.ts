@@ -4,6 +4,7 @@ import {
   ImageGenerationGenerateOffer,
   ImageGenerationOfferDecision,
   ImageGenerationOfferId,
+  ImageGenerationProfileView,
   ImageGenerationSaveOffer,
   MAX_PENDING_IMAGE_GENERATION_OFFERS,
 } from "./imageGeneration";
@@ -12,6 +13,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const SERVICE_OFFERS_PATH = "/api/offers";
 export const SERVICE_OFFERS_DECIDE_PATH = "/api/offers/decide";
+export const SERVICE_OFFER_DECISION_MAX_BYTES = 8_192;
 
 export const ServiceOfferId = ImageGenerationOfferId;
 export type ServiceOfferId = typeof ServiceOfferId.Type;
@@ -27,6 +29,7 @@ export type ServiceOfferDecision = typeof ServiceOfferDecision.Type;
 
 export const ServiceOffersResponse = Schema.Struct({
   offers: Schema.Array(ServiceOffer).pipe(Schema.maxItems(MAX_PENDING_IMAGE_GENERATION_OFFERS)),
+  imageProfiles: Schema.optional(Schema.Array(ImageGenerationProfileView)),
 }).annotations(strict);
 export type ServiceOffersResponse = typeof ServiceOffersResponse.Type;
 

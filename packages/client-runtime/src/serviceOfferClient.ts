@@ -18,18 +18,25 @@ export function createServiceOfferClient(options: {
   readonly fetch: typeof globalThis.fetch;
   readonly windowCapability: string;
 }): ServiceOfferClient {
+  const baseUrl = new URL(options.baseUrl);
+  if (
+    baseUrl.protocol !== "http:" ||
+    (baseUrl.hostname !== "127.0.0.1" && baseUrl.hostname !== "localhost")
+  ) {
+    throw new Error("Service offers require a loopback server URL.");
+  }
   const headers = { "x-octant-window-capability": options.windowCapability };
   const decodeOffers = decodeHostAnswer(ServiceOffersResponse);
   const decodeResult = decodeHostAnswer(ServiceOfferDecisionResult);
   return {
     async offers({ threadKind, scopeId }) {
-      const url = new URL(SERVICE_OFFERS_PATH, options.baseUrl);
+      const url = new URL(SERVICE_OFFERS_PATH, baseUrl);
       url.searchParams.set("threadKind", threadKind);
       url.searchParams.set("scopeId", String(scopeId));
       return decodeOffers(await request(url, { method: "GET", headers }));
     },
     async decide(decision) {
-      const url = new URL(SERVICE_OFFERS_DECIDE_PATH, options.baseUrl);
+      const url = new URL(SERVICE_OFFERS_DECIDE_PATH, baseUrl);
       return decodeResult(
         await request(url, {
           method: "POST",

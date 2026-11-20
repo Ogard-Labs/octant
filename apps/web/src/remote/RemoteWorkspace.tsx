@@ -357,6 +357,7 @@ function RemoteChatSurface(
         <ChatWorkspace
           canvasClient={canvasClient}
           controller={controller}
+          {...serviceOfferProps(props)}
           {...(props.extensionClient === undefined
             ? {}
             : { extensionClient: props.extensionClient })}
@@ -427,6 +428,7 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
       {activeThread === undefined ? null : (
         <WorkThreadWorkspace
           key={String(activeThread.id)}
+          {...serviceOfferProps(props)}
           title={activeThread.title}
           threadId={activeThread.id}
           initialThread={activeThread}
@@ -507,6 +509,7 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
           )}
           <CodeThreadWorkspace
             canvasClient={props.clients.canvas}
+            {...serviceOfferProps(props)}
             onOpenCanvas={props.onOpenCanvas}
             onOpenCanvasInSidebar={props.onOpenCanvas}
             canvasOpenLabel="Open Canvas"
@@ -522,6 +525,11 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
       )}
     </RemoteThreadPane>
   );
+}
+
+function serviceOfferProps({ actsAsHostPerson, clients }: RemoteSurfaceProps) {
+  const client = clients.serviceOffers;
+  return actsAsHostPerson && client !== undefined ? { serviceOfferClient: client } : {};
 }
 
 type RemoteThread = ChatThread | WorkThread | CodeThread;

@@ -10,6 +10,8 @@ import {
   decodeChatThreadId,
   decodeProjectId,
   decodeWindowId,
+  MAX_PENDING_IMAGE_GENERATION_OFFERS,
+  type ServiceOffer,
   type WindowId,
 } from "@octant/contracts";
 import {
@@ -62,7 +64,11 @@ import { createProtectedFilesRouteHandler } from "../protectedFilesRoutes";
 import { ExtensionToolApprovalService } from "../extensions/extensionToolApprovalService";
 import { AutomationEventStore } from "../automation/automationEventStore";
 import { RoutineProposalService } from "../automation/routineProposalService";
-import { ImageGenerationOfferService } from "../image/imageGenerationOfferService";
+import {
+  ImageGenerationOfferService,
+  type ImageOfferAnswer,
+} from "../image/imageGenerationOfferService";
+import { ServiceOfferService } from "../offers/serviceOfferService";
 import {
   chatThreadStandsInProject,
   isDeviceRegistrationCurrent,
@@ -317,22 +323,23 @@ export function wireAuthority(deps: AuthorityDependencies) {
     now: processAuthorityTime,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
   });
-  // Image generations an agent asked the person to start, answered from a
-  // card in the thread. A prompt like the routine proposals above, so it
-  // rides the same change topic.
-  const imageGenerationOffers = new ImageGenerationOfferService({
-    onAsked: onWaitingAsk,
-    uuid: randomUUID,
-    now: processAuthorityTime,
-    onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
-  });
+  const serviceOffers = new ServiceOfferService<ServiceOffer, ImageOfferAnswer>(
+    MAX_PENDING_IMAGE_GENERATION_OFFERS,
+    {
+      onAsked: onWaitingAsk,
+      uuid: randomUUID,
+      now: processAuthorityTime,
+      onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+    },
+  );
+  const imageGenerationOffers = new ImageGenerationOfferService(serviceOffers);
   // An ask waits with no expiry, so a thread archived while its turn is
   // still parked on one must give it up here. Later areas register the asks
   // they hold, as they register window revocations below.
   const threadArchivals: Array<(threadId: string) => void> = [
     (id) => extensionToolApprovalService.withdrawThread(id),
     (id) => routineProposalService.withdrawThread(id),
-    (id) => imageGenerationOffers.withdrawThread(id),
+    (id) => serviceOffers.withdrawThread(id),
   ];
   const onThreadArchived = (withdraw: (threadId: string) => void): void => {
     threadArchivals.push(withdraw);
@@ -427,7 +434,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
         (id) => androidInputGrants.revokeWindow(String(id)),
         (id) => extensionToolApprovalService.revokeWindow(id),
         (id) => routineProposalService.revokeWindow(id),
-        (id) => imageGenerationOffers.revokeWindow(id),
+        (id) => serviceOffers.revokeWindow(id),
         (id) => codeSessionAuthority.revokeWindow(id),
         (id) => {
           for (const [requestId, binding] of agentRunExecutionWindows) {
@@ -501,6 +508,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     extensionToolApprovalService,
     routineProposalService,
     imageGenerationOffers,
+    serviceOffers,
     isPairedDeviceScope,
     isRestrictedDeviceScope,
     liveTurns,

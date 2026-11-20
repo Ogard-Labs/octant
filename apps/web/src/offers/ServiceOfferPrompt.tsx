@@ -3,6 +3,7 @@ import type {
   ImageGenerationProfileView,
   ServiceOffer,
   ServiceOfferDecision,
+  ServiceOffersResponse,
 } from "@octant/contracts";
 import { useCallback, useEffect, useState, type ComponentType } from "react";
 import "../followUps/follow-up-suggestions.css";
@@ -41,7 +42,7 @@ export function ServiceOfferPrompt(props: {
   readonly className?: string;
 }) {
   const { client, scopeId, threadKind, turnActive } = props;
-  const [offers, setOffers] = useState<ReadonlyArray<ServiceOffer>>([]);
+  const [listed, setListed] = useState<ServiceOffersResponse>();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<{
     readonly offerId: ServiceOffer["offerId"];
@@ -50,7 +51,7 @@ export function ServiceOfferPrompt(props: {
   const revision = useThreadActivityRevision("toolApprovals");
 
   useEffect(() => {
-    setOffers([]);
+    setListed(undefined);
   }, [client, scopeId, threadKind]);
 
   const refresh = useCallback(
@@ -59,9 +60,11 @@ export function ServiceOfferPrompt(props: {
       try {
         const listed = await client.offers({ threadKind, scopeId });
         if (signal.aborted) return;
-        setOffers((current) => (samePollingData(current, listed.offers) ? current : listed.offers));
+        setListed((current) =>
+          current !== undefined && samePollingData(current, listed) ? current : listed,
+        );
       } catch {
-        if (!signal.aborted) setOffers((current) => (current.length === 0 ? current : []));
+        if (!signal.aborted) setListed(undefined);
       }
     },
     [client, scopeId, threadKind],
@@ -76,7 +79,7 @@ export function ServiceOfferPrompt(props: {
         : THREAD_ACTIVITY_RECOVERY_MS,
   );
 
-  const pending = offers[0];
+  const pending = listed?.offers[0];
   if (
     pending === undefined ||
     client === undefined ||
@@ -97,7 +100,14 @@ export function ServiceOfferPrompt(props: {
         setFailure({ offerId: answer.offerId, message: result.reason });
         return;
       }
-      setOffers((current) => current.filter((offer) => offer.offerId !== answer.offerId));
+      setListed((current) =>
+        current === undefined
+          ? undefined
+          : {
+              ...current,
+              offers: current.offers.filter((offer) => offer.offerId !== answer.offerId),
+            },
+      );
     } catch {
       setFailure({
         offerId: answer.offerId,
@@ -113,7 +123,7 @@ export function ServiceOfferPrompt(props: {
       <Card
         key={pending.offerId}
         offer={pending}
-        profiles={props.profiles}
+        profiles={listed?.imageProfiles ?? props.profiles}
         keptIn={props.keptIn}
         busy={busy}
         decide={(answer) => void decide(answer)}

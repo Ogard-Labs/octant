@@ -95,6 +95,30 @@ describe("ServiceOfferPrompt", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("offers the host's models when the window has no local profile list", async () => {
+    const user = userEvent.setup();
+    const fake: ServiceOfferClient = {
+      offers: async () => ({ offers: [offer()], imageProfiles: profiles }),
+      decide: vi.fn(async () => ({ kind: "offer-answered" as const })),
+    };
+    render(
+      <ServiceOfferPrompt
+        client={fake}
+        keptIn="project"
+        profiles={[]}
+        scopeId={scopeId}
+        threadKind="code-thread"
+        turnActive={false}
+      />,
+    );
+    await user.click(await screen.findByRole("combobox", { name: "Image model" }));
+    await user.click(await screen.findByRole("option", { name: "Gemini · gemini-3-pro-image" }));
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    expect(fake.decide).toHaveBeenCalledWith(
+      expect.objectContaining({ profileInstanceId: gemini, modelId: "gemini-3-pro-image" }),
+    );
+  });
+
   it("generates with the model the person picks and keeps it for the Project when they ask", async () => {
     const user = userEvent.setup();
     const fake = client([offer()]);

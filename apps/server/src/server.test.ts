@@ -81,6 +81,57 @@ afterEach(() => {
 });
 
 describe("startOctantServer", () => {
+  it("serves both paid-offer routes from the running host", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-service-offers-"));
+    directories.push(directory);
+    let route: ((request: Request) => Response | Promise<Response>) | undefined;
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            desktopBridgeSecret: "desktop-secret",
+            serve: (options) => {
+              route = options.fetch;
+              return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
+            },
+          });
+          const call = async (path: string, init?: RequestInit) =>
+            assertResponse(await route?.(new Request(`http://127.0.0.1:13773${path}`, init)));
+          const capability = "A".repeat(43);
+          const registered = yield* Effect.promise(() =>
+            call("/api/desktop/window-authorities", {
+              method: "POST",
+              headers: { "x-octant-desktop-secret": "desktop-secret" },
+              body: JSON.stringify({ windowId: randomUUID(), capability }),
+            }),
+          );
+          expect(registered.status).toBe(204);
+          const headers = {
+            "x-octant-window-capability": capability,
+            "content-type": "application/json",
+          };
+          for (const base of ["/api/offers", "/api/image/offers"]) {
+            const read = yield* Effect.promise(() => call(base, { headers }));
+            expect(read.status).toBe(400);
+            const answer = yield* Effect.promise(() =>
+              call(`${base}/decide`, {
+                method: "POST",
+                headers,
+                body: JSON.stringify({ offerId: randomUUID(), decision: "cancel" }),
+              }),
+            );
+            expect(answer.status).toBe(200);
+            expect(yield* Effect.promise(() => answer.json())).toEqual({
+              kind: base === "/api/offers" ? "offer-gone" : "image-offer-gone",
+            });
+          }
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+    );
+  });
+
   it("serves persisted resource limits through the authenticated host routes", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-resources-"));
     directories.push(directory);

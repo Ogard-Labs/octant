@@ -8,18 +8,24 @@ import {
   decodeProviderInstanceId,
   decodeServiceOffersResponse,
   decodeWindowId,
+  MAX_PENDING_IMAGE_GENERATION_OFFERS,
   type DeviceId,
   type ImageJob,
   type ProviderInstance,
   type RemoteSessionId,
+  type ServiceOffer,
   type StableHostId,
 } from "@octant/contracts";
-import { ImageGenerationOfferService } from "./imageGenerationOfferService";
+import { listEligibleImageProfiles } from "@octant/domain";
+import { ImageGenerationOfferService, type ImageOfferAnswer } from "./imageGenerationOfferService";
 import { createImageRouteHandler } from "./imageRoutes";
 import type { ImageJobService } from "./imageJobService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { createRemoteDevicePrincipal } from "../clientPrincipal";
+import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
+import { ServiceOfferService } from "../offers/serviceOfferService";
+import { imageOfferDecisionRules } from "./imageOfferDecisionRules";
 
 const nowMs = Date.parse("2026-08-28T12:00:00.000Z");
 const windowId = "70000000-0000-4000-8000-000000000001";
@@ -81,14 +87,30 @@ function setup(
   }));
   const authorizeScope = vi.fn(async () => options.authorized !== false);
   let uuid = 0;
-  const offers = new ImageGenerationOfferService({
-    uuid: () => `b3000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`,
+  const serviceOffers = new ServiceOfferService<ServiceOffer, ImageOfferAnswer>(
+    MAX_PENDING_IMAGE_GENERATION_OFFERS,
+    {
+      uuid: () => `b3000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`,
+      now: () => nowMs,
+    },
+  );
+  const offers = new ImageGenerationOfferService(serviceOffers);
+  const imageProfiles = {
+    listInstances: () => options.instances ?? [imageProfile()],
+    readImageGenerationSettings: () => ({ customSources: [] }),
+  };
+  const offerRoute = createServiceOfferRouteHandler({
+    offers: serviceOffers,
+    listImageProfiles: () => listEligibleImageProfiles(imageProfiles.listInstances()),
+    rules: imageOfferDecisionRules({
+      ...imageProfiles,
+      kept: { remember: async (scope, choice) => offers.remember(scope, choice) },
+    }),
+    authorizeScope,
+    windowAuthorityStore,
     now: () => nowMs,
   });
-  const handler = createImageRouteHandler({
-    offers,
-    // A thread outside a Project keeps its choice in the offer service.
-    kept: { remember: async (scope, choice) => offers.remember(scope, choice) },
+  const imageRoute = createImageRouteHandler({
     jobs: {
       enqueue,
       cancel,
@@ -99,14 +121,15 @@ function setup(
         mime: "image/png" as const,
       }),
     } as unknown as ImageJobService,
-    listInstances: () => options.instances ?? [imageProfile()],
-    readImageGenerationSettings: () => ({ customSources: [] }),
+    ...imageProfiles,
     authorizeScope,
     saveToProject,
     windowAuthorityStore,
     now: () => nowMs,
   });
-  return { handler, enqueue, cancel, saveToProject, authorizeScope, offers };
+  const handler = async (request: Request) =>
+    (await offerRoute(request)) ?? (await imageRoute(request));
+  return { handler, enqueue, cancel, saveToProject, authorizeScope, offers, serviceOffers };
 }
 
 function request(
@@ -280,7 +303,7 @@ describe("image routes", () => {
     });
 
     it("lets a person-paired device answer only its own offer and rechecks access before claiming", async () => {
-      const { handler, offers, authorizeScope } = setup();
+      const { handler, offers, authorizeScope, serviceOffers } = setup();
       const dispatch = createAuthenticatedProductDispatch({ dispatch: handler });
       const deviceScope = decodeWindowId("22222222-2222-4222-8222-222222222222");
       const principal = createRemoteDevicePrincipal({
@@ -301,8 +324,12 @@ describe("image routes", () => {
         new Request(`https://octant.example/api/offers?threadKind=code-thread&scopeId=${scopeId}`),
       );
       expect(listed?.status).toBe(200);
-      const [waiting] = offers.list(deviceScope, scope);
-      expect(decodeServiceOffersResponse(await listed?.json()).offers).toEqual([waiting]);
+      const [waiting] = serviceOffers.list(deviceScope, scope);
+      const list = decodeServiceOffersResponse(await listed?.json());
+      expect(list.offers).toEqual([waiting]);
+      expect(list.imageProfiles).toMatchObject([
+        { instanceId: profileId, modelAllowlist: ["gpt-image-2"] },
+      ]);
       const cancel = () =>
         send(
           new Request("https://octant.example/api/offers/decide", {
@@ -313,11 +340,11 @@ describe("image routes", () => {
         );
       authorizeScope.mockResolvedValueOnce(false);
       expect((await cancel())?.status).toBe(404);
-      expect(offers.list(deviceScope, scope)).toEqual([waiting]);
+      expect(serviceOffers.list(deviceScope, scope)).toEqual([waiting]);
       expect(await (await cancel())?.json()).toEqual({ kind: "offer-answered" });
       await expect(device).resolves.toEqual({ status: "cancelled" });
-      expect(offers.list(decodeWindowId(windowId), scope)).toHaveLength(1);
-      offers.close();
+      expect(serviceOffers.list(decodeWindowId(windowId), scope)).toHaveLength(1);
+      serviceOffers.close();
       await expect(local).resolves.toEqual({ status: "cancelled" });
     });
 
@@ -396,11 +423,11 @@ describe("image routes", () => {
     });
 
     it("shows another window nothing and lets it answer nothing", async () => {
-      const { handler, offers } = setup();
+      const { handler, offers, serviceOffers } = setup();
       const otherWindow = "70000000-0000-4000-8000-000000000002";
       const outcome = offers.offer({ windowId: otherWindow as never, offer });
       expect(await listed(handler)).toEqual([]);
-      const [waiting] = offers.list(otherWindow as never, scope);
+      const [waiting] = serviceOffers.list(otherWindow as never, scope);
       const response = await handler(
         request("/api/image/offers/decide", {
           method: "POST",
@@ -410,17 +437,17 @@ describe("image routes", () => {
       expect(decodeImageGenerationOfferDecisionResult(await response!.json())).toEqual({
         kind: "image-offer-gone",
       });
-      offers.revokeWindow(otherWindow as never);
+      serviceOffers.revokeWindow(otherWindow as never);
       await expect(outcome).resolves.toEqual({ status: "cancelled" });
     });
 
     it("refuses an answer from a window that can no longer open the thread and keeps the offer waiting", async () => {
-      const { handler, offers } = setup({ authorized: false });
+      const { handler, offers, serviceOffers } = setup({ authorized: false });
       let settled = false;
       void offers.offer({ windowId: windowId as never, offer }).then(() => {
         settled = true;
       });
-      const [waiting] = offers.list(windowId as never, scope);
+      const [waiting] = serviceOffers.list(windowId as never, scope);
       const response = await handler(
         request("/api/image/offers/decide", {
           method: "POST",
@@ -434,35 +461,35 @@ describe("image routes", () => {
         }),
       );
       expect(response?.status).toBe(404);
-      expect(offers.list(windowId as never, scope)).toHaveLength(1);
+      expect(serviceOffers.list(windowId as never, scope)).toHaveLength(1);
       expect(offers.remembered(scope)).toBeUndefined();
       await Promise.resolve();
       expect(settled).toBe(false);
-      offers.close();
+      serviceOffers.close();
     });
 
     it("keeps an offer waiting a day later, and gives it up when its thread is archived", async () => {
       vi.useFakeTimers();
       try {
-        const { offers } = setup();
+        const { offers, serviceOffers } = setup();
         const outcome = offers.offer({ windowId: windowId as never, offer });
         await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
-        expect(offers.list(windowId as never, scope)).toHaveLength(1);
+        expect(serviceOffers.list(windowId as never, scope)).toHaveLength(1);
         // Nothing is left behind to fire later: the wait holds no timer.
         expect(vi.getTimerCount()).toBe(0);
 
-        offers.withdrawThread("b3000000-0000-4000-8000-00000000dead");
-        expect(offers.list(windowId as never, scope)).toHaveLength(1);
-        offers.withdrawThread(scopeId);
+        serviceOffers.withdrawThread("b3000000-0000-4000-8000-00000000dead");
+        expect(serviceOffers.list(windowId as never, scope)).toHaveLength(1);
+        serviceOffers.withdrawThread(scopeId);
         await expect(outcome).resolves.toEqual({ status: "cancelled" });
-        expect(offers.list(windowId as never, scope)).toEqual([]);
+        expect(serviceOffers.list(windowId as never, scope)).toEqual([]);
       } finally {
         vi.useRealTimers();
       }
     });
 
     it("saves only on a save request, and refuses an answer that fits the other kind", async () => {
-      const { handler, offers } = setup();
+      const { handler, offers, serviceOffers } = setup();
       const saveOutcome = offers.offer({
         windowId: windowId as never,
         offer: {
@@ -474,7 +501,7 @@ describe("image routes", () => {
         },
       });
       void offers.offer({ windowId: windowId as never, offer });
-      const [saveOffer, generateOffer] = offers.list(windowId as never, scope);
+      const [saveOffer, generateOffer] = serviceOffers.list(windowId as never, scope);
       const decide = async (body: unknown) =>
         decodeImageGenerationOfferDecisionResult(
           await (await handler(
@@ -498,7 +525,7 @@ describe("image routes", () => {
         kind: "image-offer-answered",
       });
       await expect(saveOutcome).resolves.toEqual({ status: "save" });
-      offers.close();
+      serviceOffers.close();
     });
 
     it("does not list offers for a thread the window cannot open", async () => {

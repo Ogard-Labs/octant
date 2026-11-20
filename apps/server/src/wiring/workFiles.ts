@@ -25,6 +25,8 @@ import { WorkResearchProjection } from "../work/workResearchProjection";
 import { createWorkResearchSourcePort } from "../work/workResearchSourcePort";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createImageRouteHandler } from "../image/imageRoutes";
+import { imageOfferDecisionRules } from "../image/imageOfferDecisionRules";
+import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
 import { createSpeechRouteHandler } from "../speech/speechRoutes";
 import {
   createPreviewRouteHandler,
@@ -38,6 +40,7 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
   classifyFileMentionExtraFolderPath,
   defaultShellSettings,
+  listEligibleImageProfiles,
   projectExtraFolderRoots,
   type PreviewPosture,
 } from "@octant/domain";
@@ -53,7 +56,7 @@ import type { HarnessStateWiring } from "./harnessState";
 import { createServerWorkFileListing } from "../serverProjects/serverWorkFiles";
 
 export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<AuthorityWiring, "imageGenerationOffers" | "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "serviceOffers" | "windowAuthorityStore"> &
   Pick<WorkspaceWiring, "keptImageChoices" | "projectService" | "shellService"> &
   Pick<ProvidersWiring, "credentialResolver" | "imageJobService" | "providerDataDirectory"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
@@ -66,7 +69,7 @@ export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence">
 export function wireWorkFiles(deps: WorkFilesDependencies) {
   const {
     credentialResolver,
-    imageGenerationOffers,
+    serviceOffers,
     imageJobService,
     keptImageChoices,
     options,
@@ -171,13 +174,27 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     windowAuthorityStore,
     ...(credentialResolver === undefined ? {} : { credentialResolver }),
   });
-  const imageRoutes = createImageRouteHandler({
-    jobs: imageJobService,
-    offers: imageGenerationOffers,
-    kept: keptImageChoices,
+  const imageProfiles = {
     listInstances: () => persistence.readProviderInstances(),
     readImageGenerationSettings: () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration,
+  };
+  const serviceOfferRoutes = createServiceOfferRouteHandler({
+    offers: serviceOffers,
+    rules: imageOfferDecisionRules({ ...imageProfiles, kept: keptImageChoices }),
+    listImageProfiles: () =>
+      listEligibleImageProfiles(
+        imageProfiles.listInstances(),
+        imageProfiles.readImageGenerationSettings().customSources,
+      ),
+    authorizeScope: (windowId, threadKind, scopeId) =>
+      windowCanOpenThread(windowId, threadKind, String(scopeId)),
+    windowAuthorityStore,
+    now: Date.now,
+  });
+  const imageRoutes = createImageRouteHandler({
+    jobs: imageJobService,
+    ...imageProfiles,
     authorizeScope: async (windowId, threadKind, scopeId) => {
       const threadId = String(scopeId);
       // The library is host-wide: window capability already proved the
@@ -386,6 +403,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   });
   return {
     imageRoutes,
+    serviceOfferRoutes,
     previewHandoffBridgeRoutes,
     previewRoutes,
     speechRoutes,

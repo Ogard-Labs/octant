@@ -55,6 +55,10 @@ import {
 } from "@octant/client-runtime/replica-sync-status-client";
 import { createWorkTurnClient, type WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import {
+  createServiceOfferClient,
+  type ServiceOfferClient,
+} from "@octant/client-runtime/service-offer-client";
+import {
   createReplyDetailClient,
   type ReplyDetailClient,
 } from "@octant/client-runtime/reply-detail-client";
@@ -66,6 +70,7 @@ import type { ProviderOAuthCommand } from "../providers/ProviderOAuthSignIn";
 
 export interface RemoteProductClients {
   readonly conversationInputs?: ConversationInputClient;
+  readonly serviceOffers?: ServiceOfferClient;
   readonly chat: ChatClient;
   readonly canvas: CanvasClient;
   readonly code: CodeClient;
@@ -177,6 +182,7 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
   const canvas = createCanvasClient(port);
   return {
     conversationInputs: createConversationInputClient(port),
+    serviceOffers: createServiceOfferClient(port),
     chat: createChatClient(port),
     // Reading a Canvas never grants a paired browser the host's export,
     // credential, editing or share-management authority.
