@@ -248,7 +248,6 @@ async function probe(root: string) {
     await reached("same-origin-redirect", 2);
 
     // A move to a different local name on the same port is a different origin.
-    await navigate(local("/local-away"));
     const elseBefore = count("/local-else");
     await navigate(local("/local-away"));
     await landed("agent-named-local-away", local("/local-away"), "Local away");
@@ -259,7 +258,6 @@ async function probe(root: string) {
 
     // A move out to a public name that redirects back is refused on the
     // return hop; the local landing is never observed.
-    await navigate(local("/local-round"));
     const finalBefore = count("/local-final");
     await navigate(local("/local-round"));
     await landed("agent-named-local-round", local("/local-round"), "Local round");
