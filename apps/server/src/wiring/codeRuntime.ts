@@ -187,6 +187,9 @@ export function withCodeOperationRuntime(
         }),
     saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
+    ...(service.resolveDesktopFileTarget === undefined
+      ? {}
+      : { resolveDesktopFileTarget: service.resolveDesktopFileTarget.bind(service) }),
     ...(service.readGitHistory === undefined
       ? {}
       : { readGitHistory: service.readGitHistory.bind(service) }),
@@ -223,7 +226,7 @@ export function withCodeOperationRuntime(
   };
 }
 
-function withCodeBoard(
+export function withCodeBoard(
   service: CodeRouteService,
   queryBoard: NonNullable<CodeRouteService["queryBoard"]>,
 ): CodeRouteService {
@@ -238,6 +241,9 @@ function withCodeBoard(
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
     saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
+    ...(service.resolveDesktopFileTarget === undefined
+      ? {}
+      : { resolveDesktopFileTarget: service.resolveDesktopFileTarget.bind(service) }),
     ...(service.readGitHistory === undefined
       ? {}
       : { readGitHistory: service.readGitHistory.bind(service) }),

@@ -56,6 +56,7 @@ import {
   createCodeExternalEditorRouteHandler,
   resolveConfinedDesktopFilePath,
 } from "../codeExternalEditorRoutes";
+import { withCodeBoard, withCodeOperationRuntime } from "../wiring/codeRuntime";
 import { pathIsProjectConfined } from "../wiring/providers";
 import { CodeFileListingService } from "./codeFileListingService";
 import { withProjectExtraFolders } from "./codeProjectFolderRoot";
@@ -5453,10 +5454,14 @@ describe("desktop default-app target resolution for browsed Code files", () => {
         ) => resolveWithExtraFolders(scopeId, activeThread, activeCheckout, relativePath),
       ) as unknown as typeof fixture.roots.resolve;
 
+      const decoratedService = withCodeBoard(
+        withCodeOperationRuntime(fixture.service, {} as never),
+        vi.fn() as never,
+      );
       const handleDesktopTarget = createCodeExternalEditorRouteHandler({
         desktopBridgeSecret: secret,
         resolve: async (input) => {
-          const target = await fixture.service.resolveDesktopFileTarget(
+          const target = await decoratedService.resolveDesktopFileTarget?.(
             decodeWindowId(input.windowId),
             {
               threadId: decodeCodeThreadId(input.threadId),
@@ -5474,8 +5479,11 @@ describe("desktop default-app target resolution for browsed Code files", () => {
         },
       });
 
-      // 1. List and open an untouched binary file in the checkout (no journaled reference exists).
-      const listed = await fixture.service.listFiles(ids.window, {
+      // 1. List and open an untouched binary file in the checkout (no journaled reference exists),
+      // exercising the production decorator chain (withCodeOperationRuntime + withCodeBoard).
+      expect(decoratedService.listFiles).toBeDefined();
+      if (decoratedService.listFiles === undefined) throw new Error("expected listFiles");
+      const listed = await decoratedService.listFiles(ids.window, {
         threadId: ids.thread,
         checkoutId: checkout.id,
       });
@@ -5488,7 +5496,7 @@ describe("desktop default-app target resolution for browsed Code files", () => {
       if (binaryEntry?.kind !== "file") throw new Error("expected binary file entry");
       expect(binaryEntry.availability).toMatchObject({ status: "available" });
 
-      const opened = await fixture.service.openFile(ids.window, {
+      const opened = await decoratedService.openFile(ids.window, {
         threadId: ids.thread,
         checkoutId: checkout.id,
         relativePath: binaryEntry.path,
@@ -5615,6 +5623,24 @@ describe("desktop default-app target resolution for browsed Code files", () => {
         fileId: opened.result.fileId,
       }),
     ).toBeUndefined();
+  });
+
+  it("preserves optional resolveDesktopFileTarget omission through production decorators", () => {
+    const minimalService = {
+      bootstrap: vi.fn(),
+      navigation: vi.fn(),
+      read: vi.fn(),
+      execute: vi.fn(),
+      subscribe: vi.fn(),
+      readContent: vi.fn(),
+      saveFile: vi.fn(),
+      openFile: vi.fn(),
+    } as never;
+    const decorated = withCodeBoard(
+      withCodeOperationRuntime(minimalService, {} as never),
+      vi.fn() as never,
+    );
+    expect(decorated.resolveDesktopFileTarget).toBeUndefined();
   });
 });
 
