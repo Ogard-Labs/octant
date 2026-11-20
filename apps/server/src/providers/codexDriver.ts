@@ -823,6 +823,13 @@ export function codexCompactsSessions(version: string): boolean {
   return isAtLeastRelease(version, CODEX_COMPACTION_RELEASE);
 }
 
+/** The first release whose `thread/fork` cuts the copy at a turn (`lastTurnId`). */
+const CODEX_FORK_RELEASE = [0, 143, 0] as const;
+
+function codexForksSessions(version: string): boolean {
+  return isAtLeastRelease(version, CODEX_FORK_RELEASE);
+}
+
 const capabilities = {
   streaming: "supported",
   resume: "supported",
@@ -841,6 +848,10 @@ const capabilities = {
   harnessAutoReview: "supported",
   reviewVerdicts: { allow: "supported", deny: "supported" },
   modelSwitch: "supported",
+  // A rewound Code thread continues Codex's own `thread/fork` copy cut at the
+  // last kept turn's anchor (`lastTurnId`, from 0.143.0), leaving the source
+  // untouched; probing an older release lowers this to unsupported.
+  sessionRollback: "supported",
   // One app-server process serves every thread, so killing it ends them all.
   forceStop: "unsupported",
   ...unsupportedChatCapabilities,
@@ -874,6 +885,7 @@ function codexChatCapabilities(
     nativeAttachments: models.some((model) => model.inputModalities.includes("image"))
       ? "supported"
       : "unsupported",
+    sessionRollback: codexForksSessions(version) ? "supported" : "unsupported",
     sessionCompaction: {
       chat: sessionCompaction,
       work: sessionCompaction,
@@ -1940,8 +1952,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           0,
         );
         const threadFork = runtime.client.threadFork;
-        if (threadFork === undefined || !isAtLeastRelease(runtime.version, CODEX_FORK_RELEASE))
-          return undefined;
+        if (threadFork === undefined || !codexForksSessions(runtime.version)) return undefined;
         const copy = yield* request(() =>
           threadFork({
             threadId: source.value,
@@ -2171,8 +2182,6 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
 const CATALOG_AUTHORITY: CodexLaunchAuthority = { kind: "catalog" };
 /** The lease prefix of the short-lived process each session copy is made on. */
 const CODEX_SESSION_COPY_LEASE = "codex-session-copy";
-/** The first release whose `thread/fork` cuts the copy at a turn (`lastTurnId`). */
-const CODEX_FORK_RELEASE = [0, 143, 0] as const;
 
 /**
  * Everything one thread lease's process is launched for. None of it can

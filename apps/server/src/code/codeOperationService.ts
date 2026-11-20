@@ -1478,6 +1478,7 @@ export interface CodeOperationServiceOptions {
   readonly supportsSessionRollback?: (
     thread: CodeThread,
     lastKeptTurn: CodeOperationId | undefined,
+    providerRoot?: string,
   ) => Awaitable<boolean>;
   readonly events: CodeOperationEventPort;
   /**
@@ -4620,7 +4621,13 @@ export class CodeOperationService {
         return switched;
       }
       case "preview-code-rewind":
-        return await this.#previewRewind(command, thread, checkout, root.checkoutRoot);
+        return await this.#previewRewind(
+          command,
+          thread,
+          checkout,
+          root.checkoutRoot,
+          thread.workingFolderId === undefined ? undefined : root.workingDirectory,
+        );
       case "rewind-code-thread":
         return await this.#rewind(command, thread, checkout, root.checkoutRoot);
       case "create-pull-request":
@@ -5929,6 +5936,7 @@ export class CodeOperationService {
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
     checkoutRoot: string,
+    providerRoot?: string,
   ): Promise<CodeOperationResult> {
     const turns = this.#rewindTurns(command.operationId, thread, command.fromOperationId);
     if (turns.status === "refused") return turns.result;
@@ -5936,7 +5944,11 @@ export class CodeOperationService {
     const native =
       checkout.kind !== "remote-root" &&
       (await Promise.resolve(
-        this.#options.supportsSessionRollback?.(thread, turns.kept.at(-1)?.operationId),
+        this.#options.supportsSessionRollback?.(
+          thread,
+          turns.kept.at(-1)?.operationId,
+          providerRoot ?? checkoutRoot,
+        ),
       ).catch(() => false)) === true;
     const point = this.#rewindFilePoint(thread, checkout, turns.all, command.fromOperationId);
     let files: Extract<CodeOperationResult, { kind: "rewind-preview" }>["files"];
