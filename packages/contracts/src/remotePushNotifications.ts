@@ -41,6 +41,12 @@ export const RemotePushPreferencesV1 = Schema.Struct({
   failure: Schema.Boolean,
   completion: Schema.Boolean,
   threadTitles: Schema.Boolean,
+  /**
+   * Whether the phone hears that a new device joined the hub or paired with a
+   * host. On unless the phone turned it off: a phone from before the setting
+   * sends none and is told (maintainer decision, 2026-11-19).
+   */
+  newDevices: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type RemotePushPreferencesV1 = typeof RemotePushPreferencesV1.Type;
 
@@ -152,6 +158,26 @@ export const RemotePushMoveWaitingPayloadV1 = Schema.Struct({
 }).annotations(strict);
 export type RemotePushMoveWaitingPayloadV1 = typeof RemotePushMoveWaitingPayloadV1.Type;
 
+/**
+ * A new device joined the hub or paired with a host. Its own kind, outside the
+ * thread kinds, because it names no thread: the phone opens its list of new
+ * devices, which reads the host's alerts itself.
+ */
+export const RemotePushDeviceJoinedKind = Schema.Literal("device-joined");
+export type RemotePushDeviceJoinedKind = typeof RemotePushDeviceJoinedKind.Type;
+
+/**
+ * The sealed text for a new device: its name and private address, which only
+ * the phone can read. Never a thread, a title, or a key.
+ */
+export const RemotePushDeviceJoinedPayloadV1 = Schema.Struct({
+  kind: RemotePushDeviceJoinedKind,
+  hostId: StableHostId,
+  title: boundedNonEmptyText(80),
+  body: boundedText(120),
+}).annotations(strict);
+export type RemotePushDeviceJoinedPayloadV1 = typeof RemotePushDeviceJoinedPayloadV1.Type;
+
 /** The most content a notification seals for the phone, before encryption. */
 export const REMOTE_PUSH_SEALED_CONTENT_MAX_BYTES = 2_048;
 
@@ -247,6 +273,26 @@ export const RemotePushMoveWaitingDeliveryRecordedV1 = Schema.Struct({
 }).annotations(strict);
 export type RemotePushMoveWaitingDeliveryRecordedV1 =
   typeof RemotePushMoveWaitingDeliveryRecordedV1.Type;
+
+/**
+ * One receipt per new-device notification to one device, keyed by the alert
+ * it told of. It names neither the new device nor its address: those live in
+ * the alert, never in the journal.
+ */
+export const REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES = {
+  recorded: "remote.push-device-joined-delivery-recorded@1",
+} as const;
+
+export const RemotePushDeviceJoinedDeliveryRecordedV1 = Schema.Struct({
+  hostId: StableHostId,
+  deviceId: DeviceId,
+  alertId: Schema.UUID,
+  outcome: RemotePushDeliveryOutcome,
+  failureCategory: Schema.optional(Schema.String.pipe(Schema.pattern(/^[a-z0-9-]{1,64}$/))),
+  recordedAt: UtcTimestamp,
+}).annotations(strict);
+export type RemotePushDeviceJoinedDeliveryRecordedV1 =
+  typeof RemotePushDeviceJoinedDeliveryRecordedV1.Type;
 
 /**
  * The push gateway: the one sender that holds the platform push credential.
@@ -383,6 +429,12 @@ export const decodeRemotePushRegistrationClearedV1 = Schema.decodeUnknownSync(
 );
 export const decodeRemotePushNotificationPayloadV1 = Schema.decodeUnknownSync(
   RemotePushNotificationPayloadV1,
+);
+export const decodeRemotePushDeviceJoinedPayloadV1 = Schema.decodeUnknownSync(
+  RemotePushDeviceJoinedPayloadV1,
+);
+export const decodeRemotePushDeviceJoinedDeliveryRecordedV1 = Schema.decodeUnknownSync(
+  RemotePushDeviceJoinedDeliveryRecordedV1,
 );
 export const decodeRemotePushMoveWaitingPayloadV1 = Schema.decodeUnknownSync(
   RemotePushMoveWaitingPayloadV1,

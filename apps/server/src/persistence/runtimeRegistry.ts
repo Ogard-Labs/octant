@@ -221,11 +221,13 @@ import {
   HubMembershipChangedPayload,
   REMOTE_PUSH_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES,
+  REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_REGISTRATION_EVENT_NAMES,
   REMOTE_SERVER_GRANT_CLOSED,
   REMOTE_SERVER_GRANT_OPENED,
   RemotePushDeliveryRecordedV1,
   RemotePushMoveWaitingDeliveryRecordedV1,
+  RemotePushDeviceJoinedDeliveryRecordedV1,
   RemotePushRegistrationClearedV1,
   RemotePushRegistrationRecordedV1,
   RemoteServerGrantClosedPayload,
@@ -813,6 +815,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES.recorded,
       1,
       RemotePushMoveWaitingDeliveryRecordedV1,
+    )
+    .register(
+      REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES.recorded,
+      1,
+      RemotePushDeviceJoinedDeliveryRecordedV1,
     )
     .register(PRODUCT_FEEDBACK_CAPTURED, 1, ProductFeedbackCaptured)
     .register(PRODUCT_FEEDBACK_DISCARDED, 1, ProductFeedbackDiscarded)

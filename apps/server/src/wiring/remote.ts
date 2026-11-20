@@ -331,8 +331,14 @@ export type RemoteDependencies = {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
     readonly threadMoveState: ThreadMoveStatePort;
-    /** Tells owner phones, through the phone notification path, that a move waits. */
-    readonly threadNotifications: Pick<ThreadNotificationDeliveryService, "notifyMoveWaiting">;
+    /**
+     * Tells phones through the phone notification path: owner phones that a
+     * move waits, every phone that a new device joined or paired.
+     */
+    readonly threadNotifications: Pick<
+      ThreadNotificationDeliveryService,
+      "notifyMoveWaiting" | "notifyDeviceJoined"
+    >;
     /** What this start did with the turns a restart cut off. */
     readonly restartRecovery: () => HostRestartRecovery | undefined;
   };
@@ -508,7 +514,16 @@ export function wireRemote(deps: RemoteDependencies) {
       journal: persistence.journal,
       registrationLifetime: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).pairedDeviceLifetime,
-      onDevicePaired: (device) => pairedDeviceAlerts.raise(device),
+      onDevicePaired: (device) => {
+        const alert = pairedDeviceAlerts.raise(device);
+        deps.threadNotifications.notifyDeviceJoined({
+          alertId: String(alert.alertId),
+          deviceName: alert.name,
+          ...(alert.privateAddress === undefined ? {} : { privateAddress: alert.privateAddress }),
+          joined: "host",
+          newDeviceId: alert.deviceId,
+        });
+      },
       onDeviceRemoved: (deviceId) => pairedDeviceAlerts.dropDevice(deviceId),
       hostId: identity.hostId,
       displayName: identity.displayName,
@@ -650,6 +665,23 @@ export function wireRemote(deps: RemoteDependencies) {
       writeHubMembership(change);
     } finally {
       ownerBrowserAuthorityChanged?.();
+    }
+    // A spoke raised an alert for a member a newer roster added; every phone
+    // paired here hears of it, from this spoke's own alert, never the hub's word.
+    if (change.change === "new-member-alerted") {
+      const status = spokeLinkService.status();
+      const alert =
+        status.membership === "member"
+          ? status.alerts.find((entry) => String(entry.memberId) === String(change.memberId))
+          : undefined;
+      if (alert !== undefined) {
+        deps.threadNotifications.notifyDeviceJoined({
+          alertId: String(alert.alertId),
+          deviceName: alert.name,
+          ...(alert.privateAddress === undefined ? {} : { privateAddress: alert.privateAddress }),
+          joined: "hub",
+        });
+      }
     }
   };
   const hubPairing = (): HubPairingPort | undefined => {
