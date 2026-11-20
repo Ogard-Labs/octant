@@ -66,8 +66,8 @@ describe("androidToolchainClient", () => {
           controller.close();
         },
       });
-    const fetch = vi.fn(
-      async (_url: URL, _init?: RequestInit) =>
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () =>
         new Response(chunked([0, 0], [0, 3, 1, 2], [3, 0, 0, 0, 2, 4], [5, 0, 0]), {
           status: 200,
           headers: { "x-octant-simulator-screen": "1080x2400" },
