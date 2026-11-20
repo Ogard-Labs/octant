@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -44,6 +44,7 @@ import {
   PullRequestLinkService,
   type PullRequestLinkSwitchReconciler,
 } from "./pullRequestLinkService";
+import { createProjectPullRequestPorts } from "../wiring/code";
 import { joinCodeThreadBoardPullRequests } from "./threadBoardPullRequestJoin";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
@@ -1325,5 +1326,316 @@ describe("pull request readers use the single forge identity owner", () => {
       "remote-device",
     );
     expect(merged.status).toBe("merged");
+  });
+
+  it("preserves survivor switches and thread owners on cold restart after replaying a journal with legacy duplicate reconciliation", async () => {
+    let now = "2026-11-19T10:00:00.000Z";
+    const journal = openJournal(() => now);
+    const threadA = decodeCodeThreadId("20000000-0000-4000-8000-000000000101");
+    const threadB = decodeCodeThreadId("20000000-0000-4000-8000-000000000102");
+
+    const oldTarget42 = decodeCodeProjectPullRequestSwitchTarget({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "old-repo",
+      number: 42,
+    });
+    const newTarget42 = decodeCodeProjectPullRequestSwitchTarget({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "new-repo",
+      number: 42,
+    });
+    const oldTarget43 = decodeCodeProjectPullRequestSwitchTarget({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "old-repo",
+      number: 43,
+    });
+    const newTarget43 = decodeCodeProjectPullRequestSwitchTarget({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "new-repo",
+      number: 43,
+    });
+
+    const createSwitchHarness = (options: {
+      readonly pullRequestLinks?: PullRequestLinkService;
+    }) => {
+      const threads: PullRequestAutoFixThreads = {
+        inspect: () => ({ status: "available", turnActive: false }),
+        markOutsideContent: () => true,
+        startTurn: vi.fn(async () => true),
+        notifyPerson: vi.fn(async () => undefined),
+      };
+      return new CodeProjectPullRequestSwitchService({
+        authority: {
+          authorizePullRequest: async (_wid, target) => ({
+            status: "authorized",
+            canonicalTarget: target,
+            linkedThreadIds: [String(threadA), String(threadB)],
+          }),
+          linkedPullRequests: async (_wid, tid) =>
+            String(tid) === String(threadA) ? [oldTarget42] : [newTarget42],
+        },
+        forge: {
+          readAutoMergeSettings: async () => ({
+            status: "read",
+            allowAutoMerge: true,
+            methods: { merge: true, squash: true, rebase: false },
+          }),
+          enableAutoMerge: async () => ({ status: "enabled" }),
+          disableAutoMerge: async () => ({ status: "disabled" }),
+          observe: async () => ({
+            status: "observed",
+            state: "open",
+            headSha: "a".repeat(40),
+            headBranch: "feature/work",
+            baseBranch: "main",
+            autoMergeEnabled: true,
+            waitingOn: [],
+            failures: [],
+            activity: {
+              checks: "passed",
+              failedChecks: [],
+              conflicting: false,
+              reviews: [],
+              comments: [],
+            },
+          }),
+        },
+        threads,
+        journal,
+        ...(options.pullRequestLinks === undefined
+          ? {}
+          : { pullRequestLinks: options.pullRequestLinks }),
+        clock: () => now,
+        uuid: randomUUID,
+      });
+    };
+
+    // Phase 1: simulate a pre-reader-migration journal where standalone
+    // SwitchService reconciled duplicate links and wrote retirement `disabled`
+    // events on `newTarget42` for switches that stayed ON on both links.
+    const legacySwitches = createSwitchHarness({});
+    const legacyLinks = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+      switchReconciler: legacySwitches,
+    });
+
+    await legacyLinks.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "old-repo",
+      number: 42,
+      threadIds: [threadA],
+    });
+    now = "2026-11-19T10:01:00.000Z";
+    await legacyLinks.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "new-repo",
+      number: 42,
+      threadIds: [threadB],
+    });
+    await legacySwitches.setMergeWhenReady(
+      windowId,
+      { kind: "enable", target: oldTarget42, headSha: "a".repeat(40), method: "squash" },
+      "local-window",
+      signal,
+    );
+    await legacySwitches.setMergeWhenReady(
+      windowId,
+      { kind: "enable", target: newTarget42, headSha: "a".repeat(40), method: "squash" },
+      "local-window",
+      signal,
+    );
+    await legacySwitches.setAutoFix(
+      windowId,
+      { kind: "enable", target: oldTarget42, threadId: threadA },
+      "user",
+    );
+    await legacySwitches.setAutoFix(
+      windowId,
+      { kind: "enable", target: newTarget42, threadId: threadB },
+      "user",
+    );
+    await legacySwitches.watch({ windowId, threadId: threadA, providerInstanceId, signal });
+    await legacySwitches.watch({ windowId, threadId: threadB, providerInstanceId, signal });
+
+    // Also record a mixed-switch duplicate (#43: Merge when ready ON on old only).
+    await legacyLinks.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "old-repo",
+      number: 43,
+      threadIds: [threadA],
+    });
+    now = "2026-11-19T10:02:00.000Z";
+    await legacyLinks.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "new-repo",
+      number: 43,
+      threadIds: [threadB],
+    });
+    await legacySwitches.setMergeWhenReady(
+      windowId,
+      { kind: "enable", target: oldTarget43, headSha: "b".repeat(40), method: "squash" },
+      "local-window",
+      signal,
+    );
+
+    // Reconcile both pairs through legacy standalone SwitchService.
+    now = "2026-11-19T10:05:00.000Z";
+    const merged42 = await legacyLinks.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "new-repo",
+      lookupRepositoryOwner: "acme",
+      lookupRepositoryName: "old-repo",
+      number: 42,
+      pullRequestNodeId: "PR_kwDOreplay42",
+      baseRepositoryNodeId: "R_kgDOreplay1",
+    });
+    expect(merged42.status).toBe("merged");
+
+    now = "2026-11-19T10:06:00.000Z";
+    const merged43 = await legacyLinks.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "new-repo",
+      lookupRepositoryOwner: "acme",
+      lookupRepositoryName: "old-repo",
+      number: 43,
+      pullRequestNodeId: "PR_kwDOreplay43",
+      baseRepositoryNodeId: "R_kgDOreplay1",
+    });
+    expect(merged43.status).toBe("merged");
+
+    // Phase 2: cold restart with PullRequestLinkService wired into SwitchService.
+    const restartedLinks = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    const restartedSwitches = createSwitchHarness({ pullRequestLinks: restartedLinks });
+
+    const view42 = await restartedSwitches.query(windowId, newTarget42);
+    expect(view42.mergeWhenReady.status).toBe("on");
+    expect(view42.autoFix).toMatchObject({ status: "on", threadId: threadA });
+    // Watch on the survivor's thread A stays active (not retired or clobbered by thread B).
+    await expect(
+      restartedSwitches.unwatch({ threadId: threadA, providerInstanceId }),
+    ).resolves.toEqual({ status: "unwatched", target: newTarget42 });
+
+    // Mixed switch (#43) remains OFF after cold restart.
+    const view43 = await restartedSwitches.query(windowId, newTarget43);
+    expect(view43.mergeWhenReady.status).toBe("off");
+
+    // A genuine subsequent disable on the renamed target still sticks across restart.
+    now = "2026-11-19T11:00:00.000Z";
+    await restartedSwitches.setMergeWhenReady(
+      windowId,
+      { kind: "disable", target: newTarget42 },
+      "local-window",
+      signal,
+    );
+    const secondRestartLinks = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    const secondRestartSwitches = createSwitchHarness({ pullRequestLinks: secondRestartLinks });
+    expect((await secondRestartSwitches.query(windowId, newTarget42)).mergeWhenReady.status).toBe(
+      "off",
+    );
+    expect((await secondRestartSwitches.query(windowId, newTarget42)).autoFix).toMatchObject({
+      status: "on",
+      threadId: threadA,
+    });
+  });
+
+  it("recovers from a stale second remote through production createProjectPullRequestPorts wiring", async () => {
+    const { repoRoot, gitPort, git } = createRealGitRepo("https://github.com/acme/new-repo.git");
+    git("remote", "add", "upstream", "https://github.com/acme/old-repo.git");
+
+    const binDir = mkdtempSync(join(tmpdir(), "octant-fake-gh-"));
+    cleanups.push(() => rmSync(binDir, { recursive: true, force: true }));
+    const fakeGh = join(binDir, "gh");
+    writeFileSync(
+      fakeGh,
+      `#!/bin/sh
+if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
+  case "$*" in
+    *owner{login}*)
+      printf '{"data":{"repository":{"id":"R_kgDOprodWiring1","owner":{"login":"acme"},"name":"new-repo"}}}\\n'
+      exit 0
+      ;;
+    *)
+      printf '{"data":{"repository":{"pullRequests":{"nodes":[]}}}}\\n'
+      exit 0
+      ;;
+  esac
+fi
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  printf '[{"id":"PR_kwDOprodWiring42","number":42,"title":"Wired stale remote PR","isDraft":false,"state":"OPEN","mergeable":"MERGEABLE","author":{"login":"octocat"},"updatedAt":"2026-11-19T10:00:00Z","url":"https://github.com/acme/new-repo/pull/42","baseRefName":"main","headRefName":"feature/work","headRepositoryOwner":{"login":"acme"},"statusCheckRollup":[{"state":"SUCCESS"}],"reviewDecision":"APPROVED"}]\\n'
+  exit 0
+fi
+echo "unexpected gh invocation: $*" >&2
+exit 1
+`,
+      "utf8",
+    );
+    chmodSync(fakeGh, 0o755);
+
+    const ports = createProjectPullRequestPorts(fakeGh);
+    expect(ports.ghAvailable).toBe(true);
+    expect(typeof ports.list.observeBaseRepository).toBe("function");
+
+    const journal = openJournal(() => "2026-11-19T10:00:00.000Z");
+    const links = new PullRequestLinkService({
+      journal,
+      uuid: randomUUID,
+      clock: () => "2026-11-19T10:00:00.000Z",
+    });
+    const service = new CodeProjectPullRequestService({
+      projects: {
+        bootstrap: async () => ({
+          active: [
+            {
+              id: projectId,
+              name: "Wired Project",
+              type: "code",
+              lifecycle: "active",
+              binding: { canonicalRoot: repoRoot },
+            },
+          ],
+        }),
+      },
+      remotes: { remotes: (root) => gitPort.observeRemotes(root) },
+      list: ports.list,
+      detail: ports.detail,
+      merge: ports.merge,
+      threads: { list: async () => [] },
+      pullRequestLinks: links,
+      clock: () => "2026-11-19T10:00:00.000Z",
+    });
+
+    const refreshed = await service.refresh(windowId, { kind: "refresh-all" }, signal);
+    expect(refreshed.projects[0]).toMatchObject({
+      projectId,
+      kind: "connected",
+      repositoryOwner: "acme",
+      repositoryName: "new-repo",
+    });
+    expect(refreshed.rows).toHaveLength(1);
+    expect(refreshed.rows[0]).toMatchObject({
+      repositoryOwner: "acme",
+      repositoryName: "new-repo",
+      number: 42,
+    });
   });
 });

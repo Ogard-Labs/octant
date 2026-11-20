@@ -535,7 +535,7 @@ const unavailableActionForge = {
   readContext: async () => ({ status: "unavailable", reason: "unavailable" }) as const,
 };
 
-function createProjectPullRequestPorts(ghExecutable: string | undefined): {
+export function createProjectPullRequestPorts(ghExecutable: string | undefined): {
   readonly list: CodeProjectPullRequestListPort;
   readonly detail: CodeProjectPullRequestDetailPort;
   readonly merge: CodeProjectPullRequestMergePort;
@@ -565,6 +565,7 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
     return {
       list: {
         listActive: (request, signal) => port.listActive(request, signal),
+        observeBaseRepository: (request, signal) => port.observeBaseRepository(request, signal),
       },
       detail: {
         observeReviewByIdentity: (request, signal) => port.observeReviewByIdentity(request, signal),

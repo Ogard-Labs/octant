@@ -61,11 +61,22 @@ export interface PullRequestLinkRegistryState {
   readonly byId: ReadonlyMap<string, PullRequestLinkRecord>;
   /**
    * Every historical `(projectId, owner/name, number)` display key recorded by
-   * `created` and `display-updated` events, mapped to the link that owned it.
-   * `resolveCanonicalPullRequestLink` follows any `merged-into` chain to the
-   * active surviving link.
+   * `created` and `display-updated` events, mapped to the links that have owned
+   * it (most recent first) so reusing a repository name never erases an earlier
+   * link's historical alias. `resolveCanonicalPullRequestLink` follows any
+   * `merged-into` chain to the active surviving link.
    */
-  readonly historicalDisplayByKey: ReadonlyMap<string, PullRequestHistoricalDisplay>;
+  readonly historicalDisplayByKey: ReadonlyMap<string, ReadonlyArray<PullRequestHistoricalDisplay>>;
+}
+
+function recordHistoricalDisplay(
+  historicalDisplayByKey: Map<string, ReadonlyArray<PullRequestHistoricalDisplay>>,
+  key: string,
+  entry: PullRequestHistoricalDisplay,
+): void {
+  const existing = historicalDisplayByKey.get(key) ?? [];
+  const filtered = existing.filter((item) => String(item.linkId) !== String(entry.linkId));
+  historicalDisplayByKey.set(key, [entry, ...filtered]);
 }
 
 export function emptyPullRequestLinkRegistryState(): PullRequestLinkRegistryState {
@@ -125,7 +136,8 @@ export function applyPullRequestLinkEvent(
         createdOrder: sequence,
         displayOrder: sequence,
       });
-      historicalDisplayByKey.set(
+      recordHistoricalDisplay(
+        historicalDisplayByKey,
         pullRequestDisplayLookupKey(p.projectId, p.repositoryOwner, p.repositoryName, p.number),
         {
           linkId: p.linkId,
@@ -182,7 +194,8 @@ export function applyPullRequestLinkEvent(
         ...(headBranch === undefined ? {} : { headBranch }),
         displayOrder: sequence,
       });
-      historicalDisplayByKey.set(
+      recordHistoricalDisplay(
+        historicalDisplayByKey,
         pullRequestDisplayLookupKey(
           existing.projectId,
           p.repositoryOwner,
@@ -249,19 +262,31 @@ export function resolveCanonicalPullRequestLink(
 function forgeIdCompatible(
   link: PullRequestLinkRecord,
   pullRequestNodeId: string | undefined,
+  baseRepositoryNodeId: string | undefined,
 ): boolean {
-  return (
-    pullRequestNodeId === undefined ||
-    link.pullRequestNodeId === undefined ||
-    link.pullRequestNodeId === pullRequestNodeId
-  );
+  if (
+    pullRequestNodeId !== undefined &&
+    link.pullRequestNodeId !== undefined &&
+    link.pullRequestNodeId !== pullRequestNodeId
+  ) {
+    return false;
+  }
+  if (
+    baseRepositoryNodeId !== undefined &&
+    link.baseRepositoryNodeId !== undefined &&
+    link.baseRepositoryNodeId !== baseRepositoryNodeId
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /**
  * Resolves a pull request to its single active canonical link in `projectId`:
  * forge node ID first, then active display coordinates, then historical display
  * aliases (for renamed or transferred repositories and merged duplicate links).
- * Never matches a link whose recorded forge node ID differs from a supplied one.
+ * Never matches a link whose recorded forge node ID or base repository node ID
+ * differs from a supplied one.
  */
 export function resolvePullRequestLink(
   state: PullRequestLinkRegistryState,
@@ -271,6 +296,7 @@ export function resolvePullRequestLink(
     readonly repositoryName?: string;
     readonly number?: number;
     readonly pullRequestNodeId?: string;
+    readonly baseRepositoryNodeId?: string;
   },
 ): PullRequestLinkRecord | undefined {
   const projectKey = String(query.projectId);
@@ -279,7 +305,8 @@ export function resolvePullRequestLink(
       if (
         link.status === "active" &&
         String(link.projectId) === projectKey &&
-        link.pullRequestNodeId === query.pullRequestNodeId
+        link.pullRequestNodeId === query.pullRequestNodeId &&
+        forgeIdCompatible(link, query.pullRequestNodeId, query.baseRepositoryNodeId)
       ) {
         return link;
       }
@@ -307,23 +334,25 @@ export function resolvePullRequestLink(
         link.repositoryName,
         link.number,
       ) === wanted &&
-      forgeIdCompatible(link, query.pullRequestNodeId)
+      forgeIdCompatible(link, query.pullRequestNodeId, query.baseRepositoryNodeId)
     ) {
       return link;
     }
   }
-  const historical = state.historicalDisplayByKey.get(wanted);
-  if (historical === undefined) return undefined;
-  const canonical = resolveCanonicalPullRequestLink(state, historical.linkId);
-  if (
-    canonical === undefined ||
-    canonical.status !== "active" ||
-    String(canonical.projectId) !== projectKey ||
-    !forgeIdCompatible(canonical, query.pullRequestNodeId)
-  ) {
-    return undefined;
+  const historicalEntries = state.historicalDisplayByKey.get(wanted);
+  if (historicalEntries === undefined) return undefined;
+  for (const historical of historicalEntries) {
+    const canonical = resolveCanonicalPullRequestLink(state, historical.linkId);
+    if (
+      canonical !== undefined &&
+      canonical.status === "active" &&
+      String(canonical.projectId) === projectKey &&
+      forgeIdCompatible(canonical, query.pullRequestNodeId, query.baseRepositoryNodeId)
+    ) {
+      return canonical;
+    }
   }
-  return canonical;
+  return undefined;
 }
 
 /**
@@ -347,14 +376,16 @@ export function listPullRequestDisplayAliases(
     repositoryName: canonical.repositoryName,
     number: canonical.number,
   });
-  for (const entry of state.historicalDisplayByKey.values()) {
-    const resolved = resolveCanonicalPullRequestLink(state, entry.linkId);
-    if (resolved !== undefined && String(resolved.linkId) === canonicalId) {
-      add({
-        repositoryOwner: entry.repositoryOwner,
-        repositoryName: entry.repositoryName,
-        number: entry.number,
-      });
+  for (const entries of state.historicalDisplayByKey.values()) {
+    for (const entry of entries) {
+      const resolved = resolveCanonicalPullRequestLink(state, entry.linkId);
+      if (resolved !== undefined && String(resolved.linkId) === canonicalId) {
+        add({
+          repositoryOwner: entry.repositoryOwner,
+          repositoryName: entry.repositoryName,
+          number: entry.number,
+        });
+      }
     }
   }
   return [...byKey.values()];
@@ -379,12 +410,14 @@ function projectRepositoryGroups(
     ]);
     byCanonicalLinkId.set(String(link.linkId), names);
   }
-  for (const entry of state.historicalDisplayByKey.values()) {
-    if (String(entry.projectId) !== projectKey) continue;
-    const resolved = resolveCanonicalPullRequestLink(state, entry.linkId);
-    if (resolved === undefined || resolved.status !== "active") continue;
-    const names = byCanonicalLinkId.get(String(resolved.linkId));
-    names?.add(`${entry.repositoryOwner.toLowerCase()}/${entry.repositoryName.toLowerCase()}`);
+  for (const entries of state.historicalDisplayByKey.values()) {
+    for (const entry of entries) {
+      if (String(entry.projectId) !== projectKey) continue;
+      const resolved = resolveCanonicalPullRequestLink(state, entry.linkId);
+      if (resolved === undefined || resolved.status !== "active") continue;
+      const names = byCanonicalLinkId.get(String(resolved.linkId));
+      names?.add(`${entry.repositoryOwner.toLowerCase()}/${entry.repositoryName.toLowerCase()}`);
+    }
   }
 
   const groups: RepositoryEquivalenceGroup[] = [];

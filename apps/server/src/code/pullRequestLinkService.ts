@@ -170,6 +170,7 @@ export interface PullRequestLinkLookupQuery {
   readonly repositoryName?: string;
   readonly number?: number;
   readonly pullRequestNodeId?: string;
+  readonly baseRepositoryNodeId?: string;
 }
 
 export interface PullRequestLinkReader {
@@ -379,6 +380,9 @@ export class PullRequestLinkService implements PullRequestLinkOwner {
         ...(query.pullRequestNodeId === undefined
           ? {}
           : { pullRequestNodeId: query.pullRequestNodeId }),
+        ...(query.baseRepositoryNodeId === undefined
+          ? {}
+          : { baseRepositoryNodeId: query.baseRepositoryNodeId }),
       });
       if (byCanonical !== undefined) return byCanonical;
     }
@@ -396,6 +400,13 @@ export class PullRequestLinkService implements PullRequestLinkOwner {
         query.pullRequestNodeId !== undefined &&
         link.pullRequestNodeId !== undefined &&
         link.pullRequestNodeId !== query.pullRequestNodeId
+      ) {
+        continue;
+      }
+      if (
+        query.baseRepositoryNodeId !== undefined &&
+        link.baseRepositoryNodeId !== undefined &&
+        link.baseRepositoryNodeId !== query.baseRepositoryNodeId
       ) {
         continue;
       }
@@ -777,14 +788,10 @@ export class PullRequestLinkService implements PullRequestLinkOwner {
         link.baseRepositoryNodeId !== normalized.baseRepositoryNodeId);
     const add = (link: PullRequestLinkRecord | undefined) => {
       if (link === undefined || link.status !== "active") return;
-      // Never match or merge a link whose recorded forge node ID differs from
-      // the observed pull request's node ID (for example if an old repository
+      // Never match or merge a link whose recorded pull-request or base-repository
+      // node ID differs from the observed one (for example if an old repository
       // name was reused by a different repository with the same PR number).
-      if (
-        normalized.pullRequestNodeId !== undefined &&
-        link.pullRequestNodeId !== undefined &&
-        link.pullRequestNodeId !== normalized.pullRequestNodeId
-      ) {
+      if (conflictsWithObservation(link)) {
         return;
       }
       matched.set(String(link.linkId), link);
@@ -819,6 +826,9 @@ export class PullRequestLinkService implements PullRequestLinkOwner {
           ...(normalized.pullRequestNodeId === undefined
             ? {}
             : { pullRequestNodeId: normalized.pullRequestNodeId }),
+          ...(normalized.baseRepositoryNodeId === undefined
+            ? {}
+            : { baseRepositoryNodeId: normalized.baseRepositoryNodeId }),
         }),
       );
     };
@@ -997,7 +1007,7 @@ export class PullRequestLinkService implements PullRequestLinkOwner {
         afterSequence = envelope.globalSequence;
         this.#sequence = envelope.globalSequence;
         this.#versions.set(envelope.aggregateId, envelope.aggregateVersion);
-        const decoded = decodeEnvelopeEvent(envelope.eventName, envelope.payload);
+        const decoded = decodePullRequestLinkEnvelopeEvent(envelope.eventName, envelope.payload);
         if (decoded !== undefined) {
           this.#recordKnownDisplayKey(decoded);
           this.#state = applyPullRequestLinkEvent(this.#state, decoded, envelope.globalSequence);
@@ -1095,7 +1105,7 @@ function safeDecode<T>(value: string | undefined, decode: (input: unknown) => T)
   }
 }
 
-function decodeEnvelopeEvent(
+export function decodePullRequestLinkEnvelopeEvent(
   eventName: string,
   payload: unknown,
 ): PullRequestLinkJournalEvent | undefined {

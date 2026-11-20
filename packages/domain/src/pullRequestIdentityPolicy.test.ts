@@ -283,6 +283,15 @@ describe("pull request identity policy", () => {
       }),
     ).toBeUndefined();
     expect(
+      resolvePullRequestLink(state, {
+        projectId,
+        repositoryOwner: "acme",
+        repositoryName: "old-repo",
+        number: 42,
+        baseRepositoryNodeId: "R_kgDOdifferent99",
+      }),
+    ).toBeUndefined();
+    expect(
       areSamePullRequestRepositoryInProject(
         state,
         projectId,

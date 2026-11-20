@@ -6,6 +6,7 @@ import {
   CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS,
   CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
   CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
+  CODE_PULL_REQUEST_LINK_AGGREGATE,
   decodeCodeProjectPullRequestAutoFixRecorded,
   decodeCodeProjectPullRequestMergeWhenReadyRecorded,
   decodeCodeProjectPullRequestSwitchesView,
@@ -46,12 +47,20 @@ import {
   type PullRequestWatchObservation,
 } from "@octant/domain/code-pull-request-switch-policy";
 import {
+  applyPullRequestLinkEvent,
   buildDuplicatePullRequestSwitchNotices,
+  emptyPullRequestLinkRegistryState,
   reconcileMergedPullRequestSwitches,
+  resolveCanonicalPullRequestLink,
+  resolvePullRequestLink,
+  type PullRequestLinkRecord,
+  type PullRequestLinkRegistryState,
   type PullRequestLinkSwitchSnapshot,
 } from "@octant/domain/pull-request-identity-policy";
 import { Schema } from "effect";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import {
+  decodePullRequestLinkEnvelopeEvent,
   splitRepositoryName,
   type PullRequestLinkOwner,
   type PullRequestLinkSwitchReconciler,
@@ -1268,37 +1277,264 @@ export class CodeProjectPullRequestSwitchService
   }
 
   #replay(journal: Pick<Journal, "replayAggregateType">): void {
-    let afterSequence = 0;
-    for (;;) {
-      const page = journal.replayAggregateType({
-        aggregateType: CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE,
-        afterSequence,
-        limit: 1_000,
-      });
-      for (const envelope of page) {
-        afterSequence = envelope.globalSequence;
-        if (envelope.eventName === CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED) {
-          this.#apply({
-            kind: "merge-when-ready",
-            occurredAt: envelope.occurredAt,
-            record: decodeCodeProjectPullRequestMergeWhenReadyRecorded(envelope.payload),
-          });
-        } else if (envelope.eventName === CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED) {
-          this.#apply({
-            kind: "auto-fix",
-            occurredAt: envelope.occurredAt,
-            record: decodeCodeProjectPullRequestAutoFixRecorded(envelope.payload),
-          });
-        } else if (envelope.eventName === CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED) {
-          this.#apply({
-            kind: "watch",
-            occurredAt: envelope.occurredAt,
-            record: decodeCodeProjectPullRequestWatchRecorded(envelope.payload),
-          });
+    if (this.#pullRequestLinks === undefined) {
+      let afterSequence = 0;
+      for (;;) {
+        const page = journal.replayAggregateType({
+          aggregateType: CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE,
+          afterSequence,
+          limit: 1_000,
+        });
+        for (const envelope of page) {
+          afterSequence = envelope.globalSequence;
+          const switchEvent = decodeSwitchEnvelopeEvent(
+            envelope.eventName,
+            envelope.occurredAt,
+            envelope.payload,
+          );
+          if (switchEvent !== undefined) this.#apply(switchEvent);
         }
+        if (page.length < 1_000) return;
       }
-      if (page.length < 1_000) return;
     }
+
+    // Replay pull-request link events and switch events together in journal
+    // order so duplicate links keep separate switch histories until their
+    // `merged-into` event, preserving the surviving link's switch owners and
+    // ignoring legacy duplicate-bucket retirement disables written right after
+    // `merged-into` for switches that stayed ON.
+    let linkState: PullRequestLinkRegistryState = emptyPullRequestLinkRegistryState();
+    let pendingReconciliation:
+      | {
+          nextExpectedSequence: number;
+          readonly survivingTargetKey: string;
+          readonly mergedTargetKey: string;
+          readonly expectedRetirements: Set<PullRequestSwitchKind>;
+          readonly expectedTurnOffs: Set<PullRequestSwitchKind>;
+        }
+      | undefined;
+
+    const canonicalTargetOf = (
+      link: PullRequestLinkRecord,
+    ): CodeProjectPullRequestSwitchTarget => ({
+      projectId: link.projectId,
+      repositoryOwner: decodeRepositoryOwner(link.repositoryOwner),
+      repositoryName: decodeRepositoryName(link.repositoryName),
+      number: link.number,
+    });
+
+    const adoptFoldKey = (
+      fromKey: string,
+      toKey: string,
+      target: CodeProjectPullRequestSwitchTarget,
+    ): void => {
+      if (fromKey === toKey) return;
+      const legacyFold = this.#folds.get(fromKey);
+      if (legacyFold !== undefined) {
+        if (!this.#folds.has(toKey)) {
+          this.#folds.set(toKey, { ...legacyFold, target });
+        }
+        this.#folds.delete(fromKey);
+      }
+    };
+
+    const resolveReplayIdentity = (
+      target: CodeProjectPullRequestSwitchTarget,
+    ): { readonly key: string; readonly target: CodeProjectPullRequestSwitchTarget } => {
+      const link = resolvePullRequestLink(linkState, {
+        projectId: target.projectId,
+        repositoryOwner: target.repositoryOwner,
+        repositoryName: target.repositoryName,
+        number: target.number,
+      });
+      if (link === undefined) {
+        return { key: pullRequestSwitchKey(target), target };
+      }
+      const canonicalKey = `link:${String(link.linkId)}`;
+      const canonicalTarget = canonicalTargetOf(link);
+      adoptFoldKey(pullRequestSwitchKey(target), canonicalKey, canonicalTarget);
+      return { key: canonicalKey, target: canonicalTarget };
+    };
+
+    for (const envelope of replayAggregateTypesInOrder(journal, [
+      CODE_PULL_REQUEST_LINK_AGGREGATE,
+      CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE,
+    ])) {
+      if (envelope.aggregateType === CODE_PULL_REQUEST_LINK_AGGREGATE) {
+        pendingReconciliation = undefined;
+        const decoded = decodePullRequestLinkEnvelopeEvent(envelope.eventName, envelope.payload);
+        if (decoded === undefined) continue;
+        if (decoded.kind === "created") {
+          linkState = applyPullRequestLinkEvent(linkState, decoded, envelope.globalSequence);
+          const created = linkState.byId.get(String(decoded.payload.linkId));
+          if (created !== undefined) {
+            const target = canonicalTargetOf(created);
+            adoptFoldKey(pullRequestSwitchKey(target), `link:${String(created.linkId)}`, target);
+          }
+          continue;
+        }
+        if (decoded.kind === "display-updated") {
+          linkState = applyPullRequestLinkEvent(linkState, decoded, envelope.globalSequence);
+          const updated = linkState.byId.get(String(decoded.payload.linkId));
+          if (updated !== undefined) {
+            const canonicalKey = `link:${String(updated.linkId)}`;
+            const target = canonicalTargetOf(updated);
+            adoptFoldKey(pullRequestSwitchKey(target), canonicalKey, target);
+            const existing = this.#folds.get(canonicalKey);
+            if (existing !== undefined) {
+              this.#folds.set(canonicalKey, { ...existing, target });
+            }
+          }
+          continue;
+        }
+        if (decoded.kind === "merged-into") {
+          const survivingBefore = resolveCanonicalPullRequestLink(
+            linkState,
+            decoded.payload.survivingLinkId,
+          );
+          const mergedBefore = linkState.byId.get(String(decoded.payload.linkId));
+          linkState = applyPullRequestLinkEvent(linkState, decoded, envelope.globalSequence);
+          if (survivingBefore === undefined || mergedBefore === undefined) continue;
+          const survivingKey = `link:${String(survivingBefore.linkId)}`;
+          const mergedKey = `link:${String(mergedBefore.linkId)}`;
+          const survivingTarget = canonicalTargetOf(survivingBefore);
+          const mergedTarget = canonicalTargetOf(mergedBefore);
+          adoptFoldKey(pullRequestSwitchKey(survivingTarget), survivingKey, survivingTarget);
+          adoptFoldKey(pullRequestSwitchKey(mergedTarget), mergedKey, mergedTarget);
+          const survivingHadFold = this.#folds.has(survivingKey);
+          let survivingFold =
+            this.#folds.get(survivingKey) ?? emptyPullRequestSwitchFold(survivingTarget);
+          const mergedFold = this.#folds.get(mergedKey) ?? emptyPullRequestSwitchFold(mergedTarget);
+          const decision = reconcileMergedPullRequestSwitches(
+            switchSnapshotOf(survivingFold),
+            switchSnapshotOf(mergedFold),
+          );
+          const recordedDisabled = new Set<PullRequestSwitchKind>(decoded.payload.disabledSwitches);
+          const turnOffSet = new Set<PullRequestSwitchKind>([
+            ...decoded.payload.disabledSwitches,
+            ...decision.disabledSwitches,
+          ]);
+          if (turnOffSet.has("merge-when-ready") && survivingFold.mergeWhenReady.status === "on") {
+            survivingFold = applyPullRequestSwitchEvent(survivingFold, {
+              kind: "merge-when-ready",
+              occurredAt: envelope.occurredAt,
+              record: decodeCodeProjectPullRequestMergeWhenReadyRecorded({
+                target: survivingTarget,
+                change: { kind: "disabled" },
+              }),
+            });
+          }
+          if (turnOffSet.has("auto-fix") && survivingFold.autoFix.status === "on") {
+            survivingFold = applyPullRequestSwitchEvent(survivingFold, {
+              kind: "auto-fix",
+              occurredAt: envelope.occurredAt,
+              record: decodeCodeProjectPullRequestAutoFixRecorded({
+                target: survivingTarget,
+                threadId: decodeCodeThreadId(survivingFold.autoFix.threadId),
+                change: { kind: "disabled" },
+              }),
+            });
+          }
+          if (turnOffSet.has("watch") && survivingFold.watch.status === "on") {
+            survivingFold = applyPullRequestSwitchEvent(survivingFold, {
+              kind: "watch",
+              occurredAt: envelope.occurredAt,
+              record: decodeCodeProjectPullRequestWatchRecorded({
+                target: survivingTarget,
+                threadId: decodeCodeThreadId(survivingFold.watch.threadId),
+                change: { kind: "disabled" },
+              }),
+            });
+          }
+          if (survivingHadFold) {
+            this.#folds.set(survivingKey, { ...survivingFold, target: survivingTarget });
+          }
+          this.#folds.delete(mergedKey);
+
+          const expectedRetirements = new Set<PullRequestSwitchKind>();
+          if (decision.mergeWhenReady === "keep-on" && !recordedDisabled.has("merge-when-ready")) {
+            expectedRetirements.add("merge-when-ready");
+          }
+          if (decision.autoFix === "keep-on" && !recordedDisabled.has("auto-fix")) {
+            expectedRetirements.add("auto-fix");
+          }
+          if (decision.watch === "keep-on" && !recordedDisabled.has("watch")) {
+            expectedRetirements.add("watch");
+          }
+          if (expectedRetirements.size > 0 || turnOffSet.size > 0) {
+            pendingReconciliation = {
+              nextExpectedSequence: envelope.globalSequence + 1,
+              survivingTargetKey: pullRequestSwitchKey(survivingTarget),
+              mergedTargetKey: pullRequestSwitchKey(mergedTarget),
+              expectedRetirements,
+              expectedTurnOffs: turnOffSet,
+            };
+          }
+          continue;
+        }
+        linkState = applyPullRequestLinkEvent(linkState, decoded, envelope.globalSequence);
+        continue;
+      }
+
+      if (envelope.aggregateType !== CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE) {
+        continue;
+      }
+      const switchEvent = decodeSwitchEnvelopeEvent(
+        envelope.eventName,
+        envelope.occurredAt,
+        envelope.payload,
+      );
+      if (switchEvent === undefined) continue;
+
+      if (pendingReconciliation !== undefined) {
+        const targetKey = pullRequestSwitchKey(switchEvent.record.target);
+        const matchesContiguousSystemDisable =
+          envelope.globalSequence === pendingReconciliation.nextExpectedSequence &&
+          envelope.actor.kind === "system" &&
+          switchEvent.record.change.kind === "disabled";
+        if (
+          matchesContiguousSystemDisable &&
+          pendingReconciliation.expectedRetirements.has(switchEvent.kind) &&
+          targetKey === pendingReconciliation.mergedTargetKey
+        ) {
+          pendingReconciliation.expectedRetirements.delete(switchEvent.kind);
+          pendingReconciliation.nextExpectedSequence += 1;
+          if (
+            pendingReconciliation.expectedRetirements.size === 0 &&
+            pendingReconciliation.expectedTurnOffs.size === 0
+          ) {
+            pendingReconciliation = undefined;
+          }
+          continue;
+        }
+        if (
+          matchesContiguousSystemDisable &&
+          pendingReconciliation.expectedTurnOffs.has(switchEvent.kind) &&
+          (targetKey === pendingReconciliation.survivingTargetKey ||
+            targetKey === pendingReconciliation.mergedTargetKey)
+        ) {
+          pendingReconciliation.expectedTurnOffs.delete(switchEvent.kind);
+          pendingReconciliation.nextExpectedSequence += 1;
+          if (
+            pendingReconciliation.expectedRetirements.size === 0 &&
+            pendingReconciliation.expectedTurnOffs.size === 0
+          ) {
+            pendingReconciliation = undefined;
+          }
+          continue;
+        }
+        pendingReconciliation = undefined;
+      }
+
+      const resolved = resolveReplayIdentity(switchEvent.record.target);
+      const current = this.#folds.get(resolved.key) ?? emptyPullRequestSwitchFold(resolved.target);
+      this.#folds.set(resolved.key, {
+        ...applyPullRequestSwitchEvent(current, switchEvent),
+        target: resolved.target,
+      });
+    }
+
+    this.#canonicalizeFolds();
   }
 
   #recordMergeWhenReady(
@@ -1576,4 +1812,33 @@ export function autoFixTurnText(
     sections.join("\n\n"),
     "--- outside content ends ---",
   ].join("\n");
+}
+
+function decodeSwitchEnvelopeEvent(
+  eventName: string,
+  occurredAt: string,
+  payload: unknown,
+): PullRequestSwitchEvent | undefined {
+  if (eventName === CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED) {
+    return {
+      kind: "merge-when-ready",
+      occurredAt,
+      record: decodeCodeProjectPullRequestMergeWhenReadyRecorded(payload),
+    };
+  }
+  if (eventName === CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED) {
+    return {
+      kind: "auto-fix",
+      occurredAt,
+      record: decodeCodeProjectPullRequestAutoFixRecorded(payload),
+    };
+  }
+  if (eventName === CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED) {
+    return {
+      kind: "watch",
+      occurredAt,
+      record: decodeCodeProjectPullRequestWatchRecorded(payload),
+    };
+  }
+  return undefined;
 }
