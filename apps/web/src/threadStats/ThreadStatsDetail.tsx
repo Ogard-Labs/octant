@@ -2,6 +2,8 @@ import { threadStats, threadStatsInputOf, turnDetail, type TurnDetailRow } from 
 import type { TurnMetricsRecord } from "@octant/contracts";
 import { ChevronLeft, ChevronRight } from "../ui/icons";
 import { useEffect, useId, useMemo, useState } from "react";
+import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
+import { formatClockTime, type TimestampFormatPreference } from "../theme/timestampFormat";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { useThreadStatsScope } from "./threadStatsScope";
@@ -102,11 +104,12 @@ function ThreadStatsDetail(props: {
 }
 
 function TurnSections(props: { readonly turn: TurnMetricsRecord }) {
+  const timestampFormat = useTimestampFormat();
   const detail = useMemo(() => turnDetail(props.turn), [props.turn]);
   return (
     <>
       <p className="thread-stats-detail__subject">
-        {String(props.turn.modelId)} · {formatClock(props.turn.endedAt)}
+        {String(props.turn.modelId)} · {formatClock(props.turn.endedAt, timestampFormat)}
       </p>
       {detail.tokens.length === 0 ? null : <DetailSection rows={detail.tokens} title="Tokens" />}
       <DetailSection rows={detail.timing} title="Timing" />
@@ -142,8 +145,8 @@ function DetailSection(props: {
   );
 }
 
-function formatClock(iso: string): string {
+function formatClock(iso: string, timestampFormat?: TimestampFormatPreference): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return formatClockTime(date, { hour: "2-digit", minute: "2-digit" }, timestampFormat);
 }

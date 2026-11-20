@@ -1489,7 +1489,6 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     "/api/projects/",
     "/api/spend-ceilings",
     "/api/theme/",
-    "/api/validation/",
     "/api/zen",
   ].map((path) => ({
     kind: "prefix" as const,

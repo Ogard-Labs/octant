@@ -863,14 +863,13 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).toHaveBeenCalledTimes(5);
   });
 
-  it("classifies the POST-only Extension, validation, and Context reads as reads", () => {
+  it("classifies the POST-only Extension and Context reads as reads", () => {
     for (const path of [
       "/api/extensions/catalog",
       "/api/extensions/inspect",
       "/api/extensions/preview",
       "/api/extensions/snapshot",
       "/api/extensions/state",
-      "/api/validation/evidence",
     ]) {
       expect(
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
@@ -923,7 +922,7 @@ describe("authenticated product route dispatch", () => {
     ).toBeUndefined();
   });
 
-  it("dispatches the POST-only Extension, validation, and Context reads for a paired device", async () => {
+  it("dispatches the POST-only Extension and Context reads for a paired device", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });
 
@@ -933,13 +932,12 @@ describe("authenticated product route dispatch", () => {
       "/api/extensions/preview",
       "/api/extensions/snapshot",
       "/api/extensions/state",
-      "/api/validation/evidence",
       "/api/context/inspect",
     ]) {
       const response = await product(handoff(path, "POST"));
       expect(response?.status).toBe(200);
     }
-    expect(dispatch).toHaveBeenCalledTimes(7);
+    expect(dispatch).toHaveBeenCalledTimes(6);
 
     for (const path of [
       "/api/context/commands",
@@ -952,7 +950,7 @@ describe("authenticated product route dispatch", () => {
       const response = await product(handoff(path, "POST"));
       expect(response?.status).toBe(403);
     }
-    expect(dispatch).toHaveBeenCalledTimes(7);
+    expect(dispatch).toHaveBeenCalledTimes(6);
   });
 
   it("dispatches a paired device's MCP tool prompt list and answer to the route, which judges each prompt", async () => {

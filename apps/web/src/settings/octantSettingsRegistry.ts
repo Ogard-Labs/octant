@@ -1050,7 +1050,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Model roles",
           scope: "host",
           keywords:
-            "model roles roles main model builder planner planning scout quick edit hard problems reviewer careful review research lookups quick jobs small jobs sees images reading images vision advisor backup fallback ask before using continue on the fallback coordinators workers helper agents which job uses which role slots default plan slow task smol deep",
+            "model roles roles main model builder scout quick edit hard problems reviewer careful review research lookups quick jobs sees images reading images vision advisor backup fallback ask before using continue on the fallback coordinators workers helper agents which job uses which role slots default plan slow task smol quick deep",
         },
         {
           id: settingId("subagent-creation-posture"),

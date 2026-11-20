@@ -45,11 +45,7 @@ export type RoutesDependencies = {
   > &
   Pick<
     UsageWiring,
-    | "diagnosticsExportRoutes"
-    | "spendCeilingRoutes"
-    | "usageDashboardRoutes"
-    | "usageRoutes"
-    | "validationEvidenceRoutes"
+    "diagnosticsExportRoutes" | "spendCeilingRoutes" | "usageDashboardRoutes" | "usageRoutes"
   > &
   Pick<
     ComputerUseWiring,
@@ -279,7 +275,6 @@ export function wireRoutes(deps: RoutesDependencies) {
     workSessionRoutes,
     usageDashboardRoutes,
     usageRoutes,
-    validationEvidenceRoutes,
     workFileListingRoutes,
     workMutationRoutes,
     workOverviewRoutes,
@@ -410,7 +405,6 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await threadExportRoutes(request)) ??
     (await threadHandOffRoutes(request)) ??
     (await computerUseRoutes(request)) ??
-    (await validationEvidenceRoutes(request)) ??
     (await extensionRoutes(request)) ??
     (await providerToolingRoutes(request)) ??
     (await browserAutomationRoutes(request)) ??
