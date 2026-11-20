@@ -1608,6 +1608,8 @@ Status: Built. Since: —. Detail: [Architecture: Providers](../architecture.md#
 
 ### Image generation and voice
 
+- Agent offers for paid outside calls share one host-held card mechanism. A pending offer is visible only to the local window or person-paired device whose turn asked. The host checks current thread access and the offer kind before taking one answer. Offers do not survive restart. Built: image generation and image save use the shared mechanism, with legacy image routes kept compatible for one release; the paired web interface can answer its own offers. The native phone card is not built yet.
+
 Image generation is a journaled job with exactly one profile, and voice is an app-managed capability that rides one enabled compatible-endpoint instance. Neither grants Chat filesystem authority.
 
 - A safety refusal ends a job and is never retried elsewhere. The journal holds attachment references and a prompt hash, never image bytes or prompt text.

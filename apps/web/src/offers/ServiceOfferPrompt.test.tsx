@@ -1,14 +1,14 @@
-import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import type {
   ImageGenerationOffer,
-  ImageGenerationOfferDecisionResult,
+  ServiceOfferDecisionResult,
   ImageGenerationProfileView,
   ImageGenerationScopeId,
 } from "@octant/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { ImageGenerationOfferPrompt } from "./ImageGenerationOfferPrompt";
+import { ServiceOfferPrompt } from "./ServiceOfferPrompt";
 
 const scopeId = "cc000000-0000-4000-8000-000000000001" as ImageGenerationScopeId;
 const openAi = "cc000000-0000-4000-8000-000000000010";
@@ -51,18 +51,18 @@ function offer(overrides: Partial<ImageGenerationOffer> = {}): ImageGenerationOf
 
 function client(
   offers: ReadonlyArray<ImageGenerationOffer>,
-  answer: ImageGenerationOfferDecisionResult = { kind: "image-offer-answered" },
+  answer: ServiceOfferDecisionResult = { kind: "offer-answered" },
 ) {
   const fake = {
     offers: vi.fn(async () => ({ offers })),
-    decideOffer: vi.fn(async () => answer),
+    decide: vi.fn(async () => answer),
   };
-  return fake as unknown as ImageGenerationClient & typeof fake;
+  return fake satisfies ServiceOfferClient;
 }
 
-function renderPrompt(fake: ImageGenerationClient, keptIn: "project" | "thread" = "project") {
+function renderPrompt(fake: ServiceOfferClient, keptIn: "project" | "thread" = "project") {
   return render(
-    <ImageGenerationOfferPrompt
+    <ServiceOfferPrompt
       client={fake}
       keptIn={keptIn}
       profiles={profiles}
@@ -73,7 +73,7 @@ function renderPrompt(fake: ImageGenerationClient, keptIn: "project" | "thread" 
   );
 }
 
-describe("ImageGenerationOfferPrompt", () => {
+describe("ServiceOfferPrompt", () => {
   it("asks whether to generate the agent's picture with an image model, the suggested model chosen", async () => {
     renderPrompt(client([offer()]));
     const card = await screen.findByRole("article", { name: "Image generation request" });
@@ -104,7 +104,7 @@ describe("ImageGenerationOfferPrompt", () => {
     await user.click(screen.getByRole("checkbox", { name: "Don't ask again in this Project" }));
     await user.click(screen.getByRole("button", { name: "Generate" }));
     await waitFor(() =>
-      expect(fake.decideOffer).toHaveBeenCalledExactlyOnceWith({
+      expect(fake.decide).toHaveBeenCalledExactlyOnceWith({
         offerId,
         decision: "generate",
         profileInstanceId: gemini,
@@ -120,7 +120,7 @@ describe("ImageGenerationOfferPrompt", () => {
     renderPrompt(fake);
     await user.click(await screen.findByRole("button", { name: "Let the agent draw it" }));
     await waitFor(() =>
-      expect(fake.decideOffer).toHaveBeenCalledExactlyOnceWith({
+      expect(fake.decide).toHaveBeenCalledExactlyOnceWith({
         offerId,
         decision: "agent-draws",
       }),
@@ -131,7 +131,7 @@ describe("ImageGenerationOfferPrompt", () => {
     const user = userEvent.setup();
     renderPrompt(
       client([offer()], {
-        kind: "image-offer-refused",
+        kind: "offer-refused",
         reason: "That image model is not available. Choose another one.",
       }),
     );
@@ -169,7 +169,7 @@ describe("ImageGenerationOfferPrompt", () => {
     expect(card).toHaveTextContent("never replaced");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
-      expect(fake.decideOffer).toHaveBeenCalledExactlyOnceWith({ offerId, decision: "save" }),
+      expect(fake.decide).toHaveBeenCalledExactlyOnceWith({ offerId, decision: "save" }),
     );
   });
 });

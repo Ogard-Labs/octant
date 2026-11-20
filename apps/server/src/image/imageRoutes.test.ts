@@ -6,13 +6,20 @@ import {
   decodeImageGenerationProfilesResponse,
   decodeImageJob,
   decodeProviderInstanceId,
+  decodeServiceOffersResponse,
+  decodeWindowId,
+  type DeviceId,
   type ImageJob,
   type ProviderInstance,
+  type RemoteSessionId,
+  type StableHostId,
 } from "@octant/contracts";
 import { ImageGenerationOfferService } from "./imageGenerationOfferService";
 import { createImageRouteHandler } from "./imageRoutes";
 import type { ImageJobService } from "./imageJobService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
+import { createRemoteDevicePrincipal } from "../clientPrincipal";
 
 const nowMs = Date.parse("2026-08-28T12:00:00.000Z");
 const windowId = "70000000-0000-4000-8000-000000000001";
@@ -254,6 +261,65 @@ describe("image routes", () => {
       );
       return decodeImageGenerationOffersResponse(await response!.json()).offers;
     }
+
+    it("shows a waiting image request through the shared offers endpoint and claims it only once across endpoints", async () => {
+      const { handler, offers } = setup();
+      const outcome = offers.offer({ windowId: windowId as never, offer });
+      const response = await handler(
+        request(`/api/offers?threadKind=code-thread&scopeId=${scopeId}`),
+      );
+      expect(response?.status).toBe(200);
+      const [waiting] = decodeServiceOffersResponse(await response?.json()).offers;
+      expect(waiting).toMatchObject({ kind: "generate" });
+      const body = { offerId: waiting?.offerId, decision: "cancel" };
+      const shared = await handler(request("/api/offers/decide", { method: "POST", body }));
+      expect(await shared?.json()).toMatchObject({ kind: "offer-answered" });
+      await expect(outcome).resolves.toEqual({ status: "cancelled" });
+      const legacy = await handler(request("/api/image/offers/decide", { method: "POST", body }));
+      expect(await legacy?.json()).toMatchObject({ kind: "image-offer-gone" });
+    });
+
+    it("lets a person-paired device answer only its own offer and rechecks access before claiming", async () => {
+      const { handler, offers, authorizeScope } = setup();
+      const dispatch = createAuthenticatedProductDispatch({ dispatch: handler });
+      const deviceScope = decodeWindowId("22222222-2222-4222-8222-222222222222");
+      const principal = createRemoteDevicePrincipal({
+        hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
+        deviceId: String(deviceScope) as DeviceId,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
+        admittedBy: "host-person",
+      });
+      const local = offers.offer({ windowId: decodeWindowId(windowId), offer });
+      const device = offers.offer({ windowId: deviceScope, offer });
+      const send = (request: Request) =>
+        dispatch({ request, principal, abortSignal: new AbortController().signal });
+      const listed = await send(
+        new Request(`https://octant.example/api/offers?threadKind=code-thread&scopeId=${scopeId}`),
+      );
+      expect(listed?.status).toBe(200);
+      const [waiting] = offers.list(deviceScope, scope);
+      expect(decodeServiceOffersResponse(await listed?.json()).offers).toEqual([waiting]);
+      const cancel = () =>
+        send(
+          new Request("https://octant.example/api/offers/decide", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ offerId: waiting?.offerId, decision: "cancel" }),
+          }),
+        );
+      authorizeScope.mockResolvedValueOnce(false);
+      expect((await cancel())?.status).toBe(404);
+      expect(offers.list(deviceScope, scope)).toEqual([waiting]);
+      expect(await (await cancel())?.json()).toEqual({ kind: "offer-answered" });
+      await expect(device).resolves.toEqual({ status: "cancelled" });
+      expect(offers.list(decodeWindowId(windowId), scope)).toHaveLength(1);
+      offers.close();
+      await expect(local).resolves.toEqual({ status: "cancelled" });
+    });
 
     it("shows the waiting offer to the asking window and runs the model the person chose", async () => {
       const { handler, offers } = setup();
