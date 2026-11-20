@@ -7680,7 +7680,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and `ideogram-image`, and for an OpenAI-compatible custom image source, a
   bounded generated-image attachment scope, and usage rows attributed as
   `image-generation` (a provider that returns no token counts leaves its row
-  `unavailable`, never a measured zero; Usage lists each job with its provider, model, and quality, under the Project and mode of the thread it was made in, and a library job is unfiled). Thread-scoped generation — from both the composer/manual route and the agent tool — is admitted against the thread's and its current Project's configured spend ceilings before provider dispatch (`ImageJobService.enqueue`), independently of the in-thread cost confirmation card; host-wide `image-library` jobs carry no thread or Project ceiling. A job uses exactly one profile; a safety refusal ends it
+  `unavailable`, never a measured zero; OpenAI and an OpenAI-compatible source
+  report `usage.input_tokens` and `output_tokens`, and Gemini reports
+  `usageMetadata.promptTokenCount` as input and `candidatesTokenCount` plus
+  `thoughtsTokenCount` as output, while Black Forest Labs and Ideogram return
+  no token counts. No image response states a cost in US dollars — Black
+  Forest Labs states one in its own credits — so an image row is never
+  `provider-recorded` and Octant does not convert credits or price images
+  from a list; Usage lists each job with its provider, model, and quality, under the Project and mode of the thread it was made in, and a library job is unfiled). Thread-scoped generation — from both the composer/manual route and the agent tool — is admitted against the thread's and its current Project's configured spend ceilings before provider dispatch (`ImageJobService.enqueue`), independently of the in-thread cost confirmation card; host-wide `image-library` jobs carry no thread or Project ceiling. A job uses exactly one profile; a safety refusal ends it
   and is never retried elsewhere; a job found queued or running after a
   restart fails as interrupted and is never resent. A stored image must fit
   20 MiB and, when its header declares dimensions, 16,384 pixels a side and
@@ -9659,10 +9666,14 @@ that reason. The per-turn detail says "Cut off at the output limit". The
 transcript shows a quiet note with Continue, which drafts a follow-up into
 the composer and sends nothing until the person does.
 
-The ACP and RPC mappers (Devin, Kimi, Grok, Copilot, Mistral Vibe, Oh My Pi)
-report no usage today: the prompt result is read only for its stop reason, and
-the capability is declared `unsupported`, so their turns are recorded as
-unreported and no cache figure is invented. A driver declares usage
+The ACP mappers (Devin, Kimi, Grok, Copilot, Mistral Vibe) report no usage
+today: the prompt result is read only for its stop reason, and the capability
+is declared `unsupported`, so their turns are recorded as unreported and no
+cache figure is invented. Oh My Pi declares usage and tool activity
+`unsupported` for a different reason: its driver runs no turns, so no RPC
+event of its is read. Its RPC is Pi's, whose completed assistant messages
+carry usage, so turn execution, when it lands, can read usage as the Pi driver
+does. A driver declares usage
 `unsupported` only when it never reports usage for that instance, because a
 spend ceiling leaves such a provider's unreported turns out (below); one
 response without usage is not that evidence, so a runtime observed per turn
@@ -10094,7 +10105,8 @@ ceiling. The host decides by provider and level, not by row: a ledger row's
 capability as the host observes it now (`ProviderRuntimeRegistry`, the same
 observation that gates app-managed tools and model switches) decides whether
 its unreported rows count. Only `usage: "unsupported"` leaves them out: the ACP
-mappers and Oh My Pi declare it because they never emit usage. A Code turn's
+mappers declare it because they never emit usage, and Oh My Pi because it runs
+no turns. A Code turn's
 row records whether the turn ran at Full access (`ran_at_full_access`, from
 the `executionPolicy` its `conversation-turn-started` event journals), and a
 Full access row reads `capabilities.atFullAccess.usage` where the probe gives
