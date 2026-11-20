@@ -62,6 +62,7 @@ it("passes conformance at Full access for an agent whose shell runs without aski
       "task-list",
       "approval-request",
       ...(profile.userQuestions === "supported" ? (["user-input-request"] as const) : []),
+      "usage",
       "interrupted",
     ],
     expectedFailureCategories: {
@@ -106,7 +107,9 @@ describe.each(Object.values(acpProviderProfiles))(
           "task-list",
           "approval-request",
           ...(profile.userQuestions === "supported" ? (["user-input-request"] as const) : []),
-          ...(profile.reportsTurnUsage === true ? (["usage"] as const) : []),
+          // Every agent without a pinned usage reading is read by ACP's
+          // standard usage, which this fixture's reply carries.
+          ...(profile.usageVersions === undefined ? (["usage"] as const) : []),
           "interrupted",
         ],
         expectedFailureCategories: {
@@ -328,7 +331,7 @@ class ConformanceClient implements AcpClientPort {
       }),
     );
   }
-  prompt = async (sourceSessionId: string): Promise<{ stopReason: string }> => {
+  prompt = async (sourceSessionId: string): Promise<{ stopReason: string; usage?: unknown }> => {
     const notify = (update: Record<string, unknown>) => this.announce(sourceSessionId, update);
     notify({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hello" } });
     notify({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "think" } });
@@ -363,14 +366,18 @@ class ConformanceClient implements AcpClientPort {
         { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
       ]);
     }
-    return new Promise<{ stopReason: string }>((resolve) => {
-      // An agent that reports each turn's usage in its reply reports it here.
+    return new Promise<{ stopReason: string; usage?: unknown }>((resolve) => {
+      // The reply carries ACP's standard usage; a profile with a reviewed
+      // rule for a reply without a total gets that shape instead.
       this.#cancel = () =>
         resolve({
           stopReason: "cancelled",
-          ...(this.profile.reportsTurnUsage === true
-            ? { usage: { inputTokens: 12, outputTokens: 3, cachedReadTokens: 4 } }
-            : {}),
+          usage: {
+            inputTokens: 12,
+            outputTokens: 3,
+            cachedReadTokens: 4,
+            ...(this.profile.turnUsageWithoutTotal === undefined ? { totalTokens: 19 } : {}),
+          },
         });
     });
   };

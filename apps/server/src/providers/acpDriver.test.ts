@@ -948,6 +948,104 @@ describe("verified ACP usage", () => {
   );
 });
 
+describe("standard ACP usage", () => {
+  const kilo = acpProviderProfiles.kilo;
+  const runTurn = async (driverFixture: ReturnType<typeof fixture>) =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driverFixture.driver.acquire({
+            instanceId,
+            projectRoot,
+            mode: "code",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const stream = yield* connection.subscribe;
+          const collected = yield* Effect.fork(Effect.promise(() => collectTerminal(stream)));
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          const events = yield* Fiber.join(collected);
+          yield* connection.stop(sessionId);
+          return events;
+        }),
+      ),
+    );
+  const usageUpdate = (client: ReturnType<typeof fixture>["client"], amount: number) =>
+    client.emit({
+      kind: "notification",
+      method: "session/update",
+      params: {
+        sessionId: "agent-session-1",
+        update: {
+          sessionUpdate: "usage_update",
+          used: 9_000,
+          size: 128_000,
+          cost: { amount, currency: "USD" },
+        },
+      },
+    });
+
+  it("records an unpinned agent's reply usage with its US-dollar cost and context before it completes", async () => {
+    const f = fixture(kilo);
+    f.client.prompt.mockImplementationOnce(async () => {
+      usageUpdate(f.client, 0.042);
+      return {
+        stopReason: "end_turn",
+        usage: { inputTokens: 1_000, outputTokens: 200, cachedReadTokens: 600, totalTokens: 1_800 },
+      };
+    });
+    const events = await runTurn(f);
+    expect(events.map((event) => event.kind)).toEqual(["usage", "completed"]);
+    expect(events[0]).toMatchObject({
+      kind: "usage",
+      inputTokens: 1_600,
+      outputTokens: 200,
+      cacheReadInputTokens: 600,
+      costUsd: 0.042,
+      contextTokens: 9_000,
+      contextWindow: 128_000,
+    });
+  });
+
+  it("records no usage for an unpinned agent whose reply carries none", async () => {
+    const f = fixture(kilo);
+    f.client.prompt.mockImplementationOnce(async () => {
+      usageUpdate(f.client, 0.5);
+      return { stopReason: "end_turn" };
+    });
+    const events = await runTurn(f);
+    expect(events.map((event) => event.kind)).toEqual(["completed"]);
+  });
+
+  it("keeps the usage a reviewed agent showed before its prompt was rejected", async () => {
+    const f = fixture(vibe, { runtimeVersion: "3.0.3" });
+    const snapshot = (input: number, output: number) =>
+      f.client.emit({
+        kind: "notification",
+        method: "session/update",
+        params: {
+          sessionId: "agent-session-1",
+          update: {
+            sessionUpdate: "usage_update",
+            used: 600,
+            size: 200_000,
+            _meta: { promptTokens: input, completionTokens: output, cachedTokens: 0 },
+          },
+        },
+      });
+    f.client.newSession.mockImplementationOnce(async () => {
+      snapshot(1_000, 200);
+      return { sessionId: "agent-session-1", configOptions: f.client.configOptions };
+    });
+    f.client.prompt.mockImplementationOnce(async () => {
+      snapshot(1_300, 260);
+      throw new Error("agent exited");
+    });
+    const events = await runTurn(f);
+    expect(events.map((event) => event.kind)).toEqual(["usage", "failed"]);
+    expect(events[0]).toMatchObject({ inputTokens: 300, outputTokens: 60, contextTokens: 600 });
+  });
+});
+
 describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
   it("delivers immediate prompt output to every established subscriber", async () => {
     const { driver } = fixture(profile);
@@ -996,8 +1094,8 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         userQuestions:
           profile.elicitationVersions === undefined ? profile.userQuestions : "unavailable",
         reasoning: "supported",
-        // An agent that reports each turn's usage in its reply has it on any release.
-        usage: profile.reportsTurnUsage === true ? "supported" : "unsupported",
+        // Only a profile that pins its usage reading loses it on another release.
+        usage: profile.usageVersions === undefined ? "supported" : "unsupported",
         fileChanges: "unavailable",
         nativeChildAgents: "unavailable",
         // Mistral Vibe's auto-approve mode is its own reviewer; no other agent has one.
