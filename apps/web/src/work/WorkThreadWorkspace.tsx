@@ -200,6 +200,11 @@ import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { SideTaskInline, sideTasksAfterTurn, useThreadSideTasks } from "../followUps/SideTaskCards";
+import {
+  FinishedReceiptInline,
+  finishedReceiptsAfterTurn,
+  useThreadFinishedReceipts,
+} from "../finishedReceipts/FinishedReceiptCard";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TurnActions } from "../transcript/TurnActions";
@@ -209,6 +214,7 @@ import {
   turnWorkedFor,
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
+import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { HarnessRetryStatus, type HarnessRetryStreamEvent } from "../transcript/HarnessRetryStatus";
 import {
   pendingThreadHandoffNotice,
@@ -273,6 +279,13 @@ type WorkTranscriptRow =
       readonly key: string;
       readonly turnId: string;
       readonly running: boolean;
+      readonly last: boolean;
+      readonly loadedTurnIds: ReadonlySet<string>;
+    }
+  | {
+      readonly kind: "finished-receipt";
+      readonly key: string;
+      readonly turnId: string;
       readonly last: boolean;
       readonly loadedTurnIds: ReadonlySet<string>;
     }
@@ -379,6 +392,7 @@ function WorkTurnHeader(props: {
   readonly turn: WorkTurnState;
   /** What Strict kept for the turn before this one, so the notice shows once per change. */
   readonly previousStrictKept?: StrictKeptProtections | undefined;
+  readonly onStopTurn?: () => void;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   /** Puts the stopped turn's prompt back in the composer to send again. */
   readonly onRestorePrompt?: (prompt: string) => void;
@@ -438,6 +452,12 @@ function WorkTurnHeader(props: {
           )}
         </p>
       )}
+      <TurnLoopStallNotice
+        {...(props.turn.loopNotice === undefined ? {} : { loopNotice: props.turn.loopNotice })}
+        {...(props.turn.stallNotice === undefined ? {} : { stallNotice: props.turn.stallNotice })}
+        running={props.turn.status === "accepted" || props.turn.status === "running"}
+        {...(props.onStopTurn === undefined ? {} : { onStop: props.onStopTurn })}
+      />
       {usageLimit === undefined ? null : (
         <UsageLimitNotice
           limit={usageLimit}
@@ -742,6 +762,22 @@ function applyWorkTurnStreamFrame(
       ...(frame.toolStepsTruncated ? { toolStepsTruncated: true } : {}),
       ...(frame.reasoningMs === undefined ? {} : { reasoningMs: frame.reasoningMs }),
     };
+    return next;
+  }
+  if (frame.kind === "turn-loop-noticed" || frame.kind === "turn-loop-stopped") {
+    if (index === -1) return turns;
+    const current = turns[index];
+    if (current === undefined) return turns;
+    const next = turns.slice();
+    next[index] = { ...current, loopNotice: frame.notice };
+    return next;
+  }
+  if (frame.kind === "turn-stall-noticed") {
+    if (index === -1) return turns;
+    const current = turns[index];
+    if (current === undefined) return turns;
+    const next = turns.slice();
+    next[index] = { ...current, stallNotice: frame.notice };
     return next;
   }
   if (frame.kind === "provider-retry" || frame.kind === "provider-retry-cleared") return turns;
@@ -1575,6 +1611,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     revealTurnId,
   ]);
   const sideTasks = useThreadSideTasks();
+  const finishedReceipts = useThreadFinishedReceipts();
   const loadedTurnIds = useMemo(() => new Set(turns.map((turn) => String(turn.turnId))), [turns]);
   const transcriptRows = useMemo<ReadonlyArray<WorkTranscriptRow>>(() => {
     const rows: WorkTranscriptRow[] = [];
@@ -1646,6 +1683,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         last: turn === turns.at(-1),
         loadedTurnIds,
       };
+      if (finishedReceiptsAfterTurn(finishedReceipts, placement).length > 0) {
+        rows.push({
+          kind: "finished-receipt",
+          key: `${String(turn.requestId)}-finished-receipt`,
+          ...placement,
+        });
+      }
       if (sideTasksAfterTurn(sideTasks, placement).length > 0) {
         rows.push({
           kind: "side-tasks",
@@ -1661,7 +1705,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
     if (status !== undefined) rows.push({ kind: "status", key: "status", text: status });
     return rows;
-  }, [firstPageSettled, loadedTurnIds, pendingRequests, sideTasks, status, turns]);
+  }, [
+    finishedReceipts,
+    firstPageSettled,
+    loadedTurnIds,
+    pendingRequests,
+    sideTasks,
+    status,
+    turns,
+  ]);
   // The turn's first row, whichever kind opens it (its prompt, or the header
   // a reply opens with), is where the reader lands.
   const revealKey =
@@ -2752,6 +2804,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                               : {})}
                             turn={row.head}
                             previousStrictKept={previousStrictKeptOf(row.head)}
+                            {...(props.turnClient === undefined ||
+                            stoppableTurn === undefined ||
+                            String(stoppableTurn.requestId) !== String(row.head.requestId)
+                              ? {}
+                              : { onStopTurn: () => void onStop() })}
                             {...(thread?.usageResume === undefined ||
                             String(thread.usageResume.record.turnId) !== String(row.head.turnId)
                               ? {}
@@ -2801,6 +2858,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         : {})}
                       turn={row.turn}
                       previousStrictKept={previousStrictKeptOf(row.turn)}
+                      {...(props.turnClient === undefined ||
+                      stoppableTurn === undefined ||
+                      String(stoppableTurn.requestId) !== String(row.turn.requestId)
+                        ? {}
+                        : { onStopTurn: () => void onStop() })}
                       {...(thread?.usageResume === undefined ||
                       String(thread.usageResume.record.turnId) !== String(row.turn.turnId)
                         ? {}
@@ -2857,6 +2919,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       </p>
                     ) : null}
                   </section>
+                );
+              }
+              if (row.kind === "finished-receipt") {
+                return (
+                  <FinishedReceiptInline
+                    last={row.last}
+                    loadedTurnIds={row.loadedTurnIds}
+                    turnId={row.turnId}
+                  />
                 );
               }
               if (row.kind === "side-tasks") {

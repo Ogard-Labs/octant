@@ -117,36 +117,38 @@ function routes(
       frame: { mediaType: "image/png", width: 1, height: 1, bytes: png },
     })),
     input: vi.fn<DesktopLeaseService["input"]>(async () => ({ status: "delivered" })),
-    recipeMachines: vi.fn<DesktopLeaseService["recipeMachines"]>(async ({ actor }) =>
-      actor.kind === "local-user"
-        ? {
-            status: "recipe-machines",
-            machines: [
-              {
-                machineId: decodeDesktopMachineId("host-studio"),
-                displayName: "studio",
-                online: true,
-              },
-            ],
-          }
-        : { status: "refused", reason: "not-permitted" },
+    recipeMachines: vi.fn<DesktopLeaseService["recipeMachines"]>(
+      async ({ actor, personPairedDevice }) =>
+        actor.kind === "local-user" || personPairedDevice === true
+          ? {
+              status: "recipe-machines",
+              machines: [
+                {
+                  machineId: decodeDesktopMachineId("host-studio"),
+                  displayName: "studio",
+                  online: true,
+                },
+              ],
+            }
+          : { status: "refused", reason: "not-permitted" },
     ),
-    spend: vi.fn<DesktopLeaseService["spend"]>(({ actor }) =>
-      actor.kind === "local-user"
+    spend: vi.fn<DesktopLeaseService["spend"]>(({ actor, personPairedDevice }) =>
+      actor.kind === "local-user" || personPairedDevice === true
         ? { status: "spend", summary: { month: "2026-10", spentUsdCents: 0 } }
         : { status: "refused", reason: "spend-cap-local-only" },
     ),
-    setSpendCap: vi.fn<DesktopLeaseService["setSpendCap"]>(({ actor, monthlyCapUsdCents }) =>
-      actor.kind === "local-user"
-        ? {
-            status: "spend",
-            summary: {
-              month: "2026-10",
-              spentUsdCents: 0,
-              ...(monthlyCapUsdCents === undefined ? {} : { monthlyCapUsdCents }),
-            },
-          }
-        : { status: "refused", reason: "spend-cap-local-only" },
+    setSpendCap: vi.fn<DesktopLeaseService["setSpendCap"]>(
+      ({ actor, monthlyCapUsdCents, personPairedDevice }) =>
+        actor.kind === "local-user" || personPairedDevice === true
+          ? {
+              status: "spend",
+              summary: {
+                month: "2026-10",
+                spentUsdCents: 0,
+                ...(monthlyCapUsdCents === undefined ? {} : { monthlyCapUsdCents }),
+              },
+            }
+          : { status: "refused", reason: "spend-cap-local-only" },
     ),
     leaseSettings: vi.fn<DesktopLeaseService["leaseSettings"]>(({ actor, personPairedDevice }) =>
       actor.kind === "local-user" || personPairedDevice === true
@@ -293,7 +295,7 @@ describe("Desktop pane routes", () => {
     ).toBe(400);
   });
 
-  it("asks for the person's machines as the authenticated person, so a paired device is refused", async () => {
+  it("asks for the person's machines from a local window or person-paired device, never a hub-introduced device", async () => {
     const { handler, service } = routes();
     const request = { kind: "recipe-machines", providerId: "cua", placementId: "other-machine" };
     const local = await handler(post("/api/code/desktops", request));
@@ -303,9 +305,20 @@ describe("Desktop pane routes", () => {
     });
     const remote = await handler(post("/api/code/desktops", request, { remote: true }));
     await expect(remote?.json()).resolves.toEqual({ status: "refused", reason: "not-permitted" });
-    expect(service.recipeMachines.mock.calls.map(([input]) => input.actor.kind)).toEqual([
-      "local-user",
-      "remote-device",
+    const paired = await handler(post("/api/code/desktops", request, { personPaired: true }));
+    await expect(paired?.json()).resolves.toEqual({
+      status: "recipe-machines",
+      machines: [{ machineId: "host-studio", displayName: "studio", online: true }],
+    });
+    expect(
+      service.recipeMachines.mock.calls.map(([input]) => [
+        input.actor.kind,
+        input.personPairedDevice === true,
+      ]),
+    ).toEqual([
+      ["local-user", false],
+      ["remote-device", false],
+      ["remote-device", true],
     ]);
     const namesActor = await handler(
       post(
@@ -315,10 +328,10 @@ describe("Desktop pane routes", () => {
       ),
     );
     expect(namesActor?.status).toBe(400);
-    expect(service.recipeMachines).toHaveBeenCalledTimes(2);
+    expect(service.recipeMachines).toHaveBeenCalledTimes(3);
   });
 
-  it("sets the monthly spend cap only for a person at a local window, never for a paired device", async () => {
+  it("reads and sets the monthly spend cap for a local window or person-paired device, never a hub-introduced device", async () => {
     const { handler, service } = routes();
     const set = { kind: "set-spend-cap", monthlyCapUsdCents: 5_000 };
     const local = await handler(post("/api/code/desktops", set));
@@ -331,14 +344,32 @@ describe("Desktop pane routes", () => {
       status: "refused",
       reason: "spend-cap-local-only",
     });
-    expect(service.setSpendCap.mock.calls.map(([input]) => input.actor.kind)).toEqual([
-      "local-user",
-      "remote-device",
+    const paired = await handler(post("/api/code/desktops", set, { personPaired: true }));
+    await expect(paired?.json()).resolves.toEqual({
+      status: "spend",
+      summary: { month: "2026-10", spentUsdCents: 0, monthlyCapUsdCents: 5_000 },
+    });
+    expect(
+      service.setSpendCap.mock.calls.map(([input]) => [
+        input.actor.kind,
+        input.personPairedDevice === true,
+      ]),
+    ).toEqual([
+      ["local-user", false],
+      ["remote-device", false],
+      ["remote-device", true],
     ]);
     const read = await handler(post("/api/code/desktops", { kind: "spend" }, { remote: true }));
     await expect(read?.json()).resolves.toEqual({
       status: "refused",
       reason: "spend-cap-local-only",
+    });
+    const pairedRead = await handler(
+      post("/api/code/desktops", { kind: "spend" }, { personPaired: true }),
+    );
+    await expect(pairedRead?.json()).resolves.toEqual({
+      status: "spend",
+      summary: { month: "2026-10", spentUsdCents: 0 },
     });
     // A body that names its own actor is refused before the service hears it.
     const namesActor = await handler(
@@ -348,7 +379,7 @@ describe("Desktop pane routes", () => {
       }),
     );
     expect(namesActor?.status).toBe(400);
-    expect(service.setSpendCap).toHaveBeenCalledTimes(2);
+    expect(service.setSpendCap).toHaveBeenCalledTimes(3);
   });
 
   it("changes the lease settings for a person at a local window or on a device they paired, as that device, never for a hub-introduced device", async () => {
@@ -430,7 +461,7 @@ describe("Desktop pane routes", () => {
     const { handler } = routes();
     await expect(handler(post("/api/code/board", {}))).resolves.toBeUndefined();
   });
-  it("allows preview decisions only from the authenticated local window and refuses paired devices before dispatch", async () => {
+  it("allows preview decisions from a local window or person-paired device and refuses hub-introduced devices before dispatch", async () => {
     const previews = vi.fn<
       NonNullable<Parameters<typeof createDesktopPaneRouteHandler>[0]["previews"]>
     >(async () => ({ status: "preview-state", available: true }));
@@ -443,6 +474,8 @@ describe("Desktop pane routes", () => {
       status: "preview-refused",
       reason: "not-permitted",
     });
+    const paired = await handler(post("/api/code/desktops", request, { personPaired: true }));
+    await expect(paired?.json()).resolves.toEqual({ status: "preview-state", available: true });
     const forged = await handler(
       post(
         "/api/code/desktops",
@@ -451,11 +484,17 @@ describe("Desktop pane routes", () => {
       ),
     );
     expect(forged?.status).toBe(400);
-    expect(previews).toHaveBeenCalledOnce();
+    expect(previews).toHaveBeenCalledTimes(2);
     expect(previews.mock.calls[0]?.[0]).toMatchObject({
       actor: { kind: "local-user" },
       scopeId: windowId,
       leaseId,
+    });
+    expect(previews.mock.calls[1]?.[0]).toMatchObject({
+      actor: { kind: "remote-device", deviceId },
+      scopeId: deviceId,
+      leaseId,
+      personPairedDevice: true,
     });
   });
 });

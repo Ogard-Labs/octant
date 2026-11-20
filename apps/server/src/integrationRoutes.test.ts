@@ -163,5 +163,31 @@ describe("integration authentication routes", () => {
     bindLocalWindow(invalid);
     expect((await handler(invalid))?.status).toBe(400);
     expect(service.execute).not.toHaveBeenCalled();
+
+    const pairedAuth = new Request(
+      "http://127.0.0.1/api/integrations/linear/authentication/commands",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://127.0.0.1" },
+        body: JSON.stringify({ kind: "setup" }),
+      },
+    );
+    bindPrincipalRouteContext(pairedAuth, {
+      principal: {
+        kind: "remote-device",
+        hostId: "host",
+        deviceId: "device",
+        credentialGeneration: 1,
+        origin: "https://remote.test",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "session",
+        admittedBy: "host-person",
+      } as never,
+      scopeId: "scope" as never,
+    });
+    service.execute.mockResolvedValueOnce({ state: "unauthorized", capabilities: [] });
+    expect((await handler(pairedAuth))?.status).toBe(200);
+    expect(service.execute).toHaveBeenCalledOnce();
   });
 });

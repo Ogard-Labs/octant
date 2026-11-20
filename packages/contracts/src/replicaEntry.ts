@@ -26,7 +26,8 @@ import {
   CanvasCommentId,
   CanvasCommentReplyId,
 } from "./canvasBoard";
-import { CanvasActor } from "./canvasIdentity";
+import { CanvasChoiceAnswer } from "./canvasChoiceAnswer";
+import { CanvasActor, CanvasBlockId } from "./canvasIdentity";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 
@@ -226,8 +227,60 @@ export const ReplicaCommentEntry = Schema.Struct({
 }).annotations(strict);
 export type ReplicaCommentEntry = typeof ReplicaCommentEntry.Type;
 
-/** An entry about a Canvas: a version, a deletion, or a change to its comments. */
-export type ReplicaCanvasEntry = ReplicaArtifactEntry | ReplicaCommentEntry;
+const ChoiceQuestionId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
+
+/**
+ * One change to a Canvas decision form's saved answers, as it travels between
+ * a person's own computers. A `set` carries the saved answer with its question
+ * fingerprint, chosen option labels, optional written answer or note, author,
+ * and time; a `clear` removes the saved answer for that question.
+ */
+export const ReplicaChoiceAnswerChange = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("set"),
+    answer: CanvasChoiceAnswer,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("clear"),
+    blockId: CanvasBlockId,
+    questionId: ChoiceQuestionId,
+    clearedBy: CanvasActor,
+    clearedAt: UtcTimestamp,
+  }).annotations(strict),
+);
+export type ReplicaChoiceAnswerChange = typeof ReplicaChoiceAnswerChange.Type;
+
+/**
+ * A change to a Canvas decision form's saved answers, carried in the same log
+ * as its versions and comments and under the same rules: write-once, signed by
+ * the computer that wrote it, and never overwritten. `after` names, for each
+ * other computer, the newest choice-answer entry on this Canvas the writer
+ * held when the change was made, so every reader applies a change only after
+ * what its writer had already seen; the writer's own earlier entries come
+ * first by its sequence. `contentHash` is the SHA-256 of
+ * {@link replicaChoiceAnswerContentPreimage}.
+ */
+export const ReplicaChoiceAnswerEntry = Schema.Struct({
+  format: Schema.Literal(REPLICA_ENTRY_FORMAT),
+  kind: Schema.Literal("canvas-choice-answer"),
+  origin: ReplicaOrigin,
+  artifact: ReplicaArtifactOrigin,
+  after: Schema.Array(ReplicaSlotRef).pipe(
+    Schema.maxItems(64),
+    Schema.filter(
+      (after) => new Set(after.map((slot) => String(slot.instanceId))).size === after.length,
+    ),
+  ),
+  contentHash: ReplicaContentHash,
+  change: ReplicaChoiceAnswerChange,
+}).annotations(strict);
+export type ReplicaChoiceAnswerEntry = typeof ReplicaChoiceAnswerEntry.Type;
+
+/** An entry about a Canvas: a version, a deletion, a comment change, or a decision-form answer change. */
+export type ReplicaCanvasEntry =
+  | ReplicaArtifactEntry
+  | ReplicaCommentEntry
+  | ReplicaChoiceAnswerEntry;
 
 /**
  * Membership lifecycle, carried in the same log so a computer that is not yet
@@ -433,6 +486,7 @@ export type ReplicaMembershipEntry = typeof ReplicaMembershipEntry.Type;
 export const ReplicaEntry = Schema.Union(
   ReplicaArtifactEntry,
   ReplicaCommentEntry,
+  ReplicaChoiceAnswerEntry,
   ReplicaMembershipEntry,
 );
 export type ReplicaEntry = typeof ReplicaEntry.Type;
@@ -442,7 +496,8 @@ export function isReplicaMembershipEntry(entry: ReplicaEntry): entry is ReplicaM
   return (
     entry.kind !== "artifact-version" &&
     entry.kind !== "artifact-tombstone" &&
-    entry.kind !== "canvas-comment"
+    entry.kind !== "canvas-comment" &&
+    entry.kind !== "canvas-choice-answer"
   );
 }
 
@@ -450,6 +505,8 @@ export const decodeReplicaEntry = Schema.decodeUnknownSync(ReplicaEntry);
 export const decodeReplicaArtifactEntry = Schema.decodeUnknownSync(ReplicaArtifactEntry);
 export const decodeReplicaCommentEntry = Schema.decodeUnknownSync(ReplicaCommentEntry);
 export const decodeReplicaCommentChange = Schema.decodeUnknownSync(ReplicaCommentChange);
+export const decodeReplicaChoiceAnswerEntry = Schema.decodeUnknownSync(ReplicaChoiceAnswerEntry);
+export const decodeReplicaChoiceAnswerChange = Schema.decodeUnknownSync(ReplicaChoiceAnswerChange);
 export const decodeReplicaMembershipEntry = Schema.decodeUnknownSync(ReplicaMembershipEntry);
 export const decodeReplicaSignatureVerdict = Schema.decodeUnknownSync(ReplicaSignatureVerdict);
 
@@ -489,6 +546,18 @@ function canonicalCommentChange(change: ReplicaCommentChange): ReplicaCommentCha
   // Decoding puts the keys in schema order, so every writer and reader
   // encodes one change as one byte string.
   return decodeReplicaCommentChange(JSON.parse(JSON.stringify(change)));
+}
+
+/**
+ * The bytes a choice-answer entry's content hash covers: the change alone, in
+ * its canonical key order, with a trailing newline.
+ */
+export function replicaChoiceAnswerContentPreimage(change: ReplicaChoiceAnswerChange): string {
+  return `${JSON.stringify(canonicalChoiceAnswerChange(change), null, 2)}\n`;
+}
+
+function canonicalChoiceAnswerChange(change: ReplicaChoiceAnswerChange): ReplicaChoiceAnswerChange {
+  return decodeReplicaChoiceAnswerChange(JSON.parse(JSON.stringify(change)));
 }
 
 /**
@@ -614,6 +683,22 @@ export function encodeReplicaEntry(entry: ReplicaEntry): string {
         })),
         contentHash: entry.contentHash,
         change: canonicalCommentChange(entry.change),
+      };
+      break;
+    case "canvas-choice-answer":
+      body = {
+        ...head,
+        artifact: {
+          canvasId: entry.artifact.canvasId,
+          hostId: entry.artifact.hostId,
+          projectName: entry.artifact.projectName,
+        },
+        after: entry.after.map((slot) => ({
+          instanceId: slot.instanceId,
+          sequence: slot.sequence,
+        })),
+        contentHash: entry.contentHash,
+        change: canonicalChoiceAnswerChange(entry.change),
       };
       break;
   }

@@ -2686,11 +2686,11 @@ maintainer's hardware, or names the maintainer gate.
      It also carries `targetProjectId`, required with a member: Projects get their
      own ids on each host, so the parent's Project id on A means nothing on B and is
      never sent. A cannot list B's Projects (the grant naming them is held on B),
-     so the agent is given the id by the person and B checks it against that grant
-     as it does for the loopback routes. A missing one answers
+     so the agent is given the id by the person and B checks it against that grant.
+     A missing one answers
      `remote-delegation-project-required`; one B does not have or the grant does not
      cover answers as the member's refusal.
-     It reaches the same delegating service the loopback routes use, so the parent
+     Both tools reach the host's delegating service directly, so the parent
      check, the peer-grant clamp, `peer:A` on B, approvals on B, the framed and
      tainting result, and the cancel on a stopped turn are one set of rules. The
      request takes a task only: a model, `after`, or the parent's conversation is
@@ -2701,10 +2701,9 @@ maintainer's hardware, or names the maintainer gate.
      member that refuses (no grant for this host, or a grant that does not cover the
      request) each answer as a refusal value, and the target's own words are not
      repeated to the model. Capabilities report `remoteDelegation` honestly. The
-     agent receives the request id; reading the result and cancelling a single
-     request stay on the loopback routes (a stopped parent turn still cancels them),
-     and a driver whose tool surface is not one of these two has no way to name a
-     member.
+     agent receives the request id, the host polls open delegations for results, and
+     a stopped parent turn cancels its open remote children; a driver whose tool
+     surface is not one of these two has no way to name a member.
 
 7. **Failover.** Standby order, roster and wake-time copies, stand-in and
    step-down. Acceptance: members switch after the set time and return when

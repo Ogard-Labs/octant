@@ -811,25 +811,23 @@ runs, not when it was recorded.
   field's value), an address that contains a string, the page's
   `domcontentloaded` or `load`, or an element attached, detached, visible,
   hidden, enabled, or disabled. `match` is `all` (the default) or `any`.
-- Every wait has a limit: `timeoutMs` up to the ceiling in Settings ›
-  Permissions › Longest Browser wait (10 minutes by default, 1 to 60), 10
-  seconds when it names none, on both Browsers (maintainer request,
-  2026-11-12; built, under
-  [Octant's own limits become settings](../architecture.md#security-and-authority)).
-  The tool reads any wait up to an hour; the browser service refuses one past
-  the person's ceiling as `policy-denied` before it reaches the page, naming
-  the ceiling. The waits of one `steps` call together may last at most an
-  hour (a wait that names no limit counts as 10 seconds), and a longer batch
-  is refused as malformed. The default stays 10 minutes because one call has
-  to answer inside the time a runtime allows an app-managed call (eleven
-  minutes under the Claude runtime), which the setting's description says. A page's idle
-  interval is 10 minutes too, so an admitted wait keeps its page for the
-  wait's own limit and 30 seconds more: the hold is fixed when the wait is
-  dispatched, so a call that hangs past it still cannot extend the page's
-  life. A wait that runs out fails and names the
-  conditions that never held. A ref in a wait becomes the snapshot's selector
-  without the identity check an action makes, because waiting for an element
-  to change or leave is the point.
+- Every wait names `timeoutMs`, or uses 10 seconds when it names none, on both
+  Browsers. Outside Strict there is no wait limit: any positive integer
+  `timeoutMs` is admitted (maintainer decision, 2026-11-19; built). Under
+  Strict, a wait is capped by Settings › Permissions › Longest Browser wait
+  (10 minutes by default, 1 to 60; built under
+  [Octant's own limits become settings](../architecture.md#security-and-authority)),
+  and the browser service refuses one past the person's ceiling as
+  `policy-denied` before it reaches the page, naming the ceiling. The Strict
+  default stays 10 minutes because one call has to answer inside the time a
+  runtime allows an app-managed call (eleven minutes under the Claude runtime),
+  which the setting's description says. A page's idle interval is 10 minutes
+  too, so an admitted wait keeps its page for the wait's own duration and 30
+  seconds more: the hold is fixed when the wait is dispatched, so a call that
+  hangs past it still cannot extend the page's life. A wait that runs out fails
+  and names the conditions that never held. A ref in a wait becomes the
+  snapshot's selector without the identity check an action makes, because
+  waiting for an element to change or leave is the point.
 - **Settling.** After `navigate`, `click`, `type`, `press`, `scroll`, `hover`,
   `select`, `drag`, `upload`, and `resize`, the Browser waits for the page's
   load and then for the document to stop changing for 250 ms, at most 2

@@ -20,7 +20,8 @@ import {
   type ReplicaRestoreCommand,
   type ReplicaRestoreResult,
 } from "@octant/contracts/replica-entry";
-import type { ClientPrincipal } from "../clientPrincipal";
+import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal, readPrincipalRouteContext } from "../principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -105,8 +106,7 @@ export function createReplicaMembershipRouteHandler(
       }
       return failure("Replica membership request is invalid.", 400, origin);
     }
-    // Host-only: a paired phone is refused even if transport policy regressed.
-    if (principal.principal.kind !== "local-window") {
+    if (!principalActsAsHostPerson(principal.principal)) {
       return failure("Replica membership is host-only.", 403, origin);
     }
 
@@ -153,7 +153,14 @@ export function createReplicaMembershipRouteHandler(
 
     let outcome: ReplicaMembershipOutcome;
     try {
-      outcome = await dependencies.service.execute(command);
+      const actor =
+        principal.principal.kind === "remote-device"
+          ? eventActorForPrincipal(principal.principal)
+          : undefined;
+      outcome =
+        actor === undefined
+          ? await dependencies.service.execute(command)
+          : await dependencies.service.execute(command, actor);
     } catch {
       return failure("Replica membership command failed.", 500, origin);
     }
@@ -175,7 +182,7 @@ export function createReplicaMembershipRouteHandler(
     } catch {
       return failure("Replica membership request is unauthorized.", 401, origin);
     }
-    if (principal.principal.kind !== "local-window") {
+    if (!principalActsAsHostPerson(principal.principal)) {
       return failure("Replica membership is host-only.", 403, origin);
     }
     try {

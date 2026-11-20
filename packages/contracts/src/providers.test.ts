@@ -54,6 +54,7 @@ describe("provider registry contracts", () => {
       "provider.instance-removed@1",
       "provider.defaults-updated@1",
       "provider.catalog-updated@1",
+      "provider.acp-agent-install-scripts-ran@1",
     ]);
   });
   it.each([
@@ -1790,6 +1791,38 @@ describe("provider registry contracts", () => {
         instanceId: ids.instance,
         expectedVersion: 0,
         source: { kind: "registry", registryId: "cursor", archive: "https://elsewhere.example/a" },
+      }),
+    ).toThrow();
+  });
+
+  it("decodes journaled ACP install-script run records and rejects mismatched outcome reasons", () => {
+    const succeeded = {
+      instanceId: ids.instance,
+      registryId: "factory-droid",
+      version: "1.12.1",
+      distribution: "npx",
+      outcome: "succeeded",
+      sandboxed: true,
+      completedAt: occurredAt,
+    } as const;
+    const failed = {
+      ...succeeded,
+      outcome: "failed",
+      sandboxed: false,
+      reason: "script-failed",
+    } as const;
+    expect(providerContracts.decodeProviderAcpAgentInstallScriptsRan(succeeded)).toEqual(succeeded);
+    expect(providerContracts.decodeProviderAcpAgentInstallScriptsRan(failed)).toEqual(failed);
+    expect(() =>
+      providerContracts.decodeProviderAcpAgentInstallScriptsRan({
+        ...succeeded,
+        reason: "script-failed",
+      }),
+    ).toThrow();
+    expect(() =>
+      providerContracts.decodeProviderAcpAgentInstallScriptsRan({
+        ...succeeded,
+        outcome: "failed",
       }),
     ).toThrow();
   });

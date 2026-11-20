@@ -84,7 +84,11 @@ export interface CodeProjectPullRequestActionAuthority {
     windowId: WindowId,
     target: CodeProjectPullRequestDetailQuery,
   ): Promise<
-    | { readonly status: "authorized"; readonly linkedThreadIds: ReadonlyArray<string> }
+    | {
+        readonly status: "authorized";
+        readonly linkedThreadIds: ReadonlyArray<string>;
+        readonly canonicalTarget?: CodeProjectPullRequestDetailQuery;
+      }
     | { readonly status: "not-authorized" }
     | { readonly status: "disconnected" }
   >;
@@ -192,8 +196,16 @@ export class CodeProjectPullRequestActionService {
     } else if (authorized.status === "disconnected") {
       outcome = { status: "unavailable", reason: "disconnected" };
     } else {
+      const target = authorized.canonicalTarget ?? command;
       try {
-        outcome = await this.#send(command, signal);
+        outcome = await this.#send(
+          {
+            ...command,
+            repositoryOwner: target.repositoryOwner,
+            repositoryName: target.repositoryName,
+          },
+          signal,
+        );
       } catch (error) {
         // The call reached the forge, so the attempt is recorded as failed
         // with the effect unknown; the error text is never journaled.
@@ -223,8 +235,9 @@ export class CodeProjectPullRequestActionService {
     if (authorized.status === "disconnected") {
       return { status: "unavailable", reason: "disconnected" };
     }
+    const target = authorized.canonicalTarget ?? query;
     return this.#forge.readContext(
-      { owner: query.repositoryOwner, name: query.repositoryName, number: query.number },
+      { owner: target.repositoryOwner, name: target.repositoryName, number: query.number },
       signal,
     );
   }

@@ -7,6 +7,12 @@ import { Questionnaire, QuestionnaireAnswerText } from "./questionnaire";
 import { SideChatSourceReceipt, SideChatDraftReturnReferences } from "./sideChatReturn";
 import { personDecides } from "./hostAnswer";
 import { HarnessRetryNotice } from "./harnessRetry";
+import {
+  TurnLoopNotice,
+  TurnLoopNoticeCount,
+  TurnLoopNoticeToolName,
+  TurnStallNotice,
+} from "./turnLoopNotice";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import { AnyAttachmentMediaType } from "./attachmentMediaType";
@@ -411,6 +417,10 @@ export const ChatAttempt = Schema.Struct({
    * cancelled attempt does not keep a stale wait.
    */
   harnessRetry: Schema.optional(HarnessRetryNotice),
+  /** Repeated identical tool call notice or Strict stop recorded on this attempt. */
+  loopNotice: Schema.optional(TurnLoopNotice),
+  /** Silent-turn notice recorded outside Strict when the stalled-turn limit elapsed. */
+  stallNotice: Schema.optional(TurnStallNotice),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
 })
@@ -1394,6 +1404,38 @@ export const ChatAttemptToolStepChanged = Schema.Struct({
 }).annotations(strict);
 export type ChatAttemptToolStepChanged = typeof ChatAttemptToolStepChanged.Type;
 
+export const ChatTurnLoopNoticed = Schema.Struct({
+  kind: Schema.Literal("turn-loop-noticed"),
+  threadId: ChatThreadId,
+  turnId: ChatTurnId,
+  attemptId: ChatAttemptId,
+  toolName: TurnLoopNoticeToolName,
+  count: TurnLoopNoticeCount,
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type ChatTurnLoopNoticed = typeof ChatTurnLoopNoticed.Type;
+
+export const ChatTurnLoopStopped = Schema.Struct({
+  kind: Schema.Literal("turn-loop-stopped"),
+  threadId: ChatThreadId,
+  turnId: ChatTurnId,
+  attemptId: ChatAttemptId,
+  toolName: TurnLoopNoticeToolName,
+  count: TurnLoopNoticeCount,
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type ChatTurnLoopStopped = typeof ChatTurnLoopStopped.Type;
+
+export const ChatTurnStallNoticed = Schema.Struct({
+  kind: Schema.Literal("turn-stall-noticed"),
+  threadId: ChatThreadId,
+  turnId: ChatTurnId,
+  attemptId: ChatAttemptId,
+  idleMs: Schema.Int.pipe(Schema.positive()),
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type ChatTurnStallNoticed = typeof ChatTurnStallNoticed.Type;
+
 export const ChatTurnRouteDecided = Schema.Struct({
   kind: Schema.Literal("turn-route-decided"),
   decision: ChatTurnRouteDecision,
@@ -1447,6 +1489,9 @@ export const ChatPublicEvent = Schema.Union(
   ChatAttemptUpdated,
   ChatAttemptResponseAppended,
   ChatAttemptToolStepChanged,
+  ChatTurnLoopNoticed,
+  ChatTurnLoopStopped,
+  ChatTurnStallNoticed,
   ChatTurnRouteDecided,
   ChatAttachmentUpdated,
   ChatCitationRecorded,
@@ -1503,6 +1548,9 @@ export const CHAT_EVENT_NAMES = [
   "chat.attempt-updated@1",
   "chat.attempt-response-appended@1",
   "chat.attempt-tool-step@1",
+  "chat.turn-loop-noticed@1",
+  "chat.turn-loop-stopped@1",
+  "chat.turn-stall-noticed@1",
   "chat.turn-route-decided@1",
   "chat.attachment-updated@1",
   "chat.citation-recorded@1",
@@ -1564,6 +1612,9 @@ export const decodeChatAttemptUpdated = Schema.decodeUnknownSync(ChatAttemptUpda
 export const decodeChatAttemptToolStepChanged = Schema.decodeUnknownSync(
   ChatAttemptToolStepChanged,
 );
+export const decodeChatTurnLoopNoticed = Schema.decodeUnknownSync(ChatTurnLoopNoticed);
+export const decodeChatTurnLoopStopped = Schema.decodeUnknownSync(ChatTurnLoopStopped);
+export const decodeChatTurnStallNoticed = Schema.decodeUnknownSync(ChatTurnStallNoticed);
 export const decodeChatAttemptResponseAppended = Schema.decodeUnknownSync(
   ChatAttemptResponseAppended,
 );

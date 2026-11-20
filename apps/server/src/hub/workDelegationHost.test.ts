@@ -345,6 +345,30 @@ describe("the Work thread a delegation becomes on the receiving spoke", () => {
     expect(await host.readThread(THREAD, DELEGATED_TURN)).toBeUndefined();
     expect(await host.interrupt(THREAD, DELEGATED_TURN)).toBe("unavailable");
   });
+
+  it("marks a peer-delegated Work thread before starting its first turn so person memory is withheld", async () => {
+    const withheld = new Set<string>();
+    const order: string[] = [];
+    const { host } = services({
+      onDelegatedThreadCreated: (threadId) => {
+        withheld.add(threadId);
+        order.push(`marked:${threadId}`);
+      },
+      turns: {
+        ...baseTurns(),
+        startFirstTurn: async (_scope, command) => {
+          const { threadId } = command as { readonly threadId: string };
+          order.push(`started:${threadId}:withheld=${String(withheld.has(threadId))}`);
+          return { kind: "accepted" };
+        },
+      },
+    });
+
+    const started = await host.startThread(input);
+
+    expect(started).toMatchObject({ status: "started", threadId: THREAD });
+    expect(order).toEqual([`marked:${THREAD}`, `started:${THREAD}:withheld=true`]);
+  });
 });
 
 /** The thread's turns as given, with every cancel the host sends kept in `cancelled`. */
