@@ -39,6 +39,7 @@ import {
 import { createPendingRequestRouteHandler } from "../pendingRequestRoutes";
 import { PendingRequestService, type PendingRequestReader } from "../pendingRequestService";
 import { waitingAsksFrom, type WaitingAskThread } from "../waitingAsks";
+import type { ContextWiring } from "./context";
 import type { BrowserWiring } from "./browser";
 import { createThreadSearchRouteHandler } from "../threadSearchRoutes";
 import { createWorkThreadRouteHandler } from "../workThreadRoutes";
@@ -127,6 +128,7 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
     | "workThreadServiceWithWorkflows"
   > &
   Pick<WorkFilesWiring, "workResearchProjection"> &
+  Pick<ContextWiring, "windowCanOpenThread"> &
   Pick<AgentRunsWiring, "finishedReceipts"> &
   Pick<FoundationsWiring, "workArtifactProjection" | "workThreadProjection" | "workTurnProjection">;
 
@@ -140,6 +142,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     browserToolApprovalService,
     extensionToolApprovalService,
     serviceOffers,
+    windowCanOpenThread,
     projectMemoryAccess,
     routineProposalService,
     chatService,
@@ -413,19 +416,35 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     ],
     chat: () => chatService.listPendingQuestions(),
     children: childPendingForReader,
+    offerHostRun: randomUUID(),
     // Each list is the holding service's own for this reader, so who may
     // answer an ask is decided where it always was.
-    asks: (reader) =>
-      waitingAsksFrom(
+    asks: async (reader) => {
+      const windowId = reader.scopeId;
+      const checkedOffers = await Promise.all(
+        serviceOffers
+          .listForWindow(windowId)
+          .map(async (offer) =>
+            (await windowCanOpenThread(windowId, offer.threadKind, String(offer.scopeId)))
+              ? offer
+              : undefined,
+          ),
+      );
+      return waitingAsksFrom(
         {
           toolApprovals: extensionToolApprovalService.list(reader),
           browserApprovals: browserToolApprovalService.list(reader.scopeId),
           memoryProposals: projectMemoryAccess.proposals.list(reader.scopeId),
           routineProposals: routineProposalService.list(reader.scopeId),
-          imageOffers: serviceOffers.listForWindow(reader.scopeId),
+          serviceOffers: checkedOffers.flatMap((offer) => {
+            if (offer === undefined) return [];
+            const live = serviceOffers.find(windowId, offer.offerId);
+            return live === undefined ? [] : [live];
+          }),
         },
         readWaitingAskThread,
-      ),
+      );
+    },
   });
   const pendingRequestRoutes = createPendingRequestRouteHandler({
     service: pendingRequestService,
@@ -438,7 +457,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
   const fleetActivityRoutes = createFleetActivityRouteHandler({
     service: new FleetActivityService({
       readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
-      pending: (windowId) => pendingRequestService.list(windowId),
+      pending: (windowId, reader) => pendingRequestService.list(windowId, reader),
       boundCodeWindows: () => windowsBoundToACodeProject(persistence.readWindowWorkspaces()),
       codePending: async (windowId) => [
         ...((await codeOperationRuntime?.pendingRequests?.(windowId)) ?? []),
