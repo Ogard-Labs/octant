@@ -399,7 +399,10 @@ a delayed notification cannot charge the preceding turn again. Context is
 included only when the latest valid snapshot's token totals match that receipt;
 otherwise the older occupancy is omitted. A missing baseline or final receipt,
 or a malformed, partial or regressing snapshot, leaves usage unavailable for that turn.
-Later valid updates cannot repair an invalidated turn. Late snapshots update
+Later valid updates cannot repair an invalidated turn. A turn that fails
+before its reply (a rejected prompt or a failure raised mid-turn) reports the
+counters its latest valid snapshot added since the baseline, with that
+snapshot's context, before the failure. Late snapshots update
 the next turn's baseline without producing a turn event. Startup captures at
 most one native identity; mixed or mismatched identities leave no baseline.
 Other releases remain unsupported until their wire semantics are verified.
@@ -2423,16 +2426,66 @@ Full access are as they were.
   or the Project's `.grok/sandbox.toml`, neither of which Octant writes; no
   per-command grant reaching an ACP client could be read from the release.
 
+### Usage an ACP agent reports
+
+Every ACP agent records its usage in Octant (maintainer decision,
+2026-11-20). A profile that pins a reviewed reading (`usageVersions`:
+Mistral Vibe 3.0.3, whose figures are cumulative, under
+[Mistral Vibe surface](#mistral-vibe-surface)) is read only by that rule
+and only on those releases. Every other agent, built-in or added, is read
+by ACP's standard usage, and its probe declares `usage: "supported"`
+(`acpTurnUsage` and `finishAcpReportedTurn` in
+`apps/server/src/providers/acpUsage.ts`). The schema is ACP's unstable
+`Usage`, `UsageUpdate` and `Cost` as published in
+`@agentclientprotocol/sdk` 2.8.0 (`schema/v1/schema.unstable.json`).
+
+- **Tokens.** The `session/prompt` reply's `usage` is "token usage for this
+  turn" and is the turn's figure, emitted once, before the turn's terminal
+  event. Its `totalTokens` is the "sum of all token types", and the schema
+  does not say whether `inputTokens` already counts `cachedReadTokens` and
+  `cachedWriteTokens`, or whether `outputTokens` already counts
+  `thoughtTokens`. The total decides: Octant takes the first reading whose
+  parts add up to it, every type disjoint first (as the schema's sum
+  describes), then cache inside input and thought inside output, then each
+  mixed nesting. Octant's input is all input, cached or not, kept also as
+  cache reads and writes, and its output counts thinking. A reply whose
+  parts fit no reading, or with no total (the schema requires one) and no
+  reviewed rule for that (`turnUsageWithoutTotal`), reports nothing.
+- **Context.** A `usage_update`'s `used` of `size` during the turn becomes
+  the turn's context reading; an update from an earlier turn is not carried
+  into a later one.
+- **Cost.** `cost` is the session's cumulative cost. A turn is charged what
+  it grew by since the last settled turn, so an update that arrives after a
+  reply is charged to the next turn rather than lost. A session Octant opened
+  with `session/new` starts from zero; one it loaded or resumed is priced
+  from the second cost it sees. Only `currency: "USD"` becomes `costUsd`;
+  another currency or unit ("credits"), a cost that fell or a changed unit
+  leaves the turn without a provider cost, so the ledger estimates it or
+  refuses a money ceiling as unknown spend.
+- **No report.** A reply without whole counts records the turn as
+  unreported. Because the capability is supported, a money or token
+  ceiling refuses after such a turn as unknown spend, as for any measuring
+  provider, where it used to leave ACP turns out as Not measured.
+- **Failed turns.** A turn's consumer stops reading at its failure, so a
+  failure the driver raises mid-turn (a protocol fault, a refused question,
+  an undeliverable form answer) or a rejected prompt first offers the usage
+  observed so far. Only a pinned reading has any before the reply (its
+  cumulative snapshots since the turn began); a standard agent's failed
+  turn records unreported, and its reply, if one still comes, settles the
+  session cost so the next turn is charged only its own share.
+
+Not verified: the schema also calls these figures "total ... across all
+turns", and Mistral Vibe's reply is cumulative. An unpinned agent whose
+reply is cumulative would be over-counted, and the usage contracts carry no
+confidence marker to flag that per row; a profile pins its reading once a
+probe shows otherwise. Each built-in profile's reply shape remains a
+live-probe check.
+
 ### What an ACP agent cannot do
 
-The protocol leaves three things to the agent, and the driver reports them as
+The protocol leaves two things to the agent, and the driver reports them as
 absent rather than imitating them:
 
-- **No usage window.** A prompt result carries only a stop reason, so the
-  driver declares `usage: "unsupported"`. The runtime card reads **Context
-  window: Not reported**, a Code, Work, or Chat thread's context meter says
-  the runtime reports no usage instead of waiting for a figure, and a spend
-  ceiling leaves the turns out.
 - **No compaction request.** The driver declares no `sessionCompaction`, so
   the host refuses compaction as `runtime-cannot-compact`. The runtime card
   reads **Compaction: Not available**, and the context popover and inspector
@@ -2728,8 +2781,10 @@ with the person's token. The CLI talks to Google itself.
   when `initialize` advertises it, leaving out any an Octant thread holds
   (`importsSessions`).
 - **Usage and limits.** The `session/prompt` reply's `usage` is that turn's
-  own; its `inputTokens` leaves out cached reads, so Octant's input is input
-  plus `cachedReadTokens`, kept also as cache reads (`reportsTurnUsage`). The
+  own, read as [any ACP agent's](#usage-an-acp-agent-reports); a reply
+  without `totalTokens` is read by the reviewed rule that its `inputTokens`
+  leaves out cached reads, so Octant's input is input plus
+  `cachedReadTokens`, kept also as cache reads (`turnUsageWithoutTotal`). The
   account's 5-hour and weekly windows are not read: the CLI answers `/usage`
   only through headless mode, which Google does not support wrapping inside
   another application on consumer plans, so its limits report as
@@ -2872,9 +2927,10 @@ advertises. The model is set in the spelling the session reported
 session already opened on that model. No mode is selected (`selectsNoMode`), since no mapping of
 Chat, Work, Code and Plan onto the agent's own modes was read; Plan's
 read-only wall and the level's approvals are Octant's sandbox and approval
-bridge. It pins no exact-release feature (usage, compaction, file review,
-forms, warm reuse, unadvertised HTTP tools), so none is offered at any
-level, and the Full access "unverified" rule has nothing to offer it. An
+bridge. It pins no exact-release feature (compaction, file review, forms, warm
+reuse, unadvertised HTTP tools), so none is offered at any level, and the
+Full access "unverified" rule has nothing to offer it. Its usage is read as
+[any ACP agent's](#usage-an-acp-agent-reports). An
 agent whose session lists no model has nothing to select and cannot start a
 thread.
 

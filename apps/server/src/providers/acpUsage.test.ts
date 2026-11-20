@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  acpReportedUsageState,
   acpTurnUsage,
+  beginAcpReportedTurn,
   beginAcpUsageTurn,
+  finishAcpReportedTurn,
   finishAcpUsageTurn,
   observeAcpUsage,
+  observeAcpUsageUpdate,
+  observedAcpUsageTurn,
   type AcpUsageState,
 } from "./acpUsage";
 
@@ -135,23 +140,183 @@ describe("ACP cumulative usage", () => {
 });
 
 describe("usage an agent reports in its prompt reply", () => {
-  it("adds cached reads back into input and keeps them as cache reads", () => {
-    expect(acpTurnUsage({ inputTokens: 100, outputTokens: 20, cachedReadTokens: 300 })).toEqual({
+  it("adds cached reads back into input for a reviewed reply that carries no total", () => {
+    const rule = "input-excludes-cache-reads";
+    expect(
+      acpTurnUsage({ inputTokens: 100, outputTokens: 20, cachedReadTokens: 300 }, rule),
+    ).toEqual({
       kind: "usage",
       inputTokens: 400,
       outputTokens: 20,
       cacheReadInputTokens: 300,
     });
-    expect(acpTurnUsage({ inputTokens: 5, outputTokens: 1 })).toEqual({
+    expect(acpTurnUsage({ inputTokens: 5, outputTokens: 1 }, rule)).toEqual({
       kind: "usage",
       inputTokens: 5,
       outputTokens: 1,
     });
   });
 
+  it("reads no reply without a total unless a reviewed rule says what its input holds", () => {
+    expect(
+      acpTurnUsage({ inputTokens: 100, outputTokens: 20, cachedReadTokens: 300 }),
+    ).toBeUndefined();
+  });
+
   it("reports nothing for a reply without whole counts", () => {
     expect(acpTurnUsage(undefined)).toBeUndefined();
-    expect(acpTurnUsage({ inputTokens: "5", outputTokens: 1 })).toBeUndefined();
-    expect(acpTurnUsage({ inputTokens: 5, outputTokens: 1.5 })).toBeUndefined();
+    expect(acpTurnUsage({ inputTokens: "5", outputTokens: 1, totalTokens: 6 })).toBeUndefined();
+    expect(acpTurnUsage({ inputTokens: 5, outputTokens: 1.5, totalTokens: 6 })).toBeUndefined();
+    expect(
+      acpTurnUsage({ inputTokens: 5, outputTokens: 1, totalTokens: 6, cachedReadTokens: -1 }),
+    ).toBeUndefined();
+  });
+
+  it("adds disjoint cache and thought figures into input and output when the total sums them all", () => {
+    expect(
+      acpTurnUsage({
+        inputTokens: 100,
+        outputTokens: 20,
+        thoughtTokens: 30,
+        cachedReadTokens: 300,
+        cachedWriteTokens: 50,
+        totalTokens: 500,
+      }),
+    ).toEqual({
+      kind: "usage",
+      inputTokens: 450,
+      outputTokens: 50,
+      cacheReadInputTokens: 300,
+      cacheWriteInputTokens: 50,
+    });
+  });
+
+  it("keeps input and output as they come when the total shows they already count cache and thought", () => {
+    expect(
+      acpTurnUsage({
+        inputTokens: 400,
+        outputTokens: 50,
+        thoughtTokens: 30,
+        cachedReadTokens: 300,
+        totalTokens: 450,
+      }),
+    ).toEqual({ kind: "usage", inputTokens: 400, outputTokens: 50, cacheReadInputTokens: 300 });
+  });
+
+  it("reads each part inside or outside its parent as the total sums it", () => {
+    expect(
+      acpTurnUsage({
+        inputTokens: 100,
+        outputTokens: 50,
+        thoughtTokens: 30,
+        cachedReadTokens: 300,
+        totalTokens: 450,
+      }),
+    ).toEqual({ kind: "usage", inputTokens: 400, outputTokens: 50, cacheReadInputTokens: 300 });
+    expect(
+      acpTurnUsage({
+        inputTokens: 400,
+        outputTokens: 20,
+        thoughtTokens: 30,
+        cachedReadTokens: 300,
+        totalTokens: 450,
+      }),
+    ).toEqual({ kind: "usage", inputTokens: 400, outputTokens: 50, cacheReadInputTokens: 300 });
+  });
+
+  it("reports nothing when no reading of the parts adds up to the total", () => {
+    expect(
+      acpTurnUsage({ inputTokens: 100, outputTokens: 20, cachedReadTokens: 30, totalTokens: 999 }),
+    ).toBeUndefined();
+  });
+});
+
+describe("standard ACP usage updates", () => {
+  const reply = { inputTokens: 100, outputTokens: 20, totalTokens: 120 };
+  const update = (amount: number, currency = "USD", used = 4_000) => ({
+    sessionUpdate: "usage_update",
+    used,
+    size: 128_000,
+    cost: { amount, currency },
+  });
+
+  it("charges a new session's turns what its cumulative US-dollar cost grew by", () => {
+    const state = acpReportedUsageState("new");
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(0.1));
+    expect(finishAcpReportedTurn(state, reply)).toEqual({
+      kind: "usage",
+      inputTokens: 100,
+      outputTokens: 20,
+      costUsd: 0.1,
+      contextTokens: 4_000,
+      contextWindow: 128_000,
+    });
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(0.3, "USD", 6_000));
+    expect(finishAcpReportedTurn(state, reply)).toMatchObject({
+      costUsd: 0.2,
+      contextTokens: 6_000,
+    });
+  });
+
+  it("charges a cost update that arrives after the reply to the next turn and drops stale context", () => {
+    const state = acpReportedUsageState("new");
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(0.1));
+    finishAcpReportedTurn(state, reply);
+    observeAcpUsageUpdate(state, update(0.25));
+    beginAcpReportedTurn(state);
+    const usage = finishAcpReportedTurn(state, reply);
+    expect(usage).toMatchObject({ costUsd: 0.15 });
+    expect(usage).not.toHaveProperty("contextTokens");
+  });
+
+  it("prices no turn of a loaded session until a cost was reported before it", () => {
+    const state = acpReportedUsageState("existing");
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(5));
+    expect(finishAcpReportedTurn(state, reply)).not.toHaveProperty("costUsd");
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(5.5));
+    expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0.5 });
+  });
+
+  it("records no provider cost in another currency or unit, or when the cost fell", () => {
+    const credits = acpReportedUsageState("new");
+    beginAcpReportedTurn(credits);
+    observeAcpUsageUpdate(credits, update(3, "credits"));
+    expect(finishAcpReportedTurn(credits, reply)).not.toHaveProperty("costUsd");
+    const fell = acpReportedUsageState("existing");
+    observeAcpUsageUpdate(fell, update(2));
+    beginAcpReportedTurn(fell);
+    observeAcpUsageUpdate(fell, update(1));
+    expect(finishAcpReportedTurn(fell, reply)).not.toHaveProperty("costUsd");
+  });
+
+  it("reports nothing for a turn whose reply carries no usage, and still settles its cost", () => {
+    const state = acpReportedUsageState("new");
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(0.4));
+    expect(finishAcpReportedTurn(state, undefined)).toBeUndefined();
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(0.5));
+    expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0.1 });
+  });
+});
+
+describe("usage of a turn that fails before its reply", () => {
+  it("reports the counters a reviewed agent's snapshots added since the turn began", () => {
+    const state = started();
+    observeAcpUsage(state, snapshot(1_300, 450, 250));
+    expect(observedAcpUsageTurn(state)).toEqual({
+      kind: "usage",
+      inputTokens: 300,
+      outputTokens: 50,
+      cacheReadInputTokens: 50,
+      contextTokens: 120,
+      contextWindow: 200_000,
+    });
+    expect(observedAcpUsageTurn(state)).toBeUndefined();
   });
 });
