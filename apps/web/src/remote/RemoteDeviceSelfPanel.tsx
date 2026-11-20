@@ -7,7 +7,8 @@ import {
   remoteSignOut,
 } from "@octant/client-runtime";
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { formatDateTime } from "../theme/timestampFormat";
+import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
+import { formatDateTime, type TimestampFormatPreference } from "../theme/timestampFormat";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -20,11 +21,14 @@ export interface RemoteDeviceSelfPanelProps {
   readonly onRevoked: (warning?: string) => void;
 }
 
-function formatTimestamp(value: string | undefined): string {
+function formatTimestamp(
+  value: string | undefined,
+  timestampFormat?: TimestampFormatPreference,
+): string {
   if (value === undefined) return "Unavailable";
   const parsed = Date.parse(value);
   if (Number.isNaN(parsed)) return "Unavailable";
-  return formatDateTime(parsed);
+  return formatDateTime(parsed, undefined, timestampFormat);
 }
 
 const ROTATE_LABEL = "Rotate this device's key";
@@ -38,6 +42,7 @@ const ROTATE_SUCCESS =
 
 export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
   const state = useRemoteSession(props.bridge);
+  const timestampFormat = useTimestampFormat();
   const alive = useRef(true);
   const focusReturnRef = useRef<HTMLButtonElement>(null);
   const rotateButtonRef = useRef<HTMLButtonElement>(null);
@@ -123,15 +128,15 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
           </div>
           <div className="remote-shell__device-fact">
             <dt>Last seen</dt>
-            <dd>{formatTimestamp(metadata.lastSeenAt)}</dd>
+            <dd>{formatTimestamp(metadata.lastSeenAt, timestampFormat)}</dd>
           </div>
           <div className="remote-shell__device-fact">
             <dt>Device expires</dt>
-            <dd>{formatTimestamp(metadata.expiresAt)}</dd>
+            <dd>{formatTimestamp(metadata.expiresAt, timestampFormat)}</dd>
           </div>
           <div className="remote-shell__device-fact">
             <dt>Session idle</dt>
-            <dd>{formatTimestamp(metadata.sessionIdleExpiresAt)}</dd>
+            <dd>{formatTimestamp(metadata.sessionIdleExpiresAt, timestampFormat)}</dd>
           </div>
         </dl>
       )}

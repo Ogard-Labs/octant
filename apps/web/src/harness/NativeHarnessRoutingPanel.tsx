@@ -36,11 +36,12 @@ import { nativeHarnessReadinessById, roleSuggestionModels } from "./modelRoleOpt
 import { RoleSuggestionPreview } from "./RoleSuggestionPreview";
 import {
   ADVISOR_ROLE,
-  MODEL_ROLES,
   UNRESOLVED_BUILT_IN_SLOT_IDS,
+  activeBoundSlotIds,
   rolePresentation,
   slotFromSuggestion,
   slotWithCandidates,
+  visibleModelRoles,
 } from "./modelRoles";
 import "./native-harness.css";
 
@@ -203,21 +204,23 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
 
   const configuration = pending ?? settings.configuration;
   const saving = pending !== undefined;
+  const activeBound = activeBoundSlotIds(configuration);
+  const visibleRoles = visibleModelRoles(configuration);
+  const hiddenSlotIds = new Set<string>(
+    [...UNRESOLVED_BUILT_IN_SLOT_IDS].filter((id) => !activeBound.has(id)),
+  );
   const shownIds = new Set<string>([
-    ...MODEL_ROLES.map((role) => role.id),
+    ...visibleRoles.map((role) => role.id),
     ADVISOR_ROLE.id,
-    ...UNRESOLVED_BUILT_IN_SLOT_IDS,
+    ...hiddenSlotIds,
   ]);
-  // A role this page has no name for (a custom slot, saved from the CLI) still
-  // shows, under Other roles, so it cannot hide a model Octant would use.
-  // Built-in slots no server caller resolves stay hidden even if saved earlier.
-  const otherRoles = [
-    ADVISOR_ROLE,
-    ...configuration.slots
-      .map((slot) => String(slot.id))
-      .filter((id) => !shownIds.has(id))
-      .map(rolePresentation),
-  ];
+  // A role this page has no name for (a custom slot, saved from the CLI or
+  // targeted by a live job) still shows under Other roles so it cannot hide a
+  // model Octant would use. Built-in slots with no live job binding stay hidden.
+  const otherRoleIds = [
+    ...new Set([...configuration.slots.map((slot) => String(slot.id)), ...activeBound]),
+  ].filter((id) => !shownIds.has(id));
+  const otherRoles = [ADVISOR_ROLE, ...otherRoleIds.map(rolePresentation)];
   const standardSlot = (job: NativeHarnessJob) =>
     String(DEFAULT_NATIVE_HARNESS_JOB_SLOTS.find((binding) => binding.job === job)?.slotId);
   const boundSlot = (job: NativeHarnessJob) => {
@@ -226,10 +229,8 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
   };
   const slotIds = [
     ...new Set([
-      ...NATIVE_HARNESS_BUILT_IN_SLOT_IDS.filter((id) => !UNRESOLVED_BUILT_IN_SLOT_IDS.has(id)),
-      ...configuration.slots
-        .map((slot) => String(slot.id))
-        .filter((id) => !UNRESOLVED_BUILT_IN_SLOT_IDS.has(id)),
+      ...NATIVE_HARNESS_BUILT_IN_SLOT_IDS.filter((id) => !hiddenSlotIds.has(id)),
+      ...configuration.slots.map((slot) => String(slot.id)).filter((id) => !hiddenSlotIds.has(id)),
       ...EDITABLE_JOBS.map(boundSlot),
     ]),
   ];
@@ -269,7 +270,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
   // changed binding counts as routing someone saved.
   const hasSavedRouting =
     configuration.slots.some(
-      (slot) => !UNRESOLVED_BUILT_IN_SLOT_IDS.has(String(slot.id)) && slot.candidates.length > 0,
+      (slot) => !hiddenSlotIds.has(String(slot.id)) && slot.candidates.length > 0,
     ) || !standardJobs;
 
   const readiness = nativeHarnessReadinessById(props.providers);
@@ -422,7 +423,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                 </span>
                 <OctantButton
                   disabled={saving}
-                  onClick={() => suggest(MODEL_ROLES.map((role) => role.id))}
+                  onClick={() => suggest(visibleRoles.map((role) => role.id))}
                   size="sm"
                   variant="secondary"
                 >
@@ -430,7 +431,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                 </OctantButton>
               </div>
             ) : null}
-            {MODEL_ROLES.map((role) =>
+            {visibleRoles.map((role) =>
               role.id === "default" ? (
                 <div
                   className="native-harness-role"

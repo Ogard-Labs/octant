@@ -9,7 +9,8 @@ import type {
   ServiceLimitBucket,
 } from "@octant/contracts";
 import { SurfaceSection } from "../surface/SurfaceHeader";
-import { formatDateTime } from "../theme/timestampFormat";
+import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
+import { formatDateTime, type TimestampFormatPreference } from "../theme/timestampFormat";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { driverLabel } from "../providers/providerSettingsPresentation";
@@ -314,6 +315,7 @@ function EntryDetails({
   readonly runtime: string;
   readonly now: number;
 }) {
+  const timestampFormat = useTimestampFormat();
   if (entry.status === "unavailable") {
     return <p className="provider-limits__state">{unavailableCopy(entry.reason, runtime)}</p>;
   }
@@ -324,16 +326,16 @@ function EntryDetails({
         <div className="provider-limits__warning">
           <p>{limits === undefined ? "Refresh failed" : "Stale · refresh failed"}</p>
           {entry.failure.retryAt === undefined ? null : (
-            <p>Retry after {formatTime(entry.failure.retryAt)}</p>
+            <p>Retry after {formatTime(entry.failure.retryAt, timestampFormat)}</p>
           )}
           {entry.lastSuccessfulAt === undefined ? null : (
-            <p>Last successful read {formatTime(entry.lastSuccessfulAt)}</p>
+            <p>Last successful read {formatTime(entry.lastSuccessfulAt, timestampFormat)}</p>
           )}
         </div>
       ) : null}
       {limits === undefined ? <p>Unavailable</p> : <LimitBuckets limits={limits} now={now} />}
       <p className="provider-limits__updated">
-        Last updated {formatTime(limits?.updatedAt ?? entry.observedAt)}
+        Last updated {formatTime(limits?.updatedAt ?? entry.observedAt, timestampFormat)}
       </p>
     </div>
   );
@@ -346,6 +348,7 @@ function LimitBuckets({
   readonly limits: ProviderServiceLimits;
   readonly now: number;
 }) {
+  const timestampFormat = useTimestampFormat();
   const buckets = [
     ["requests", limits.requests],
     ["tokens", limits.tokens],
@@ -380,7 +383,7 @@ function LimitBuckets({
       ))}
       {limits.retry.status === "active" ? (
         <p className="provider-limits__warning">
-          Retry window until {formatTime(limits.retry.until)}
+          Retry window until {formatTime(limits.retry.until, timestampFormat)}
         </p>
       ) : null}
     </div>
@@ -413,6 +416,7 @@ function QuotaWindow(props: {
   readonly detail?: string;
   readonly overage?: string;
 }) {
+  const timestampFormat = useTimestampFormat();
   const expired = props.resetsAt !== undefined && Date.parse(props.resetsAt) <= props.now;
   const remaining = expired ? undefined : props.remainingPercent;
   return (
@@ -435,8 +439,9 @@ function QuotaWindow(props: {
               : `${remaining}% left`}
         </span>
         {props.resetsAt === undefined || expired ? null : (
-          <time dateTime={props.resetsAt} title={formatTime(props.resetsAt)}>
-            {formatTime(props.resetsAt)} · {resetCountdown(props.resetsAt, props.now)}
+          <time dateTime={props.resetsAt} title={formatTime(props.resetsAt, timestampFormat)}>
+            {formatTime(props.resetsAt, timestampFormat)} ·{" "}
+            {resetCountdown(props.resetsAt, props.now)}
           </time>
         )}
       </div>
@@ -471,6 +476,6 @@ function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function formatTime(value: string): string {
-  return formatDateTime(value, { dateStyle: "medium", timeStyle: "short" });
+function formatTime(value: string, timestampFormat?: TimestampFormatPreference): string {
+  return formatDateTime(value, { dateStyle: "medium", timeStyle: "short" }, timestampFormat);
 }

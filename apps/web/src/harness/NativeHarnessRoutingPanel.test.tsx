@@ -324,6 +324,44 @@ describe("NativeHarnessRoutingPanel roles", () => {
     }
   });
 
+  it("keeps plan and smol editable whenever a live server-resolved job explicitly binds to them", async () => {
+    const user = userEvent.setup();
+    const saved = settings({
+      slots: [
+        { id: "plan" as never, candidates: [candidate(endpointA, "scribe-2")] },
+        { id: "smol" as never, candidates: [candidate(endpointA, "scribe-2-mini")] },
+      ],
+      jobSlots: [
+        { job: "researcher", slotId: "plan" as never },
+        { job: "implementer", slotId: "smol" as never },
+      ],
+    });
+    const withoutPlan = settings(
+      {
+        slots: [{ id: "smol" as never, candidates: [candidate(endpointA, "scribe-2-mini")] }],
+        jobSlots: saved.configuration.jobSlots,
+      },
+      2,
+    );
+    const updateRouting = savedAs(withoutPlan);
+    renderPanel({ routing: async () => saved, updateRouting, fixtures: [local, router] });
+
+    const planner = await screen.findByRole("group", { name: "Planner" });
+    const smallJobs = screen.getByRole("group", { name: "Small jobs" });
+    expect(within(planner).getByRole("button", { name: "Planner, main" })).toHaveTextContent(
+      "Scribe 2",
+    );
+    expect(within(smallJobs).getByRole("button", { name: "Small jobs, main" })).toHaveTextContent(
+      "Scribe 2 Mini",
+    );
+
+    await user.click(within(planner).getByRole("button", { name: "Remove scribe-2 from Planner" }));
+    expect(updateRouting).toHaveBeenCalledWith({
+      configuration: withoutPlan.configuration,
+      expectedVersion: 1,
+    });
+  });
+
   it("saves a chosen model at once, with the version it was read at", async () => {
     const user = userEvent.setup();
     const next = roles({ task: [candidate(endpointB, "router-text")] });

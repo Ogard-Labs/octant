@@ -15,7 +15,8 @@ import {
   type ContextCompositionEntry,
 } from "./contextInspectorModel";
 import type { CompactionOffer } from "./sessionCompactionPresentation";
-import { formatDateTime } from "../theme/timestampFormat";
+import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
+import { formatDateTime, type TimestampFormatPreference } from "../theme/timestampFormat";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import "./context.css";
@@ -41,6 +42,7 @@ export interface ContextInspectorProps {
 }
 
 export function ContextInspector(props: ContextInspectorProps) {
+  const timestampFormat = useTimestampFormat();
   const { snapshot } = props;
   const { plan } = snapshot.next;
   const composition = contextCompositionEntries(snapshot);
@@ -147,7 +149,7 @@ export function ContextInspector(props: ContextInspectorProps) {
           <p className="context-inspector__freshness">
             <span>Updated</span>{" "}
             <time dateTime={snapshot.serviceLimits.updatedAt}>
-              {formatTime(snapshot.serviceLimits.updatedAt)}
+              {formatTime(snapshot.serviceLimits.updatedAt, timestampFormat)}
             </time>
           </p>
           {hasUnavailableLimit(snapshot) ? <p>Unavailable</p> : null}
@@ -160,9 +162,15 @@ export function ContextInspector(props: ContextInspectorProps) {
             />
             <Fact label="Quota" value={snapshot.serviceLimits.quota} />
             <Fact label="Reservation" value={snapshot.capacity?.state ?? "Unavailable"} />
-            <Fact label="Retry" value={retryLabel(snapshot)} />
-            <Fact label="Requests reset" value={resetLabel(snapshot.serviceLimits.requests)} />
-            <Fact label="Tokens reset" value={resetLabel(snapshot.serviceLimits.tokens)} />
+            <Fact label="Retry" value={retryLabel(snapshot, timestampFormat)} />
+            <Fact
+              label="Requests reset"
+              value={resetLabel(snapshot.serviceLimits.requests, timestampFormat)}
+            />
+            <Fact
+              label="Tokens reset"
+              value={resetLabel(snapshot.serviceLimits.tokens, timestampFormat)}
+            />
             <Fact
               label="Concurrency reset"
               value={resetLabel(snapshot.serviceLimits.concurrency)}
@@ -372,23 +380,31 @@ function hasUnavailableLimit(snapshot: ContextInspectorSnapshot): boolean {
   );
 }
 
-function retryLabel(snapshot: ContextInspectorSnapshot): string {
+function retryLabel(
+  snapshot: ContextInspectorSnapshot,
+  timestampFormat?: TimestampFormatPreference,
+): string {
   return snapshot.serviceLimits.retry.status === "inactive"
     ? "Inactive"
-    : `Active until ${formatTime(snapshot.serviceLimits.retry.until)}`;
+    : `Active until ${formatTime(snapshot.serviceLimits.retry.until, timestampFormat)}`;
 }
 
-function resetLabel(bucket: ServiceLimitBucket): string {
+function resetLabel(
+  bucket: ServiceLimitBucket,
+  timestampFormat?: TimestampFormatPreference,
+): string {
   if (bucket.status === "unavailable") return "Unavailable";
-  return bucket.resetsAt === undefined ? "Not reported" : formatTime(bucket.resetsAt);
+  return bucket.resetsAt === undefined
+    ? "Not reported"
+    : formatTime(bucket.resetsAt, timestampFormat);
 }
 
 function formatNumber(value: number): string {
   return numberFormat.format(value);
 }
 
-function formatTime(timestamp: string): string {
-  return formatDateTime(timestamp, { dateStyle: "medium", timeStyle: "short" });
+function formatTime(timestamp: string, timestampFormat?: TimestampFormatPreference): string {
+  return formatDateTime(timestamp, { dateStyle: "medium", timeStyle: "short" }, timestampFormat);
 }
 
 function signed(value: number): string {

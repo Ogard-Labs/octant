@@ -1,6 +1,8 @@
 import {
   MAX_NATIVE_HARNESS_SLOT_CANDIDATES,
   nativeHarnessSlotCandidateKey,
+  type NativeHarnessJob,
+  type NativeHarnessRoutingConfiguration,
   type NativeHarnessSlot,
   type NativeHarnessSlotCandidate,
   type NativeHarnessSlotId,
@@ -13,9 +15,22 @@ export interface ModelRolePresentation {
   readonly meaning: string;
 }
 
+/** Every job a live server caller resolves through the routing table. */
+export const SERVER_RESOLVED_JOBS: ReadonlyArray<NativeHarnessJob> = [
+  "lead",
+  "researcher",
+  "implementer",
+  "reviewer",
+  "image-understanding",
+  "advisor",
+  "custom",
+];
+
+const SERVER_RESOLVED_JOB_SET: ReadonlySet<NativeHarnessJob> = new Set(SERVER_RESOLVED_JOBS);
+
 /**
- * Built-in slots kept in the wire schema for saved settings, but hidden from
- * Settings while no server caller resolves them.
+ * Built-in slots kept in the wire schema for saved settings, hidden from
+ * Settings when no server-resolved job explicitly binds to them.
  */
 export const UNRESOLVED_BUILT_IN_SLOT_IDS: ReadonlySet<string> = new Set(["plan", "smol"]);
 
@@ -31,6 +46,38 @@ const HIDDEN_ROLE_PRESENTATIONS: ReadonlyArray<ModelRolePresentation> = [
     meaning: "Titles, summaries and shortening long threads. A small, fast model is enough.",
   },
 ];
+
+/**
+ * Slot ids targeted by any server-resolved job in the given routing
+ * configurations (host routing and optional Project override).
+ */
+export function activeBoundSlotIds(
+  ...configurations: ReadonlyArray<NativeHarnessRoutingConfiguration | undefined>
+): ReadonlySet<string> {
+  const bound = new Set<string>();
+  for (const configuration of configurations) {
+    if (configuration === undefined) continue;
+    for (const binding of configuration.jobSlots) {
+      if (SERVER_RESOLVED_JOB_SET.has(binding.job)) {
+        bound.add(String(binding.slotId));
+      }
+    }
+  }
+  return bound;
+}
+
+/**
+ * The primary roles to show for the given routing configurations: always the
+ * server-resolved built-in roles, plus any otherwise-hidden built-in slot
+ * (`plan`, `smol`) that a live server-resolved job currently binds to.
+ */
+export function visibleModelRoles(
+  ...configurations: ReadonlyArray<NativeHarnessRoutingConfiguration | undefined>
+): ReadonlyArray<ModelRolePresentation> {
+  const bound = activeBoundSlotIds(...configurations);
+  const extra = HIDDEN_ROLE_PRESENTATIONS.filter((role) => bound.has(role.id));
+  return extra.length === 0 ? MODEL_ROLES : [...MODEL_ROLES, ...extra];
+}
 
 /**
  * The server-resolved roles a person sees, in the order the work gets harder.

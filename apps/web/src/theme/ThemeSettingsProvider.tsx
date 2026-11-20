@@ -4,7 +4,6 @@ import {
   GLASS_TINT_FLOOR,
   GLASS_TINT_SECONDARY_FLOOR,
   type ThemeSettings,
-  type ThemeTimestampFormat,
 } from "@octant/contracts/theme";
 import { enforceSidebarBackgroundAccessibility } from "@octant/domain/theme-policy";
 import {
@@ -38,6 +37,7 @@ import { rememberThemeMode } from "./firstPaintTheme";
 import { upgradeLegacyAccent } from "./accentSwatches";
 import { useMediaQueryMatches } from "./useMediaQueryMatches";
 import { usePluginThemes } from "./pluginThemes";
+import type { TimestampFormatPreference } from "./timestampFormat";
 
 const VARIABLE_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
   sidebar: ["sidebar-opaque"],
@@ -305,7 +305,12 @@ export function ThemeSettingsProvider(props: {
         : resolveTerminalColorProjection(resolved, { increasedContrast }),
     [resolved, increasedContrast],
   );
-  const timestampFormat = applied?.accessible.timestampFormat;
+  // When a theme is loaded without `timestampFormat`, provide explicit `null`
+  // (locale default) rather than `undefined`, so mounted children immediately
+  // drop any previous clock format during render before the layout effect
+  // clears `data-octant-timestamp-format` on the document root.
+  const timestampFormat: TimestampFormatPreference | undefined =
+    applied === undefined ? undefined : (applied.accessible.timestampFormat ?? null);
   return (
     <IncreasedContrastContext.Provider value={increasedContrast}>
       <TimestampFormatContext.Provider value={timestampFormat}>
@@ -319,14 +324,15 @@ export function ThemeSettingsProvider(props: {
   );
 }
 
-const TimestampFormatContext = createContext<ThemeTimestampFormat | undefined>(undefined);
+const TimestampFormatContext = createContext<TimestampFormatPreference | undefined>(undefined);
 
 /**
- * The theme's configured timestamp clock format (`12h` or `24h`), or
- * `undefined` to follow the locale default. Components subscribing to this
- * hook re-render immediately when the theme setting changes.
+ * The theme's configured timestamp clock format (`"12h"` or `"24h"`), `null`
+ * when the mounted theme explicitly leaves it unset (locale default), or
+ * `undefined` outside a `ThemeSettingsProvider`. Components subscribing to
+ * this hook re-render immediately when the theme setting changes.
  */
-export function useTimestampFormat(): ThemeTimestampFormat | undefined {
+export function useTimestampFormat(): TimestampFormatPreference | undefined {
   return useContext(TimestampFormatContext);
 }
 

@@ -1,7 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { ThemeTimestampFormat } from "@octant/contracts/theme";
 import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
-import { formatClockTime, formatDateTime } from "../theme/timestampFormat";
+import {
+  formatClockTime,
+  formatDateTime,
+  type TimestampFormatPreference,
+} from "../theme/timestampFormat";
 import {
   Ban,
   Circle,
@@ -97,12 +100,13 @@ function outcomeIcon(outcome: TurnHeaderOutcome) {
  * provenance.
  */
 export function TurnHeader(props: TurnHeaderProps) {
+  const timestampFormat = useTimestampFormat();
   const Icon = outcomeIcon(props.outcome);
   const liveLine =
     props.startedAt !== undefined &&
     (props.outcome === "running" || props.outcome === "streaming") &&
     props.label === undefined;
-  const hoverDetails = [props.provider, turnTimeTitle(props.at)]
+  const hoverDetails = [props.provider, turnTimeTitle(props.at, timestampFormat)]
     .filter((value): value is string => value !== undefined)
     .join(" · ");
   return (
@@ -279,7 +283,7 @@ export function turnWorkedFor(
 /** Clock time for today, date and time for anything older. */
 export function turnTimeLabel(
   at: string | undefined,
-  timestampFormat?: ThemeTimestampFormat,
+  timestampFormat?: TimestampFormatPreference,
 ): string | undefined {
   if (at === undefined) return undefined;
   const date = new Date(at);
@@ -297,7 +301,7 @@ export function turnTimeLabel(
 
 export function turnTimeTitle(
   at: string | undefined,
-  timestampFormat?: ThemeTimestampFormat,
+  timestampFormat?: TimestampFormatPreference,
 ): string | undefined {
   if (at === undefined) return undefined;
   const date = new Date(at);

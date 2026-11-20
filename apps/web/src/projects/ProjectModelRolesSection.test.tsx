@@ -350,4 +350,46 @@ describe("ProjectModelRolesSection", () => {
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(client.setProjectRouting).not.toHaveBeenCalled();
   });
+
+  it("keeps plan and smol editable for a Project when host routing or the Project override binds a live job to them", async () => {
+    const user = userEvent.setup();
+    const host: NativeHarnessRoutingConfiguration = {
+      slots: [
+        { id: "plan" as never, candidates: [candidate("scribe-1"), candidate("scribe-2")] },
+        { id: "smol" as never, candidates: [candidate("scribe-1"), candidate("scribe-2")] },
+      ],
+      jobSlots: [{ job: "researcher", slotId: "plan" as never }],
+    };
+    const project: NativeHarnessRoutingConfiguration = {
+      slots: [{ id: "smol" as never, candidates: [candidate("scribe-1")] }],
+      jobSlots: [{ job: "implementer", slotId: "smol" as never }],
+    };
+    const nextProject: NativeHarnessRoutingConfiguration = {
+      slots: [
+        { id: "smol" as never, candidates: [candidate("scribe-1")] },
+        { id: "plan" as never, candidates: [candidate("scribe-1"), candidate("scribe-2")] },
+      ],
+      jobSlots: project.jobSlots,
+    };
+    const setProjectRouting = savedOverride(nextProject, 2);
+    const client = renderSection({ host, project, setProjectRouting });
+
+    const planner = await screen.findByRole("group", { name: "Planner" });
+    const smallJobs = screen.getByRole("group", { name: "Small jobs" });
+    expect(within(planner).getByText("scribe-1")).toBeVisible();
+    expect(within(smallJobs).getByRole("button", { name: "Small jobs, main" })).toHaveTextContent(
+      "Scribe 1",
+    );
+
+    await chooseSelectFieldOption(
+      user,
+      screen.getByRole("combobox", { name: "Planner for this Project" }),
+      "Choose for this Project",
+    );
+
+    expect(client.setProjectRouting).toHaveBeenCalledWith(projectId, {
+      configuration: nextProject,
+      expectedVersion: 1,
+    });
+  });
 });
