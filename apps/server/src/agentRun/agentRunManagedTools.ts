@@ -498,7 +498,14 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
       if (input === undefined) return failure("invalid-agents-input");
 
       if (input.operation === "capabilities") {
-        return answer({ status: "ok", ...agentRunDelegationCapabilities(options) });
+        // Other members and the Projects each lets this host delegate to, so the
+        // agent can name a member and that member's own Project id.
+        const members = (await options.remote?.listTargets?.().catch(() => undefined)) ?? [];
+        return answer({
+          status: "ok",
+          ...agentRunDelegationCapabilities(options),
+          ...(members.length === 0 ? {} : { members }),
+        });
       }
 
       if (input.operation === "status") {

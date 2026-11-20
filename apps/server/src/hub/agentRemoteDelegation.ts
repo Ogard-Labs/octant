@@ -14,7 +14,7 @@ import type {
 import type { DelegatingSpokeService } from "./delegatingSpokeService";
 
 export interface AgentRemoteDelegationOptions {
-  readonly delegation: Pick<DelegatingSpokeService, "delegate">;
+  readonly delegation: Pick<DelegatingSpokeService, "delegate" | "listTargets">;
   readonly readProject: (projectId: string) => Pick<Project, "type"> | undefined;
   readonly isWorkEnabled: () => boolean;
 }
@@ -30,6 +30,7 @@ export function createAgentRemoteDelegation(
   options: AgentRemoteDelegationOptions,
 ): RemoteDelegationPort {
   return {
+    listTargets: () => options.delegation.listTargets(),
     start: async (input) => {
       if (input.mode !== "work" || input.projectId === undefined) {
         return refusal("remote-delegation-work-only", WORK_ONLY_MESSAGE);

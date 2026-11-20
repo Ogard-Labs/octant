@@ -1,3 +1,4 @@
+import type { ProjectId } from "@octant/contracts";
 import type { OwnerApprovalHost } from "./ownerApprovalHost";
 // A whole Octant host for the hub tests: its journal, its real remote gateway
 // behind a real TLS listener serving a certificate it made itself, and the hub
@@ -257,6 +258,11 @@ export async function startHubTestHost(input: {
   readonly listenerStatus?: Partial<PrivateListenerHostStatus>;
   /** What a delegation to this host becomes; absent, this host has no Project open for delegated work. */
   readonly delegationHost?: PeerDelegationHost;
+  /** This host's active Projects, for the list a member asks for. */
+  readonly delegationProjects?: () => ReadonlyArray<{
+    readonly projectId: ProjectId;
+    readonly name: string;
+  }>;
   /** The threads this host can send and receive in a move; absent, it holds none. */
   readonly threadMoveHosts?: {
     readonly source: ThreadMoveSourceHost;
@@ -811,6 +817,7 @@ export async function startHubTestHost(input: {
       authenticate: (request) => spoke.authenticatePeer(request),
       currentPeer: (memberId) => spoke.currentPeer(memberId),
       host: input.delegationHost ?? NO_DELEGATION_HOST,
+      ...(input.delegationProjects === undefined ? {} : { projects: input.delegationProjects }),
       state: delegationState,
       record: (change) => delegationRecords.push(change),
       now: Date.now,
@@ -820,6 +827,10 @@ export async function startHubTestHost(input: {
     state: delegationState,
     identity: () => identity,
     target: (memberId) => spoke.memberTarget(memberId),
+    members: () => {
+      const status = spoke.status();
+      return status.membership === "member" ? status.acceptedMemberIds : [];
+    },
     transport: input.delegatingTransport?.(transport) ?? transport,
     parent: input.parent ?? NO_PARENT,
     record: (change) => delegationRecords.push(change),

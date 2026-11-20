@@ -1023,6 +1023,11 @@ export function wireRemote(deps: RemoteDependencies) {
           },
         },
       }),
+      projects: () =>
+        persistence
+          .readProjects()
+          .filter((project) => project.lifecycle === "active")
+          .map((project) => ({ projectId: project.id, name: project.name })),
       state: delegationState,
       record: recordDelegation,
       now: Date.now,
@@ -1032,6 +1037,10 @@ export function wireRemote(deps: RemoteDependencies) {
     state: delegationState,
     identity: resolveHubIdentity,
     target: (memberId) => spokeLinkService.memberTarget(memberId),
+    members: () => {
+      const status = spokeLinkService.status();
+      return status.membership === "member" ? status.acceptedMemberIds : [];
+    },
     transport: hubTransport,
     parent: {
       check: (input) =>

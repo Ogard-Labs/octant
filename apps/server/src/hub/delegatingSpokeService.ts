@@ -10,6 +10,8 @@
 
 import { randomUUID } from "node:crypto";
 import {
+  decodeDelegationProjectListing,
+  type DelegationProjectListing,
   DelegationRequestId as DelegationRequestIdSchema,
   UtcTimestamp,
   WorkThreadId as WorkThreadIdSchema,
@@ -99,6 +101,8 @@ export interface DelegatingSpokeOptions {
   readonly state: DelegationStatePort;
   readonly identity: () => HubHostIdentity;
   readonly target: (memberId: string) => MemberTarget;
+  /** The roster members this host accepted, whom it may ask for their Projects. */
+  readonly members?: () => ReadonlyArray<string>;
   readonly transport: HubTransport;
   readonly parent: DelegatingParentPort;
   readonly record: (change: HubDelegationRecordedPayload) => void;
@@ -607,6 +611,36 @@ export class DelegatingSpokeService {
         String(entry.requestId) === String(requestId) ? updated(entry, change) : entry,
       ),
     });
+  }
+
+  /**
+   * Each reachable member's Projects this host may delegate to, as that member
+   * lists them under the grant it gave this host. A member that cannot be
+   * reached or refuses is left out rather than failing the list.
+   */
+  async listTargets(): Promise<
+    ReadonlyArray<{
+      readonly memberId: string;
+      readonly name: string;
+      readonly projects: DelegationProjectListing["projects"];
+    }>
+  > {
+    const listed = await Promise.all(
+      (this.#options.members?.() ?? []).map(async (memberId) => {
+        const target = this.#options.target(memberId);
+        const origin = target.status === "member" ? memberOrigin(target.member) : undefined;
+        if (target.status !== "member" || origin === undefined) return [];
+        const answer = await this.#send(target, origin, PEER_DELEGATION_ROUTES.projects, {});
+        if (answer.status === "unreachable" || !answer.response.ok) return [];
+        try {
+          const { projects } = decodeDelegationProjectListing(await answer.response.json());
+          return projects.length === 0 ? [] : [{ memberId, name: target.member.name, projects }];
+        } catch {
+          return [];
+        }
+      }),
+    );
+    return listed.flat();
   }
 
   #send(
