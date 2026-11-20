@@ -46,7 +46,11 @@ const IMPORT_REFUSALS: Readonly<Record<CookieReadRefusal, string>> = {
   "source-unreadable": "Octant could not read that browser's cookies, so nothing was imported.",
 };
 
-/** Who is asking. A local window or a person-paired device manages profiles; cookie import stays local. */
+/**
+ * Who is asking. The host's own person manages profiles at a local window or
+ * on a device they paired; cookie import touches macOS Keychain on this Mac
+ * and stays local-window only.
+ */
 export type BrowserProfilesCaller = "local-window" | "person-paired-device" | "remote-device";
 
 export interface BrowserProfileServiceOptions {
@@ -112,10 +116,13 @@ export class BrowserProfileService {
       return refused("profile-not-local", "Browser profiles are managed only on this Mac.");
     }
     if (
-      caller === "person-paired-device" &&
+      caller !== "local-window" &&
       (command.kind === "import-sources" || command.kind === "import-cookies")
     ) {
-      return refused("profile-not-local", "Cookie import is done on this Mac.");
+      return refused(
+        "profile-not-local",
+        "Cookie import requires the Keychain prompt on this Mac.",
+      );
     }
     const store = this.#options.runtime.profiles;
     if (store === undefined || (await this.#options.runtime.nativeAvailable?.()) !== true) {

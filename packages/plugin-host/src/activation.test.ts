@@ -64,6 +64,9 @@ describe("effective extension activation", () => {
     ["chat", "debug-adapter", [], false],
     ["work", "debug-adapter", [], false],
     ["code", "debug-adapter", ["filesystem", "shell", "network"], true],
+    ["chat", "pull-request-reviewer", [], false],
+    ["work", "pull-request-reviewer", [], false],
+    ["code", "pull-request-reviewer", [], true],
   ] as const)(
     "maps %s %s mode safety from component kind and capabilities",
     (mode, kind, declaredCapabilities, expected) => {
@@ -85,6 +88,9 @@ describe("effective extension activation", () => {
     ["darwin", "provider-driver", true],
     ["linux", "provider-driver", true],
     ["win32", "provider-driver", false],
+    ["darwin", "pull-request-reviewer", false],
+    ["linux", "pull-request-reviewer", false],
+    ["win32", "pull-request-reviewer", false],
     ["linux", "mcp-server", true],
   ] as const)(
     "lets a %s host run a stored %s component only where it confines it or the person's driver runs labelled: %s",

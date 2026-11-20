@@ -17,6 +17,7 @@
     "./secret-stores": "./src/secretStores.ts",
     "./automation": "./src/automation.ts",
     "./goal-loop": "./src/goalLoop.ts",
+    "./finished-receipt": "./src/finishedReceipt.ts",
     "./ship-target": "./src/shipTarget.ts",
     "./automation-notifications": "./src/automationNotifications.ts",
     "./linked-thread": "./src/linkedThread.ts",
@@ -100,7 +101,6 @@
     "./support-bundle": "./src/supportBundle.ts",
     "./validation-composition": "./src/validationComposition.ts",
     "./validation-events": "./src/validationEvents.ts",
-    "./validation-rpc": "./src/validationRpc.ts",
     "./host": "./src/host.ts",
     "./host-resources": "./src/hostResources.ts",
     "./host-oauth": "./src/hostOAuth.ts",
@@ -174,6 +174,7 @@
     "./tracker-reference": "./src/trackerReference.ts",
     "./github-onboarding": "./src/githubOnboarding.ts",
     "./code-project-pull-requests": "./src/codeProjectPullRequests.ts",
+    "./pull-request-identity": "./src/pullRequestIdentity.ts",
     "./canvas-share-snapshot": "./src/canvasShareSnapshot.ts",
     "./canvas-share-access-log": "./src/canvasShareAccessLog.ts",
     "./canvas-board": "./src/canvasBoard.ts",
@@ -191,7 +192,8 @@
     "./browser-presentation": "./src/browserPresentation.ts",
     "./provider-file-review": "./src/providerFileReview.ts",
     "./code-provider-file-review": "./src/codeProviderFileReview.ts",
-    "./code-tool-contribution": "./src/codeToolContribution.ts"
+    "./code-tool-contribution": "./src/codeToolContribution.ts",
+    "./pull-request-reviewer": "./src/pullRequestReviewer.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

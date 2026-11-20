@@ -280,11 +280,9 @@ describe("remote route policy", () => {
       // The host's whole export is bulk data with no bound for a remote
       // caller, so it alone of host control stays on the host.
       "/api/host-control/export",
-      "/api/replica-store/settings",
-      "/api/replica-store/commands",
-      // Leaving a replica, like every membership command, is the host's own.
-      "/api/replica-membership/commands",
-      "/api/replica-membership/state",
+      "/api/secret-stores/settings",
+      "/api/secret-stores/commands",
+      "/api/provider-cloud",
       "/api/missing",
     ]) {
       expect((await fixture.route(request(path, { method: "POST" }))).status).toBe(404);
@@ -293,6 +291,46 @@ describe("remote route policy", () => {
     expect(fixture.webAssets).not.toHaveBeenCalled();
     expect(fixture.preAuth).not.toHaveBeenCalled();
     expect(fixture.authenticatedProduct).not.toHaveBeenCalled();
+  });
+
+  it("forwards person-paired routes for servers, notifications, artifacts, tool records, tooling, sessions, and replica sync with no remote action for other devices", async () => {
+    const cases: ReadonlyArray<{ readonly path: string; readonly method: string }> = [
+      { path: "/api/shield/servers?projectId=p1", method: "GET" },
+      { path: "/api/shield/servers", method: "POST" },
+      { path: "/api/automation-notifications", method: "PUT" },
+      { path: "/api/push-notifications/gateway", method: "PUT" },
+      { path: "/api/artifacts/tag", method: "POST" },
+      { path: "/api/artifacts/claude-snapshot", method: "POST" },
+      { path: "/api/artifacts/claude-copy", method: "POST" },
+      { path: "/api/artifacts/mirror", method: "POST" },
+      { path: "/api/artifacts/synced", method: "POST" },
+      { path: "/api/threads/tool-call-records", method: "POST" },
+      { path: "/api/provider-tooling/list", method: "POST" },
+      { path: "/api/code-live-tasks?threadId=t1", method: "GET" },
+      { path: "/api/work-live-tasks?threadId=t1", method: "GET" },
+      { path: "/api/replica-store/settings", method: "GET" },
+      { path: "/api/replica-store/commands", method: "POST" },
+      { path: "/api/replica-membership/state", method: "GET" },
+      { path: "/api/replica-membership/commands", method: "POST" },
+    ];
+    for (const entry of cases) {
+      const fixture = handler();
+      const req = request(entry.path, {
+        method: entry.method,
+        ...(entry.method === "GET"
+          ? {}
+          : {
+              headers: {
+                origin,
+                "sec-fetch-site": "same-origin",
+                "content-type": "application/json",
+              },
+              body: "{}",
+            }),
+      });
+      expect((await fixture.route(req)).status).toBe(200);
+      expect(classifyProductAction(req)).toBeUndefined();
+    }
   });
 
   it("forwards provider bootstrap read-only, forwards provider administration and sign-in for the product dispatch to judge, and keeps discovery and probes local-only", async () => {

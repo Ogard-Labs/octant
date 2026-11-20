@@ -24,8 +24,8 @@ it exactly that one tool family, as that thread, and nothing wider.
 - **Off by default, switched on per terminal.** A thread terminal starts with a
   grant only when the start command says `browserGrant: "on"`. Only the person
   can ask, at a local window or a paired device (maintainer decision,
-  2026-11-12; not built yet: today a paired device is refused as the others
-  are): any other caller (a routine, an agent) is refused `not-local-window` and
+  2026-11-12; server policy admits a person-paired device and refuses
+  hub-introduced devices; paired UI follow-up remains): any other caller (a routine, an agent) is refused `not-local-window` and
   **no terminal is started**, so a shell never
   looks as if it has what it lacks. A running shell cannot be given the variables,
   so the grant applies to a terminal session started with it on.

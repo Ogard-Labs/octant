@@ -223,7 +223,8 @@ export interface FailingChecksFollowUpTrigger {
 }
 
 function linkedPullRequestChecksKey(threadId: string, row: CodeProjectPullRequestRow): string {
-  return `${threadId}|${String(row.projectId)}:${row.repositoryOwner}/${row.repositoryName}:${row.number}`;
+  if (row.linkId !== undefined) return `${threadId}|link:${String(row.linkId)}`;
+  return `${threadId}|${String(row.projectId)}:${row.repositoryOwner.toLowerCase()}/${row.repositoryName.toLowerCase()}:${row.number}`;
 }
 
 /**

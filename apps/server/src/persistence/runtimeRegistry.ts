@@ -71,6 +71,9 @@ import {
   ChatThreadRewound,
   ChatThreadUpdated,
   ChatTurnCreated,
+  ChatTurnLoopNoticed,
+  ChatTurnLoopStopped,
+  ChatTurnStallNoticed,
   ChatTurnRouteDecided,
   CodeProjectAccessChanged,
   CodeProjectNewThreadWorkspaceChanged,
@@ -91,6 +94,16 @@ import {
   CodeProjectPullRequestAutoFixRecorded,
   CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
   CodeProjectPullRequestWatchRecorded,
+  CODE_PULL_REQUEST_LINK_CREATED,
+  CodePullRequestLinkCreated,
+  CODE_PULL_REQUEST_LINK_THREAD_ATTACHED,
+  CodePullRequestLinkThreadAttached,
+  CODE_PULL_REQUEST_LINK_FORGE_IDS_BACKFILLED,
+  CodePullRequestLinkForgeIdsBackfilled,
+  CODE_PULL_REQUEST_LINK_DISPLAY_UPDATED,
+  CodePullRequestLinkDisplayUpdated,
+  CODE_PULL_REQUEST_LINK_MERGED_INTO,
+  CodePullRequestLinkMergedInto,
   WorkProjectStatusFileChanged,
   ProjectAgentMemoryWritesChanged,
   ProjectImageGenerationChoiceChanged,
@@ -103,6 +116,8 @@ import {
   GuardrailLevelLowered,
   PROVIDER_TOOLING_APPLIED,
   ProviderToolingAppliedRecordSchema,
+  PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN,
+  ProviderAcpAgentInstallScriptsRan,
   CodeProjectActionsChanged,
   ProjectExtraFolderAdded,
   ProjectExtraFolderRemoved,
@@ -128,6 +143,9 @@ import {
   WorkThreadCompletionConfirmed,
   WorkSettingsUpdated,
   WorkTurnAccepted,
+  WorkTurnLoopNoticed,
+  WorkTurnLoopStopped,
+  WorkTurnStallNoticed,
   WorkTurnUpdated,
   WorkThreadRewound,
   WorkPromotionFrame,
@@ -316,7 +334,10 @@ import {
   ShieldServerSetPayload,
 } from "@octant/contracts/shield-servers";
 import {
+  SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES,
   SERVER_PROJECTS_EVENT_NAMES,
+  ServerAttachmentCleanupPendingPayload,
+  ServerAttachmentCleanupSettledPayload,
   ServerProjectBoundPayload,
   ServerProjectRemovedPayload,
   ServerProjectRenamedPayload,
@@ -471,6 +492,7 @@ import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerToolEffectEvents } from "../toolEffects/toolEffectLedger";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
+import { registerFinishedReceiptEvents } from "../finishedReceipts/finishedReceiptStore";
 import { registerThreadNoteEvents } from "../threadNotes/threadNotes";
 import { registerShipEvents } from "../ship/shipEventStore";
 import { registerCanvasChoiceAnswerEvents } from "../canvas/canvasChoiceAnswerService";
@@ -579,6 +601,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     )
     .register(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED, 1, CodeProjectPullRequestAutoFixRecorded)
     .register(CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED, 1, CodeProjectPullRequestWatchRecorded)
+    .register(CODE_PULL_REQUEST_LINK_CREATED, 1, CodePullRequestLinkCreated)
+    .register(CODE_PULL_REQUEST_LINK_THREAD_ATTACHED, 1, CodePullRequestLinkThreadAttached)
+    .register(CODE_PULL_REQUEST_LINK_FORGE_IDS_BACKFILLED, 1, CodePullRequestLinkForgeIdsBackfilled)
+    .register(CODE_PULL_REQUEST_LINK_DISPLAY_UPDATED, 1, CodePullRequestLinkDisplayUpdated)
+    .register(CODE_PULL_REQUEST_LINK_MERGED_INTO, 1, CodePullRequestLinkMergedInto)
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
     .register("project.native-providers-changed@1", 1, ProjectNativeProvidersChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
@@ -610,6 +637,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.instance-removed@1", 1, ProviderInstanceRemoved)
     .register("provider.defaults-updated@1", 1, ProviderDefaultsUpdated)
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)
+    .register(PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN, 1, ProviderAcpAgentInstallScriptsRan)
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
     .register("pending-question.deferred@1", 1, PendingQuestionDeferral)
@@ -637,6 +665,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("chat.attempt-updated@1", 1, ChatAttemptUpdated)
     .register("chat.attempt-response-appended@1", 1, ChatAttemptResponseAppended)
     .register("chat.attempt-tool-step@1", 1, ChatAttemptToolStepChanged)
+    .register("chat.turn-loop-noticed@1", 1, ChatTurnLoopNoticed)
+    .register("chat.turn-loop-stopped@1", 1, ChatTurnLoopStopped)
+    .register("chat.turn-stall-noticed@1", 1, ChatTurnStallNoticed)
     .register("chat.turn-route-decided@1", 1, ChatTurnRouteDecided)
     .register("chat.attachment-updated@1", 1, ChatAttachmentUpdated)
     .register("chat.citation-recorded@1", 1, ChatCitationRecorded)
@@ -719,6 +750,16 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       ServerWorkDeveloperToolsChangedPayload,
     )
+    .register(
+      SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending,
+      1,
+      ServerAttachmentCleanupPendingPayload,
+    )
+    .register(
+      SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.settled,
+      1,
+      ServerAttachmentCleanupSettledPayload,
+    )
     .register(CLOUD_MACHINES_EVENT_NAMES.creationRequested, 1, CloudMachineCreationRequestedPayload)
     .register(CLOUD_MACHINES_EVENT_NAMES.created, 1, CloudMachineCreatedPayload)
     .register(CLOUD_MACHINES_EVENT_NAMES.creationEnded, 1, CloudMachineCreationEndedPayload)
@@ -777,6 +818,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("work.settings-updated@1", 1, WorkSettingsUpdated)
     .register("work.turn-accepted@1", 1, WorkTurnAccepted)
     .register("work.turn-updated@1", 1, WorkTurnUpdated)
+    .register("work.turn-loop-noticed@1", 1, WorkTurnLoopNoticed)
+    .register("work.turn-loop-stopped@1", 1, WorkTurnLoopStopped)
+    .register("work.turn-stall-noticed@1", 1, WorkTurnStallNoticed)
     .register("work.thread-rewound@1", 1, WorkThreadRewound)
     .register("work.artifact-mutation-recorded@1", 1, WorkArtifactMutationFrame)
     .register("work.promotion-recorded@1", 1, WorkPromotionFrame)
@@ -923,6 +967,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerThreadMoveEvents(events);
   registerMovedHistoryEvents(events);
   registerSideTaskEvents(events);
+  registerFinishedReceiptEvents(events);
   registerThreadNoteEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);

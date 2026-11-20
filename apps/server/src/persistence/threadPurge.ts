@@ -4,6 +4,7 @@ import {
   NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE,
   TOOL_EGRESS_PROJECT_AGGREGATE,
   TOOL_EGRESS_THREAD_AGGREGATE,
+  THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE,
   TURN_METRICS_AGGREGATE_TYPE,
   decodeChatThread,
   decodeContextSubjectRef,
@@ -21,6 +22,7 @@ import {
   CODE_DEBUG_EGRESS_AGGREGATE,
   CODE_DEBUG_SESSION_AGGREGATE,
 } from "@octant/contracts/code-debug";
+import { SERVER_ATTACHMENT_CLEANUP_AGGREGATE } from "@octant/contracts/server-projects";
 import { purgeAgentRunSubjectContent } from "./agentRunContentStore";
 import { purgeThreadContent } from "./chatProjection";
 import { purgeContextCompactions, purgeContextSubjectContent } from "./contextProjection";
@@ -244,11 +246,15 @@ const RUN_LINK_PATHS = [
 // Observed: it did, the run's head went with it, and the run's later purge
 // event restarted at version 1, below the version the projection had reached,
 // so the projection skipped it and kept listing the run.
+// An owed remote attachment removal names the purged threadId, and must
+// outlive the thread's erasure until the server is reached again and the
+// remote folder is deleted.
 const RETAINED_AGGREGATE_TYPES = new Set<string>([
   THREAD_RETENTION_AGGREGATE,
   "context-ledger",
   TOOL_EGRESS_PROJECT_AGGREGATE,
   BENCHMARK_RUN_AGGREGATE_TYPE,
+  SERVER_ATTACHMENT_CLEANUP_AGGREGATE,
 ]);
 
 const USAGE_EVENT_NAME = "context.usage-reconciled@1";
@@ -459,6 +465,7 @@ function collectOwnedAggregates(
   // aggregate is taken by its id rather than by a payload path.
   add(TOOL_EGRESS_THREAD_AGGREGATE, threadId);
   add(TURN_METRICS_AGGREGATE_TYPE, threadId);
+  add(THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE, threadId);
   // Coordinator wakes are journaled on the woken thread's id (coordinatorWakeJournal.ts).
   add("coordinator-wake", threadId);
   add("browser-remote-hold", threadId);
@@ -829,15 +836,15 @@ function deleteThreadScopedProjectionRows(connection: SqliteConnection, threadId
 
 /**
  * Artifact sync keeps its own copies of a Canvas: a queued publish carries
- * the bundle or the comment change, and an entry a pull kept - a version, a
- * tombstone, or a comment change - carries its exact text. Both live
- * under the replica aggregate, which the Canvas family walk does not reach,
- * so a purge erases them here. A queued publish of an erased Canvas is
- * dropped. A kept entry becomes a content-free erased slot, so its slot stays
- * settled and a later pull does not import the erased content again. Slots
- * this host published keep their content-free `published` record for the
- * same reason. The copy already in the store is the store's: nothing here
- * deletes from it.
+ * the bundle, comment change, or decision-form answer change, and an entry a
+ * pull kept - a version, a tombstone, a comment change, or a decision-form
+ * answer change - carries its exact text. Both live under the replica
+ * aggregate, which the Canvas family walk does not reach, so a purge erases
+ * them here. A queued publish of an erased Canvas is dropped. A kept entry
+ * becomes a content-free erased slot, so its slot stays settled and a later
+ * pull does not import the erased content again. Slots this host published
+ * keep their content-free `published` record for the same reason. The copy
+ * already in the store is the store's: nothing here deletes from it.
  */
 function eraseReplicaArtifactCopies(
   connection: SqliteConnection,
@@ -848,7 +855,7 @@ function eraseReplicaArtifactCopies(
       .prepare(
         `SELECT global_sequence FROM event_journal
          WHERE aggregate_type = ? AND (
-           (event_name IN (?, ?, ?) AND json_extract(payload_json, '$.artifact.canvasId') = ?)
+           (event_name IN (?, ?, ?, ?) AND json_extract(payload_json, '$.artifact.canvasId') = ?)
            OR (event_name IN (?, ?, ?, ?) AND json_extract(payload_json, '$.backfillId') IN (
              SELECT json_extract(payload_json, '$.backfillId') FROM event_journal
              WHERE event_name = ? AND json_extract(payload_json, '$.canvasId') = ?
@@ -859,6 +866,7 @@ function eraseReplicaArtifactCopies(
         REPLICA_MEMBERSHIP_AGGREGATE_TYPE,
         REPLICA_ARTIFACT_EVENT_NAMES.queued,
         REPLICA_ARTIFACT_EVENT_NAMES.commentQueued,
+        REPLICA_ARTIFACT_EVENT_NAMES.choiceAnswerQueued,
         REPLICA_ARTIFACT_EVENT_NAMES.backfillQueued,
         canvasId,
         REPLICA_ARTIFACT_EVENT_NAMES.backfillStarted,
