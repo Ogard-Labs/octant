@@ -702,16 +702,13 @@ or guest grant. Built for a device the host's own person paired; for a member th
   says. An owner device reads them from the spoke it concerns; the hub holds no
   alert and cannot clear or write one. Rationale: the party that might be
   compromised cannot be the one that reports.
-- **Browser control is its own finite action.** Selecting an already-open Code
-  Private page is an owner administration read. Taking control requires a fresh
-  own-class unlock even when an administration session is open. The resulting
-  target-bound controller lasts at most 60 seconds and authorizes only signed,
-  sequenced person frames and fixed inputs for that exact native resource.
-  It cannot administer the host, select a profile, create a page or lend a local
-  window capability. Stop/reclaim/expiry leave the agent's person hold in place;
-  only explicit Hand back releases it. See [Owner control of an open Code
-  page](browser-agent-tool.md#owner-control-of-an-open-code-page) for the supported
-  resource, volatile credential-bearing frames, cancellation and audit rules.
+- **Browser control belongs to a person-paired device, not hub ownership.**
+  The former separate enrolled-owner Browser control path was removed when
+  person-paired Browser hold shipped. A device the host's own person paired
+  holds a live Browser page over its signed device session
+  ([A paired device holds the page](browser-agent-tool.md#a-paired-device-holds-the-page));
+  an owner device on a roster-only host has no separate Browser control path
+  and is refused `remote-control-not-person`.
 - **Confirming a new member is signed by the unlock key.** The owner's unlock
   key signs a note naming the spoke, the member, its identity-key fingerprint,
   the owner, and the unlock key's fingerprint, and the spoke checks it against

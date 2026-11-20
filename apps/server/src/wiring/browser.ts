@@ -36,8 +36,12 @@ import { Effect } from "effect";
 import { createHostPersonScopes, createPersonProjectReach } from "../hostPersonScope";
 import {
   readDeviceApprovedByPerson,
+  readDeviceRegistration,
   readDeviceRegistrations,
+  readRemoteSessionInvalidation,
 } from "../persistence/remoteAccessProjection";
+import { PairedBrowserControlService } from "../browser/pairedBrowserControl";
+import { createPairedBrowserJournal } from "../browser/pairedBrowserJournal";
 import { createProductFeedbackRouteHandler } from "../productFeedbackRoutes";
 import {
   decodeBrowserContextId,
@@ -115,6 +119,7 @@ export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "onThreadArchived"
     | "onWaitingAsk"
     | "onWindowRevoked"
+    | "isRestrictedDeviceScope"
     | "processAuthorityTime"
     | "windowAuthorityStore"
     | "codeSessionAuthority"
@@ -143,6 +148,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     onThreadArchived,
     onWaitingAsk,
     onWindowRevoked,
+    isRestrictedDeviceScope,
     options,
     persistence,
     processAuthorityTime,
@@ -278,6 +284,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         ),
       isHostScope: isRoutineHostScope,
       isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      isRestrictedDevice: isRestrictedDeviceScope,
       extensionsEnabledIn: (profile) => extensionFoldersFor(profile).length,
       profileLabel: async (profile) => {
         if (profile.kind !== "account") return undefined;
@@ -840,12 +847,22 @@ export function wireBrowser(deps: BrowserDependencies) {
     });
     const browserCredentialUseService = createBrowserCredentialUseService({
       fill: {
-        prepare: async (windowId, target) =>
-          (await browserRuntime.prepareCredentialFill?.(
+        prepare: async (windowId, target) => {
+          const owner = browserAutomationService.credentialFillOwner(
             target.contextId,
-            { windowId, threadId: target.threadId },
-            target.topOrigin,
-          )) ?? { status: "refused", reason: "unavailable" },
+            windowId,
+          ) ?? {
+            windowId,
+            threadId: target.threadId,
+          };
+          return (
+            (await browserRuntime.prepareCredentialFill?.(
+              target.contextId,
+              owner,
+              target.topOrigin,
+            )) ?? { status: "refused", reason: "unavailable" }
+          );
+        },
         hold: (windowId, target, planId) =>
           browserAutomationService.holdCredentialFill(windowId, target, planId),
         host: async (command) =>
@@ -854,19 +871,32 @@ export function wireBrowser(deps: BrowserDependencies) {
             reason: "unavailable",
           },
         cancel: async (windowId, target, planId) => {
-          return browserRuntime.cancelCredentialFill?.(
+          const owner = browserAutomationService.credentialFillOwner(
             target.contextId,
-            { windowId, threadId: target.threadId },
-            planId,
+            windowId,
+          ) ?? {
+            windowId,
+            threadId: target.threadId,
+          };
+          return browserRuntime.cancelCredentialFill?.(target.contextId, owner, planId);
+        },
+        submit: async (windowId, target, planId, expiresAt) => {
+          const owner = browserAutomationService.credentialFillOwner(
+            target.contextId,
+            windowId,
+          ) ?? {
+            windowId,
+            threadId: target.threadId,
+          };
+          return (
+            (await browserRuntime.submitCredentialFill?.(
+              target.contextId,
+              owner,
+              planId,
+              expiresAt,
+            )) ?? { status: "failed", effect: "none" }
           );
         },
-        submit: async (windowId, target, planId, expiresAt) =>
-          (await browserRuntime.submitCredentialFill?.(
-            target.contextId,
-            { windowId, threadId: target.threadId },
-            planId,
-            expiresAt,
-          )) ?? { status: "failed", effect: "none" },
       },
       currentTarget: (windowId, command, held) =>
         browserAutomationService.credentialUseTarget(windowId, command, held),
@@ -934,7 +964,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       service: browserFlowService,
       recorder: new BrowserFlowRecorder(),
       caller: (windowId) =>
-        browserToolApprovalService.isPairedDevice(windowId)
+        browserToolApprovalService.isRestrictedDevice(windowId)
           ? "paired-device"
           : browserToolApprovalService.isUnattendedScope(windowId)
             ? "unattended"
@@ -1044,7 +1074,51 @@ export function wireBrowser(deps: BrowserDependencies) {
         projectBrowserService.ownsHumanPresentation(windowId, request.contextId, request.threadId),
       now: Date.now,
     });
+    const pairedBrowserControlService = new PairedBrowserControlService({
+      host: browserAutomationService.pairedBrowserHost(),
+      now: Date.now,
+      timestamp: () => new Date().toISOString(),
+      uuid: randomUUID,
+      journal: createPairedBrowserJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      }),
+      onReclaim: (listener) => browserAutomationService.onPairedLeaseReclaimed(listener),
+      onPageEnded: (listener) => browserAutomationService.onPairedLeasePageEnded(listener),
+      onSignInSettled: (listener) => browserAutomationService.onPairedLeaseSignInSettled(listener),
+      onAuthorityChange: (listener) => persistence.journal.subscribeCommitted(listener),
+    });
+    yield* Effect.addFinalizer(() => Effect.promise(() => pairedBrowserControlService.close()));
+    const resolvePairedDeviceName = (deviceId: string): string | undefined =>
+      readDeviceRegistration(persistence.connection, deviceId)?.deviceLabel;
+    const isPairedDeviceSessionCurrent = (principal: {
+      readonly deviceId: unknown;
+      readonly sessionId: unknown;
+      readonly credentialGeneration: number;
+    }): boolean => {
+      const deviceId = String(principal.deviceId);
+      const registration = readDeviceRegistration(persistence.connection, deviceId);
+      if (
+        registration === undefined ||
+        registration.state !== "active" ||
+        registration.revokedAt !== null ||
+        (registration.expiresAt !== null && Date.parse(registration.expiresAt) <= Date.now())
+      ) {
+        return false;
+      }
+      if (registration.credentialGeneration !== principal.credentialGeneration) return false;
+      if (!readDeviceApprovedByPerson(persistence.connection, deviceId)) return false;
+      return (
+        readRemoteSessionInvalidation(persistence.connection, String(principal.sessionId)) ===
+        undefined
+      );
+    };
     return {
+      pairedBrowserControlService,
+      resolvePairedDeviceName,
+      isPairedDeviceSessionCurrent,
       nativeBrowserPresentationRoutes,
       browserSessionGrants,
       browserUploadPermissions,

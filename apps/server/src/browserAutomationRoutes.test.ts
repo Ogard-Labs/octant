@@ -1125,7 +1125,7 @@ describe("browser automation routes", () => {
     });
     await withProjects(person);
     expect(projectBrowsers.execute).toHaveBeenLastCalledWith(windowId, "local-window", command);
-    // A profile page, with the person's sign-ins, stays at a window.
+    // A person-paired device opens stored profile pages just like a local window.
     const profiled = post({ ...command, profile: "personal" });
     bindPrincipalRouteContext(profiled, {
       principal: createRemoteDevicePrincipal({
@@ -1140,9 +1140,12 @@ describe("browser automation routes", () => {
       }),
       scopeId: windowId,
     });
-    const refusedProfile = await withProjects(profiled);
-    expect(await refusedProfile?.json()).toMatchObject({ reason: "profile-unavailable" });
-    expect(projectBrowsers.execute).toHaveBeenCalledTimes(3);
+    await withProjects(profiled);
+    expect(projectBrowsers.execute).toHaveBeenCalledTimes(4);
+    expect(projectBrowsers.execute).toHaveBeenLastCalledWith(windowId, "local-window", {
+      ...command,
+      profile: "personal",
+    });
 
     const without = await handler(post(command));
     expect(without?.status).toBe(503);
@@ -1760,6 +1763,321 @@ describe("browser automation routes", () => {
         }),
       );
       expect(response?.status).toBe(503);
+    });
+  });
+
+  describe("paired-device remote hold, profile visibility, and flows", () => {
+    it("admits take-over, input, stream, file upload, and hand-back only for a person-paired device and refuses hub-roster or agent-grant callers", async () => {
+      const leaseId = "33333333-3333-4333-8333-333333333333";
+      const chooserId = "44444444-4444-4444-8444-444444444444";
+      const target = {
+        threadId,
+        contextId,
+        tabId: "tab-1",
+        documentVersion: "a".repeat(64),
+        profileKind: "personal" as const,
+        originPolicyVersion: "policy-v1",
+      };
+      const pairedBrowserControl = {
+        takeOver: vi.fn(async () => ({
+          status: "held" as const,
+          leaseId: leaseId as never,
+          expiresAt: "2026-11-20T12:00:00.000Z" as never,
+          target: target as never,
+        })),
+        handBackForThread: vi.fn(async () => ({ status: "released" as const })),
+        execute: vi.fn(async () => ({
+          status: "input" as const,
+          lastAcceptedSequence: 1,
+          effect: "completed" as const,
+        })),
+        openStream: vi.fn(() => ({
+          status: "stream" as const,
+          stream: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode(`${JSON.stringify({ kind: "reclaimed-locally" })}\n`),
+              );
+              controller.close();
+            },
+          }),
+        })),
+        uploadFile: vi.fn(async () => ({ status: "released" as const })),
+      };
+      const route = createBrowserAutomationRouteHandler({
+        service: service as any,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        pairedBrowserControl: pairedBrowserControl as any,
+        resolvePairedDeviceName: () => "Henrik's iPhone",
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+
+      const bindRemote = (
+        request: Request,
+        admittedBy?: "host-person" | "hub-roster",
+        origin = "https://octant.example",
+      ) => {
+        bindPrincipalRouteContext(request, {
+          principal: createRemoteDevicePrincipal({
+            hostId: "local" as never,
+            deviceId: "90000000-0000-4000-8000-000000000001" as never,
+            credentialGeneration: 1,
+            origin,
+            protocolVersion: 1,
+            capabilityDigest: "a".repeat(64),
+            sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+            ...(admittedBy === undefined ? {} : { admittedBy }),
+          }),
+          scopeId: windowId,
+        });
+        return request;
+      };
+
+      // Hub-introduced device and agent grant are refused remote-control-not-person.
+      for (const path of [
+        "/api/browser/contexts/take-over",
+        "/api/browser/contexts/hand-back",
+        "/api/browser/remote-control/input",
+        "/api/browser/remote-control/stream",
+        "/api/browser/remote-control/file",
+      ]) {
+        const roster = bindRemote(
+          new Request(`http://127.0.0.1${path}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ threadId }),
+          }),
+          "hub-roster",
+        );
+        const rosterRes = await route(roster);
+        expect(rosterRes?.status).toBe(403);
+        expect(await rosterRes?.json()).toEqual({
+          status: "refused",
+          reason: "remote-control-not-person",
+        });
+
+        const agentGrant = bindRemote(
+          new Request(`http://127.0.0.1${path}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ threadId }),
+          }),
+          "host-person",
+          "octant-agent-access",
+        );
+        const grantRes = await route(agentGrant);
+        expect(grantRes?.status).toBe(403);
+        expect(await grantRes?.json()).toEqual({
+          status: "refused",
+          reason: "remote-control-not-person",
+        });
+      }
+
+      // Person-paired device opens a lease, streams NDJSON, sends touch input, uploads file, and hands back.
+      const takeOverReq = bindRemote(
+        new Request("http://127.0.0.1/api/browser/contexts/take-over", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ threadId }),
+        }),
+        "host-person",
+      );
+      const takeOverRes = await route(takeOverReq);
+      expect(takeOverRes?.status).toBe(200);
+      expect(await takeOverRes?.json()).toMatchObject({
+        pairedLease: { leaseId },
+      });
+
+      const streamReq = bindRemote(
+        new Request("http://127.0.0.1/api/browser/remote-control/stream", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ leaseId }),
+        }),
+        "host-person",
+      );
+      const streamRes = await route(streamReq);
+      expect(streamRes?.status).toBe(200);
+      expect(streamRes?.headers.get("content-type")).toBe("application/x-ndjson");
+      expect(await streamRes?.text()).toContain("reclaimed-locally");
+
+      const inputReq = bindRemote(
+        new Request("http://127.0.0.1/api/browser/remote-control/input", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            kind: "input",
+            leaseId,
+            sequence: 1,
+            events: [{ kind: "tap", frameId: 1, x: 0.5, y: 0.5 }],
+          }),
+        }),
+        "host-person",
+      );
+      const inputRes = await route(inputReq);
+      expect(inputRes?.status).toBe(200);
+      expect(await inputRes?.json()).toEqual({
+        status: "input",
+        lastAcceptedSequence: 1,
+        effect: "completed",
+      });
+
+      const fileReq = bindRemote(
+        new Request("http://127.0.0.1/api/browser/remote-control/file", {
+          method: "POST",
+          headers: {
+            "content-type": "application/octet-stream",
+            "x-octant-browser-lease-id": leaseId,
+            "x-octant-browser-chooser-id": chooserId,
+            "x-octant-browser-file-name": "photo.png",
+          },
+          body: new Uint8Array([1, 2, 3, 4]),
+        }),
+        "host-person",
+      );
+      const fileRes = await route(fileReq);
+      expect(fileRes?.status).toBe(200);
+      expect(pairedBrowserControl.uploadFile).toHaveBeenCalledOnce();
+
+      const handBackReq = bindRemote(
+        new Request("http://127.0.0.1/api/browser/contexts/hand-back", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ threadId, leaseId }),
+        }),
+        "host-person",
+      );
+      const handBackRes = await route(handBackReq);
+      expect(handBackRes?.status).toBe(200);
+      expect(pairedBrowserControl.handBackForThread).toHaveBeenCalledOnce();
+    });
+
+    it("lets a person-paired device see signed-in profile pages and manage profiles/flows while keeping cookie import local", async () => {
+      const profiles = {
+        execute: vi.fn(async (_caller, command) =>
+          command.kind === "import-sources"
+            ? {
+                kind: "browser-profile-refused" as const,
+                reason: "profile-not-local" as const,
+                message: "Cookie import is done on this Mac.",
+              }
+            : { kind: "browser-profiles" as const, profiles: [] },
+        ),
+      };
+      const flows = {
+        summaries: vi.fn(() => []),
+        delete: vi.fn(() => true),
+      };
+      const profileSnapshot = {
+        status: "running",
+        threadId,
+        context: {
+          contextId,
+          threadId,
+          actionId: "70000000-0000-4000-8000-000000000001",
+          correlationId: "80000000-0000-4000-8000-000000000001",
+          authority,
+          policy: {
+            profileMode: "isolated",
+            profile: { kind: "personal" },
+            allowedOrigins: ["https://account.example"],
+            credentialFieldProtection: true,
+            maxConcurrentTabs: 1,
+            sessionTimeoutMs: 300_000,
+          },
+          state: "active",
+          createdAt: "2026-10-31T12:00:00.000Z",
+        },
+        observation: {
+          contextId,
+          actionId: "70000000-0000-4000-8000-000000000001",
+          correlationId: "80000000-0000-4000-8000-000000000001",
+          authority,
+          url: "https://account.example/home",
+          title: "Account Home",
+          extractedText: "Signed in",
+          screenshotDataUrl: "data:image/jpeg;base64,AAAA",
+          observedAt: "2026-10-31T12:00:00.000Z",
+          stale: false,
+        },
+        evidence: [],
+      };
+      const route = createBrowserAutomationRouteHandler({
+        service: {
+          ...service,
+          inspectThread: vi.fn(() => profileSnapshot),
+          peekThread: vi.fn(async () => profileSnapshot),
+        } as any,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        profiles: profiles as any,
+        flows: flows as any,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+
+      const makeRemote = (
+        path: string,
+        body: unknown,
+        admittedBy: "host-person" | "hub-roster",
+      ) => {
+        const req = new Request(`http://127.0.0.1${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        bindPrincipalRouteContext(req, {
+          principal: createRemoteDevicePrincipal({
+            hostId: "local" as never,
+            deviceId: "90000000-0000-4000-8000-000000000001" as never,
+            credentialGeneration: 1,
+            origin: "https://octant.example",
+            protocolVersion: 1,
+            capabilityDigest: "a".repeat(64),
+            sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+            admittedBy,
+          }),
+          scopeId: windowId,
+        });
+        return req;
+      };
+
+      const personRead = await route(
+        makeRemote("/api/browser/contexts/current", { threadId }, "host-person"),
+      );
+      expect(await personRead?.json()).toMatchObject({
+        observation: { url: "https://account.example/home", title: "Account Home" },
+      });
+
+      const rosterRead = await route(
+        makeRemote("/api/browser/contexts/current", { threadId }, "hub-roster"),
+      );
+      expect(await rosterRead?.json()).toMatchObject({
+        failure: { reason: "profile-not-local" },
+      });
+
+      const personProfiles = await route(
+        makeRemote("/api/browser/profiles", { kind: "list" }, "host-person"),
+      );
+      expect(personProfiles?.status).toBe(200);
+      expect(profiles.execute).toHaveBeenCalledWith(
+        "person-paired-device",
+        { kind: "list" },
+        expect.objectContaining({ kind: "remote-device" }),
+      );
+
+      const personFlows = await route(
+        makeRemote("/api/browser/flows", { kind: "list" }, "host-person"),
+      );
+      expect(await personFlows?.json()).toEqual({ kind: "browser-flows", flows: [] });
+
+      const rosterFlows = await route(
+        makeRemote("/api/browser/flows", { kind: "list" }, "hub-roster"),
+      );
+      expect(await rosterFlows?.json()).toMatchObject({
+        kind: "browser-flows-refused",
+        reason: "not-local",
+      });
     });
   });
 });

@@ -461,6 +461,7 @@ function collectOwnedAggregates(
   add(TURN_METRICS_AGGREGATE_TYPE, threadId);
   // Coordinator wakes are journaled on the woken thread's id (coordinatorWakeJournal.ts).
   add("coordinator-wake", threadId);
+  add("browser-remote-hold", threadId);
   for (const match of aggregatesMatching(connection, THREAD_OWNERSHIP_PATHS, threadId)) {
     add(match.aggregateType, match.aggregateId);
   }

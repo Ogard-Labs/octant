@@ -1583,7 +1583,9 @@ async function browserToolOne(
     defaultChoice !== undefined &&
     defaultChoice !== "private" &&
     (input.operation !== "navigate" || input.profile === undefined) &&
-    profiles?.approvals.isPairedDevice?.(options.windowId) === true
+    (profiles?.approvals.isRestrictedDevice ?? profiles?.approvals.isPairedDevice)?.(
+      options.windowId,
+    ) === true
   )
     return failure("profile-not-local");
   const binding =

@@ -218,7 +218,11 @@ export interface BrowserAppManagedToolsOptions {
     Partial<
       Pick<
         BrowserToolApprovalService,
-        "isRemembered" | "isTransferRemembered" | "isUnattendedScope" | "isPairedDevice"
+        | "isRemembered"
+        | "isTransferRemembered"
+        | "isUnattendedScope"
+        | "isPairedDevice"
+        | "isRestrictedDevice"
       >
     >;
   /**
@@ -528,7 +532,9 @@ export function createBrowserAppManagedTools(
       defaultChoice !== undefined &&
       defaultChoice !== "private" &&
       (input.operation !== "navigate" || input.profile === undefined) &&
-      options.approvals?.isPairedDevice?.(options.windowId) === true
+      (options.approvals?.isRestrictedDevice ?? options.approvals?.isPairedDevice)?.(
+        options.windowId,
+      ) === true
     )
       return failure("profile-not-local");
     const existingBinding =
@@ -1023,7 +1029,8 @@ function signInRefusal(options: BrowserAppManagedToolsOptions): string | undefin
   if (options.approvals?.isUnattendedScope?.(options.windowId) === true) {
     return "sign-in-needs-a-person";
   }
-  if (options.approvals?.isPairedDevice?.(options.windowId) === true) {
+  const restricted = options.approvals?.isRestrictedDevice ?? options.approvals?.isPairedDevice;
+  if (restricted?.(options.windowId) === true) {
     return "sign-in-needs-this-computer";
   }
   return undefined;

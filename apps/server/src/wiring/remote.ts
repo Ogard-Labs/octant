@@ -4,8 +4,6 @@ import { createOwnerApprovalJournal } from "../hub/ownerApprovalJournal";
 import type { WorkRequestStateWiring } from "./workRequestState";
 import { CodeService } from "../code/codeService";
 import { randomUUID } from "node:crypto";
-import { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
-import { createOwnerBrowserJournal } from "../browser/ownerBrowserJournal";
 import { homedir } from "node:os";
 import {
   type AgentRunId,
@@ -623,7 +621,6 @@ export function wireRemote(deps: RemoteDependencies) {
     options.authorityStateFiles?.hub,
   );
   const hubTransport = createPinnedHubTransport();
-  let ownerBrowserAuthorityChanged: (() => void) | undefined;
   const writeHubMembership = createHubMembershipJournal({
     journal: persistence.journal,
     connection: persistence.connection,
@@ -633,11 +630,7 @@ export function wireRemote(deps: RemoteDependencies) {
     clock: () => new Date().toISOString(),
   });
   const recordHubMembership = (change: Parameters<typeof writeHubMembership>[0]): void => {
-    try {
-      writeHubMembership(change);
-    } finally {
-      ownerBrowserAuthorityChanged?.();
-    }
+    writeHubMembership(change);
   };
   const hubPairing = (): HubPairingPort | undefined => {
     const gateway = currentRemoteGateway;
@@ -1890,34 +1883,6 @@ export function wireRemote(deps: RemoteDependencies) {
     () => void handoverExchange.deliverPendingReports().catch(() => undefined),
     HANDOVER_REPORT_RETRY_MS,
   ).unref();
-  const ownerBrowserControlService = new OwnerBrowserControlService({
-    host: browserAutomationService.ownerBrowserHost({
-      hostMemberId: () => Schema.decodeUnknownSync(HubMemberId)(hubService.hubMemberId()),
-      threadTitle: (threadId) => {
-        const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-        return thread?.lifecycle === "active" ? thread.title : undefined;
-      },
-    }),
-    now: Date.now,
-    timestamp: () => new Date().toISOString(),
-    uuid: randomUUID,
-    onReclaim: (listener) => browserAutomationService.onOwnerControlReclaimed(listener),
-    onAuthorityChange: (listener) => {
-      ownerBrowserAuthorityChanged = listener;
-      const removeCommitted = persistence.journal.subscribeCommitted(listener);
-      return () => {
-        if (ownerBrowserAuthorityChanged === listener) ownerBrowserAuthorityChanged = undefined;
-        removeCommitted();
-      };
-    },
-    audit: createOwnerBrowserJournal({
-      journal: persistence.journal,
-      connection: persistence.connection,
-      localActorId: OCTANT_LOCAL_ACTOR_ID,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-    }),
-  });
   const ownerApprovals = createOwnerApprovalHost({
     hostMemberId: String(hubService.hubMemberId()),
     pending: () => [
@@ -2002,7 +1967,6 @@ export function wireRemote(deps: RemoteDependencies) {
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     approvals: ownerApprovals,
     approvalAnswerNeedsOwnUnlock: () => ownerApprovalAnswerUnlock.required(),
-    browser: ownerBrowserControlService,
     hub: hubService,
     spoke: spokeLinkService,
     unlock: ownerUnlock,
@@ -2578,7 +2542,6 @@ export function wireRemote(deps: RemoteDependencies) {
     externalContentRoutes,
   ]);
   return {
-    ownerBrowserControlService,
     composeHostDiagnostics,
     delegationAdministrationRoutes,
     threadMoveAdministrationRoutes,
