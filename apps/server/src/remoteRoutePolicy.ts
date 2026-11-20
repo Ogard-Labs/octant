@@ -91,8 +91,6 @@ const LOCAL_ONLY_PREFIXES = [
   // The whole host's export: bulk data with no bound of its own for a remote
   // caller. Every other host-control route is forwarded below.
   "/api/host-control/export",
-  "/api/replica-store",
-  "/api/replica-membership",
   // Linking a store and pointing a key at it are acts at this machine.
   "/api/secret-stores",
   "/api/provider-cloud",
@@ -1303,6 +1301,150 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
   },
+  // Artifact replica store settings and membership, for a device the host's
+  // own person paired; each route refuses every other device session itself.
+  {
+    kind: "exact" as const,
+    path: "/api/replica-store/settings",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/replica-store/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16_384,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/replica-membership/state",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/replica-membership/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 262_144,
+  },
+  // Shield server registry (`Settings › Permissions › Servers`), read and
+  // changed by a device the host's own person paired; the route refuses a
+  // change from every other device session and journals the device as actor.
+  {
+    kind: "exact" as const,
+    path: "/api/shield/servers",
+    methods: ["GET", "POST"] as const,
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 64 * 1_024,
+  },
+  // Routine notification preferences, delivery reads, and phone push gateway
+  // settings. Restricted devices stay read-only via the action catalogue; a
+  // person-paired device changes them as a local window does.
+  {
+    kind: "exact" as const,
+    path: "/api/automation-notifications",
+    methods: ["GET", "PUT"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/automation-notifications/status",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/automation-notifications/deliveries",
+    methods: ["GET"] as const,
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/push-notifications/gateway",
+    methods: ["GET", "PUT"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
+  },
+  // Artifact library, tags, Claude page snapshots/copies, mirror, and synced
+  // artifacts. Restricted devices reach only `/api/artifacts/library` under
+  // `project.overview.read`; person-paired devices reach all of them.
+  ...[
+    "/api/artifacts/library",
+    "/api/artifacts/tag",
+    "/api/artifacts/claude-snapshot",
+    "/api/artifacts/claude-copy",
+    "/api/artifacts/synced",
+  ].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+  })),
+  {
+    kind: "exact" as const,
+    path: "/api/artifacts/mirror",
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  },
+  // Thread exports and Chat/Work tool-call records. Restricted devices may
+  // export without captures or tool records and are refused tool-call records;
+  // person-paired devices read both as a local window does.
+  ...["/api/threads/export", "/api/threads/tool-call-records"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  })),
+  // Provider tooling management, for a device the host's own person paired.
+  ...[
+    "/api/provider-tooling/list",
+    "/api/provider-tooling/plan",
+    "/api/provider-tooling/cancel",
+    "/api/provider-tooling/apply",
+  ].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 64 * 1_024,
+  })),
+  // Kept provider sessions and background live tasks in Code and Work, for a
+  // device the host's own person paired; each route refuses restricted devices.
+  ...[
+    "/api/code-live-tasks",
+    "/api/code-native-sessions",
+    "/api/work-live-tasks",
+    "/api/work-native-sessions",
+  ].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["GET"] as const,
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  })),
+  ...[
+    "/api/code-live-tasks/stop",
+    "/api/code-native-sessions/adopt",
+    "/api/work-live-tasks/stop",
+    "/api/work-native-sessions/adopt",
+  ].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+  })),
   ...["/api/agent-grants", "/api/agent-grants/threads"].map((path) => ({
     kind: "exact" as const,
     path,

@@ -231,6 +231,18 @@ describe("authenticated product route dispatch", () => {
       ["/api/remote/pairing-requests/approve", "POST"],
       ["/api/host-control/lifecycle", "POST"],
       ["/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020", "POST"],
+      ["/api/shield/servers", "POST"],
+      ["/api/canvas/network-access", "POST"],
+      ["/api/automation-notifications", "PUT"],
+      ["/api/push-notifications/gateway", "PUT"],
+      ["/api/artifacts/tag", "POST"],
+      ["/api/artifacts/mirror", "POST"],
+      ["/api/threads/tool-call-records", "POST"],
+      ["/api/replica-store/commands", "POST"],
+      ["/api/replica-membership/commands", "POST"],
+      ["/api/provider-tooling/list", "POST"],
+      ["/api/code-live-tasks", "GET"],
+      ["/api/work-live-tasks", "GET"],
     ] as const;
 
     for (const [path, method] of routes) {
@@ -268,6 +280,18 @@ describe("authenticated product route dispatch", () => {
       ["/api/host-control/status", "GET"],
       ["/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020", "POST"],
       ["/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020", "GET"],
+      ["/api/shield/servers", "POST"],
+      ["/api/canvas/network-access", "POST"],
+      ["/api/automation-notifications", "PUT"],
+      ["/api/push-notifications/gateway", "PUT"],
+      ["/api/artifacts/tag", "POST"],
+      ["/api/artifacts/mirror", "POST"],
+      ["/api/threads/tool-call-records", "POST"],
+      ["/api/replica-store/commands", "POST"],
+      ["/api/replica-membership/commands", "POST"],
+      ["/api/provider-tooling/list", "POST"],
+      ["/api/code-live-tasks", "GET"],
+      ["/api/work-live-tasks", "GET"],
     ] as const) {
       expect((await product({ ...handoff(path, method), principal: introduced }))?.status).toBe(
         403,

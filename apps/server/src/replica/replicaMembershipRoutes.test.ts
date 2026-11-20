@@ -113,19 +113,51 @@ describe("replica membership routes", () => {
     expect(response?.status).toBe(400);
   });
 
-  it("refuses a paired remote device even though the transport accepted it", async () => {
+  it("admits a person-paired device for replica membership while refusing hub-introduced and restricted devices", async () => {
     const { bindPrincipalRouteContext } = await import("../principalRouteContext");
-    const { instance, calls } = service([]);
+    const { instance, calls } = service([
+      {
+        kind: "revoked",
+        subject: "11111111-1111-4111-8111-111111111111",
+        view: emptyView,
+      } as never,
+    ]);
     const handler = createReplicaMembershipRouteHandler({
       service: instance as never,
       view: () => emptyView,
       windowAuthorityStore: windowStore(),
     });
-    const request = makeRequest({
+    for (const admittedBy of [undefined, "hub-roster"] as const) {
+      const request = makeRequest({
+        kind: "revoke",
+        subject: "11111111-1111-4111-8111-111111111111",
+      });
+      bindPrincipalRouteContext(request, {
+        principal: {
+          kind: "remote-device",
+          deviceId: Schema.decodeUnknownSync(DeviceId)("00000000-0000-4000-8000-00000000c001"),
+          hostId: Schema.decodeUnknownSync(StableHostId)("00000000-0000-4000-8000-00000000c002"),
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
+            "00000000-0000-4000-8000-00000000c003",
+          ),
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        },
+        scopeId: decodeWindowId("00000000-0000-4000-8000-00000000c001"),
+      });
+      const response = await handler(request);
+      expect(response?.status).toBe(403);
+    }
+    expect(calls.length).toBe(0);
+
+    const paired = makeRequest({
       kind: "revoke",
       subject: "11111111-1111-4111-8111-111111111111",
     });
-    bindPrincipalRouteContext(request, {
+    bindPrincipalRouteContext(paired, {
       principal: {
         kind: "remote-device",
         deviceId: Schema.decodeUnknownSync(DeviceId)("00000000-0000-4000-8000-00000000c001"),
@@ -137,12 +169,13 @@ describe("replica membership routes", () => {
         sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
           "00000000-0000-4000-8000-00000000c003",
         ),
+        admittedBy: "host-person",
       },
       scopeId: decodeWindowId("00000000-0000-4000-8000-00000000c001"),
     });
-    const response = await handler(request);
-    expect(response?.status).toBe(403);
-    expect(calls.length).toBe(0);
+    const response = await handler(paired);
+    expect(response?.status).toBe(200);
+    expect(calls.length).toBe(1);
   });
 
   it("refuses a leave from a paired remote device before the service runs", async () => {

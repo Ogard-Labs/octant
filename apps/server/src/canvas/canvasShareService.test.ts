@@ -765,21 +765,74 @@ describe("CanvasShareService", () => {
     expect(accessLog[0]?.principalId).toBe(ids.device);
   });
 
-  it("refuses a paired remote device that tries to mint or withdraw an owner's share", () => {
-    const { service, shareEventNames } = harness();
-
-    expect(service.share(shareRequest(), context, project, devicePrincipal)).toMatchObject({
-      kind: "denied",
-      denialCode: "unauthorized",
+  it("lets a person-paired device mint and withdraw a share with device journal attribution while keeping hub-introduced devices refused and audience reads remote", () => {
+    const { service, journal, shareEventNames } = harness();
+    const hubPrincipal = createRemoteDevicePrincipal({
+      hostId: "local" as never,
+      deviceId: ids.device as never,
+      credentialGeneration: 1,
+      origin: "https://octant.invalid",
+      protocolVersion: 1,
+      capabilityDigest: "a".repeat(64),
+      sessionId: ids.session as never,
+      admittedBy: "hub-roster",
     });
+    const personPairedPrincipal = createRemoteDevicePrincipal({
+      hostId: "local" as never,
+      deviceId: ids.device as never,
+      credentialGeneration: 1,
+      origin: "https://octant.invalid",
+      protocolVersion: 1,
+      capabilityDigest: "a".repeat(64),
+      sessionId: ids.session as never,
+      admittedBy: "host-person",
+    });
+
+    for (const blocked of [devicePrincipal, hubPrincipal]) {
+      expect(service.share(shareRequest(), context, project, blocked)).toMatchObject({
+        kind: "denied",
+        denialCode: "unauthorized",
+      });
+    }
     expect(shareEventNames()).toHaveLength(0);
 
-    service.share(shareRequest(), context, project, localPrincipal);
-    expect(service.revoke(revokeRequest(), context, project, devicePrincipal)).toMatchObject({
-      kind: "denied",
-      denialCode: "unauthorized",
+    // Person-paired device creates a share; journal envelope records the device actor.
+    const created = service.share(shareRequest(), context, project, personPairedPrincipal);
+    expect(created).toMatchObject({ kind: "accepted" });
+
+    // Audience reads still classify the remote principal as a remote device (not local-user),
+    // so an owner-only snapshot denies that device when reading.
+    expect(
+      service.access({ request: accessRequest(), principal: personPairedPrincipal }),
+    ).toMatchObject({ kind: "denied", outcome: "denied-audience" });
+
+    // Hub-introduced and restricted devices remain refused on revoke.
+    for (const blocked of [devicePrincipal, hubPrincipal]) {
+      expect(service.revoke(revokeRequest(), context, project, blocked)).toMatchObject({
+        kind: "denied",
+        denialCode: "unauthorized",
+      });
+    }
+
+    // Person-paired device revokes the share; journal envelope records the device actor.
+    expect(service.revoke(revokeRequest(), context, project, personPairedPrincipal)).toMatchObject({
+      kind: "accepted",
+      snapshot: { status: "revoked" },
     });
-    expect(shareEventNames()).toEqual([CANVAS_SHARE_SNAPSHOT_CREATED]);
+
+    const shareEnvelopes = journal.replayAggregateType({
+      aggregateType: "canvas-share",
+      afterSequence: 0,
+      limit: 10,
+    });
+    expect(shareEnvelopes.map((envelope) => envelope.eventName)).toEqual([
+      CANVAS_SHARE_SNAPSHOT_CREATED,
+      CANVAS_SHARE_SNAPSHOT_REVOKED,
+    ]);
+    expect(shareEnvelopes.map((envelope) => envelope.actor)).toEqual([
+      { kind: "remote-device", actorId: ids.device, deviceId: ids.device },
+      { kind: "remote-device", actorId: ids.device, deviceId: ids.device },
+    ]);
   });
 
   it("journals a scope-probing read before refusing it, without echoing the snapshot's scope", () => {

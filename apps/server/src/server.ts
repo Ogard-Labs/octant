@@ -514,6 +514,7 @@ export function startOctantServer(
     } = yield* wireWorkspace({
       imageGenerationOffers,
       isPairedDeviceScope,
+      isRestrictedDeviceScope,
       machineChangeFeed,
       onThreadArchived,
       onWaitingAsk,
@@ -933,6 +934,7 @@ export function startOctantServer(
       imageDescriber,
       resolveThreadStrict,
       isPairedDeviceScope,
+      isRestrictedDeviceScope,
       windowAuthorityStore,
       threadWakeups,
       hostResourceBudget,
@@ -1951,6 +1953,8 @@ export function startOctantServer(
       providerRoutes,
       providerUsageLimitsRoutes,
       remoteServerGrantLocalRoutes,
+      replicaMembershipRoutes,
+      replicaStoreSettingsRoutes,
       replicaSyncStatusRoutes,
       scaffoldRoutes,
       replyDetailRoutes,
@@ -2217,8 +2221,6 @@ export function startOctantServer(
                 (await hostControlRoutes(request)) ??
                 (await supportBundleRoutes(request)) ??
                 (await externalContentRoutes(request)) ??
-                (await replicaStoreSettingsRoutes(request)) ??
-                (await replicaMembershipRoutes(request)) ??
                 (await dispatchMeasuredProductRoutes(request)) ??
                 (await webAssets(request)) ??
                 new Response("Not Found", { status: 404 })

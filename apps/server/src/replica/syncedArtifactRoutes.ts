@@ -2,7 +2,7 @@ import {
   decodeArtifactSyncedCommand,
   type ArtifactSyncedCommand,
 } from "@octant/contracts/artifact-library";
-import { authenticateRouteWindowId, readPrincipalRouteContext } from "../principalRouteContext";
+import { authenticateRouteWindowId, boundPrincipalIsRestricted } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { SyncedArtifactService } from "./syncedArtifactService";
@@ -43,7 +43,7 @@ export function createSyncedArtifactRouteHandler(deps: SyncedArtifactRouteDepend
     }
     if (request.method !== "POST") return undefined;
 
-    if (readPrincipalRouteContext(request)?.principal.kind === "remote-device") {
+    if (boundPrincipalIsRestricted(request)) {
       return failure("Synced artifacts are settled on the host.", 403, origin);
     }
     try {
