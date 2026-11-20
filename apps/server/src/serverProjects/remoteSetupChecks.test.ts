@@ -128,6 +128,25 @@ describe("read-only remote setup checks", () => {
     });
     expect(await checks.check(input)).toMatchObject({ reason: "registration-changed" });
   });
+
+  it("admits a person-paired device and reports key-confirmation-required when the SSH agent requires confirmation", async () => {
+    const checks = new RemoteSetupChecks({
+      servers: () => [server],
+      agentAvailable: () => true,
+      connection: {
+        run: async () => ({
+          status: "unreachable",
+          message: "Permission denied (publickey).",
+          errorOutput:
+            "sign_and_send_pubkey: signing failed for ED25519-SK from agent: agent refused operation",
+        }),
+      },
+    });
+    expect(await checks.check(input, undefined, { pairedDevice: true })).toMatchObject({
+      status: "disconnected",
+      reason: "key-confirmation-required",
+    });
+  });
 });
 
 import { afterAll, beforeAll } from "vitest";

@@ -4,7 +4,9 @@ import { connect as netConnect, type Socket } from "node:net";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
 import { REMOTE_SERVER_PROXY_RELAYED, REMOTE_SERVER_PROXY_RELAYED_HEADER } from "@octant/contracts";
 import { relayResponseHeaders, type RemoteServerRelayHeader } from "@octant/domain";
-import { webSocketAcceptFor } from "../webSocketRelay";
+import { webSocketAcceptFor, type WebSocketTransportStream } from "../webSocketRelay";
+
+export type RelayUpstreamStream = WebSocketTransportStream;
 
 /** The upstream connection's own bounds; the request body's is the route's. */
 export interface RemoteServerRelayLimits {
@@ -30,6 +32,11 @@ export interface RemoteServerRelayRequest {
 export interface RemoteServerRelayInput {
   /** The loopback URL the grant was minted for; the only place this connects. */
   readonly endpointUrl: string;
+  /**
+   * Optional dedicated upstream transport (such as an SSH stdio stream for a
+   * server Project preview) used in place of connecting to loopback.
+   */
+  readonly connectUpstream?: () => Promise<RelayUpstreamStream | undefined>;
   readonly request: RemoteServerRelayRequest;
   /**
    * Asked with the SHA-256 of an HTTPS dev server's certificate before any
@@ -75,9 +82,21 @@ interface LoopbackTarget {
 export async function relayToDevServer(
   input: RemoteServerRelayInput,
 ): Promise<RemoteServerRelayAttempt> {
+  if (input.signal.aborted) return settledWith(input, { kind: "aborted" });
+  if (input.connectUpstream !== undefined) {
+    let stream: RelayUpstreamStream | undefined;
+    try {
+      stream = await input.connectUpstream();
+    } catch {
+      return settledWith(input, { kind: input.signal.aborted ? "aborted" : "unreachable" });
+    }
+    if (stream === undefined) {
+      return settledWith(input, { kind: input.signal.aborted ? "aborted" : "unreachable" });
+    }
+    return exchange(stream, input);
+  }
   const target = loopbackTarget(input.endpointUrl);
   if (target === undefined) return settledWith(input, { kind: "unreachable" });
-  if (input.signal.aborted) return settledWith(input, { kind: "aborted" });
 
   let socket: Socket | TLSSocket;
   try {
@@ -98,7 +117,7 @@ export async function relayToDevServer(
 }
 
 function exchange(
-  socket: Socket | TLSSocket,
+  socket: RelayUpstreamStream,
   input: RemoteServerRelayInput,
 ): Promise<RemoteServerRelayAttempt> {
   const { request, signal } = input;
@@ -109,9 +128,23 @@ function exchange(
     let answered = false;
     let settled = false;
     let fail: ((error: Error) => void) | undefined;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const onIdleTimeout = () => {
+      if (!answered) refuse({ kind: "unreachable" });
+      else fail?.(new Error("The dev server sent nothing within the idle bound."));
+    };
+    const armIdleTimer = () => {
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
+      idleTimer = setTimeout(onIdleTimeout, input.limits.idleTimeoutMs);
+    };
     const settle = () => {
       if (settled) return;
       settled = true;
+      if (idleTimer !== undefined) {
+        clearTimeout(idleTimer);
+        idleTimer = undefined;
+      }
+      socket.off("data", armIdleTimer);
       signal.removeEventListener("abort", onAbort);
       socket.destroy();
       input.onSettled();
@@ -130,10 +163,12 @@ function exchange(
       fail?.(new Error("The grant this response travelled under closed."));
     }
     signal.addEventListener("abort", onAbort, { once: true });
-    socket.setTimeout(input.limits.idleTimeoutMs, () => {
-      if (!answered) refuse({ kind: "unreachable" });
-      else fail?.(new Error("The dev server sent nothing within the idle bound."));
-    });
+    if ("setTimeout" in socket && typeof socket.setTimeout === "function") {
+      socket.setTimeout(input.limits.idleTimeoutMs, onIdleTimeout);
+    } else {
+      socket.on("data", armIdleTimer);
+      armIdleTimer();
+    }
 
     const upstream = httpRequest({
       method: request.method,
@@ -178,6 +213,8 @@ const MAX_HANDSHAKE_ANSWER_BYTES = 16 * 1024;
 export interface RemoteServerWebSocketInput {
   /** The loopback URL the grant was minted for; the only place this connects. */
   readonly endpointUrl: string;
+  /** Optional dedicated upstream transport used in place of loopback (e.g. SSH stdio). */
+  readonly connectUpstream?: () => Promise<RelayUpstreamStream | undefined>;
   /** The dev server's own path and query. */
   readonly pathQuery: string;
   /** The handshake's headers, already made the host's own, with this key. */
@@ -194,7 +231,7 @@ export interface RemoteServerWebSocketInput {
 export type RemoteServerWebSocketAttempt =
   | {
       readonly kind: "opened";
-      readonly socket: Socket | TLSSocket;
+      readonly socket: RelayUpstreamStream;
       /** Bytes the dev server sent after its handshake answer: its first frames. */
       readonly head: Uint8Array;
       readonly protocol: string | undefined;
@@ -217,8 +254,6 @@ export type RemoteServerWebSocketAttempt =
 export async function openDevServerWebSocket(
   input: RemoteServerWebSocketInput,
 ): Promise<RemoteServerWebSocketAttempt> {
-  const target = loopbackTarget(input.endpointUrl);
-  if (target === undefined) return { kind: "unreachable" };
   if (input.signal.aborted) return { kind: "aborted" };
   // The handshake is written by hand, so nothing in it may end a line early.
   if (
@@ -230,6 +265,18 @@ export async function openDevServerWebSocket(
   ) {
     return { kind: "declined" };
   }
+  if (input.connectUpstream !== undefined) {
+    let stream: RelayUpstreamStream | undefined;
+    try {
+      stream = await input.connectUpstream();
+    } catch {
+      return { kind: input.signal.aborted ? "aborted" : "unreachable" };
+    }
+    if (stream === undefined) return { kind: input.signal.aborted ? "aborted" : "unreachable" };
+    return handshake(stream, input);
+  }
+  const target = loopbackTarget(input.endpointUrl);
+  if (target === undefined) return { kind: "unreachable" };
   let socket: Socket | TLSSocket;
   try {
     socket = await connect(target, input.limits.connectTimeoutMs, input.signal);
@@ -247,7 +294,7 @@ export async function openDevServerWebSocket(
 }
 
 function handshake(
-  socket: Socket | TLSSocket,
+  socket: RelayUpstreamStream,
   input: RemoteServerWebSocketInput,
 ): Promise<RemoteServerWebSocketAttempt> {
   return new Promise((resolve) => {

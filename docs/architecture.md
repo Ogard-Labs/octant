@@ -6983,11 +6983,11 @@ before an outside RPC reply. No key or generic credential-return route is
 exposed. Runtime activation and observed capability requirements still apply.
 
 Opt-in defaults off independently for each provider instance. A local window or
-a paired device that can open the current Code Project and thread opts in and
-submits (maintainer decision, 2026-11-12; not built yet: today a local window
-must own them and a paired client is refused; designed under
-**Paired devices and cloud jobs** below); routines, subagents and headless
-callers receive no implicit authority. Submission rechecks current
+a device the host's own person paired that can open the current Code Project and
+thread opts in and submits (maintainer decision, 2026-11-12; built under
+**Paired devices and cloud jobs** below); hub-introduced devices, restricted
+devices, routines, subagents and headless callers receive no implicit authority.
+Submission rechecks current
 window, Project binding, checkout, effective posture, opt-in, instance version,
 key availability and spend policy after any credential unlock. The original
 authenticated window capability remains current across body reads and unlocks;
@@ -7026,13 +7026,11 @@ and de-links retained unknown usage under the existing retention rule. It does
 not delete provider-held data or guarantee remote cancellation; a late known ID
 is used only for cleanup, without restoring purged input.
 
-**Paired devices and cloud jobs** (designed, not built; maintainer request,
-2026-11-18). A device the host's own person paired opts an instance in or
-out, submits, acknowledges unknown jobs, reads and requests cancellation as
-a local window does. Today the submission policy (`canManageProvider`,
-`decideProviderCloudSubmission`) takes a `WindowId` and the store journals
-every job event as the system, so the design changes who is judged and who
-is recorded:
+**Paired devices and cloud jobs** (built; maintainer request, 2026-11-18). A
+device the host's own person paired opts an instance in or out, submits,
+acknowledges unknown jobs, reads and requests cancellation as a local window
+does, with the host judging the authenticated principal and recording the
+acting device:
 
 - **Who is judged.** The service takes the authenticated principal, not a
   window id: a local window, or a `person-paired-device` with its device id,
@@ -15478,14 +15476,13 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   finishing a connector sign-in from a paired browser or phone, by device
   authorization where the issuer offers it and otherwise a one-time relay
   bound to the device that began it
-  ([Finishing a connector sign-in from a paired device](#extensions-and-skills)).
-  Designed, not built (maintainer request, 2026-11-18): the Browser's
-  dedicated streaming lease and UI for Take over, Hand back, `sign-in`,
-  profile pages and saved flows
+  ([Finishing a connector sign-in from a paired device](#extensions-and-skills));
+  the Browser's dedicated streaming lease and UI for Take over, Hand back,
+  `sign-in`, profile pages and saved flows
   ([A paired device holds the page](design/browser-agent-tool.md#a-paired-device-holds-the-page),
   [what a device sees of a signed-in page](design/browser-profiles.md#what-a-paired-device-sees-of-a-signed-in-page));
   and provider cloud sessions and server Projects beyond reading, whose
-  records gain a versioned device principal
+  records carry a versioned device principal
   ([Paired devices and cloud jobs](#provider-cloud-jobs),
   [Server Projects: Paired devices](design/server-projects.md#paired-devices)).
   Each is listed in

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import {
+  decodeProviderCloudOptInChangedV2Payload,
   decodeProviderCloudRequest,
   decodeProviderCloudResponse,
   ProviderCloudCreateInput,
@@ -48,5 +49,31 @@ describe("provider cloud boundary", () => {
     const create = { jobId: start.jobId, modelId: start.modelId };
     expect(decodeCreate({ ...create, text: pasted })).toMatchObject({ text: pasted });
     expect(() => decodeCreate({ ...create, text: "   " })).toThrow();
+  });
+  it("decodes credential-unlock-needs-this-computer refusal and v2 paired-device principal payloads strictly", () => {
+    expect(
+      decodeProviderCloudResponse({
+        status: "refused",
+        reason: "credential-unlock-needs-this-computer",
+      }),
+    ).toEqual({ status: "refused", reason: "credential-unlock-needs-this-computer" });
+    expect(
+      decodeProviderCloudOptInChangedV2Payload({
+        instanceId: start.instanceId,
+        enabled: true,
+        principal: { kind: "person-paired-device", credentialGeneration: 2 },
+      }),
+    ).toMatchObject({
+      instanceId: start.instanceId,
+      enabled: true,
+      principal: { kind: "person-paired-device", credentialGeneration: 2 },
+    });
+    expect(() =>
+      decodeProviderCloudOptInChangedV2Payload({
+        instanceId: start.instanceId,
+        enabled: true,
+        principal: { kind: "person-paired-device", credentialGeneration: 0 },
+      }),
+    ).toThrow();
   });
 });

@@ -13,6 +13,7 @@ export function createServerWorkActionTask(options: {
   readonly readThread: (id: WorkThreadId) => WorkThread | undefined;
   readonly workspace: (id: WindowId) => WindowWorkspace | undefined;
   readonly isWindowLive: (id: WindowId) => boolean;
+  readonly isPersonPairedDevice?: (id: WindowId) => boolean;
   readonly workEnabled: () => boolean;
 }): (
   windowId: WindowId,
@@ -44,6 +45,11 @@ export function createServerWorkActionTask(options: {
     const authorityRevision = authorityOf(thread);
     const current = () => {
       const fresh = options.readThread(threadId);
+      const callerReachesProject =
+        options.isPersonPairedDevice?.(windowId) === true
+          ? true
+          : options.isWindowLive(windowId) &&
+            windowCanAccessWorkProject({ workspace: options.workspace(windowId), projectId });
       return (
         fresh !== undefined &&
         fresh.lifecycle === "active" &&
@@ -52,8 +58,7 @@ export function createServerWorkActionTask(options: {
         serverWorkProjectOf(options.store, fresh)?.folder === project.folder &&
         authorityOf(fresh) === authorityRevision &&
         options.workEnabled() &&
-        options.isWindowLive(windowId) &&
-        windowCanAccessWorkProject({ workspace: options.workspace(windowId), projectId })
+        callerReachesProject
       );
     };
     if (!current()) return undefined;

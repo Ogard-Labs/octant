@@ -16,6 +16,7 @@ import { ProjectId } from "./projects";
 import {
   CloudMachineState,
   ServerFolderPath,
+  ServerProjectEventPrincipalV2,
   ServerProjectMode,
   ServerProjectName,
 } from "./serverProjects";
@@ -31,6 +32,12 @@ export const CLOUD_MACHINES_EVENT_NAMES = {
   projectBound: "cloud-machines.project-bound@1",
   stateChanged: "cloud-machines.state-changed@1",
   destroyed: "cloud-machines.destroyed@1",
+} as const;
+export const CLOUD_MACHINES_EVENT_NAMES_V2 = {
+  creationRequested: "cloud-machines.creation-requested@2",
+  projectBound: "cloud-machines.project-bound@2",
+  stateChanged: "cloud-machines.state-changed@2",
+  destroyed: "cloud-machines.destroyed@2",
 } as const;
 
 /** Machines that may hold something in the person's account at once. */
@@ -178,23 +185,34 @@ export const CloudMachine = Schema.Struct({
 }).annotations(strict);
 export type CloudMachine = typeof CloudMachine.Type;
 
-/** Only a person at a local window acts on a cloud machine. */
+/** Version 1 records name only a local window; version 2 also names a person-paired device. */
 const localWindow = Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict);
+export const CloudMachineEventPrincipalV2 = ServerProjectEventPrincipalV2;
+export type CloudMachineEventPrincipalV2 = ServerProjectEventPrincipalV2;
+
+const CloudMachineCreationRequestedMachine = Schema.Struct({
+  id: AggregateId,
+  targetId: CloudMachineTargetId,
+  name: ServerProjectName,
+  recipe: CloudMachineRecipe,
+  credentialReference: CloudCredentialReference,
+  folder: ServerFolderPath,
+  mode: Schema.optional(ServerProjectMode),
+  requestedAt: UtcTimestamp,
+}).annotations(strict);
 
 export const CloudMachineCreationRequestedPayload = Schema.Struct({
-  machine: Schema.Struct({
-    id: AggregateId,
-    targetId: CloudMachineTargetId,
-    name: ServerProjectName,
-    recipe: CloudMachineRecipe,
-    credentialReference: CloudCredentialReference,
-    folder: ServerFolderPath,
-    mode: Schema.optional(ServerProjectMode),
-    requestedAt: UtcTimestamp,
-  }).annotations(strict),
+  machine: CloudMachineCreationRequestedMachine,
   principal: localWindow,
 }).annotations(strict);
 export type CloudMachineCreationRequestedPayload = typeof CloudMachineCreationRequestedPayload.Type;
+
+export const CloudMachineCreationRequestedPayloadV2 = Schema.Struct({
+  machine: CloudMachineCreationRequestedMachine,
+  principal: CloudMachineEventPrincipalV2,
+}).annotations(strict);
+export type CloudMachineCreationRequestedPayloadV2 =
+  typeof CloudMachineCreationRequestedPayloadV2.Type;
 
 export const CloudMachineCreatedPayload = Schema.Struct({
   machineId: AggregateId,
@@ -215,6 +233,13 @@ export const CloudMachineProjectBoundPayload = Schema.Struct({
   principal: localWindow,
 }).annotations(strict);
 
+export const CloudMachineProjectBoundPayloadV2 = Schema.Struct({
+  machineId: AggregateId,
+  serverId: AggregateId,
+  projectId: ProjectId,
+  principal: CloudMachineEventPrincipalV2,
+}).annotations(strict);
+
 export const CloudMachineStateChangedPayload = Schema.Struct({
   machineId: AggregateId,
   /** `destroy` is a destroy the provider is still finishing; `observe` is a refresh. */
@@ -226,11 +251,29 @@ export const CloudMachineStateChangedPayload = Schema.Struct({
   principal: localWindow,
 }).annotations(strict);
 
+export const CloudMachineStateChangedPayloadV2 = Schema.Struct({
+  machineId: AggregateId,
+  /** `destroy` is a destroy the provider is still finishing; `observe` is a refresh. */
+  act: Schema.Literal("suspend", "resume", "destroy", "observe"),
+  state: CloudMachineState,
+  observedAt: UtcTimestamp,
+  /** Present only when the provider reported a cost with this answer. */
+  costPerHour: Schema.optional(CloudMachineHourlyCost),
+  principal: CloudMachineEventPrincipalV2,
+}).annotations(strict);
+
 export const CloudMachineDestroyedPayload = Schema.Struct({
   machineId: AggregateId,
   state: CloudMachineState,
   observedAt: UtcTimestamp,
   principal: localWindow,
+}).annotations(strict);
+
+export const CloudMachineDestroyedPayloadV2 = Schema.Struct({
+  machineId: AggregateId,
+  state: CloudMachineState,
+  observedAt: UtcTimestamp,
+  principal: CloudMachineEventPrincipalV2,
 }).annotations(strict);
 
 /** A target the plugin host offers now: installed, trusted and enabled. */

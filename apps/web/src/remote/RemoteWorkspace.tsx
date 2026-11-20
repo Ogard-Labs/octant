@@ -236,6 +236,9 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
           projectBrowserClient={props.clients.projectBrowser}
           projectClient={props.clients.project}
           projectTerminalClient={props.clients.projectTerminal}
+          {...(props.clients.serverProjects === undefined
+            ? {}
+            : { serverProjectsClient: props.clients.serverProjects })}
         />
       ) : null}
       <OctantDialogPresence>
@@ -506,6 +509,7 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
             />
           )}
           <CodeThreadWorkspace
+            actsAsHostPerson={props.actsAsHostPerson}
             canvasClient={props.clients.canvas}
             onOpenCanvas={props.onOpenCanvas}
             onOpenCanvasInSidebar={props.onOpenCanvas}

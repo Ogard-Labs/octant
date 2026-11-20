@@ -3,7 +3,7 @@ import { decodeWorkThreadId } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts";
 import { notifyWindowRevocations } from "../windowRevocations";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { defaultShellSettings } from "@octant/domain";
 import {
   type AgentRun,
@@ -31,6 +31,7 @@ import { ProcessAuthorityClock } from "../processAuthorityClock";
 import {
   readDeviceApprovedByPerson,
   readDeviceRegistration,
+  readRemoteSessionInvalidation,
 } from "../persistence/remoteAccessProjection";
 import { AgentRunEventStore } from "../agentRun/agentRunEventStore";
 import { AgentRunPersistenceService } from "../agentRun/agentRunPersistenceService";
@@ -237,6 +238,28 @@ export function wireAuthority(deps: AuthorityDependencies) {
   const isRestrictedDeviceScope = (scopeId: WindowId): boolean =>
     isPairedDeviceScope(scopeId) &&
     !readDeviceApprovedByPerson(persistence.connection, String(scopeId));
+  const isPersonPairedDeviceCurrent = (
+    deviceId: string,
+    credentialGeneration: number,
+    sessionId?: string,
+  ): boolean => {
+    const registration = readDeviceRegistration(persistence.connection, deviceId);
+    if (
+      registration === undefined ||
+      !isDeviceRegistrationCurrent(registration, Date.now()) ||
+      registration.credentialGeneration !== credentialGeneration ||
+      !readDeviceApprovedByPerson(persistence.connection, deviceId)
+    ) {
+      return false;
+    }
+    if (sessionId !== undefined) {
+      const digest = createHash("sha256").update(sessionId).digest("hex");
+      if (readRemoteSessionInvalidation(persistence.connection, digest) !== undefined) {
+        return false;
+      }
+    }
+    return true;
+  };
   // Peer-delegated Work threads run under the host scope for a peer granted
   // one Project, so host-wide person memory is withheld from those threads and
   // any subagent they spawn — live before the first turn starts and rebuilt
@@ -503,6 +526,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     imageGenerationOffers,
     isPairedDeviceScope,
     isRestrictedDeviceScope,
+    isPersonPairedDeviceCurrent,
     liveTurns,
     machineChangeFeed,
     onAgentRunExecutionAccepted,

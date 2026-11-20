@@ -97,4 +97,28 @@ describe("Code provider cloud sessions", () => {
     expect(screen.queryByText("Previous private receipt")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Task text to send")).toHaveValue("");
   });
+
+  it("tells a paired browser when the host's credential store must be unlocked at the computer", async () => {
+    vi.stubGlobal("crypto", webcrypto);
+    const execute = vi
+      .fn<ProviderCloudSessionClient["execute"]>()
+      .mockImplementation(async (command) =>
+        command.kind === "start"
+          ? decodeProviderCloudResponse({
+              status: "refused",
+              reason: "credential-unlock-needs-this-computer",
+            })
+          : ready,
+      );
+    const user = userEvent.setup();
+    render(<ProviderCloudSessions client={{ execute }} threadId={threadId} />);
+    fireEvent.click(screen.getByText("Provider cloud sessions"));
+    await user.type(await screen.findByLabelText("Task text to send"), "Synthetic input.");
+    await user.click(screen.getByRole("button", { name: "Review cloud task" }));
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: "Run in provider cloud" }));
+    expect(
+      await screen.findByText(/Unlock this provider's key at this computer/i),
+    ).toBeInTheDocument();
+  });
 });

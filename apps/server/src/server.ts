@@ -275,6 +275,7 @@ export function startOctantServer(
       extensionToolApprovalService,
       isPairedDeviceScope,
       isRestrictedDeviceScope,
+      isPersonPairedDeviceCurrent,
       liveTurns,
       machineChangeFeed,
       onAgentRunExecutionAccepted,
@@ -664,6 +665,7 @@ export function startOctantServer(
       resolveThreadStrict,
       providerAvailabilityMarks,
       isProjectPolicyTargetAllowed,
+      isPersonPairedDeviceCurrent,
       toolEffectLedger,
       hostResourceBudget,
       serverAttachmentCleanup,
@@ -1096,6 +1098,8 @@ export function startOctantServer(
       onWindowRevoked,
       isPairedDeviceScope,
       isRestrictedDeviceScope,
+      isPersonPairedDeviceCurrent,
+      serverPreviewTunnels,
       desktopLeases,
       installDesktopPreviewRequest,
       workThreadProjection,
@@ -1888,6 +1892,7 @@ export function startOctantServer(
       windowAuthorityStore,
       spendCeilingService,
       configuredDriverOptions,
+      isPersonPairedDeviceCurrent,
       ...(options.allowedRendererHttpOrigin === undefined
         ? {}
         : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
