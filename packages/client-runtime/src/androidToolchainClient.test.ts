@@ -1,30 +1,7 @@
-import type { AndroidDiscoveryRequest } from "@octant/contracts/android-toolchain";
-import { beforeAll, describe, expect, it, vi } from "vitest";
-
-let createAndroidToolchainClient: (options: Record<string, unknown>) => {
-  discover(request: AndroidDiscoveryRequest, signal?: AbortSignal): Promise<any>;
-  snapshot(request: unknown): Promise<any>;
-  watchScreen(
-    request: unknown,
-    signal?: AbortSignal,
-  ): Promise<
-    | {
-        readonly status: "watching";
-        readonly screen: { readonly width: number; readonly height: number };
-        readonly frames: AsyncIterable<Uint8Array>;
-        readonly transport?: { readonly kind: string; readonly reason?: string };
-      }
-    | { readonly status: "failed"; readonly kind: string; readonly message: string }
-  >;
-};
-
-beforeAll(async () => {
-  const path = "./androidToolchainClient";
-  const loaded = await import(path).catch(() => undefined);
-  expect(loaded).toBeDefined();
-  expect(loaded?.createAndroidToolchainClient).toBeTypeOf("function");
-  createAndroidToolchainClient = loaded!.createAndroidToolchainClient;
-});
+import { decodeAndroidDiscoveryRequest } from "@octant/contracts/android-toolchain";
+import { decodeAndroidScreenStreamRequest } from "@octant/contracts/android-toolchain-rpc";
+import { describe, expect, it, vi } from "vitest";
+import { createAndroidToolchainClient } from "./androidToolchainClient";
 
 const authority = {
   hostId: "4f70656e-4f72-4269-9474-4c6f63616c31",
@@ -33,21 +10,21 @@ const authority = {
   providerInstanceId: "80000000-0000-4000-8000-000000000002",
   extension: { kind: "core" },
 } as const;
-const request: AndroidDiscoveryRequest = {
-  actionId: "80000000-0000-4000-8000-000000000003" as never,
-  correlationId: "80000000-0000-4000-8000-000000000004" as never,
-  authority: authority as never,
-  threadId: "80000000-0000-4000-8000-000000000005" as never,
-  checkoutId: "80000000-0000-4000-8000-000000000006" as never,
-};
+const request = decodeAndroidDiscoveryRequest({
+  actionId: "80000000-0000-4000-8000-000000000003",
+  correlationId: "80000000-0000-4000-8000-000000000004",
+  authority,
+  threadId: "80000000-0000-4000-8000-000000000005",
+  checkoutId: "80000000-0000-4000-8000-000000000006",
+});
 
-const watchRequest = {
+const watchRequest = decodeAndroidScreenStreamRequest({
   kind: "android-screen-stream-request",
   authority,
   threadId: request.threadId,
   checkoutId: request.checkoutId,
   emulatorId: "Pixel_8_API_34",
-};
+});
 
 describe("androidToolchainClient", () => {
   it("sends normalized discovery and decodes the shared snapshot", async () => {
