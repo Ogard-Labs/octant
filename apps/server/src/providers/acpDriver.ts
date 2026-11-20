@@ -51,7 +51,7 @@ import {
   textOnlyInputModalities,
   unsupportedChatCapabilities,
 } from "@octant/provider-sdk/chat-conformance";
-import { Effect, Exit, PubSub, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Option, PubSub, Scope, Stream } from "effect";
 import {
   mapAcpNotification,
   mapAcpPermissionRequest,
@@ -1559,9 +1559,16 @@ function makeConnection(
       };
       const scope = await Effect.runPromise(Scope.make());
       try {
-        const apiKey = await Effect.runPromise(resolveApiKey(options), { signal });
+        const runOptions = signal === undefined ? undefined : { signal };
+        const apiKeyExit = await Effect.runPromiseExit(resolveApiKey(options), runOptions);
+        if (Exit.isFailure(apiKeyExit)) {
+          throw Option.getOrElse(Cause.failureOption(apiKeyExit.cause), () =>
+            failure("provider-failed", `${name} credentials could not be resolved.`),
+          );
+        }
+        const apiKey = apiKeyExit.value;
         let receipt: Awaited<ReturnType<ProviderRuntimeRegistry["trackProcess"]>> | undefined;
-        const processConnection = await Effect.runPromise(
+        const startedExit = await Effect.runPromiseExit(
           options.process
             .start({
               ...(options.sandboxPolicy === undefined
@@ -1587,8 +1594,14 @@ function makeConnection(
               },
             })
             .pipe(Effect.provideService(Scope.Scope, scope)),
-          { signal },
+          runOptions,
         );
+        if (Exit.isFailure(startedExit)) {
+          throw Option.getOrElse(Cause.failureOption(startedExit.cause), () =>
+            failure("provider-failed", `${name} process failed without a typed failure.`),
+          );
+        }
+        const processConnection = startedExit.value;
         if (receipt === undefined) {
           await options.runtimeRegistry.trackProcess(options.instanceId, processConnection);
         }

@@ -208,20 +208,6 @@ export const WINDOWS_KEPT_SANDBOX_REFUSAL =
   "Keeping the sandbox at Full access needs a sandbox Windows doesn't have yet. Turn Keep the sandbox off, or run it on a Mac or Linux host.";
 
 /**
- * Why a Chat provider launch refuses on a Windows host. Chat has no folder or
- * shell. Codex (no execution environment), Claude (no file or shell tool) and
- * Pi (no built-in tool) are configured that way natively and start there
- * outside Strict. OpenCode's permission rules can deny its file and shell
- * tools, but its command templates run shell substitutions and its plugins
- * run code in its own process outside those rules; an ACP agent's client
- * capabilities decide only whether it uses Octant's file and terminal
- * methods, and no reviewed agent profile can be told to drop its own built-in
- * file and shell tools. Only Octant's sandbox holds those two to Chat's rule.
- */
-export const WINDOWS_CHAT_PROVIDER_REFUSAL =
-  "This provider keeps Chat without a folder or shell only inside Octant's sandbox, which Windows doesn't have yet. On this computer use Codex, Claude, Pi or an Octant Harness model for Chat, or this provider in Work or Code.";
-
-/**
  * Why a provider turn at `access` refuses on this host, or undefined when it
  * may start. On Windows a turn below Full access runs with the provider's own
  * approvals and no Octant sandbox claimed, so only what needs Octant's sandbox
@@ -245,9 +231,9 @@ export function hostProviderTurnRefusal(input: {
  * How one provider launch runs on a Windows host, decided from that launch's
  * own mode, level and Strict value, so no earlier launch or cached read admits
  * another. `unconfined` starts the provider with no Octant sandbox: at Full
- * access with no approvals, below it with the provider's own approvals, every
- * ask still answered and journaled on the server. A launch that does not say
- * whether it is Strict is Strict.
+ * access with no approvals, below it and in Chat outside Strict with the
+ * provider's own rules and approvals, every ask still answered and journaled
+ * on the server. A launch that does not say whether it is Strict is Strict.
  */
 export type WindowsProviderLaunch =
   | { readonly status: "unconfined"; readonly approvals: "none" | "provider" }
@@ -258,19 +244,18 @@ export function windowsProviderLaunch(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox?: boolean | undefined;
   readonly strict?: boolean | undefined;
-  /**
-   * Whether this provider's Chat launch has no file or shell tool by its own
-   * configuration, so Chat's rule holds without Octant's sandbox.
-   */
-  readonly chatWithoutFolderOrShell?: boolean | undefined;
 }): WindowsProviderLaunch {
-  if (input.mode === "chat" && input.chatWithoutFolderOrShell !== true)
-    return { status: "refused", reason: WINDOWS_CHAT_PROVIDER_REFUSAL };
   if (input.strict === true) return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
+  if (input.fullAccessSandbox === true) {
+    return { status: "refused", reason: WINDOWS_KEPT_SANDBOX_REFUSAL };
+  }
+  if (input.mode === "chat") {
+    return input.strict === false
+      ? { status: "unconfined", approvals: "provider" }
+      : { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
+  }
   if (input.executionPolicy === "full-access") {
-    return input.fullAccessSandbox === true
-      ? { status: "refused", reason: WINDOWS_KEPT_SANDBOX_REFUSAL }
-      : { status: "unconfined", approvals: "none" };
+    return { status: "unconfined", approvals: "none" };
   }
   if (input.strict !== false) return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
   return { status: "unconfined", approvals: "provider" };

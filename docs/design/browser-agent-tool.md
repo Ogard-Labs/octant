@@ -298,8 +298,9 @@ the page, the workspace, or the person is reached.
     navigation elsewhere is refused on it rather than closing it. On the
     headless Browser the person's own page holds the site they typed, because
     that Browser cannot keep a typed address's redirect off this computer's
-    network. A page the agent opened admits every site there too, and its
-    redirects are followed wherever they go. Credential-field
+    network. A page the agent opened admits every site there too, and the
+    redirects of a load the host named for it — its `navigate`, its `tab-open`
+    with a target — are followed wherever they go. Credential-field
     protection, Take over and Hand back, and the paired-device reach are the
     same on it as on any page.
   - A Private page opened for one site (before this rule, or for a local
@@ -313,6 +314,41 @@ the page, the workspace, or the person is reached.
   - A typed address's redirect is still never followed onto this computer or
     its network, unless that is where the person typed; the agent's own
     navigation is not held to that.
+- A move the page itself starts — a clicked link, a script, a refresh, a
+  subframe; the host cannot tell them apart — onto this computer or its
+  network is refused before the allowlist or a temporary grant is consulted:
+  a private, loopback, or link-local IP address as written (an IPv4-mapped
+  IPv6 one included), `localhost`, a name under `.localhost`, `.local`,
+  `.internal`, `.lan`, or `.home.arpa`, or a bare name. The text alone is
+  read, never a resolver, and only http(s) addresses get the decision. The
+  rule holds on the desktop and the headless Browser alike: the desktop
+  guard reads the navigation events the renderer reports, and the headless
+  Browser pauses each document request and each redirect hop before it is
+  sent and judges the same address text the same way. A context approved
+  for exactly one origin keeps hops to that origin. On
+  desktop, a local document committed after an explicit open of its exact
+  origin may also follow
+  links and redirects in its own tab, even in a wider context. The main
+  frame must start the move and each hop must stay on the exact scheme,
+  host, and port. The headless Browser keeps the same committed-document
+  continuation, but its guard cannot see which frame started a main-frame
+  move, so it admits the exact-origin continuation whichever frame started
+  it. This adds no site approval and carries nothing to a new
+  tab or a reopened sleeping tab. Open link in the context menu opens a new
+  tab and follows the ordinary page-started rule. A host-named load has a
+  separate exception for its own top-level redirect chain: the agent's
+  `navigate` or `tab-open` under the context's allowlist, and a person's
+  typed address within the exact scheme, host, and port they typed. An
+  admitted page-started main navigation supersedes that named load, and a
+  main document commit ends it. A renderer start, a subframe, an
+  extension's load, a script, and a held or reopened page never borrow the
+  named-load exception. On the headless Browser the tab's document guard
+  does not pause a committed out-of-process frame's own moves or a
+  popup's, so a browser-wide session pauses every document hop of the
+  frames and pages a tab's own guard cannot reach — including a
+  frame's redirect hops — and judges them with the same rule: subframes
+  and popups never earn the named-load exception or the exact-origin
+  continuation. A refused popup is closed anyway.
 - After a page expires, ordinary agent calls answer `context-expired` and name
   its former Private, Project, or Personal profile, rather than claiming it
   never opened. Reopening requires an explicit `navigate`; a stored profile
