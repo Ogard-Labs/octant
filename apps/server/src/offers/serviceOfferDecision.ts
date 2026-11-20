@@ -1,8 +1,8 @@
-import type { WindowId } from "@octant/contracts";
+import type { EventActor, WindowId } from "@octant/contracts";
 
 type Prepared<Outcome> =
   | { readonly reason: string }
-  | { readonly outcome: Outcome; readonly remember?: () => Promise<void> };
+  | { readonly outcome: Outcome; readonly remember?: (actor?: EventActor) => Promise<void> };
 
 export type ServiceOfferRules<View extends { readonly kind: string }, Decision, Outcome> = {
   readonly [Kind in View["kind"]]: (
@@ -32,6 +32,7 @@ export async function resolveServiceOfferDecision<
   };
   readonly windowId: WindowId;
   readonly decision: Decision;
+  readonly actor?: EventActor;
   readonly authorize: (offer: View) => Promise<boolean>;
   readonly rules: ServiceOfferRules<View, Decision, Outcome>;
 }) {
@@ -47,7 +48,7 @@ export async function resolveServiceOfferDecision<
   // Remembering is optional: even if a Project changed under the answer, the
   // current tool call still hears what the person chose.
   try {
-    await prepared.remember?.();
+    await prepared.remember?.(input.actor);
   } finally {
     claimed.settle(prepared.outcome);
   }

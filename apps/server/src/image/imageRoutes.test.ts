@@ -95,6 +95,9 @@ function setup(
     },
   );
   const offers = new ImageGenerationOfferService(serviceOffers);
+  const remember = vi.fn<
+    NonNullable<Parameters<typeof imageOfferDecisionRules>[0]["kept"]>["remember"]
+  >(async (scope, choice) => offers.remember(scope, choice));
   const imageProfiles = {
     listInstances: () => options.instances ?? [imageProfile()],
     readImageGenerationSettings: () => ({ customSources: [] }),
@@ -104,7 +107,7 @@ function setup(
     listImageProfiles: () => listEligibleImageProfiles(imageProfiles.listInstances()),
     rules: imageOfferDecisionRules({
       ...imageProfiles,
-      kept: { remember: async (scope, choice) => offers.remember(scope, choice) },
+      kept: { remember },
     }),
     authorizeScope,
     windowAuthorityStore,
@@ -129,7 +132,16 @@ function setup(
   });
   const handler = async (request: Request) =>
     (await offerRoute(request)) ?? (await imageRoute(request));
-  return { handler, enqueue, cancel, saveToProject, authorizeScope, offers, serviceOffers };
+  return {
+    handler,
+    enqueue,
+    cancel,
+    saveToProject,
+    authorizeScope,
+    offers,
+    serviceOffers,
+    remember,
+  };
 }
 
 function request(
@@ -303,7 +315,7 @@ describe("image routes", () => {
     });
 
     it("lets a person-paired device answer only its own offer and rechecks access before claiming", async () => {
-      const { handler, offers, authorizeScope, serviceOffers } = setup();
+      const { handler, offers, authorizeScope, serviceOffers, remember } = setup();
       const dispatch = createAuthenticatedProductDispatch({ dispatch: handler });
       const deviceScope = decodeWindowId("22222222-2222-4222-8222-222222222222");
       const principal = createRemoteDevicePrincipal({
@@ -330,19 +342,32 @@ describe("image routes", () => {
       expect(list.imageProfiles).toMatchObject([
         { instanceId: profileId, modelAllowlist: ["gpt-image-2"] },
       ]);
-      const cancel = () =>
+      const generate = () =>
         send(
           new Request("https://octant.example/api/offers/decide", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ offerId: waiting?.offerId, decision: "cancel" }),
+            body: JSON.stringify({
+              offerId: waiting?.offerId,
+              decision: "generate",
+              profileInstanceId: profileId,
+              modelId: "gpt-image-2",
+              rememberForThread: true,
+            }),
           }),
         );
       authorizeScope.mockResolvedValueOnce(false);
-      expect((await cancel())?.status).toBe(404);
+      expect((await generate())?.status).toBe(404);
+      expect(remember).not.toHaveBeenCalled();
       expect(serviceOffers.list(deviceScope, scope)).toEqual([waiting]);
-      expect(await (await cancel())?.json()).toEqual({ kind: "offer-answered" });
-      await expect(device).resolves.toEqual({ status: "cancelled" });
+      expect(await (await generate())?.json()).toEqual({ kind: "offer-answered" });
+      const choice = { profileInstanceId: profileId, modelId: "gpt-image-2" };
+      await expect(device).resolves.toEqual({ status: "generate", ...choice });
+      expect(remember).toHaveBeenCalledExactlyOnceWith(waiting, choice, {
+        kind: "remote-device",
+        actorId: String(deviceScope),
+        deviceId: String(deviceScope),
+      });
       expect(serviceOffers.list(decodeWindowId(windowId), scope)).toHaveLength(1);
       serviceOffers.close();
       await expect(local).resolves.toEqual({ status: "cancelled" });

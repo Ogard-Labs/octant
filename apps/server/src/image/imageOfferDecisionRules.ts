@@ -41,8 +41,8 @@ export function imageOfferDecisionRules(input: {
         ...(kept === undefined || !decision.rememberForThread
           ? {}
           : {
-              remember: async () => {
-                await kept.remember(offer, choice).catch(() => undefined);
+              remember: async (actor) => {
+                await kept.remember(offer, choice, actor).catch(() => undefined);
               },
             }),
       };
