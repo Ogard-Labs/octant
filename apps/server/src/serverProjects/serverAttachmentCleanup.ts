@@ -30,6 +30,7 @@ import {
   checkServerAttachmentReachable,
   isSafeServerAttachmentThreadId,
   removeServerThreadAttachments,
+  type ServerAttachmentTransferGuard,
 } from "./serverAttachments";
 import type { ServerAddress, ServerConnection } from "./serverConnection";
 import { SERVER_THREAD_ATTACHMENTS } from "./serverFiles";
@@ -40,10 +41,13 @@ import type { ServerProjectStore } from "./serverProjectStore";
  * thread is deleted/purged or marked Leave no trace, or when its whole server
  * Project is removed. Canonical: docs/design/server-projects.md § Threads.
  *
- * When a server cannot be reached during thread deletion, purge, or Leave no
- * trace, local state is never held up: a pending removal is journaled under
- * its own aggregate (which thread purge retains) and retried automatically on
- * the next successful SSH connection to that exact server alias and user.
+ * Cleanup intent (`server-attachment-cleanup.pending@1`) is journaled before
+ * SSH starts so a crash or host exit while SSH is in flight never strands a
+ * remote folder. When a server cannot be reached, local deletion, purge, or
+ * Leave no trace is never held up: the pending record survives thread purge
+ * and host restart, is drained before any new attachment upload for that same
+ * `(server, thread)`, and retries automatically on the next regular SSH
+ * connection to that exact server alias and user.
  */
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
@@ -97,9 +101,17 @@ export class ServerAttachmentCleanup {
   /** Keyed by deterministic aggregate id of `(serverId, threadId)`. */
   readonly #pending = new Map<string, ServerAttachmentCleanupPendingPayload>();
   readonly #versions = new Map<string, number>();
+  /** Aggregate ids currently owned by an active removal or pre-transfer drain. */
+  readonly #claimed = new Set<string>();
+  /** `(server, threadId)` keys currently inside a guarded attachment transfer. */
+  readonly #activeTransfers = new Set<string>();
+  /** Per-`(server, threadId)` serialization tail so cleanup and upload never overlap. */
+  readonly #threadChains = new Map<string, Promise<unknown>>();
   readonly #inFlightThreads = new Map<string, Promise<ServerAttachmentThreadCleanupOutcome>>();
   readonly #inFlightDrains = new Map<string, Promise<void>>();
   readonly #background = new Set<Promise<unknown>>();
+  #closed = false;
+  #closeController = new AbortController();
   #unsubscribeJournal: (() => void) | undefined;
   #unsubscribeConnection: (() => void) | undefined;
 
@@ -116,6 +128,8 @@ export class ServerAttachmentCleanup {
    * connections.
    */
   load(): void {
+    this.#closed = false;
+    this.#closeController = new AbortController();
     this.#pending.clear();
     this.#versions.clear();
     let after = 0;
@@ -147,17 +161,21 @@ export class ServerAttachmentCleanup {
     );
     this.#unsubscribeConnection?.();
     this.#unsubscribeConnection = this.#options.connection.subscribeConnected?.((server) => {
-      if (this.#hasPendingFor(server)) {
+      if (!this.#closed && this.#hasDrainablePendingFor(server)) {
         this.#trackBackground(this.drainForServer(server));
       }
     });
   }
 
+  /** Stops admitting new cleanups/drains and aborts any in-flight SSH removals cleanly. */
   close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
     this.#unsubscribeJournal?.();
     this.#unsubscribeJournal = undefined;
     this.#unsubscribeConnection?.();
     this.#unsubscribeConnection = undefined;
+    this.#closeController.abort();
   }
 
   pending(): ReadonlyArray<ServerAttachmentCleanupPendingPayload> {
@@ -178,6 +196,54 @@ export class ServerAttachmentCleanup {
       ]);
     }
   }
+
+  /**
+   * Drains and settles any owed cleanup for `(server, threadId)` before new
+   * files are uploaded, serialized per `(server, threadId)` so an upload can
+   * never race a reconnect drain or Leave-no-trace cleanup.
+   */
+  readonly guardTransfer: ServerAttachmentTransferGuard = async (input) => {
+    if (this.#closed || !isSafeServerAttachmentThreadId(input.threadId)) {
+      return input.refused();
+    }
+    const key = threadTransferKey(input.server, input.threadId);
+    return this.#serializeThread(key, async () => {
+      if (this.#isStopped(input.signal)) return input.refused();
+      this.#activeTransfers.add(key);
+      try {
+        const sKey = serverKey(input.server);
+        if (this.#pendingForThread(input.server, input.threadId).length > 0) {
+          const activeDrain = this.#inFlightDrains.get(sKey);
+          if (activeDrain !== undefined) await activeDrain;
+        }
+        const owed = this.#pendingForThread(input.server, input.threadId);
+        if (owed.length > 0) {
+          if (this.#isStopped(input.signal)) return input.refused();
+          const ids = owed.map(([aggregateId]) => aggregateId);
+          for (const id of ids) this.#claimed.add(id);
+          try {
+            const outcome = await removeServerThreadAttachments({
+              connection: this.#options.connection,
+              server: input.server,
+              threadIds: [input.threadId],
+              timeoutMs: this.#drainTimeoutMs,
+              signal: this.#signalFor(input.signal),
+            });
+            if (outcome.status !== "removed" || this.#closed) return input.refused();
+            for (const id of ids) {
+              if (!this.#settlePendingById(id)) return input.refused();
+            }
+          } finally {
+            for (const id of ids) this.#claimed.delete(id);
+          }
+        }
+        if (this.#isStopped(input.signal)) return input.refused();
+        return await input.transfer();
+      } finally {
+        this.#activeTransfers.delete(key);
+      }
+    });
+  };
 
   /**
    * Removes `~/.octant/thread-attachments/<threadId>/` when the thread belongs
@@ -214,15 +280,33 @@ export class ServerAttachmentCleanup {
    * Safe to invoke concurrently; overlapping drains for one server coalesce.
    */
   drainForServer(server: ServerAddress): Promise<void> {
-    if (!this.#hasPendingFor(server)) return Promise.resolve();
-    const serverKey = `${server.user}\0${server.alias}`;
-    const existing = this.#inFlightDrains.get(serverKey);
+    if (this.#closed || !this.#hasDrainablePendingFor(server)) return Promise.resolve();
+    const sKey = serverKey(server);
+    const existing = this.#inFlightDrains.get(sKey);
     if (existing !== undefined) return existing;
     const task = this.#drainServerNow(server).finally(() => {
-      if (this.#inFlightDrains.get(serverKey) === task) this.#inFlightDrains.delete(serverKey);
+      if (this.#inFlightDrains.get(sKey) === task) this.#inFlightDrains.delete(sKey);
     });
-    this.#inFlightDrains.set(serverKey, task);
+    this.#inFlightDrains.set(sKey, task);
     return task;
+  }
+
+  /**
+   * Durably journals cleanup intent for all threads of a server Project before
+   * the Project is removed from the catalog, so a host crash between catalog
+   * removal and SSH completion never loses track of remote folders.
+   */
+  prepareProjectRemoval(input: {
+    readonly project: ServerProject;
+    readonly server: ServerAddress | undefined;
+  }): ReadonlyArray<string> {
+    const threadIds = this.#projectThreadIds(String(input.project.id));
+    if (input.server !== undefined) {
+      for (const threadId of threadIds) {
+        this.#recordPending(input.project, input.server, threadId);
+      }
+    }
+    return threadIds;
   }
 
   /**
@@ -234,24 +318,11 @@ export class ServerAttachmentCleanup {
     readonly project: ServerProject;
     readonly server: ServerAddress | undefined;
   }): Promise<string | undefined> {
-    const projectId = String(input.project.id);
-    const threadIdSet = new Set<string>();
-    for (const threadId of this.#options.listThreadsForProject(projectId)) {
-      if (isSafeServerAttachmentThreadId(threadId)) threadIdSet.add(threadId);
-    }
-    for (const entry of this.#pending.values()) {
-      if (String(entry.projectId) === projectId && isSafeServerAttachmentThreadId(entry.threadId)) {
-        threadIdSet.add(entry.threadId);
-      }
-    }
-    const threadIds = [...threadIdSet].sort();
+    const threadIds = this.prepareProjectRemoval(input);
     if (input.server === undefined) {
       return formatLeftBehindNotice(input.project.name, undefined, threadIds);
     }
-    if (this.#options.connection.refusal?.(input.server) !== undefined) {
-      for (const threadId of threadIds) {
-        this.#recordPending(input.project, input.server, threadId);
-      }
+    if (this.#closed || this.#options.connection.refusal?.(input.server) !== undefined) {
       return formatLeftBehindNotice(input.project.name, input.server.alias, threadIds);
     }
     if (threadIds.length === 0) {
@@ -259,27 +330,33 @@ export class ServerAttachmentCleanup {
         connection: this.#options.connection,
         server: input.server,
         timeoutMs: this.#inlineTimeoutMs,
+        signal: this.#closeController.signal,
       });
       return reachable
         ? undefined
         : formatLeftBehindNotice(input.project.name, input.server.alias, []);
     }
-    const outcome = await removeServerThreadAttachments({
-      connection: this.#options.connection,
-      server: input.server,
-      threadIds,
-      timeoutMs: this.#inlineTimeoutMs,
-    });
-    if (outcome.status === "removed") {
-      for (const threadId of threadIds) {
-        this.#settleIfPending(String(input.project.serverId), threadId);
+    const serverId = String(input.project.serverId);
+    const aggregateIds = threadIds.map((threadId) => pendingAggregateId(serverId, threadId));
+    for (const id of aggregateIds) this.#claimed.add(id);
+    try {
+      const outcome = await removeServerThreadAttachments({
+        connection: this.#options.connection,
+        server: input.server,
+        threadIds,
+        timeoutMs: this.#inlineTimeoutMs,
+        signal: this.#closeController.signal,
+      });
+      if (outcome.status === "removed" && !this.#closed) {
+        for (const id of aggregateIds) {
+          this.#settlePendingById(id);
+        }
+        return undefined;
       }
-      return undefined;
+      return formatLeftBehindNotice(input.project.name, input.server.alias, threadIds);
+    } finally {
+      for (const id of aggregateIds) this.#claimed.delete(id);
     }
-    for (const threadId of threadIds) {
-      this.#recordPending(input.project, input.server, threadId);
-    }
-    return formatLeftBehindNotice(input.project.name, input.server.alias, threadIds);
   }
 
   async #removeForThreadNow(
@@ -289,47 +366,73 @@ export class ServerAttachmentCleanup {
   ): Promise<ServerAttachmentThreadCleanupOutcome> {
     const address = this.#options.store.addressOf(String(project.id));
     if (address.kind !== "address") return { status: "skipped" };
-    if (this.#options.connection.refusal?.(address.server) !== undefined) {
-      this.#recordPending(project, address.server, threadId);
+    // Journal intent before starting SSH so a crash mid-call survives restart.
+    this.#recordPending(project, address.server, threadId);
+    if (this.#closed || this.#options.connection.refusal?.(address.server) !== undefined) {
       return { status: "pending" };
     }
-    const outcome = await removeServerThreadAttachments({
-      connection: this.#options.connection,
-      server: address.server,
-      threadIds: [threadId],
-      timeoutMs: this.#inlineTimeoutMs,
+    const key = threadTransferKey(address.server, threadId);
+    return this.#serializeThread(key, async () => {
+      if (this.#closed) return { status: "pending" };
+      if (!this.#pending.has(aggregateId)) return { status: "removed" };
+      this.#claimed.add(aggregateId);
+      try {
+        const outcome = await removeServerThreadAttachments({
+          connection: this.#options.connection,
+          server: address.server,
+          threadIds: [threadId],
+          timeoutMs: this.#inlineTimeoutMs,
+          signal: this.#closeController.signal,
+        });
+        if (outcome.status === "removed") {
+          if (this.#closed) return { status: "pending" };
+          return this.#settlePendingById(aggregateId)
+            ? { status: "removed" }
+            : { status: "pending" };
+        }
+        if (outcome.status === "refused") return { status: "refused" };
+        return { status: "pending" };
+      } finally {
+        this.#claimed.delete(aggregateId);
+      }
     });
-    if (outcome.status === "removed") {
-      this.#settlePendingById(aggregateId);
-      return { status: "removed" };
-    }
-    if (outcome.status === "refused") return { status: "refused" };
-    this.#recordPending(project, address.server, threadId);
-    return { status: "pending" };
   }
 
   async #drainServerNow(server: ServerAddress): Promise<void> {
-    if (this.#options.connection.refusal?.(server) !== undefined) return;
+    if (this.#closed || this.#options.connection.refusal?.(server) !== undefined) return;
     for (;;) {
-      const entries = [...this.#pending.entries()].filter(
-        ([, entry]) => entry.alias === server.alias && entry.user === server.user,
-      );
+      if (this.#closed || this.#options.connection.refusal?.(server) !== undefined) return;
+      const entries = this.#drainableEntriesFor(server);
       if (entries.length === 0) return;
+      const ids = entries.map(([aggregateId]) => aggregateId);
       const threadIds = entries.map(([, entry]) => entry.threadId);
-      const outcome = await removeServerThreadAttachments({
-        connection: this.#options.connection,
-        server,
-        threadIds,
-        timeoutMs: this.#drainTimeoutMs,
-      });
-      if (outcome.status !== "removed") return;
-      for (const [aggregateId] of entries) {
-        this.#settlePendingById(aggregateId);
+      for (const id of ids) this.#claimed.add(id);
+      let settledCount = 0;
+      let allSettled = true;
+      try {
+        const outcome = await removeServerThreadAttachments({
+          connection: this.#options.connection,
+          server,
+          threadIds,
+          timeoutMs: this.#drainTimeoutMs,
+          signal: this.#closeController.signal,
+        });
+        if (outcome.status !== "removed" || this.#closed) return;
+        for (const id of ids) {
+          if (this.#settlePendingById(id)) settledCount += 1;
+          else allSettled = false;
+        }
+      } finally {
+        for (const id of ids) this.#claimed.delete(id);
       }
+      // Stop immediately when journal persistence fails or makes no progress so
+      // a closing or failing store never triggers an endless SSH retry loop.
+      if (!allSettled || settledCount === 0) return;
     }
   }
 
   #onCommitted(append: CommittedAppend): void {
+    if (this.#closed) return;
     for (const event of append.events) {
       if (event.eventName !== PERSON_MEMORY_THREAD_UNTRACED) continue;
       let mark: ReturnType<typeof decodeThreadUntraced>;
@@ -345,17 +448,49 @@ export class ServerAttachmentCleanup {
     }
   }
 
-  #hasPendingFor(server: ServerAddress): boolean {
-    for (const entry of this.#pending.values()) {
-      if (entry.alias === server.alias && entry.user === server.user) return true;
+  #projectThreadIds(projectId: string): ReadonlyArray<string> {
+    const threadIdSet = new Set<string>();
+    for (const threadId of this.#options.listThreadsForProject(projectId)) {
+      if (isSafeServerAttachmentThreadId(threadId)) threadIdSet.add(threadId);
     }
-    return false;
+    for (const entry of this.#pending.values()) {
+      if (String(entry.projectId) === projectId && isSafeServerAttachmentThreadId(entry.threadId)) {
+        threadIdSet.add(entry.threadId);
+      }
+    }
+    return [...threadIdSet].sort();
   }
 
-  #recordPending(project: ServerProject, server: ServerAddress, threadId: string): void {
-    if (!isSafeServerAttachmentThreadId(threadId)) return;
+  #pendingForThread(
+    server: ServerAddress,
+    threadId: string,
+  ): ReadonlyArray<readonly [string, ServerAttachmentCleanupPendingPayload]> {
+    return [...this.#pending.entries()].filter(
+      ([, entry]) =>
+        entry.alias === server.alias && entry.user === server.user && entry.threadId === threadId,
+    );
+  }
+
+  #drainableEntriesFor(
+    server: ServerAddress,
+  ): ReadonlyArray<readonly [string, ServerAttachmentCleanupPendingPayload]> {
+    return [...this.#pending.entries()].filter(
+      ([aggregateId, entry]) =>
+        entry.alias === server.alias &&
+        entry.user === server.user &&
+        !this.#claimed.has(aggregateId) &&
+        !this.#activeTransfers.has(threadTransferKey(server, entry.threadId)),
+    );
+  }
+
+  #hasDrainablePendingFor(server: ServerAddress): boolean {
+    return this.#drainableEntriesFor(server).length > 0;
+  }
+
+  #recordPending(project: ServerProject, server: ServerAddress, threadId: string): boolean {
+    if (!isSafeServerAttachmentThreadId(threadId)) return false;
     const aggregateId = pendingAggregateId(String(project.serverId), threadId);
-    if (this.#pending.has(aggregateId)) return;
+    if (this.#pending.has(aggregateId)) return true;
     const payload = decodeServerAttachmentCleanupPendingPayload({
       serverId: project.serverId,
       alias: server.alias,
@@ -366,16 +501,14 @@ export class ServerAttachmentCleanup {
     });
     if (this.#append(aggregateId, SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending, payload)) {
       this.#pending.set(aggregateId, payload);
+      return true;
     }
+    return false;
   }
 
-  #settleIfPending(serverId: string, threadId: string): void {
-    this.#settlePendingById(pendingAggregateId(serverId, threadId));
-  }
-
-  #settlePendingById(aggregateId: string): void {
+  #settlePendingById(aggregateId: string): boolean {
     const entry = this.#pending.get(aggregateId);
-    if (entry === undefined) return;
+    if (entry === undefined) return true;
     const payload = decodeServerAttachmentCleanupSettledPayload({
       serverId: entry.serverId,
       projectId: entry.projectId,
@@ -384,7 +517,9 @@ export class ServerAttachmentCleanup {
     });
     if (this.#append(aggregateId, SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.settled, payload)) {
       this.#pending.delete(aggregateId);
+      return true;
     }
+    return false;
   }
 
   #apply(aggregateId: string, eventName: string, payload: unknown): void {
@@ -426,6 +561,30 @@ export class ServerAttachmentCleanup {
     return true;
   }
 
+  #serializeThread<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.#threadChains.get(key) ?? Promise.resolve();
+    const run = previous.then(work, work);
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    const cleaned = tail.finally(() => {
+      if (this.#threadChains.get(key) === cleaned) this.#threadChains.delete(key);
+    });
+    this.#threadChains.set(key, cleaned);
+    return run;
+  }
+
+  #isStopped(signal: AbortSignal | undefined): boolean {
+    return this.#closed || signal?.aborted === true;
+  }
+
+  #signalFor(extra: AbortSignal | undefined): AbortSignal {
+    return extra === undefined
+      ? this.#closeController.signal
+      : AbortSignal.any([this.#closeController.signal, extra]);
+  }
+
   #trackBackground(promise: Promise<unknown>): void {
     const tracked = promise
       .catch(() => undefined)
@@ -434,6 +593,14 @@ export class ServerAttachmentCleanup {
       });
     this.#background.add(tracked);
   }
+}
+
+function serverKey(server: ServerAddress): string {
+  return `${server.user}\0${server.alias}`;
+}
+
+function threadTransferKey(server: ServerAddress, threadId: string): string {
+  return `${server.user}\0${server.alias}\0${threadId}`;
 }
 
 /** Deterministic UUID aggregate id for one pending `(serverId, threadId)` removal. */

@@ -193,6 +193,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     HarnessStateWiring,
     | "threadAwaitsHarnessQuestion"
     | "nativeHarnessSessions"
+    | "serverAttachmentCleanup"
     | "serverConnection"
     | "serverProjectStore"
   > &
@@ -332,6 +333,7 @@ export function wireWork(deps: WorkDependencies) {
     managedWorktreeReceipts,
     terminalSessionImports,
     nativeHarnessComposition,
+    serverAttachmentCleanup,
     serverConnection,
     serverProjectStore,
     shieldServerStore,
@@ -663,6 +665,7 @@ export function wireWork(deps: WorkDependencies) {
               connection: serverConnection,
               composition: nativeHarnessComposition,
               record: (record) => shieldServerStore.recordServerCommand(record),
+              guardTransfer: serverAttachmentCleanup.guardTransfer,
             },
             { thread },
           );

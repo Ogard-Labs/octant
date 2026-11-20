@@ -690,6 +690,7 @@ describe("server attachment cleanup", () => {
     const handler = createServerProjectRouteHandler({
       windowAuthorityStore: windows,
       store,
+      prepareProjectRemoval: (input) => cleanup.prepareProjectRemoval(input),
       removeProjectAttachments: (input) => cleanup.removeForProject(input),
       now: () => 1,
     });
@@ -754,6 +755,374 @@ describe("server attachment cleanup", () => {
     });
     expect(String(unregisteredBody.notice)).toContain(`~/${SERVER_THREAD_ATTACHMENTS}/`);
     cleanup.close();
+  });
+
+  it("drains and settles owed cleanup before uploading a new attachment to a still-live untraced thread", async () => {
+    const directory = scratch();
+    const { connection, journal } = openHarness(directory);
+    const fake = controllableConnection();
+    const store = new ServerProjectStore({
+      journal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => NOW,
+      servers: () => [WEB],
+      connection: fake.connection,
+    });
+    store.load();
+    const bound = await store.bind({
+      name: "App",
+      serverId: String(WEB.serverId),
+      folder: "/srv/app",
+      principal: "local-window",
+    });
+    if (bound.kind !== "changed" || bound.project === undefined) {
+      throw new Error("Expected server Project to bind.");
+    }
+    const project = bound.project;
+    const threadId = "5e7e6666-0000-4000-8000-000000000001";
+    const personMemory = new PersonMemoryStore({
+      connection,
+      journal,
+      uuid: randomUUID,
+      clock: () => decodeUtcTimestamp(NOW),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const cleanup = makeCleanup({
+      journal,
+      store,
+      connection: fake.connection,
+      serverProjectForThread: (mode, id) =>
+        mode === "code" && id === threadId ? project : undefined,
+    });
+
+    // Mark Leave no trace while offline -> pending cleanup is journaled.
+    fake.setResponder(() => ({ status: "unreachable", message: "Offline" }));
+    personMemory.change(
+      decodePersonMemoryCommand({
+        kind: "set-thread-leaves-no-trace",
+        mode: "code",
+        threadId,
+        leavesNoTrace: true,
+      }),
+    );
+    await cleanup.whenIdle();
+    expect(cleanup.pending().map((entry) => entry.threadId)).toEqual([threadId]);
+
+    // Connectivity returns, and the very first SSH action is uploading a new attachment.
+    const events: string[] = [];
+    const newBytes = new TextEncoder().encode("fresh attachment\n");
+    const sha256 = (await import("node:crypto"))
+      .createHash("sha256")
+      .update(newBytes)
+      .digest("hex");
+    fake.calls.length = 0;
+    fake.setResponder((_server, input) => {
+      const isUpload = input.script.includes("sha256sum");
+      events.push(isUpload ? "upload" : "remove");
+      return isUpload
+        ? {
+            status: "ran",
+            exitCode: 0,
+            output: Buffer.from(
+              `/home/deploy/${SERVER_THREAD_ATTACHMENTS}/${threadId}/att-new/fresh.txt\0${sha256}`,
+            ),
+            truncated: false,
+            errorOutput: "",
+          }
+        : {
+            status: "ran",
+            exitCode: 0,
+            output: Buffer.alloc(0),
+            truncated: false,
+            errorOutput: "",
+          };
+    });
+
+    const uploaded = await transferServerAttachments({
+      connection: fake.connection,
+      server: { alias: WEB.alias, user: WEB.user },
+      threadId,
+      files: [
+        {
+          attachmentId: "att-new",
+          displayName: "fresh.txt",
+          mediaType: "text/plain",
+          bytes: newBytes,
+        },
+      ],
+      guard: cleanup.guardTransfer,
+    });
+    await cleanup.whenIdle();
+
+    expect(uploaded.status).toBe("transferred");
+    // Cleanup ran and settled strictly BEFORE the upload; no post-upload removal deleted it.
+    expect(events).toEqual(["remove", "upload"]);
+    expect(cleanup.pending()).toEqual([]);
+
+    cleanup.close();
+    personMemory.close();
+  });
+
+  it("stops retrying immediately when settlement persistence fails and aborts active drains cleanly on close", async () => {
+    const directory = scratch();
+    const { journal } = openHarness(directory);
+    const fake = controllableConnection();
+    const store = new ServerProjectStore({
+      journal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => NOW,
+      servers: () => [WEB],
+      connection: fake.connection,
+    });
+    store.load();
+    const bound = await store.bind({
+      name: "App",
+      serverId: String(WEB.serverId),
+      folder: "/srv/app",
+      principal: "local-window",
+    });
+    if (bound.kind !== "changed" || bound.project === undefined) {
+      throw new Error("Expected server Project to bind.");
+    }
+    const project = bound.project;
+    const threadId = "5e7e7777-0000-4000-8000-000000000001";
+
+    // Queue one pending entry while server is unreachable.
+    let failSettlement = false;
+    const wrappedJournal: ConstructorParameters<typeof ServerAttachmentCleanup>[0]["journal"] = {
+      append: (request) => {
+        const events =
+          typeof request === "object" &&
+          request !== null &&
+          "events" in request &&
+          Array.isArray(request.events)
+            ? request.events
+            : [];
+        if (
+          failSettlement &&
+          events.some(
+            (event) =>
+              typeof event === "object" &&
+              event !== null &&
+              "eventName" in event &&
+              event.eventName === SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.settled,
+          )
+        ) {
+          throw new Error("SQLite database is closed");
+        }
+        return journal.append(request);
+      },
+      replayAggregateType: (input) => journal.replayAggregateType(input),
+      aggregateVersions: (aggregateType) => journal.aggregateVersions(aggregateType),
+      subscribeCommitted: (listener) => journal.subscribeCommitted(listener),
+    };
+    const cleanup = new ServerAttachmentCleanup({
+      journal: wrappedJournal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => NOW,
+      connection: fake.connection,
+      store,
+      serverProjectForThread: () => project,
+      listThreadsForProject: () => [],
+    });
+    cleanup.load();
+
+    fake.setResponder(() => ({ status: "unreachable", message: "Offline" }));
+    expect(await cleanup.removeForThread({ project, threadId })).toEqual({ status: "pending" });
+    expect(cleanup.pending()).toHaveLength(1);
+
+    // Server answers cleanly, but settlement append throws -> must run SSH once and stop.
+    failSettlement = true;
+    fake.calls.length = 0;
+    fake.setResponder(() => ({
+      status: "ran",
+      exitCode: 0,
+      output: Buffer.alloc(0),
+      truncated: false,
+      errorOutput: "",
+    }));
+    await cleanup.drainForServer({ alias: WEB.alias, user: WEB.user });
+    expect(fake.calls).toHaveLength(1);
+    expect(cleanup.pending()).toHaveLength(1);
+
+    // Calling close() during an active SSH drain aborts the in-flight call and refuses new work.
+    failSettlement = false;
+    let observedAbort = false;
+    let startedResolve: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      startedResolve = resolve;
+    });
+    fake.calls.length = 0;
+    fake.setResponder(
+      (_server, input) =>
+        new Promise<ServerCall>((resolve) => {
+          startedResolve?.();
+          input.signal?.addEventListener(
+            "abort",
+            () => {
+              observedAbort = true;
+              resolve({ status: "cancelled", output: Buffer.alloc(0), truncated: false });
+            },
+            { once: true },
+          );
+        }),
+    );
+    const activeDrain = cleanup.drainForServer({ alias: WEB.alias, user: WEB.user });
+    await started;
+    cleanup.close();
+    await activeDrain;
+    await cleanup.whenIdle();
+
+    expect(observedAbort).toBe(true);
+    expect(cleanup.pending()).toHaveLength(1);
+    fake.calls.length = 0;
+    await cleanup.drainForServer({ alias: WEB.alias, user: WEB.user });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("durably journals cleanup intent before starting SSH so a restart mid-call recovers both thread and Project cleanups", async () => {
+    const directory = scratch();
+    const { journal } = openHarness(directory);
+    const fake = controllableConnection();
+    const store = new ServerProjectStore({
+      journal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => NOW,
+      servers: () => [WEB],
+      connection: fake.connection,
+    });
+    store.load();
+    const firstBind = await store.bind({
+      name: "ThreadApp",
+      serverId: String(WEB.serverId),
+      folder: "/srv/thread-app",
+      principal: "local-window",
+    });
+    const secondBind = await store.bind({
+      name: "ProjectApp",
+      serverId: String(WEB.serverId),
+      folder: "/srv/project-app",
+      principal: "local-window",
+    });
+    if (
+      firstBind.kind !== "changed" ||
+      firstBind.project === undefined ||
+      secondBind.kind !== "changed" ||
+      secondBind.project === undefined
+    ) {
+      throw new Error("Expected server Projects to bind.");
+    }
+    const threadProject = firstBind.project;
+    const removedProject = secondBind.project;
+    const threadId = "5e7e8888-0000-4000-8000-000000000001";
+    const projectThreadId = "5e7e8888-0000-4000-8000-000000000002";
+
+    const cleanup = makeCleanup({
+      journal,
+      store,
+      connection: fake.connection,
+      serverProjectForThread: () => threadProject,
+      listThreadsForProject: (projectId) =>
+        projectId === String(removedProject.id) ? [projectThreadId] : [],
+    });
+
+    const windowId = decodeWindowId("00000000-0000-4000-8000-000000000471");
+    const capability = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCA";
+    const windows = new WindowAuthorityStore();
+    windows.register({ windowId, capability, now: 0 });
+    const handler = createServerProjectRouteHandler({
+      windowAuthorityStore: windows,
+      store,
+      prepareProjectRemoval: (input) => cleanup.prepareProjectRemoval(input),
+      removeProjectAttachments: (input) => cleanup.removeForProject(input),
+      now: () => 1,
+    });
+
+    // Hold SSH calls open so we can simulate host exit while SSH is still in flight.
+    let sshCallsStarted = 0;
+    let bothStartedResolve: (() => void) | undefined;
+    const bothStarted = new Promise<void>((resolve) => {
+      bothStartedResolve = resolve;
+    });
+    fake.setResponder(
+      (_server, input) =>
+        new Promise<ServerCall>((resolve) => {
+          sshCallsStarted += 1;
+          if (sshCallsStarted === 2) bothStartedResolve?.();
+          input.signal?.addEventListener(
+            "abort",
+            () => resolve({ status: "cancelled", output: Buffer.alloc(0), truncated: false }),
+            { once: true },
+          );
+        }),
+    );
+
+    const inFlightThread = cleanup.removeForThread({ project: threadProject, threadId });
+    const inFlightProject = handler(
+      new Request("http://127.0.0.1/api/server-projects", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "remove-server-project",
+          projectId: removedProject.id,
+        }),
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+    await bothStarted;
+
+    // BEFORE either SSH call finishes, both pending intents are already committed in the journal.
+    const committedBeforeSsh = journal
+      .replayAggregateType({
+        aggregateType: SERVER_ATTACHMENT_CLEANUP_AGGREGATE,
+        afterSequence: 0,
+        limit: 20,
+      })
+      .map((envelope) => ({
+        eventName: envelope.eventName,
+        threadId: (envelope.payload as { readonly threadId: string }).threadId,
+      }));
+    expect(committedBeforeSsh).toEqual([
+      { eventName: SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending, threadId },
+      { eventName: SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending, threadId: projectThreadId },
+    ]);
+
+    // Simulate crash/exit before SSH returns.
+    cleanup.close();
+    await Promise.all([inFlightThread, inFlightProject]);
+
+    // Restarted cleanup recovers both intents and settles them on the next SSH connection.
+    const restarted = makeCleanup({
+      journal,
+      store,
+      connection: fake.connection,
+      serverProjectForThread: () => undefined,
+    });
+    expect(
+      restarted
+        .pending()
+        .map((entry) => entry.threadId)
+        .sort(),
+    ).toEqual([threadId, projectThreadId]);
+
+    fake.calls.length = 0;
+    fake.setResponder(() => ({
+      status: "ran",
+      exitCode: 0,
+      output: Buffer.alloc(0),
+      truncated: false,
+      errorOutput: "",
+    }));
+    await fake.connection.run(
+      { alias: WEB.alias, user: WEB.user },
+      { script: "true", timeoutMs: 5_000, maxOutputBytes: 256 },
+    );
+    await restarted.whenIdle();
+    expect(restarted.pending()).toEqual([]);
+    restarted.close();
   });
 });
 
@@ -957,6 +1326,127 @@ describe.skipIf(!canRunThrowawaySshd)(
         restarted.close();
       } finally {
         cleanup.close();
+        rmSync(folder, { recursive: true, force: true });
+      }
+    });
+
+    it("removes the old remote file and preserves a newly uploaded attachment when an untraced thread reconnects via upload", async () => {
+      const directory = scratch();
+      const { connection, journal } = openHarness(directory);
+      const threadId = randomUUID();
+      const folder = join(homedir(), SERVER_THREAD_ATTACHMENTS, threadId);
+      const projectFolder = join(sshd.root, `proj-${randomUUID()}`);
+      mkdirSync(projectFolder, { recursive: true });
+      const liveServer: ShieldServer = {
+        ...WEB,
+        alias: sshd.alias,
+        user: sshd.user,
+      };
+      let reachable = true;
+      const store = new ServerProjectStore({
+        journal,
+        personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        uuid: randomUUID,
+        clock: () => NOW,
+        servers: () => [liveServer],
+        connection: sshConnection,
+      });
+      store.load();
+
+      const bound = await store.bind({
+        name: "Live",
+        serverId: String(liveServer.serverId),
+        folder: projectFolder,
+        principal: "local-window",
+      });
+      if (bound.kind !== "changed" || bound.project === undefined) {
+        throw new Error("Expected throwaway SSH Project to bind.");
+      }
+      const project = bound.project;
+      const gatedConnection: ConstructorParameters<
+        typeof ServerAttachmentCleanup
+      >[0]["connection"] = {
+        subscribeConnected: (listener) => sshConnection.subscribeConnected(listener),
+        run: (server, input) =>
+          reachable
+            ? sshConnection.run(server, input)
+            : Promise.resolve({ status: "unreachable", message: "Simulated offline server" }),
+      };
+      const personMemory = new PersonMemoryStore({
+        connection,
+        journal,
+        uuid: randomUUID,
+        clock: () => decodeUtcTimestamp(NOW),
+        actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      });
+      const cleanup = makeCleanup({
+        journal,
+        store,
+        connection: gatedConnection,
+        serverProjectForThread: (mode, id) =>
+          mode === "code" && id === threadId ? project : undefined,
+      });
+
+      try {
+        const oldCopy = await transferServerAttachments({
+          connection: sshConnection,
+          server: { alias: sshd.alias, user: sshd.user },
+          threadId,
+          files: [
+            {
+              attachmentId: "att-old",
+              displayName: "old.txt",
+              mediaType: "text/plain",
+              bytes: new TextEncoder().encode("old secret\n"),
+            },
+          ],
+          guard: cleanup.guardTransfer,
+        });
+        expect(oldCopy.status).toBe("transferred");
+        const oldPath = oldCopy.status === "transferred" ? (oldCopy.files[0]?.path ?? "") : "";
+        expect(existsSync(oldPath)).toBe(true);
+
+        // Server goes offline; person marks the live thread Leave no trace.
+        reachable = false;
+        personMemory.change(
+          decodePersonMemoryCommand({
+            kind: "set-thread-leaves-no-trace",
+            mode: "code",
+            threadId,
+            leavesNoTrace: true,
+          }),
+        );
+        await cleanup.whenIdle();
+        expect(cleanup.pending()).toHaveLength(1);
+        expect(existsSync(oldPath)).toBe(true);
+
+        // Server reconnects and the first SSH operation is uploading a new attachment to the same thread.
+        reachable = true;
+        const newCopy = await transferServerAttachments({
+          connection: sshConnection,
+          server: { alias: sshd.alias, user: sshd.user },
+          threadId,
+          files: [
+            {
+              attachmentId: "att-new",
+              displayName: "new.txt",
+              mediaType: "text/plain",
+              bytes: new TextEncoder().encode("new upload\n"),
+            },
+          ],
+          guard: cleanup.guardTransfer,
+        });
+        await cleanup.whenIdle();
+
+        expect(newCopy.status).toBe("transferred");
+        const newPath = newCopy.status === "transferred" ? (newCopy.files[0]?.path ?? "") : "";
+        expect(existsSync(oldPath)).toBe(false);
+        expect(existsSync(newPath)).toBe(true);
+        expect(readFileSync(newPath, "utf8")).toBe("new upload\n");
+        expect(cleanup.pending()).toEqual([]);
+      } finally {
+        cleanup.close();
+        personMemory.close();
         rmSync(folder, { recursive: true, force: true });
       }
     });

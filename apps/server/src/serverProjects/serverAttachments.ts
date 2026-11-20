@@ -102,6 +102,19 @@ export type ServerAttachmentTransfer =
   | { readonly status: "transferred"; readonly files: ReadonlyArray<AttachedFileByPath> }
   | { readonly status: "refused"; readonly message: string };
 
+/**
+ * Coordinates an attachment upload with any pending remote cleanup for the
+ * same `(server, threadId)`, draining and settling owed removals before new
+ * files are written and serializing concurrent cleanups against the upload.
+ */
+export type ServerAttachmentTransferGuard = <T>(input: {
+  readonly server: ServerAddress;
+  readonly threadId: string;
+  readonly signal?: AbortSignal;
+  readonly transfer: () => Promise<T>;
+  readonly refused: () => T;
+}) => Promise<T>;
+
 export async function transferServerAttachments(input: {
   readonly connection: Pick<ServerConnection, "run">;
   /** The server the thread's Project is on, read now; absent refuses. */
@@ -114,50 +127,62 @@ export async function transferServerAttachments(input: {
     readonly bytes: Uint8Array;
   }>;
   readonly signal?: AbortSignal;
+  readonly guard?: ServerAttachmentTransferGuard;
 }): Promise<ServerAttachmentTransfer> {
   if (input.server === undefined || !isSafeServerAttachmentThreadId(input.threadId))
     return { status: "refused", message: SERVER_ATTACHMENT_TRANSFER_REFUSAL };
-  const transferred: AttachedFileByPath[] = [];
-  for (const file of input.files) {
-    let name: string;
-    try {
-      name = sanitizeManagedAttachmentDisplayName(
-        file.displayName,
-        (message) => new Error(message),
-      );
-    } catch {
-      name = "attachment";
+  const server = input.server;
+  const runTransfer = async (): Promise<ServerAttachmentTransfer> => {
+    const transferred: AttachedFileByPath[] = [];
+    for (const file of input.files) {
+      let name: string;
+      try {
+        name = sanitizeManagedAttachmentDisplayName(
+          file.displayName,
+          (message) => new Error(message),
+        );
+      } catch {
+        name = "attachment";
+      }
+      if (name === ".") name = "attachment";
+      const call = await input.connection.run(server, {
+        script: TRANSFER_SCRIPT,
+        args: [input.threadId, file.attachmentId, name],
+        stdin: Buffer.from(file.bytes),
+        timeoutMs: TRANSFER_TIMEOUT_MS,
+        maxOutputBytes: 8_192,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
+      if (call.status !== "ran" || call.exitCode !== 0)
+        return { status: "refused", message: SERVER_ATTACHMENT_TRANSFER_REFUSAL };
+      const output = call.output.toString("utf8");
+      const nul = output.indexOf("\0");
+      const path = output.slice(0, nul);
+      const digest = output.slice(nul + 1).trim();
+      if (
+        nul <= 0 ||
+        !path.startsWith("/") ||
+        !path.includes(`/${SERVER_THREAD_ATTACHMENTS}/${input.threadId}/`) ||
+        digest !== createHash("sha256").update(file.bytes).digest("hex")
+      )
+        return { status: "refused", message: SERVER_ATTACHMENT_TRANSFER_REFUSAL };
+      transferred.push({
+        displayName: file.displayName,
+        mediaType: file.mediaType,
+        byteLength: file.bytes.byteLength,
+        path,
+      });
     }
-    if (name === ".") name = "attachment";
-    const call = await input.connection.run(input.server, {
-      script: TRANSFER_SCRIPT,
-      args: [input.threadId, file.attachmentId, name],
-      stdin: Buffer.from(file.bytes),
-      timeoutMs: TRANSFER_TIMEOUT_MS,
-      maxOutputBytes: 8_192,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
-    if (call.status !== "ran" || call.exitCode !== 0)
-      return { status: "refused", message: SERVER_ATTACHMENT_TRANSFER_REFUSAL };
-    const output = call.output.toString("utf8");
-    const nul = output.indexOf("\0");
-    const path = output.slice(0, nul);
-    const digest = output.slice(nul + 1).trim();
-    if (
-      nul <= 0 ||
-      !path.startsWith("/") ||
-      !path.includes(`/${SERVER_THREAD_ATTACHMENTS}/${input.threadId}/`) ||
-      digest !== createHash("sha256").update(file.bytes).digest("hex")
-    )
-      return { status: "refused", message: SERVER_ATTACHMENT_TRANSFER_REFUSAL };
-    transferred.push({
-      displayName: file.displayName,
-      mediaType: file.mediaType,
-      byteLength: file.bytes.byteLength,
-      path,
-    });
-  }
-  return { status: "transferred", files: transferred };
+    return { status: "transferred", files: transferred };
+  };
+  if (input.guard === undefined) return runTransfer();
+  return input.guard({
+    server,
+    threadId: input.threadId,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    transfer: runTransfer,
+    refused: () => ({ status: "refused", message: SERVER_ATTACHMENT_TRANSFER_REFUSAL }),
+  });
 }
 
 export type ServerAttachmentRemoval =
