@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createNewDeviceAlertsClient } from "./newDeviceAlertsClient";
+import { createNewDeviceAlertsClient, readMobileNewDeviceAlerts } from "./newDeviceAlertsClient";
 
 const list = {
   alerts: [
@@ -49,5 +49,18 @@ describe("reading a host's new-device alerts from any connected device", () => {
     const init = fetch.mock.calls[0]?.[1];
     expect(init?.method).toBe("POST");
     expect(new Headers(init?.headers).get("x-octant-window-capability")).toBe("cap");
+  });
+
+  it("reads one computer's alerts from the phone over its own session", async () => {
+    const authenticatedFetch = vi.fn(async () => Response.json(list));
+    await expect(
+      readMobileNewDeviceAlerts({
+        transport: { hostId: "77000000-0000-4000-8000-0000000000ff", authenticatedFetch },
+      }),
+    ).resolves.toEqual(list);
+    expect(authenticatedFetch).toHaveBeenCalledWith({
+      method: "GET",
+      path: "/api/new-device-alerts",
+    });
   });
 });

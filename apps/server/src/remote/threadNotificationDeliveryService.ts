@@ -25,20 +25,25 @@ import { createHash } from "node:crypto";
 import { Option, Schema } from "effect";
 import {
   decodeRemotePushDeliveryRecordedV1,
+  decodeRemotePushDeviceJoinedDeliveryRecordedV1,
   decodeRemotePushMoveWaitingDeliveryRecordedV1,
   REMOTE_PUSH_DELIVERY_EVENT_NAMES,
+  REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES,
   type OctantMode,
   type RemotePushDeliveryOutcome,
+  type RemotePushDeviceJoinedKind,
   type RemotePushMoveWaitingKind,
   type RemotePushNotificationKind,
 } from "@octant/contracts";
 import {
   admitRemotePushByRate,
+  buildRedactedDeviceJoinedPushNotification,
   buildRedactedMoveWaitingPushNotification,
   buildRedactedPushNotification,
   remotePushDedupeKey,
   remotePushPreferenceAllows,
+  remotePushWantsNewDevices,
 } from "@octant/domain/push-notification-policy";
 import type { PushDeliveryTransport } from "../automation/pushDeliveryTransport";
 import type { Journal } from "../persistence/journal";
@@ -78,6 +83,17 @@ interface ThreadNotificationFact {
 }
 
 /** A move a window holds here until an owner phone confirms it. */
+/** A new-device alert this host raised, for every paired phone to hear of. */
+export interface DeviceJoinedFact {
+  /** The alert's own id: one notification per alert and phone. */
+  readonly alertId: string;
+  readonly deviceName: string;
+  readonly privateAddress?: string;
+  readonly joined: "hub" | "host";
+  /** A device that paired with this host is not told about itself. */
+  readonly newDeviceId?: string;
+}
+
 export interface MoveWaitingFact {
   /** The wait's own id: one notification per wait, never one per thread it holds. */
   readonly waitId: string;
@@ -100,7 +116,10 @@ interface DeliveryResult {
 interface Delivery {
   readonly destination: PushTokenRecord;
   readonly receiptId: string;
-  readonly kind: RemotePushNotificationKind | RemotePushMoveWaitingKind;
+  readonly kind:
+    | RemotePushNotificationKind
+    | RemotePushMoveWaitingKind
+    | RemotePushDeviceJoinedKind;
   readonly collapseOn: string;
   readonly content: unknown;
   /** The receipt the journal keeps for this delivery; never its text. */
@@ -312,6 +331,50 @@ export class ThreadNotificationDeliveryService {
     this.#queue = this.#queue
       .then(() => this.#notifyMoveWaiting(wait))
       .catch(() => this.#report("A held-move notification stopped on an unexpected error."));
+  }
+
+  /**
+   * A new device joined this host's hub or paired with it: every phone paired
+   * here hears of it, unless it turned new devices off (maintainer decision,
+   * 2026-11-19). A second call for the same alert sends nothing more.
+   */
+  notifyDeviceJoined(fact: DeviceJoinedFact): void {
+    this.#queue = this.#queue
+      .then(() => this.#notifyDeviceJoined(fact))
+      .catch(() => this.#report("A new-device notification stopped on an unexpected error."));
+  }
+
+  async #notifyDeviceJoined(fact: DeviceJoinedFact): Promise<void> {
+    if (this.#transport.providerDelivery() !== "available") return;
+    for (const listed of this.#registrations.listDestinations()) {
+      const destination = this.#current(listed);
+      if (destination === undefined) continue;
+      if (fact.newDeviceId !== undefined && destination.deviceId === fact.newDeviceId) continue;
+      if (!remotePushWantsNewDevices(destination.preferences)) continue;
+      await this.#deliver({
+        destination,
+        receiptId: receiptAggregateId(destination, `device-joined:${fact.alertId}`),
+        kind: "device-joined",
+        collapseOn: `device-joined:${fact.alertId}`,
+        content: buildRedactedDeviceJoinedPushNotification({
+          hostId: destination.hostId,
+          deviceName: fact.deviceName,
+          ...(fact.privateAddress === undefined ? {} : { privateAddress: fact.privateAddress }),
+          joined: fact.joined,
+          computerLabel: this.#computerLabel(),
+        }),
+        receipt: (result, recordedAt) => ({
+          eventName: REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES.recorded,
+          payload: decodeRemotePushDeviceJoinedDeliveryRecordedV1({
+            hostId: destination.hostId,
+            deviceId: destination.deviceId,
+            alertId: fact.alertId,
+            ...result,
+            recordedAt,
+          }),
+        }),
+      });
+    }
   }
 
   async #notifyMoveWaiting(wait: MoveWaitingFact): Promise<void> {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   admitRemotePushByRate,
   buildRedactedAutomationPushNotification,
+  buildRedactedDeviceJoinedPushNotification,
   buildRedactedMoveWaitingPushNotification,
   buildRedactedPushNotification,
   automationNotificationKindForLifecycle,
@@ -10,6 +11,7 @@ import {
   remotePushDedupeKey,
   remotePushPreferenceAllows,
   remotePushUrgency,
+  remotePushWantsNewDevices,
 } from "./pushNotificationPolicy";
 import {
   admitAutomationNotification,
@@ -139,6 +141,72 @@ describe("buildRedactedMoveWaitingPushNotification", () => {
       destinationName: "æ".repeat(200),
     }).body;
     expect(encoder.encode(body).byteLength).toBeLessThanOrEqual(120);
+  });
+});
+
+describe("buildRedactedDeviceJoinedPushNotification", () => {
+  it("names the new device and its private address, and where it joined", () => {
+    expect(
+      buildRedactedDeviceJoinedPushNotification({
+        hostId,
+        deviceName: "Ada's phone",
+        privateAddress: "192.168.1.20",
+        joined: "host",
+        computerLabel: "Studio Mac",
+      }),
+    ).toEqual({
+      kind: "device-joined",
+      hostId,
+      title: "New device: Ada's phone",
+      body: "192.168.1.20 · paired with Studio Mac",
+    });
+    expect(
+      buildRedactedDeviceJoinedPushNotification({
+        hostId,
+        deviceName: "Tablet",
+        joined: "hub",
+        computerLabel: "Studio Mac",
+      }).body,
+    ).toBe("Joined the hub");
+  });
+
+  it("keeps a device name that looks like a secret or a path off the lock screen", () => {
+    for (const deviceName of ["sk-live-abc", "/Users/example/phone", "  "]) {
+      expect(
+        buildRedactedDeviceJoinedPushNotification({
+          hostId,
+          deviceName,
+          joined: "hub",
+          computerLabel: "Studio Mac",
+        }).title,
+      ).toBe("New device");
+    }
+  });
+
+  it("stays within the payload's byte bounds for a long name", () => {
+    const pushed = buildRedactedDeviceJoinedPushNotification({
+      hostId,
+      deviceName: "æ".repeat(200),
+      privateAddress: "fd7a:115c:a1e0:ab12:4843:cd96:6258:b240",
+      joined: "host",
+      computerLabel: "æ".repeat(200),
+    });
+    expect(encoder.encode(pushed.title).byteLength).toBeLessThanOrEqual(80);
+    expect(encoder.encode(pushed.body).byteLength).toBeLessThanOrEqual(120);
+  });
+
+  it("tells a phone about new devices unless it turned them off, a phone from before the setting included", () => {
+    const preferences = {
+      approvalNeeded: true,
+      waiting: true,
+      failure: true,
+      completion: true,
+      threadTitles: false,
+    };
+    expect(remotePushWantsNewDevices(preferences)).toBe(true);
+    expect(remotePushWantsNewDevices({ ...preferences, newDevices: true })).toBe(true);
+    expect(remotePushWantsNewDevices({ ...preferences, newDevices: false })).toBe(false);
+    expect(remotePushUrgency("device-joined")).toBe("high");
   });
 });
 

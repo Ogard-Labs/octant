@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildMobileMovesDeepLink, buildMobileThreadDeepLink } from "../notifications/deepLinks";
-import { DEEP_LINK_HOST_NOT_PAIRED, movesLinkOpening } from "./deepLinkNavigation";
+import { DEEP_LINK_HOST_NOT_PAIRED, computersLinkOpening } from "./deepLinkNavigation";
 import { captureMobileDeepLink, consumeMobileDeepLink } from "./mobileDeepLinkCaptureState";
 
 describe("mobile deep-link capture", () => {
@@ -43,15 +43,21 @@ describe("mobile deep-link capture", () => {
     // The notification the person tapped last wins.
     const captured = captureMobileDeepLink(waitingThread, buildMobileMovesDeepLink(hostId));
 
-    expect(captured).toEqual({ pendingMovesLink: { hostId } });
-    const link = captured.pendingMovesLink;
+    expect(captured).toEqual({ pendingComputersLink: { hostId } });
+    const link = captured.pendingComputersLink;
     if (link === undefined) throw new Error("The moves link was not kept.");
-    expect(movesLinkOpening(link, [hostId])).toEqual({ route: "hosts", entryMode: "manage" });
-    expect(movesLinkOpening(link, ["someone-else"])).toEqual({
+    expect(computersLinkOpening(link, [hostId])).toEqual({ route: "hosts", entryMode: "manage" });
+    expect(computersLinkOpening(link, ["someone-else"])).toEqual({
       route: "hosts",
       entryMode: "manage",
       notice: DEEP_LINK_HOST_NOT_PAIRED,
     });
     expect(consumeMobileDeepLink(captured)).toEqual({});
+  });
+
+  it("opens the Computers screen for a tapped new-device notification, as for a held move", () => {
+    const hostId = "11111111-1111-4111-8111-111111111111";
+    const captured = captureMobileDeepLink({}, `octant://hosts/${hostId}/new-devices`);
+    expect(captured).toEqual({ pendingComputersLink: { hostId } });
   });
 });

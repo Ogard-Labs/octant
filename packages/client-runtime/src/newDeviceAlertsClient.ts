@@ -4,6 +4,7 @@ import {
   decodeHostAnswer,
   type NewDeviceAlertList as NewDeviceAlertListType,
 } from "@octant/contracts";
+import type { MobileRemoteTransport } from "./mobileInboxClient";
 
 /**
  * The new-device alerts a host holds, for any device connected to it: a
@@ -57,4 +58,22 @@ export function createNewDeviceAlertsClient(port: {
       }
     },
   };
+}
+
+/** The phone's read of one paired computer's new-device alerts, over its own session. */
+export async function readMobileNewDeviceAlerts(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly signal?: AbortSignal;
+}): Promise<NewDeviceAlertListType | undefined> {
+  try {
+    const response = await input.transport.authenticatedFetch({
+      method: "GET",
+      path: NEW_DEVICE_ALERTS_PATH,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+    if (!response.ok) return undefined;
+    return decodeHostAnswer(NewDeviceAlertList)(await response.json());
+  } catch {
+    return undefined;
+  }
 }

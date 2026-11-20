@@ -57,6 +57,8 @@ async function registerWithComputer(input: {
   readonly requestCapability: RequestCapability;
   /** True once the person has turned notifications off for this computer. */
   readonly isCancelled: () => boolean;
+  /** Whether this phone hears that a new device joined or paired with the computer. */
+  readonly newDevices: boolean;
 }): Promise<EnablePhoneNotificationsResult> {
   if (input.isCancelled()) return { status: "cancelled" };
   const notificationPublicKey = await input.permission.getNotificationPublicKey(
@@ -89,6 +91,7 @@ async function registerWithComputer(input: {
       failure: true,
       completion: true,
       threadTitles: false,
+      newDevices: input.newDevices,
     },
   });
   // Turned off while registering: nothing is recorded, and the forgetting that
@@ -99,6 +102,7 @@ async function registerWithComputer(input: {
     deviceId: input.deviceId,
     hostKeyFingerprint: input.hostKeyFingerprint,
     tokenDigest: await digestPlatformToken(input.token),
+    ...(input.newDevices ? {} : { newDevices: false as const }),
   });
   return { status: "registered" };
 }
@@ -117,6 +121,12 @@ export async function enablePhoneNotifications(input: {
   readonly permission: MobileNotificationPermissionPort;
   readonly book: PushRegistrationBook;
   readonly requestCapability?: RequestCapability;
+  /**
+   * Whether this phone hears about new devices on this computer. Absent, it
+   * keeps the choice it made before, or hears of them (maintainer decision,
+   * 2026-11-19: on by default).
+   */
+  readonly newDevices?: boolean;
 }): Promise<EnablePhoneNotificationsResult> {
   if (!input.permission.available) return { status: "refused", reason: "unavailable" };
   if (input.deviceId === undefined) return { status: "refused", reason: "no-device-identity" };
@@ -128,8 +138,13 @@ export async function enablePhoneNotifications(input: {
     return { status: "refused", reason: "no-platform-token" };
   }
   const deviceId = input.deviceId;
+  const earlier = (await input.book.list()).find(
+    (entry) => entry.hostId === input.transport.hostId,
+  );
+  const newDevices = input.newDevices ?? earlier?.newDevices !== false;
   return input.book.lifecycle.run(input.transport.hostId, (isCancelled) =>
     registerWithComputer({
+      newDevices,
       transport: input.transport,
       hostKeyFingerprint: input.hostKeyFingerprint,
       deviceId,
@@ -240,6 +255,7 @@ export async function rotatePhoneNotifications(input: {
         if (transport === undefined) return "not-connected";
         try {
           const result = await registerWithComputer({
+            newDevices: record.newDevices !== false,
             transport,
             hostKeyFingerprint: record.hostKeyFingerprint,
             deviceId: record.deviceId,
