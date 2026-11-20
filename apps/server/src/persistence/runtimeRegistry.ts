@@ -112,6 +112,8 @@ import {
   GuardrailLevelLowered,
   PROVIDER_TOOLING_APPLIED,
   ProviderToolingAppliedRecordSchema,
+  PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN,
+  ProviderAcpAgentInstallScriptsRan,
   CodeProjectActionsChanged,
   ProjectExtraFolderAdded,
   ProjectExtraFolderRemoved,
@@ -631,6 +633,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.instance-removed@1", 1, ProviderInstanceRemoved)
     .register("provider.defaults-updated@1", 1, ProviderDefaultsUpdated)
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)
+    .register(PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN, 1, ProviderAcpAgentInstallScriptsRan)
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
     .register("pending-question.deferred@1", 1, PendingQuestionDeferral)

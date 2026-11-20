@@ -11964,7 +11964,12 @@ download was unverified) and **Turn on**, each its own journaled command that
 the host decides and refuses out of order, and that only a client acting as
 the host's own person may send. A registry agent is named by its registry id
 alone; its package, release, archive address and checksum come from the
-host's listing. The install runs nothing it fetched. Until trusted, the
+host's listing. The install runs nothing it fetched; for a package with
+deferred install scripts, Connection Check before Trust reports that the
+package needs its install script, and clicking **Trust** runs those scripts
+with no further prompt (natively outside Strict, and inside Octant's sandbox
+with writes limited to the agent's install folder under Strict), journaling the
+outcome, actor, timestamp and sandbox state. Until trusted, the
 agent runs in Octant's sandbox at every level with nothing remembered and
 none of Octant's tools
 ([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
