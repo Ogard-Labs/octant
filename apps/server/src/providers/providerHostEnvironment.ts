@@ -1,5 +1,5 @@
-import { existsSync, realpathSync } from "node:fs";
-import { isAbsolute, join, normalize } from "node:path";
+import { existsSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, join, normalize, sep } from "node:path";
 
 /**
  * The host environment a provider runtime receives outside Strict.
@@ -87,36 +87,68 @@ export function awsProfileReadPaths(
 ): readonly string[] {
   const home = hostEnvironment.HOME?.trim();
   const hasHome = home !== undefined && home.length > 0 && isAbsolute(home);
-  const candidates: string[] = [];
-  if (hasHome) candidates.push(join(home, ".aws"));
-  for (const name of AWS_PROFILE_FILE_VARIABLES) {
-    const raw = hostEnvironment[name]?.trim();
-    if (raw === undefined || raw.length === 0) continue;
-    if (raw.startsWith("~/") && hasHome) {
-      candidates.push(join(home, raw.slice(2)));
-    } else if (isAbsolute(raw)) {
-      candidates.push(raw);
-    }
-  }
   const seen = new Set<string>();
   const existing: string[] = [];
+  const exposedDirectories: string[] = [];
   const push = (path: string) => {
     if (!seen.has(path)) {
       seen.add(path);
       existing.push(path);
     }
   };
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) continue;
-    // Preserve the literal configured path so Linux Bubblewrap binds the
-    // resolved source at the exact path the runtime opens (`~/.aws` or the
-    // configured env var path), and also retain the canonical target for
-    // macOS Seatbelt read rules.
-    push(normalize(candidate));
+  const isInsideExposedDirectory = (path: string) =>
+    exposedDirectories.some(
+      (directory) => path === directory || path.startsWith(`${directory}${sep}`),
+    );
+
+  if (hasHome) {
+    const awsDir = normalize(join(home, ".aws"));
+    if (existsSync(awsDir)) {
+      push(awsDir);
+      let isDir = false;
+      try {
+        isDir = statSync(awsDir).isDirectory();
+      } catch {
+        // Ignore transient stat failures.
+      }
+      if (isDir) exposedDirectories.push(awsDir);
+      try {
+        const canonicalAwsDir = realpathSync(awsDir);
+        push(canonicalAwsDir);
+        if (isDir) exposedDirectories.push(canonicalAwsDir);
+      } catch {
+        // Keep the literal path when realpath fails on a transient entry.
+      }
+    }
+  }
+
+  for (const name of AWS_PROFILE_FILE_VARIABLES) {
+    const raw = hostEnvironment[name]?.trim();
+    if (raw === undefined || raw.length === 0) continue;
+    let candidate: string | undefined;
+    if (raw.startsWith("~/") && hasHome) {
+      candidate = join(home, raw.slice(2));
+    } else if (isAbsolute(raw)) {
+      candidate = raw;
+    }
+    if (candidate === undefined || !existsSync(candidate)) continue;
+    const literal = normalize(candidate);
+    let canonical: string | undefined;
     try {
-      push(realpathSync(candidate));
+      canonical = realpathSync(literal);
     } catch {
       // Keep the literal path when realpath fails on a transient entry.
+    }
+    // If an already-exposed `~/.aws` directory already contains the literal
+    // path, omit the redundant child literal so Linux Bubblewrap never tries to
+    // bind-mount over a symlink inside a read-only parent mount. Retain the
+    // canonical target when it lives outside `~/.aws` so symlink resolution
+    // succeeds on both Linux and macOS.
+    if (!isInsideExposedDirectory(literal)) {
+      push(literal);
+    }
+    if (canonical !== undefined && !isInsideExposedDirectory(canonical)) {
+      push(canonical);
     }
   }
   return existing;

@@ -160,14 +160,16 @@ describe("isolatedClaudeAccountEnvironment", () => {
     }
   });
 
-  it("preserves literal symlinked ~/.aws and AWS file paths alongside canonical targets so Linux Bubblewrap mounts them at the configured paths", async () => {
+  it("preserves literal symlinked ~/.aws and sibling AWS files while omitting redundant binds for symlinks inside ~/.aws", async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "octant-aws-symlink-")));
     const fakeHome = join(root, "home");
     const dotfiles = join(root, "dotfiles");
     const realAwsDir = join(dotfiles, "aws");
-    const realConfigFile = join(dotfiles, "shared-aws-config");
+    const realSiblingConfig = join(dotfiles, "shared-aws-config");
+    const realNestedCreds = join(dotfiles, "nested-aws-creds");
     const symlinkAwsDir = join(fakeHome, ".aws");
-    const symlinkConfigFile = join(fakeHome, "aws-config");
+    const symlinkSiblingConfig = join(fakeHome, "aws-config");
+    const symlinkNestedCreds = join(symlinkAwsDir, "credentials");
     const projectRoot = join(root, "project");
     const tempDir = join(root, "tmp");
     const bwrapPath = join(root, "bwrap");
@@ -176,17 +178,27 @@ describe("isolatedClaudeAccountEnvironment", () => {
     await mkdir(projectRoot, { recursive: true });
     await mkdir(tempDir, { recursive: true });
     await writeFile(join(realAwsDir, "config"), "[profile work]\n");
-    await writeFile(realConfigFile, "[profile custom]\n");
+    await writeFile(realSiblingConfig, "[profile custom]\n");
+    await writeFile(realNestedCreds, "[work]\n");
     await symlink(realAwsDir, symlinkAwsDir);
-    await symlink(realConfigFile, symlinkConfigFile);
+    await symlink(realSiblingConfig, symlinkSiblingConfig);
+    await symlink(realNestedCreds, join(realAwsDir, "credentials"));
     await writeFile(bwrapPath, '#!/bin/sh\nexec "$@"\n');
     await chmod(bwrapPath, 0o700);
 
     const readPaths = awsProfileReadPaths({
       HOME: fakeHome,
-      AWS_CONFIG_FILE: symlinkConfigFile,
+      AWS_CONFIG_FILE: symlinkSiblingConfig,
+      AWS_SHARED_CREDENTIALS_FILE: symlinkNestedCreds,
     });
-    expect(readPaths).toEqual([symlinkAwsDir, realAwsDir, symlinkConfigFile, realConfigFile]);
+    expect(readPaths).toEqual([
+      symlinkAwsDir,
+      realAwsDir,
+      symlinkSiblingConfig,
+      realSiblingConfig,
+      realNestedCreds,
+    ]);
+    expect(readPaths).not.toContain(symlinkNestedCreds);
 
     const launch = buildBubblewrapLaunch(
       {
@@ -209,7 +221,10 @@ describe("isolatedClaudeAccountEnvironment", () => {
       }
     }
     expect(roBinds).toContainEqual([realAwsDir, symlinkAwsDir]);
-    expect(roBinds).toContainEqual([realConfigFile, symlinkConfigFile]);
+    expect(roBinds).toContainEqual([realSiblingConfig, symlinkSiblingConfig]);
+    expect(roBinds).toContainEqual([realNestedCreds, realNestedCreds]);
+    // Bubblewrap must never try to bind over a symlink already exposed inside read-only ~/.aws.
+    expect(roBinds.some(([, target]) => target === symlinkNestedCreds)).toBe(false);
   });
 
   it("under Strict keeps the fixed list and every channel off", () => {
