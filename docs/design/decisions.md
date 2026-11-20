@@ -48,7 +48,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Native harness](#native-harness)                                                     | 7         | 5       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 8         | 7       | 1            | 0                   |
-| [Sandbox and confinement](#sandbox-and-confinement)                                   | 16        | 9       | 6            | 1                   |
+| [Sandbox and confinement](#sandbox-and-confinement)                                   | 17        | 9       | 6            | 2                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 13        | 6       | 7            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 7         | 4       | 3            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **288**   | **175** | **109**      | **4**               |
+| **All areas**                                                                         | **289**   | **175** | **109**      | **5**               |
 
 ## Principles and hard lines
 
@@ -2325,6 +2325,17 @@ A confined launch on Windows runs in a fresh AppContainer with ACL grants and a 
 - Hosted Windows evidence covers the mechanism on an administrator runner; an ordinary account, a desktop Windows release, ACL propagation cost on a large checkout, terminals and a real provider remain unverified.
 
 Status: Partly built. Since: 2026-11-15. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
+
+### Keeping the sandbox at Full access on Windows
+
+Proposed: Work and Code can opt into a Windows folder boundary at Full access
+without routine prompts. The existing choice stays off by default and does not
+stand in for canonical Strict. The proposal requires an AppContainer and a
+launch-owned Job Object, an explicitly admitted runtime, and verified recovery
+after abrupt loss. Unsupported runtimes, tools and policies refuse; nothing
+retries unconfined. Existing Windows execution with the opt-in off is unchanged.
+
+Status: Designed, not built. Detail: [Architecture: Windows Full access kept-sandbox proposal](../architecture.md#windows-full-access-kept-sandbox-proposal).
 
 ## Terminals, browsers and side surfaces
 

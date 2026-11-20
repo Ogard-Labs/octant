@@ -20407,6 +20407,8 @@ domain's `guardrailPolicy.ts`); Strict at every level is refused by name
 ("Strict needs a sandbox Windows doesn't have yet") and so is Full access with
 the sandbox kept, before anything is journaled or started. The shared Strict
 control retains confinement at Full access too; it cannot be enabled on Windows.
+See the [Windows Full access kept-sandbox proposal](#windows-full-access-kept-sandbox-proposal)
+for the proposed basic opt-in; it does not change current availability.
 The mode picker offers those levels with the line "On Windows the provider's
 own approvals decide; Octant's sandbox does not run here", and shows them
 unavailable on a Strict thread. Each provider launch decides again from its
@@ -21420,6 +21422,134 @@ The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 bundled first-party catalog, sign-in through the MCP authorization flow, and
 servers imported from other tools' configuration on this Mac, all as
 user-added packages through the published seams and the credential broker.
+
+### Windows Full access kept-sandbox proposal
+
+**Designed, not built.** This proposal covers native Windows Work and Code at
+Full access. Today the server still refuses a kept sandbox and canonical Strict.
+Neither the dormant launcher nor the unrestricted Windows provider tests prove
+this combination. Admission does not ship until the gates below pass.
+
+**Choice and defaults.** Keep the opt-in off by default, including old journals
+with no choice. Resolve the existing thread, Project and Settings preferences in
+that order, including an explicit Off and the existing inheritance and replay
+rules. The proposed presentation uses the existing control and Full-access-only
+preference, explicitly labeled **Keep the sandbox** for this Windows choice,
+not a second switch. This mapping needs maintainer approval: the current picker
+and defaults expose Strict, and the compatibility field by itself may also
+represent canonical Strict. Do not treat that field as proof of a basic opt-in,
+reinterpret saved Strict or custom-policy choices, or silently migrate them.
+Requests for canonical Strict still refuse. With the opt-in off and Strict off,
+open Full access, provider-native Auto and other levels, existing approval and
+warning behavior, and other platforms do not change. Plan, Chat and a turn
+clamped below Full access gain no authority from this proposal.
+
+**Boundary.** The server resolves the effective turn, bound checkout or Work
+folder, explicit grants, protected locations, network policy and provider before
+starting a thread runtime or accepting an executable tool operation. A window,
+catalog probe or saved preference cannot grant launch authority. The existing
+fixed native launcher, supplied by the Windows package and selected only by the
+host, starts the runtime with a fresh AppContainer SID and a non-breakaway,
+kill-on-close Job Object attached at process creation. The AppContainer and
+filesystem ACLs enforce file access; the Job Object contains the process tree and
+owns stop, not file permissions. Require both for the runtime and its descendants,
+with no inherited host authority or handles beyond the admitted I/O. If the
+launcher, policy, token or job cannot be verified, refuse before workload code
+runs. Never substitute a provider sandbox, an unrestricted process or an
+unrestricted probe for this admission, and never retry unconfined after failure.
+
+Use only the bound folder, explicitly authorized grants and the smallest
+declared support paths (read-only runtime/toolchain, launch-private scratch and
+provider state). The OS must deny writes outside that set and reads of protected
+personal files and other accounts; a narrow provider-owned account grant, if
+needed, follows the existing credential broker rules. Verify the effective ACLs,
+including ambient package access, rather than assuming an AppContainer excludes
+every host file. Accept only supported local path and filesystem forms. Require
+native object identity and reparse-aware checks for the executable and every
+grant component at admission, and hold the admitted objects through setup. For
+the lifetime of the run, access through a link, junction or changed path must
+still be checked by the OS against the actual destination object's rights. A
+string comparison or a one-time scan is not proof of that invariant. Refuse a
+root or layout if inherited ACLs, aliases or concurrent changes cannot preserve
+it. Do not solve this by granting a broader parent directory.
+
+**Initial admission.** Target only an explicitly verified native Codex app-server
+executable and version, using its external-sandbox policy and no routine approvals
+inside the boundary. The admitted program must start and use shell and edit from
+inside the container with the exact supported package, account and toolchain
+layout; no command shim, alternate Windows launcher or guessed interpreter.
+Use its existing stdio channel. When effective policy allows direct network,
+give the launcher only the capabilities for that mode, with host loopback still
+unavailable. A no-network launch never gets network to make a provider work; if
+the runtime cannot operate in the requested mode, refuse it. No ambient keys,
+loopback exemptions or new relay in this proposal. Do not expose any provider
+configuration or integration that can dispatch the turn's work to an
+unconfined host process or another service in place of this boundary.
+
+| Runtime or operation                                                                                                                                                 | Proposed initial result and refusal reason                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Verified native Codex on eligible Code and Work turns                                                                                                                | Native shell commands and edits run inside the job and AppContainer without routine prompts. An incompatible build, account layout or policy says “Codex cannot keep the sandbox with this Windows setup. No runtime was started.”                                                                                                                                                                          |
+| Claude Code, OpenCode, Pi, ACP agents, Octant Harness, other runtimes or provider shims                                                                              | Refuse before probe or spawn: “This runtime is not verified for Keep the sandbox on Windows. Choose a supported Codex installation or another host.” Admission is per runtime and version, not per family of executable files.                                                                                                                                                                              |
+| Octant-operated file reads/writes, thread terminals, checks, Project actions, language/debug processes and other host or delegated work on behalf of a confined turn | Do not expose them as available in the initial slice. Enforce the same refusal on direct tool and command routes: “This operation cannot run inside the Windows sandbox yet.” A later admission must run the file or command effect under the same or narrower OS-enforced grants; a lexical check followed by host-authority I/O, a host tool bridge, or the person's separate terminal is not equivalent. |
+
+Report named reasons before dispatch, with actionable choices and no sensitive
+paths or credentials in receipts. Handshake or start failure must clean up the
+attempt and say the confined runtime did not start successfully; never claim
+that no process started if setup had progressed past process creation. Keep
+independently authorized person actions separate from runtime authority.
+
+**Lifecycle.** Use a new launch for each admitted provider session; never adopt an
+open provider session or share with catalog, another thread, or a different
+policy. Resume uses a fresh confined process, even when reusing conversation
+history. Bind active work to an immutable receipt for the owning thread/session,
+provider identity, posture, verified grant identities and policy. A permission
+change cannot widen an active job; stop on revocation, and apply the new policy
+only after verified teardown and fresh admission. On Stop, cancellation,
+completion, initialization failure, or loss of the host owner, revoke the lease
+and stop the whole job; require verified descendant exit before normal cleanup.
+Do not use a PID-only tree walk as the confined path's authority.
+
+Record the private, durable launch identity, profile and verified grant
+identities before changing ACLs. Clean up owned SID entries (including inherited
+effects) and profile on normal exit. After an abrupt loss, recover under the
+same serialization used for grants, before any affected new admission. Prove
+the old launch is dead, remove only the recorded SID's entries on verified
+objects, preserve unrelated ACL changes and live launches, and verify profile
+removal. Recovery is bounded and idempotent; refuse affected launches and report
+cleanup pending if identity, termination or restoration cannot be verified.
+The runtime cannot write the ownership record. A stale entry or a killed
+launcher is not evidence of successful cleanup.
+
+**Limits in the first slice.** These are limits or prerequisites, not changes to
+the existing Windows launcher or a commitment to fix all Windows workflows.
+
+| Known gap                            | Proposed disposition                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Protected store inside a grant       | Keep whole-launch refusal and identify the conflicting grant category. Suggest a narrower clean grant or another host, not weakening the protected list. Do not rely on deny entries or runtime exceptions to carve out protected content. Refuse writable layouts where a later protected match cannot remain denied. |
+| Lone file and parent enumeration     | Direct access only when the file grant is supported; never add parent listing or sibling access implicitly. An adapter requiring enumeration of an ungranted parent is not admitted.                                                                                                                                   |
+| Read roots under a write grant       | No change to existing overlap semantics elsewhere. In this opt-in, refuse an effective requirement for read-only access that the proposed write grant cannot represent; do not change generic read-root precedence.                                                                                                    |
+| ConPTY and large checkouts           | Interactive Octant terminals stay unavailable until native containment and stop are proven. Measure grant, stop and cleanup cost on a representative large checkout; bound setup and refuse partial or timed-out grants. Do not claim a performance floor from hosted fixtures.                                        |
+| Launcher killed outright             | Whole-job stop and verified ACL/profile recovery are separate requirements; recovery is a prerequisite for this opt-in, not a separate approved repair to other routes.                                                                                                                                                |
+| Proxied network and host relays      | Refuse by name when required: “The requested network limits are not supported by the Windows sandbox.” Never replace proxy-only access with direct access or turn off the person's Network limits.                                                                                                                     |
+| Other providers and real Codex turns | Existing native Windows paths are unchanged. Fake-provider launch, version and stop evidence does not establish a whole confined turn; the real-provider gate below is required.                                                                                                                                       |
+
+**Verification for the build phase (not run by this proposal).** Use disposable
+folders and synthetic protected-file fixtures for denials. Capture exact source
+and package identity, Windows version, account privilege, provider version,
+case and outcome; an administrator-hosted runner is not a standard-user smoke.
+
+| Gate                       | Evidence required before enabling the opt-in                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1. Admission and defaults  | Windows server CI tests Code and Work with the opt-in on and off, inherited On, explicit Off, old journal absent, canonical Strict refused and Plan clamped. Verify with opt-in off that existing Full access and native Auto launch and approval behavior is unchanged. Run the provider tests with a supported executable fixture and unsupported runtime, executable, policy and missing-launcher cases; assert refusal reaches the caller and no unrestricted probe, spawn or retry occurs.                                      |
+| 2. Native boundary         | Windows launcher CI proves in-root and explicit-grant effects succeed, read-only paths stay read-only, ungranted sibling writes and synthetic protected-file reads are denied, and access remains denied for child processes and junction destinations. Check unsafe or changed grant identities, unsupported policy overlaps and network modes, and no partial grants on setup failure.                                                                                                                                             |
+| 3. Octant operations       | Windows server tests assert unsupported terminal, file and other tool requests are unavailable in advertised capabilities and fail before host-side I/O or spawn when sent directly. Compare the corresponding opt-in-off behavior.                                                                                                                                                                                                                                                                                                  |
+| 4. Lifecycle and recovery  | Windows CI switches open → confined → open, changes grant authority, and interrupts both initialization and a live turn. Verify new process identity, whole-job exit on Stop and owner loss, normal cleanup, interrupted recovery on restart, and preservation of unrelated ACLs and another live launch. Include a bounded failure when cleanup cannot be proved.                                                                                                                                                                   |
+| 5. Windows 11 release gate | On an ordinary Windows 11 account with the candidate package and real supported Codex, run a complete turn in Code and Work: command and edits in the checkout and an explicit grant without routine prompts; verify synthetic sibling/protected denials, stop and descendant/ACL/profile cleanup, and the open Full access and native Auto controls. Record bounded grant/cleanup timings for a large checkout. Track this smoke once in the maintainer acceptance list. No support claim until this and the Windows CI gates pass. |
+
+Stop and ask the maintainer if this would require administrator rights, a
+driver or privileged helper; change behavior when the opt-in is off; weaken
+the boundary to admit a runtime; or make the existing preference ambiguous.
+Do not proceed from proposal to build without explicit approval.
 
 ## Development loop
 
