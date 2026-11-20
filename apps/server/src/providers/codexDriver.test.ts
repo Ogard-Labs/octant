@@ -759,6 +759,9 @@ describe("Codex driver probe and runtime lifecycle", () => {
         userQuestions: "supported",
         nativeChildAgents: "unsupported",
         harnessAutoReview: "supported",
+        // A rewind continues Codex's own `thread/fork` copy cut at the last
+        // kept turn's anchor from 0.143.0 onward.
+        sessionRollback: "supported",
       },
       models: [
         {
@@ -6012,9 +6015,10 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
     expect(f.startCount()).toBe(1);
     expect(f.closeCount()).toBe(1);
 
-    // Another folder or mode, or a Codex whose fork cannot cut at a turn, goes back as the text handoff.
+    // Another folder or mode, a blank anchor, or a Codex whose fork cannot cut at a turn goes back as the text handoff.
     expect(await fork({ projectRoot: "/tmp/another-project" })).toBeUndefined();
     expect(await fork({ mode: "work" })).toBeUndefined();
+    expect(await fork({ anchor: "   " })).toBeUndefined();
     const older = fixture({
       version: "0.142.5",
       threadFork: async () => {
@@ -6035,6 +6039,47 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
       ),
     ).toBeUndefined();
     expect(older.calls.some((call) => call.method === "thread/fork")).toBe(false);
+
+    // A copy that fails closes its short-lived process and surfaces the failure so the caller falls back to text handoff.
+    const failing = fixture({
+      version: "0.170.0",
+      threadFork: async () => {
+        throw new Error("fork failed");
+      },
+    });
+    const failed = await Effect.runPromise(
+      Effect.exit(
+        makeCodexDriver(failing.options()).forkSession?.({
+          instanceId,
+          sessionId: secondSessionId,
+          source,
+          anchor: "turn-2",
+          projectRoot,
+          mode: "code",
+          modelId: decodeProviderModelId("gpt-5.4"),
+        }) ?? Effect.succeed(undefined),
+      ),
+    );
+    expect(failed._tag).toBe("Failure");
+    expect(failing.startCount()).toBe(1);
+    expect(failing.closeCount()).toBe(1);
+  });
+
+  it("reports session rollback supported only from Codex 0.143.0 onward", async () => {
+    for (const version of ["0.143.0", "0.144.4", "0.170.0"]) {
+      const f = fixture({ version });
+      const probe = await Effect.runPromise(
+        Effect.scoped(makeCodexDriver(f.options()).probe({ instanceId })),
+      );
+      expect(probe.capabilities.sessionRollback).toBe("supported");
+    }
+    for (const version of ["0.142.5", "0.143.0-alpha.1"]) {
+      const f = fixture({ version });
+      const probe = await Effect.runPromise(
+        Effect.scoped(makeCodexDriver(f.options()).probe({ instanceId })),
+      );
+      expect(probe.capabilities.sessionRollback).toBe("unsupported");
+    }
   });
 
   it("makes each of two concurrent copies on its own process, so neither copy is still held when it is returned", async () => {
