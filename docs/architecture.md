@@ -17041,17 +17041,17 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Code tools reach the models its connection check reports with tool use;
   Harness endpoints reach them only for models a person verified.
 
-  | Column                    | Driver kinds                                                                                                                  | Chat  | Work              | Code              | Agent loop       |
-  | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------- | ----------------- | ---------------- |
-  | Claude Code               | `claude`                                                                                                                      | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | Codex                     | `codex`                                                                                                                       | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | OpenCode                  | `opencode`                                                                                                                    | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | Pi                        | `pi`                                                                                                                          | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | ACP agents                | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx`, `acp-agent` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | Ollama                    | `ollama`                                                                                                                      | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Harness endpoints         | `openai-compatible`, `anthropic-compatible`, `azure-foundry`, `amazon-bedrock`                                                | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Outside harness endpoints | `outside-harness-endpoint`                                                                                                    | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Oh My Pi                  | `oh-my-pi`                                                                                                                    | `no`  | `no`              | `no`              | `none`           |
+  | Column                    | Driver kinds                                                                                                                                 | Chat  | Work              | Code              | Agent loop       |
+  | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------- | ----------------- | ---------------- |
+  | Claude Code               | `claude`                                                                                                                                     | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Codex                     | `codex`                                                                                                                                      | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | OpenCode                  | `opencode`                                                                                                                                   | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Pi                        | `pi`                                                                                                                                         | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | ACP agents                | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx`, `antigravity`, `acp-agent` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Ollama                    | `ollama`                                                                                                                                     | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Harness endpoints         | `openai-compatible`, `anthropic-compatible`, `azure-foundry`, `amazon-bedrock`                                                               | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Outside harness endpoints | `outside-harness-endpoint`                                                                                                                   | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Oh My Pi                  | `oh-my-pi`                                                                                                                                   | `no`  | `no`              | `no`              | `none`           |
 
   The image profiles (`openai-image`, `gemini-native-image`, `bfl-image`,
   `ideogram-image`) are not turn drivers and are not in the matrix.
