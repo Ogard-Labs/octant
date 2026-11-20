@@ -1,9 +1,11 @@
 import type { ProjectBrowserClient } from "@octant/client-runtime/project-browser-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
+import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { ProjectId } from "@octant/contracts/projects";
-import { useMemo, useState } from "react";
+import type { ServerProjectEntry } from "@octant/contracts/server-projects";
+import { useEffect, useMemo, useState } from "react";
 import { useProjectController } from "../projects/useProjectController";
 import { StartQuickTools, StartQuickToolsContext } from "../shell/StartQuickTools";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -13,22 +15,47 @@ export interface RemoteProjectToolsProps {
   readonly projectClient: ProjectClient;
   readonly projectTerminalClient: ProjectTerminalClient;
   readonly projectBrowserClient: ProjectBrowserClient;
+  readonly serverProjectsClient?: Pick<ServerProjectsClient, "read">;
 }
 
 /**
  * A Project's own terminal and browser, on a browser the host's own person
- * paired: the device's own shell in the Project's folder and its own Private
- * page, through the Project tools list (a window's start screen no longer shows it). The host
- * decides everything that matters (the Project is local and active, a Work
- * Project's Developer tools are on, the shell and page belong to this device
- * alone and end when it is revoked or goes quiet, a profile page stays at a
- * window); the shell mounts this for no other session.
+ * paired: the device's own shell in any local or server Project's folder and
+ * its own Private page, through the Project tools list. The host decides
+ * everything that matters (the Project is active, a Work Project's Developer
+ * tools are on, the shell and page belong to this device alone and end when
+ * it is revoked or goes quiet, a profile page stays at a window); the shell
+ * mounts this for no other session.
  */
 export function RemoteProjectTools(props: RemoteProjectToolsProps) {
   const projects = useProjectController({ activeMode: props.mode, client: props.projectClient });
-  const choices = projects.projects.filter(
-    (project) => project.type === props.mode && project.lifecycle === "active",
-  );
+  const [serverProjects, setServerProjects] = useState<ReadonlyArray<ServerProjectEntry>>([]);
+  useEffect(() => {
+    const reader = props.serverProjectsClient;
+    if (reader === undefined) {
+      setServerProjects([]);
+      return;
+    }
+    const abort = new AbortController();
+    void reader
+      .read(abort.signal)
+      .then((view) => {
+        if (!abort.signal.aborted) setServerProjects(view.projects);
+      })
+      .catch(() => {
+        if (!abort.signal.aborted) setServerProjects([]);
+      });
+    return () => abort.abort();
+  }, [props.serverProjectsClient]);
+  const choices = useMemo(() => {
+    const local = projects.projects
+      .filter((project) => project.type === props.mode && project.lifecycle === "active")
+      .map((project) => ({ id: project.id, label: project.name }));
+    const onServer = serverProjects
+      .filter((project) => (project.mode ?? "code") === props.mode)
+      .map((project) => ({ id: project.id, label: `${project.name} (Server)` }));
+    return [...local, ...onServer];
+  }, [projects.projects, props.mode, serverProjects]);
   const [chosen, setChosen] = useState<ProjectId>();
   const projectId = choices.find((project) => project.id === chosen)?.id ?? choices[0]?.id;
   const services = useMemo(
@@ -53,7 +80,7 @@ export function RemoteProjectTools(props: RemoteProjectToolsProps) {
           const match = choices.find((project) => String(project.id) === next);
           if (match !== undefined) setChosen(match.id);
         }}
-        options={choices.map((project) => ({ id: String(project.id), label: project.name }))}
+        options={choices.map((project) => ({ id: String(project.id), label: project.label }))}
         value={projectId === undefined ? "" : String(projectId)}
       />
       {projectId === undefined ? null : (

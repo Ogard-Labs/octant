@@ -313,20 +313,34 @@ import {
 } from "@octant/contracts/shield-servers";
 import {
   SERVER_PROJECTS_EVENT_NAMES,
-  ServerProjectBoundPayload,
-  ServerProjectRemovedPayload,
-  ServerProjectRenamedPayload,
+  SERVER_PROJECTS_EVENT_NAMES_V2,
+  SERVER_PROJECTS_PREVIEW_OUTCOME_V1,
+  ServerPreviewOutcomePayloadV1,
+  ServerPreviewOutcomePayloadV2,
   ServerProjectActionsReplacedPayload,
+  ServerProjectActionsReplacedPayloadV2,
+  ServerProjectBoundPayload,
+  ServerProjectBoundPayloadV2,
+  ServerProjectRemovedPayload,
+  ServerProjectRemovedPayloadV2,
+  ServerProjectRenamedPayload,
+  ServerProjectRenamedPayloadV2,
   ServerWorkDeveloperToolsChangedPayload,
+  ServerWorkDeveloperToolsChangedPayloadV2,
 } from "@octant/contracts/server-projects";
 import {
   CLOUD_MACHINES_EVENT_NAMES,
+  CLOUD_MACHINES_EVENT_NAMES_V2,
   CloudMachineCreatedPayload,
   CloudMachineCreationEndedPayload,
   CloudMachineCreationRequestedPayload,
+  CloudMachineCreationRequestedPayloadV2,
   CloudMachineDestroyedPayload,
+  CloudMachineDestroyedPayloadV2,
   CloudMachineProjectBoundPayload,
+  CloudMachineProjectBoundPayloadV2,
   CloudMachineStateChangedPayload,
+  CloudMachineStateChangedPayloadV2,
 } from "@octant/contracts/cloud-machines";
 import {
   RUNTIME_NETWORK_EVENT_NAMES,
@@ -707,20 +721,43 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     )
     .register(SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran, 1, ShieldRemoteCommandRanPayload)
     .register(SERVER_PROJECTS_EVENT_NAMES.bound, 1, ServerProjectBoundPayload)
+    .register(SERVER_PROJECTS_EVENT_NAMES_V2.bound, 1, ServerProjectBoundPayloadV2)
     .register(SERVER_PROJECTS_EVENT_NAMES.renamed, 1, ServerProjectRenamedPayload)
+    .register(SERVER_PROJECTS_EVENT_NAMES_V2.renamed, 1, ServerProjectRenamedPayloadV2)
     .register(SERVER_PROJECTS_EVENT_NAMES.removed, 1, ServerProjectRemovedPayload)
+    .register(SERVER_PROJECTS_EVENT_NAMES_V2.removed, 1, ServerProjectRemovedPayloadV2)
     .register(SERVER_PROJECTS_EVENT_NAMES.actionsReplaced, 1, ServerProjectActionsReplacedPayload)
+    .register(
+      SERVER_PROJECTS_EVENT_NAMES_V2.actionsReplaced,
+      1,
+      ServerProjectActionsReplacedPayloadV2,
+    )
     .register(
       SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged,
       1,
       ServerWorkDeveloperToolsChangedPayload,
     )
+    .register(
+      SERVER_PROJECTS_EVENT_NAMES_V2.developerToolsChanged,
+      1,
+      ServerWorkDeveloperToolsChangedPayloadV2,
+    )
+    .register(SERVER_PROJECTS_PREVIEW_OUTCOME_V1, 1, ServerPreviewOutcomePayloadV1)
+    .register(SERVER_PROJECTS_EVENT_NAMES_V2.previewOutcome, 1, ServerPreviewOutcomePayloadV2)
     .register(CLOUD_MACHINES_EVENT_NAMES.creationRequested, 1, CloudMachineCreationRequestedPayload)
+    .register(
+      CLOUD_MACHINES_EVENT_NAMES_V2.creationRequested,
+      1,
+      CloudMachineCreationRequestedPayloadV2,
+    )
     .register(CLOUD_MACHINES_EVENT_NAMES.created, 1, CloudMachineCreatedPayload)
     .register(CLOUD_MACHINES_EVENT_NAMES.creationEnded, 1, CloudMachineCreationEndedPayload)
     .register(CLOUD_MACHINES_EVENT_NAMES.projectBound, 1, CloudMachineProjectBoundPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES_V2.projectBound, 1, CloudMachineProjectBoundPayloadV2)
     .register(CLOUD_MACHINES_EVENT_NAMES.stateChanged, 1, CloudMachineStateChangedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES_V2.stateChanged, 1, CloudMachineStateChangedPayloadV2)
     .register(CLOUD_MACHINES_EVENT_NAMES.destroyed, 1, CloudMachineDestroyedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES_V2.destroyed, 1, CloudMachineDestroyedPayloadV2)
     .register(SHIELD_TAG_EVENT_NAMES.recorded, 1, ShieldTagRecordedPayload)
     .register(SHIELD_FORGE_CHANGE_EVENT_NAMES.observed, 1, ShieldForgeChangeObservedPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)

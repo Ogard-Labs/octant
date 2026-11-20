@@ -6,7 +6,9 @@ import {
   ActorId,
   ReplayCursor,
   decodeBindingRevisionId,
+  decodeCodeCheckoutId,
   decodeCodeTerminalId,
+  decodeCodeThreadId,
   decodeLayoutNodeId,
   decodePaneId,
   decodeEventActor,
@@ -213,6 +215,9 @@ function harness(
       typeof ProjectTerminalService
     >[0]["serverProject"];
     readonly personPairedDevice?: (scope: string) => boolean;
+    readonly isPersonPairedDeviceCurrent?: ConstructorParameters<
+      typeof ProjectTerminalService
+    >[0]["isPersonPairedDeviceCurrent"];
     readonly deviceQuietMs?: number;
     readonly strict?: boolean;
     readonly shell?: string;
@@ -260,6 +265,9 @@ function harness(
           personPairedDevice: (scope: WindowId) =>
             options.personPairedDevice?.(String(scope)) === true,
         }),
+    ...(options.isPersonPairedDeviceCurrent === undefined
+      ? {}
+      : { isPersonPairedDeviceCurrent: options.isPersonPairedDeviceCurrent }),
     ...(options.deviceQuietMs === undefined ? {} : { deviceQuietMs: options.deviceQuietMs }),
     ...(options.strict === undefined ? {} : { strict: () => options.strict === true }),
     ...(options.shell === undefined ? {} : { shell: () => options.shell ?? "" }),
@@ -898,19 +906,70 @@ describe("Project terminals", () => {
       ]);
     });
 
-    it("keeps saved actions and worktree setup at a window", async () => {
+    it("keeps local worktree setup at a window while admitting saved actions and server shells", async () => {
       const { service, terminals } = harness({
         access: () => true,
         personPairedDevice: (scope) => scope === deviceId,
       });
+      const preparation = await service.execute(
+        deviceScope,
+        "local-window",
+        {
+          kind: "child-worktree-source",
+          projectId,
+          thread: {
+            threadId: decodeCodeThreadId("00000000-0000-4000-8000-000000000091"),
+            checkoutId: decodeCodeCheckoutId("00000000-0000-4000-8000-000000000092"),
+          },
+          action: "capture",
+        },
+        deviceActor,
+      );
+      expect(refusal(preparation)).toBe("unauthorized");
       const suggested = await service.execute(
         deviceScope,
         "local-window",
         { kind: "suggest-actions", projectId },
         deviceActor,
       );
-      expect(refusal(suggested)).toBe("unauthorized");
+      expect(suggested.kind).toBe("project-action-suggestions");
       expect(terminals.launches).toEqual([]);
+    });
+
+    it("opens a server Project terminal owned by the device and ends it on revoke or quiet without affecting local windows", async () => {
+      let deviceLive = true;
+      const login = { command: "ssh", args: ["web"], environment: {} };
+      const { service, terminals, journal } = harness({
+        projects: new Map(),
+        access: () => true,
+        serverProject: () => ({
+          mode: "code",
+          bindingRevisionId: decodeBindingRevisionId("00000000-0000-4000-8000-000000000077"),
+          login: () => login,
+        }),
+        personPairedDevice: (scope) => scope === deviceId,
+        isPersonPairedDeviceCurrent: () => deviceLive,
+        deviceQuietMs: 60_000,
+      });
+      const binding = { deviceId, sessionId: "sess-1", credentialGeneration: 2 };
+      const started = await service.execute(
+        deviceScope,
+        "local-window",
+        start(),
+        deviceActor,
+        binding,
+      );
+      expect(started).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+      expect(terminals.launches[0]?.server).toEqual(login);
+
+      // Device revocation/session end terminates the server terminal and journals the device actor.
+      deviceLive = false;
+      await service.settleAuthorities();
+      expect(terminals.terminated).toEqual([ids.terminal]);
+      expect(actors(journal)).toEqual([
+        { name: "code.project-terminal-started@1", actor: deviceActor },
+        { name: "code.project-terminal-ended@1", actor: deviceActor },
+      ]);
     });
 
     it("ends the device's shell when the device goes quiet, and when it stops acting as the person", async () => {

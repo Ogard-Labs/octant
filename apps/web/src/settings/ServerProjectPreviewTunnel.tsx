@@ -119,6 +119,13 @@ export function ServerProjectPreviewTunnel(props: {
       <div role="status" aria-live="polite">
         {view === null ? (
           "No preview owned by this window."
+        ) : view.localPort === 0 && view.endpoint.startsWith("/api/server-proxy/") ? (
+          <p className="shield-servers__note">
+            {view.status === "listening"
+              ? "Relayed through this host's private listener. The remote connection is checked when opened."
+              : `Preview ${view.status}.`}{" "}
+            Remote 127.0.0.1:{view.remotePort}. Relay {view.endpoint}.
+          </p>
         ) : (
           <p className="shield-servers__note">
             {view.status === "listening"

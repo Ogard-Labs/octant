@@ -11,12 +11,17 @@ import {
 import {
   CLOUD_MACHINES_AGGREGATE,
   CLOUD_MACHINES_EVENT_NAMES,
+  CLOUD_MACHINES_EVENT_NAMES_V2,
   CloudMachineCreatedPayload,
   CloudMachineCreationEndedPayload,
   CloudMachineCreationRequestedPayload,
+  CloudMachineCreationRequestedPayloadV2,
   CloudMachineDestroyedPayload,
+  CloudMachineDestroyedPayloadV2,
   CloudMachineProjectBoundPayload,
+  CloudMachineProjectBoundPayloadV2,
   CloudMachineStateChangedPayload,
+  CloudMachineStateChangedPayloadV2,
   decodeCloudMachineDescription,
   MAX_CLOUD_MACHINES,
   MAX_SETTLED_CLOUD_MACHINES_SHOWN,
@@ -60,11 +65,15 @@ const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeEventName = Schema.decodeUnknownSync(EventName);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const decodeRequested = Schema.decodeUnknownSync(CloudMachineCreationRequestedPayload);
+const decodeRequestedV2 = Schema.decodeUnknownSync(CloudMachineCreationRequestedPayloadV2);
 const decodeCreated = Schema.decodeUnknownSync(CloudMachineCreatedPayload);
 const decodeEnded = Schema.decodeUnknownSync(CloudMachineCreationEndedPayload);
 const decodeBound = Schema.decodeUnknownSync(CloudMachineProjectBoundPayload);
+const decodeBoundV2 = Schema.decodeUnknownSync(CloudMachineProjectBoundPayloadV2);
 const decodeStateChanged = Schema.decodeUnknownSync(CloudMachineStateChangedPayload);
+const decodeStateChangedV2 = Schema.decodeUnknownSync(CloudMachineStateChangedPayloadV2);
 const decodeDestroyed = Schema.decodeUnknownSync(CloudMachineDestroyedPayload);
+const decodeDestroyedV2 = Schema.decodeUnknownSync(CloudMachineDestroyedPayloadV2);
 
 const REPLAY_BATCH = 500;
 /** States a provider reports while it finishes an act; never a basis for gating the next one. */
@@ -83,8 +92,43 @@ const DESTROY_CONFIRMATION_MS = 5 * 60_000;
 export const CLOUD_MACHINE_SUSPENDED_MESSAGE =
   "This machine is suspended; resume it first in Settings › Permissions › Servers. Nothing ran.";
 
-export type CloudMachinePrincipal = "local-window" | "remote-device" | "agent" | "routine";
+export type CloudMachinePrincipal =
+  | "local-window"
+  | { readonly kind: "local-window"; readonly windowId?: string }
+  | {
+      readonly kind: "person-paired-device";
+      readonly deviceId: string;
+      readonly sessionId: string;
+      readonly credentialGeneration: number;
+      readonly actor: EventActorValue;
+    }
+  | "remote-device"
+  | "agent"
+  | "routine";
 export type CloudMachineAct = "create" | "describe" | "suspend" | "resume" | "destroy";
+
+type AdmittedCloudMachinePrincipal =
+  | {
+      readonly version: 1;
+      readonly ownerKey: string;
+      readonly payloadPrincipal: { readonly kind: "local-window" };
+      readonly actor: EventActorValue;
+      readonly serverProjectPrincipal: "local-window";
+    }
+  | {
+      readonly version: 2;
+      readonly ownerKey: string;
+      readonly payloadPrincipal: {
+        readonly kind: "person-paired-device";
+        readonly credentialGeneration: number;
+      };
+      readonly actor: EventActorValue;
+      readonly serverProjectPrincipal: {
+        readonly kind: "person-paired-device";
+        readonly credentialGeneration: number;
+        readonly actor: EventActorValue;
+      };
+    };
 
 export type CloudMachinesChange =
   | { readonly kind: "changed"; readonly machine?: CloudMachine; readonly message?: string }
@@ -128,7 +172,7 @@ export class CloudMachineService {
   readonly #busy = new Set<string>();
   readonly #confirmations = new Map<
     string,
-    { readonly machineId: string; readonly expiresAt: number }
+    { readonly machineId: string; readonly expiresAt: number; readonly ownerKey: string }
   >();
 
   constructor(options: CloudMachineServiceOptions) {
@@ -229,8 +273,8 @@ export class CloudMachineService {
     readonly mode?: "work" | undefined;
     readonly principal: CloudMachinePrincipal;
   }): Promise<CloudMachinesChange> {
-    const person = personRefusal(input.principal);
-    if (person !== undefined) return person;
+    const admitted = this.#admit(input.principal);
+    if (admitted === undefined) return refused("needs-person");
     if (this.#liveCount() >= MAX_CLOUD_MACHINES) return refused("too-many-machines");
     const target = this.#target(input.targetId);
     if (target === undefined) return refused("target-not-offered");
@@ -243,7 +287,7 @@ export class CloudMachineService {
     // Read again: another creation may have filled the limit while the broker answered.
     if (this.#liveCount() >= MAX_CLOUD_MACHINES) return refused("too-many-machines");
 
-    const requested = decodeRequested({
+    const requestedRaw = {
       machine: {
         id: this.#options.uuid(),
         targetId: input.targetId,
@@ -254,10 +298,16 @@ export class CloudMachineService {
         ...(input.mode === "work" ? { mode: "work" as const } : {}),
         requestedAt: this.#options.clock(),
       },
-      principal: { kind: "local-window" },
-    });
+      principal: admitted.payloadPrincipal,
+    };
+    const requested =
+      admitted.version === 2 ? decodeRequestedV2(requestedRaw) : decodeRequested(requestedRaw);
     const machineId = String(requested.machine.id);
-    if (!this.#record(machineId, CLOUD_MACHINES_EVENT_NAMES.creationRequested, requested))
+    const requestedEvent =
+      admitted.version === 2
+        ? CLOUD_MACHINES_EVENT_NAMES_V2.creationRequested
+        : CLOUD_MACHINES_EVENT_NAMES.creationRequested;
+    if (!this.#record(machineId, requestedEvent, requested, admitted.actor))
       return refused("unavailable");
 
     this.#busy.add(machineId);
@@ -274,10 +324,11 @@ export class CloudMachineService {
           machineId,
           "uncertain",
           "The provider did not answer. A machine may exist in your cloud account; check there before creating another.",
+          admitted.actor,
         );
       }
       if (answer.status === "refused") {
-        return this.#creationEnded(machineId, "refused", answer.detail);
+        return this.#creationEnded(machineId, "refused", answer.detail, admitted.actor);
       }
       const described = decodeCloudMachineDescription(answer.machine);
       if (described._tag === "None" || described.value.endpoint === undefined) {
@@ -285,6 +336,7 @@ export class CloudMachineService {
           machineId,
           "uncertain",
           "The provider's answer could not be read. A machine may exist in your cloud account; check there.",
+          admitted.actor,
         );
       }
       const created = {
@@ -292,13 +344,13 @@ export class CloudMachineService {
         machine: described.value,
         observedAt: this.#options.clock(),
       };
-      if (!this.#record(machineId, CLOUD_MACHINES_EVENT_NAMES.created, created)) {
+      if (!this.#record(machineId, CLOUD_MACHINES_EVENT_NAMES.created, created, admitted.actor)) {
         return refused(
           "unavailable",
           "The machine was created but could not be recorded. Check your cloud account.",
         );
       }
-      return await this.#bind(machineId);
+      return await this.#bind(machineId, admitted);
     } finally {
       this.#busy.delete(machineId);
     }
@@ -313,8 +365,8 @@ export class CloudMachineService {
     readonly machineId: string;
     readonly principal: CloudMachinePrincipal;
   }): Promise<CloudMachinesChange> {
-    const person = personRefusal(input.principal);
-    if (person !== undefined) return person;
+    const admitted = this.#admit(input.principal);
+    if (admitted === undefined) return refused("needs-person");
     const machine = this.#machines.get(input.machineId);
     if (machine === undefined || machine.lifecycle !== "created")
       return refused("machine-not-found");
@@ -322,7 +374,7 @@ export class CloudMachineService {
     if (this.#busy.has(input.machineId)) return refused("machine-busy");
     this.#busy.add(input.machineId);
     try {
-      return await this.#bind(input.machineId);
+      return await this.#bind(input.machineId, admitted);
     } finally {
       this.#busy.delete(input.machineId);
     }
@@ -344,21 +396,26 @@ export class CloudMachineService {
 
   /**
    * The one question a destroy asks. It changes nothing: it hands the person's
-   * window a single-use confirmation for exactly this machine, which the
-   * destroy must carry back before it expires.
+   * window or paired device session a single-use confirmation for exactly this
+   * machine, which the destroy must carry back from that same principal before
+   * it expires.
    */
   requestDestroy(input: {
     readonly machineId: string;
     readonly principal: CloudMachinePrincipal;
   }): CloudMachinesChange {
-    const person = personRefusal(input.principal);
-    if (person !== undefined) return person;
+    const admitted = this.#admit(input.principal);
+    if (admitted === undefined) return refused("needs-person");
     const machine = this.#machines.get(input.machineId);
     if (machine?.lifecycle !== "created" || machine.providerMachineId === undefined)
       return refused("machine-not-found");
     const confirmation = this.#options.uuid();
     const expiresAt = this.#options.now() + DESTROY_CONFIRMATION_MS;
-    this.#confirmations.set(confirmation, { machineId: input.machineId, expiresAt });
+    this.#confirmations.set(confirmation, {
+      machineId: input.machineId,
+      expiresAt,
+      ownerKey: admitted.ownerKey,
+    });
     return {
       kind: "confirm",
       machineId: machine.id,
@@ -373,14 +430,15 @@ export class CloudMachineService {
     readonly confirmation: string;
     readonly principal: CloudMachinePrincipal;
   }): Promise<CloudMachinesChange> {
-    const person = personRefusal(input.principal);
-    if (person !== undefined) return person;
+    const admitted = this.#admit(input.principal);
+    if (admitted === undefined) return refused("needs-person");
     const confirmed = this.#confirmations.get(input.confirmation);
     // Spent on first use, matched or not, so a confirmation is never tried twice.
     this.#confirmations.delete(input.confirmation);
     if (
       confirmed === undefined ||
       confirmed.machineId !== input.machineId ||
+      confirmed.ownerKey !== admitted.ownerKey ||
       confirmed.expiresAt < this.#options.now()
     ) {
       return refused("confirmation-required");
@@ -392,7 +450,7 @@ export class CloudMachineService {
     try {
       const answer = await this.#ask(machine, target, providerMachineId, "destroy");
       if (answer.kind === "refused") return answer;
-      return this.#settle(machine, "destroy", answer.result);
+      return this.#settle(machine, "destroy", answer.result, admitted);
     } finally {
       this.#busy.delete(input.machineId);
     }
@@ -408,13 +466,13 @@ export class CloudMachineService {
     readonly machineId: string;
     readonly principal: CloudMachinePrincipal;
   }): Promise<CloudMachinesChange> {
-    const person = personRefusal(input.principal);
-    if (person !== undefined) return person;
+    const admitted = this.#admit(input.principal);
+    if (admitted === undefined) return refused("needs-person");
     const ready = this.#ready(input.machineId);
     if (ready.kind === "refused") return ready;
     this.#busy.add(input.machineId);
     try {
-      return await this.#observe(ready.machine, ready.target, ready.providerMachineId);
+      return await this.#observe(ready.machine, ready.target, ready.providerMachineId, admitted);
     } finally {
       this.#busy.delete(input.machineId);
     }
@@ -424,8 +482,8 @@ export class CloudMachineService {
     input: { readonly machineId: string; readonly principal: CloudMachinePrincipal },
     act: "suspend" | "resume",
   ): Promise<CloudMachinesChange> {
-    const person = personRefusal(input.principal);
-    if (person !== undefined) return person;
+    const admitted = this.#admit(input.principal);
+    if (admitted === undefined) return refused("needs-person");
     const ready = this.#ready(input.machineId);
     if (ready.kind === "refused") return ready;
     const { target, providerMachineId } = ready;
@@ -436,7 +494,7 @@ export class CloudMachineService {
       // accepted the last act. Gating on it would refuse every act forever,
       // so read where the machine stands first.
       if (machine.state === undefined || IN_BETWEEN_STATES.has(machine.state)) {
-        const observed = await this.#observe(machine, target, providerMachineId);
+        const observed = await this.#observe(machine, target, providerMachineId, admitted);
         if (observed.kind === "refused") return observed;
         const current = this.#machines.get(input.machineId);
         if (current?.lifecycle !== "created") return observed;
@@ -447,7 +505,7 @@ export class CloudMachineService {
         return refused("machine-not-suspended");
       const answer = await this.#ask(machine, target, providerMachineId, act);
       if (answer.kind === "refused") return answer;
-      return this.#settle(machine, act, answer.result);
+      return this.#settle(machine, act, answer.result, admitted);
     } finally {
       this.#busy.delete(input.machineId);
     }
@@ -457,10 +515,11 @@ export class CloudMachineService {
     machine: CloudMachine,
     target: CloudMachineTarget,
     providerMachineId: string,
+    admitted: AdmittedCloudMachinePrincipal,
   ): Promise<CloudMachinesChange> {
     const answer = await this.#ask(machine, target, providerMachineId, "describe");
     if (answer.kind === "refused") return answer;
-    return this.#settle(machine, "observe", answer.result);
+    return this.#settle(machine, "observe", answer.result, admitted);
   }
 
   /**
@@ -475,13 +534,18 @@ export class CloudMachineService {
     result:
       | { readonly status: "missing" }
       | { readonly status: "accepted"; readonly machine: CloudMachineDescription },
+    admitted: AdmittedCloudMachinePrincipal,
   ): CloudMachinesChange {
     const machineId = String(machine.id);
     const observedAt = this.#options.clock();
-    const principal = { kind: "local-window" as const };
+    const principal = admitted.payloadPrincipal;
     if (result.status === "missing" || result.machine.state === "destroyed") {
       const payload = { machineId: machine.id, state: "destroyed" as const, observedAt, principal };
-      if (!this.#record(machineId, CLOUD_MACHINES_EVENT_NAMES.destroyed, payload))
+      const eventName =
+        admitted.version === 2
+          ? CLOUD_MACHINES_EVENT_NAMES_V2.destroyed
+          : CLOUD_MACHINES_EVENT_NAMES.destroyed;
+      if (!this.#record(machineId, eventName, payload, admitted.actor))
         return refused("unavailable", "The machine is gone but that could not be recorded.");
     } else {
       const payload = {
@@ -494,7 +558,11 @@ export class CloudMachineService {
           : { costPerHour: result.machine.costPerHour }),
         principal,
       };
-      if (!this.#record(machineId, CLOUD_MACHINES_EVENT_NAMES.stateChanged, payload))
+      const eventName =
+        admitted.version === 2
+          ? CLOUD_MACHINES_EVENT_NAMES_V2.stateChanged
+          : CLOUD_MACHINES_EVENT_NAMES.stateChanged;
+      if (!this.#record(machineId, eventName, payload, admitted.actor))
         return refused("unavailable");
     }
     return { kind: "changed", machine: this.#machines.get(machineId) ?? machine };
@@ -572,7 +640,10 @@ export class CloudMachineService {
    * the machine created and on record: it costs money whether bound or not,
    * and the person can bind again or destroy it.
    */
-  async #bind(machineId: string): Promise<CloudMachinesChange> {
+  async #bind(
+    machineId: string,
+    admitted: AdmittedCloudMachinePrincipal,
+  ): Promise<CloudMachinesChange> {
     const machine = this.#machines.get(machineId);
     if (machine?.endpoint === undefined) return refused("machine-not-found");
     const endpoint = machine.endpoint;
@@ -603,7 +674,7 @@ export class CloudMachineService {
       serverId: String(serverId),
       folder: machine.folder,
       mode: machine.mode,
-      principal: "local-window",
+      principal: admitted.serverProjectPrincipal,
     });
     if (bound.kind === "refused" || bound.project === undefined) {
       return {
@@ -616,9 +687,13 @@ export class CloudMachineService {
       machineId: machine.id,
       serverId,
       projectId: bound.project.id,
-      principal: { kind: "local-window" as const },
+      principal: admitted.payloadPrincipal,
     };
-    if (!this.#record(machineId, CLOUD_MACHINES_EVENT_NAMES.projectBound, payload)) {
+    const eventName =
+      admitted.version === 2
+        ? CLOUD_MACHINES_EVENT_NAMES_V2.projectBound
+        : CLOUD_MACHINES_EVENT_NAMES.projectBound;
+    if (!this.#record(machineId, eventName, payload, admitted.actor)) {
       return {
         kind: "changed",
         machine,
@@ -632,9 +707,10 @@ export class CloudMachineService {
     machineId: string,
     outcome: "refused" | "uncertain",
     detail: string,
+    actor: EventActorValue,
   ): CloudMachinesChange {
     const payload = { machineId, outcome, detail: bounded(detail) };
-    this.#record(machineId, CLOUD_MACHINES_EVENT_NAMES.creationEnded, payload);
+    this.#record(machineId, CLOUD_MACHINES_EVENT_NAMES.creationEnded, payload, actor);
     return refused(outcome === "refused" ? "provider-refused" : "provider-failed", payload.detail);
   }
 
@@ -642,9 +718,55 @@ export class CloudMachineService {
     return this.#options.targets().find((offered) => offered.targetId === targetId)?.target;
   }
 
+  #admit(principal: CloudMachinePrincipal): AdmittedCloudMachinePrincipal | undefined {
+    if (principal === "local-window") {
+      return {
+        version: 1,
+        ownerKey: "local-window",
+        payloadPrincipal: { kind: "local-window" },
+        actor: this.#personActor,
+        serverProjectPrincipal: "local-window",
+      };
+    }
+    if (typeof principal === "object" && principal.kind === "local-window") {
+      return {
+        version: 1,
+        ownerKey:
+          principal.windowId === undefined ? "local-window" : `window:${principal.windowId}`,
+        payloadPrincipal: { kind: "local-window" },
+        actor: this.#personActor,
+        serverProjectPrincipal: "local-window",
+      };
+    }
+    if (typeof principal === "object" && principal.kind === "person-paired-device") {
+      const actor = decodeActor(principal.actor);
+      return {
+        version: 2,
+        ownerKey: `device:${principal.deviceId}:${principal.sessionId}:${String(principal.credentialGeneration)}`,
+        payloadPrincipal: {
+          kind: "person-paired-device",
+          credentialGeneration: principal.credentialGeneration,
+        },
+        actor,
+        serverProjectPrincipal: {
+          kind: "person-paired-device",
+          credentialGeneration: principal.credentialGeneration,
+          actor,
+        },
+      };
+    }
+    return undefined;
+  }
+
   #apply(eventName: string, payload: unknown): void {
-    if (eventName === CLOUD_MACHINES_EVENT_NAMES.creationRequested) {
-      const { machine } = decodeRequested(payload);
+    if (
+      eventName === CLOUD_MACHINES_EVENT_NAMES.creationRequested ||
+      eventName === CLOUD_MACHINES_EVENT_NAMES_V2.creationRequested
+    ) {
+      const { machine } =
+        eventName === CLOUD_MACHINES_EVENT_NAMES_V2.creationRequested
+          ? decodeRequestedV2(payload)
+          : decodeRequested(payload);
       this.#machines.set(String(machine.id), { ...machine, lifecycle: "creating" });
       return;
     }
@@ -671,15 +793,27 @@ export class CloudMachineService {
         lifecycle: ended.outcome === "refused" ? "creation-refused" : "creation-uncertain",
         detail: ended.detail,
       });
-    } else if (eventName === CLOUD_MACHINES_EVENT_NAMES.projectBound) {
-      const bound = decodeBound(payload);
+    } else if (
+      eventName === CLOUD_MACHINES_EVENT_NAMES.projectBound ||
+      eventName === CLOUD_MACHINES_EVENT_NAMES_V2.projectBound
+    ) {
+      const bound =
+        eventName === CLOUD_MACHINES_EVENT_NAMES_V2.projectBound
+          ? decodeBoundV2(payload)
+          : decodeBound(payload);
       this.#machines.set(machineId, {
         ...existing,
         serverId: bound.serverId,
         projectId: bound.projectId,
       });
-    } else if (eventName === CLOUD_MACHINES_EVENT_NAMES.stateChanged) {
-      const changed = decodeStateChanged(payload);
+    } else if (
+      eventName === CLOUD_MACHINES_EVENT_NAMES.stateChanged ||
+      eventName === CLOUD_MACHINES_EVENT_NAMES_V2.stateChanged
+    ) {
+      const changed =
+        eventName === CLOUD_MACHINES_EVENT_NAMES_V2.stateChanged
+          ? decodeStateChangedV2(payload)
+          : decodeStateChanged(payload);
       this.#machines.set(machineId, {
         ...existing,
         state: changed.state,
@@ -688,8 +822,14 @@ export class CloudMachineService {
           ? {}
           : { costPerHour: { ...changed.costPerHour, observedAt: changed.observedAt } }),
       });
-    } else if (eventName === CLOUD_MACHINES_EVENT_NAMES.destroyed) {
-      const destroyed = decodeDestroyed(payload);
+    } else if (
+      eventName === CLOUD_MACHINES_EVENT_NAMES.destroyed ||
+      eventName === CLOUD_MACHINES_EVENT_NAMES_V2.destroyed
+    ) {
+      const destroyed =
+        eventName === CLOUD_MACHINES_EVENT_NAMES_V2.destroyed
+          ? decodeDestroyedV2(payload)
+          : decodeDestroyed(payload);
       this.#machines.set(machineId, {
         ...existing,
         lifecycle: "destroyed",
@@ -700,7 +840,12 @@ export class CloudMachineService {
   }
 
   /** Journals one event on the machine's own aggregate, then applies it. */
-  #record(machineId: string, eventName: string, payload: unknown): boolean {
+  #record(
+    machineId: string,
+    eventName: string,
+    payload: unknown,
+    actor: EventActorValue = this.#personActor,
+  ): boolean {
     const version = this.#versions.get(machineId) ?? 0;
     try {
       this.#options.journal.append({
@@ -715,7 +860,7 @@ export class CloudMachineService {
             eventName: decodeEventName(eventName),
             eventVersion: 1,
             correlationId: decodeCorrelationId(this.#options.uuid()),
-            actor: this.#personActor,
+            actor,
             occurredAt: decodeTimestamp(this.#options.clock()),
             payload,
           },
@@ -728,16 +873,6 @@ export class CloudMachineService {
     this.#apply(eventName, payload);
     return true;
   }
-}
-
-function personRefusal(
-  principal: CloudMachinePrincipal,
-): Extract<CloudMachinesChange, { readonly kind: "refused" }> | undefined {
-  if (principal === "agent" || principal === "routine") return refused("needs-person");
-  // A paired device acts for the host's own person in the design, but the
-  // server Project it would bind still refuses one, so it is refused here too.
-  if (principal === "remote-device") return refused("needs-local-window");
-  return undefined;
 }
 
 /** A machine that holds nothing in the person's account any more. */

@@ -70,4 +70,45 @@ describe("a paired browser's Project tools", () => {
     );
     await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
+
+  it("includes bound server Projects matching the active mode in a paired browser's Project tools", async () => {
+    const serverProjectId = "80000000-0000-4000-8000-000000000099";
+    const execute = vi.fn<ProjectTerminalClient["execute"]>(async () => ({
+      kind: "project-terminal-refused",
+      reason: "unavailable",
+      message: "Refused for test",
+    }));
+    render(
+      <RemoteProjectTools
+        mode="work"
+        projectBrowserClient={{} as ProjectBrowserClient}
+        projectClient={projectClient()}
+        projectTerminalClient={{ execute }}
+        serverProjectsClient={{
+          read: async () => ({
+            projects: [
+              {
+                id: serverProjectId as never,
+                serverId: "80000000-0000-4000-8000-000000000088" as never,
+                name: "Remote Docs",
+                folder: "/srv/docs",
+                mode: "work",
+                boundAt: "2026-11-04T00:00:00.000Z" as never,
+                actions: [],
+                actionsVersion: 0 as never,
+              },
+            ],
+          }),
+          command: vi.fn(),
+        }}
+      />,
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "Terminal" }));
+    await waitFor(() => expect(execute).toHaveBeenCalled());
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({
+      kind: "start",
+      projectId: serverProjectId,
+    });
+  });
 });

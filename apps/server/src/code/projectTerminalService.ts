@@ -90,6 +90,13 @@ export type ProjectActionPlacementRequest = Extract<
   { kind: "preview-action" | "start-action" }
 >;
 
+/** A person-paired device's session identity, bound to its terminals and saved-action placements. */
+export interface ProjectTerminalDeviceBinding {
+  readonly deviceId: string;
+  readonly sessionId: string;
+  readonly credentialGeneration: number;
+}
+
 export interface ProjectTerminalServiceOptions {
   readonly network?: ProviderRuntimeNetworkPort;
   /**
@@ -105,6 +112,7 @@ export interface ProjectTerminalServiceOptions {
   readonly placeServerAction?: (
     windowId: WindowId,
     command: ProjectActionPlacementRequest,
+    deviceBinding?: ProjectTerminalDeviceBinding,
   ) => Promise<
     | ServerProjectActionPlacement
     | Extract<ProjectTerminalResult, { kind: "project-terminal-refused" }>
@@ -168,12 +176,21 @@ export interface ProjectTerminalServiceOptions {
    * question so a revoke applies at once. Absent, no device owns a terminal.
    */
   readonly personPairedDevice?: (scopeId: WindowId) => boolean;
+  /**
+   * Checks that a device's session and credential generation are still current
+   * (not revoked, signed out, or re-paired).
+   */
+  readonly isPersonPairedDeviceCurrent?: (
+    deviceId: string,
+    credentialGeneration: number,
+    sessionId?: string,
+  ) => boolean;
   /** How long a device's terminal runs with no command from it; 60 seconds by default. */
   readonly deviceQuietMs?: number;
   readonly nowMs?: () => number;
 }
 
-/** What a device's shell commands are: its own shell, never a saved action or a server's. */
+/** Commands a person-paired device may issue on a Project terminal or saved action. */
 const DEVICE_TERMINAL_COMMANDS: ReadonlySet<ProjectTerminalCommand["kind"]> = new Set([
   "start",
   "attach",
@@ -181,6 +198,9 @@ const DEVICE_TERMINAL_COMMANDS: ReadonlySet<ProjectTerminalCommand["kind"]> = ne
   "write",
   "resize",
   "stop",
+  "suggest-actions",
+  "preview-action",
+  "start-action",
 ]);
 
 /** Where a server Project's terminal logs in. Canonical: docs/design/server-projects.md § Threads. */
@@ -212,8 +232,11 @@ interface Owner {
   uncertainty?: "server-transport-lost" | "server-stop-unconfirmed";
   /** Who the journal names for this shell's start and end: the device that opened it, if one did. */
   readonly actor?: EventActorValue;
-  /** Set for a shell a paired device owns: when that device last sent it a command. */
-  device?: { lastSeenMs: number };
+  /** Set for a shell a paired device owns: its session binding and when it last sent a command. */
+  device?: {
+    lastSeenMs: number;
+    readonly binding?: ProjectTerminalDeviceBinding;
+  };
 }
 
 type Authority =
@@ -287,11 +310,26 @@ export class ProjectTerminalService {
     const quiet = this.#options.deviceQuietMs ?? DEVICE_QUIET_MS;
     for (const owner of this.#owners.values()) {
       if (owner.device === undefined || owner.ended) continue;
-      if (this.#options.personPairedDevice?.(owner.windowId) !== true)
+      if (!this.#deviceOwnerCurrent(owner.windowId, owner.device.binding))
         await this.#end(owner.terminalId, owner, "authority-revoked").catch(() => undefined);
       else if (now - owner.device.lastSeenMs > quiet)
         await this.#end(owner.terminalId, owner, "transport-lost").catch(() => undefined);
     }
+  }
+
+  #deviceOwnerCurrent(
+    scopeId: WindowId,
+    binding: ProjectTerminalDeviceBinding | undefined,
+  ): boolean {
+    if (this.#options.personPairedDevice?.(scopeId) !== true) return false;
+    if (binding !== undefined && this.#options.isPersonPairedDeviceCurrent !== undefined) {
+      return this.#options.isPersonPairedDeviceCurrent(
+        binding.deviceId,
+        binding.credentialGeneration,
+        binding.sessionId,
+      );
+    }
+    return true;
   }
 
   /**
@@ -318,6 +356,7 @@ export class ProjectTerminalService {
     command: ProjectTerminalCommand,
     /** Who the route resolved the caller as; a paired device's shell is journaled as that device. */
     actor?: EventActorValue,
+    deviceBinding?: ProjectTerminalDeviceBinding,
   ): Promise<ProjectTerminalResult> {
     // A remote Code terminal is gated as an agent and waits on an approval the
     // thread holds. A Project terminal has no thread to hold one, so a device
@@ -329,23 +368,24 @@ export class ProjectTerminalService {
         "Project terminals open only from this computer's own window or a device its person paired.",
       );
     }
-    // A device the host's own person paired opens its own shell in a Project
-    // it reaches, as that person (maintainer decision, 2026-11-12). Saved
-    // actions, worktree setup and a server Project's shell stay at a window.
+    // A device the host's own person paired opens its own shell and runs saved
+    // actions in any local or server Project it reaches, as that person; local
+    // worktree setup recipes stay at a window.
     const device = this.#options.personPairedDevice?.(windowId) === true;
     if (device && !DEVICE_TERMINAL_COMMANDS.has(command.kind)) {
       return refused("unauthorized", "Open this at a window on this computer.");
     }
+    const deviceContext = device
+      ? {
+          actor: actor ?? this.#actor,
+          ...(deviceBinding === undefined ? {} : { binding: deviceBinding }),
+        }
+      : undefined;
     if (command.kind === "start")
-      return this.#start(
-        windowId,
-        command,
-        undefined,
-        undefined,
-        device ? { actor: actor ?? this.#actor } : undefined,
-      );
-    if (command.kind === "preview-action") return this.#previewAction(windowId, command);
-    if (command.kind === "start-action") return this.#startAction(windowId, command);
+      return this.#start(windowId, command, undefined, undefined, deviceContext);
+    if (command.kind === "preview-action")
+      return this.#previewAction(windowId, command, deviceBinding);
+    if (command.kind === "start-action") return this.#startAction(windowId, command, deviceContext);
     if (command.kind === "child-worktree-source") return this.#childSource(windowId, command);
     if (command.kind === "worktree-preparation") return this.#preparation(windowId, command);
     if (command.kind === "suggest-actions") return this.#suggest(windowId, command.projectId);
@@ -629,8 +669,9 @@ export class ProjectTerminalService {
   async #previewAction(
     windowId: WindowId,
     command: Extract<ProjectTerminalCommand, { kind: "preview-action" }>,
+    deviceBinding?: ProjectTerminalDeviceBinding,
   ): Promise<ProjectTerminalResult> {
-    const placed = await this.#placeAction(windowId, command);
+    const placed = await this.#placeAction(windowId, command, deviceBinding);
     if (placed.kind === "project-terminal-refused") return placed;
     return decodeProjectTerminalResult({
       kind: "project-action-preview",
@@ -644,11 +685,12 @@ export class ProjectTerminalService {
   async #placeAction(
     windowId: WindowId,
     command: Extract<ProjectTerminalCommand, { kind: "preview-action" | "start-action" }>,
+    deviceBinding?: ProjectTerminalDeviceBinding,
   ) {
     const authority = this.#authority(windowId, command.projectId);
     if (authority.kind === "allowed-on-server")
       return (
-        (await this.#options.placeServerAction?.(windowId, command)) ??
+        (await this.#options.placeServerAction?.(windowId, command, deviceBinding)) ??
         refused("unavailable", "Saved actions are unavailable for this server Project.")
       );
     if (authority.kind !== "allowed")
@@ -727,11 +769,12 @@ export class ProjectTerminalService {
   async #startAction(
     windowId: WindowId,
     command: Extract<ProjectTerminalCommand, { kind: "start-action" }>,
+    device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
   ): Promise<ProjectTerminalResult> {
-    const placed = await this.#placeAction(windowId, command);
+    const placed = await this.#placeAction(windowId, command, device?.binding);
     if (placed.kind === "project-terminal-refused") return placed;
     if (placed.kind === "placed-on-server")
-      return this.#startServerAction(windowId, command, placed);
+      return this.#startServerAction(windowId, command, placed, device);
     if (
       placed.action.preparesWorktrees === true &&
       placed.checkout?.receiptId !== undefined &&
@@ -746,7 +789,7 @@ export class ProjectTerminalService {
       String(command.projectVersion) !== String(placed.project.version)
     )
       return refused("authority-revoked", "This action changed. Review it again.");
-    return this.#start(windowId, { ...command, kind: "start" }, placed.action, placed);
+    return this.#start(windowId, { ...command, kind: "start" }, placed.action, placed, device);
   }
 
   async #start(
@@ -758,7 +801,7 @@ export class ProjectTerminalService {
       readonly folder: string;
       readonly receipt: ActionReceipt;
     },
-    device?: { readonly actor: EventActorValue },
+    device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
   ): Promise<ProjectTerminalResult> {
     const authority = this.#authority(windowId, command.projectId);
     if (authority.kind === "refused") return refused(authority.reason, authority.message);
@@ -766,12 +809,7 @@ export class ProjectTerminalService {
       return refused("unavailable", "This terminal id is already in use.");
     }
     if (authority.kind === "allowed-on-server") {
-      if (device !== undefined)
-        return refused(
-          "unauthorized",
-          "A server Project's terminal opens at a window on this computer.",
-        );
-      return this.#startOnServer(windowId, command, authority);
+      return this.#startOnServer(windowId, command, authority, device);
     }
     const root = await this.#options.resolveRoot(authority.project);
     if (root === undefined) {
@@ -1007,6 +1045,7 @@ export class ProjectTerminalService {
     windowId: WindowId,
     command: Extract<ProjectTerminalCommand, { readonly kind: "start" }>,
     authority: Extract<Authority, { readonly kind: "allowed-on-server" }>,
+    device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
   ): Promise<ProjectTerminalResult> {
     const work = authority.server.mode === "work";
     if (work && authority.server.interactiveAllowed !== true)
@@ -1071,6 +1110,7 @@ export class ProjectTerminalService {
         false,
         work ? current : undefined,
         work,
+        device,
       );
     } catch {
       return refused("unavailable", "The terminal could not start.");
@@ -1084,6 +1124,7 @@ export class ProjectTerminalService {
     windowId: WindowId,
     command: Extract<ProjectTerminalCommand, { kind: "start-action" }>,
     placed: ServerProjectActionPlacement,
+    device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
   ): Promise<ProjectTerminalResult> {
     const server = placed.receipt.server;
     if (
@@ -1107,16 +1148,22 @@ export class ProjectTerminalService {
       );
     };
     try {
-      this.#append(command.terminalId, 0, PROJECT_TERMINAL_EVENT_NAMES.started, {
-        kind: "project-terminal-started",
-        projectId: command.projectId,
-        terminalId: command.terminalId,
-        windowId,
-        bindingRevisionId: placed.bindingRevisionId,
-        posture: "full-access",
-        startedAt: this.#options.clock(),
-        action: placed.receipt,
-      });
+      this.#append(
+        command.terminalId,
+        0,
+        PROJECT_TERMINAL_EVENT_NAMES.started,
+        {
+          kind: "project-terminal-started",
+          projectId: command.projectId,
+          terminalId: command.terminalId,
+          windowId,
+          bindingRevisionId: placed.bindingRevisionId,
+          posture: "full-access",
+          startedAt: this.#options.clock(),
+          action: placed.receipt,
+        },
+        device?.actor,
+      );
     } catch {
       return refused(
         "unavailable",
@@ -1136,7 +1183,13 @@ export class ProjectTerminalService {
         admit: current,
       });
     } catch {
-      this.#safeJournalEnded(command.projectId, command.terminalId, "start-unconfirmed", undefined);
+      this.#safeJournalEnded(
+        command.projectId,
+        command.terminalId,
+        "start-unconfirmed",
+        undefined,
+        device?.actor,
+      );
       return refused(
         "unavailable",
         "The server action's start could not be confirmed. Inspect this run and the server before preparing another; nothing was retried.",
@@ -1150,6 +1203,8 @@ export class ProjectTerminalService {
       placed.receipt,
       true,
       current,
+      false,
+      device,
     );
   }
 
@@ -1163,14 +1218,14 @@ export class ProjectTerminalService {
     recorded = false,
     authorized?: () => boolean,
     serverWorkShell = false,
-    device?: { readonly actor: EventActorValue },
+    device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
   ): Promise<ProjectTerminalResult> {
     const personPairedDevice = this.#options.personPairedDevice;
     // A device's shell holds only while that device still acts as the person.
     const held =
       device === undefined || personPairedDevice === undefined
         ? authorized
-        : () => personPairedDevice(windowId) && authorized?.() !== false;
+        : () => this.#deviceOwnerCurrent(windowId, device.binding) && authorized?.() !== false;
     const owner: Owner = {
       terminalId: command.terminalId,
       windowId,
@@ -1186,7 +1241,10 @@ export class ProjectTerminalService {
         ? {}
         : {
             actor: device.actor,
-            device: { lastSeenMs: this.#options.nowMs?.() ?? Date.now() },
+            device: {
+              lastSeenMs: this.#options.nowMs?.() ?? Date.now(),
+              ...(device.binding === undefined ? {} : { binding: device.binding }),
+            },
           }),
     };
     try {

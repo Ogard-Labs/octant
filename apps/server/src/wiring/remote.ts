@@ -448,6 +448,9 @@ export function wireRemote(deps: RemoteDependencies) {
             credentialGeneration: input.principal.credentialGeneration,
             sessionIdDigest: input.sessionIdDigest,
             origin: input.principal.origin,
+            ...(input.principal.admittedBy === undefined
+              ? {}
+              : { admittedBy: input.principal.admittedBy }),
           },
           scopeId: context.scopeId,
           grantId: input.grantId,
@@ -473,6 +476,9 @@ export function wireRemote(deps: RemoteDependencies) {
             credentialGeneration: input.principal.credentialGeneration,
             sessionIdDigest: input.sessionIdDigest,
             origin: input.principal.origin,
+            ...(input.principal.admittedBy === undefined
+              ? {}
+              : { admittedBy: input.principal.admittedBy }),
           },
           scopeId: context.scopeId,
           grantId: input.grantId,

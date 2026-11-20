@@ -114,8 +114,11 @@ import { serverWorkBindingRevisionId } from "../serverProjects/serverWorkThreads
 import { serverTerminalLogin } from "../serverProjects/serverTerminal";
 import {
   decodeServerProjectRemovedPayload,
+  decodeServerProjectRemovedPayloadV2,
   SERVER_PROJECTS_EVENT_NAMES,
+  SERVER_PROJECTS_EVENT_NAMES_V2,
 } from "@octant/contracts/server-projects";
+import type { ServerPreviewTunnels } from "../serverProjects/serverPreviewTunnel";
 import type { FoundationsWiring } from "./foundations";
 import type { IntegrationsWiring } from "./integrations";
 import type { ProvidersWiring } from "./providers";
@@ -131,8 +134,13 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     | "onWindowRevoked"
     | "isPairedDeviceScope"
     | "isRestrictedDeviceScope"
-  > &
-  Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
+    | "isPersonPairedDeviceCurrent"
+  > & {
+    readonly serverPreviewTunnels?: Pick<
+      ServerPreviewTunnels,
+      "hasRelayGrant" | "openRelayStream" | "reconcile"
+    >;
+  } & Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
   Pick<
     CodeWiring,
@@ -223,6 +231,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // It shares the Code runtime's terminals, so one receipt store, reconcile,
     // and shutdown cover it; the journal records its start and end.
     const sharedTerminals = codeOperationRuntime?.terminals;
+    const personPairedDevice = (scopeId: WindowId): boolean =>
+      deps.isPairedDeviceScope(scopeId) && !deps.isRestrictedDeviceScope(scopeId);
     const serverActions = createServerProjectActions({
       store: serverProjectStore,
       connection: serverConnection,
@@ -232,6 +242,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         workspace: (id) => persistence.readWindowWorkspace(id)?.workspace,
         isWindowLive: (id) =>
           windowAuthorityStore.listWindowIds().some((live) => String(live) === String(id)),
+        isPersonPairedDevice: personPairedDevice,
         workEnabled: () =>
           enabledModes(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -285,8 +296,6 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         };
       },
     });
-    const personPairedDevice = (scopeId: WindowId): boolean =>
-      deps.isPairedDeviceScope(scopeId) && !deps.isRestrictedDeviceScope(scopeId);
     const projectTerminals =
       sharedTerminals === undefined
         ? undefined
@@ -307,20 +316,19 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             childWorktreeSources,
             readProject: persistence.readProject,
             personPairedDevice,
+            isPersonPairedDeviceCurrent: deps.isPersonPairedDeviceCurrent,
             canAccessProject: (scopeId, projectId) => {
               const project = persistence.readProject(projectId);
-              if (
-                project?.type !== "work" &&
-                serverProjectStore.workProject(String(projectId)) === undefined
-              )
+              const serverWork = serverProjectStore.workProject(String(projectId));
+              if (project?.type !== "work" && serverWork === undefined)
                 return canAccessCodeProject(scopeId, projectId);
               // A device the host's own person paired has no workspace here; it
-              // reaches every active local Work Project while Work is on, as it
-              // does when it opens a thread there.
+              // reaches every active local or server Work Project while Work is
+              // on, as it does when it opens a thread there.
               if (personPairedDevice(scopeId))
                 return (
-                  project?.type === "work" &&
-                  project.lifecycle === "active" &&
+                  ((project?.type === "work" && project.lifecycle === "active") ||
+                    serverWork !== undefined) &&
                   enabledModes(
                     persistence.readShellSettings()?.settings ?? defaultShellSettings(),
                   ).includes("work")
@@ -603,11 +611,18 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         ) {
           void projectTerminals.settleProject(decodeProjectId(event.aggregateId));
         }
-        // A removed server Project ends the shells logged in for it.
-        if (event.eventName === SERVER_PROJECTS_EVENT_NAMES.removed) {
-          void projectTerminals.revokeProject(
-            decodeServerProjectRemovedPayload(event.payload).projectId,
-          );
+        // A removed server Project ends the shells and previews logged in for it,
+        // whether a local window or a paired device opened them.
+        if (
+          event.eventName === SERVER_PROJECTS_EVENT_NAMES.removed ||
+          event.eventName === SERVER_PROJECTS_EVENT_NAMES_V2.removed
+        ) {
+          const removedProjectId =
+            event.eventName === SERVER_PROJECTS_EVENT_NAMES_V2.removed
+              ? decodeServerProjectRemovedPayloadV2(event.payload).projectId
+              : decodeServerProjectRemovedPayload(event.payload).projectId;
+          void projectTerminals.revokeProject(removedProjectId);
+          queueMicrotask(() => void deps.serverPreviewTunnels?.reconcile().catch(() => undefined));
         }
       }
     });
@@ -1023,6 +1038,9 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
           "code",
         ),
+      ...(deps.serverPreviewTunnels === undefined
+        ? {}
+        : { serverProjectPreviews: deps.serverPreviewTunnels }),
       journal: persistence.journal,
       hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
       uuid: randomUUID,

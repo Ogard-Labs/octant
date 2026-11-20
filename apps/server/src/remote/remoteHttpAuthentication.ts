@@ -659,7 +659,7 @@ export function createRemoteHttpAuthentication(
       if (session === undefined) throw new RemoteHttpAuthFailure(401, "unauthorized", true);
       release = proxy.sessions.acquire(session.deviceId);
       if (release === undefined) throw new RemoteHttpAuthFailure(503, "rate-limited");
-      const handoff = await authenticateRequest(
+      const verified = await authenticateRequest(
         request,
         sessionId,
         session,
@@ -667,9 +667,14 @@ export function createRemoteHttpAuthentication(
         proxy.sessions,
         route,
       );
-      if (handoff.principal.kind !== "remote-device") {
+      if (verified.principal.kind !== "remote-device") {
         throw new RemoteHttpAuthFailure(403, "invalid");
       }
+      const admittedBy = options.deviceAdmittedBy?.(String(verified.principal.deviceId));
+      const handoff =
+        admittedBy === undefined
+          ? verified
+          : { ...verified, principal: Object.freeze({ ...verified.principal, admittedBy }) };
       if (route.id === REMOTE_SERVER_PROXY_ROUTE_IDS.relay) {
         const relayed = await relayToGrant(request, handoff, sessionId, proxy);
         if (relayed.kind !== "relayed") return relayed.response;
@@ -688,6 +693,9 @@ export function createRemoteHttpAuthentication(
       );
       grantRelease = proxy.sessions.beginGrantRequest(session.deviceId);
       if (grantRelease === undefined) throw new RemoteHttpAuthFailure(503, "rate-limited");
+      if (handoff.principal.kind !== "remote-device") {
+        throw new RemoteHttpAuthFailure(403, "unauthorized");
+      }
       const opening = await proxy.grants.open({
         request: handoff.request,
         principal: handoff.principal,

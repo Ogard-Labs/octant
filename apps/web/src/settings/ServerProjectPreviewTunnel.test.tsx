@@ -43,3 +43,33 @@ it("shows the exact endpoint and offers deliberate reconnect after a lost connec
   expect(previewCommand).toHaveBeenLastCalledWith({ kind: "reconnect", projectId: project.id });
   expect(screen.queryByRole("link", { name: "Open preview" })).not.toBeInTheDocument();
 });
+
+it("offers the host-relayed preview link when serving a paired device with no loopback port", async () => {
+  const grantId = `rsg_${"a".repeat(64)}`;
+  const previewCommand = vi.fn(
+    async (): Promise<ServerPreviewResult> => ({
+      kind: "tunnel",
+      view: {
+        projectId: String(project.id),
+        localPort: 0,
+        remotePort: 5173,
+        endpoint: `/api/server-proxy/${grantId}/`,
+        grantId: grantId as NonNullable<
+          Extract<ServerPreviewResult, { kind: "tunnel" }>["view"]["grantId"]
+        >,
+        status: "listening",
+      },
+    }),
+  );
+  render(
+    <ServerProjectPreviewTunnel
+      project={project}
+      client={{ previewRead: async () => null, previewCommand }}
+    />,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByText("Dev server preview"));
+  await user.click(screen.getByRole("button", { name: "Start preview" }));
+  const link = await screen.findByRole("link", { name: "Open preview" });
+  expect(link).toHaveAttribute("href", `/api/server-proxy/${grantId}/`);
+});

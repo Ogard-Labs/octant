@@ -1,5 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
+import type { Duplex } from "node:stream";
 import type { Socket } from "node:net";
+
+/** A TCP/TLS socket or SSH stdio stream carrying raw WebSocket frames. */
+export type WebSocketTransportStream = Duplex & {
+  setTimeout(timeout: number, callback?: () => void): unknown;
+  setNoDelay(noDelay?: boolean): unknown;
+};
 
 /**
  * The largest WebSocket message either end of a relayed socket may send. A
@@ -110,7 +117,7 @@ const OPCODE = { continuation: 0x0, text: 0x1, binary: 0x2, close: 0x8, ping: 0x
  * 1008, so a stalled reader cannot grow the host's memory without bound.
  */
 export class WebSocketEndpoint implements WebSocketPeer {
-  readonly #socket: Socket;
+  readonly #socket: WebSocketTransportStream;
   readonly #role: "server" | "client";
   readonly #maxMessageBytes: number;
   #events: WebSocketPeerEvents | undefined;
@@ -122,7 +129,11 @@ export class WebSocketEndpoint implements WebSocketPeer {
   #closeSent = false;
   #ended = false;
 
-  constructor(socket: Socket, role: "server" | "client", maxMessageBytes: number) {
+  constructor(
+    socket: WebSocketTransportStream,
+    role: "server" | "client",
+    maxMessageBytes: number,
+  ) {
     this.#socket = socket;
     this.#role = role;
     this.#maxMessageBytes = maxMessageBytes;

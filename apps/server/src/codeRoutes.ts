@@ -685,6 +685,13 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // Who the journal names for what this request changes: the device, when a
     // device asked.
     let callerActor: EventActor;
+    let projectTerminalDeviceBinding:
+      | {
+          readonly deviceId: string;
+          readonly sessionId: string;
+          readonly credentialGeneration: number;
+        }
+      | undefined;
     let liveAdmissionCurrent: () => boolean;
     let principalAbortSignal: AbortSignal | undefined;
     const originalWindowCapability = request.headers.get(WINDOW_CAPABILITY_HEADER);
@@ -706,6 +713,15 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         : "remote-device";
       agentGrantSession = isAgentGrantSession(principalContext.principal);
       callerActor = eventActorForPrincipal(principalContext.principal);
+      projectTerminalDeviceBinding =
+        principalContext.principal.kind === "remote-device" &&
+        principalActsAsHostPerson(principalContext.principal)
+          ? {
+              deviceId: String(principalContext.principal.deviceId),
+              sessionId: String(principalContext.principal.sessionId),
+              credentialGeneration: principalContext.principal.credentialGeneration,
+            }
+          : undefined;
       operationInitiator = callerAuthority === "local-window" ? "user" : "agent";
       const capability = request.headers.get(WINDOW_CAPABILITY_HEADER) ?? "";
       // Review and selected-hunk requests recheck that this same window still
@@ -1059,6 +1075,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 callerAuthority,
                 command,
                 callerActor,
+                projectTerminalDeviceBinding,
               ),
             ),
             200,
