@@ -23,7 +23,7 @@ import { WorkResearchEventStore } from "../work/workResearchEventStore";
 import type { WorkThreadProjection } from "../work/workThreadProjection";
 import { WorkResearchProjection } from "../work/workResearchProjection";
 import { createWorkResearchSourcePort } from "../work/workResearchSourcePort";
-import { saveGeneratedImageUnder } from "../image/generatedImageSave";
+import { saveGeneratedCodeImage, saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createImageRouteHandler } from "../image/imageRoutes";
 import { createSpeechRouteHandler } from "../speech/speechRoutes";
 import {
@@ -47,6 +47,7 @@ import type { FoundationsWiring } from "./foundations";
 import type { WorkspaceWiring } from "./workspace";
 import type { ProvidersWiring } from "./providers";
 import type { CodeRuntimeWiring } from "./codeRuntime";
+import type { CodeWiring } from "./code";
 import type { WorkWiring } from "./work";
 import type { ContextWiring } from "./context";
 import type { HarnessStateWiring } from "./harnessState";
@@ -57,6 +58,7 @@ export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence">
   Pick<WorkspaceWiring, "keptImageChoices" | "projectService" | "shellService"> &
   Pick<ProvidersWiring, "credentialResolver" | "imageJobService" | "providerDataDirectory"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
+  Pick<CodeWiring, "roots"> &
   Pick<WorkWiring, "workThreadService"> &
   Readonly<{ workThreadProjection: WorkThreadProjection }> &
   Pick<ContextWiring, "windowCanOpenThread"> &
@@ -74,6 +76,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     projectService,
     providerDataDirectory,
     routeCodeService,
+    roots,
     shellService,
     windowAuthorityStore,
     windowCanOpenThread,
@@ -193,7 +196,13 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
         } satisfies ImageGenerationSaveResult;
       }
       try {
-        let canonicalRoot: string;
+        if (input.threadKind === "code-thread") {
+          const view = await routeCodeService.read(
+            input.windowId,
+            decodeCodeThreadId(String(input.scopeId)),
+          );
+          return await saveGeneratedCodeImage({ ...input, view }, roots);
+        }
         if (input.threadKind === "work-thread") {
           const bootstrap = await workThreadService.bootstrap(input.windowId);
           const thread = bootstrap.threads.find(
@@ -207,26 +216,16 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
               reason: "The Work Project is unavailable.",
             } satisfies ImageGenerationSaveResult;
           }
-          canonicalRoot = project.binding.canonicalRoot;
-        } else {
-          const view = await routeCodeService.read(
-            input.windowId,
-            decodeCodeThreadId(String(input.scopeId)),
-          );
-          const project = persistence.readProject(view.thread.projectId);
-          if (project === undefined || project.type !== "code" || project.lifecycle !== "active") {
-            return {
-              status: "refused",
-              reason: "The Code Project is unavailable.",
-            } satisfies ImageGenerationSaveResult;
-          }
-          canonicalRoot = project.binding.canonicalRoot;
+          return await saveGeneratedImageUnder({
+            root: project.binding.canonicalRoot,
+            relativePath: input.relativePath,
+            bytes: input.bytes,
+          });
         }
-        return await saveGeneratedImageUnder({
-          root: canonicalRoot,
-          relativePath: input.relativePath,
-          bytes: input.bytes,
-        });
+        return {
+          status: "refused",
+          reason: "The Image Library grants no filesystem authority.",
+        } satisfies ImageGenerationSaveResult;
       } catch {
         return {
           status: "failed",
