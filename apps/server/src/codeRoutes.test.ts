@@ -13,6 +13,8 @@ import {
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { createRemoteDevicePrincipal, resolveLocalWindowPrincipal } from "./clientPrincipal";
+import type { HubGrant } from "@octant/contracts";
+import { hubActScopeFromSpokeLink } from "./hub/hubActScope";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore, WINDOW_AUTHORITY_TTL_MS } from "./windowAuthorityStore";
 import {
@@ -653,6 +655,74 @@ describe("Code routes", () => {
 
     expect((await route(fromDevice(create())))?.status).toBe(200);
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("lets a hub-introduced device start a Code thread only in a Project the member's Act item names, and refuses the next once Act is unticked", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-created" }));
+    const grant: { current: HubGrant } = {
+      current: { items: ["roster", "introduce", "act"], actProjects: [thread.projectId] },
+    };
+    const route = routeFixture({
+      execute,
+      hubActScope: hubActScopeFromSpokeLink({
+        status: () => ({ membership: "member", grant: grant.current }) as never,
+      }),
+    });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000960";
+    const create = (projectId: string) =>
+      JSON.stringify({
+        kind: "create-code-thread",
+        thread: { ...thread, projectId, executionPolicy: "approval-gated" },
+      });
+    const from = (body: string, admittedBy?: "host-person") => {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000961" as never,
+          admittedBy: admittedBy ?? "hub-roster",
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const otherProject = "30000000-0000-4000-8000-0000000000aa";
+
+    expect((await route(from(create(String(thread.projectId)))))?.status).toBe(200);
+    const unnamed = await route(from(create(otherProject)));
+    expect(unnamed?.status).toBe(403);
+    expect(await unnamed?.json()).toMatchObject({
+      message: "This computer's Act item for its hub does not name this Project.",
+    });
+    // A fork's Project is its source's, which the route does not read.
+    const fork = await route(
+      from(
+        JSON.stringify({
+          kind: "fork-code-thread",
+          threadId: "21000000-0000-4000-8000-0000000000aa",
+          sourceThreadId: threadId,
+          throughOperationId: "22000000-0000-4000-8000-0000000000aa",
+          title: "A fork",
+        }),
+      ),
+    );
+    expect(fork?.status).toBe(403);
+    expect(execute).toHaveBeenCalledOnce();
+
+    grant.current = { items: ["roster", "introduce"], actProjects: [] };
+    expect((await route(from(create(String(thread.projectId)))))?.status).toBe(403);
+    // A device the member's own person paired is that person and never reads the Act item.
+    expect((await route(from(create(otherProject), "host-person")))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 
   it("refuses the per-run Full access flag from any caller but a window on this host", async () => {
@@ -3545,7 +3615,7 @@ function routeFixture(
   for (const extra of extraWindows) {
     store.register({ windowId: extra.windowId, capability: extra.capability, now: 0 });
   }
-  const { pairedMergeUnlock, ...serviceOverrides } = overrides;
+  const { pairedMergeUnlock, hubActScope, ...serviceOverrides } = overrides;
   const service = {
     bootstrap: vi.fn(async () => ({ settings: settings(), threads: [], checkouts: [] })),
     navigation: vi.fn(async () => ({ threads: [], activity: [], runtime: [] })),
@@ -3564,6 +3634,7 @@ function routeFixture(
     service: service as never,
     windowAuthorityStore: store,
     now: authority?.now ?? (() => 1),
+    ...(hubActScope === undefined ? {} : { hubActScope: () => hubActScope as never }),
     ...(pairedMergeUnlock === undefined
       ? {}
       : { pairedMergeUnlock: () => pairedMergeUnlock as never }),

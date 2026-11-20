@@ -23,6 +23,7 @@ import {
 } from "./threadDocumentDeliveryAuthority";
 import { Schema } from "effect";
 import { isAgentGrantSession, principalActsAsHostPerson } from "./clientPrincipal";
+import { hubActRefusalMessage, type HubActScopePort } from "./hub/hubActScope";
 import {
   authenticateRouteWindowId,
   boundPrincipalIsRestricted,
@@ -71,6 +72,8 @@ export interface WorkThreadRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly now?: () => number;
+  /** The member's Act item for its hub, which bounds where a device only the hub introduced may start a thread. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
 }
 
 export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDependencies) {
@@ -218,6 +221,19 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
         );
       }
       const command = decodeWorkThreadCommand(value);
+      // A device only the hub introduced starts a thread only in a Project the
+      // member's Act item names, read at this start; the server always binds
+      // the scope, so a route built without one belongs to no hub.
+      if (command.kind === "create-work-thread" && boundPrincipalIsHubIntroduced(request)) {
+        const decision = dependencies.hubActScope?.()?.decideStart(String(command.projectId));
+        if (decision?.status === "refused") {
+          return failureResponse(
+            { category: "unauthorized", message: hubActRefusalMessage(decision) },
+            403,
+            origin,
+          );
+        }
+      }
       if (
         boundPrincipalIsRestricted(request) &&
         ((command.kind === "change-work-thread-access" &&
@@ -550,6 +566,16 @@ function setsRestartContinuation(command: WorkThreadCommand): boolean {
  * its own guard admitted before this route: a thread, when the person chose
  * Full access for that grant.
  */
+function boundPrincipalIsHubIntroduced(request: Request): boolean {
+  const principal = readPrincipalRouteContext(request)?.principal;
+  return (
+    principal !== undefined &&
+    principal.kind === "remote-device" &&
+    !principalActsAsHostPerson(principal) &&
+    !isAgentGrantSession(principal)
+  );
+}
+
 function refusesFullAccessRaise(request: Request): boolean {
   const principal = readPrincipalRouteContext(request)?.principal;
   return (
