@@ -25,7 +25,7 @@ import {
   canvasChoiceFormState,
   canvasChoiceQuestionFingerprint,
 } from "@octant/domain";
-import { replicaArtifactHeads, replicaArtifactHidden } from "@octant/domain/replica-entry-policy";
+import { replicaArtifactHeads, replicaArtifactStanding } from "@octant/domain/replica-entry-policy";
 import type { ReplicaStore, ReplicaStorePutResult } from "@octant/plugin-api/replica-store";
 import { renderArtifactHtml, renderArtifactMarkdown } from "../canvas/artifactDocumentRender";
 import { ArtifactLibraryService } from "../canvas/artifactLibraryService";
@@ -836,7 +836,9 @@ describe.each(STORES)("artifact sync between two computers through %s", (_label,
     ]);
     const deleted = laptop.artifactProjection.state().artifact(ids.canvas);
     expect(deleted?.tombstones[0]?.parentVersionIds.toSorted()).toEqual([ids.v2a, ids.v2b].sort());
-    expect(deleted === undefined ? false : replicaArtifactHidden(deleted)).toBe(true);
+    expect(
+      deleted === undefined ? false : replicaArtifactStanding(deleted).status === "deleted",
+    ).toBe(true);
     // Its versions stay in the history; nothing was overwritten.
     expect(deleted?.versions.map((version) => String(version.versionId)).sort()).toEqual(
       [ids.v1, ids.v2a, ids.v2b].sort(),
@@ -1006,7 +1008,9 @@ describe("artifact sync", () => {
     await studio.sync.drain();
     await laptop.sync.pull();
     const synced = laptop.artifactProjection.state().artifact(ids.canvas);
-    expect(synced === undefined ? false : replicaArtifactHidden(synced)).toBe(true);
+    expect(
+      synced === undefined ? false : replicaArtifactStanding(synced).status === "deleted",
+    ).toBe(true);
     expect(studio.canvases.get(String(ids.canvas))).toHaveLength(2);
     expect(studio.sync.controlBackfill(ids.canvas, batchId, true)).toBe(false);
   });
@@ -1164,7 +1168,9 @@ describe("artifact sync", () => {
       done: 1,
     });
     const artifact = laptop.artifactProjection.state().artifact(ids.canvas);
-    expect(artifact === undefined ? true : replicaArtifactHidden(artifact)).toBe(false);
+    expect(
+      artifact === undefined ? true : replicaArtifactStanding(artifact).status === "deleted",
+    ).toBe(false);
   });
 
   it("rechecks current write authority before sending reviewed historical versions", async () => {

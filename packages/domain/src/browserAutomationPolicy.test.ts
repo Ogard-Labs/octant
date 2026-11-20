@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   evaluateBrowserAction,
-  canRecordBrowserObservation,
   decideBrowserWaitLimit,
   isContextExpired,
   browserContextExpiresAt,
-  shouldProtectCredentialField,
   originAllowed,
   parseBrowserKeyChord,
   remoteBrowserActionReach,
@@ -13,7 +11,6 @@ import {
 import type {
   BrowserActionRequest,
   BrowserContextRecord,
-  BrowserObservation,
   ToolActionAuthority,
 } from "@octant/contracts";
 
@@ -205,32 +202,6 @@ describe("evaluateBrowserAction", () => {
   });
 });
 
-describe("canRecordBrowserObservation", () => {
-  it("returns true for matching observation", () => {
-    const obs: BrowserObservation = {
-      contextId: activeContext.contextId,
-      actionId: activeContext.actionId,
-      correlationId: activeContext.correlationId,
-      authority,
-      observedAt: "2026-07-24T12:01:00.000Z" as any,
-      stale: false,
-    };
-    expect(canRecordBrowserObservation(obs, activeContext)).toBe(true);
-  });
-
-  it("returns false for mismatched context", () => {
-    const obs: BrowserObservation = {
-      contextId: "00000000-0000-4000-8000-000000000099" as any,
-      actionId: activeContext.actionId,
-      correlationId: activeContext.correlationId,
-      authority,
-      observedAt: "2026-07-24T12:01:00.000Z" as any,
-      stale: false,
-    };
-    expect(canRecordBrowserObservation(obs, activeContext)).toBe(false);
-  });
-});
-
 describe("isContextExpired", () => {
   it("uses host-observed activity and the current handoff deadline without an absolute active cap", () => {
     const created = Date.parse(activeContext.createdAt);
@@ -265,20 +236,6 @@ describe("isContextExpired", () => {
   it("returns false for stopped context", () => {
     const stopped = { ...activeContext, state: "stopped" as const };
     expect(isContextExpired(stopped, Date.now())).toBe(false);
-  });
-});
-
-describe("shouldProtectCredentialField", () => {
-  it("returns true when policy enables protection", () => {
-    expect(shouldProtectCredentialField(activeContext, "password")).toBe(true);
-  });
-
-  it("returns false when policy disables protection", () => {
-    const noProtection = {
-      ...activeContext,
-      policy: { ...activeContext.policy, credentialFieldProtection: false },
-    };
-    expect(shouldProtectCredentialField(noProtection, "password")).toBe(false);
   });
 });
 

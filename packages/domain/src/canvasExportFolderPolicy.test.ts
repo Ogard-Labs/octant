@@ -9,8 +9,8 @@ import {
   canvasExportPictureFileNames,
   canvasExportPlannedName,
   canvasExportStem,
+  freeCanvasExportFileName,
   judgeCanvasExportFolder,
-  planCanvasExportFileName,
   resolveCanvasExportFolder,
 } from "./canvasExportFolderPolicy";
 
@@ -103,58 +103,53 @@ describe("canvas export folder policy", () => {
 
   it("writes a numbered copy beside a name that is already taken", () => {
     const taken = new Set(["Launch plan.md"]);
-    const fileName = planCanvasExportFileName({
-      title: "Launch plan",
-      format: "markdown",
-      taken: (candidate) => taken.has(candidate),
-      replacesConfirmed: false,
-    });
+    const fileName = freeCanvasExportFileName(
+      canvasExportPlannedName("Launch plan", "markdown"),
+      (candidate) => taken.has(candidate),
+      false,
+    );
 
     expect(fileName).toBe("Launch plan (2).md");
   });
 
   it("keeps counting past the copies that also exist", () => {
     const taken = new Set(["Launch plan.md", "Launch plan (2).md", "Launch plan (3).md"]);
-    const fileName = planCanvasExportFileName({
-      title: "Launch plan",
-      format: "markdown",
-      taken: (candidate) => taken.has(candidate),
-      replacesConfirmed: false,
-    });
+    const fileName = freeCanvasExportFileName(
+      canvasExportPlannedName("Launch plan", "markdown"),
+      (candidate) => taken.has(candidate),
+      false,
+    );
 
     expect(fileName).toBe("Launch plan (4).md");
   });
 
   it("reuses a taken name when the person approved replacing that file", () => {
-    const fileName = planCanvasExportFileName({
-      title: "Launch plan",
-      format: "markdown",
-      taken: () => true,
-      replacesConfirmed: true,
-    });
+    const fileName = freeCanvasExportFileName(
+      canvasExportPlannedName("Launch plan", "markdown"),
+      () => true,
+      true,
+    );
 
     expect(fileName).toBe("Launch plan.md");
   });
 
   it("gives up on a name when every numbered copy is taken", () => {
-    const fileName = planCanvasExportFileName({
-      title: "Launch plan",
-      format: "markdown",
-      taken: () => true,
-      replacesConfirmed: false,
-    });
+    const fileName = freeCanvasExportFileName(
+      canvasExportPlannedName("Launch plan", "markdown"),
+      () => true,
+      false,
+    );
 
     expect(fileName).toBeUndefined();
     expect(MAX_CANVAS_EXPORT_NAME_COPIES).toBeGreaterThan(1);
   });
 
   it("writes the first free name when nothing is in the folder", () => {
-    const fileName = planCanvasExportFileName({
-      title: "Launch plan",
-      format: "html",
-      taken: () => false,
-      replacesConfirmed: false,
-    });
+    const fileName = freeCanvasExportFileName(
+      canvasExportPlannedName("Launch plan", "html"),
+      () => false,
+      false,
+    );
 
     expect(fileName).toBe("Launch plan.html");
   });

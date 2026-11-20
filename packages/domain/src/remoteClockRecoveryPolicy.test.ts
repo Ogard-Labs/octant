@@ -3,10 +3,8 @@ import {
   REMOTE_CLOCK_FORWARD_JUMP_TOLERANCE_MS,
   REMOTE_CLOCK_ROLLBACK_TOLERANCE_MS,
   deriveClockHighWaterMark,
-  evaluateClientTimestampTrust,
   evaluateMonotonicNow,
 } from "./remoteClockRecoveryPolicy";
-import { REMOTE_REQUEST_CLOCK_SKEW_MS } from "./remoteAccessPolicy";
 
 describe("evaluateMonotonicNow", () => {
   it("advances the high-water mark when wall clock moves forward", () => {
@@ -187,40 +185,5 @@ describe("deriveClockHighWaterMark", () => {
         durableTimestampsMs: [-10, Number.POSITIVE_INFINITY, 42],
       }),
     ).toBe(42);
-  });
-});
-
-describe("evaluateClientTimestampTrust", () => {
-  it("accepts a timestamp within the skew window", () => {
-    expect(evaluateClientTimestampTrust({ clientTimestampMs: 1_000, serverNowMs: 1_010 })).toEqual({
-      kind: "accepted",
-    });
-  });
-
-  it("never extends trust from a future client timestamp", () => {
-    expect(
-      evaluateClientTimestampTrust({
-        clientTimestampMs: 1_000 + REMOTE_REQUEST_CLOCK_SKEW_MS + 1,
-        serverNowMs: 1_000,
-      }),
-    ).toEqual({ kind: "rejected", reason: "future-skew" });
-  });
-
-  it("rejects a stale client timestamp", () => {
-    expect(
-      evaluateClientTimestampTrust({
-        clientTimestampMs: 1_000,
-        serverNowMs: 1_000 + REMOTE_REQUEST_CLOCK_SKEW_MS + 1,
-      }),
-    ).toEqual({ kind: "rejected", reason: "past-skew" });
-  });
-
-  it("rejects malformed timestamps", () => {
-    expect(
-      evaluateClientTimestampTrust({ clientTimestampMs: Number.NaN, serverNowMs: 1_000 }),
-    ).toEqual({ kind: "rejected", reason: "malformed" });
-    expect(
-      evaluateClientTimestampTrust({ clientTimestampMs: 1_000, serverNowMs: Number.NaN }),
-    ).toEqual({ kind: "rejected", reason: "malformed" });
   });
 });

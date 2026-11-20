@@ -667,13 +667,6 @@ export const WorkThreadNavigation = Schema.Struct({
 }).annotations(strict);
 export type WorkThreadNavigation = typeof WorkThreadNavigation.Type;
 
-export const WORK_THREAD_EVENT_NAMES = [
-  "work.thread-created@1",
-  "work.thread-updated@1",
-  "work.thread-completion-confirmed@1",
-] as const;
-
-export const WORK_SETTINGS_EVENT_NAME = "work.settings-updated@1";
 export const decodeWorkSettingsUpdated = Schema.decodeUnknownSync(WorkSettingsUpdated);
 
 export const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadId);

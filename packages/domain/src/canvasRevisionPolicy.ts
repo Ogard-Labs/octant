@@ -62,31 +62,6 @@ function mapCardsDenial(error: CanvasCardsPolicyRejected): CanvasReviseDenialCod
   return decodeCanvasReviseDenialCode(code);
 }
 
-export function canvasReviseDenialReason(input: unknown): CanvasReviseDenialCode | null {
-  let request: CanvasReviseRequest;
-  try {
-    request = decodeOrReject(
-      decodeCanvasReviseRequest,
-      input,
-      "malformed-request",
-      "Canvas revise request is malformed.",
-    );
-  } catch (error) {
-    if (error instanceof CanvasRevisionPolicyRejected) return error.denialCode;
-    return "malformed-request";
-  }
-  try {
-    clampCanvasAuthority({
-      requestedAuthority: request.requestedAuthority,
-      scope: request.workspace,
-    });
-  } catch (error) {
-    if (error instanceof CanvasCardsPolicyRejected) return mapCardsDenial(error);
-    return "malformed-request";
-  }
-  return null;
-}
-
 export interface ClampRevisionProvenanceInput {
   readonly current: CanvasDefinition;
   readonly actor: CanvasActor;
@@ -360,5 +335,3 @@ export function admitCanvasRevise(input: AdmitCanvasReviseInput): {
   };
   return { kind: "accepted", next, receipt };
 }
-
-export const validateCanvasReviseDenialCode = decodeCanvasReviseDenialCode;

@@ -5,7 +5,6 @@ import {
   admitCanvasCreate,
   authorizeCanvasCreateRequest,
   buildCreateVersion,
-  canvasCreateDenialReason,
   clampCanvasAuthority,
   projectThreadReferenceCardFromVersion,
   validateCanvasThreadReferenceCard,
@@ -53,31 +52,6 @@ function chatRequest(overrides: Record<string, unknown> = {}): Record<string, un
   };
 }
 
-function workRequest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    ...chatRequest(),
-    mode: "work",
-    workspace: { kind: "work-root", projectId, rootId },
-    ...overrides,
-  };
-}
-
-function codeRequest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    ...chatRequest(),
-    mode: "code",
-    workspace: {
-      kind: "code-worktree",
-      projectId,
-      repositoryId,
-      bindingRevisionId,
-      checkoutId,
-      verified: true,
-    },
-    ...overrides,
-  };
-}
-
 function expectDenial(action: () => unknown, code: string) {
   try {
     action();
@@ -89,28 +63,6 @@ function expectDenial(action: () => unknown, code: string) {
 }
 
 describe("Canvas cards policy cross-mode denial", () => {
-  it("admits a safe Chat, Work, and Code create request", () => {
-    expect(canvasCreateDenialReason(chatRequest())).toBeNull();
-    expect(canvasCreateDenialReason(workRequest())).toBeNull();
-    expect(canvasCreateDenialReason(codeRequest())).toBeNull();
-  });
-
-  it("rejects a mode/workspace cross-match as fail-closed", () => {
-    expect(
-      canvasCreateDenialReason(
-        chatRequest({ workspace: { kind: "work-root", projectId, rootId } }),
-      ),
-    ).toBe("malformed-request");
-    expect(canvasCreateDenialReason(workRequest({ originThreadId: "not-a-valid-uuid" }))).toBe(
-      "malformed-request",
-    );
-  });
-
-  it("fails closed for malformed requests", () => {
-    expect(canvasCreateDenialReason({})).toBe("malformed-request");
-    expect(canvasCreateDenialReason(chatRequest({ intent: "prompt" }))).toBe("malformed-request");
-  });
-
   it("denies a Chat Canvas implicit filesystem/shell/Git authority", () => {
     expectDenial(
       () =>
@@ -136,11 +88,6 @@ describe("Canvas cards policy cross-mode denial", () => {
         }),
       "chat-implicit-authority",
     );
-    expect(
-      canvasCreateDenialReason(
-        chatRequest({ requestedAuthority: { ...safeAuthority, filesystem: true } }),
-      ),
-    ).toBe("chat-implicit-authority");
   });
 
   it("denies a Work Canvas implicit shell/Git authority", () => {
@@ -157,11 +104,6 @@ describe("Canvas cards policy cross-mode denial", () => {
       () => clampCanvasAuthority({ requestedAuthority: { ...safeAuthority, git: true }, scope }),
       "work-implicit-authority",
     );
-    expect(
-      canvasCreateDenialReason(
-        workRequest({ requestedAuthority: { ...safeAuthority, shell: true } }),
-      ),
-    ).toBe("work-implicit-authority");
   });
 
   it("requires a verified worktree for a Code Canvas", () => {
@@ -180,20 +122,6 @@ describe("Canvas cards policy cross-mode denial", () => {
         }),
       "code-worktree-unverified",
     );
-    expect(
-      canvasCreateDenialReason(
-        codeRequest({
-          workspace: {
-            kind: "code-worktree",
-            projectId,
-            repositoryId,
-            bindingRevisionId,
-            checkoutId,
-            verified: false,
-          },
-        }),
-      ),
-    ).toBe("code-worktree-unverified");
   });
 });
 

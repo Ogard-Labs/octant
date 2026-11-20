@@ -946,18 +946,6 @@ export const CONTEXT_COMPACTION_EVENT_NAMES = {
   failed: "context.compaction-failed@1",
 } as const;
 
-export const CONTEXT_EVENT_NAMES = [
-  "context.manifest-created@1",
-  "context.overrides-updated@1",
-  "context.plan-created@1",
-  "context.summary-created@1",
-  "context.usage-reconciled@1",
-  "context.capacity-reservation-updated@1",
-  CONTEXT_COMPACTION_EVENT_NAMES.requested,
-  CONTEXT_COMPACTION_EVENT_NAMES.completed,
-  CONTEXT_COMPACTION_EVENT_NAMES.failed,
-] as const;
-
 export const decodeContextManifestId = Schema.decodeUnknownSync(ContextManifestId);
 export const decodeContextPlanId = Schema.decodeUnknownSync(ContextPlanId);
 export const decodeContextEntryId = Schema.decodeUnknownSync(ContextEntryId);
