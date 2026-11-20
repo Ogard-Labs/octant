@@ -1,6 +1,6 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
 import { strictKeptForLaunch } from "../strictResolution";
-import type { StalledTurnScope } from "../providers/turnBudget";
+import { sanitizeLoopNoticeToolName, type StalledTurnScope } from "../providers/turnBudget";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
@@ -6648,6 +6648,37 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(active.onContextDelivered === undefined
             ? {}
             : { onPromptSent: active.onContextDelivered }),
+          onLoopNotice: (notice) =>
+            Effect.sync(() => {
+              const toolName = sanitizeLoopNoticeToolName(notice.toolName, (value) =>
+                sanitizeProviderText(value, active.checkoutRoot, active.secrets),
+              );
+              const frame = this.#appendTurnEvent(active, {
+                event:
+                  notice.kind === "turn-loop-stopped"
+                    ? {
+                        kind: "turn-loop-stopped",
+                        toolName,
+                        count: notice.count,
+                      }
+                    : {
+                        kind: "turn-loop-noticed",
+                        toolName,
+                        count: notice.count,
+                      },
+              });
+              active.cursor = frame.cursor;
+            }),
+          onStallNotice: (notice) =>
+            Effect.sync(() => {
+              const frame = this.#appendTurnEvent(active, {
+                event: {
+                  kind: "turn-stall-noticed",
+                  idleMs: notice.idleMs,
+                },
+              });
+              active.cursor = frame.cursor;
+            }),
           persistEvent: (event) =>
             // The provider's own completion, interruption, or failure is
             // journaled as the turn's terminal state, ahead of the outcome

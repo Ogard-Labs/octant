@@ -29,6 +29,7 @@ export * from "./codePolicy";
 export * from "./guardrailPolicy";
 export * from "./secretGuardPolicy";
 export * from "./strictNoticePolicy";
+export * from "./turnLoopPolicy";
 export * from "./blockedToolsPolicy";
 export * from "./shieldJudgePolicy";
 export * from "./shieldServerPolicy";
