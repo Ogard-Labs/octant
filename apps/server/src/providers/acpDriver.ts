@@ -2530,11 +2530,12 @@ function makeConnection(
               if (
                 options.sandboxPolicy === undefined &&
                 state.completed &&
-                acpExactReleaseClaim(
-                  profile.retainedSessionVersions,
-                  state.runtime.version,
-                  state.executionPolicy,
-                ) !== "absent" &&
+                (profile.retainsSessions === true ||
+                  acpExactReleaseClaim(
+                    profile.retainedSessionVersions,
+                    state.runtime.version,
+                    state.executionPolicy,
+                  ) !== "absent") &&
                 state.approvals.size === 0 &&
                 state.questions.size === 0 &&
                 state.pendingToolAnswers.size === 0 &&

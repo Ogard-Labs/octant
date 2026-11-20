@@ -494,7 +494,11 @@ const DEFAULT_LIMITS: AcpLimits = {
   requestTimeoutMs: 15_000,
   // A turn is not a request: `session/prompt` stays open until the agent
   // finishes, so it needs its own budget. Without one, a caller that wires the
-  // request budget from a startup deadline cancels every longer reply.
+  // request budget from a startup deadline cancels every longer reply. It is
+  // a budget of silence: every message the agent sends restarts it, and it
+  // stands still while the agent waits on an answer from Octant, so a long
+  // turn that keeps working is never cut (a fixed ten minutes failed long
+  // agentic turns that were still streaming).
   turnTimeoutMs: 600_000,
   stderrBytes: 65_536,
 };
@@ -503,7 +507,9 @@ interface PendingRequest {
   readonly decode: (value: unknown) => unknown;
   readonly resolve: (value: unknown) => void;
   readonly reject: (failure: AcpFailure) => void;
-  readonly timeout: ReturnType<typeof setTimeout>;
+  timeout: ReturnType<typeof setTimeout> | undefined;
+  /** Set for a turn: its budget restarts with each agent message (see `turnTimeoutMs`). */
+  readonly idle?: { readonly ms: number; readonly expire: () => void };
 }
 
 type QueuedMessage = AcpServerNotification | AcpServerRequestMessage;
@@ -515,6 +521,19 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
   const notificationListeners = new Set<(message: AcpServerNotification) => void>();
   const requestListeners = new Set<(message: AcpServerRequestMessage) => void>();
   const queue: QueuedMessage[] = [];
+  /** Requests the agent sent that Octant has not answered yet. */
+  const awaitingClient = new Set<RpcId>();
+  const rearmIdle = () => {
+    for (const entry of pending.values()) {
+      if (entry.idle === undefined) continue;
+      clearTimeout(entry.timeout);
+      entry.timeout =
+        awaitingClient.size === 0 ? setTimeout(entry.idle.expire, entry.idle.ms) : undefined;
+    }
+  };
+  const answered = (id: RpcId) => {
+    if (awaitingClient.delete(id)) rearmIdle();
+  };
   let input = Buffer.alloc(0);
   let nextId = 1;
   let terminal = false;
@@ -636,6 +655,8 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       return;
     }
     queue.push(message);
+    if (message.kind !== "notification") awaitingClient.add(message.id);
+    rearmIdle();
     if (!dispatchScheduled) {
       dispatchScheduled = true;
       queueMicrotask(dispatch);
@@ -914,6 +935,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     params: unknown,
     decoder: (value: unknown) => A,
     timeoutMs: number = limits.requestTimeoutMs,
+    budget: "fixed" | "idle" = "fixed",
   ): Promise<A> => {
     if (terminal) return Promise.reject(new AcpFailure("closed", "ACP transport closed."));
     if (pending.size >= limits.pendingRequests) {
@@ -921,15 +943,18 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     }
     const id = nextId++;
     return new Promise<A>((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      const expire = () => {
         pending.delete(id);
         reject(new AcpFailure("timeout", "ACP request timed out."));
-      }, timeoutMs);
+      };
+      const timeout =
+        budget === "idle" && awaitingClient.size > 0 ? undefined : setTimeout(expire, timeoutMs);
       pending.set(id, {
         decode: decoder,
         resolve: (value) => resolve(value as A),
         reject,
         timeout,
+        ...(budget === "idle" ? { idle: { ms: timeoutMs, expire } } : {}),
       });
       void write({ jsonrpc: "2.0", id, method, params }).catch((error: unknown) => {
         const current = pending.get(id);
@@ -1036,6 +1061,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         { sessionId, prompt: [{ type: "text", text: prompt }, ...attachments] },
         decode(PromptResult),
         limits.turnTimeoutMs,
+        "idle",
       ),
     setConfigOption: (sessionId, configId, value) =>
       request(
@@ -1055,17 +1081,25 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       requestListeners.add(listener);
       return () => requestListeners.delete(listener);
     },
-    respond: (id, result) => write({ jsonrpc: "2.0", id, result }),
-    respondPermission: (id, optionId) =>
-      write({
+    respond: (id, result) => {
+      answered(id);
+      return write({ jsonrpc: "2.0", id, result });
+    },
+    respondPermission: (id, optionId) => {
+      answered(id);
+      return write({
         jsonrpc: "2.0",
         id,
         result: {
           outcome:
             optionId === undefined ? { outcome: "cancelled" } : { outcome: "selected", optionId },
         },
-      }),
-    reject: (id, code, message) => write({ jsonrpc: "2.0", id, error: { code, message } }),
+      });
+    },
+    reject: (id, code, message) => {
+      answered(id);
+      return write({ jsonrpc: "2.0", id, error: { code, message } });
+    },
     notify: (method, params) => write({ jsonrpc: "2.0", method, params }),
     close,
   };
