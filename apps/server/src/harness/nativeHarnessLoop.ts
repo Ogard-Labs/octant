@@ -1684,11 +1684,22 @@ export function createNativeHarnessConnection(
                 release(state);
                 throw error;
               }
-              if (state.estimatedCostUsd === null && state.latestReportedUsage !== undefined) {
+              // The last report was the last request's alone. A turn of several
+              // requests reports its whole cost once more, as completion does,
+              // so a reader that keeps the latest report (the Code ledger)
+              // records every request; one that sums per-request reports lets
+              // this whole-turn report replace them, so nothing counts twice.
+              if (
+                state.latestReportedUsage !== undefined &&
+                (state.estimatedCostUsd === null || state.steps > 1 || state.compactedThisTurn)
+              ) {
                 emit(state, {
                   kind: "usage",
                   ...state.latestReportedUsage,
-                  estimatedCostUsd: null,
+                  estimatedCostUsd: state.estimatedCostUsd,
+                  ...(state.contextTokens === undefined
+                    ? {}
+                    : { contextTokens: state.contextTokens }),
                 });
               }
               emit(state, { kind: "interrupted", message: "The provider request was cancelled." });
