@@ -1,14 +1,22 @@
 import {
+  EventActor,
+  EventEnvelope,
   MAX_REPLAYABLE_RUN_CASES,
   THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE,
   THREAD_FINISHED_RECEIPT_EVENT_NAMES,
   THREAD_RETENTION_EVENT_NAMES,
+  TOOL_EFFECT_AGGREGATE_TYPE,
   decodeFinishedReceiptRecorded,
+  decodeProject,
+  decodeProjectId,
+  decodeProjectWorkingFolderId,
   decodeProviderInstanceId,
   decodeProviderModelId,
   decodeThreadRetentionThreadPurged,
-  type EventEnvelope,
   type FinishedReceiptRecorded,
+  type Project,
+  type ProjectId,
+  type ProjectWorkingFolderId,
   type ReplayableRunCase,
   type ReplayableRunCaseModel,
 } from "@octant/contracts";
@@ -18,15 +26,12 @@ import {
   PersonMemoryThreadUntraced,
 } from "@octant/contracts/person-memory";
 import {
-  isReceiptStaleAfterJournalEvents,
-  type FinishedReceiptFileChangeSignal,
-} from "@octant/domain/finished-receipt-policy";
-import {
   projectReplayableRunCases,
   type ReplayableRunCaseCandidate,
   type ReplayableRunCaseThreadRef,
 } from "@octant/domain/replayable-run-case-policy";
 import { Schema } from "effect";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import type { Journal } from "../persistence/journal";
 import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import {
@@ -34,8 +39,16 @@ import {
   type ReadOnlySqliteConnection,
   type SqliteConnection,
 } from "../persistence/sqlitePort";
+import { ThreadFinishedReceiptStore } from "./finishedReceiptStore";
 
 const decodeThreadUntraced = Schema.decodeUnknownSync(PersonMemoryThreadUntraced);
+const decodeActor = Schema.decodeUnknownSync(EventActor);
+const decodeEventEnvelope = Schema.decodeUnknownSync(EventEnvelope);
+
+const READ_ONLY_ACTOR = decodeActor({
+  kind: "local-user",
+  actorId: "00000000-0000-4000-8000-000000000001",
+});
 
 export const REPLAYABLE_RUN_CASE_AGGREGATE_TYPES = [
   "project",
@@ -45,6 +58,17 @@ export const REPLAYABLE_RUN_CASE_AGGREGATE_TYPES = [
   "code-operation",
   PERSON_MEMORY_UNTRACED_AGGREGATE_TYPE,
   THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE,
+] as const;
+
+const RECEIPT_STALENESS_AGGREGATE_TYPES = [
+  THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE,
+  "code-operation",
+  "code-file",
+  "work-thread",
+  "work-turn",
+  "work-artifact",
+  TOOL_EFFECT_AGGREGATE_TYPE,
+  "project",
 ] as const;
 
 export interface CodePromptEvidenceReference {
@@ -82,10 +106,15 @@ interface CodeTurnFact {
   rewound: boolean;
 }
 
+type InitialRequestSnapshot =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "code-evidence"; readonly reference: CodePromptEvidenceReference };
+
 interface RecordedReceiptFact {
   readonly sequence: number;
   readonly receipt: FinishedReceiptRecorded;
   readonly leavesNoTraceAtRecord: boolean;
+  readonly initialRequestAtRecord?: InitialRequestSnapshot | undefined;
   readonly modelAtRecord?: ReplayableRunCaseModel | undefined;
 }
 
@@ -297,11 +326,16 @@ class ReplayableRunCaseAccumulator {
       if (this.#seenReceiptIds.has(idKey)) return;
       this.#seenReceiptIds.add(idKey);
       const leavesNoTraceAtRecord = this.#untraced.has(`${receipt.mode}:${receipt.threadId}`);
+      // Snapshot the thread's surviving initial request and model at this exact
+      // journal sequence so a later rewind + replacement turn never rewrites
+      // an earlier receipt's request.
+      const initialRequestAtRecord = this.#snapshotInitialRequest(receipt);
       const modelAtRecord = this.#resolveModelAtRecord(receipt, envelope.globalSequence);
       this.#receipts.push({
         sequence: envelope.globalSequence,
         receipt,
         leavesNoTraceAtRecord,
+        ...(initialRequestAtRecord === undefined ? {} : { initialRequestAtRecord }),
         ...(modelAtRecord === undefined ? {} : { modelAtRecord }),
       });
     }
@@ -316,6 +350,11 @@ class ReplayableRunCaseAccumulator {
         }
       }
     }
+    for (const entry of this.#receipts) {
+      if (entry.initialRequestAtRecord?.kind === "code-evidence") {
+        ids.add(entry.initialRequestAtRecord.reference.contentId);
+      }
+    }
     return [...ids];
   }
 
@@ -324,7 +363,10 @@ class ReplayableRunCaseAccumulator {
     readonly maxCases?: number | undefined;
   }): ReadonlyArray<ReplayableRunCase> {
     const candidates: ReplayableRunCaseCandidate[] = this.#receipts.map((entry) => {
-      const request = this.#resolveInitialRequest(entry.receipt, options.readCodeEvidence);
+      const request = resolveSnapshotRequest(
+        entry.initialRequestAtRecord,
+        options.readCodeEvidence,
+      );
       const projectName = this.#projects.get(String(entry.receipt.projectId));
       const model =
         entry.modelAtRecord ?? this.#resolveModelAtRecord(entry.receipt, entry.sequence);
@@ -346,24 +388,23 @@ class ReplayableRunCaseAccumulator {
     });
   }
 
-  #resolveInitialRequest(
-    receipt: FinishedReceiptRecorded,
-    readCodeEvidence: CodeEvidenceReader | undefined,
-  ): string | undefined {
+  #snapshotInitialRequest(receipt: FinishedReceiptRecorded): InitialRequestSnapshot | undefined {
     if (receipt.mode === "work") {
       const turns = this.#workTurns.get(receipt.threadId);
       if (turns === undefined || turns.length === 0) return undefined;
       const firstUserTurn = turns.find((turn) => !turn.isDelivery) ?? turns[0];
-      return firstUserTurn?.prompt;
+      return firstUserTurn === undefined ? undefined : { kind: "text", text: firstUserTurn.prompt };
     }
 
     const turns = this.#codeTurns.get(receipt.threadId);
     if (turns === undefined || turns.length === 0) return undefined;
     const firstSurviving = turns.find((turn) => !turn.rewound);
     if (firstSurviving === undefined) return undefined;
-    if (firstSurviving.inlinePrompt !== undefined) return firstSurviving.inlinePrompt;
-    if (firstSurviving.promptRef !== undefined && readCodeEvidence !== undefined) {
-      return readCodeEvidence(firstSurviving.promptRef);
+    if (firstSurviving.inlinePrompt !== undefined) {
+      return { kind: "text", text: firstSurviving.inlinePrompt };
+    }
+    if (firstSurviving.promptRef !== undefined) {
+      return { kind: "code-evidence", reference: firstSurviving.promptRef };
     }
     return undefined;
   }
@@ -404,6 +445,15 @@ class ReplayableRunCaseAccumulator {
     }
     return this.#codeThreadModels.get(receipt.threadId);
   }
+}
+
+function resolveSnapshotRequest(
+  snapshot: InitialRequestSnapshot | undefined,
+  readCodeEvidence: CodeEvidenceReader | undefined,
+): string | undefined {
+  if (snapshot === undefined) return undefined;
+  if (snapshot.kind === "text") return snapshot.text;
+  return readCodeEvidence?.(snapshot.reference);
 }
 
 /**
@@ -463,6 +513,18 @@ interface RawJournalRow {
   readonly event_name: string;
   readonly event_version: number;
   readonly payload_json: string;
+}
+
+interface RawFullJournalRow extends RawJournalRow {
+  readonly event_id: string;
+  readonly aggregate_version: number;
+  readonly host_id: string;
+  readonly correlation_id: string;
+  readonly causation_id: string | null;
+  readonly actor_kind: string;
+  readonly actor_id: string;
+  readonly actor_json: string | null;
+  readonly occurred_at: string;
 }
 
 interface RawCodeEvidenceRow {
@@ -535,9 +597,11 @@ function readReplayableRunCasesFromReadOnlySqlite(
 }
 
 /**
- * Read the latest host-recorded finished receipt (and its staleness) for one
- * thread from a SQLite journal in read-only mode. Used by the maintainer replay
- * script to inspect the outcome of a replayed run.
+ * Read the latest host-recorded finished receipt (and its authoritative
+ * staleness) for one thread from a SQLite journal in read-only mode.
+ * Hydrates the server's authoritative {@link ThreadFinishedReceiptStore} over
+ * the read-only SQLite rows so tool-effect, code-file, work-artifact, and
+ * sibling Work folder invalidations match the live host identically.
  */
 export function readLatestFinishedReceiptFromDatabase(
   databasePath: string,
@@ -545,113 +609,130 @@ export function readLatestFinishedReceiptFromDatabase(
 ): { readonly receipt: FinishedReceiptRecorded; readonly stale: boolean } | undefined {
   const connection = openReadOnlySqlite(databasePath);
   try {
+    const aggregateList = RECEIPT_STALENESS_AGGREGATE_TYPES.map((type) => `'${type}'`).join(", ");
     const rows = connection.all(
-      `SELECT global_sequence, aggregate_type, aggregate_id, event_name, event_version, payload_json
+      `SELECT global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+              event_name, event_version, host_id, correlation_id, causation_id,
+              actor_kind, actor_id, actor_json, occurred_at, payload_json
        FROM event_journal
-       WHERE aggregate_type IN ('${THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE}', 'code-operation', 'code-file', 'work-turn')
+       WHERE aggregate_type IN (${aggregateList})
        ORDER BY global_sequence ASC`,
-    ) as ReadonlyArray<RawJournalRow>;
+    ) as ReadonlyArray<RawFullJournalRow>;
 
-    let latest:
-      | { readonly sequence: number; readonly receipt: FinishedReceiptRecorded }
-      | undefined;
-    const fileChanges: FinishedReceiptFileChangeSignal[] = [];
+    const envelopesByType = new Map<string, EventEnvelope[]>();
+    const projectsById = new Map<string, Project>();
 
     for (const row of rows) {
-      if (row.event_version !== 1) continue;
       let payload: unknown;
       try {
         payload = JSON.parse(row.payload_json);
       } catch {
         continue;
       }
-      if (
-        row.aggregate_type === THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE &&
-        row.event_name === THREAD_FINISHED_RECEIPT_EVENT_NAMES.recorded &&
-        row.aggregate_id === threadId
-      ) {
-        try {
-          const receipt = decodeFinishedReceiptRecorded(payload);
-          latest = { sequence: row.global_sequence, receipt };
-        } catch {
-          continue;
+
+      if (row.aggregate_type === "project") {
+        const rawProject = asRecord(payload)?.project;
+        if (rawProject !== undefined) {
+          try {
+            const project = decodeProject(rawProject);
+            projectsById.set(String(project.id), project);
+          } catch {
+            // Ignore partial or non-project payloads.
+          }
         }
         continue;
       }
 
-      if (latest === undefined) continue;
-      const change = classifyThreadFileChange(
-        row.aggregate_type,
-        row.event_name,
-        payload,
-        threadId,
-      );
-      if (change !== undefined) {
-        fileChanges.push({
-          sequence: row.global_sequence,
-          ...(change.turnId === undefined ? {} : { turnId: change.turnId }),
-        });
-      }
+      const envelope = decodeReadOnlyEnvelope(row, payload);
+      if (envelope === undefined) continue;
+      const list = envelopesByType.get(row.aggregate_type) ?? [];
+      list.push(envelope);
+      envelopesByType.set(row.aggregate_type, list);
     }
 
-    if (latest === undefined) return undefined;
-    const stale = isReceiptStaleAfterJournalEvents({
-      receiptSequence: latest.sequence,
-      receiptTurnId: latest.receipt.turnId,
-      fileChanges,
+    const readOnlyJournal: Pick<Journal, "append" | "replayAggregateType"> = {
+      append: () => {
+        throw new Error("Read-only finished receipt journal does not support append.");
+      },
+      replayAggregateType: (cursor) => {
+        const list = envelopesByType.get(cursor.aggregateType) ?? [];
+        const matched: EventEnvelope[] = [];
+        for (const envelope of list) {
+          if (envelope.globalSequence <= cursor.afterSequence) continue;
+          if (cursor.eventName !== undefined && envelope.eventName !== cursor.eventName) continue;
+          if (
+            cursor.exceptEventName !== undefined &&
+            envelope.eventName === cursor.exceptEventName
+          ) {
+            continue;
+          }
+          matched.push(envelope);
+          if (matched.length >= cursor.limit) break;
+        }
+        return matched;
+      },
+    };
+
+    const store = new ThreadFinishedReceiptStore({
+      journal: readOnlyJournal,
+      uuid: () => "00000000-0000-4000-8000-000000000000",
+      actor: READ_ONLY_ACTOR,
+      clock: () => "1970-01-01T00:00:00.000Z",
+      resolveWorkFolderRoot: (projectId, workingFolderId) => {
+        let decodedProjectId: ProjectId;
+        try {
+          decodedProjectId = decodeProjectId(projectId);
+        } catch {
+          return undefined;
+        }
+        const project = projectsById.get(String(decodedProjectId));
+        if (project === undefined || project.type === "chat") return undefined;
+        let decodedFolderId: ProjectWorkingFolderId | undefined;
+        if (workingFolderId !== undefined) {
+          try {
+            decodedFolderId = decodeProjectWorkingFolderId(workingFolderId);
+          } catch {
+            return undefined;
+          }
+        }
+        return approvedWorkingFolderRoot(project, decodedFolderId);
+      },
     });
-    return { receipt: latest.receipt, stale };
+
+    const latest = store.latest(threadId);
+    return latest === undefined ? undefined : { receipt: latest.receipt, stale: latest.stale };
   } finally {
     connection.close();
   }
 }
 
-function classifyThreadFileChange(
-  aggregateType: string,
-  eventName: string,
+function decodeReadOnlyEnvelope(
+  row: RawFullJournalRow,
   payload: unknown,
-  threadId: string,
-): { readonly turnId?: string } | undefined {
-  if (aggregateType === "code-operation" && eventName === "code.operation-event-recorded@1") {
-    const frame = asRecord(payload);
-    if (readStringField(frame, "threadId") !== threadId) return undefined;
-    const event = asRecord(frame?.event);
-    if (event === undefined) return undefined;
-    if (event.kind === "file-change" || event.kind === "diff") return {};
-    if (event.kind === "conversation-turn-changed-files") {
-      const changed = asRecord(event.changedFiles);
-      const total = typeof changed?.total === "number" ? changed.total : 0;
-      if (total > 0 || changed?.truncated === true) {
-        const operationId = readStringField(frame, "operationId");
-        return operationId === undefined ? {} : { turnId: operationId };
-      }
-    }
+): EventEnvelope | undefined {
+  try {
+    const actor =
+      row.actor_json !== null && row.actor_json.length > 0
+        ? (JSON.parse(row.actor_json) as unknown)
+        : { kind: row.actor_kind, actorId: row.actor_id };
+    return decodeEventEnvelope({
+      globalSequence: row.global_sequence,
+      eventId: row.event_id,
+      aggregateType: row.aggregate_type,
+      aggregateId: row.aggregate_id,
+      aggregateVersion: row.aggregate_version,
+      eventName: row.event_name,
+      eventVersion: row.event_version,
+      hostId: row.host_id,
+      correlationId: row.correlation_id,
+      ...(row.causation_id === null ? {} : { causationId: row.causation_id }),
+      actor,
+      occurredAt: row.occurred_at,
+      payload,
+    });
+  } catch {
     return undefined;
   }
-  if (aggregateType === "code-file" && eventName === "code.file-reference-updated@1") {
-    const frame = asRecord(payload);
-    const file = asRecord(frame?.file);
-    if (
-      frame?.kind === "file-reference-updated" &&
-      file?.state === "completed" &&
-      readStringField(file, "threadId") === threadId
-    ) {
-      return {};
-    }
-    return undefined;
-  }
-  if (aggregateType === "work-turn" && eventName === "work.turn-updated@1") {
-    const updated = asRecord(payload);
-    if (readStringField(updated, "threadId") !== threadId) return undefined;
-    const wroteFiles = asRecord(updated?.wroteFiles);
-    const paths = Array.isArray(wroteFiles?.paths) ? wroteFiles.paths : [];
-    if (paths.length > 0 || wroteFiles?.truncated === true) {
-      const turnId = readStringField(updated, "turnId");
-      return turnId === undefined ? {} : { turnId };
-    }
-    return undefined;
-  }
-  return undefined;
 }
 
 function createSqliteCodeEvidenceReader(connection: SqliteConnection): CodeEvidenceReader {

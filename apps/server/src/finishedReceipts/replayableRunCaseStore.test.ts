@@ -9,6 +9,8 @@ import {
   EventActor,
   EventId,
   MAX_REPLAYABLE_RUN_CASES,
+  TOOL_EFFECT_AGGREGATE_TYPE,
+  TOOL_EFFECT_EVENT_NAMES,
   decodeFinishedReceiptId,
   decodeMentionableThreadId,
   decodeProjectId,
@@ -92,7 +94,9 @@ function openTestJournal() {
     .register("work.thread-rewound@1", 1, Schema.Unknown)
     .register("code.thread-created@1", 1, Schema.Unknown)
     .register("code.thread-updated@1", 1, Schema.Unknown)
-    .register("code.operation-event-recorded@1", 1, Schema.Unknown);
+    .register("code.operation-event-recorded@1", 1, Schema.Unknown)
+    .register(TOOL_EFFECT_EVENT_NAMES.intended, 1, Schema.Unknown)
+    .register(TOOL_EFFECT_EVENT_NAMES.settled, 1, Schema.Unknown);
 
   const journal = new Journal({
     connection,
@@ -608,6 +612,273 @@ describe("replayable run case journal projection", () => {
       }
 
       expect(readReplayableRunCasesFromDatabase(databasePath)).toEqual(rebuilt);
+    } finally {
+      personMemory.close();
+    }
+  });
+
+  it("marks a Work thread's latest receipt stale in read-only database inspection when a file-writing tool effect settles afterwards", () => {
+    const { databasePath, journal, receipts, personMemory } = openTestJournal();
+    try {
+      const workThreadId = randomUUID();
+      const turnId = randomUUID();
+      appendEvent(journal, {
+        aggregateType: "work-thread",
+        aggregateId: workThreadId,
+        expectedVersion: 0,
+        eventName: "work.thread-created@1",
+        payload: {
+          thread: {
+            id: workThreadId,
+            projectId: String(WORK_PROJECT_ID),
+            title: "Folder edit test",
+            providerInstanceId: String(PROVIDER_A),
+            modelId: String(MODEL_SONNET),
+          },
+        },
+      });
+      appendEvent(journal, {
+        aggregateType: "work-turn",
+        aggregateId: randomUUID(),
+        expectedVersion: 0,
+        eventName: "work.turn-accepted@1",
+        payload: {
+          kind: "turn-accepted",
+          requestId: randomUUID(),
+          threadId: workThreadId,
+          turnId,
+          projectId: String(WORK_PROJECT_ID),
+          prompt: "Update the release checklist.",
+          authority: {
+            providerInstanceId: String(PROVIDER_A),
+            modelId: String(MODEL_SONNET),
+          },
+        },
+      });
+      const receipt = makeReceipt({
+        threadId: workThreadId,
+        mode: "work",
+        projectId: WORK_PROJECT_ID,
+        turnId,
+        summary: "Updated the release checklist.",
+      });
+      receipts.record(receipt);
+
+      expect(readLatestFinishedReceiptFromDatabase(databasePath, workThreadId)).toEqual({
+        receipt,
+        stale: false,
+      });
+
+      const toolEffectId = randomUUID();
+      const toolCallId = randomUUID();
+      appendEvent(journal, {
+        aggregateType: TOOL_EFFECT_AGGREGATE_TYPE,
+        aggregateId: toolEffectId,
+        expectedVersion: 0,
+        eventName: TOOL_EFFECT_EVENT_NAMES.intended,
+        payload: {
+          threadId: workThreadId,
+          toolCallId,
+          toolName: "Write",
+        },
+      });
+      appendEvent(journal, {
+        aggregateType: TOOL_EFFECT_AGGREGATE_TYPE,
+        aggregateId: toolEffectId,
+        expectedVersion: 1,
+        eventName: TOOL_EFFECT_EVENT_NAMES.settled,
+        payload: {
+          threadId: workThreadId,
+          toolCallId,
+          outcome: "succeeded",
+        },
+      });
+
+      expect(readLatestFinishedReceiptFromDatabase(databasePath, workThreadId)).toEqual({
+        receipt,
+        stale: true,
+      });
+    } finally {
+      personMemory.close();
+    }
+  });
+
+  it("preserves a pre-rewind receipt's original request instead of pairing it with a post-rewind replacement turn in both Work and Code", () => {
+    const { databasePath, connection, journal, receipts, personMemory } = openTestJournal();
+    try {
+      // Work: Turn 1 -> Receipt 1 -> Rewind Turn 1 -> Replacement Turn 2 -> Receipt 2.
+      const workThreadId = randomUUID();
+      const workReq1 = randomUUID();
+      const workTurn1 = randomUUID();
+      const workTurn2 = randomUUID();
+      appendEvent(journal, {
+        aggregateType: "work-turn",
+        aggregateId: workReq1,
+        expectedVersion: 0,
+        eventName: "work.turn-accepted@1",
+        payload: {
+          kind: "turn-accepted",
+          requestId: workReq1,
+          threadId: workThreadId,
+          turnId: workTurn1,
+          projectId: String(WORK_PROJECT_ID),
+          prompt: "Original Work request before rewind",
+          authority: {
+            providerInstanceId: String(PROVIDER_A),
+            modelId: String(MODEL_SONNET),
+          },
+        },
+      });
+      const workReceipt1 = makeReceipt({
+        threadId: workThreadId,
+        mode: "work",
+        projectId: WORK_PROJECT_ID,
+        turnId: workTurn1,
+        summary: "Finished original Work request",
+        recordedAt: "2026-11-19T12:01:00.000Z",
+      });
+      receipts.record(workReceipt1);
+      appendEvent(journal, {
+        aggregateType: "work-turn",
+        aggregateId: randomUUID(),
+        expectedVersion: 0,
+        eventName: "work.thread-rewound@1",
+        payload: {
+          kind: "thread-rewound",
+          rewindId: randomUUID(),
+          threadId: workThreadId,
+          removedRequestIds: [workReq1],
+        },
+      });
+      appendEvent(journal, {
+        aggregateType: "work-turn",
+        aggregateId: randomUUID(),
+        expectedVersion: 0,
+        eventName: "work.turn-accepted@1",
+        payload: {
+          kind: "turn-accepted",
+          requestId: randomUUID(),
+          threadId: workThreadId,
+          turnId: workTurn2,
+          projectId: String(WORK_PROJECT_ID),
+          prompt: "Replacement Work request after rewind",
+          authority: {
+            providerInstanceId: String(PROVIDER_A),
+            modelId: String(MODEL_SONNET),
+          },
+        },
+      });
+      const workReceipt2 = makeReceipt({
+        threadId: workThreadId,
+        mode: "work",
+        projectId: WORK_PROJECT_ID,
+        turnId: workTurn2,
+        summary: "Finished replacement Work request",
+        recordedAt: "2026-11-19T12:02:00.000Z",
+      });
+      receipts.record(workReceipt2);
+
+      // Code: Turn 1 -> Receipt 1 -> Rewind Turn 1 -> Replacement Turn 2 -> Receipt 2.
+      const codeThreadId = randomUUID();
+      const codeOp1 = randomUUID();
+      const codeOpRewind = randomUUID();
+      const codeOp2 = randomUUID();
+      const codePrompt1 = insertCodeEvidence(
+        connection,
+        randomUUID(),
+        "Original Code request before rewind",
+      );
+      const codePrompt2 = insertCodeEvidence(
+        connection,
+        randomUUID(),
+        "Replacement Code request after rewind",
+      );
+      appendEvent(journal, {
+        aggregateType: "code-operation",
+        aggregateId: codeOp1,
+        expectedVersion: 0,
+        eventName: "code.operation-event-recorded@1",
+        payload: {
+          operationId: codeOp1,
+          threadId: codeThreadId,
+          event: {
+            kind: "conversation-turn-started",
+            providerInstanceId: String(PROVIDER_A),
+            modelId: String(MODEL_SONNET),
+            prompt: codePrompt1,
+          },
+        },
+      });
+      const codeReceipt1 = makeReceipt({
+        threadId: codeThreadId,
+        mode: "code",
+        projectId: CODE_PROJECT_ID,
+        turnId: codeOp1,
+        summary: "Finished original Code request",
+        recordedAt: "2026-11-19T12:03:00.000Z",
+      });
+      receipts.record(codeReceipt1);
+      appendEvent(journal, {
+        aggregateType: "code-operation",
+        aggregateId: codeOpRewind,
+        expectedVersion: 0,
+        eventName: "code.operation-event-recorded@1",
+        payload: {
+          operationId: codeOpRewind,
+          threadId: codeThreadId,
+          event: {
+            kind: "operation-result",
+            result: {
+              kind: "thread-rewound",
+              fromOperationId: codeOp1,
+              scope: "conversation",
+            },
+          },
+        },
+      });
+      appendEvent(journal, {
+        aggregateType: "code-operation",
+        aggregateId: codeOp2,
+        expectedVersion: 0,
+        eventName: "code.operation-event-recorded@1",
+        payload: {
+          operationId: codeOp2,
+          threadId: codeThreadId,
+          event: {
+            kind: "conversation-turn-started",
+            providerInstanceId: String(PROVIDER_A),
+            modelId: String(MODEL_SONNET),
+            prompt: codePrompt2,
+          },
+        },
+      });
+      const codeReceipt2 = makeReceipt({
+        threadId: codeThreadId,
+        mode: "code",
+        projectId: CODE_PROJECT_ID,
+        turnId: codeOp2,
+        summary: "Finished replacement Code request",
+        recordedAt: "2026-11-19T12:04:00.000Z",
+      });
+      receipts.record(codeReceipt2);
+
+      const projected = new ReplayableRunCaseStore({ journal, connection }).list();
+      const byReceiptId = new Map(
+        projected.map((entry) => [String(entry.receiptId), entry.request]),
+      );
+      expect(byReceiptId.get(String(workReceipt1.receiptId))).toBe(
+        "Original Work request before rewind",
+      );
+      expect(byReceiptId.get(String(workReceipt2.receiptId))).toBe(
+        "Replacement Work request after rewind",
+      );
+      expect(byReceiptId.get(String(codeReceipt1.receiptId))).toBe(
+        "Original Code request before rewind",
+      );
+      expect(byReceiptId.get(String(codeReceipt2.receiptId))).toBe(
+        "Replacement Code request after rewind",
+      );
+      expect(readReplayableRunCasesFromDatabase(databasePath)).toEqual(projected);
     } finally {
       personMemory.close();
     }

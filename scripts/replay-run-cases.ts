@@ -36,6 +36,9 @@ import {
   readLatestFinishedReceiptFromDatabase,
   readReplayableRunCasesFromDatabase,
 } from "../apps/server/src/finishedReceipts/replayableRunCaseStore";
+import { listAgentModels } from "../packages/cli/src/agentHost";
+import { readActiveProjects } from "../packages/cli/src/agentStart";
+import { openLocalControlSession } from "../packages/cli/src/localControl";
 
 export interface ReplayRunCasesCommand {
   readonly journalPath?: string | undefined;
@@ -46,6 +49,26 @@ export interface ReplayRunCasesCommand {
   readonly dryRun: boolean;
   readonly json: boolean;
 }
+
+export interface ReplayHostProject {
+  readonly id: string;
+  readonly name: string;
+}
+
+export interface ReplayHostModel {
+  readonly instanceId: string;
+  readonly endpoint: string;
+  readonly modelId: string;
+}
+
+export interface ReplayHostCatalog {
+  readonly projects: ReadonlyArray<ReplayHostProject>;
+  readonly models: ReadonlyArray<ReplayHostModel>;
+}
+
+export type ReplayAgentArgsResult =
+  | { readonly status: "ready"; readonly args: ReadonlyArray<string> }
+  | { readonly status: "failed"; readonly reason: string };
 
 export type ReplayCaseRunResult =
   | {
@@ -154,6 +177,82 @@ export function parseReplayRunCasesCommand(argv: ReadonlyArray<string>): ReplayR
     ...(modelOverride === undefined ? {} : { modelOverride }),
     dryRun,
     json,
+  };
+}
+
+/**
+ * Resolve the exact `octant agent` arguments for replaying one stored case:
+ * - `--project` receives the Project's current name (matched by Project id
+ *   against the target host's active Projects, falling back to the stored
+ *   Project name — never a UUID, which `octant agent --project` does not match).
+ * - `--model` uses `modelOverride` if supplied, or qualifies the recorded
+ *   `providerInstanceId` against the target host's offered models as
+ *   `endpoint/model` so duplicate model IDs across endpoints never fail as
+ *   ambiguous in `pickAgentModel`.
+ */
+export function buildAgentReplayArgs(input: {
+  readonly runCase: ReplayableRunCase;
+  readonly modelOverride?: string | undefined;
+  readonly hostProjects?: ReadonlyArray<ReplayHostProject> | undefined;
+  readonly hostModels?: ReadonlyArray<ReplayHostModel> | undefined;
+}): ReplayAgentArgsResult {
+  const projectId = String(input.runCase.project.id);
+  const hostProject = input.hostProjects?.find((entry) => entry.id === projectId);
+  const resolvedProjectName =
+    hostProject?.name.trim() || input.runCase.project.name?.trim() || undefined;
+  if (resolvedProjectName === undefined) {
+    return {
+      status: "failed",
+      reason: `Project ${projectId} has no resolvable Project name for octant agent --project.`,
+    };
+  }
+
+  let modelArg: string | undefined;
+  if (input.modelOverride !== undefined) {
+    modelArg = input.modelOverride;
+  } else if (input.runCase.model !== undefined) {
+    const providerId = String(input.runCase.model.providerInstanceId);
+    const modelId = String(input.runCase.model.modelId);
+    const models = input.hostModels ?? [];
+    const exact = models.find(
+      (choice) =>
+        choice.instanceId === providerId && choice.modelId.toLowerCase() === modelId.toLowerCase(),
+    );
+    if (exact !== undefined) {
+      modelArg = `${exact.endpoint}/${exact.modelId}`;
+    } else {
+      const byInstance = models.find((choice) => choice.instanceId === providerId);
+      if (byInstance !== undefined) {
+        modelArg = `${byInstance.endpoint}/${modelId}`;
+      } else {
+        const sameModelMatches = models.filter(
+          (choice) => choice.modelId.toLowerCase() === modelId.toLowerCase(),
+        );
+        if (sameModelMatches.length > 1) {
+          return {
+            status: "failed",
+            reason: `Model "${modelId}" is offered by multiple endpoints and recorded provider ${providerId} is unavailable; pass --model endpoint/model.`,
+          };
+        }
+        modelArg = modelId;
+      }
+    }
+  }
+
+  return {
+    status: "ready",
+    args: [
+      resolve(repoRoot, "packages/cli/src/bin.ts"),
+      "agent",
+      "--json",
+      "--mode",
+      input.runCase.mode,
+      "--project",
+      resolvedProjectName,
+      ...(modelArg === undefined ? [] : ["--model", modelArg]),
+      "--prompt",
+      input.runCase.request,
+    ],
   };
 }
 
@@ -289,27 +388,54 @@ function defaultHostJournalPath(): string {
   return join(paths.dataDirectory, "octant.sqlite3");
 }
 
+async function loadTargetHostCatalog(): Promise<ReplayHostCatalog> {
+  const session = await openLocalControlSession({
+    host: { env: process.env, platform: process.platform, home: homedir() },
+  });
+  if (session.kind !== "opened") {
+    return { projects: [], models: [] };
+  }
+  try {
+    const [projectsResult, models] = await Promise.all([
+      readActiveProjects(session),
+      listAgentModels(session, "harness"),
+    ]);
+    const projects =
+      projectsResult.kind === "read"
+        ? projectsResult.active.map((project) => ({
+            id: String(project.id),
+            name: project.name,
+          }))
+        : [];
+    return { projects, models };
+  } finally {
+    await session.close();
+  }
+}
+
 function createHostReplayCaseRunner(journalPath: string): ReplayCaseRunner {
+  let cachedCatalog: Promise<ReplayHostCatalog> | undefined;
   return async (runCase, options) => {
-    const model = options.modelOverride ?? runCase.model?.modelId;
-    const args = [
-      resolve(repoRoot, "packages/cli/src/bin.ts"),
-      "agent",
-      "--json",
-      "--mode",
-      runCase.mode,
-      "--project",
-      String(runCase.project.id),
-      ...(model === undefined ? [] : ["--model", String(model)]),
-      "--prompt",
-      runCase.request,
-    ];
+    cachedCatalog ??= loadTargetHostCatalog();
+    const catalog = await cachedCatalog;
+    const built = buildAgentReplayArgs({
+      runCase,
+      modelOverride: options.modelOverride,
+      hostProjects: catalog.projects,
+      hostModels: catalog.models,
+    });
+    if (built.status === "failed") {
+      return { status: "failed", reason: built.reason };
+    }
 
     const spawned = await new Promise<
       | { readonly status: "ran"; readonly exitCode: number; readonly stdout: string }
       | { readonly status: "error"; readonly message: string }
     >((done) => {
-      const child = spawn("bun", args, { cwd: repoRoot, stdio: ["ignore", "pipe", "inherit"] });
+      const child = spawn("bun", built.args, {
+        cwd: repoRoot,
+        stdio: ["ignore", "pipe", "inherit"],
+      });
       let stdout = "";
       child.stdout.on("data", (chunk) => {
         stdout += String(chunk);

@@ -12,7 +12,9 @@ import {
   type ReplayableRunCase,
 } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
+import { pickAgentModel } from "../packages/cli/src/agentThread";
 import {
+  buildAgentReplayArgs,
   formatReplayRunCasesReport,
   parseAgentReplayThreadId,
   parseReplayRunCasesCommand,
@@ -194,5 +196,80 @@ describe("maintainer replayable run case script", () => {
     expect(rootPkg.scripts.test).not.toContain("replay-run-cases");
     expect(rootPkg.scripts.verify).not.toContain("replay-run-cases");
     expect(rootPkg.scripts["replay:run-cases"]).toBe("bun scripts/replay-run-cases.ts");
+  });
+
+  it("passes the resolved Project name (never the Project UUID) to octant agent --project and fails clearly when no name exists", () => {
+    const runCase = makeCase(1, "code", ALL_PROVEN_ITEMS);
+
+    // Prefers the current Project name from the target host over stale stored names.
+    const renamed = buildAgentReplayArgs({
+      runCase,
+      hostProjects: [{ id: String(PROJECT_ID), name: "Octant Renamed" }],
+    });
+    expect(renamed.status).toBe("ready");
+    if (renamed.status === "ready") {
+      const projectFlagIndex = renamed.args.indexOf("--project");
+      expect(projectFlagIndex).toBeGreaterThan(-1);
+      expect(renamed.args[projectFlagIndex + 1]).toBe("Octant Renamed");
+      expect(renamed.args).not.toContain(String(PROJECT_ID));
+    }
+
+    // Falls back to the stored Project name when the host list does not contain it.
+    const fallback = buildAgentReplayArgs({ runCase });
+    expect(fallback.status).toBe("ready");
+    if (fallback.status === "ready") {
+      const projectFlagIndex = fallback.args.indexOf("--project");
+      expect(fallback.args[projectFlagIndex + 1]).toBe("Octant");
+      expect(fallback.args).not.toContain(String(PROJECT_ID));
+    }
+
+    // Fails clearly rather than passing a Project UUID when no name is resolvable.
+    const namelessCase: ReplayableRunCase = {
+      ...runCase,
+      project: { id: PROJECT_ID },
+    };
+    const missing = buildAgentReplayArgs({ runCase: namelessCase, hostProjects: [] });
+    expect(missing.status).toBe("failed");
+    if (missing.status === "failed") {
+      expect(missing.reason).toContain("Project name");
+    }
+  });
+
+  it("disambiguates duplicate model IDs across two endpoints using providerInstanceId", () => {
+    const secondProviderId = decodeProviderInstanceId("55555555-5555-4555-8555-555555555555");
+    const sharedModelId = decodeProviderModelId("gpt-5.2");
+    const runCase: ReplayableRunCase = {
+      ...makeCase(1, "code", ALL_PROVEN_ITEMS),
+      model: { providerInstanceId: secondProviderId, modelId: sharedModelId },
+    };
+    const hostModels = [
+      { instanceId: String(PROVIDER_ID), endpoint: "Personal OpenAI", modelId: "gpt-5.2" },
+      { instanceId: String(secondProviderId), endpoint: "Work OpenAI", modelId: "gpt-5.2" },
+    ] as const;
+
+    // Bare model id would be ambiguous in pickAgentModel.
+    expect(pickAgentModel(hostModels, "gpt-5.2")).toBeUndefined();
+
+    const built = buildAgentReplayArgs({ runCase, hostModels });
+    expect(built.status).toBe("ready");
+    if (built.status === "ready") {
+      const modelFlagIndex = built.args.indexOf("--model");
+      expect(modelFlagIndex).toBeGreaterThan(-1);
+      const selector = built.args[modelFlagIndex + 1];
+      expect(selector).toBe("Work OpenAI/gpt-5.2");
+      expect(pickAgentModel(hostModels, selector ?? "")?.instanceId).toBe(String(secondProviderId));
+    }
+
+    // Explicit --model override is forwarded verbatim.
+    const overridden = buildAgentReplayArgs({
+      runCase,
+      hostModels,
+      modelOverride: "Personal OpenAI/gpt-5.2",
+    });
+    expect(overridden.status).toBe("ready");
+    if (overridden.status === "ready") {
+      const modelFlagIndex = overridden.args.indexOf("--model");
+      expect(overridden.args[modelFlagIndex + 1]).toBe("Personal OpenAI/gpt-5.2");
+    }
   });
 });
