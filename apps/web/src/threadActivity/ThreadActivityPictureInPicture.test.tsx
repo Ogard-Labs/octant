@@ -502,6 +502,51 @@ describe("ThreadActivityPictureInPicture", () => {
     await waitFor(() => expect(computerUse.stop).toHaveBeenCalledOnce());
   });
 
+  it("offers Remember for this Project in the thread preview card when the host allows remembering", async () => {
+    const user = userEvent.setup();
+    const base = computerSession(threadId, "waiting-for-approval");
+    const waiting = {
+      ...base,
+      pendingApproval: {
+        ...base.pendingApproval!,
+        scope: "application-session" as const,
+        canRememberForProject: true,
+      },
+    };
+    const running = computerSession(threadId, "running");
+    const computerUse = {
+      list: vi.fn(async () => [waiting]),
+      decide: vi.fn(async () => running),
+      stop: vi.fn(async () => running),
+      inspect: vi.fn(async () => waiting),
+    } as unknown as ComputerUseClient;
+
+    render(
+      <ThreadActivityPictureInPicture
+        computerUseClient={computerUse}
+        pollIntervalMs={60_000}
+        threadId={threadId as never}
+      >
+        <div>Conversation</div>
+      </ThreadActivityPictureInPicture>,
+    );
+
+    const remember = await screen.findByRole("button", { name: "Remember for this Project" });
+    expect(remember).toBeVisible();
+    await user.click(remember);
+    await waitFor(() =>
+      expect(computerUse.decide).toHaveBeenCalledWith({
+        sessionId: waiting.sessionId,
+        threadId: waiting.threadId,
+        authority: waiting.authority,
+        actionId: waiting.pendingApproval.actionId,
+        approvalId: waiting.pendingApproval.approvalId,
+        decision: "approved",
+        rememberForProject: true,
+      }),
+    );
+  });
+
   it("opens the full prompt, with its sources, before a marked approval can be given from the collapsed strip", async () => {
     const user = userEvent.setup();
     const waiting = computerSession(threadId, "waiting-for-approval", undefined, {

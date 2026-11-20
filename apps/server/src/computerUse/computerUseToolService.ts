@@ -13,13 +13,19 @@ import {
   sameToolActionAuthority,
   type ApprovalOutsideContent,
   type ComputerUseActionKind,
+  type ProjectId,
   type ToolActionAuthority,
 } from "@octant/contracts";
-import { decideDesktopArtifactPath, isToolAllowedByAllowlist } from "@octant/domain";
+import {
+  decideComputerUseApproval,
+  decideDesktopArtifactPath,
+  isToolAllowedByAllowlist,
+} from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { createComputerUsePlugin } from "../plugins/computerUse/computerUsePlugin";
 import {
   createComputerUseRuntime,
+  type ComputerUseApprovalApprover,
   type ComputerUseDestinationReport,
   type ComputerUseEvidenceEvent,
 } from "./computerUseRuntime";
@@ -88,6 +94,14 @@ export function createComputerUseToolService(options: {
   readonly strict?: (owner: ComputerUseOwner) => boolean;
   /** The sources that marked the owner's thread, read when an approval is asked. */
   readonly outsideContent?: (owner: ComputerUseOwner) => ApprovalOutsideContent | undefined;
+  /** Whether a remembered Project grant already covers this Project and app. */
+  readonly projectAppRemembered?: (projectId: ProjectId, appId: string) => boolean;
+  /** Persists a "Remember for this Project" approval for this Project and app. */
+  readonly rememberProjectApp?: (input: {
+    readonly projectId: ProjectId;
+    readonly appId: string;
+    readonly approver: ComputerUseApprovalApprover;
+  }) => void | Promise<void>;
   readonly threadTitle: (owner: ComputerUseOwner) => string;
   readonly record: (event: ComputerUseEvidenceEvent) => void | Promise<void>;
   /**
@@ -105,6 +119,8 @@ export function createComputerUseToolService(options: {
       readonly appId: string;
       readonly sessionId: string;
       readonly authority: ToolActionAuthority;
+      readonly oneTimeOnly: boolean;
+      readonly canRememberForProject: boolean;
       /** The agent's stated reason, shown on the approval this action asks. */
       readonly reason?: string;
       result?: ComputerControlResult;
@@ -135,15 +151,6 @@ export function createComputerUseToolService(options: {
    */
   const outsideContentGates = (owner: ComputerUseOwner): boolean =>
     options.externalContentIngested(owner) && (options.strict?.(owner) ?? true);
-  /**
-   * Whether outside content on the owner's thread makes every action ask.
-   * Under Strict below Full access it does: a standing grant must not carry an
-   * irreversible action the content may have steered (untrustedContentPolicy).
-   * At Full access, and outside Strict, the mark gates nothing, as for every
-   * other tool there, and only the first action on each app asks.
-   */
-  const asksEveryAction = (owner: ComputerUseOwner): boolean =>
-    outsideContentGates(owner) && !options.fullAccess(owner);
   /**
    * Why the tool-call authority gate refuses this owner, or undefined when it
    * admits it. `approved` says a one-time approval for this very action was
@@ -217,14 +224,32 @@ export function createComputerUseToolService(options: {
   }
   const runtime = createComputerUseRuntime({
     destination: { status: "available", kind: "macos-host" },
-    // Where outside content makes every action ask (see `requiresApproval`
-    // below), the offer is for this one action: offering the app there
+    // Where outside content makes every action ask (under Strict below Full
+    // access), the offer is for this one action: offering the app there
     // promised a grant the next action would not honour.
     approvalScope: (request) => {
       const action = pending.get(String(request.actionId));
-      return action !== undefined && asksEveryAction(action.owner)
-        ? undefined
-        : "application-session";
+      return action !== undefined && action.oneTimeOnly ? undefined : "application-session";
+    },
+    approvalCanRememberForProject: (request) => {
+      const action = pending.get(String(request.actionId));
+      return action !== undefined && action.canRememberForProject;
+    },
+    onRememberForProject: async ({ request, targetApp, approver }) => {
+      const action = pending.get(String(request.actionId));
+      if (
+        action === undefined ||
+        action.owner.leaseId !== undefined ||
+        action.authority.projectId === undefined ||
+        options.rememberProjectApp === undefined
+      ) {
+        throw new Error("Computer-use Project approval cannot be persisted for this action.");
+      }
+      await options.rememberProjectApp({
+        projectId: action.authority.projectId,
+        appId: targetApp,
+        approver,
+      });
     },
     // How long an unanswered offer waits, not how long a grant lasts. An
     // offer that died sooner turned a late click into a silent no-op that the
@@ -242,7 +267,7 @@ export function createComputerUseToolService(options: {
       const title =
         action === undefined ? "this task" : options.threadTitle(action.owner).slice(0, 100);
       const head =
-        action !== undefined && asksEveryAction(action.owner)
+        action !== undefined && action.oneTimeOnly
           ? `Allow this one action in ${action.appId}${where} for "${title}".`
           : `Allow control of ${action?.appId ?? "this application"}${where} for "${title}" for this thread.`;
       const prefix = ' The agent says: "';
@@ -398,18 +423,36 @@ export function createComputerUseToolService(options: {
             ? command.operation
             : "observe-window";
     const grantKey = `${ownerKey(owner)}:${JSON.stringify(authority)}:${appId}`;
-    // The first action on each app in a thread always asks: no grant exists
-    // until the person approves one, and no level skips that, Full access
-    // included. The grant is a standing approval for the thread. Where
-    // outside content makes every action ask, the runtime asks again and the
-    // person confirms this action freshly.
-    const requiresApproval = !grants.has(grantKey) || asksEveryAction(owner);
+    const approval = decideComputerUseApproval({
+      plan: false,
+      fullAccess: options.fullAccess(owner),
+      strict: options.strict?.(owner) ?? true,
+      externalContentIngested: options.externalContentIngested(owner),
+      hasThreadGrant: grants.has(grantKey),
+      hasProjectGrant:
+        owner.leaseId === undefined &&
+        authority.projectId !== undefined &&
+        options.projectAppRemembered?.(authority.projectId, appId) === true,
+      hasProjectScope:
+        owner.leaseId === undefined &&
+        authority.projectId !== undefined &&
+        options.rememberProjectApp !== undefined,
+    });
+    if (approval.kind === "refused") {
+      return refused(
+        "unavailable",
+        "Computer use is unavailable for this task's current authority.",
+      );
+    }
+    const requiresApproval = approval.kind === "required";
     const action = {
       owner,
       command,
       appId,
       sessionId,
       authority,
+      oneTimeOnly: approval.kind === "required" && approval.scope === "one-time",
+      canRememberForProject: approval.kind === "required" && approval.canRememberForProject,
       ...(reason === undefined ? {} : { reason }),
     };
     pending.set(actionId, action);

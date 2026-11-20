@@ -49,7 +49,7 @@ import {
   MAX_RUNTIME_TURNS_PER_TURN_SETTING,
   MAX_THREAD_TOOL_STEPS_SETTING,
 } from "./threadToolSteps";
-import { AggregateVersion, UtcTimestamp } from "./events";
+import { AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { DEFAULT_PAIRED_DEVICE_LIFETIME, PairedDeviceLifetime } from "./remoteAccess";
 import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
@@ -687,6 +687,21 @@ export const SkillFolderSettings = Schema.Struct({
 });
 export type SkillFolderSettings = typeof SkillFolderSettings.Type;
 
+/**
+ * One "Remember for this Project" answer to a Computer use first-action
+ * approval below Full access: later threads in that Project control that
+ * application without asking again until the person forgets it in Settings.
+ * Grows only through the approval decision path; a settings replacement may
+ * only forget entries.
+ */
+export const RememberedComputerUseApp = Schema.Struct({
+  projectId: ProjectId,
+  appId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  grantedBy: EventActor,
+  grantedAt: UtcTimestamp,
+}).annotations(strict);
+export type RememberedComputerUseApp = typeof RememberedComputerUseApp.Type;
+
 /** One site remembered for one stored Browser profile; see `rememberedBrowserProfileSites`. */
 export const RememberedBrowserProfileSite = Schema.Struct({
   origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
@@ -1239,6 +1254,15 @@ export const ShellSettings = Schema.Struct({
    */
   rememberedBrowserTransfers: Schema.optionalWith(
     Schema.Array(RememberedBrowserTransfer).pipe(Schema.maxItems(1_024)),
+    { default: () => [] },
+  ),
+  /**
+   * Applications the person approved with "Remember for this Project" for the
+   * bundled Computer use tool below Full access. Grows only through the
+   * approval decision path; a settings replacement may only forget entries.
+   */
+  rememberedComputerUseApps: Schema.optionalWith(
+    Schema.Array(RememberedComputerUseApp).pipe(Schema.maxItems(1_024)),
     { default: () => [] },
   ),
   /** Local opt-in; old grants never inherit a newly enabled native owner. */

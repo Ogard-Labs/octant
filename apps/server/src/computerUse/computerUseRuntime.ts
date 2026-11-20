@@ -56,7 +56,13 @@ export interface ComputerUsePendingApproval {
   readonly expiresAt: string;
   readonly summary: string;
   readonly scope?: "application-session";
+  readonly canRememberForProject?: boolean;
+  readonly outsideContent?: ApprovalOutsideContent;
 }
+
+export type ComputerUseApprovalApprover =
+  | { readonly kind: "window"; readonly windowId: WindowId }
+  | { readonly kind: "paired-device"; readonly deviceId: string };
 
 export type ComputerUseRuntimeView = ComputerUseSessionView;
 
@@ -117,6 +123,7 @@ export interface ComputerUseRuntime {
     readonly actionId: string;
     readonly approvalId: string;
     readonly decision: "approved" | "denied";
+    readonly rememberForProject?: boolean | undefined;
   }) => Promise<ComputerUseRuntimeView>;
   readonly stop: (input: {
     readonly ownerWindowId: WindowId;
@@ -134,13 +141,22 @@ export interface ComputerUseRuntime {
   /**
    * A device the host's own person paired is that person, so it reaches every
    * session on this host, whichever window's turn started it: the person away
-   * from the Mac must be able to stop what drives its desktop. These never
-   * answer an approval; that stays with the owner window's own `decide`.
+   * from the Mac can inspect, answer approvals for, and stop what drives its
+   * desktop, with the paired device recorded as the actor.
    */
   readonly listForHostPerson: () => ReadonlyArray<ComputerUseRuntimeView>;
   readonly inspectForHostPerson: (
     input: ComputerUseHostPersonScope,
   ) => ComputerUseRuntimeView | undefined;
+  readonly decideForHostPerson: (
+    input: ComputerUseHostPersonScope & {
+      readonly actionId: string;
+      readonly approvalId: string;
+      readonly decision: "approved" | "denied";
+      readonly rememberForProject?: boolean | undefined;
+    },
+    device: { readonly deviceId: string },
+  ) => Promise<ComputerUseRuntimeView>;
   readonly stopForHostPerson: (
     input: ComputerUseHostPersonScope,
     device: { readonly deviceId: string },
@@ -177,6 +193,12 @@ export function createComputerUseRuntime(_options: {
   readonly approvalScope?:
     | "application-session"
     | ((request: ComputerUseActionRequest) => "application-session" | undefined);
+  readonly approvalCanRememberForProject?: (request: ComputerUseActionRequest) => boolean;
+  readonly onRememberForProject?: (input: {
+    readonly request: ComputerUseActionRequest;
+    readonly targetApp: string;
+    readonly approver: ComputerUseApprovalApprover;
+  }) => void | Promise<void>;
   readonly approvalSummary?: (request: ComputerUseActionRequest) => string;
   /** The sources that marked the thread, which a one-time approval names. */
   readonly approvalOutsideContent?: (
@@ -509,6 +531,8 @@ export function createComputerUseRuntime(_options: {
           typeof options.approvalScope === "function"
             ? options.approvalScope(input.request)
             : options.approvalScope;
+        const canRememberForProject =
+          options.approvalCanRememberForProject?.(input.request) === true;
         session.state = "waiting-for-approval";
         session.pendingApproval = {
           approvalId,
@@ -520,6 +544,7 @@ export function createComputerUseRuntime(_options: {
               ? `Allow control of ${session.observation.targetApp} for this thread.`
               : `${input.request.kind} in ${session.observation.targetApp}`),
           ...(approvalScope === undefined ? {} : { scope: approvalScope }),
+          ...(canRememberForProject ? { canRememberForProject: true } : {}),
           ...outsideContentOf(options.approvalOutsideContent?.(input.request)),
         };
         await append(session, "approval-requested", "One-time approval is required.");
@@ -546,8 +571,16 @@ export function createComputerUseRuntime(_options: {
     }
   };
 
-  const decide: ComputerUseRuntime["decide"] = async (input) => {
-    const session = scoped(input);
+  const decideSession = async (
+    session: RuntimeSession | undefined,
+    input: {
+      readonly actionId: string;
+      readonly approvalId: string;
+      readonly decision: "approved" | "denied";
+      readonly rememberForProject?: boolean | undefined;
+    },
+    approver: ComputerUseApprovalApprover,
+  ): Promise<ComputerUseRuntimeView> => {
     if (session === undefined) {
       throw new ComputerUseRuntimeError(
         "unauthorized",
@@ -572,18 +605,74 @@ export function createComputerUseRuntime(_options: {
         "Computer-use approval is stale, expired, mismatched, or already consumed.",
       );
     }
+    if (input.rememberForProject === true) {
+      if (input.decision !== "approved" || pending.canRememberForProject !== true) {
+        throw new ComputerUseRuntimeError(
+          "approval-denied",
+          "This computer-use approval cannot be remembered for the Project.",
+        );
+      }
+    }
     session.pendingApproval = undefined;
     if (input.decision === "denied") {
       session.state = "stopped";
-      await append(session, "approval-denied", "User denied the proposed action.");
+      await append(
+        session,
+        "approval-denied",
+        approver.kind === "paired-device"
+          ? `The person denied the proposed action from paired device ${approver.deviceId}.`
+          : "User denied the proposed action.",
+      );
       await cleanup(session);
       return view(session);
     }
-    await append(session, "approval-approved", "User approved this action once.");
+    if (input.rememberForProject === true) {
+      try {
+        await options.onRememberForProject?.({
+          request: session.request,
+          targetApp: session.observation.targetApp,
+          approver,
+        });
+      } catch {
+        session.state = "failed";
+        try {
+          await append(
+            session,
+            "session-failed",
+            "Computer-use Project approval could not be journaled.",
+          );
+        } catch {
+          // Persistence may still be unavailable; cleanup still runs.
+        }
+        await cleanup(session);
+        throw new ComputerUseRuntimeError(
+          "unavailable",
+          "Computer-use Project approval could not be journaled.",
+        );
+      }
+    }
+    const approvalDetail =
+      approver.kind === "paired-device"
+        ? input.rememberForProject === true
+          ? `The person approved this action and remembered it for this Project from paired device ${approver.deviceId}.`
+          : `The person approved this action from paired device ${approver.deviceId}.`
+        : input.rememberForProject === true
+          ? "User approved this action and remembered it for this Project."
+          : "User approved this action once.";
+    await append(session, "approval-approved", approvalDetail);
     if (session.controller.signal.aborted) return await finishAborted(session);
     session.execution = execute(session);
     return await session.execution;
   };
+
+  const decide: ComputerUseRuntime["decide"] = async (input) =>
+    await decideSession(scoped(input), input, { kind: "window", windowId: input.ownerWindowId });
+
+  const decideForHostPerson: ComputerUseRuntime["decideForHostPerson"] = async (input, device) =>
+    await decideSession(scopedForHostPerson(input), input, {
+      kind: "paired-device",
+      deviceId: device.deviceId,
+    });
 
   const stop: ComputerUseRuntime["stop"] = async (input) =>
     await stopSession(scoped(input), "User requested an immediate stop.");
@@ -737,6 +826,7 @@ export function createComputerUseRuntime(_options: {
       const session = scopedForHostPerson(input);
       return session === undefined ? undefined : view(session);
     },
+    decideForHostPerson,
     stopForHostPerson,
     revokeWindow,
     close,

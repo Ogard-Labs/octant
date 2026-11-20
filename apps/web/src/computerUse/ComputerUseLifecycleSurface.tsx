@@ -42,6 +42,7 @@ export function ComputerUseLifecycleSurface(props: {
     <ComputerUseLifecyclePane
       busy={controller.busy}
       onApprove={() => void controller.approve()}
+      onRememberForProject={() => void controller.approveForProject()}
       onDeny={() => void controller.deny()}
       onStop={() => void controller.stop()}
       view={controller.view}

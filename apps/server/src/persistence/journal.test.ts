@@ -268,6 +268,7 @@ describe("Journal", () => {
         browserHeldDownloadLimit: 5,
         browserUploadFileCountLimit: 5,
         rememberedBrowserTransfers: [],
+        rememberedComputerUseApps: [],
         persistentBrowserOwner: false,
         pairedDeviceLifetime: "30-days",
       },

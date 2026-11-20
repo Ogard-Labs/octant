@@ -1191,30 +1191,39 @@ can request control, including one that has read hostile content. The
 selection used to be the person's intent for each send; these rules put that
 intent at the moment of action instead:
 
-- The first Computer action on each application in a thread asks, even under
-  Full access: no app grant exists until the person approves one, and the
-  tool never reads the execution policy to skip the ask. A grant lasts the
-  thread and covers that application, owner, and authority only. It has no
-  clock: it ends when the task is stopped, when the thread is archived or
-  otherwise stops being active, when its provider, model, or authority
-  changes, when Computer is disabled, and at a host restart, because grants
-  are held in memory and never journaled. A setting can remember it for the
-  Project (maintainer request, 2026-11-12; not built yet: no setting
-  remembers a grant for the Project).
-- Below Full access, once outside content has entered the thread (a Browser page, a tool result,
-  imported content), no standing grant carries a Computer action: every
-  action asks again, for that one action, and the ask names what marked the
-  thread. At Full access outside content does not make later actions ask
-  again (maintainer request, 2026-11-12). The level is the thread's as it
-  stands when the action is asked, so lowering a thread brings the ask back
-  on its next action, and a Code turn sent below its thread's level asks.
+- At Full access outside Strict, Computer use requires no first-action
+  approval (maintainer decision, 2026-11-19). Below Full access (and under
+  Strict at Full access), the first Computer action on each application in a
+  thread asks once: no app grant exists until the person approves one. A
+  thread grant lasts the thread and covers that application, owner, and
+  authority only. It has no clock: it ends when the task is stopped, when the
+  thread is archived or otherwise stops being active, when its provider,
+  model, or authority changes, when Computer is disabled, and at a host
+  restart, because thread grants are held in memory. On a Project-scoped
+  thread targeting this host's applications, the first-action approval also
+  offers **Remember for this Project** (never offered on a one-time ask under
+  Strict after outside content), which journals the `(projectId, appId)` grant
+  with actor and timestamp in shell settings so later threads in that Project
+  proceed without first-action approval across restarts while other Projects
+  still ask; Settings › Computer use lists each remembered application and
+  forgets it on request (maintainer request, 2026-11-12; built).
+- Below Full access under Strict, once outside content has entered the thread
+  (a Browser page, a tool result, imported content), no standing grant
+  (thread or remembered Project) carries a Computer action: every action asks
+  again, for that one action, with no Project remember option, and the ask
+  names what marked the thread. Outside Strict, and at Full access, outside
+  content marks the thread without making later actions ask again. The level
+  and Strict state are read from the thread as they stand when the action is
+  asked, so lowering a thread or turning Strict on brings the ask back on its
+  next action, and a Code turn sent below its thread's level asks.
 - The approval card shows the agent's stated reason, quoted as its words, and
   the outside sources with their last read.
-- The person approves control of this Mac, at a local window or a paired device
-  (maintainer decision, 2026-11-12); no agent, routine, hub, or peer host does.
-  Not built yet: today only the person at this Mac approves, and a paired device
-  or remote client may read a session's state and can neither approve nor stop
-  it. A desktop lease's approvals are asked in the thread.
+- The person approves (including **Remember for this Project**) and stops
+  control of this Mac at a local window or a device the host's own person
+  paired (`actsAsHostPerson`), recorded with that actor and timestamp; a
+  hub-introduced or restricted device, agent, routine, hub, or peer host is
+  refused (maintainer decisions, 2026-11-12 and 2026-11-19; built). A desktop
+  lease's approvals are asked in the thread.
 - Stop, cancellation, a changed authority, or turning the plugin off revokes
   control.
 
@@ -13708,11 +13717,15 @@ every eligible Chat, Work, and Code turn, under the offer and approval rules in
 selection exists. The public plugin capability is bound to one task, window,
 provider, model, and access posture, and may pass the agent's one-line reason
 for an action to the host, which shows it on the approval and grants nothing
-for it. The first action in each application asks once and the grant lasts the
-thread; a setting can remember it for the Project. At Full access outside
-content does not make later actions ask again; below Full access that re-ask
-stays (maintainer request, 2026-11-12). Not built yet: no setting
-remembers a grant for the Project. Stop, cancellation, changed authority, or disable revokes
+for it. At Full access outside Strict no first-action approval is required;
+below Full access (and under Strict at Full access) the first action in each
+application asks once and the grant lasts the thread, and the card offers
+**Remember for this Project** (journaled with actor and timestamp and
+forgettable in Settings › Computer use; maintainer decisions, 2026-11-12 and
+2026-11-19; built). Outside Strict, and at Full access, outside content does
+not make later actions ask again; below Full access under Strict that one-time
+re-ask stays and withholds Project remembering. Stop, cancellation, changed
+authority, or disable revokes
 control. Observations carry window and element identities, with screenshots
 for image-capable models. Application content remains untrusted.
 Lifecycle evidence retains the exact tool authority: Chat may have no Project;
@@ -14203,8 +14216,10 @@ mechanisms are:
        switch. A provider's own commands are not on the list outside
        Strict ([Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
        built for Octant Shield's forge hard lines).
-    3. Computer use: the first action in each application asks, once per
-       thread, because it drives the person's real desktop.
+    3. Computer use under Strict: outside Strict, Full access needs no
+       first-action approval (maintainer decision, 2026-11-19; built). Under
+       Strict, the first action in each application still asks once per thread
+       unless remembered for the Project.
     4. The Browser on a signed-in profile: a site approval per origin and
        profile, which the person can remember or widen to "Allow all sites
        in this profile". A Private page needs none.
@@ -14616,13 +14631,14 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Auto, Ask first, Accept edits, or Full access, and a device the host's
     own person did not pair cannot pick Full access for it. A Work thread
     moves to Plan from its own mode picker, as a Code thread does.
-  - **Computer keeps its first-action ask** at every level, Full access
-    included: it asks at the first action in each application, once per
-    thread. The Browser asks only on a signed-in profile, at every level; a
-    Private page asks nothing at any level (maintainer decision, 2026-11-17;
-    before, only at Full access). Both are entries in the Full access rule
-    above (maintainer request, 2026-11-12, replacing the earlier decision
-    that both asked at every level). Built.
+  - **Computer asks below Full access (and under Strict at Full access):**
+    outside Strict, Full access requires no first-action approval (maintainer
+    decision, 2026-11-19). Below Full access (and under Strict), it asks at
+    the first action in each application, once per thread, and offers
+    **Remember for this Project** (journaled per Project and application,
+    visible and forgettable in Settings › Computer use). The Browser asks only
+    on a signed-in profile, at every level; a Private page asks nothing at any
+    level (maintainer decision, 2026-11-17; before, only at Full access). Built.
   - **Plan is an overlay,** not a level: a mode of a thread at any level,
     always read-only.
   - **Lowering is journaled and shown.** Each change records who lowered it,

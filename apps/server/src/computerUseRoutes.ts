@@ -23,6 +23,7 @@ export function createComputerUseRouteHandler(options: {
     | "stop"
     | "listForHostPerson"
     | "inspectForHostPerson"
+    | "decideForHostPerson"
     | "stopForHostPerson"
   >;
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -74,7 +75,7 @@ export function createComputerUseRouteHandler(options: {
         if (!principalActsAsHostPerson(context.principal)) {
           return failure(
             "unauthorized",
-            "Computer use is stopped by the host's own person.",
+            "Computer use is controlled only by the host's own person.",
             403,
             origin,
           );
@@ -137,7 +138,9 @@ export function createComputerUseRouteHandler(options: {
         }
       } else if (path === "/api/computer-use/approvals") {
         const decision = decodeComputerUseApprovalDecisionRequest(body.value);
-        result = await options.runtime.decide({ ownerWindowId, ...decision });
+        result = pairedPerson
+          ? await options.runtime.decideForHostPerson(decision, { deviceId: pairedDeviceId })
+          : await options.runtime.decide({ ownerWindowId, ...decision });
       } else {
         const stop = decodeComputerUseStopRequest(body.value);
         result = pairedPerson

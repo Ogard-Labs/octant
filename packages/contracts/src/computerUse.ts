@@ -181,6 +181,8 @@ export const ComputerUsePendingApproval = Schema.Struct({
   expiresAt: UtcTimestamp,
   summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   scope: Schema.optional(Schema.Literal("application-session")),
+  /** Whether the person may remember this application grant for the thread's Project. */
+  canRememberForProject: Schema.optional(Schema.Boolean),
   /** Present when the thread has taken in outside content; see `ApprovalOutsideContent`. */
   outsideContent: Schema.optional(ApprovalOutsideContent),
 }).annotations({ ...strict, ...personDecides });
@@ -222,7 +224,14 @@ export const ComputerUseApprovalDecisionRequest = Schema.Struct({
   actionId: ToolActionId,
   approvalId: ToolApprovalId,
   decision: Schema.Literal("approved", "denied"),
-}).annotations(strict);
+  rememberForProject: Schema.optional(Schema.Boolean),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (request) => request.decision === "approved" || request.rememberForProject !== true,
+    ),
+  );
 export type ComputerUseApprovalDecisionRequest = typeof ComputerUseApprovalDecisionRequest.Type;
 
 export const ComputerUseStopRequest = ComputerUseSessionScope;

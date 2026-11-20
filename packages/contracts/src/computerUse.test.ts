@@ -9,6 +9,8 @@ import {
   decodeComputerUseSessionState,
   decodeComputerUseApprovalState,
   decodeComputerUseSensitiveFieldKind,
+  decodeComputerUsePendingApproval,
+  decodeComputerUseApprovalDecisionRequest,
 } from "./computerUse";
 
 describe("ComputerUseActionKind", () => {
@@ -193,5 +195,48 @@ describe("ComputerUseFailure", () => {
       const failure = decodeComputerUseFailure({ category, message: "test" });
       expect(failure.category).toBe(category);
     }
+  });
+});
+
+describe("ComputerUse approval contracts", () => {
+  it("accepts rememberForProject on an approval and refuses it on a denial", () => {
+    const pending = decodeComputerUsePendingApproval({
+      approvalId: "00000000-0000-4000-8000-000000000010",
+      actionId: "00000000-0000-4000-8000-000000000002",
+      expiresAt: "2026-07-24T12:05:00.000Z",
+      summary: "Allow control of Preview for this thread.",
+      scope: "application-session",
+      canRememberForProject: true,
+    });
+    expect(pending.canRememberForProject).toBe(true);
+
+    const baseDecision = {
+      sessionId: "00000000-0000-4000-8000-000000000001",
+      threadId: "00000000-0000-4000-8000-000000000007",
+      authority: {
+        hostId: "00000000-0000-4000-8000-000000000004",
+        mode: "work",
+        projectId: "00000000-0000-4000-8000-000000000005",
+        providerInstanceId: "00000000-0000-4000-8000-000000000006",
+        extension: { kind: "core" },
+      },
+      actionId: "00000000-0000-4000-8000-000000000002",
+      approvalId: "00000000-0000-4000-8000-000000000010",
+    } as const;
+
+    const approved = decodeComputerUseApprovalDecisionRequest({
+      ...baseDecision,
+      decision: "approved",
+      rememberForProject: true,
+    });
+    expect(approved.rememberForProject).toBe(true);
+
+    expect(() =>
+      decodeComputerUseApprovalDecisionRequest({
+        ...baseDecision,
+        decision: "denied",
+        rememberForProject: true,
+      }),
+    ).toThrow();
   });
 });

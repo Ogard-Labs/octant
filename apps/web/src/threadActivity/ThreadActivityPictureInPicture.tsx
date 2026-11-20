@@ -199,7 +199,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
     }
   }, [currentComputerSession?.sessionId]);
 
-  async function decideComputerUse(decision: "approved" | "denied") {
+  async function decideComputerUse(decision: "approved" | "denied", rememberForProject?: boolean) {
     const pending = currentComputerSession?.pendingApproval;
     if (
       pending === undefined ||
@@ -219,6 +219,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
         actionId: pending.actionId,
         approvalId: pending.approvalId,
         decision,
+        ...(rememberForProject === true ? { rememberForProject: true } : {}),
       });
       setComputerSession(isComputerUseActivity(next) ? next : undefined);
     } catch {
@@ -325,6 +326,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
         <ComputerUseActivityPreview
           busy={busy}
           onApprove={() => void decideComputerUse("approved")}
+          onRememberForProject={() => void decideComputerUse("approved", true)}
           onDeny={() => void decideComputerUse("denied")}
           session={currentComputerSession}
         />
@@ -384,6 +386,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
 function ComputerUseActivityPreview(props: {
   readonly busy: boolean;
   readonly onApprove: () => void;
+  readonly onRememberForProject: () => void;
   readonly onDeny: () => void;
   readonly session: ComputerUseSessionView;
 }) {
@@ -410,6 +413,17 @@ function ComputerUseActivityPreview(props: {
           >
             Deny
           </OctantButton>
+          {props.session.pendingApproval.canRememberForProject === true ? (
+            <OctantButton
+              disabled={props.busy}
+              onClick={props.onRememberForProject}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Remember for this Project
+            </OctantButton>
+          ) : null}
           <OctantButton disabled={props.busy} onClick={props.onApprove} size="sm" type="button">
             {computerUseApproveLabel(props.session.pendingApproval)}
           </OctantButton>

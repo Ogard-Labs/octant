@@ -38,6 +38,7 @@ import {
   enabledModes,
   browserProfileSiteListed,
   browserTransferRemembered,
+  computerUseAppRemembered,
   normalizeEnvironmentPresentationState,
   reconcileWorkspaceWithSettings,
   replaceShellSettings,
@@ -311,6 +312,72 @@ export class ShellService implements ShellServiceApi {
         },
         expectedVersion: input.expectedVersion,
         events: [this.#pendingEvent("shell.settings-replaced", { settings })],
+      });
+      return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
+    } catch (error) {
+      throw this.#mapFailure(error);
+    }
+  }
+
+  /**
+   * The Computer use counterpart of {@link rememberBrowserOrigins}: remembers
+   * a "Remember for this Project" approval for one Project and application,
+   * journaled with the approving local user or person-paired device and time.
+   */
+  rememberComputerUseApp(input: {
+    readonly approver:
+      | { readonly kind: "window"; readonly windowId: WindowId }
+      | { readonly kind: "paired-device"; readonly actor: EventActor };
+    readonly expectedVersion: AggregateVersion;
+    readonly projectId: ProjectId;
+    readonly appId: string;
+  }): ShellCommandResult {
+    this.#assertReady();
+    try {
+      let actor: EventActor;
+      if (input.approver.kind === "window") {
+        if (!this.#registeredWindowIds.has(input.approver.windowId)) {
+          throw new ShellServiceError({
+            category: "invalid",
+            message: "Shell command window is not registered with this server session.",
+          });
+        }
+        actor = { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID };
+      } else {
+        if (input.approver.actor.kind !== "remote-device") {
+          throw new ShellServiceError({
+            category: "invalid",
+            message: "Paired-device computer-use approval requires a remote-device actor.",
+          });
+        }
+        actor = input.approver.actor;
+      }
+      const current = this.#persistence.readShellSettings()?.settings ?? defaultShellSettings();
+      const merged = computerUseAppRemembered(
+        current.rememberedComputerUseApps,
+        input.projectId,
+        input.appId,
+      )
+        ? current.rememberedComputerUseApps
+        : current.rememberedComputerUseApps.concat([
+            {
+              projectId: input.projectId,
+              appId: input.appId,
+              grantedBy: actor,
+              grantedAt: decodeTimestamp(this.#clock()),
+            },
+          ]);
+      const settings = this.#withJudgedDefaultFolder(
+        { ...current, rememberedComputerUseApps: merged },
+        current,
+      );
+      const committed = this.#persistence.journal.append({
+        aggregate: {
+          aggregateType: "shell-settings",
+          aggregateId: SHELL_SETTINGS_AGGREGATE_ID,
+        },
+        expectedVersion: input.expectedVersion,
+        events: [this.#pendingEvent("shell.settings-replaced", { settings }, actor)],
       });
       return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
     } catch (error) {

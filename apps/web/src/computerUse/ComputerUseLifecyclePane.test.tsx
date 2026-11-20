@@ -112,6 +112,38 @@ describe("ComputerUseLifecyclePane", () => {
       ),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Allow app for this thread" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Remember for this Project" })).toBeNull();
+  });
+
+  it("offers Remember for this Project only when the host says the approval can be remembered", () => {
+    const approve = vi.fn();
+    const remember = vi.fn();
+    const rememberable = decodeComputerUseSessionView({
+      ...waiting,
+      pendingApproval: {
+        approvalId: "80000000-0000-4000-8000-000000000001",
+        actionId: "90000000-0000-4000-8000-000000000001",
+        expiresAt: "2026-07-27T21:01:00.000Z",
+        summary: "Allow control of Preview for this thread.",
+        scope: "application-session",
+        canRememberForProject: true,
+      },
+    });
+    render(
+      <ComputerUseLifecyclePane
+        onApprove={approve}
+        onRememberForProject={remember}
+        onDeny={() => undefined}
+        onStop={() => undefined}
+        view={rememberable}
+      />,
+    );
+
+    const rememberButton = screen.getByRole("button", { name: "Remember for this Project" });
+    expect(rememberButton).toBeVisible();
+    fireEvent.click(rememberButton);
+    expect(remember).toHaveBeenCalledOnce();
+    expect(approve).not.toHaveBeenCalled();
   });
 
   it.each([

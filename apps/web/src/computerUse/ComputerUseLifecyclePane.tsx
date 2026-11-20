@@ -7,6 +7,7 @@ export interface ComputerUseLifecyclePaneProps {
   readonly view: ComputerUseSessionView;
   readonly busy?: boolean;
   readonly onApprove: () => void;
+  readonly onRememberForProject?: () => void;
   readonly onDeny: () => void;
   readonly onStop: () => void;
 }
@@ -42,6 +43,17 @@ export function ComputerUseLifecyclePane(props: ComputerUseLifecyclePaneProps) {
             <OctantButton disabled={props.busy} onClick={props.onApprove} type="button">
               {computerUseApproveLabel(props.view.pendingApproval)}
             </OctantButton>
+            {props.view.pendingApproval.canRememberForProject === true &&
+            props.onRememberForProject !== undefined ? (
+              <OctantButton
+                disabled={props.busy}
+                onClick={props.onRememberForProject}
+                type="button"
+                variant="secondary"
+              >
+                Remember for this Project
+              </OctantButton>
+            ) : null}
             <OctantButton
               disabled={props.busy}
               onClick={props.onDeny}

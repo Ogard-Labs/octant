@@ -39,7 +39,7 @@ feel (Appearance, Sidebar, Keybindings), AI (Providers & Models, Octant Harness,
 Voice & images, then Chat, Work and Code: which provider or model answers each
 job, and how each mode starts), Tools (Skills & Extensions, Web search, Computer use,
 Device tools, GitHub, Linear: what a running agent may reach; Web search's
-rules are in [Web search backends](web-search-backends.md#settings)), Safety (Permissions,
+rules are in [Web search backends](web-search-backends.md#settings), and Computer use holds the plugin switch, guided setup, driver updates, and **Remembered applications** listing each Project and application remembered from a below-Full-access approval with **Forget**), Safety (Permissions,
 Secret stores, Memory: what an agent may touch, reach and remember), and
 Data & devices (Data & storage, Sync, Remote access, Host, Usage: what this
 computer stores and the other machines it talks to). An earlier Privacy & data

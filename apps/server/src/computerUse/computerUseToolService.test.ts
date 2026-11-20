@@ -7,8 +7,12 @@ import {
   decodeDesktopLeaseId,
   decodeDesktopProviderId,
   decodeEventActor,
+  decodeProjectId,
+  decodeShellCommand,
   decodeToolActionAuthority,
+  type ProjectId,
 } from "@octant/contracts";
+import { computerUseAppRemembered, defaultShellSettings } from "@octant/domain";
 import {
   decodeComputerUseOwner,
   decodeComputerControlResult,
@@ -26,6 +30,10 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import type { PersistenceService } from "../persistence/persistenceService";
+import { rebuildProjections } from "../persistence/projection";
+import { readShellSettings } from "../persistence/shellProjection";
+import { ShellService } from "../shellService";
 import type { ComputerUseEvidenceEvent } from "./computerUseRuntime";
 import { createComputerUseToolService } from "./computerUseToolService";
 import type {
@@ -680,9 +688,33 @@ describe("Computer offered on every eligible turn", () => {
     }
   });
 
-  it("asks before the first action on each app in a thread even under Full access", async () => {
+  it("runs the first action without approval at Full access outside Strict", async () => {
+    const fullAccess = decodeComputerUseOwner({
+      ...owner,
+      mode: "work",
+      executionPolicy: "full-access",
+    });
+    const f = fixture({ toolOwner: fullAccess, fullAccess: true, strict: false });
+    try {
+      const result = await f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      expect(result).toMatchObject({ result: { kind: "windows" } });
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(
+        f.service.runtime
+          .list(fullAccess.windowId)
+          .some((view) => view.pendingApproval !== undefined),
+      ).toBe(false);
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("asks before the first action on each app in a thread under Strict even at Full access", async () => {
     const fullAccess = decodeComputerUseOwner({ ...owner, executionPolicy: "full-access" });
-    const f = fixture({ toolOwner: fullAccess });
+    const f = fixture({ toolOwner: fullAccess, fullAccess: true, strict: true });
     try {
       const first = f.tools.execute({
         name: "octant_computer",
@@ -700,6 +732,294 @@ describe("Computer offered on every eligible turn", () => {
       expect(askedAgain.summary).toContain("com.example.Other");
       await other;
       expect(f.execute).toHaveBeenCalledTimes(2);
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("remembers an app grant for the Project across restarts and threads, isolates other Projects, and asks again once forgotten", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-computer-project-remember-"));
+    directories.push(directory);
+    const projectA = decodeProjectId("55555555-5555-4555-8555-555555555501");
+    const projectB = decodeProjectId("55555555-5555-4555-8555-555555555502");
+    const threadA1 = decodeComputerUseOwner({
+      ...owner,
+      mode: "work",
+      threadId: "22222222-2222-4222-8222-222222222201",
+    });
+    const threadA2 = decodeComputerUseOwner({
+      ...owner,
+      mode: "work",
+      threadId: "22222222-2222-4222-8222-222222222202",
+    });
+    const threadB1 = decodeComputerUseOwner({
+      ...owner,
+      mode: "work",
+      threadId: "22222222-2222-4222-8222-222222222203",
+    });
+    const authorityFor = (projectId: ProjectId) =>
+      decodeToolActionAuthority({
+        hostId: "44444444-4444-4444-8444-444444444444",
+        mode: "work",
+        projectId,
+        providerInstanceId: owner.providerInstanceId,
+        extension: { kind: "core" },
+      });
+    const projectOf = (target: ComputerUseOwner): ProjectId =>
+      String(target.threadId) === String(threadB1.threadId) ? projectB : projectA;
+
+    const boot = () => {
+      const connection = openSqlite(join(directory, "octant.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => "2026-11-19T12:00:00.000Z");
+      const runtime = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: runtime.events,
+        projections: runtime.projections,
+        clock: () => "2026-11-19T12:00:00.000Z",
+      });
+      const persistence = {
+        journal,
+        readShellSettings: () => readShellSettings(connection),
+        readWindowWorkspace: () => undefined,
+        readWindowWorkspaces: () => [],
+        readEnvironmentPresentation: () => undefined,
+        readProject: () => undefined,
+        readChatThread: () => undefined,
+        readCodeThread: () => undefined,
+        status: () => ({ state: "current" as const, integrity: "ok" as const }),
+        rebuildProjections: () =>
+          rebuildProjections({
+            connection,
+            journal,
+            projections: runtime.projections.all(),
+            clock: () => "2026-11-19T12:00:00.000Z",
+          }),
+        close: () => connection.close(),
+      };
+      const shellService = new ShellService({
+        persistence: persistence as unknown as PersistenceService,
+        uuid: () => crypto.randomUUID(),
+        clock: () => "2026-11-19T12:00:00.000Z",
+      });
+      shellService.bootstrap(owner.windowId);
+      const execute = vi.fn(async () =>
+        decodeComputerControlResult({
+          kind: "windows",
+          appId: "com.example.Fixture",
+          windows: [{ windowId: 9, title: "Fixture" }],
+        }),
+      );
+      const service = createComputerUseToolService({
+        desktop: {
+          status: async () => ({
+            supported: true,
+            enabled: true,
+            automaticUpdates: true,
+            permissions: { accessibility: true, screenRecording: true },
+            driver: "ready",
+            activeSessions: 0,
+            update: "current",
+          }),
+          configure: async () => {},
+          reserve: async () => true,
+          execute,
+          release: async () => {},
+        },
+        settings: () => ({ enabled: true, automaticUpdates: true }),
+        authority: (target) => authorityFor(projectOf(target)),
+        ownerIsCurrent: () => true,
+        toolConstraints: () => [],
+        fullAccess: () => false,
+        strict: () => false,
+        externalContentIngested: () => false,
+        projectAppRemembered: (projectId, appId) =>
+          computerUseAppRemembered(
+            (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+              .rememberedComputerUseApps,
+            projectId,
+            appId,
+          ),
+        rememberProjectApp: ({ projectId, appId, approver }) => {
+          const stored = persistence.readShellSettings();
+          shellService.rememberComputerUseApp({
+            approver:
+              approver.kind === "window"
+                ? approver
+                : {
+                    kind: "paired-device",
+                    actor: decodeEventActor({
+                      kind: "remote-device",
+                      actorId: approver.deviceId,
+                      deviceId: approver.deviceId,
+                    }),
+                  },
+            expectedVersion: stored?.aggregateVersion ?? (0 as never),
+            projectId,
+            appId,
+          });
+        },
+        threadTitle: () => "Project task",
+        record: async () => {},
+        now: () => Date.now(),
+      });
+      return { persistence, shellService, service, execute };
+    };
+
+    const command = {
+      name: "octant_computer",
+      inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+    };
+
+    // First server lifetime: approve with "Remember for this Project" in Project A.
+    const firstBoot = boot();
+    try {
+      const toolsA1 = firstBoot.service.toolSet(threadA1);
+      if (toolsA1 === undefined) throw new Error("Expected offered tool.");
+      const pendingCall = toolsA1.execute(command);
+      await vi.waitFor(() =>
+        expect(
+          firstBoot.service.runtime.list(owner.windowId).find((v) => v.pendingApproval),
+        ).toBeDefined(),
+      );
+      const view = firstBoot.service.runtime.list(owner.windowId).find((v) => v.pendingApproval);
+      if (view?.pendingApproval === undefined) throw new Error("Expected pending approval.");
+      expect(view.pendingApproval.canRememberForProject).toBe(true);
+      await firstBoot.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: threadA1.threadId,
+        authority: authorityFor(projectA),
+        sessionId: view.sessionId,
+        actionId: view.pendingApproval.actionId,
+        approvalId: view.pendingApproval.approvalId,
+        decision: "approved",
+        rememberForProject: true,
+      });
+      expect(await pendingCall).toMatchObject({ result: { kind: "windows" } });
+      expect(firstBoot.persistence.readShellSettings()?.settings.rememberedComputerUseApps).toEqual(
+        [
+          expect.objectContaining({
+            projectId: projectA,
+            appId: "com.example.Fixture",
+            grantedBy: expect.objectContaining({ kind: "local-user" }),
+            grantedAt: "2026-11-19T12:00:00.000Z",
+          }),
+        ],
+      );
+    } finally {
+      await firstBoot.service.close();
+      firstBoot.persistence.close();
+    }
+
+    // Simulated restart: reopen persistence and rebuild projections from the journal.
+    const secondBoot = boot();
+    try {
+      secondBoot.persistence.rebuildProjections();
+      // A brand-new thread in Project A runs without first-action approval.
+      const toolsA2 = secondBoot.service.toolSet(threadA2);
+      if (toolsA2 === undefined) throw new Error("Expected offered tool.");
+      expect(await toolsA2.execute(command)).toMatchObject({ result: { kind: "windows" } });
+      expect(secondBoot.execute).toHaveBeenCalledOnce();
+      expect(
+        secondBoot.service.runtime
+          .list(owner.windowId)
+          .some((view) => view.pendingApproval !== undefined),
+      ).toBe(false);
+
+      // A thread in Project B still requires approval.
+      const toolsB1 = secondBoot.service.toolSet(threadB1);
+      if (toolsB1 === undefined) throw new Error("Expected offered tool.");
+      const pendingB = toolsB1.execute(command);
+      await vi.waitFor(() =>
+        expect(
+          secondBoot.service.runtime.list(owner.windowId).find((v) => v.pendingApproval),
+        ).toBeDefined(),
+      );
+      const viewB = secondBoot.service.runtime.list(owner.windowId).find((v) => v.pendingApproval);
+      if (viewB?.pendingApproval === undefined) throw new Error("Expected Project B approval.");
+      await secondBoot.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: threadB1.threadId,
+        authority: authorityFor(projectB),
+        sessionId: viewB.sessionId,
+        actionId: viewB.pendingApproval.actionId,
+        approvalId: viewB.pendingApproval.approvalId,
+        decision: "denied",
+      });
+      expect(await pendingB).toMatchObject({ isError: true });
+
+      // Forgetting the remembered app in Settings makes a new Project A thread ask again.
+      const stored = secondBoot.persistence.readShellSettings();
+      if (stored === undefined) throw new Error("Expected stored settings.");
+      secondBoot.shellService.execute(
+        decodeShellCommand({
+          kind: "replace-settings",
+          windowId: owner.windowId,
+          expectedVersion: stored.aggregateVersion,
+          settings: { ...stored.settings, rememberedComputerUseApps: [] },
+        }),
+      );
+      const threadA3 = decodeComputerUseOwner({
+        ...owner,
+        mode: "work",
+        threadId: "22222222-2222-4222-8222-222222222204",
+      });
+      const toolsA3 = secondBoot.service.toolSet(threadA3);
+      if (toolsA3 === undefined) throw new Error("Expected offered tool.");
+      const pendingA3 = toolsA3.execute(command);
+      await vi.waitFor(() =>
+        expect(
+          secondBoot.service.runtime.list(owner.windowId).find((v) => v.pendingApproval),
+        ).toBeDefined(),
+      );
+      const viewA3 = secondBoot.service.runtime.list(owner.windowId).find((v) => v.pendingApproval);
+      if (viewA3?.pendingApproval === undefined)
+        throw new Error("Expected Project A approval after forgetting.");
+      await secondBoot.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: threadA3.threadId,
+        authority: authorityFor(projectA),
+        sessionId: viewA3.sessionId,
+        actionId: viewA3.pendingApproval.actionId,
+        approvalId: viewA3.pendingApproval.approvalId,
+        decision: "denied",
+      });
+      expect(await pendingA3).toMatchObject({ isError: true });
+    } finally {
+      await secondBoot.service.close();
+      secondBoot.persistence.close();
+    }
+  });
+
+  it("refuses rememberForProject when the pending approval does not allow remembering", async () => {
+    const f = fixture({ strict: true });
+    try {
+      f.taint();
+      const pendingCall = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const view = f.service.runtime.list(owner.windowId)[0];
+      if (view?.pendingApproval === undefined) throw new Error("Expected approval.");
+      expect(view.pendingApproval.canRememberForProject).toBeUndefined();
+      await expect(
+        f.service.runtime.decide({
+          ownerWindowId: owner.windowId,
+          threadId: owner.threadId,
+          authority,
+          sessionId: view.sessionId,
+          actionId: view.pendingApproval.actionId,
+          approvalId: view.pendingApproval.approvalId,
+          decision: "approved",
+          rememberForProject: true,
+        }),
+      ).rejects.toThrow("cannot be remembered for the Project");
+      await f.tools.close?.();
+      expect(await pendingCall).toMatchObject({ isError: true });
+      expect(f.execute).not.toHaveBeenCalled();
     } finally {
       await f.service.close();
     }

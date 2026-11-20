@@ -134,3 +134,52 @@ it("opens each privacy pane explicitly and requires a successful test before cla
   expect(await screen.findByText("Not tested")).toBeVisible();
   expect(screen.getByRole("button", { name: "Test Computer use" })).toBeDisabled();
 });
+
+it("lists remembered Project applications and forgets one through settings", async () => {
+  const onSettingsChange = vi.fn();
+  const projectA = "30000000-0000-4000-8000-000000000001" as never;
+  const projectB = "30000000-0000-4000-8000-000000000002" as never;
+  const preview = {
+    projectId: projectA,
+    appId: "com.apple.Preview",
+    grantedBy: {
+      kind: "local-user" as const,
+      actorId: "00000000-0000-4000-8000-000000000002" as never,
+    },
+    grantedAt: "2026-11-19T12:00:00.000Z" as never,
+  };
+  const safari = {
+    projectId: projectB,
+    appId: "com.apple.Safari",
+    grantedBy: {
+      kind: "local-user" as const,
+      actorId: "00000000-0000-4000-8000-000000000002" as never,
+    },
+    grantedAt: "2026-11-19T12:01:00.000Z" as never,
+  };
+  render(
+    <ComputerUseSettingsView
+      settings={{ enabled: true, automaticUpdates: false }}
+      rememberedApps={[preview, safari]}
+      projectNames={
+        new Map([
+          [String(projectA), "Alpha"],
+          [String(projectB), "Beta"],
+        ])
+      }
+      onSettingsChange={onSettingsChange}
+      bridge={{}}
+    />,
+  );
+
+  expect(screen.getByText("com.apple.Preview · Alpha")).toBeVisible();
+  expect(screen.getByText("com.apple.Safari · Beta")).toBeVisible();
+  const forgetButtons = screen.getAllByRole("button", { name: "Forget" });
+  expect(forgetButtons).toHaveLength(2);
+  fireEvent.click(forgetButtons[0]!);
+  await waitFor(() =>
+    expect(onSettingsChange).toHaveBeenCalledWith({
+      rememberedComputerUseApps: [safari],
+    }),
+  );
+});

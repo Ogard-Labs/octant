@@ -2099,6 +2099,147 @@ describe("ShellService", () => {
     ).toMatchObject({ kind: "settings-replaced", settings: { rememberedBrowserTransfers: [] } });
   });
 
+  it("refuses remembered Computer use apps added through replace-settings, journals them with actor and timestamp for a window or paired device, and lets Settings forget them", () => {
+    let storedSettings: ReturnType<PersistenceService["readShellSettings"]>;
+    const stub = persistenceStub();
+    const append = vi.fn(
+      (request: {
+        readonly expectedVersion: number;
+        readonly events: ReadonlyArray<{ readonly payload: { readonly settings: unknown } }>;
+      }) => {
+        const result = stub.append(request);
+        const settings = request.events[0]?.payload.settings;
+        if (settings !== undefined) {
+          storedSettings = {
+            settings: settings as ReturnType<typeof defaultShellSettings>,
+            aggregateVersion: result.aggregateVersion as never,
+          };
+        }
+        return result;
+      },
+    );
+    const persistence = {
+      ...stub.persistence,
+      journal: { append, transaction: <A>(body: () => A): A => body() },
+      readShellSettings: () => storedSettings,
+    } as unknown as PersistenceService;
+    const service = new ShellService({
+      persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    service.bootstrap(ids.window);
+    const localActor = { kind: "local-user" as const, actorId: OCTANT_LOCAL_ACTOR_ID };
+    const localEntry = {
+      projectId,
+      appId: "com.apple.Preview",
+      grantedBy: localActor,
+      grantedAt: now as never,
+    };
+    const remembered = { ...defaultShellSettings(), rememberedComputerUseApps: [localEntry] };
+
+    expect(() =>
+      service.execute(
+        decodeShellCommand({
+          kind: "replace-settings",
+          windowId: ids.window,
+          expectedVersion: 0,
+          settings: remembered,
+        }),
+      ),
+    ).toThrowError(
+      expect.objectContaining({ failure: expect.objectContaining({ category: "invalid" }) }),
+    );
+    expect(() =>
+      service.rememberComputerUseApp({
+        approver: {
+          kind: "window",
+          windowId: "60000000-0000-4000-8000-0000000000aa" as never,
+        },
+        expectedVersion: 0 as never,
+        projectId,
+        appId: "com.apple.Preview",
+      }),
+    ).toThrowError(
+      expect.objectContaining({ failure: expect.objectContaining({ category: "invalid" }) }),
+    );
+    expect(append).not.toHaveBeenCalled();
+
+    expect(
+      service.rememberComputerUseApp({
+        approver: { kind: "window", windowId: ids.window },
+        expectedVersion: 0 as never,
+        projectId,
+        appId: "com.apple.Preview",
+      }),
+    ).toEqual({ kind: "settings-replaced", settings: remembered, version: 1 });
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "shell.settings-replaced",
+            actor: localActor,
+            occurredAt: now,
+            payload: { settings: remembered },
+          }),
+        ],
+      }),
+    );
+
+    const pairedDeviceId = "70000000-0000-4000-8000-0000000000aa" as never;
+    const pairedActor = {
+      kind: "remote-device" as const,
+      actorId: pairedDeviceId,
+      deviceId: pairedDeviceId,
+    };
+    const pairedEntry = {
+      projectId,
+      appId: "com.apple.Safari",
+      grantedBy: pairedActor,
+      grantedAt: now as never,
+    };
+    expect(
+      service.rememberComputerUseApp({
+        approver: { kind: "paired-device", actor: pairedActor },
+        expectedVersion: 1 as never,
+        projectId,
+        appId: "com.apple.Safari",
+      }),
+    ).toEqual({
+      kind: "settings-replaced",
+      settings: {
+        ...defaultShellSettings(),
+        rememberedComputerUseApps: [localEntry, pairedEntry],
+      },
+      version: 2,
+    });
+    expect(append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "shell.settings-replaced",
+            actor: pairedActor,
+            occurredAt: now,
+          }),
+        ],
+      }),
+    );
+
+    expect(
+      service.execute(
+        decodeShellCommand({
+          kind: "replace-settings",
+          windowId: ids.window,
+          expectedVersion: 2,
+          settings: { ...remembered, rememberedComputerUseApps: [localEntry] },
+        }),
+      ),
+    ).toMatchObject({
+      kind: "settings-replaced",
+      settings: { rememberedComputerUseApps: [localEntry] },
+    });
+  });
+
   it("keeps reporting a folder stored under Documents after the host default moved", () => {
     const stored = decodeShellSettings({
       ...defaultShellSettings(),

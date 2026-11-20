@@ -1,19 +1,25 @@
+import { useState } from "react";
 import { ComputerUseSetup } from "./ComputerUseSetup";
 import { useComputerUseSetup, type ComputerBridge } from "./useComputerUseSetup";
 import {
   type ComputerUseSettings,
   type ComputerUseStatus,
 } from "@octant/contracts/computer-use-plugin";
-import type { ShellSettings } from "@octant/contracts/shell";
+import type { RememberedComputerUseApp, ShellSettings } from "@octant/contracts/shell";
 import { thisComputerName, useHostPlatform } from "../platform";
 import { getInjectedHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { SettingRow, SettingsSection } from "./primitives";
+import { SettingRow, SettingsSection, SettingsState } from "./primitives";
+
+const NO_REMEMBERED_APPS: ReadonlyArray<RememberedComputerUseApp> = [];
+const NO_PROJECT_NAMES: ReadonlyMap<string, string> = new Map();
 
 export function ComputerUseSettingsView(props: {
   readonly settings: ComputerUseSettings;
   readonly onSettingsChange: (patch: Partial<ShellSettings>) => Promise<boolean> | boolean | void;
+  readonly rememberedApps?: ReadonlyArray<RememberedComputerUseApp>;
+  readonly projectNames?: ReadonlyMap<string, string>;
   readonly bridge?: ComputerBridge;
 }) {
   const bridge = props.bridge ?? getInjectedHostBridge();
@@ -21,6 +27,24 @@ export function ComputerUseSettingsView(props: {
   const setup = useComputerUseSetup(bridge, props.settings.enabled);
   const { status, busy, run } = setup;
   const supported = status?.supported === true;
+  const rememberedApps = props.rememberedApps ?? NO_REMEMBERED_APPS;
+  const projectNames = props.projectNames ?? NO_PROJECT_NAMES;
+  const [forgettingKey, setForgettingKey] = useState<string>();
+  const forgetApp = async (entry: RememberedComputerUseApp) => {
+    const key = `${String(entry.projectId)}\0${entry.appId}`;
+    setForgettingKey(key);
+    try {
+      await props.onSettingsChange({
+        rememberedComputerUseApps: rememberedApps.filter(
+          (candidate) =>
+            String(candidate.projectId) !== String(entry.projectId) ||
+            candidate.appId !== entry.appId,
+        ),
+      });
+    } finally {
+      setForgettingKey(undefined);
+    }
+  };
   const updateLabels: Readonly<Record<ComputerUseStatus["update"], string>> = {
     idle: "Not checked yet",
     checking: "Checking for updates…",
@@ -33,7 +57,7 @@ export function ComputerUseSettingsView(props: {
     <section aria-label="Computer use" id="settings-computer-use">
       <SettingsSection
         title="Plugin"
-        description="While on, agents on a supported provider can use apps on this Mac. Each app asks you first."
+        description="While on, agents on a supported provider can use apps on this Mac. Below Full access, each app asks you first."
       >
         <div className="setgroup">
           <SettingRow
@@ -119,6 +143,49 @@ export function ComputerUseSettingsView(props: {
             active.
           </p>
         ) : null}
+      </SettingsSection>
+      <SettingsSection
+        collapse={{
+          open: rememberedApps.length > 0,
+          summary:
+            rememberedApps.length === 0
+              ? "None remembered"
+              : rememberedApps.length === 1
+                ? "1 app remembered"
+                : `${rememberedApps.length} apps remembered`,
+        }}
+        description="Granted by “Remember for this Project” on a Computer use approval below Full access. Forget one and the next thread asks again."
+        title="Remembered applications"
+      >
+        {rememberedApps.length === 0 ? (
+          <SettingsState kind="empty">No remembered applications.</SettingsState>
+        ) : (
+          <div className="setgroup">
+            {rememberedApps.map((entry) => {
+              const key = `${String(entry.projectId)}\0${entry.appId}`;
+              const projectName = projectNames.get(String(entry.projectId)) ?? "Project";
+              return (
+                <SettingRow
+                  description={`Threads in ${projectName} below Full access can use ${entry.appId} without asking.`}
+                  key={key}
+                  label={`${entry.appId} · ${projectName}`}
+                  scope="host"
+                  settingId="computer-use-remembered-apps"
+                >
+                  <OctantButton
+                    disabled={forgettingKey === key}
+                    onClick={() => void forgetApp(entry)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Forget
+                  </OctantButton>
+                </SettingRow>
+              );
+            })}
+          </div>
+        )}
       </SettingsSection>
     </section>
   );

@@ -447,6 +447,7 @@ export function startOctantServer(
       desktopPaneRoutes,
       desktopLeases,
       installDesktopPreviewRequest,
+      installRememberComputerUseApp,
       desktopRecipeKeys,
       launchSessionRoutes,
       machineChangeRoutes,
@@ -528,6 +529,7 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    installRememberComputerUseApp(shellService);
     const {
       runningWorkTurnAccess,
       runningWorkTurnSandbox,

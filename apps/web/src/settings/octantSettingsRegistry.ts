@@ -1307,6 +1307,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "driver update check daily",
         },
         {
+          id: settingId("computer-use-remembered-apps"),
+          label: "Remembered applications",
+          scope: "host",
+          keywords: "computer use remembered applications project approvals forget",
+        },
+        {
           id: settingId("desktop-spend-cap"),
           label: "Monthly cap for desktops that bill you",
           scope: "host",
