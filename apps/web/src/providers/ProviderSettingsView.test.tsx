@@ -1566,6 +1566,60 @@ describe("ProviderSettingsView", () => {
     expect(card.textContent).not.toMatch(/auth\.json|oauth token|plugin|skill|raw acp/i);
   });
 
+  it("shows the honest Windows Chat capability notice on OpenCode and ACP cards on Windows, and omits it on macOS", async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({ displayName: "OpenCode local" }),
+          observed: observation({ readiness: "ready" }),
+        })}
+      />,
+      "win32",
+    );
+    const openCodeCard = screen.getByRole("article", { name: "OpenCode local" });
+    await user.click(within(openCodeCard).getByRole("button", { name: "Connection details" }));
+    expect(within(openCodeCard).getByText("Chat on Windows")).toBeVisible();
+    expect(
+      within(openCodeCard).getByText(
+        /OpenCode’s own permission rules—not Octant—keep its file and shell tools off in Chat/,
+      ),
+    ).toBeVisible();
+    unmount();
+
+    const { unmount: unmountAcp } = renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: kiloProvider(),
+          observed: observation({ readiness: "ready" }),
+        })}
+      />,
+      "win32",
+    );
+    const kiloCard = screen.getByRole("article", { name: "Kilo local" });
+    await user.click(within(kiloCard).getByRole("button", { name: "Connection details" }));
+    expect(within(kiloCard).getByText("Chat on Windows")).toBeVisible();
+    expect(
+      within(kiloCard).getByText(
+        /this agent’s own permission handling—not Octant confinement—applies in Chat/,
+      ),
+    ).toBeVisible();
+    unmountAcp();
+
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({ displayName: "OpenCode local" }),
+          observed: observation({ readiness: "ready" }),
+        })}
+      />,
+      "darwin",
+    );
+    const macCard = screen.getByRole("article", { name: "OpenCode local" });
+    await user.click(within(macCard).getByRole("button", { name: "Connection details" }));
+    expect(within(macCard).queryByText("Chat on Windows")).not.toBeInTheDocument();
+  });
+
   it("explains the fail-closed Kimi runtime and provider-owned profile boundary", () => {
     renderExpanded(
       <ProviderSettingsView

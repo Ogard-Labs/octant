@@ -10,6 +10,7 @@ import {
   reviewVerdictsLabel,
   sessionRollbackLabel,
   turnModesLabel,
+  windowsChatBoundaryLabel,
 } from "./providerSettingsPresentation";
 
 describe("provider Settings presentation", () => {
@@ -411,5 +412,33 @@ describe("ownReviewerLabel", () => {
 
   it("does not call a reviewer missing when the connection check could not say", () => {
     expect(ownReviewerLabel("mistral-vibe", report("unavailable"))).toBeUndefined();
+  });
+});
+
+describe("windowsChatBoundaryLabel", () => {
+  it("explains OpenCode's own permission rules in Chat on Windows outside Strict", () => {
+    const label = windowsChatBoundaryLabel("opencode", "win32");
+    expect(label).toMatch(
+      /OpenCode’s own permission rules—not Octant—keep its file and shell tools off in Chat/,
+    );
+    expect(label).toMatch(/command templates and plugins run as they do in OpenCode itself/);
+    expect(label).toMatch(/Strict stays refused/);
+  });
+
+  it("explains an ACP agent's own permission handling in Chat on Windows outside Strict", () => {
+    for (const kind of ["mistral-vibe", "kilo", "acp-agent"] as const) {
+      const label = windowsChatBoundaryLabel(kind, "win32");
+      expect(label).toMatch(/own permission handling—not Octant confinement—applies in Chat/);
+      expect(label).toMatch(/Strict stays refused/);
+    }
+  });
+
+  it("says nothing on macOS, Linux, or other providers", () => {
+    expect(windowsChatBoundaryLabel("opencode", "darwin")).toBeUndefined();
+    expect(windowsChatBoundaryLabel("opencode", "linux")).toBeUndefined();
+    expect(windowsChatBoundaryLabel("mistral-vibe", "darwin")).toBeUndefined();
+    expect(windowsChatBoundaryLabel("claude", "win32")).toBeUndefined();
+    expect(windowsChatBoundaryLabel("codex", "win32")).toBeUndefined();
+    expect(windowsChatBoundaryLabel("pi", "win32")).toBeUndefined();
   });
 });

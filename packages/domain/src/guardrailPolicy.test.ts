@@ -14,7 +14,6 @@ import {
   hostSandboxRefusal,
   hostStartsThreadsAtOpenFullAccess,
   windowsProviderLaunch,
-  WINDOWS_CHAT_PROVIDER_REFUSAL,
   WINDOWS_KEPT_SANDBOX_REFUSAL,
   WINDOWS_SANDBOX_MISSING_REASON,
   WINDOWS_STRICT_REFUSAL,
@@ -365,36 +364,30 @@ describe("levels on a host without Octant's sandbox", () => {
       }),
     ).toEqual({ status: "refused", reason: WINDOWS_KEPT_SANDBOX_REFUSAL });
     expect(windowsProviderLaunch({ mode: "chat", executionPolicy: "plan", strict: false })).toEqual(
-      { status: "refused", reason: WINDOWS_CHAT_PROVIDER_REFUSAL },
+      { status: "unconfined", approvals: "provider" },
     );
   });
 
-  it("starts Chat on Windows outside Strict only for a provider whose own configuration leaves it no folder or shell", () => {
-    expect(
-      windowsProviderLaunch({
-        mode: "chat",
-        executionPolicy: "approval-gated",
-        strict: false,
-        chatWithoutFolderOrShell: true,
-      }),
-    ).toEqual({ status: "unconfined", approvals: "provider" });
-    expect(
-      windowsProviderLaunch({
-        mode: "chat",
-        executionPolicy: "approval-gated",
-        strict: false,
-        chatWithoutFolderOrShell: false,
-      }),
-    ).toEqual({ status: "refused", reason: WINDOWS_CHAT_PROVIDER_REFUSAL });
-    for (const strict of [true, undefined]) {
+  it("starts Chat on Windows outside Strict on the provider's own rules, and refuses Strict or omitted Strict", () => {
+    for (const executionPolicy of ["approval-gated", "plan"] as const) {
       expect(
         windowsProviderLaunch({
           mode: "chat",
-          executionPolicy: "approval-gated",
-          strict,
-          chatWithoutFolderOrShell: true,
+          executionPolicy,
+          strict: false,
         }),
-      ).toEqual({ status: "refused", reason: WINDOWS_STRICT_REFUSAL });
+      ).toEqual({ status: "unconfined", approvals: "provider" });
+    }
+    for (const executionPolicy of ["approval-gated", "plan", "full-access"] as const) {
+      for (const strict of [true, undefined]) {
+        expect(
+          windowsProviderLaunch({
+            mode: "chat",
+            executionPolicy,
+            strict,
+          }),
+        ).toEqual({ status: "refused", reason: WINDOWS_STRICT_REFUSAL });
+      }
     }
   });
 

@@ -9,6 +9,7 @@ import {
   type ProviderToolDefinition,
 } from "@octant/contracts";
 import { cacheHitRate, deriveTurnMetrics, foldCodeTurnUsage } from "@octant/domain";
+import { WINDOWS_STRICT_REFUSAL } from "@octant/domain/guardrail-policy";
 import { ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,7 +18,7 @@ import { Effect, Fiber, Stream } from "effect";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { makeAcpDriver, type AcpClientPort, type AcpDriverOptions } from "./acpDriver";
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
-import { sanitizeAcpEnvironment } from "./acpProcess";
+import { makeAcpProcessLive, sanitizeAcpEnvironment } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpProviderProfile } from "./acpProfiles";
 import { addedAcpAgentProfile } from "./addedAcpAgent";
 import { AcpFailure, type AcpNewSessionResult, type AcpConfigOptionsResult } from "./acpProtocol";
@@ -4453,5 +4454,60 @@ describe("an added ACP agent's model selection", () => {
     });
     expect(client.call).not.toHaveBeenCalledWith("session/set_model", expect.anything());
     expect(client.setConfigOption).not.toHaveBeenCalled();
+  });
+});
+
+describe("ACP Chat on Windows", () => {
+  it("starts an ACP agent Chat session on Windows outside Strict without confinement and refuses Strict", async () => {
+    const { driver, starts } = fixture(kilo);
+    await withProcessPlatform("win32", () =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "chat" });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              strict: false,
+            });
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      ),
+    );
+    expect(starts[0]).toMatchObject({
+      mode: "chat",
+      executionPolicy: "approval-gated",
+      strict: false,
+    });
+
+    const strictDriver = makeAcpDriver({
+      instanceId,
+      profile: kilo,
+      binaryPath,
+      managedHome,
+      process: makeAcpProcessLive({ platform: "win32" }),
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+    });
+    const refused = await withProcessPlatform("win32", () =>
+      Effect.runPromise(
+        Effect.flip(
+          Effect.scoped(
+            strictDriver.acquire({ instanceId, projectRoot, mode: "chat" }).pipe(
+              Effect.flatMap((connection) =>
+                connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict: true,
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(refused).toMatchObject({ category: "incompatible", message: WINDOWS_STRICT_REFUSAL });
   });
 });

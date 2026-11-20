@@ -1,4 +1,5 @@
 import {
+  isAcpAgentKind,
   PROVIDER_NATIVE_SETUP_FEATURES,
   type KeyProviderDriverKind,
   type OwnMemoryProviderDriverKind,
@@ -6,6 +7,7 @@ import {
   type ProviderNativeSetupFeature,
   type ProviderObservedState,
 } from "@octant/contracts";
+import { useHostPlatform } from "../platform";
 import { SettingRow } from "../settings/primitives";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { keyProviderLabel } from "./providerSettingsPresentation";
@@ -42,9 +44,18 @@ const FEATURE_NAMES: Readonly<Record<ProviderNativeSetupFeature, string>> = {
  * all, so a feature Octant cannot see is never implied.
  */
 export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProps) {
+  const hostPlatform = useHostPlatform();
   const name = keyProviderLabel(props.instance.driverKind);
   const settingId = `provider-${props.instance.id}-native-setup`;
   const unsupported = unsupportedFeatures(props.observed?.capabilities);
+  const chatBoundaryClause =
+    hostPlatform !== "win32"
+      ? "Plan stays read-only, and Chat never gets a folder or a shell."
+      : props.instance.driverKind === "opencode"
+        ? "Plan stays read-only. In Chat on Windows outside Strict, OpenCode’s own permission rules—not Octant—keep its file and shell tools off, and its command templates and plugins run as they do in OpenCode itself."
+        : isAcpAgentKind(props.instance.driverKind)
+          ? `Plan stays read-only. In Chat on Windows outside Strict, ${name}’s own permission handling—not Octant confinement—applies.`
+          : "Plan stays read-only, and Chat never gets a folder or a shell.";
   return (
     <SettingRow
       description={
@@ -53,9 +64,8 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
           subagents, web search and fetch, skills, and the MCP servers, plugins, settings, and hooks
           in its home folder. On by default; each call still follows the thread’s level. Octant
           still shows each subagent and marks each web read. Turned off, web search and fetch stay
-          off in every mode, and Full access still turns the rest on. Plan stays read-only, and Chat
-          never gets a folder or a shell. A Project’s own hooks, MCP servers, and plugins load only
-          in a Project you trust for {name}.
+          off in every mode, and Full access still turns the rest on. {chatBoundaryClause} A
+          Project’s own hooks, MCP servers, and plugins load only in a Project you trust for {name}.
           {props.instance.driverKind === "mistral-vibe" ? (
             <>
               {" "}

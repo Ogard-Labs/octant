@@ -79,6 +79,7 @@ import {
   ownReviewerLabel,
   reviewVerdictsLabel,
   sessionRollbackLabel,
+  windowsChatBoundaryLabel,
   providerDetectionBlockedReason,
   providerProcessDiagnosticFacts,
   providerProcessFailureSummary,
@@ -801,6 +802,7 @@ function latestVersionProp(
 
 function ProviderRow(props: ProviderRowProps) {
   const hostPlatform = useHostPlatform();
+  const windowsChatNotice = windowsChatBoundaryLabel(props.instance.driverKind, hostPlatform);
   const [configurationOpen, setConfigurationOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(props.needsAttention);
   const [renameSaved, setRenameSaved] = useState(false);
@@ -1947,6 +1949,9 @@ function ProviderRow(props: ProviderRowProps) {
                     Project” does not extend provider authority.
                   </p>
                 ) : null}
+                {props.observed === undefined && windowsChatNotice !== undefined ? (
+                  <p className="provider-card__authority-note">{windowsChatNotice}</p>
+                ) : null}
                 {props.observed === undefined ? null : (
                   <ProviderRuntimeIntegrationFacts
                     instanceId={String(props.instance.id)}
@@ -1977,6 +1982,12 @@ function ProviderRow(props: ProviderRowProps) {
                         <div>
                           <dt>Runs turns in</dt>
                           <dd>{turnModesLabel(props.observed.capabilities)}</dd>
+                        </div>
+                      )}
+                      {windowsChatNotice === undefined ? null : (
+                        <div>
+                          <dt>Chat on Windows</dt>
+                          <dd>{windowsChatNotice}</dd>
                         </div>
                       )}
                       {ownReviewerLabel(props.instance.driverKind, props.observed.capabilities) ===
