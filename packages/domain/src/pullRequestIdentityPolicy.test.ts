@@ -568,4 +568,134 @@ describe("pull request identity policy", () => {
       ),
     ).toBe(false);
   });
+
+  it("refuses to let an unbackfilled rename group bridge a reused current name with a historically renamed distinct repository node ID", () => {
+    const linkThird = decodePullRequestLinkId("50000000-0000-4000-8000-000000000003");
+    let state = emptyPullRequestLinkRegistryState();
+    // 1. Unbackfilled link records acme/old -> acme/new without baseRepositoryNodeId.
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkEarly,
+          projectId,
+          threadIds: [threadA],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "old",
+          number: 41,
+          pullRequestNodeId: "PR_kwDO41",
+          linkedAt: "2026-11-01T10:00:00.000Z",
+        }),
+      },
+      1,
+    );
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "display-updated",
+        payload: {
+          linkId: linkEarly,
+          repositoryOwner: "acme",
+          repositoryName: "new",
+          number: 41,
+          url: "https://github.com/acme/new/pull/41",
+        },
+      },
+      2,
+    );
+    // 2. Repository R1 lived at acme/new and then renamed again to acme/final
+    //    (so acme/new is now only a historical alias of R1).
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkLate,
+          projectId,
+          threadIds: [threadB],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "new",
+          number: 42,
+          pullRequestNodeId: "PR_kwDO42",
+          baseRepositoryNodeId: "R_kgDOR1",
+          linkedAt: "2026-11-02T10:00:00.000Z",
+        }),
+      },
+      3,
+    );
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "display-updated",
+        payload: {
+          linkId: linkLate,
+          repositoryOwner: "acme",
+          repositoryName: "final",
+          number: 42,
+          url: "https://github.com/acme/final/pull/42",
+        },
+      },
+      4,
+    );
+    // Before R2 reuses acme/old, only R1 is associated with {old, new}, so
+    // single-ID partial backfill still keeps old <-> new equivalence.
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "old" },
+        { owner: "acme", name: "new" },
+      ),
+    ).toBe(true);
+
+    // 3. Distinct repository R2 now reuses acme/old. The unbackfilled group
+    //    now spans R2 (current owner of old) and R1 (historical owner of new),
+    //    so old and new must NOT bridge.
+    state = applyPullRequestLinkEvent(
+      state,
+      {
+        kind: "created",
+        payload: decodeCodePullRequestLinkCreated({
+          linkId: linkThird,
+          projectId,
+          threadIds: [],
+          host: "github.com",
+          repositoryOwner: "acme",
+          repositoryName: "old",
+          number: 43,
+          pullRequestNodeId: "PR_kwDO43",
+          baseRepositoryNodeId: "R_kgDOR2",
+          linkedAt: "2026-11-03T10:00:00.000Z",
+        }),
+      },
+      5,
+    );
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "old" },
+        { owner: "acme", name: "new" },
+      ),
+    ).toBe(false);
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "old" },
+        { owner: "acme", name: "final" },
+      ),
+    ).toBe(false);
+    expect(
+      areSamePullRequestRepositoryInProject(
+        state,
+        projectId,
+        { owner: "acme", name: "new" },
+        { owner: "acme", name: "final" },
+      ),
+    ).toBe(true);
+  });
 });

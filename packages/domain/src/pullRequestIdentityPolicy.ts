@@ -489,13 +489,17 @@ function projectRepositoryGroups(
     }
   }
   for (const group of groups) {
-    const unknownGroupCurrentOwners = new Set<string>();
     if (group.baseRepositoryNodeId === undefined) {
+      const effectiveOwners = new Set<string>();
       for (const name of group.names) {
-        const currentOwners = currentNodeIdsByName.get(name);
-        if (currentOwners !== undefined) {
-          for (const owner of currentOwners) unknownGroupCurrentOwners.add(owner);
+        const owners = currentNodeIdsByName.get(name) ?? allNodeIdsByName.get(name);
+        if (owners !== undefined) {
+          for (const owner of owners) effectiveOwners.add(owner);
         }
+      }
+      if (effectiveOwners.size > 1) {
+        group.names.clear();
+        continue;
       }
     }
     for (const name of Array.from(group.names)) {
@@ -508,9 +512,8 @@ function projectRepositoryGroups(
         const [soleOwner] = currentOwners;
         if (
           soleOwner !== undefined &&
-          ((group.baseRepositoryNodeId !== undefined &&
-            String(group.baseRepositoryNodeId) !== soleOwner) ||
-            (group.baseRepositoryNodeId === undefined && unknownGroupCurrentOwners.size > 1))
+          group.baseRepositoryNodeId !== undefined &&
+          String(group.baseRepositoryNodeId) !== soleOwner
         ) {
           group.names.delete(name);
         }
