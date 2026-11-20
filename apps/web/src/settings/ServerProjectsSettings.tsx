@@ -1,4 +1,7 @@
-import { ServerProjectPreviewTunnel } from "./ServerProjectPreviewTunnel";
+import {
+  ServerProjectPreviewTunnel,
+  type ServerProjectRelayedPreviewOpener,
+} from "./ServerProjectPreviewTunnel";
 import {
   CLOUD_MACHINE_SUSPENDED_NOTICE,
   CloudMachinesSettings,
@@ -53,6 +56,8 @@ export interface ServerProjectsSettingsProps {
   readonly codeProjectId?: ProjectId | undefined;
   readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
+  /** Opens a host-relayed server Project preview through the desktop forwarder. */
+  readonly onOpenRelayedPreview?: ServerProjectRelayedPreviewOpener;
 }
 
 export const SERVER_PROJECTS_INTRO =
@@ -413,7 +418,13 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                     ) : null}
                   </div>
                 )}
-                <ServerProjectPreviewTunnel client={client} project={project} />
+                <ServerProjectPreviewTunnel
+                  client={client}
+                  project={project}
+                  {...(props.onOpenRelayedPreview === undefined
+                    ? {}
+                    : { onOpenRelayedPreview: props.onOpenRelayedPreview })}
+                />
               </li>
             ))}
           </ul>
@@ -536,6 +547,7 @@ export function ServerAccessSettings(props: {
   readonly codeProjectId?: ProjectId | undefined;
   readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
+  readonly onOpenRelayedPreview?: ServerProjectRelayedPreviewOpener;
   readonly servers: ShieldServersClient | undefined;
   readonly projects: ServerProjectsSettingsProps["client"];
   readonly focusedSetting?: string | undefined;
@@ -571,6 +583,9 @@ export function ServerAccessSettings(props: {
         {...(props.onOpenServerProject === undefined
           ? {}
           : { onOpenServerProject: props.onOpenServerProject })}
+        {...(props.onOpenRelayedPreview === undefined
+          ? {}
+          : { onOpenRelayedPreview: props.onOpenRelayedPreview })}
         {...(props.terminalClient === undefined ? {} : { terminalClient: props.terminalClient })}
         {...(props.actionStoragePrefix === undefined
           ? {}

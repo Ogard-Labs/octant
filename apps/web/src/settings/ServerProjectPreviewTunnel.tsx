@@ -5,16 +5,18 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
+export type ServerProjectRelayedPreviewOpener = (
+  view: ServerPreviewView,
+) => Promise<
+  | { readonly kind: "opened"; readonly notice?: string }
+  | { readonly kind: "refused"; readonly message: string }
+>;
+
 export function ServerProjectPreviewTunnel(props: {
   readonly project: ServerProject;
   readonly client: Pick<ServerProjectsClient, "previewRead" | "previewCommand">;
   /** Opens a host-relayed preview through the paired desktop app's signed forwarder. */
-  readonly onOpenRelayedPreview?: (
-    view: ServerPreviewView,
-  ) => Promise<
-    | { readonly kind: "opened"; readonly notice?: string }
-    | { readonly kind: "refused"; readonly message: string }
-  >;
+  readonly onOpenRelayedPreview?: ServerProjectRelayedPreviewOpener;
 }) {
   const { project, client } = props;
   const id = useId();

@@ -1,5 +1,6 @@
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
 import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
+import type { ServerProjectRelayedPreviewOpener } from "../settings/ServerProjectPreviewTunnel";
 import type { AgentGrantClient } from "@octant/client-runtime/agent-grant-client";
 import { lazy, Suspense } from "react";
 import type { WorkSettingsController } from "../work/useWorkSettings";
@@ -116,6 +117,7 @@ export interface ShellSettingsSurfaceProps {
   readonly codeProjectId?: ProjectId | undefined;
   readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
+  readonly onOpenRelayedServerProjectPreview?: ServerProjectRelayedPreviewOpener;
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   readonly replicaSyncStatusClient?: ReplicaSyncStatusClient;
   readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
@@ -249,6 +251,11 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.onOpenServerProject === undefined
               ? {}
               : { onOpenServerProject: props.onOpenServerProject })}
+            {...(props.onOpenRelayedServerProjectPreview === undefined
+              ? {}
+              : {
+                  onOpenRelayedServerProjectPreview: props.onOpenRelayedServerProjectPreview,
+                })}
             {...(props.projectTerminalClient === undefined
               ? {}
               : { projectTerminalClient: props.projectTerminalClient })}

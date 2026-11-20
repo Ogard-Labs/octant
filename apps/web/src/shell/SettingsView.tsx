@@ -146,6 +146,7 @@ import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-cl
 import type { ProviderToolingClient } from "@octant/client-runtime/provider-tooling-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
+import type { ServerProjectRelayedPreviewOpener } from "../settings/ServerProjectPreviewTunnel";
 import { ServerAccessSettings } from "../settings/ServerProjectsSettings";
 import { RemoteSetupGuide } from "../settings/RemoteSetupGuide";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
@@ -332,6 +333,7 @@ export interface SettingsViewProps {
   readonly codeProjectId?: ProjectId | undefined;
   readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
+  readonly onOpenRelayedServerProjectPreview?: ServerProjectRelayedPreviewOpener;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   /** Read-only sync status, used when this client is not on the host. */
@@ -1588,6 +1590,9 @@ function ActiveSectionContent({
             {...(props.onOpenServerProject === undefined
               ? {}
               : { onOpenServerProject: props.onOpenServerProject })}
+            {...(props.onOpenRelayedServerProjectPreview === undefined
+              ? {}
+              : { onOpenRelayedPreview: props.onOpenRelayedServerProjectPreview })}
             {...(props.projectTerminalClient === undefined
               ? {}
               : { terminalClient: props.projectTerminalClient })}
