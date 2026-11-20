@@ -7,16 +7,10 @@ import {
   THREAD_RETENTION_EVENT_NAMES,
   TOOL_EFFECT_AGGREGATE_TYPE,
   decodeFinishedReceiptRecorded,
-  decodeProject,
-  decodeProjectId,
-  decodeProjectWorkingFolderId,
   decodeProviderInstanceId,
   decodeProviderModelId,
   decodeThreadRetentionThreadPurged,
   type FinishedReceiptRecorded,
-  type Project,
-  type ProjectId,
-  type ProjectWorkingFolderId,
   type ReplayableRunCase,
   type ReplayableRunCaseModel,
 } from "@octant/contracts";
@@ -31,7 +25,6 @@ import {
   type ReplayableRunCaseThreadRef,
 } from "@octant/domain/replayable-run-case-policy";
 import { Schema } from "effect";
-import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import type { Journal } from "../persistence/journal";
 import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import {
@@ -620,26 +613,12 @@ export function readLatestFinishedReceiptFromDatabase(
     ) as ReadonlyArray<RawFullJournalRow>;
 
     const envelopesByType = new Map<string, EventEnvelope[]>();
-    const projectsById = new Map<string, Project>();
 
     for (const row of rows) {
       let payload: unknown;
       try {
         payload = JSON.parse(row.payload_json);
       } catch {
-        continue;
-      }
-
-      if (row.aggregate_type === "project") {
-        const rawProject = asRecord(payload)?.project;
-        if (rawProject !== undefined) {
-          try {
-            const project = decodeProject(rawProject);
-            projectsById.set(String(project.id), project);
-          } catch {
-            // Ignore partial or non-project payloads.
-          }
-        }
         continue;
       }
 
@@ -678,25 +657,6 @@ export function readLatestFinishedReceiptFromDatabase(
       uuid: () => "00000000-0000-4000-8000-000000000000",
       actor: READ_ONLY_ACTOR,
       clock: () => "1970-01-01T00:00:00.000Z",
-      resolveWorkFolderRoot: (projectId, workingFolderId) => {
-        let decodedProjectId: ProjectId;
-        try {
-          decodedProjectId = decodeProjectId(projectId);
-        } catch {
-          return undefined;
-        }
-        const project = projectsById.get(String(decodedProjectId));
-        if (project === undefined || project.type === "chat") return undefined;
-        let decodedFolderId: ProjectWorkingFolderId | undefined;
-        if (workingFolderId !== undefined) {
-          try {
-            decodedFolderId = decodeProjectWorkingFolderId(workingFolderId);
-          } catch {
-            return undefined;
-          }
-        }
-        return approvedWorkingFolderRoot(project, decodedFolderId);
-      },
     });
 
     const latest = store.latest(threadId);

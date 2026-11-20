@@ -233,6 +233,35 @@ describe("maintainer replayable run case script", () => {
     if (missing.status === "failed") {
       expect(missing.reason).toContain("Project name");
     }
+
+    // Refuses when two active Projects share a name (case- and trim-insensitive)
+    // so octant agent --project cannot silently redirect replay to the first match.
+    const secondProjectId = decodeProjectId("66666666-6666-4666-8666-666666666666");
+    const targetSecondCase: ReplayableRunCase = {
+      ...runCase,
+      project: { id: secondProjectId, name: "Website" },
+    };
+    const duplicate = buildAgentReplayArgs({
+      runCase: targetSecondCase,
+      hostProjects: [
+        { id: String(PROJECT_ID), name: "website" },
+        { id: String(secondProjectId), name: " Website " },
+      ],
+    });
+    expect(duplicate.status).toBe("failed");
+    if (duplicate.status === "failed") {
+      expect(duplicate.reason).toContain("multiple active Projects");
+    }
+
+    // Refuses when the stored Project name now belongs only to a different active Project.
+    const hijacked = buildAgentReplayArgs({
+      runCase: targetSecondCase,
+      hostProjects: [{ id: String(PROJECT_ID), name: "Website" }],
+    });
+    expect(hijacked.status).toBe("failed");
+    if (hijacked.status === "failed") {
+      expect(hijacked.reason).toContain("different active Project");
+    }
   });
 
   it("disambiguates duplicate model IDs across two endpoints using providerInstanceId", () => {

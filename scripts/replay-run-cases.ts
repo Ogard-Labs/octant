@@ -197,13 +197,30 @@ export function buildAgentReplayArgs(input: {
   readonly hostModels?: ReadonlyArray<ReplayHostModel> | undefined;
 }): ReplayAgentArgsResult {
   const projectId = String(input.runCase.project.id);
-  const hostProject = input.hostProjects?.find((entry) => entry.id === projectId);
+  const hostProjects = input.hostProjects ?? [];
+  const hostProject = hostProjects.find((entry) => entry.id === projectId);
   const resolvedProjectName =
     hostProject?.name.trim() || input.runCase.project.name?.trim() || undefined;
   if (resolvedProjectName === undefined) {
     return {
       status: "failed",
       reason: `Project ${projectId} has no resolvable Project name for octant agent --project.`,
+    };
+  }
+  const normalizedProjectName = resolvedProjectName.toLowerCase();
+  const matchingProjects = hostProjects.filter(
+    (entry) => entry.name.trim().toLowerCase() === normalizedProjectName,
+  );
+  if (matchingProjects.length > 1) {
+    return {
+      status: "failed",
+      reason: `Project name "${resolvedProjectName}" matches multiple active Projects on this host; refusing to replay Project ${projectId} into an ambiguous target.`,
+    };
+  }
+  if (matchingProjects.length === 1 && matchingProjects[0]?.id !== projectId) {
+    return {
+      status: "failed",
+      reason: `Project name "${resolvedProjectName}" belongs to a different active Project (${String(matchingProjects[0]?.id)}) than recorded Project ${projectId}.`,
     };
   }
 
