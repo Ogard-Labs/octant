@@ -29,7 +29,7 @@ import {
   type AcpProviderProfile,
   type AcpSessionMode,
 } from "./acpProfiles";
-import { providerHostEnvironment } from "./providerHostEnvironment";
+import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
@@ -582,11 +582,12 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // A thread that keeps the sandbox takes the Accept edits wall instead.
         const wall = acpWallPolicy(input);
         if (platform === "win32") {
-          // Windows has no Octant sandbox: Full access, or a level below it
-          // outside Strict, where the agent's own mode asks Octant before each
-          // side effect and Plan keeps the agent's read-only mode, starts
-          // unconfined; anything else is refused by name. The process port
-          // admitted a readiness check already.
+          // Windows has no Octant sandbox: Full access, a level below it
+          // outside Strict (where the agent's own mode asks Octant before each
+          // side effect and Plan keeps the agent's read-only mode), or Chat
+          // outside Strict (on the agent's own permission handling) starts
+          // unconfined; Strict and a kept sandbox are refused by name. The
+          // process port admitted a readiness check already.
           const form =
             input.purpose === "probe"
               ? ({ status: "unconfined", approvals: "none" } as const)
@@ -724,6 +725,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 managedHome,
                 ...hostAuthentication.readPaths,
                 ...hostReadPaths,
+                ...(input.strict === false &&
+                input.fullAccessSandbox !== true &&
+                input.sandboxPolicy === undefined
+                  ? awsProfileReadPaths(input.environment)
+                  : []),
                 binaryDirectory,
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
@@ -736,6 +742,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 managedHome,
                 ...hostAuthentication.readPaths,
                 ...hostReadPaths,
+                ...(input.strict === false &&
+                input.fullAccessSandbox !== true &&
+                input.sandboxPolicy === undefined
+                  ? awsProfileReadPaths(input.environment)
+                  : []),
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),

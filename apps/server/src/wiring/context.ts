@@ -89,6 +89,9 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     | "browserProfileService"
     | "browserToolApprovalService"
     | "liveProjectBrowsers"
+    | "pairedBrowserControlService"
+    | "resolvePairedDeviceName"
+    | "isPairedDeviceSessionCurrent"
   > &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
   Pick<ChatWiring, "chatService"> &
@@ -124,6 +127,9 @@ export function wireContext(deps: ContextDependencies) {
     configuredDriverOptions,
     contextHarness,
     liveProjectBrowsers,
+    pairedBrowserControlService,
+    resolvePairedDeviceName,
+    isPairedDeviceSessionCurrent,
     browserExtensionService,
     browserFlowService,
     browserProfileService,
@@ -309,6 +315,8 @@ export function wireContext(deps: ContextDependencies) {
         turnRefusal: (threadId) => chatService.turnStandingRefusal(decodeChatThreadId(threadId)),
         conversation: (threadId) =>
           chatService.sessionCompactionConversation(decodeChatThreadId(threadId)),
+        conversationForCompaction: (threadId) =>
+          chatService.sessionCompactionConversationWithAttachments(decodeChatThreadId(threadId)),
         scratchRoot: (threadId) => chatService.scratchRoot(decodeChatThreadId(threadId)),
         runtimeSessions: {
           exists: (threadId) => chatRuntimeSession(threadId) !== undefined,
@@ -997,6 +1005,9 @@ export function wireContext(deps: ContextDependencies) {
     profiles: browserProfileService,
     flows: browserFlowService,
     flowRuns,
+    pairedBrowserControl: pairedBrowserControlService,
+    resolvePairedDeviceName,
+    isPairedDeviceSessionCurrent,
     extensions: browserExtensionService,
     authority: browserAuthority,
     approvals: browserToolApprovalService,

@@ -87,6 +87,7 @@ import { useBrowserFeedbackPointing } from "./useBrowserFeedbackPointing";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { useNativeBrowserSurface } from "./useNativeBrowserSurface";
 import { BrowserMarkupStage, type MarkupNotice } from "./BrowserMarkupStage";
+import { PairedBrowserHoldStage } from "./PairedBrowserHoldStage";
 import {
   MAX_WAITING_OFFERS,
   threadImageOfferKey,
@@ -207,6 +208,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const [addressTyped, setAddressTyped] = useState(false);
   const [scope, setScope] = useState<BrowserThreadScope>();
   const [snapshot, setSnapshot] = useState<BrowserAutomationSnapshot>();
+  const [pairedLease, setPairedLease] = useState<BrowserAutomationSnapshot["pairedLease"]>();
   const [agentRead, setAgentRead] = useState<{
     readonly client: BrowserAutomationClient;
     readonly threadId: string;
@@ -629,18 +631,20 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   // they hand it back. The server decides; this only shows it.
   const personHasPage = activeContext && snapshot?.waitingForPerson === "take-over";
   const driverLabel = personHasPage
-    ? snapshot?.ownerController === undefined
+    ? snapshot?.remoteHolder === undefined
       ? "You have the page"
-      : `Owner: ${snapshot.ownerController.name}`
-    : !nativeContext
-      ? "Preview"
-      : nativeSurface.failed
-        ? "Live page unavailable"
-        : nativeState?.control === "agent"
-          ? "Agent active"
-          : nativeState?.control === "user"
-            ? "You control"
-            : "Shared live page";
+      : `Held from ${snapshot.remoteHolder.deviceName}`
+    : snapshot?.waitingForPerson === "sign-in" && snapshot.remoteHolder !== undefined
+      ? `Held from ${snapshot.remoteHolder.deviceName}`
+      : !nativeContext
+        ? "Preview"
+        : nativeSurface.failed
+          ? "Live page unavailable"
+          : nativeState?.control === "agent"
+            ? "Agent active"
+            : nativeState?.control === "user"
+              ? "You control"
+              : "Shared live page";
   // While the agent drives a signed-in page the indicator names the profile, so
   // it is plain whose account the agent is acting as.
   const drivenProfile = storedProfileOf(snapshot?.context?.policy.profile);
@@ -668,6 +672,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       setUrl(snapshot.observation.url);
     }
   }, [nativeState?.url, snapshot?.observation?.url]);
+
+  useEffect(() => {
+    setPairedLease(undefined);
+  }, [props.tab.threadId]);
 
   useEffect(() => {
     if (props.tab.threadId === undefined) return;
@@ -1144,7 +1152,18 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     if (ask === undefined || props.tab.threadId === undefined) return;
     localFailure.current = false;
     try {
-      update(await ask.call(props.client, { threadId: props.tab.threadId }));
+      const next = await ask.call(props.client, {
+        threadId: props.tab.threadId,
+        ...(hold === "hand-back" && pairedLease !== undefined
+          ? { leaseId: pairedLease.leaseId }
+          : {}),
+      });
+      update(next);
+      if (hold === "take-over") {
+        if (next.pairedLease !== undefined) setPairedLease(next.pairedLease);
+      } else {
+        setPairedLease(undefined);
+      }
     } catch (error) {
       localFailure.current = true;
       localFailureRevision.current = currentSnapshotRevision.current ?? snapshotRevision(snapshot);
@@ -1162,6 +1181,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     setSnapshot(next);
     setStatus(next.status);
     setMessage(snapshotFailureNotice(next.failure));
+    if (next.context?.state !== "active" || next.waitingForPerson === undefined) {
+      setPairedLease(undefined);
+    }
   }
 
   function queueRemoteAction(
@@ -1514,11 +1536,15 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   ]
     .filter((part) => part !== undefined)
     .join(" ");
-  // While a remote owner controls the page, handing it back is refused until
-  // local input or this action reclaims it, so Reclaim locally is the action the
-  // person needs; Hand back moves into the more menu.
-  const ownerHolds =
-    activeContext && snapshot?.ownerController !== undefined && props.client.takeOver !== undefined;
+  // While a paired device holds the page remotely, handing it back from another
+  // window is refused until local input or this action reclaims it, so Reclaim
+  // locally is the action the person needs on desktop; Hand back moves into the
+  // more menu.
+  const remoteHolds =
+    activeContext &&
+    snapshot?.remoteHolder !== undefined &&
+    pairedLease === undefined &&
+    props.client.takeOver !== undefined;
   // Take over and Hand back hold the thread's shared page, the one the agent
   // uses. A tab that shows a page of its own, which no agent reaches, offers
   // neither: asked from there, the host would hold the shared page and answer
@@ -1527,27 +1553,40 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const holdAction =
     props.startFresh === true && ownPage !== false
       ? undefined
-      : ownerHolds
+      : remoteHolds
         ? ({
             hold: "reclaim",
             label: "Reclaim locally",
-            title: "Stop remote owner control and keep the page held locally",
+            title: "Stop remote control and keep the page held locally",
           } as const)
-        : activeContext && personHasPage && props.client.handBack !== undefined
+        : activeContext &&
+            (personHasPage || pairedLease !== undefined) &&
+            props.client.handBack !== undefined
           ? ({
               hold: "hand-back",
               label: "Hand back",
               title: "You have the page. Hand it back to let the agent use it again.",
             } as const)
           : activeContext &&
-              snapshot?.waitingForPerson === undefined &&
+              snapshot?.waitingForPerson === "sign-in" &&
+              !nativeContext &&
+              pairedLease === undefined &&
+              props.client.pairedControl !== undefined &&
               props.client.takeOver !== undefined
             ? ({
                 hold: "take-over",
-                label: "Take over",
-                title: "Use the page yourself. The agent can take it back when it needs it",
+                label: "Sign in here",
+                title: "Hold this page from this device to finish signing in",
               } as const)
-            : undefined;
+            : activeContext &&
+                snapshot?.waitingForPerson === undefined &&
+                props.client.takeOver !== undefined
+              ? ({
+                  hold: "take-over",
+                  label: "Take over",
+                  title: "Use the page yourself. The agent can take it back when it needs it",
+                } as const)
+              : undefined;
   const holdIcon = (hold: "hand-back" | "take-over" | "reclaim") =>
     hold === "hand-back" ? (
       <Undo2 aria-hidden="true" size={16} />
@@ -1566,10 +1605,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   });
   const chromeWidth = useElementWidth(chrome);
   // One predicate for the more menu's Login permission item and the control that
-  // answers it: only a live native page in a Work or Code thread has a review to
-  // open, so a headless or remote client is never offered an action that cannot run.
+  // answers it: a live native page or a person-paired device holding the page in
+  // a Work or Code thread has a review to open.
   const credentialContext =
-    nativeContext &&
+    (nativeContext || pairedLease !== undefined) &&
     activeContext &&
     props.client.manageCredentialUse !== undefined &&
     snapshot?.context !== undefined &&
@@ -1581,7 +1620,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         }
       : undefined;
   const baseMoreItems: ReadonlyArray<OctantMenuItem> = [
-    ...(ownerHolds && personHasPage && props.client.handBack !== undefined
+    ...(remoteHolds && personHasPage && props.client.handBack !== undefined
       ? [{ icon: holdIcon("hand-back"), label: "Hand back", value: "hand-back" }]
       : []),
     ...(activeContext && props.client.takeCapture !== undefined
@@ -2228,6 +2267,18 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             onClose={closeMarkup}
           />
         </div>
+      ) : pairedLease !== undefined ? (
+        <PairedBrowserHoldStage
+          {...(props.client.pairedControl === undefined
+            ? {}
+            : { client: props.client.pairedControl })}
+          lease={pairedLease}
+          onEnded={(reason) => {
+            setPairedLease(undefined);
+            if (reason !== undefined) setMessage(reason);
+          }}
+          onHandBack={() => void holdPage("hand-back")}
+        />
       ) : (
         <article
           aria-label="Interactive headless Browser preview"

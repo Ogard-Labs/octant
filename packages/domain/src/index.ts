@@ -109,6 +109,7 @@ export * from "./dataLifecyclePolicy";
 export * from "./threadRetentionPolicy";
 export * from "./threadCompletionPolicy";
 export * from "./finishedReceiptPolicy";
+export * from "./replayableRunCasePolicy";
 export * from "./threadProjectMovePolicy";
 export * from "./threadExportPolicy";
 export * from "./threadHandOffPolicy";
@@ -140,6 +141,7 @@ export * from "./parallelRunPolicy";
 export * from "./productFeedbackPolicy";
 export * from "./projectPolicy";
 export * from "./projectViewPolicy";
+export * from "./pullRequestReviewPolicy";
 export * from "./providerCapacityPolicy";
 export * from "./modelCatalogPolicy";
 export * from "./modelPickerPolicy";
@@ -262,7 +264,7 @@ export * from "./browserCredentialUsePolicy";
 
 export * from "./browserPageScriptPolicy";
 
-export * from "./ownerBrowserPolicy";
+export * from "./pairedBrowserPolicy";
 export * from "./listenerKeyTransition";
 export * from "./routineSchedule";
 export * from "./turnActivityTiming";

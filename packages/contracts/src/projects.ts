@@ -1348,36 +1348,6 @@ export const MemoryEntryTransferred = Schema.Struct({
 }).annotations(strict);
 export type MemoryEntryTransferred = typeof MemoryEntryTransferred.Type;
 
-export const PROJECT_EVENT_NAMES = [
-  "project.created@1",
-  "project.renamed@1",
-  "project.color-changed@1",
-  "project.order-changed@1",
-  "project.lifecycle-changed@1",
-  "project.binding-relinked@1",
-  "project.code-access-changed@1",
-  "project.code-permission-mode-changed@1",
-  "project.code-auto-reviewer-changed@1",
-  "project.code-new-thread-workspace-changed@1",
-  "project.code-pull-request-background-refresh-changed@1",
-  "project.provider-policy-changed@1",
-  "project.native-providers-changed@1",
-  "project.work-status-file-changed@1",
-  "project.work-developer-tools-changed@1",
-  "project.work-permission-mode-changed@1",
-  "project.work-actions-changed@1",
-  "project.brand-kit-changed@1",
-  "project.design-system-changed@1",
-  "project.code-desktop-recipe-changed@1",
-  "project.code-actions-changed@1",
-  "project.extra-folder-added@1",
-  "project.extra-folder-removed@1",
-  "memory.entry-created@1",
-  "memory.entry-superseded@1",
-  "memory.entry-retracted@1",
-  "memory.entry-transferred@1",
-] as const;
-
 export const decodeProjectId = Schema.decodeUnknownSync(ProjectId);
 export const decodeProjectAction = Schema.decodeUnknownSync(ProjectAction);
 export const decodeProjectActions = Schema.decodeUnknownSync(ProjectActions);

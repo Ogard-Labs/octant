@@ -1,6 +1,7 @@
 import { MAX_AVATAR_IMAGE_CHARACTERS } from "@octant/contracts/user-profile";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  browserAvatarEnvironment,
   importAvatarFromFile,
   importAvatarFromGravatar,
   type AvatarImageEnvironment,
@@ -172,5 +173,63 @@ describe("importing an avatar from Gravatar", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("drawing the avatar on the browser's canvas", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubCanvas(
+    context: { readonly drawImage: ReturnType<typeof vi.fn> } | null,
+    toDataURL?: (format: string, quality?: number) => string,
+  ) {
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => context),
+      toDataURL: vi.fn(toDataURL ?? (() => "data:image/webp;base64,AAAA")),
+    };
+    vi.stubGlobal("document", { createElement: vi.fn(() => canvas) });
+    return canvas;
+  }
+
+  it("closes the decoded bitmap once the square is drawn", async () => {
+    stubCanvas({ drawImage: vi.fn() });
+    const close = vi.fn();
+
+    const encoded = await browserAvatarEnvironment().encode(
+      { width: 400, height: 300, close },
+      128,
+    );
+
+    expect(encoded).toEqual({ dataUrl: "data:image/webp;base64,AAAA" });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the bitmap when the Mac cannot make a canvas", async () => {
+    stubCanvas(null);
+    const close = vi.fn();
+
+    const encoded = await browserAvatarEnvironment().encode(
+      { width: 400, height: 300, close },
+      128,
+    );
+
+    expect(encoded).toBeUndefined();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the bitmap when encoding throws", async () => {
+    stubCanvas({ drawImage: vi.fn() }, () => {
+      throw new Error("encode failed");
+    });
+    const close = vi.fn();
+
+    await expect(
+      browserAvatarEnvironment().encode({ width: 400, height: 300, close }, 128),
+    ).rejects.toThrow("encode failed");
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });

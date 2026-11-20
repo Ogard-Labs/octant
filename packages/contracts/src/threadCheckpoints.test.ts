@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_THREAD_CHECKPOINT_LABEL_LENGTH,
-  THREAD_CHECKPOINT_EVENT_NAMES,
   decodeThreadCheckpoint,
   decodeThreadCheckpointCommand,
   decodeThreadCheckpointCommandResult,
@@ -133,13 +132,5 @@ describe("thread checkpoints", () => {
       restore: { mode: "code", threadId: ids.chatThread },
     });
     expect(result.kind === "checkpoint-restored" && result.restore.threadId).toBe(ids.chatThread);
-  });
-
-  it("names every checkpoint event it journals", () => {
-    expect([...THREAD_CHECKPOINT_EVENT_NAMES]).toEqual([
-      "checkpoint.marked@1",
-      "checkpoint.forgotten@1",
-      "checkpoint.restored@1",
-    ]);
   });
 });

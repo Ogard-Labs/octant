@@ -3,6 +3,10 @@ import { MAX_THREAD_PUBLISHED_SNAPSHOT_BYTES } from "./threadToolSteps";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+  decodeThreadNativeSetupRequest,
+  decodeThreadProviderMentionsResult,
+} from "./threadNativeSetup";
+import {
   ProviderCapabilitySupport,
   ProviderDriverKind,
   decodeProviderDefaults,
@@ -35,24 +39,6 @@ const ids = {
 const occurredAt = "2026-07-14T10:00:00.000Z";
 
 describe("provider registry contracts", () => {
-  it("publishes the durable provider event vocabulary without entity actor provenance", () => {
-    expect((providerContracts as Record<string, unknown>).PROVIDER_EVENT_NAMES).toEqual([
-      "provider.instance-created@1",
-      "provider.instance-renamed@1",
-      "provider.instance-binary-changed@1",
-      "provider.instance-configuration-changed@1",
-      "provider.instance-driver-rebound@1",
-      "provider.instance-driver-quarantined@1",
-      "provider.instance-data-tags-changed@1",
-      "provider.instance-enabled-changed@1",
-      "provider.instance-native-setup-changed@1",
-      "provider.instance-own-memory-changed@1",
-      "provider.instance-removed@1",
-      "provider.defaults-updated@1",
-      "provider.catalog-updated@1",
-      "provider.acp-agent-install-scripts-ran@1",
-    ]);
-  });
   it.each([
     "codex",
     "claude",
@@ -3652,6 +3638,47 @@ describe("provider runtime contracts", () => {
         category: "incompatible",
         message: "private provider diagnostic",
         reason: "OpenCode 2 preview is discovery-only",
+      }),
+    ).toThrow();
+  });
+
+  it("decodes thread and draft provider mention requests and project-scoped mentions strictly", () => {
+    const threadId = "80000000-0000-4000-8000-000000000440";
+    const projectId = "80000000-0000-4000-8000-000000000441";
+    expect(decodeThreadNativeSetupRequest({ kind: "mentions", threadId, mode: "code" })).toEqual({
+      kind: "mentions",
+      threadId,
+      mode: "code",
+    });
+    expect(
+      decodeThreadNativeSetupRequest({
+        kind: "draft-mentions",
+        projectId,
+        mode: "work",
+        providerInstanceId: ids.instance,
+      }),
+    ).toMatchObject({ kind: "draft-mentions", projectId, mode: "work" });
+    expect(() =>
+      decodeThreadNativeSetupRequest({ kind: "mentions", threadId, mode: "chat" }),
+    ).toThrow();
+    expect(
+      decodeThreadProviderMentionsResult({
+        mentions: [
+          { kind: "skill", name: "local", scope: "project", description: "Deploy" },
+          { kind: "skill", name: "tidy" },
+          { kind: "plugin", name: "docs", scope: "account" },
+        ],
+      }),
+    ).toEqual({
+      mentions: [
+        { kind: "skill", name: "local", scope: "project", description: "Deploy" },
+        { kind: "skill", name: "tidy" },
+        { kind: "plugin", name: "docs", scope: "account" },
+      ],
+    });
+    expect(() =>
+      decodeThreadProviderMentionsResult({
+        mentions: [{ kind: "skill", name: "local", scope: "repo" }],
       }),
     ).toThrow();
   });

@@ -8,14 +8,17 @@ import { randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  AggregateVersion,
   decodeChatThreadId,
   decodeCodeThreadId,
+  decodeEventActor,
   decodeWindowId,
   decodeWorkThreadId,
   type DesktopPreviewRequest,
   type DesktopPreviewAnswer,
   type WorkAccess,
 } from "@octant/contracts";
+import { Schema } from "effect";
 import type { DesktopLeaseCaller } from "../computerUse/desktopLeaseService";
 import { createMachineChangeRouteHandler } from "../machineChangeRoutes";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
@@ -40,6 +43,7 @@ import {
 } from "@octant/contracts";
 import {
   browserToolTransport,
+  computerUseAppRemembered,
   defaultShellSettings,
   workThreadAccessOf,
   type AppToolThreadLevel,
@@ -75,7 +79,7 @@ import {
   CUA_DESKTOP_DAEMON,
 } from "../plugins/cuaDesktop/cuaDesktopProvider";
 import { makeDesktopProviderCredentialBrokerClient } from "../providers/credentialBrokerClient";
-import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { OCTANT_LOCAL_ACTOR_ID, ShellServiceError, type ShellService } from "../shellService";
 import { withToolFamilyHelp } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import {
@@ -410,6 +414,8 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   };
   // The tool service exists wherever a send can bind a destination: this
   // Mac's screen, or a desktop a Linux host can lease.
+  const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
+  let shellServiceRef: Pick<ShellService, "rememberComputerUseApp"> | undefined;
   const leasingOffered = desktopProviders().some((entry) => entry.effective);
   const computerUseTools =
     computerUseDesktop === undefined && !leasingOffered
@@ -480,6 +486,53 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
           strict: (owner) => deps.resolveThreadStrict(owner.threadId),
           outsideContent: (owner) =>
             readApprovalOutsideContent(persistence.connection, owner.threadId),
+          projectAppRemembered: (projectId, appId) =>
+            computerUseAppRemembered(
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                .rememberedComputerUseApps,
+              projectId,
+              appId,
+            ),
+          rememberProjectApp: ({ projectId, appId, approver }) => {
+            if (shellServiceRef === undefined) {
+              throw new Error("Shell service is not ready to persist Computer use approvals.");
+            }
+            const resolvedApprover =
+              approver.kind === "window"
+                ? approver
+                : {
+                    kind: "paired-device" as const,
+                    actor: decodeEventActor({
+                      kind: "remote-device",
+                      actorId: approver.deviceId,
+                      deviceId: approver.deviceId,
+                    }),
+                  };
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              const stored = persistence.readShellSettings();
+              const current = stored?.settings ?? defaultShellSettings();
+              if (computerUseAppRemembered(current.rememberedComputerUseApps, projectId, appId)) {
+                return;
+              }
+              try {
+                shellServiceRef.rememberComputerUseApp({
+                  approver: resolvedApprover,
+                  expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
+                  projectId,
+                  appId,
+                });
+                machineChangeFeed.publish(["computer-use"]);
+                return;
+              } catch (error) {
+                if (
+                  !(error instanceof ShellServiceError && error.failure.category === "conflict") ||
+                  attempt === 1
+                ) {
+                  throw error;
+                }
+              }
+            }
+          },
           threadTitle: (owner) =>
             (owner.mode === "chat"
               ? persistence.readChatThread(decodeChatThreadId(owner.threadId))?.title
@@ -635,6 +688,9 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     desktopLeases,
     installDesktopPreviewRequest: (request: NonNullable<typeof previewRequest>) => {
       previewRequest = request;
+    },
+    installRememberComputerUseApp: (shellService: Pick<ShellService, "rememberComputerUseApp">) => {
+      shellServiceRef = shellService;
     },
     /** Where a Project's desktop recipe keeps the key a cloud provider reads. */
     desktopRecipeKeys,

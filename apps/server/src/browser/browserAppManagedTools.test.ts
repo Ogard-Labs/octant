@@ -10,6 +10,7 @@ import {
   type ToolActionAuthority,
 } from "@octant/contracts";
 import { createBrowserAppManagedTools, type BrowserModelBinding } from "./browserAppManagedTools";
+import { BrowserToolApprovalService } from "./browserToolApprovalService";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
 import { BrowserFlowRecorder, browserToolInputRecord, flowDecision } from "./browserFlows";
 import {
@@ -3098,4 +3099,113 @@ it("advertises the named account selectors that the Browser parser accepts", () 
       ),
     ).toBeUndefined();
   }
+});
+
+describe("real BrowserToolApprovalService receiver binding on paired devices", () => {
+  it("evaluates sign-in and stored default profiles through a real BrowserToolApprovalService without detaching private fields", async () => {
+    const personPhone = "10000000-0000-4000-8000-0000000000aa" as never;
+    const restrictedPhone = "10000000-0000-4000-8000-0000000000bb" as never;
+    const approvalService = new BrowserToolApprovalService({
+      uuid: () => crypto.randomUUID(),
+      now: Date.now,
+      authorityIsCurrent: () => true,
+      isLocalWindow: () => false,
+      isRestrictedDevice: (scope) => String(scope) === String(restrictedPhone),
+    });
+    const workAuthority = decodeToolActionAuthority({
+      hostId: "30000000-0000-4000-8000-000000000001",
+      mode: "work",
+      projectId: "40000000-0000-4000-8000-000000000001",
+      providerInstanceId: "50000000-0000-4000-8000-000000000001",
+      extension: { kind: "core" },
+    });
+    const active = snapshot({
+      status: "running",
+      context: {
+        contextId: "60000000-0000-4000-8000-000000000001" as never,
+        threadId,
+        actionId: "70000000-0000-4000-8000-000000000001" as never,
+        correlationId: "80000000-0000-4000-8000-000000000001" as never,
+        authority: workAuthority,
+        state: "active",
+        presentation: "native-live",
+        policy: {
+          profileMode: "isolated",
+          profile: { kind: "personal" },
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 60_000,
+        },
+        createdAt: "2026-11-20T10:00:00.000Z" as never,
+      },
+      observation: {
+        contextId: "60000000-0000-4000-8000-000000000001" as never,
+        actionId: "70000000-0000-4000-8000-000000000001" as never,
+        correlationId: "80000000-0000-4000-8000-000000000001" as never,
+        authority: workAuthority,
+        url: "https://example.com/login",
+        title: "Login",
+        revision: 1,
+        observedAt: "2026-11-20T10:00:00.000Z" as never,
+        stale: false,
+      },
+    });
+    const makeTools = (scope: typeof personPhone, hasContext: boolean) =>
+      createBrowserAppManagedTools({
+        windowId: scope,
+        threadId,
+        mode: "work",
+        executionPolicy: "approval-gated",
+        modelId: modelId as never,
+        resolveAuthority: () => workAuthority,
+        resolveModelId: () => modelId as never,
+        uuid: () => "90000000-0000-4000-8000-000000000001",
+        approvals: approvalService,
+        modelBindings: new Map<string, BrowserModelBinding>(),
+        resolveTaskProfile: () => "personal",
+        browser: {
+          inspectThread: () => (hasContext ? active : snapshot({ status: "ready" })),
+          create: vi.fn(async () => active),
+          act: vi.fn(async () => active),
+          releaseThread: vi.fn(async () => active),
+        },
+      });
+
+    // Restricted device is refused on both sign-in and default personal profile without throwing TypeError.
+    const restrictedSignIn = await makeTools(restrictedPhone, true).execute({
+      name: BROWSER_TOOL_DEFINITION.name,
+      inputJson: JSON.stringify({ operation: "sign-in", reason: "Sign in to continue" }),
+    });
+    expect(restrictedSignIn).toMatchObject({
+      isError: true,
+      result: { error: "sign-in-needs-this-computer" },
+    });
+
+    const restrictedProfile = await makeTools(restrictedPhone, false).execute({
+      name: BROWSER_TOOL_DEFINITION.name,
+      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+    });
+    expect(restrictedProfile).toMatchObject({
+      isError: true,
+      result: { error: "profile-not-local" },
+    });
+
+    // Person-paired device reaches the real approval prompt instead of throwing or refusing as restricted.
+    const signInPromise = makeTools(personPhone, true).execute({
+      name: BROWSER_TOOL_DEFINITION.name,
+      inputJson: JSON.stringify({ operation: "sign-in", reason: "Sign in to continue" }),
+    });
+    await vi.waitFor(() => expect(approvalService.list(personPhone)).toHaveLength(1));
+    const pending = approvalService.list(personPhone)[0];
+    if (pending === undefined) throw new Error("Expected pending sign-in approval");
+    approvalService.decide(personPhone, {
+      approvalId: pending.approvalId,
+      decision: "denied",
+    });
+    expect(await signInPromise).toMatchObject({
+      isError: true,
+      result: { error: "browser-approval-denied" },
+    });
+  });
 });

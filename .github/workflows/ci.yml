@@ -344,6 +344,9 @@ jobs:
       - name: Native download redirect source receipt
         timeout-minutes: 2
         run: bun run smoke:browser-download-source
+      - name: Native page-started local-navigation guard
+        timeout-minutes: 3
+        run: bun run smoke:browser-local-navigation
       # Prove the protocol workers' native boundary before the broader suites.
       - name: Bun export worker isolation
         id: export_worker_bun

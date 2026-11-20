@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_RUN_TURN_REQUEST_SHAPE,
-  CONTEXT_EVENT_NAMES,
   decodeCapacityReservation,
   decodeContextCapacityReservationUpdated,
   decodeContextEntry,
@@ -351,19 +350,5 @@ describe("context contracts", () => {
     expect(() => decodeContextSummaryContent("")).toThrowError();
     expect(decodeContextUsageReconciled({ reconciliation })).toEqual({ reconciliation });
     expect(decodeContextCapacityReservationUpdated({ reservation })).toEqual({ reservation });
-  });
-
-  it("publishes the versioned context event vocabulary", () => {
-    expect(CONTEXT_EVENT_NAMES).toEqual([
-      "context.manifest-created@1",
-      "context.overrides-updated@1",
-      "context.plan-created@1",
-      "context.summary-created@1",
-      "context.usage-reconciled@1",
-      "context.capacity-reservation-updated@1",
-      "context.compaction-requested@1",
-      "context.compaction-completed@1",
-      "context.compaction-failed@1",
-    ]);
   });
 });

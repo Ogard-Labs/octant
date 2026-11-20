@@ -298,8 +298,9 @@ the page, the workspace, or the person is reached.
     navigation elsewhere is refused on it rather than closing it. On the
     headless Browser the person's own page holds the site they typed, because
     that Browser cannot keep a typed address's redirect off this computer's
-    network. A page the agent opened admits every site there too, and its
-    redirects are followed wherever they go. Credential-field
+    network. A page the agent opened admits every site there too, and the
+    redirects of a load the host named for it — its `navigate`, its `tab-open`
+    with a target — are followed wherever they go. Credential-field
     protection, Take over and Hand back, and the paired-device reach are the
     same on it as on any page.
   - A Private page opened for one site (before this rule, or for a local
@@ -313,6 +314,41 @@ the page, the workspace, or the person is reached.
   - A typed address's redirect is still never followed onto this computer or
     its network, unless that is where the person typed; the agent's own
     navigation is not held to that.
+- A move the page itself starts — a clicked link, a script, a refresh, a
+  subframe; the host cannot tell them apart — onto this computer or its
+  network is refused before the allowlist or a temporary grant is consulted:
+  a private, loopback, or link-local IP address as written (an IPv4-mapped
+  IPv6 one included), `localhost`, a name under `.localhost`, `.local`,
+  `.internal`, `.lan`, or `.home.arpa`, or a bare name. The text alone is
+  read, never a resolver, and only http(s) addresses get the decision. The
+  rule holds on the desktop and the headless Browser alike: the desktop
+  guard reads the navigation events the renderer reports, and the headless
+  Browser pauses each document request and each redirect hop before it is
+  sent and judges the same address text the same way. A context approved
+  for exactly one origin keeps hops to that origin. On
+  desktop, a local document committed after an explicit open of its exact
+  origin may also follow
+  links and redirects in its own tab, even in a wider context. The main
+  frame must start the move and each hop must stay on the exact scheme,
+  host, and port. The headless Browser keeps the same committed-document
+  continuation, but its guard cannot see which frame started a main-frame
+  move, so it admits the exact-origin continuation whichever frame started
+  it. This adds no site approval and carries nothing to a new
+  tab or a reopened sleeping tab. Open link in the context menu opens a new
+  tab and follows the ordinary page-started rule. A host-named load has a
+  separate exception for its own top-level redirect chain: the agent's
+  `navigate` or `tab-open` under the context's allowlist, and a person's
+  typed address within the exact scheme, host, and port they typed. An
+  admitted page-started main navigation supersedes that named load, and a
+  main document commit ends it. A renderer start, a subframe, an
+  extension's load, a script, and a held or reopened page never borrow the
+  named-load exception. On the headless Browser the tab's document guard
+  does not pause a committed out-of-process frame's own moves or a
+  popup's, so a browser-wide session pauses every document hop of the
+  frames and pages a tab's own guard cannot reach — including a
+  frame's redirect hops — and judges them with the same rule: subframes
+  and popups never earn the named-load exception or the exact-origin
+  continuation. A refused popup is closed anyway.
 - After a page expires, ordinary agent calls answer `context-expired` and name
   its former Private, Project, or Personal profile, rather than claiming it
   never opened. Reopening requires an explicit `navigate`; a stored profile
@@ -737,8 +773,9 @@ runs, not when it was recorded.
   does ([Results](#results)); a saved flow never holds a recording.
 - **Who may.** The thread's own agent in Work and Code saves, lists, and runs. A
   paired device's turn saves and runs as a local window's does (maintainer
-  decision, 2026-11-12; not built yet: today it may not, because a flow
-  navigates and types, which it may not), and Plan mode lists but refuses to save or run
+  decision, 2026-11-12; built for person-paired devices under
+  [A paired device holds the page](#a-paired-device-holds-the-page); restricted
+  roster devices remain refused), and Plan mode lists but refuses to save or run
   ([Plan mode](#plan-mode)). A routine or a subagent may run a flow, on a Private page only,
   because the profile rules apply to each replayed step as to any call; it may
   not save one. A terminal grant has no flows. Chat has no Browser.
@@ -750,9 +787,9 @@ runs, not when it was recorded.
   Browser records (profiles, approvals) travel in none of them.
 - **The person's view.** Settings › Data & storage › Browser flows lists every
   Project's flows with step count and first address and deletes one after a
-  confirmation, from a local window or a paired device (`/api/browser/flows`;
-  maintainer decision, 2026-11-12; not built yet: today a paired device is
-  refused; designed in [A paired device holds the page](#a-paired-device-holds-the-page)). A person may also select an existing active, idle Work or Code task,
+  confirmation, from a local window or a person-paired device (`/api/browser/flows`;
+  maintainer decision, 2026-11-12; built under
+  [A paired device holds the page](#a-paired-device-holds-the-page)). A person may also select an existing active, idle Work or Code task,
   review its fixed steps and run-specific text, and start through that task's
   current model and authority. Settings supplies no authority of its own.
 - **Reviewed run.** The server binds the local window, flow version, task/model,
@@ -1033,10 +1070,10 @@ needed.
   `browser-sign-in-cancelled`, and the page is the agent's again.
 - Refused before anyone is asked on a routine's or a subagent's turn and for a
   CLI in a thread terminal (`sign-in-needs-a-person`): nobody there can sign
-  in. A paired device's turn is offered the sign-in, and the person signs in
-  from that device or at the computer (maintainer decision, 2026-11-12; not built
-  yet: today it is refused, `sign-in-needs-this-computer`; designed in
-  [A paired device holds the page](#a-paired-device-holds-the-page)).
+  in. A person-paired device's turn is offered the sign-in, and the person
+  signs in from that device or at the computer (maintainer decision, 2026-11-12;
+  built under [A paired device holds the page](#a-paired-device-holds-the-page);
+  a roster-only or restricted device's turn keeps `sign-in-needs-this-computer`).
 - While a native page is held for sign-in or take-over, **Login permission**
   lets the person review one 1Password account/vault/item by immutable IDs.
   The review names the exact HTTPS origin and port, top frame, profile and
@@ -1196,102 +1233,25 @@ packaged, personal-account or cross-platform acceptance evidence.
   and adds nothing for anyone to do on the page, so it is not journaled, as the
   sign-in hold is not.
 - **Who may.** Take over and Hand back are the person's, from a window of this
-  computer that can see the thread, through `/api/browser/contexts/take-over`
-  and `/api/browser/contexts/hand-back`. The route checks the window's
-  capability and its authority over the thread; the service refuses a routine's
-  window and a page that is not there, in another window, or whose authority
-  ended. A routine, a subagent, and a terminal CLI never reach it: it is not
-  an operation of the agent tool. A paired device takes over and hands back
-  as a local window does (maintainer decision, 2026-11-12). Not built yet:
-  today a paired device may not, and the gateway does not admit the paths for
-  it; the design is [A paired device holds the page](#a-paired-device-holds-the-page).
-- Rationale for what is built today: a paired device may tap, press, and
-  scroll a Private page (`remoteBrowserActionReach`) but cannot type, choose,
-  or navigate, so holding the agent out of a page was worth nothing to it. Once
-  a paired device types and navigates, the hold is as useful to it as to a
-  window.
-
-### Owner control of an open Code page
-
-An enrolled owner has a separate signed control path. It is what is built
-today; once every paired device controls the Browser as a local window does
-(maintainer decision, 2026-11-12), this unlock gates nothing and the path
-is kept only until that is built. It does not widen the
-ordinary paired-device routes above. The first supported resource is an
-already-open, visible native Code Private page in its original local window.
-Work, Chat, dedicated pages, routine/subagent scopes, stored profiles, embedded
-or hidden views, and headless pages are refused. Listing targets exposes only
-the exact thread, site and controller metadata, under owner administration
-consent. It exposes neither page content nor a local window capability.
-
-Taking over always needs a fresh own-class unlock bound to that selected host,
-thread, context, document and origin-policy version. An administration session
-cannot authorize it. One controller receives at most 60 seconds, measured from
-admission with an absolute native deadline. Every subsequent request is signed
-by that original owner identity, uses a one-use sequence, and revalidates owner
-list/key/device status, task/window authority and the native target. A control
-ID alone grants nothing. A changed document, active tab or viewport refuses
-old coordinates; the person must select and unlock the current target again.
-
-The owner uses a closed touch-tap/touch-scroll/key/text operation set. Native
-mouse dispatch cannot stand in for a tap: the supported Electron runtime emits
-the same reclaim event for a dispatched mouse click as for local mouse input.
-Fixed touch dispatch preserves local mouse/key reclaim without suppressing it.
-There is no URL,
-selector, JavaScript, arbitrary protocol, transfer, profile or credential-broker
-operation. Page navigation remains inside the task's existing reviewed origins;
-owner input does not add origins. Device-local authenticators, popups, unsupported
-pages and cross-origin sign-in paths may require **Finish on the host Mac**.
-
-Frames are volatile, person-only JPEG responses, at most 1920 by 1200 and
-4 MiB of JPEG bytes, with bounded base64/JSON transport. They can contain credentials.
-They never enter agent observations, captures, artifacts, journal, export or
-logs. The native source must still be visible and current after capture.
-Private fill/script custody blocks owner frame/input admission, including an
-acquire-and-release interval overlapping a late frame. Owner control likewise
-blocks private fill/script acquisition and agent observations; an earlier
-agent capture cannot publish after a control interval has ended.
-
-The local toolbar names the active owner and offers **Reclaim locally**. Local
-input immediately invalidates remote control at the native boundary. **Stop
-remote control**, lease expiry and disconnect do not resume the agent: the
-existing person hold remains. Closing or hiding the owner view aborts pending
-requests and sends a bounded, signed stop without another unlock. An unreachable
-host may retain its finite lease until expiry; instantaneous network-disconnect
-revocation is not promised. A sent input can have a possible effect and is never
-automatically retried. Only an explicitly confirmed **Hand back** releases the
-person hold and requires the agent's fresh reading before acting again.
-A handback is confirmed only while the native controller is still current, so
-after local input reclaims the page a remote **Hand back** is refused and the
-person hold stays. An input still awaiting its native result prevents a
-confirmed handback, another controller and agent observations on that page. A transport failure is not proof
-that input stopped; an unsettled native input keeps those operations refused.
-Host-observed membership and journaled device/resource changes revalidate the
-current controller and abort its queued requests before input admission. This
-does not promise atomic revocation across a disconnected host or an effect that
-has already started.
-
-The journal records only bounded authority/effect metadata with the actual
-`owner-unlock` petitioner. Its service envelope is `system`, not a fabricated
-local user. Typed values, origins, frames and signing material are absent, and
-thread purge removes these thread-owned records. The live controller and
-frames are not recovered after host restart.
-
-- Rationale: reusing the sign-in hold keeps one place that decides the page is
-  the person's, so every agent path (Work, Code, a batch's steps, an action
-  that waited on an approval) already checks it. The refusal names a different
-  reason because "waiting for the person to sign in" would be false.
+  computer or a person-paired device that can see the thread, through
+  `/api/browser/contexts/take-over` and `/api/browser/contexts/hand-back`. The
+  route checks the window's capability or the device's `person-paired-device`
+  standing and its authority over the thread; the service refuses a routine's
+  window, a roster-only or restricted device (`remote-control-not-person`), and
+  a page that is not there, in another window, or whose authority ended. A
+  routine, a subagent, and a terminal CLI never reach it: it is not an
+  operation of the agent tool. See
+  [A paired device holds the page](#a-paired-device-holds-the-page).
 
 ### A paired device holds the page
 
-Designed, not built (maintainer request, 2026-11-18). A device the host's own
+Built (maintainer request, 2026-11-18). A device the host's own
 person paired takes over a page of the desktop's native Browser, drives it,
 and hands it back as a window of this computer does; it answers a `sign-in`
 card from that device; it opens and acts on profile pages
 ([Browser profiles: what a device sees](browser-profiles.md#what-a-paired-device-sees-of-a-signed-in-page));
-and it saves, reviews and runs flows. Until it is built, the refusals named
-in [Take over and Hand back](#take-over-and-hand-back) and the owner control
-path above stay as they are.
+and it saves, reviews and runs flows. The former separate enrolled-owner
+control path was removed with this build.
 
 - **Who.** Only a principal the gateway marks `person-paired-device` (the
   device's registration says `user-approved`; `GET /api/remote/auth/device`
@@ -1434,8 +1394,7 @@ path above stay as they are.
   address after the first is recorded. Thread purge removes them.
 
 **Wire contract.** A schema-only module `@octant/contracts/paired-browser-control`
-generalizes today's owner control contract (`ownerBrowser.ts`) instead of
-adding a parallel one:
+replaces the former owner control contract:
 
 - `PairedBrowserTarget`: thread, context, tab, document version and profile
   kind, taken from what the device's Browser pane already lists.
@@ -1495,8 +1454,7 @@ twice.
   upgrade; and widening the owner path's 60-second, per-input unlock to
   person-paired devices, which the 2026-11-13 decision removed from the
   product routes.
-- Once this is built, the owner control path above gates nothing and is
-  removed with it.
+- The former separate enrolled-owner control path was removed with this build.
 
 ## Diagnostics
 
@@ -1700,8 +1658,9 @@ Several threads of one Project may each drive their own page at the same time.
   thread's id and title, and whether an agent drives it. It returns no page text
   and no picture; a selected page's picture is read through its own thread's
   route, under that thread's authority, as the dock's Browser card reads it. A
-  paired device reads the same list (maintainer decision, 2026-11-12; not built yet:
-  today it gets a page in a stored profile named by its existence alone).
+  person-paired device reads the same list (maintainer decision, 2026-11-12;
+  built); a roster-only or restricted device still gets a page in a stored
+  profile named by its existence alone.
 - An agent counts as driving a page while an agent action is queued or running
   on it and for 15 seconds after the last one ends; a CLI in a terminal grant
   is not marked.

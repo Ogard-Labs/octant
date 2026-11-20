@@ -649,6 +649,22 @@ and `quickstart`. A publish from a type with no local file is judged at the
 Project root and its approval says it sends a page Claude made. Under Strict
 the thread's choice still decides and the tool publishes one Project file only.
 
+**Bedrock and AWS profiles outside Strict.** Provider runtimes that support
+Amazon Bedrock natively (including Claude Code with `CLAUDE_CODE_USE_BEDROCK=1`
+and Codex's Bedrock providers) read the person's AWS profile, environment, and
+own refresh settings exactly as in their own CLIs (maintainer decision,
+2026-11-19). Octant never resolves, copies, or replaces AWS credentials for a
+provider runtime. Outside Strict, the launch environment preserves the person's
+AWS variables (`AWS_PROFILE`, `AWS_REGION`, `AWS_DEFAULT_REGION`,
+`AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_ROLE_ARN`,
+`AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_CONTAINER_CREDENTIALS_*`,
+`CLAUDE_CODE_USE_BEDROCK`, and the rest), confined Plan and Chat launches
+narrow protected files to other providers' sign-ins and keep read access to
+existing `~/.aws` and configured AWS config/credential/token files, and Claude
+Code admits Bedrock account routing (`apiProvider: "bedrock"`) on both probe
+and session start. Under Strict, each runtime keeps its fixed environment list,
+protected-file wall, and first-party routing rule.
+
 **Several Claude accounts.** Each Claude account is its own provider
 instance with its own `CLAUDE_CONFIG_DIR` and secure-storage folder, its own
 claude.ai sign-in and its own artifacts switch. A thread runs on one
@@ -1710,33 +1726,47 @@ no rule about an Octant tool reaches its model. A session still open in the
 person's own Codex keeps its writer there, and the resume reports that
 another Codex process is using the thread until it closes.
 
-**Codex fork and rewind** (maintainer request, 2026-11-18; built for fork).
-A Code fork continues a copy of Codex's own thread rather than a text
-handoff where it can, as Claude Code's does ([Fork and rewind](#fork-and-rewind)).
-Each completed turn journals its Codex turn id as its native anchor, and the
-driver's `forkSession` calls `thread/fork` with `lastTurnId` set to it,
-`cwd` set to the Project's folder and `excludeTurns`. The copy keeps the
-source's app tools (measured with codex-cli 0.170.0), so its cursor carries
-the source's tool record and `adopted` mark. Codex leaves the copy loaded in
-the app-server that made it, and another app-server's resume refuses a
-loaded thread, so the copy is made on a short-lived catalog process of its
-own that closes as soon as the copy exists; the fork's first turn then
-resumes it on its own lease, and the journal holds the copy from then on.
-Each copy has a process of its own, so two forks at once never leave one
-copy loaded while the other is made. A copy is made only into the source's own folder and
-mode, and only by a release whose fork cuts at a turn (`lastTurnId`, from
-codex-cli 0.143.0); a fork onto its own worktree, a turn with no anchor, an
-older Codex and a failed copy go back with the text handoff. Codex still
-reports `sessionRollback` unsupported, so a rewind keeps the text handoff.
+**Codex fork and rewind** (maintainer request, 2026-11-18; built for fork and
+rewind, maintainer decision 2026-11-19). A Code fork or rewind continues a copy
+of Codex's own thread rather than a text handoff where it can, as Claude Code's
+does ([Fork and rewind](#fork-and-rewind)). Each completed turn journals its
+Codex turn id as its native anchor, and the driver's `forkSession` calls
+`thread/fork` with `lastTurnId` set to it, `cwd` set to the Project's folder
+and `excludeTurns`. The copy keeps the source's app tools (measured with
+codex-cli 0.170.0), so its cursor carries the source's tool record and
+`adopted` mark. Codex leaves the copy loaded in the app-server that made it,
+and another app-server's resume refuses a loaded thread, so the copy is made on
+a short-lived catalog process of its own that closes as soon as the copy
+exists; the fork's first turn or the rewound thread's next turn then resumes it
+on its own lease, leaving the source thread untouched, and the journal holds
+the copy from then on. Each copy has a process of its own, so two concurrent
+copies never leave one loaded while the other is made. Codex reports
+`sessionRollback` supported from `0.143.0` (the first release whose
+`thread/fork` cuts at `lastTurnId`) and `unsupported` on older releases; the
+rewind preview promises a native copy only when Codex is `0.143.0` or later,
+the folder and mode match the kept turn's session binding, and the last kept
+turn journaled its Codex turn anchor. A fork onto its own worktree, a different
+folder or mode, a turn with no anchor, a Codex release older than `0.143.0`, or
+a failed copy goes back cleanly with the text handoff. Files come back only
+through Octant's checkpoints.
 
-**Codex skills and plugins in `@`** (maintainer request, 2026-11-18; built).
+**Codex skills and plugins in `@`** (maintainer requests, 2026-11-18 and 2026-11-19; built).
 The composer's `@` menu lists Codex's own skills and plugins after Octant's,
 labelled as Codex's. The probe reads the account's skills with `skills/list`
 (no folder: the `user`, `system` and `admin` scopes; a Project's skills are
 not the account's) and its installed, enabled plugins with
 `plugin/installed` (codex-cli 0.135.0 and later), into the observation's
 `mentions`; a release that lists neither offers none, and a failed read never
-fails the probe. Choosing one writes Codex's own reference into the draft:
+fails the probe. In a local Work or Code thread (or draft), opening `@` also
+queries `skills/list` for the thread's own folder (`cwd` / checkout / working
+directory, bypassing Codex's cache) **only when the thread's launch actually
+loads Project skills** (`nativeSetup.skills === true`). Project skills are
+marked `scope: "project"` and labelled **Project** beside the account's skills
+(winning deduplication if a Project skill shares a name with an account skill);
+when Project skills are off (`nativeSetup.skills !== true`), or for a Chat
+thread or server Project with no local folder, no Project skills are listed
+and no disabled or greyed rows appear. Choosing one writes Codex's own
+reference into the draft:
 `$name` for a skill, `@name` for a plugin. At send the driver reads the
 prompt's `$name` and `@name` references and resolves each against Codex's
 own listing for the thread's folder, never a path the client sent: a skill
@@ -1823,8 +1853,9 @@ every mode there. On Linux 2.x runs turns in every mode too (maintainer
 decision, 2026-11-16, replacing the 2026-11-14 refusal of Chat and Plan): its
 Chat and Plan launches start processes inside a read-only capsule with the
 same stand-in first on `PATH`, and the probe attests that capsule
-([Plan and Chat tool parity](../architecture.md#security-and-authority)). A
-host that is neither macOS nor Linux refuses a 2.x Chat or Plan launch before
+([Plan and Chat tool parity](../architecture.md#security-and-authority)). On Windows
+2.x runs turns in every mode outside Strict without an Octant jail (below). A
+host that is neither macOS, Linux, nor Windows refuses a 2.x Chat or Plan launch before
 it starts with a sentence naming why and reports `turnModes` with Chat and
 Plan unsupported (`host-confinement`), which the provider's Settings page
 shows as where it runs turns. Rationale: there the jail Chat and Plan need can
@@ -1850,8 +1881,16 @@ OpenCode's own settings for the repository, where clearing it is the way to
 revoke it. OpenCode then makes later matching edits without asking and
 settles other pending requests the grant covers, so the files an `always`
 answer names, and those of a request OpenCode settled by itself, stay
-admitted by the file-change check for that Project root while the host runs;
-after a host restart such an edit fails the turn until it is approved again. Approval-gated on
+admitted by the file-change check while the native process that earned them
+runs; the admission is a ledger of that process's generation, retired with
+it, so a later connection of the same Project admits nothing the earlier
+process remembered, and after a host restart or process exit such an edit
+fails the turn until it is approved again. The ledger holds at most 1,024
+file names per process and fails closed: a request whose new names would not
+fit whole is answered `once` instead of being remembered by half, and a
+request OpenCode settles by itself cannot be re-answered, so the same full
+ledger leaves it the one-use admission a `once` answer gives rather than
+nothing. Approval-gated on
 2.x honours permission grants the person saved in OpenCode itself for the
 same repository: OpenCode keys them by the repository's root commit, keeps
 them in its own data store (shared with the person's own use because
@@ -1983,7 +2022,17 @@ reports through the same events as a prompt. A command route that fails
 after the context was admitted leaves that context queued in the session,
 where the next run would read it stale beside the next turn's own; the turn
 fails as `stale-resume` and the driver never resumes that session again (in
-this host process), so the thread starts on a new session. Such a turn runs
+this host process), so the thread starts on a new session. The denial is a
+tombstone the driver keeps for the host's whole life rather than a list it
+can evict, and a `session.deleted` the provider reports clears the session's
+own tombstone — a deletion is an ending, not a doubt. The tombstones are
+bounded to 4,096; a 4,097th distinct denial cannot be represented, so
+refusal latches for every resume — an id the cap dropped or one never seen
+— until the host restarts, while a new session may still start. The tool catalogue a
+session's resume may reuse is bounded to 128 catalogues held for 30 minutes
+each, dropped oldest-first past that; a resume that misses simply installs
+no app tools rather than another session's, and a deleted or stale session's
+catalogue is dropped with it. Such a turn runs
 in every mode, Chat and Plan included (maintainer decision, 2026-11-16;
 built). A command may run a shell before the model sees it: a configured
 command's template expands `` !`…` `` through OpenCode's shell, which asks no
@@ -2948,23 +2997,25 @@ its status are in
   launch carries no sandbox settings at all (the SDK port refuses one that
   does): one asking for that sandbox with `failIfUnavailable` would leave
   every command unable to run.
-- **Chat** outside Strict starts unconfined on a family told natively that
-  it has no folder or shell (`chatWithoutFolderOrShell`): Codex with no
-  execution environment and its shell, image, plugin and app features off;
-  Pi with `--no-tools`, no extension and none of the person's resources; and
-  Claude with no file or shell tool in its session's tool list
-  (`claudeExecutionOptions` leaves out `Read`, `Grep`, `Glob`, `LS`, `Edit`,
-  `Write`, `NotebookEdit`, `Bash` and the task tools on Windows). OpenCode
-  and the ACP agents stay refused by name in Chat: OpenCode's permission
-  rules can deny its file and shell tools, but its command templates run
-  shell substitutions and its plugins run code in its own process outside
-  those rules, and an ACP agent's client capabilities decide only whether it
-  uses Octant's file and terminal methods, never its own built-in tools,
-  which no reviewed profile can be told to drop.
-- **Refused by name:** Strict at every level ("Strict needs a sandbox
-  Windows doesn't have yet"), Full access with the sandbox kept, and a Chat
-  launch on OpenCode or an ACP agent. A launch that does not carry its Strict
-  value is Strict.
+- **Chat** outside Strict starts unconfined on every provider family (maintainer
+  decision, 2026-11-19: outside Strict, the provider's own rules apply and
+  Octant adds none of its own): Codex with no execution environment and its
+  shell, image, plugin and app features off; Pi with `--no-tools`, no extension
+  and none of the person's resources; Claude with no file or shell tool in its
+  session's tool list (`claudeExecutionOptions` leaves out `Read`, `Grep`,
+  `Glob`, `LS`, `Edit`, `Write`, `NotebookEdit`, `Bash` and the task tools on
+  Windows); OpenCode with a deny-everything Chat permission ruleset of its own
+  (`*` denied, keeping only Octant's session tool bridge and 2.x `question`
+  open, with no Octant isolation); and ACP agents on their own permission
+  handling with no Octant isolation. Both the provider card and Settings
+  capability wording state honestly that outside Strict on Windows OpenCode's
+  own permission rules, not Octant, keep its file and shell tools off in Chat
+  (and its command templates and plugins run as they do in OpenCode itself),
+  and that an ACP agent's own permission handling, not Octant confinement,
+  applies in Chat.
+- **Refused by name:** Strict at every level, Chat included ("Strict needs a
+  sandbox Windows doesn't have yet"), and Full access with the sandbox kept. A
+  launch that does not carry its Strict value is Strict.
 - **Version and catalog reads.** An admitted launch reads its version
   unconfined. A read that serves no one thread (Codex's catalog lease,
   OpenCode's or an ACP agent's readiness check) runs unconfined only while the host's new

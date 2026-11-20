@@ -21,6 +21,7 @@ import { RemoteAccessDefaults } from "./RemoteAccessDefaults";
 import { RemoteCoordinatorProposals } from "./RemoteCoordinatorProposals";
 import { RemoteProjectTools } from "./RemoteProjectTools";
 import { RemoteCodeThreadStart, RemoteWorkThreadStart } from "./RemoteThreadStart";
+import { ThreadNativeSetupProvider } from "../providers/ThreadNativeSetupControl";
 import { useProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -126,6 +127,18 @@ function useRemoteReplyDetail(
 
 function RemoteModeSurface(props: RemoteWorkspaceProps) {
   const providerController = useProviderController({ client: props.clients.provider });
+  // Only a browser the host's own person paired may read or change thread
+  // native setup and Project Codex skills; restricted remote sessions keep none.
+  const threadNativeSetupServices = useMemo(
+    () =>
+      props.actsAsHostPerson !== true || providerController.threadNativeSetup === undefined
+        ? undefined
+        : {
+            instances: providerController.instances,
+            ...providerController.threadNativeSetup,
+          },
+    [props.actsAsHostPerson, providerController.instances, providerController.threadNativeSetup],
+  );
   const providerGroups = useMemo(
     () =>
       buildModelPickerGroups({
@@ -203,7 +216,9 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
   }
   return (
     <>
-      {surface}
+      <ThreadNativeSetupProvider services={threadNativeSetupServices}>
+        {surface}
+      </ThreadNativeSetupProvider>
       {props.actsAsHostPerson === true && props.mode !== "chat" ? (
         <RemoteAccessDefaults
           codeClient={props.clients.code}

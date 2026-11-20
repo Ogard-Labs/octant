@@ -2811,8 +2811,6 @@ export function validateCanvasDefinition(input: unknown): CanvasDefinition {
   return definition;
 }
 
-export const validateCanvas = validateCanvasDefinition;
-
 export function measureCanvasBudget(input: CanvasDefinition): CanvasBudgetUsage {
   const definition = validateCanvasDefinition(input);
   return calculateBudgetUsage(definition, inspectCanvasPayload(definition));

@@ -45,7 +45,6 @@ export const MAX_AUTOMATION_HISTORY_ENTRIES = 256;
 export const MAX_AUTOMATION_QUERY_LIMIT = 100;
 export const MAX_AUTOMATION_QUERY_CURSOR_LENGTH = 256;
 export const MAX_AUTOMATION_MISSED_RUN_CAP = 10_000;
-export const DEFAULT_AUTOMATION_MISSED_RUN_CAP = 128;
 export const AutomationMissedRunCap = Schema.Int.pipe(
   Schema.greaterThanOrEqualTo(1),
   Schema.lessThanOrEqualTo(MAX_AUTOMATION_MISSED_RUN_CAP),

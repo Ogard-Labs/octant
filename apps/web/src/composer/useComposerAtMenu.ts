@@ -1,10 +1,25 @@
-import { createElement, useId, useState, type KeyboardEvent } from "react";
-import type { ProviderInstanceId, ProviderMention } from "@octant/contracts";
+import {
+  createElement,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
+import type {
+  ProjectId,
+  ProviderExecutionPolicy,
+  ProviderInstanceId,
+  ProviderMention,
+  ThreadNativeSetupRequest,
+} from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 import { File, Folder, Globe2, Monitor, Plug, Sparkles } from "../ui/icons";
 import { filterOctantCommands } from "../palette/commandModel";
 import { useOctantCommands } from "../palette/CommandRegistry";
 import { readPathMentionQuery, type PathMentionCandidate } from "../code/pathMentions";
+import { useThreadNativeSetupServices } from "../providers/ThreadNativeSetupControl";
 import { OctantButton } from "../ui/base/OctantButton";
 
 /** How many skills, servers, and connectors one query lists before files. */
@@ -26,6 +41,14 @@ export interface ComposerProviderMentions {
   /** The provider's name, so each row says whose skill or plugin it is. */
   readonly label: string;
   readonly mentions: ReadonlyArray<ProviderMention>;
+  /**
+   * Identifies the thread/Project/setup scope of `load`. Changing it drops
+   * earlier folder-scoped mentions immediately so stale Project skills never
+   * appear after switching threads or turning Project skills off.
+   */
+  readonly scopeKey?: string;
+  /** Loads thread- or Project-scoped mentions when the `@` menu opens. */
+  readonly load?: () => Promise<ReadonlyArray<ProviderMention>>;
 }
 
 /** The selected provider's own skills and plugins, as its picker group carries them. */
@@ -38,6 +61,106 @@ export function composerProviderMentions(
   const mentions = group?.providerMentions;
   if (group === undefined || mentions === undefined || mentions.length === 0) return undefined;
   return { label: group.driverLabel, mentions };
+}
+
+export type ThreadProviderMentionsTarget =
+  | {
+      readonly kind: "thread";
+      readonly mode: "work" | "code";
+      readonly threadId: string;
+      readonly projectId?: ProjectId | undefined;
+      readonly providerInstanceId: ProviderInstanceId | undefined;
+      readonly executionPolicy?: ProviderExecutionPolicy | undefined;
+    }
+  | {
+      readonly kind: "draft";
+      readonly mode: "work" | "code";
+      readonly projectId: ProjectId | undefined;
+      readonly providerInstanceId: ProviderInstanceId | undefined;
+      readonly executionPolicy?: ProviderExecutionPolicy | undefined;
+    };
+
+/**
+ * The selected provider's skills and plugins for a Work or Code thread or
+ * draft. Starts with the account-level mentions from the picker group and
+ * refreshes from the host when `@` opens so Project skills appear (labeled
+ * "Project") only while the thread's launch actually loads them.
+ */
+export function useThreadProviderMentions(
+  groups: ReadonlyArray<PickerGroup> | undefined,
+  target: ThreadProviderMentionsTarget,
+): ComposerProviderMentions | undefined {
+  const services = useThreadNativeSetupServices();
+  const readMentions = services?.readMentions;
+  const revision = services?.revision ?? 0;
+  const instanceId = target.providerInstanceId;
+  const group =
+    instanceId === undefined
+      ? undefined
+      : groups?.find((candidate) => String(candidate.instance.id) === String(instanceId));
+  const accountNativeSetup =
+    group !== undefined && "nativeSetup" in group.instance ? group.instance.nativeSetup : undefined;
+  const project =
+    target.projectId === undefined
+      ? undefined
+      : services?.projects?.find((candidate) => String(candidate.id) === String(target.projectId));
+  const trustedKey =
+    project !== undefined && project.type !== "chat"
+      ? (project.nativeProviders ?? []).join(",")
+      : "";
+  const request = useMemo<
+    Extract<ThreadNativeSetupRequest, { kind: "mentions" | "draft-mentions" }> | undefined
+  >(() => {
+    if (readMentions === undefined || group === undefined || instanceId === undefined) {
+      return undefined;
+    }
+    if (target.kind === "thread") {
+      return { kind: "mentions", mode: target.mode, threadId: target.threadId };
+    }
+    if (target.projectId === undefined) return undefined;
+    return {
+      kind: "draft-mentions",
+      mode: target.mode,
+      projectId: target.projectId,
+      providerInstanceId: instanceId,
+      ...(target.executionPolicy === undefined ? {} : { executionPolicy: target.executionPolicy }),
+    };
+  }, [
+    readMentions,
+    group,
+    instanceId,
+    target.kind,
+    target.mode,
+    target.kind === "thread" ? target.threadId : undefined,
+    target.projectId,
+    target.executionPolicy,
+  ]);
+  const scopeKey =
+    request === undefined
+      ? undefined
+      : [
+          request.kind,
+          request.mode,
+          request.kind === "mentions" ? request.threadId : String(request.projectId),
+          String(instanceId),
+          target.executionPolicy ?? "",
+          accountNativeSetup === false ? "acct-off" : "acct-on",
+          trustedKey,
+          String(revision),
+        ].join(":");
+  return useMemo<ComposerProviderMentions | undefined>(() => {
+    if (group === undefined) return undefined;
+    const mentions = group.providerMentions ?? [];
+    if (request === undefined || readMentions === undefined || scopeKey === undefined) {
+      return mentions.length === 0 ? undefined : { label: group.driverLabel, mentions };
+    }
+    return {
+      label: group.driverLabel,
+      mentions,
+      scopeKey,
+      load: () => readMentions(request),
+    };
+  }, [group, request, readMentions, scopeKey]);
 }
 
 /** The runtime's own reference for a skill or plugin, as its own composer writes it. */
@@ -85,11 +208,48 @@ export function useComposerAtMenu(input: {
   const [token, setToken] = useState<ReturnType<typeof readPathMentionQuery>>();
   const [activeIndex, setActiveIndex] = useState(0);
   const [resolving, setResolving] = useState(false);
+  const [loadedMentions, setLoadedMentions] = useState<
+    { readonly scopeKey: string; readonly mentions: ReadonlyArray<ProviderMention> } | undefined
+  >(undefined);
+  const loadedForOpenRef = useRef<string | undefined>(undefined);
   const raw = token === undefined ? undefined : `@${token.query}`;
   const tokenIsCurrent =
     token !== undefined &&
     raw !== undefined &&
     input.draft.slice(token.start, token.start + raw.length) === raw;
+  const providerLoad = input.provider?.load;
+  const providerScopeKey = input.provider?.scopeKey;
+  useEffect(() => {
+    if (!tokenIsCurrent) {
+      loadedForOpenRef.current = undefined;
+      return;
+    }
+    if (providerLoad === undefined || providerScopeKey === undefined) return;
+    if (loadedForOpenRef.current === providerScopeKey) return;
+    loadedForOpenRef.current = providerScopeKey;
+    let current = true;
+    let settled = false;
+    void providerLoad()
+      .then((mentions) => {
+        settled = true;
+        if (current) setLoadedMentions({ scopeKey: providerScopeKey, mentions });
+      })
+      .catch(() => {
+        settled = true;
+      });
+    return () => {
+      current = false;
+      // If `load` identity changed before the in-flight request settled, allow
+      // the next effect run for the same scope to start a fresh request.
+      if (!settled && loadedForOpenRef.current === providerScopeKey) {
+        loadedForOpenRef.current = undefined;
+      }
+    };
+  }, [tokenIsCurrent, providerLoad, providerScopeKey]);
+  const providerMentions =
+    providerScopeKey !== undefined && loadedMentions?.scopeKey === providerScopeKey
+      ? loadedMentions.mentions
+      : (input.provider?.mentions ?? []);
 
   const rows: Array<AtMenuRow> = [];
   if (tokenIsCurrent) {
@@ -137,14 +297,19 @@ export function useComposerAtMenu(input: {
     }
     const query = token.query.toLowerCase();
     const provider = input.provider;
-    for (const mention of (provider?.mentions ?? [])
+    for (const mention of providerMentions
       .filter((candidate) => candidate.name.toLowerCase().includes(query))
       .slice(0, MAX_EXTENSION_ROWS)) {
       const reference = providerMentionReference(mention);
+      const providerLabel = provider?.label ?? "Provider";
+      const origin =
+        mention.scope === "project"
+          ? `Project · ${providerLabel}'s own ${mention.kind}`
+          : `${providerLabel}'s own ${mention.kind}`;
       rows.push({
         id: `provider-mention:${mention.kind}:${mention.name}`,
         title: reference,
-        meta: [`${provider?.label ?? "Provider"}'s own ${mention.kind}`, mention.description]
+        meta: [origin, mention.description]
           .filter((part) => part !== undefined && part.length > 0)
           .join(" · "),
         icon: mention.kind === "skill" ? "skill" : "server",

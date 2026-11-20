@@ -69,9 +69,6 @@ export type ReplicaReconcileOutcome =
   | { readonly outcome: KeepingOutcome }
   | { readonly outcome: "refused"; readonly reason: ReplicaRefusalReason };
 
-type OverwriteName = Extract<(typeof REPLICA_RECONCILE_OUTCOMES)[number], "replace" | "overwrite">;
-export const replicaReconcileCannotOverwrite: [OverwriteName] extends [never] ? true : never = true;
-
 /**
  * A revoked instance carries the cut its revocation named: entries it signed
  * at or before that sequence keep counting, and later ones are refused. When
@@ -519,17 +516,6 @@ export function replicaArtifactHeads(
       originSequence: tombstone.originSequence,
     }));
   return [...versions, ...tombstones];
-}
-
-/**
- * Whether another computer hides the artifact: only when every head is a
- * tombstone. A revision beside a deletion keeps it visible.
- */
-export function replicaArtifactHidden(
-  record: Pick<ReplicaArtifactRecord, "versions" | "tombstones">,
-): boolean {
-  const heads = replicaArtifactHeads(record);
-  return heads.length > 0 && heads.every((head) => head.kind === "tombstone");
 }
 
 /**

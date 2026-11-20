@@ -15,6 +15,7 @@ export interface AuthenticatedProductDispatchHandoff {
   readonly request: Request;
   readonly principal: ClientPrincipal;
   readonly abortSignal?: AbortSignal;
+  readonly sessionNow?: () => number;
   readonly freshness?: "current" | "rotation-due";
   readonly requestFacts?: unknown;
 }
@@ -53,6 +54,7 @@ export function createAuthenticatedProductDispatch(
       request: handoff.request,
       principal: handoff.principal,
       ...(handoff.abortSignal === undefined ? {} : { abortSignal: handoff.abortSignal }),
+      ...(handoff.sessionNow === undefined ? {} : { sessionNow: handoff.sessionNow }),
     });
     bindPrincipalRouteContext(handoff.request, context);
     const cleaned = await withoutImageMetadata(handoff.request, handoff.principal);
@@ -103,6 +105,14 @@ export function classifyProductAction(request: Request): string | undefined {
     // action starts, controls, or observes a session, whatever the method.
     if (path.startsWith("/api/code/debug/")) return undefined;
     if (method === "POST" && path === "/api/code/board") return "project.overview.read";
+    if (
+      method === "POST" &&
+      (path === "/api/code/pull-request-reviews/project/query" ||
+        path === "/api/code/pull-request-reviews/thread/query" ||
+        path === "/api/code/pull-request-reviews/pr/query")
+    ) {
+      return "project.overview.read";
+    }
     if (method === "POST" && path === "/api/code/evidence/batch") {
       return "project.overview.read";
     }

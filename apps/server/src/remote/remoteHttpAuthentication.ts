@@ -214,6 +214,8 @@ export interface RemoteClientPrincipalHandoff {
    * must stop work immediately — a revoke/rotate has invalidated the session.
    */
   readonly abortSignal?: AbortSignal;
+  /** Gateway's shared monotonic clock so long-lived routes match gateway session expiry checks. */
+  readonly sessionNow?: () => number;
 }
 
 /**
@@ -275,6 +277,7 @@ export interface RemoteHttpAuthenticationOptions {
   readonly pushTokenStore?: PushNotificationTokenStore;
   readonly requestRegistry?: RemoteRequestRegistryPort;
   readonly sessionRevalidation?: RemoteSessionRevalidationPort;
+  readonly sessionNow?: () => number;
   readonly productDispatch?: (
     handoff: RemoteClientPrincipalHandoff,
   ) => Promise<Response | undefined>;
@@ -619,6 +622,7 @@ export function createRemoteHttpAuthentication(
         ...handoff,
         request: bindAbortSignal(handoff.request, combinedSignal),
         abortSignal: combinedSignal,
+        ...(options.sessionNow === undefined ? {} : { sessionNow: options.sessionNow }),
       };
       const response = await options.productDispatch(dispatchHandoff);
       if (response === undefined) throw new RemoteHttpAuthFailure(503, "unavailable");

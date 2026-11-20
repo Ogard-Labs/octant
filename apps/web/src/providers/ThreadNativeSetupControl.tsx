@@ -5,7 +5,9 @@ import {
   type ProjectSummary,
   type ProviderInstanceId,
   type ProviderInstance,
+  type ProviderMention,
   type ThreadNativeSetupChoice,
+  type ThreadNativeSetupRequest,
   type ThreadProjectCode,
 } from "@octant/contracts";
 import { ChevronDown } from "../ui/icons";
@@ -36,6 +38,12 @@ export interface ThreadNativeSetupServices {
     threadId: string,
     mode: "work" | "code",
   ) => Promise<ThreadProjectCode>;
+  /** Provider skills and plugins available for a Work or Code thread or draft in its bound folder. */
+  readonly readMentions?: (
+    request: Extract<ThreadNativeSetupRequest, { kind: "mentions" | "draft-mentions" }>,
+  ) => Promise<ReadonlyArray<ProviderMention>>;
+  /** Incremented whenever a thread's own setup choice changes, so cached `@` menu reads refresh. */
+  readonly revision?: number;
   /** The Projects as this window last read them, for their live trust. */
   readonly projects?: ReadonlyArray<ProjectSummary>;
   /**

@@ -89,7 +89,6 @@ export const EventActor = Schema.Union(
 export type EventActor = typeof EventActor.Type;
 
 export const decodeEventActor = Schema.decodeUnknownSync(EventActor);
-export const encodeEventActorJson = Schema.encodeSync(EventActor);
 
 export const PendingEvent = Schema.Struct({
   eventId: EventId,

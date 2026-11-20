@@ -211,8 +211,8 @@ import {
 } from "../composer/useComposerSlashCommands";
 import {
   ComposerAtTypeahead,
-  composerProviderMentions,
   useComposerAtMenu,
+  useThreadProviderMentions,
 } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 
@@ -735,8 +735,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
   const pathMentionOpen = pathMentions.open && !mention.open;
+  const providerMentions = useThreadProviderMentions(props.providerGroups, {
+    kind: "thread",
+    mode: "code",
+    threadId: String(props.threadId),
+    projectId: view?.thread.projectId,
+    providerInstanceId: view?.thread.providerInstanceId,
+    executionPolicy: view?.thread.executionPolicy,
+  });
   const atMenu = useComposerAtMenu({
-    provider: composerProviderMentions(props.providerGroups, view?.thread.providerInstanceId),
+    provider: providerMentions,
     textarea: () => textareaRef.current,
     draft,
     onDraftChange: (next) => {

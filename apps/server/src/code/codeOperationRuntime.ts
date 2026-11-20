@@ -1048,6 +1048,9 @@ export interface CodeOperationRuntime {
     threadId: CodeThreadId,
     checkoutId: import("@octant/contracts").CodeCheckoutId,
   ): Promise<import("@octant/contracts").CodeRepositoryTestStatus>;
+  createReviewFinding?: ReviewFindingService["create"];
+  resolveReviewTarget?: CodeOperationService["resolveReviewTarget"];
+  retainPullRequestDiff?: CodeOperationService["retainPullRequestDiff"];
   conversation(
     windowId: WindowId,
     threadId: CodeThreadId,
@@ -1655,22 +1658,35 @@ export function createCodeOperationRuntime(
     ...(options.supportsSessionRollback === undefined
       ? {}
       : {
-          supportsSessionRollback: async (thread, lastKeptTurn) => {
+          supportsSessionRollback: async (thread, lastKeptTurn, providerRoot) => {
             if (options.supportsSessionRollback?.(thread) !== true) return false;
             if (lastKeptTurn === undefined) return true;
             // A runtime that copies its own session cuts only at the anchor
-            // the last kept turn journaled; without one the rewind sends the
-            // text handoff, so the preview must not promise a copy. The
-            // harness's transcript copy needs no anchor.
+            // the last kept turn journaled, and only for the same folder and
+            // mode; otherwise the rewind sends the text handoff, so the
+            // preview must not promise a copy. The harness's transcript copy
+            // needs no anchor.
             const driver = await Promise.resolve(options.resolveProviderDriver(thread)).catch(
               () => undefined,
             );
             if (driver?.forkSession === undefined) return true;
             const anchor = options.nativeTurnAnchor?.(thread.id, String(lastKeptTurn));
-            return (
-              anchor !== undefined &&
-              String(anchor.providerInstanceId) === String(thread.providerInstanceId)
-            );
+            if (
+              anchor === undefined ||
+              anchor.anchor.trim().length === 0 ||
+              String(anchor.providerInstanceId) !== String(thread.providerInstanceId)
+            )
+              return false;
+            const binding = anchor.resumeCursor.binding;
+            if (binding !== undefined) {
+              if (
+                String(binding.instanceId) !== String(thread.providerInstanceId) ||
+                binding.mode !== "code" ||
+                (providerRoot !== undefined && binding.projectRoot !== providerRoot)
+              )
+                return false;
+            }
+            return true;
           },
         }),
     ...(options.pullRequestLinks === undefined
@@ -2581,6 +2597,11 @@ export function createCodeOperationRuntime(
       service.subscribe(windowId, threadId, operationId, afterCursor, limit),
     readRepositoryTestStatus: (windowId, threadId, checkoutId) =>
       service.readRepositoryTestStatus(windowId, threadId, checkoutId),
+    createReviewFinding: (windowId, input, admissionCurrent, actor) =>
+      reviewFindings.create(windowId, input, admissionCurrent, actor),
+    resolveReviewTarget: (windowId, input, admissionCurrent) =>
+      service.resolveReviewTarget(windowId, input, admissionCurrent),
+    retainPullRequestDiff: (windowId, input) => service.retainPullRequestDiff(windowId, input),
     conversation: async (windowId, threadId, afterCursor, limit) => {
       const thread = options.persistence.readCodeThread(threadId);
       if (thread === undefined || thread.id !== threadId) {

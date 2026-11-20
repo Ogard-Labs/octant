@@ -34,7 +34,6 @@ import {
 } from "../process/seatbeltProfile";
 import { projectCodeEntries } from "@octant/domain";
 import {
-  WINDOWS_CHAT_PROVIDER_REFUSAL,
   WINDOWS_KEPT_SANDBOX_REFUSAL,
   WINDOWS_SANDBOX_MISSING_REASON,
   WINDOWS_STRICT_REFUSAL,
@@ -706,7 +705,7 @@ describe("ACP child-server profiles", () => {
     });
   });
 
-  it("starts an ACP agent on Windows at Full access and below it outside Strict with no sandbox, and refuses Strict, a kept sandbox and Chat by name", async () => {
+  it("starts an ACP agent on Windows at Full access, below it, and in Chat outside Strict with no sandbox, and refuses Strict and a kept sandbox by name", async () => {
     const target = fixture(kilo);
     const confinement = makeAcpConfinementLive({
       platform: "win32",
@@ -735,6 +734,7 @@ describe("ACP child-server profiles", () => {
       { executionPolicy: "full-access" },
       { executionPolicy: "approval-gated", strict: false },
       { executionPolicy: "plan", strict: false },
+      { mode: "chat", executionPolicy: "approval-gated", strict: false },
     ] as const) {
       expect(await prepare(level)).toMatchObject({
         _tag: "Right",
@@ -744,10 +744,8 @@ describe("ACP child-server profiles", () => {
     for (const [level, message] of [
       [{ executionPolicy: "auto-accept-edits" }, WINDOWS_STRICT_REFUSAL],
       [{ executionPolicy: "full-access", fullAccessSandbox: true }, WINDOWS_KEPT_SANDBOX_REFUSAL],
-      [
-        { mode: "chat", executionPolicy: "approval-gated", strict: false },
-        WINDOWS_CHAT_PROVIDER_REFUSAL,
-      ],
+      [{ mode: "chat", executionPolicy: "approval-gated", strict: true }, WINDOWS_STRICT_REFUSAL],
+      [{ mode: "chat", executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
     ] as const) {
       expect(await prepare(level)).toMatchObject({
         _tag: "Left",

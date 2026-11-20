@@ -186,6 +186,7 @@ export interface RemoteGatewayServices {
   readonly spokeWebOrigins?: () => readonly string[];
   readonly serve: Serve;
   readonly now?: () => number;
+  readonly monotonicSource?: () => number;
   readonly uuid?: () => string;
   readonly clock?: () => string;
   readonly actorId?: string;
@@ -545,6 +546,7 @@ function assembleServices(
     connection: options.connection,
     hostId: identity.hostId,
     wallClock,
+    ...(options.monotonicSource === undefined ? {} : { monotonicSource: options.monotonicSource }),
   });
   const now = monotonicClock.now();
   // A6: single clock derivation — both `now` and `clock` derive from the one
@@ -785,6 +787,7 @@ function assembleServices(
     ...(pushTokenStore === undefined ? {} : { pushTokenStore }),
     requestRegistry: registry as RemoteRequestRegistryPort,
     sessionRevalidation,
+    sessionNow: now,
     deviceAdmittedBy,
     ...(options.productDispatch === undefined ? {} : { productDispatch: options.productDispatch }),
     ...(proxySessions === undefined || remoteServerGrants === undefined

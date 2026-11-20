@@ -454,6 +454,7 @@ export function startOctantServer(
       desktopPaneRoutes,
       desktopLeases,
       installDesktopPreviewRequest,
+      installRememberComputerUseApp,
       desktopRecipeKeys,
       launchSessionRoutes,
       machineChangeRoutes,
@@ -536,6 +537,7 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    installRememberComputerUseApp(shellService);
     const {
       runningWorkTurnAccess,
       runningWorkTurnSandbox,
@@ -600,6 +602,7 @@ export function startOctantServer(
       resolveThreadStrict,
       resolveHostStrict,
       hostResourceBudget,
+      serverProjectStore,
       serverRegistry,
       providerRuntimeNetwork,
       providerRuntimeRegistry,
@@ -874,6 +877,9 @@ export function startOctantServer(
       browserProfileService,
       browserToolApprovalService,
       liveProjectBrowsers,
+      pairedBrowserControlService,
+      resolvePairedDeviceName,
+      isPairedDeviceSessionCurrent,
       productFeedbackRoutes,
       nativeBrowserPresentationRoutes,
       productFeedbackService,
@@ -892,6 +898,7 @@ export function startOctantServer(
       onThreadArchived,
       onWaitingAsk,
       onWindowRevoked,
+      isRestrictedDeviceScope,
       browserCaptures,
       codeEvidence,
       externalContentIngestionStore,
@@ -924,6 +931,7 @@ export function startOctantServer(
       appleToolchainRoutes,
       baseRouteCodeService,
       codeSessionRoutes,
+      pullRequestReviewRoutes,
       codeCompletedThreadSource,
       codeOperationRuntime,
       codeService,
@@ -943,6 +951,7 @@ export function startOctantServer(
       isRestrictedDeviceScope,
       windowAuthorityStore,
       threadWakeups,
+      turnMetrics,
       hostResourceBudget,
       managedWorktreeReceipts,
       providerAvailabilityMarks,
@@ -1403,6 +1412,9 @@ export function startOctantServer(
       contextHarness,
       hostShield,
       liveProjectBrowsers,
+      pairedBrowserControlService,
+      resolvePairedDeviceName,
+      isPairedDeviceSessionCurrent,
       nativeHarnessHooks,
       observeTurnEnded,
       persistence,
@@ -1902,6 +1914,7 @@ export function startOctantServer(
       agentRunSettingsRoutes,
       androidToolchainRoutes,
       codeSessionRoutes,
+      pullRequestReviewRoutes,
       appleToolchainRoutes,
       artifactLibraryRoutes,
       artifactMirrorRoutes,
@@ -2006,7 +2019,6 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
-      ownerBrowserControlService,
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
@@ -2149,8 +2161,6 @@ export function startOctantServer(
           nextDueAt: definition.nextDueAt,
         })),
     });
-
-    yield* Effect.addFinalizer(() => Effect.promise(() => ownerBrowserControlService.close()));
     let remoteListenerError: PrivateListenerFailureCode | undefined;
     // Retained so shutdown can settle warming before the runtime registry
     // closes: an acquisition that lands after `closeAll()` would leave a warm

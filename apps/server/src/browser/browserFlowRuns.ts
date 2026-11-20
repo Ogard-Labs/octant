@@ -38,6 +38,7 @@ export interface BrowserFlowRunsOptions {
 
 interface OwnedRun {
   readonly windowId: WindowId;
+  readonly sessionFingerprint: string | undefined;
   readonly fingerprint: string;
   readonly flowIdentity: string;
   readonly abort: AbortController;
@@ -78,6 +79,7 @@ export class BrowserFlowRuns {
     projectId: ProjectId,
     name: string,
     task: Pick<BrowserFlowTask, "threadId" | "mode">,
+    sessionFingerprint?: string,
   ): BrowserFlowsResult {
     this.#expire();
     const selected = this.#options
@@ -103,6 +105,7 @@ export class BrowserFlowRuns {
     const expiresAt = this.#options.now() + lifetime;
     const run: OwnedRun = {
       windowId,
+      sessionFingerprint,
       fingerprint: bound.fingerprint,
       flowIdentity: JSON.stringify(flow),
       abort: new AbortController(),
@@ -131,8 +134,8 @@ export class BrowserFlowRuns {
     return this.#view(run);
   }
 
-  inspect(windowId: WindowId, runId: string): BrowserFlowsResult {
-    const run = this.#owned(windowId, runId);
+  inspect(windowId: WindowId, runId: string, sessionFingerprint?: string): BrowserFlowsResult {
+    const run = this.#owned(windowId, runId, sessionFingerprint);
     return run === undefined
       ? refused("not-found", "This Browser flow run is no longer available.")
       : this.#view(run);
@@ -142,8 +145,9 @@ export class BrowserFlowRuns {
     windowId: WindowId,
     runId: string,
     values: ReadonlyArray<BrowserFlowRunValue>,
+    sessionFingerprint?: string,
   ): Promise<BrowserFlowsResult> {
-    const run = this.#owned(windowId, runId);
+    const run = this.#owned(windowId, runId, sessionFingerprint);
     if (run === undefined)
       return refused("not-found", "This Browser flow run is no longer available.");
     if (run.view.state !== "review")
@@ -184,8 +188,12 @@ export class BrowserFlowRuns {
     return this.#launch(run);
   }
 
-  async resume(windowId: WindowId, runId: string): Promise<BrowserFlowsResult> {
-    const run = this.#owned(windowId, runId);
+  async resume(
+    windowId: WindowId,
+    runId: string,
+    sessionFingerprint?: string,
+  ): Promise<BrowserFlowsResult> {
+    const run = this.#owned(windowId, runId, sessionFingerprint);
     if (run === undefined || run.view.state !== "paused")
       return refused("run-stale", "Only a paused, unchanged flow can resume.");
     if (this.#current(run)?.resumeFingerprint !== run.resumeFingerprint) {
@@ -195,8 +203,8 @@ export class BrowserFlowRuns {
     return this.#launch(run);
   }
 
-  cancel(windowId: WindowId, runId: string): BrowserFlowsResult {
-    const run = this.#owned(windowId, runId);
+  cancel(windowId: WindowId, runId: string, sessionFingerprint?: string): BrowserFlowsResult {
+    const run = this.#owned(windowId, runId, sessionFingerprint);
     if (run === undefined)
       return refused("not-found", "This Browser flow run is no longer available.");
     if (run.view.state === "review" || active(run)) {
@@ -226,10 +234,18 @@ export class BrowserFlowRuns {
     this.#runs.clear();
   }
 
-  #owned(windowId: WindowId, runId: string): OwnedRun | undefined {
+  #owned(windowId: WindowId, runId: string, sessionFingerprint?: string): OwnedRun | undefined {
     this.#expire();
     const run = this.#runs.get(runId);
-    return run?.windowId === windowId ? run : undefined;
+    if (run === undefined || run.windowId !== windowId) return undefined;
+    if (run.sessionFingerprint !== sessionFingerprint) {
+      if (run.view.state === "review" || active(run)) {
+        run.abort.abort();
+        this.#finish(run, "cancelled", "The paired device session changed.");
+      }
+      return undefined;
+    }
+    return run;
   }
 
   #current(run: OwnedRun): BrowserFlowTaskBinding | undefined {

@@ -38,6 +38,7 @@ export * from "./auditEvents";
 export * from "./goal";
 export * from "./goalLoop";
 export * from "./finishedReceipt";
+export * from "./replayableRunCases";
 export * from "./shipTarget";
 export * from "./threadPlan";
 export * from "./threadTasks";
@@ -237,7 +238,7 @@ export * from "./browserCredentialUse";
 
 export * from "./browserPageScript";
 
-export * from "./ownerBrowser";
+export * from "./pairedBrowserControl";
 
 export * from "./childWorktreeSources";
 

@@ -189,48 +189,6 @@ export function describeWorktreeSource(
   }
 }
 
-export interface CachedSnapshotFacts {
-  readonly remoteName?: string;
-  readonly branch?: string;
-  readonly resolvedHead?: string;
-  readonly fetchedAt?: string;
-}
-
-export type CachedSnapshotEligibility =
-  | Readonly<{ eligible: true; disclosure: WorktreeSourceDisclosure }>
-  | Readonly<{ eligible: false }>;
-
-/**
- * A last-fetched snapshot may be offered only as an explicit user action that
- * first displays its age, remote, branch, and exact object ID. It is eligible
- * only when every one of those facts is present.
- */
-export function canUseCachedSnapshot(
-  facts: CachedSnapshotFacts,
-  now: () => Date,
-): CachedSnapshotEligibility {
-  if (
-    facts.remoteName === undefined ||
-    facts.branch === undefined ||
-    facts.resolvedHead === undefined ||
-    facts.fetchedAt === undefined
-  ) {
-    return { eligible: false };
-  }
-  const disclosure = describeWorktreeSource(
-    {
-      kind: "cached-snapshot",
-      remoteName: facts.remoteName,
-      branch: facts.branch,
-      resolvedHead: facts.resolvedHead,
-      fetchedAt: facts.fetchedAt,
-    },
-    now,
-  );
-  if (disclosure === undefined) return { eligible: false };
-  return { eligible: true, disclosure };
-}
-
 /**
  * Maps the server-authoritative preview (exact object ID resolved by the
  * managed-worktree Git port) into the renderer's presentation resolution. The

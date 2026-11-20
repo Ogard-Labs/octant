@@ -1,0 +1,54 @@
+import { Schema } from "effect";
+import { UtcTimestamp } from "./events";
+import { FinishedReceiptId, FinishedReceiptRecorded } from "./finishedReceipt";
+import { ProjectId } from "./projects";
+import { ProviderInstanceId, ProviderModelId } from "./providers";
+
+const strict = { parseOptions: { onExcessProperty: "error" as const } };
+const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
+
+/** Maximum number of newest replayable run cases retained by the projection. */
+export const MAX_REPLAYABLE_RUN_CASES = 200;
+
+/** Maximum character length of a stored run case's initial request text. */
+export const MAX_REPLAYABLE_RUN_CASE_REQUEST_LENGTH = 200_000;
+
+export const ReplayableRunCaseProject = Schema.Struct({
+  id: ProjectId,
+  name: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+}).annotations(strict);
+export type ReplayableRunCaseProject = typeof ReplayableRunCaseProject.Type;
+
+export const ReplayableRunCaseModel = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+}).annotations(strict);
+export type ReplayableRunCaseModel = typeof ReplayableRunCaseModel.Type;
+
+/**
+ * One replayable run case derived from a recorded finished report
+ * (`thread.finished-receipt-recorded@1`) for a non-untraced Work or Code thread.
+ * Rebuilt idempotently from the journal and capped to the newest 200 cases.
+ */
+export const ReplayableRunCase = Schema.Struct({
+  receiptId: FinishedReceiptId,
+  threadId: Schema.UUID,
+  mode: Schema.Literal("work", "code"),
+  request: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(MAX_REPLAYABLE_RUN_CASE_REQUEST_LENGTH),
+  ),
+  project: ReplayableRunCaseProject,
+  model: Schema.optional(ReplayableRunCaseModel),
+  receipt: FinishedReceiptRecorded,
+  changedFileCount: Schema.optional(NonNegativeInt),
+  recordedAt: UtcTimestamp,
+}).annotations(strict);
+export type ReplayableRunCase = typeof ReplayableRunCase.Type;
+
+export const ReplayableRunCases = Schema.Array(ReplayableRunCase).pipe(
+  Schema.maxItems(MAX_REPLAYABLE_RUN_CASES),
+);
+export type ReplayableRunCases = typeof ReplayableRunCases.Type;
+
+export const decodeReplayableRunCase = Schema.decodeUnknownSync(ReplayableRunCase);
+export const decodeReplayableRunCases = Schema.decodeUnknownSync(ReplayableRunCases);
