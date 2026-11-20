@@ -324,9 +324,19 @@ export class AgentRunOrchestrationService {
     runId: AgentRunId,
     expectedVersion: number,
     liveAuthority: AgentRunAuthority,
-    input?: { readonly ownerWindowId?: string },
+    input?: {
+      readonly ownerWindowId?: string;
+      readonly onExecutionAccepted?: (run: AgentRun) => void;
+    },
   ): AgentRunCommandResult {
-    return this.#start(runId, expectedVersion, liveAuthority, undefined, input?.ownerWindowId);
+    return this.#start(
+      runId,
+      expectedVersion,
+      liveAuthority,
+      undefined,
+      input?.ownerWindowId,
+      input?.onExecutionAccepted,
+    );
   }
 
   #start(
@@ -339,6 +349,7 @@ export class AgentRunOrchestrationService {
       readonly onExecutionAccepted?: (run: AgentRun) => void;
     },
     ownerWindowId = continuation?.ownerWindowId,
+    onExecutionAccepted = continuation?.onExecutionAccepted,
   ): AgentRunCommandResult {
     const current = this.#persistence.getById(runId);
     if (current === undefined) {
@@ -520,8 +531,8 @@ export class AgentRunOrchestrationService {
               ...(continuation.message === undefined ? {} : { message: continuation.message }),
               ...(ownerWindowId === undefined ? {} : { ownerWindowId }),
             });
-          continuation.onExecutionAccepted?.(started.run);
         }
+        onExecutionAccepted?.(started.run);
         return started;
       } catch (error) {
         prepared?.release();
@@ -756,7 +767,10 @@ export class AgentRunOrchestrationService {
   #startAfterProviderSlotWait(
     run: AgentRun,
     liveAuthority: AgentRunAuthority,
-    ownerWindowId?: string,
+    input?: {
+      readonly ownerWindowId?: string;
+      readonly onExecutionAccepted?: (run: AgentRun) => void;
+    },
   ): void {
     const reservation = this.#capacity.tryReserve({
       runId: run.id,
@@ -770,12 +784,7 @@ export class AgentRunOrchestrationService {
     if (reservation.status === "queued") return;
     this.#reservations.set(run.id, reservation.reservationId);
     try {
-      const started = this.start(
-        run.id,
-        run.version,
-        liveAuthority,
-        ownerWindowId === undefined ? undefined : { ownerWindowId },
-      );
+      const started = this.start(run.id, run.version, liveAuthority, input);
       if (started.kind === "run-command-failed") this.#releaseReservation(run.id);
     } catch (error) {
       this.#releaseReservation(run.id);
@@ -905,7 +914,12 @@ export class AgentRunOrchestrationService {
     if (waitingOnSlot) {
       // A person asking for the child now is asking for one more try; it keeps
       // waiting if the provider is still full.
-      this.#startAfterProviderSlotWait(current, authority, input?.ownerWindowId);
+      this.#startAfterProviderSlotWait(current, authority, {
+        ...(input?.ownerWindowId === undefined ? {} : { ownerWindowId: input.ownerWindowId }),
+        ...(input?.onExecutionAccepted === undefined
+          ? {}
+          : { onExecutionAccepted: input.onExecutionAccepted }),
+      });
       return { kind: "run-updated", run: this.#persistence.getById(runId) ?? current };
     }
     return this.#start(runId, expectedVersion, authority, input ?? {});
