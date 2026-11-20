@@ -308,6 +308,7 @@ export function startOctantServer(
     const {
       agentRunInteractions,
       cloudMachineServers,
+      serverAttachmentCleanup,
       serverConnection,
       serverProjectStore,
       serverRegistry,
@@ -662,6 +663,7 @@ export function startOctantServer(
       isProjectPolicyTargetAllowed,
       toolEffectLedger,
       hostResourceBudget,
+      serverAttachmentCleanup,
       serverConnection,
       cloudMachineServers,
       personMemory,
@@ -952,6 +954,7 @@ export function startOctantServer(
       browserModelBindings,
       personMemoryAccess,
       octantInstructions,
+      serverAttachmentCleanup,
       serverConnection,
       serverProjectStore,
       shieldServerStore,
@@ -1310,6 +1313,7 @@ export function startOctantServer(
       workProjectStatusFiles,
       workProjectStatusReader,
       workThreadProjection,
+      serverAttachmentCleanup,
       serverConnection,
       serverProjectStore,
       shieldServerStore,
@@ -2071,6 +2075,7 @@ export function startOctantServer(
       hostMemoryGuard,
       languageServerApprovals,
       nativeHarnessSessions,
+      serverAttachmentCleanup,
       onWorkTurnCancelled,
       remoteDelegationHolder,
       threadStandingAnswers,
@@ -2369,6 +2374,7 @@ export function startOctantServer(
           idleCompactions.stop();
           personMemorySweep.stop();
           personMemory.close();
+          serverAttachmentCleanup.close();
           try {
             await hostMemoryGuard.stop();
           } catch (error) {

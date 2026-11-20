@@ -15547,9 +15547,15 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
       it, and another thread's tools do not read it, even through a Project
       folder that holds the login's home. The copy is made before the turn's
       start is journaled, and a copy that fails refuses the turn before it is
-      accepted, with a sentence saying so;
-      images and natively taken files go as before. Not built: removing the
-      server copies when the thread is deleted or purged.
+      accepted, with a sentence saying so; images and natively taken files go
+      as before. Deleting or purging the thread, or marking it Leave no trace,
+      removes `~/.octant/thread-attachments/<thread>/` over the Project's SSH
+      connection with safe-path guards; an unreachable server never holds up
+      local deletion, instead journaling a pending removal that retries and
+      settles on the next regular SSH connection to that server, and removing a
+      whole server Project while its server is unreachable succeeds with a
+      notice naming the remote attachment folder left behind
+      ([Server Projects](design/server-projects.md#threads)).
     - **Chat.** Chat has no folder, so no file is named by a path. A file the
       provider and model take natively goes natively; an image goes to a
       model that reads images or to Sees images as before; any other file

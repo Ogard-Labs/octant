@@ -236,9 +236,23 @@ checks never change registry/configuration or journal state.
   against the journaled digest, and the turn names its path there. The thread's
   file tools read that folder and write nowhere in it; another thread's do not
   read it, even through a Project folder that holds the login's home. The copy
-  is made before the turn's start is journaled, so a failed copy leaves no turn. A copy that fails refuses the turn with a sentence saying so. The
-  copies stay on the server when the thread is deleted (not built: removing
-  them). The same holds for a Work thread there
+  is made before the turn's start is journaled, so a failed copy leaves no turn.
+  A copy that fails refuses the turn with a sentence saying so. When the thread
+  is deleted or purged, or marked Leave no trace, Octant removes
+  `~/.octant/thread-attachments/<thread>/` over the Project's SSH connection,
+  refusing any unsafe thread identifier or symlink outside that folder before
+  touching the server. If the server cannot be reached, local deletion, purge,
+  or Leave no trace is never held up: a pending removal is journaled under
+  `server-attachment-cleanup` (`server-attachment-cleanup.pending@1`, retained
+  across thread purge and host restart) and retried automatically on the next
+  regular SSH connection to that exact server alias and login, retiring the
+  mark with `server-attachment-cleanup.settled@1` once removed. Read-only setup
+  probes never trigger cleanup. Removing a whole server Project deletes its
+  threads' attachment folders when the server is reachable; when the server is
+  unreachable or no longer registered, Project removal still succeeds and
+  returns a notice naming the folder left on the server
+  (`~/.octant/thread-attachments/` or the specific thread folder(s)) so the
+  person knows what to clean up. The same holds for a Work thread there
   ([Plan and Chat tool parity](../architecture.md#security-and-authority)).
 - **The same levels.** The thread's guardrail level is resolved as it is for
   any Code thread (thread, then the account default), and decides each call as

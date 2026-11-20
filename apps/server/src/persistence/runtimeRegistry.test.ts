@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { REMOTE_ACCESS_EVENT_NAMES } from "@octant/contracts/remote-access";
+import { SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES } from "@octant/contracts/server-projects";
 import { EventPayloadInvalid, UnknownEventName } from "./journalErrors";
 import { RETIRED_EVENT_NAMES } from "./retiredEvents";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
@@ -41,6 +42,42 @@ describe("createPhase1RuntimeRegistries", () => {
     ).toMatchObject({ toStatus: "failed", recoveryReason: "interrupted by restart" });
     expect(() =>
       registry.events.decode("image.job-queued@1", 1, { job, b64_json: "secret-bytes" }),
+    ).toThrow(EventPayloadInvalid);
+  });
+
+  it("registers server attachment cleanup events and rejects unsafe thread identifiers", () => {
+    const registry = createPhase1RuntimeRegistries().events;
+    const pending = {
+      serverId: "5e7e1111-0000-4000-8000-000000000001",
+      alias: "web1",
+      user: "deploy",
+      projectId: "5e7e1111-0000-4000-8000-000000000002",
+      threadId: "5e7e1111-0000-4000-8000-000000000003",
+      queuedAt: "2026-11-19T12:00:00.000Z",
+    };
+    const settled = {
+      serverId: pending.serverId,
+      projectId: pending.projectId,
+      threadId: pending.threadId,
+      settledAt: "2026-11-19T12:05:00.000Z",
+    };
+    expect(registry.decode(SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending, 1, pending)).toEqual(
+      pending,
+    );
+    expect(registry.decode(SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.settled, 1, settled)).toEqual(
+      settled,
+    );
+    expect(() =>
+      registry.decode(SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending, 1, {
+        ...pending,
+        threadId: "../etc",
+      }),
+    ).toThrow(EventPayloadInvalid);
+    expect(() =>
+      registry.decode(SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.settled, 1, {
+        ...settled,
+        extra: true,
+      }),
     ).toThrow(EventPayloadInvalid);
   });
 

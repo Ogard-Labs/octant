@@ -330,7 +330,10 @@ import { serverPullRequestRepository } from "../serverProjects/serverWorktrees";
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
-} & Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
+} & Pick<
+    HarnessStateWiring,
+    "serverAttachmentCleanup" | "serverConnection" | "serverProjectStore"
+  > &
   Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,
@@ -561,6 +564,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     selectCodeConversation,
     codeSessionConversation,
     siblingThreadsService,
+    serverAttachmentCleanup,
     serverConnection,
     serverProjectStore,
     shieldServerStore,
@@ -1166,6 +1170,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             server: address?.kind === "address" ? address.server : undefined,
             threadId: String(thread.id),
             files,
+            guard: serverAttachmentCleanup.guardTransfer,
           });
         },
         serverTerminalLogin: (thread) => {

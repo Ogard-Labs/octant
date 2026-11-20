@@ -25,6 +25,11 @@ export interface ThreadArtifactPurgeInput {
   readonly purgeChatAttachments: (threadId: string) => Promise<void>;
   readonly purgeWorkAttachments: (threadId: string) => Promise<void>;
   readonly purgeCodeAttachments: (threadId: string) => Promise<void>;
+  /** Removes attached files copied to an SSH server for a server-Project thread, or journals a retry if unreachable. */
+  readonly purgeServerAttachments?: (input: {
+    readonly mode: OctantMode;
+    readonly threadId: string;
+  }) => Promise<void>;
   readonly purgeGeneratedImages: (threadId: string) => Promise<void>;
   readonly purgeBrowserCaptures: (threadId: string) => Promise<void>;
   readonly purgeAgentMessages: (threadId: string) => Promise<void>;
@@ -36,6 +41,7 @@ export async function purgeThreadArtifacts(input: ThreadArtifactPurgeInput): Pro
   await input.purgeChatAttachments(input.threadId);
   await input.purgeWorkAttachments(input.threadId);
   await input.purgeCodeAttachments(input.threadId);
+  await input.purgeServerAttachments?.({ mode: input.mode, threadId: input.threadId });
   await input.purgeGeneratedImages(input.threadId);
   await input.purgeBrowserCaptures(input.threadId);
   await input.purgeAgentMessages(input.threadId);

@@ -170,6 +170,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     HarnessStateWiring,
     | "agentRunInteractions"
     | "cloudMachineServers"
+    | "serverAttachmentCleanup"
     | "serverConnection"
     | "serverProjectStore"
     | "serverRegistry"
@@ -198,6 +199,7 @@ export function wireHarness(deps: HarnessDependencies) {
     safeNetworkStore,
     agentRunInteractions,
     cloudMachineServers,
+    serverAttachmentCleanup,
     serverConnection,
     serverProjectStore,
     serverRegistry,
@@ -345,6 +347,8 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: serverProjectStore,
     cloudMachineOf: (projectId) => cloudMachines.machineForProject(projectId),
+    stageProjectRemoval: (input) => serverAttachmentCleanup.stageProjectRemoval(input),
+    removeProjectAttachments: (input) => serverAttachmentCleanup.removeForProject(input),
   });
   const serverResourceReaders = new Map<string, () => Promise<ServerResourceRead>>();
   const resourceRoutes = createServerResourceRoutes({
