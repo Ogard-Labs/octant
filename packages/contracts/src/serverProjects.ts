@@ -314,3 +314,24 @@ export const ServerPreviewResult = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("refused"), reason: Schema.String }).annotations(strict),
 );
 export type ServerPreviewResult = typeof ServerPreviewResult.Type;
+
+/**
+ * The TCP ports the SSH login serves from a server Project's folder, read on
+ * the server: the port and the process's short name, never a command line.
+ */
+export const ServerProjectListenerList = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("listed"),
+    listeners: Schema.Array(
+      Schema.Struct({
+        port: Schema.Int.pipe(Schema.between(1, 65535)),
+        processName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(64)),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("unavailable"),
+    message: Schema.String.pipe(Schema.maxLength(512)),
+  }).annotations(strict),
+);
+export type ServerProjectListenerList = typeof ServerProjectListenerList.Type;

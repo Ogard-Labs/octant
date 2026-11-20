@@ -4,16 +4,20 @@ import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ServerPreviewTunnels } from "./serverPreviewTunnel";
+import type { ServerProjectListenerRead } from "./serverProjectListeners";
 
 const PATH = "/api/server-project-preview";
+/** What the login serves from a Project's folder, read on the server so a preview can be picked. */
+const LISTENERS_PATH = "/api/server-project-listeners";
 export function createServerPreviewTunnelRoutes(dependencies: {
   readonly windows: WindowAuthorityStore;
   readonly tunnels: ServerPreviewTunnels;
+  readonly listeners?: (projectId: string) => Promise<ServerProjectListenerRead>;
   readonly now?: () => number;
 }) {
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (url.pathname !== PATH) return undefined;
+    if (url.pathname !== PATH && url.pathname !== LISTENERS_PATH) return undefined;
     const headers = {
       "content-type": "application/json",
       "cache-control": "no-store",
@@ -46,6 +50,14 @@ export function createServerPreviewTunnelRoutes(dependencies: {
       owner = String(context.scopeId);
     } catch {
       return json({ error: "Preview request is unauthorized." }, 401);
+    }
+    // Listed for the window that starts the preview, under the same rule.
+    if (url.pathname === LISTENERS_PATH) {
+      if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
+      if (dependencies.listeners === undefined) {
+        return json({ status: "unavailable", message: "Listing is unavailable on this host." });
+      }
+      return json(await dependencies.listeners(url.searchParams.get("projectId") ?? ""));
     }
     await dependencies.tunnels.reconcile();
     if (request.method === "GET")

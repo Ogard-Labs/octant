@@ -1,4 +1,5 @@
 import { configureSandboxNetworkSnapshot } from "../process/sandboxRuntimePolicy";
+import { listServerProjectListeners } from "../serverProjects/serverProjectListeners";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
 import { activeSandboxPolicy, configureSandboxToolNetwork } from "../process/sandboxRuntimePolicy";
 import { RemoteSetupChecks } from "../serverProjects/remoteSetupChecks";
@@ -319,6 +320,21 @@ export function wireHarness(deps: HarnessDependencies) {
   const previewRoutes = createServerPreviewTunnelRoutes({
     windows: windowAuthorityStore,
     tunnels: serverPreviewTunnels,
+    listeners: async (projectId) => {
+      const project = serverProjectStore.project(projectId);
+      const address = serverProjectStore.addressOf(projectId);
+      if (project === undefined || address.kind !== "address") {
+        return {
+          status: "unavailable",
+          message: "This Project's server is no longer registered.",
+        };
+      }
+      return listServerProjectListeners({
+        connection: serverConnection,
+        server: address.server,
+        folder: project.folder,
+      });
+    },
   });
   // Machines in the person's own cloud account, each bound as a server
   // Project. Targets arrive only from cloud machine target plugins the person

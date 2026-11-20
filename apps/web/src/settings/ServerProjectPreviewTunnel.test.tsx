@@ -43,3 +43,40 @@ it("shows the exact endpoint and offers deliberate reconnect after a lost connec
   expect(previewCommand).toHaveBeenLastCalledWith({ kind: "reconnect", projectId: project.id });
   expect(screen.queryByRole("link", { name: "Open preview" })).not.toBeInTheDocument();
 });
+
+it("lists what the login serves from the Project's folder and previews one in a click", async () => {
+  const user = userEvent.setup();
+  const previewCommand = vi.fn(async () => ({
+    kind: "tunnel" as const,
+    view: {
+      projectId: project.id,
+      remotePort: 5432,
+      localPort: 49152,
+      endpoint: "http://127.0.0.1:49152",
+      status: "listening" as const,
+    },
+  }));
+  render(
+    <ServerProjectPreviewTunnel
+      project={project}
+      client={{
+        previewRead: async () => null,
+        previewCommand,
+        listeners: async () => ({
+          status: "listed",
+          listeners: [{ port: 5432, processName: "postgres" }],
+        }),
+      }}
+    />,
+  );
+  await user.click(screen.getByText("Dev server preview"));
+  await user.click(await screen.findByRole("button", { name: "Preview postgres on port 5432" }));
+  expect(previewCommand).toHaveBeenCalledWith({
+    kind: "start",
+    projectId: project.id,
+    remotePort: 5432,
+    localPort: 0,
+  });
+  // Who can reach the forwarded port is said plainly.
+  expect(screen.getByText(/guarded commands can't reach it/)).toBeInTheDocument();
+});

@@ -87,4 +87,48 @@ describe("person-operated server preview routes", () => {
     const stopped = await route(request({ kind: "stop", projectId }));
     expect(await stopped?.json()).toMatchObject({ view: { status: "stopped" } });
   });
+  it("lists what the login serves from a Project's folder to a window, and to no paired device", async () => {
+    const windows = new WindowAuthorityStore();
+    windows.register({ windowId: id, capability, now: 0 });
+    const tunnels = new ServerPreviewTunnels({
+      now: () => Date.now(),
+      address: () => undefined,
+      ownerCurrent: () => true,
+      agentSocket: () => undefined,
+      record: () => true,
+    });
+    owned.push(tunnels);
+    const asked: string[] = [];
+    const route = createServerPreviewTunnelRoutes({
+      windows,
+      tunnels,
+      listeners: async (project) => {
+        asked.push(project);
+        return { status: "listed", listeners: [{ port: 5173, processName: "node" }] };
+      },
+      now: () => 1,
+    });
+    const read = () =>
+      new Request(`http://127.0.0.1/api/server-project-listeners?projectId=${projectId}`, {
+        headers: { "x-octant-window-capability": capability },
+      });
+
+    const listed = await route(read());
+    expect(listed?.status).toBe(200);
+    expect(await listed?.json()).toEqual({
+      status: "listed",
+      listeners: [{ port: 5173, processName: "node" }],
+    });
+
+    const remote = read();
+    bindPrincipalRouteContext(remote, {
+      principal: {
+        kind: "remote-device",
+        deviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      } as never,
+      scopeId: id,
+    });
+    expect((await route(remote))?.status).toBe(403);
+    expect(asked).toEqual([projectId]);
+  });
 });

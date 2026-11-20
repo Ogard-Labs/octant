@@ -1,13 +1,17 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ServerProjectsClient } from "@octant/client-runtime";
-import type { ServerProject, ServerPreviewView } from "@octant/contracts/server-projects";
+import type {
+  ServerProject,
+  ServerPreviewView,
+  ServerProjectListenerList,
+} from "@octant/contracts/server-projects";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 export function ServerProjectPreviewTunnel(props: {
   readonly project: ServerProject;
-  readonly client: Pick<ServerProjectsClient, "previewRead" | "previewCommand">;
+  readonly client: Pick<ServerProjectsClient, "previewRead" | "previewCommand" | "listeners">;
 }) {
   const { project, client } = props;
   const id = useId();
@@ -18,6 +22,24 @@ export function ServerProjectPreviewTunnel(props: {
   const [view, setView] = useState<ServerPreviewView | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
+  const [serving, setServing] = useState<ServerProjectListenerList>();
+  // What the login serves from this Project's folder, read on the server once
+  // the panel opens, so a preview is one click instead of a typed port.
+  useEffect(() => {
+    if (!open || client.listeners === undefined) return;
+    let active = true;
+    void client.listeners(String(project.id)).then(
+      (listed) => {
+        if (active) setServing(listed);
+      },
+      () => {
+        if (active) setServing({ status: "unavailable", message: "The server could not be read." });
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [client, project.id, open]);
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -43,7 +65,7 @@ export function ServerProjectPreviewTunnel(props: {
     };
   }, [client, project.id, open]);
   if (client.previewCommand === undefined || client.previewRead === undefined) return null;
-  async function command(kind: "start" | "stop" | "reconnect") {
+  async function command(kind: "start" | "stop" | "reconnect", port: string = remotePort) {
     if (client.previewCommand === undefined) return;
     sequence.current += 1;
     setBusy(true);
@@ -54,7 +76,7 @@ export function ServerProjectPreviewTunnel(props: {
           ? {
               kind,
               projectId: project.id,
-              remotePort: Number(remotePort),
+              remotePort: Number(port),
               localPort: Number(localPort),
             }
           : { kind, projectId: project.id },
@@ -91,9 +113,43 @@ export function ServerProjectPreviewTunnel(props: {
         existing paired-host preview.
       </p>
       <p className="shield-servers__note">
-        The remote endpoint is 127.0.0.1 on this Project's server. The local address is private to
-        this computer. Opening a preview does not start the dev server.
+        The remote endpoint is 127.0.0.1 on this Project's server. Opening a preview does not start
+        the dev server. Any TCP service works, not only web pages: a database on the server is
+        reached at the local address with its own client.
       </p>
+      <p className="shield-servers__note">
+        The local address is 127.0.0.1 on this computer. Agents' guarded commands can't reach it
+        unless you allow that port for a thread; a Full access thread, and a provider that reaches
+        this computer's own ports, can reach it as they can any local service.
+      </p>
+      {serving === undefined ? null : serving.status === "unavailable" ? (
+        <p className="shield-servers__note">{serving.message}</p>
+      ) : serving.listeners.length === 0 ? (
+        <p className="shield-servers__note">Nothing is listening from this Project's folder.</p>
+      ) : (
+        <ul aria-label="Running on the server" className="shield-servers__list">
+          {serving.listeners.map((listener) => (
+            <li key={listener.port}>
+              <span>
+                {listener.processName} on port {listener.port}
+              </span>
+              <OctantButton
+                aria-label={`Preview ${listener.processName} on port ${String(listener.port)}`}
+                disabled={busy || running}
+                onClick={() => {
+                  setRemotePort(String(listener.port));
+                  void command("start", String(listener.port));
+                }}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Preview
+              </OctantButton>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="shield-servers__form">
         <div className="host-settings__field">
           <label htmlFor={`${id}-remote`}>Remote port</label>
