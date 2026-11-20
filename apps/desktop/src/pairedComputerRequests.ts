@@ -80,6 +80,11 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   { method: "POST", path: "/api/code/commands" },
   { method: "PUT", path: "/api/code/evidence" },
   { method: "GET", path: "/api/projects/bootstrap" },
+  // Choosing a folder on that computer and making a Code Project from it, as
+  // its own person; the host refuses any other device.
+  { method: "POST", path: "/api/folders/browse" },
+  { method: "POST", path: "/api/folders/select" },
+  { method: "POST", path: "/api/projects/commands" },
   { method: "GET", path: "/api/providers/bootstrap" },
   { method: "GET", path: "/api/pending-requests" },
 ];

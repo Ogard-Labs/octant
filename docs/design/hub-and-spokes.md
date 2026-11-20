@@ -3542,7 +3542,13 @@ a numbered slice. Built, with these narrower readings:
     browse and one-use receipt for a device it admits as its person, and its
     Project bind. Acceptance: a device the host's person paired binds a
     folder there; a hub-introduced or restricted device is refused.
-    Verification: server route and permission tests.
+    Verification: server route and permission tests. Built (2026-11-20):
+    the private listener forwards `/api/folders/browse` and `/select` as
+    routes for a device the host's own person paired, the route answers that
+    device in its own scope (so its candidates and receipt are its own) and
+    refuses a hub-introduced device and an agent grant, and the Code start
+    form in a paired browser or a desktop window's paired computer offers
+    **New Project from a folder…** on that computer.
 15. **One window shows every computer's work.** The merged reads carry
     each reachable host's threads, Needs you and live turns, stale and
     read-only when a host is unreachable. Verification: client-runtime tests

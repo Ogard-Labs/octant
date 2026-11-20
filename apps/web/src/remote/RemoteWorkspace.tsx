@@ -438,6 +438,7 @@ export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "client
   /** Canvas is absent where its routes do not reach the host (a desktop window's paired computer). */
   readonly clients: Pick<RemoteProductClients, "code" | "project"> & {
     readonly canvas?: RemoteProductClients["canvas"];
+    readonly folderBrowse?: RemoteProductClients["folderBrowse"];
   };
   /**
    * False in a desktop window showing a paired computer's threads: the page's
@@ -488,6 +489,9 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
             codeClient={props.clients.code}
             connected={props.connected}
             controller={controller}
+            {...(props.clients.folderBrowse === undefined
+              ? {}
+              : { folderBrowse: props.clients.folderBrowse })}
             onCreated={(thread) => {
               props.onNavigate();
               setActiveThreadId(thread.id);

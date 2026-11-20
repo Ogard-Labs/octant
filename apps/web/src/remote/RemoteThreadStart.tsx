@@ -1,4 +1,5 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { decodeCodeThread, type CodeThread } from "@octant/contracts/code";
@@ -16,6 +17,7 @@ import {
 } from "@octant/domain";
 import { useState } from "react";
 import type { useCodeController } from "../code/useCodeController";
+import { FolderPicker } from "../projects/FolderPicker";
 import { useProjectController } from "../projects/useProjectController";
 import { firstSelectableProviderSelection } from "../providers/firstSelectableProviderSelection";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -35,7 +37,7 @@ function useStartableProjects(client: ProjectClient, mode: "work" | "code") {
   );
   const [chosenId, setChosenId] = useState<string>();
   const chosen = projects.find((project) => String(project.id) === chosenId) ?? projects[0];
-  return { projects, chosen, choose: setChosenId };
+  return { projects, chosen, choose: setChosenId, controller };
 }
 
 function ProjectChoice(props: {
@@ -151,6 +153,11 @@ export interface RemoteCodeThreadStartProps {
   /** False while the session is stale: the host would not hear the command. */
   readonly connected: boolean;
   readonly onCreated: (thread: CodeThread) => void;
+  /**
+   * That computer's folders, for a new Code Project there. Present only where
+   * the host takes it, from a device its own person paired.
+   */
+  readonly folderBrowse?: Pick<FolderBrowseClient, "browse" | "select">;
 }
 
 /**
@@ -163,11 +170,66 @@ export interface RemoteCodeThreadStartProps {
  */
 export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
   const { controller } = props;
-  const { projects, chosen, choose } = useStartableProjects(props.projectClient, "code");
+  const {
+    projects,
+    chosen,
+    choose,
+    controller: projectActions,
+  } = useStartableProjects(props.projectClient, "code");
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
-  if (projects.length === 0) return null;
+  const [pickingFolder, setPickingFolder] = useState(false);
+  const { folderBrowse } = props;
+  if (projects.length === 0 && folderBrowse === undefined) return null;
+
+  // A folder on that computer becomes a Code Project there: the receipt is
+  // that host's own, so the Project is its local one.
+  const newProject =
+    folderBrowse === undefined ? null : (
+      <>
+        <OctantButton
+          aria-label="New Project from a folder on this computer"
+          disabled={!props.connected || busy}
+          onClick={() => setPickingFolder(true)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          New Project from a folder…
+        </OctantButton>
+        {pickingFolder ? (
+          <FolderPicker
+            client={folderBrowse}
+            hostId={LOCAL_HOST_ID}
+            mode="code"
+            onCancel={() => setPickingFolder(false)}
+            onSelect={(receiptId, displayName, selection) => {
+              setPickingFolder(false);
+              void projectActions
+                .create("code", displayName, receiptId, LOCAL_HOST_ID, selection?.initializeGit)
+                .then((projectId) => {
+                  if (projectId === undefined) {
+                    setMessage(`The computer could not make ${displayName} a Code Project.`);
+                    return;
+                  }
+                  choose(String(projectId));
+                });
+            }}
+            showGitInit
+            title="Choose a folder on this computer"
+          />
+        ) : null}
+      </>
+    );
+  if (projects.length === 0) {
+    return (
+      <div className="flex flex-col gap-1">
+        {newProject}
+        {message === undefined ? null : <OctantAlert tone="warning">{message}</OctantAlert>}
+      </div>
+    );
+  }
 
   const start = async (): Promise<string | undefined> => {
     const text = prompt.trim();
@@ -306,6 +368,7 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
       }}
     >
       <ProjectChoice chosen={chosen} disabled={busy} onChoose={choose} projects={projects} />
+      {newProject}
       <OctantInput
         aria-label="First message"
         disabled={busy}

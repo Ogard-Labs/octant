@@ -936,8 +936,8 @@ describe("remote route policy", () => {
       });
       expect(inspect(path, "GET")).toMatchObject({ kind: "reject" });
     }
-    // A skill folder is chosen in the host's own folder picker, whose receipt
-    // route no device is forwarded.
+    // A skill folder is chosen in the host's own native folder picker, which
+    // no device is forwarded.
     for (const method of ["GET", "POST"] as const) {
       const decision = inspect("/api/extensions/skill-folder-selection", method);
       expect(decision).toMatchObject({ kind: "reject" });
@@ -948,14 +948,41 @@ describe("remote route policy", () => {
         origin,
         authenticatedRoutes: [
           {
-            id: "folder-select",
-            match: { kind: "exact", path: "/api/folders/select" },
+            id: "secret-store-link",
+            match: { kind: "exact", path: "/api/secret-stores" },
             surface: "authenticated-product",
             methods: ["GET", "POST"],
           },
         ],
       }),
     ).toThrow("local-only");
+  });
+
+  it("forwards folder browse and choice for the product dispatch, which admits only the host's own person", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    for (const path of ["/api/folders/browse", "/api/folders/select"]) {
+      expect(inspect(path, "POST")).toMatchObject({
+        kind: "allow",
+        surface: "authenticated-product",
+      });
+      expect(inspect(path, "GET")).toMatchObject({ kind: "reject" });
+      // No catalogued action: every session but the host's own person is refused.
+      expect(classifyProductAction(new Request(`${origin}${path}`, { method: "POST" }))).toBe(
+        undefined,
+      );
+    }
   });
 
   it("forwards a provider key on its way to the credential broker, and keeps the desktop bridge's own key routes on the host", () => {
