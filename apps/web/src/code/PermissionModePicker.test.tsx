@@ -49,6 +49,34 @@ describe("the approval control", () => {
       Reflect.deleteProperty(window, "octantHost");
     }
   });
+
+  it("opens the mode menu when triggered from a Plan-mode pane without switching mode automatically", async () => {
+    const onChange = vi.fn();
+    let openMenu: (() => void) | undefined;
+    render(
+      <div>
+        <button onClick={() => openMenu?.()} type="button">
+          Change mode
+        </button>
+        <PermissionModePicker
+          autoSupported
+          onChange={onChange}
+          onRegisterOpener={(open) => {
+            openMenu = open;
+          }}
+          value="plan"
+        />
+      </div>,
+    );
+
+    expect(screen.queryByRole("menuitemradio", { name: "Ask first" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Change mode" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Ask first" })).toBeVisible();
+    expect(onChange).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("menuitemradio", { name: "Ask first" }));
+    expect(onChange).toHaveBeenCalledWith("ask-first");
+  });
 });
 
 describe("the mode control's state at a glance", () => {

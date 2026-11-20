@@ -325,7 +325,6 @@ async function connectPersonCloudSource(input: {
 }): Promise<ProviderOAuthView> {
   const { dependencies } = input;
   if (
-    input.principal !== "local-window" ||
     authorizePrincipalAction({ principalKind: input.principal, action: "provider.oauth.begin" })
       .kind === "deny"
   ) {

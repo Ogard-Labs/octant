@@ -505,6 +505,8 @@ export class CanvasService {
     project: CanvasProjectRecord | undefined,
     blocks?: ReadonlyArray<CanvasDefinition["blocks"][number]>,
     presentation?: CanvasPresentation,
+    /** A device the host's own person paired, which the journal names; absent, the store's actor. */
+    deviceActor?: EventActor,
   ): CanvasReviseResult {
     let request;
     try {
@@ -549,6 +551,7 @@ export class CanvasService {
         current: entry.currentVersion,
         next: admitted.next,
         occurredAt: admitted.receipt.createdAt,
+        ...(deviceActor === undefined ? {} : { actor: deviceActor }),
       });
       this.#projection.applyVersionAppended({ canvasId, version: admitted.next });
       this.#promptSummaries.set(String(admitted.next.versionId), request.prompt);

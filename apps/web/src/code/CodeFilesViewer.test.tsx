@@ -22,12 +22,17 @@ const editorSave = vi.fn(async () => true);
 const editorDiscard = vi.fn();
 
 vi.mock("./useCodeEditorFile", () => ({
-  useCodeEditorFile: (options: { readonly relativePath?: string }) => ({
+  useCodeEditorFile: (options: {
+    readonly relativePath?: string;
+    readonly threadId?: CodeThreadId;
+    readonly checkoutId?: CodeCheckoutId;
+  }) => ({
     file: {
       path: options.relativePath,
       state: "available",
+      threadId: options.threadId,
+      checkoutId: options.checkoutId ?? "00000000-0000-4000-8000-000000000912",
       fileId: `mock-${options.relativePath}`,
-      checkoutId: "00000000-0000-4000-8000-000000000912",
     },
     refresh: vi.fn(),
   }),
@@ -38,6 +43,7 @@ vi.mock("./MonacoEditorPane", () => ({
     readonly file: { readonly path: string };
     readonly onDirtyChange?: (dirty: boolean) => void;
     readonly onOpenInMainArea?: () => void;
+    readonly onOpenInDefaultApp?: () => Promise<void>;
   }) => (
     <section aria-label={`Code editor for ${props.file.path}`}>
       <button
@@ -51,6 +57,11 @@ vi.mock("./MonacoEditorPane", () => ({
       <button onClick={props.onOpenInMainArea} type="button">
         Open {props.file.path} in main area
       </button>
+      {props.onOpenInDefaultApp === undefined ? null : (
+        <button onClick={() => void props.onOpenInDefaultApp?.()} type="button">
+          Open in default app
+        </button>
+      )}
     </section>
   ),
 }));
@@ -122,7 +133,12 @@ const listing = {
 } as unknown as CodeFileListingResult;
 
 function mount(
-  options: { readonly status?: ReadonlyArray<unknown>; readonly listingFails?: boolean } = {},
+  options: {
+    readonly status?: ReadonlyArray<unknown>;
+    readonly listingFails?: boolean;
+    readonly hostBridge?: CodeFilesViewerProps["hostBridge"];
+    readonly checkoutKind?: "worktree" | "remote-root";
+  } = {},
 ) {
   const onOpenInMainArea = vi.fn();
   const executeOperation = vi.fn(async () =>
@@ -132,7 +148,11 @@ function mount(
   );
   const view = {
     thread: { id: threadId, projectId: "p", executionPolicy: "full-access" },
-    checkout: { id: checkoutId, kind: "worktree", head: { kind: "branch", name: "main" } },
+    checkout: {
+      id: checkoutId,
+      kind: options.checkoutKind ?? "worktree",
+      head: { kind: "branch", name: "main" },
+    },
   } as unknown as CodeFilesViewerProps["view"];
   render(
     <div>
@@ -158,6 +178,7 @@ function mount(
             watch: vi.fn(async function* () {}),
           } as never,
         }}
+        {...(options.hostBridge === undefined ? {} : { hostBridge: options.hostBridge })}
         filesCloseScope={scope}
         onOpenInMainArea={onOpenInMainArea}
         view={view}
@@ -360,6 +381,47 @@ describe("CodeFilesViewer", () => {
       await user.click(await screen.findByRole("button", { name: "Don't save" }));
       await waitFor(() => expect(tabNames()).toEqual([]));
       expect(editorDiscard).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("open in default app availability", () => {
+    it("wires Open in default app on the desktop through the existing desktop bridge", async () => {
+      const user = userEvent.setup();
+      const openCodeExternalEditor = vi.fn(async () => undefined);
+      mount({
+        hostBridge: { openCodeExternalEditor } as unknown as CodeFilesViewerProps["hostBridge"],
+      });
+      await user.click(await screen.findByRole("treeitem", { name: "logo.png" }));
+      const openButton = await screen.findByRole("button", { name: "Open in default app" });
+      await user.click(openButton);
+      expect(openCodeExternalEditor).toHaveBeenCalledWith({
+        threadId,
+        checkoutId,
+        fileId: "mock-logo.png",
+        line: 1,
+        column: 1,
+        defaultApplication: true,
+      });
+    });
+
+    it("omits Open in default app on a paired browser session with no desktop host bridge", async () => {
+      const user = userEvent.setup();
+      mount();
+      await user.click(await screen.findByRole("treeitem", { name: "logo.png" }));
+      expect(await screen.findByRole("region", { name: "Code editor for logo.png" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Open in default app" })).not.toBeInTheDocument();
+    });
+
+    it("omits Open in default app for a remote-root checkout even on desktop", async () => {
+      const user = userEvent.setup();
+      const openCodeExternalEditor = vi.fn(async () => undefined);
+      mount({
+        checkoutKind: "remote-root",
+        hostBridge: { openCodeExternalEditor } as unknown as CodeFilesViewerProps["hostBridge"],
+      });
+      await user.click(await screen.findByRole("treeitem", { name: "logo.png" }));
+      expect(await screen.findByRole("region", { name: "Code editor for logo.png" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Open in default app" })).not.toBeInTheDocument();
     });
   });
 });

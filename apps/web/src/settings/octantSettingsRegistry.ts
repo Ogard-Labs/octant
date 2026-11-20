@@ -74,6 +74,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "pause throttle testing helper agents commands",
         },
         {
+          id: settingId("resource-keepAwake"),
+          label: "Keep the computer awake while agents work",
+          scope: "host",
+          keywords:
+            "keep awake sleep prevent idle battery power ac suspend routines turns computer awake",
+        },
+        {
           id: settingId("resource-refresh"),
           label: "Refresh host load",
           scope: "host",
@@ -1043,7 +1050,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Model roles",
           scope: "host",
           keywords:
-            "model roles roles main model builder planner planning scout quick edit hard problems reviewer careful review research lookups quick jobs small jobs sees images reading images vision advisor backup fallback ask before using continue on the fallback coordinators workers helper agents which job uses which role slots default plan slow task smol deep",
+            "model roles roles main model builder scout quick edit hard problems reviewer careful review research lookups quick jobs sees images reading images vision advisor backup fallback ask before using continue on the fallback coordinators workers helper agents which job uses which role slots default plan slow task smol quick deep",
         },
         {
           id: settingId("subagent-creation-posture"),
@@ -1563,7 +1570,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("thread-messages-per-turn"),
           label: "Thread messages per turn",
           scope: "host",
-          keywords: "thread messages ask mentioned chat per turn limit coordination",
+          keywords: "thread messages ask mentioned chat per turn limit coordination strict",
+        },
+        {
+          id: settingId("sibling-thread-reads-per-turn"),
+          label: "Sibling thread reads per turn",
+          scope: "host",
+          keywords: "sibling thread reads per turn limit messaging project strict",
+        },
+        {
+          id: settingId("sibling-thread-waits-per-turn"),
+          label: "Sibling thread waits per turn",
+          scope: "host",
+          keywords: "sibling thread waits per turn limit messaging project strict",
         },
         {
           id: settingId("coordinators-per-project"),
@@ -1593,7 +1612,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("browser-wait-limit"),
           label: "Longest Browser wait",
           scope: "host",
-          keywords: "browser wait minutes limit timeout page agent",
+          keywords: "browser wait minutes limit timeout page agent strict",
         },
         {
           id: settingId("child-run-wait-limit"),

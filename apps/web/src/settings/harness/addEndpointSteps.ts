@@ -257,12 +257,10 @@ export const ASSIGNABLE_ROLES: ReadonlyArray<{
   readonly needsImages?: true;
 }> = [
   { id: NATIVE_HARNESS_BUILT_IN_SLOTS.default, label: "Builder" },
-  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.plan, label: "Planner" },
   { id: NATIVE_HARNESS_BUILT_IN_SLOTS.deep, label: "Hard problems" },
   { id: NATIVE_HARNESS_BUILT_IN_SLOTS.slow, label: "Reviewer" },
   { id: NATIVE_HARNESS_BUILT_IN_SLOTS.task, label: "Scout" },
   { id: NATIVE_HARNESS_BUILT_IN_SLOTS.quick, label: "Quick edit" },
-  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.smol, label: "Small jobs" },
   { id: NATIVE_HARNESS_BUILT_IN_SLOTS.vision, label: "Sees images", needsImages: true },
   { id: NATIVE_HARNESS_BUILT_IN_SLOTS.advisor, label: "Advisor" },
 ];

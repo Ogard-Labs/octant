@@ -92,13 +92,15 @@ export type GhPullRequestSwitchObservation =
       autoMergeEnabled: boolean;
       waitingOn: ReadonlyArray<CodeProjectPullRequestMergeWait>;
       failures: ReadonlyArray<GhAutoFixFailureDetail>;
+      /** GitHub GraphQL node ID of the pull request, when available. */
+      pullRequestNodeId?: string;
       /** Present only when the observation was asked for activity. */
       activity?: GhPullRequestActivity;
     }>
   | Readonly<{ status: "unavailable" }>;
 
 const VIEW_FIELDS =
-  "state,headRefOid,headRefName,baseRefName,mergeable,autoMergeRequest,reviewDecision";
+  "id,state,headRefOid,headRefName,baseRefName,mergeable,autoMergeRequest,reviewDecision";
 const ACTIVITY_VIEW_FIELDS = `${VIEW_FIELDS},statusCheckRollup`;
 /** The newest reviews and comments a watch keeps from one read. */
 const MAX_ACTIVITY_ENTRIES = 50;
@@ -265,6 +267,10 @@ export class GhPullRequestSwitchPort {
       if (discussion === undefined) return { status: "unavailable" };
       activity = pullRequestActivity(pullRequest, discussion, conflicting);
     }
+    const pullRequestNodeId =
+      typeof pullRequest.id === "string" && /^[A-Za-z0-9+/=_-]{1,128}$/.test(pullRequest.id)
+        ? pullRequest.id
+        : undefined;
     const base = {
       status: "observed" as const,
       state,
@@ -272,6 +278,7 @@ export class GhPullRequestSwitchPort {
       headBranch: typeof pullRequest.headRefName === "string" ? pullRequest.headRefName : "",
       baseBranch: typeof pullRequest.baseRefName === "string" ? pullRequest.baseRefName : "",
       autoMergeEnabled: isRecord(pullRequest.autoMergeRequest),
+      ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
       ...(activity === undefined ? {} : { activity }),
     };
     if (state !== "open" || !reads.failures) return { ...base, waitingOn: [], failures: [] };

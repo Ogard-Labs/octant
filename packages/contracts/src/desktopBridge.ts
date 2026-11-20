@@ -62,6 +62,15 @@ export interface BackgroundHostChange {
   readonly openAtLogin?: boolean;
 }
 
+/**
+ * Live status of the desktop app's prevent-app-suspension assertion.
+ * Active summaries are built strictly from work counts — never thread titles.
+ */
+export type KeepAwakeStatus =
+  | { readonly state: "active"; readonly summary: string }
+  | { readonly state: "idle"; readonly reason: "disabled" | "on-battery" | "no-work" }
+  | { readonly state: "unavailable" };
+
 export type BoundProjectType = "work" | "code";
 export type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
 
@@ -112,6 +121,8 @@ export interface CodeExternalEditorRequest {
   readonly fileId: string;
   readonly line: number;
   readonly column: number;
+  /** Opens the resolved file in the desktop's default application instead of a configured external editor. */
+  readonly defaultApplication?: boolean;
 }
 
 export interface OpenInApplicationDescriptor {
