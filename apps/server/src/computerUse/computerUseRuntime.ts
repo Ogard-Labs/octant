@@ -633,22 +633,22 @@ export function createComputerUseRuntime(_options: {
           targetApp: session.observation.targetApp,
           approver,
         });
-      } catch {
+      } catch (error) {
         session.state = "failed";
+        const runtimeError =
+          error instanceof ComputerUseRuntimeError
+            ? error
+            : new ComputerUseRuntimeError(
+                "unavailable",
+                "Computer-use Project approval could not be journaled.",
+              );
         try {
-          await append(
-            session,
-            "session-failed",
-            "Computer-use Project approval could not be journaled.",
-          );
+          await append(session, "session-failed", runtimeError.message);
         } catch {
           // Persistence may still be unavailable; cleanup still runs.
         }
         await cleanup(session);
-        throw new ComputerUseRuntimeError(
-          "unavailable",
-          "Computer-use Project approval could not be journaled.",
-        );
+        throw runtimeError;
       }
     }
     const approvalDetail =

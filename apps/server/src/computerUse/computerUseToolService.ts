@@ -24,6 +24,7 @@ import {
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { createComputerUsePlugin } from "../plugins/computerUse/computerUsePlugin";
 import {
+  ComputerUseRuntimeError,
   createComputerUseRuntime,
   type ComputerUseApprovalApprover,
   type ComputerUseDestinationReport,
@@ -237,16 +238,46 @@ export function createComputerUseToolService(options: {
     },
     onRememberForProject: async ({ request, targetApp, approver }) => {
       const action = pending.get(String(request.actionId));
+      const currentAuthority = action === undefined ? undefined : options.authority(action.owner);
       if (
         action === undefined ||
         action.owner.leaseId !== undefined ||
-        action.authority.projectId === undefined ||
-        options.rememberProjectApp === undefined
+        action.owner.executionPolicy === "plan" ||
+        !options.settings().enabled ||
+        !options.ownerIsCurrent(action.owner) ||
+        currentAuthority === undefined ||
+        currentAuthority.projectId === undefined ||
+        !sameToolActionAuthority(currentAuthority, request.authority) ||
+        !sameToolActionAuthority(currentAuthority, action.authority) ||
+        targetApp !== action.appId ||
+        options.rememberProjectApp === undefined ||
+        admissionRefusal(action.owner, true) !== undefined
       ) {
-        throw new Error("Computer-use Project approval cannot be persisted for this action.");
+        throw new ComputerUseRuntimeError(
+          "approval-denied",
+          "Computer-use Project approval is no longer valid for this task's current authority.",
+        );
+      }
+      // Re-evaluate live taint, Strict, and level posture before persisting:
+      // outside content arriving under Strict while the prompt waited must
+      // prevent writing a standing Project grant.
+      const liveApproval = decideComputerUseApproval({
+        plan: false,
+        fullAccess: options.fullAccess(action.owner),
+        strict: options.strict?.(action.owner) ?? true,
+        externalContentIngested: options.externalContentIngested(action.owner),
+        hasThreadGrant: false,
+        hasProjectGrant: false,
+        hasProjectScope: true,
+      });
+      if (liveApproval.kind !== "required" || !liveApproval.canRememberForProject) {
+        throw new ComputerUseRuntimeError(
+          "approval-denied",
+          "This computer-use approval can no longer be remembered for the Project.",
+        );
       }
       await options.rememberProjectApp({
-        projectId: action.authority.projectId,
+        projectId: currentAuthority.projectId,
         appId: targetApp,
         approver,
       });

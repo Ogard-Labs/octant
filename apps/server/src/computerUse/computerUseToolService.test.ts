@@ -1025,6 +1025,179 @@ describe("Computer offered on every eligible turn", () => {
     }
   });
 
+  it("refuses to persist a Project grant when the thread loses authority or Computer use is disabled while approval waits", async () => {
+    const projectId = decodeProjectId("55555555-5555-4555-8555-555555555511");
+    const projectOwner = decodeComputerUseOwner({ ...owner, mode: "work" });
+    const projectAuthority = decodeToolActionAuthority({
+      hostId: "44444444-4444-4444-8444-444444444444",
+      mode: "work",
+      projectId,
+      providerInstanceId: owner.providerInstanceId,
+      extension: { kind: "core" },
+    });
+
+    for (const drift of ["revoked-or-plan", "disabled"] as const) {
+      let current = true;
+      let enabled = true;
+      const rememberProjectApp = vi.fn();
+      const execute = vi.fn(async () =>
+        decodeComputerControlResult({
+          kind: "windows",
+          appId: "com.example.Fixture",
+          windows: [{ windowId: 9, title: "Fixture" }],
+        }),
+      );
+      const service = createComputerUseToolService({
+        desktop: {
+          status: async () => ({
+            supported: true,
+            enabled: true,
+            automaticUpdates: true,
+            permissions: { accessibility: true, screenRecording: true },
+            driver: "ready",
+            activeSessions: 0,
+            update: "current",
+          }),
+          configure: async () => {},
+          reserve: async () => true,
+          execute,
+          release: async () => {},
+        },
+        settings: () => ({ enabled, automaticUpdates: true }),
+        authority: () => projectAuthority,
+        ownerIsCurrent: () => current,
+        toolConstraints: () => [],
+        fullAccess: () => false,
+        strict: () => false,
+        externalContentIngested: () => false,
+        rememberProjectApp,
+        threadTitle: () => "Project task",
+        record: async () => {},
+        now: () => Date.now(),
+      });
+      try {
+        const tools = service.toolSet(projectOwner);
+        if (tools === undefined) throw new Error("Expected offered tool.");
+        const pendingCall = tools.execute({
+          name: "octant_computer",
+          inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+        });
+        await vi.waitFor(() =>
+          expect(service.runtime.list(projectOwner.windowId)[0]?.pendingApproval).toBeDefined(),
+        );
+        const view = service.runtime.list(projectOwner.windowId)[0];
+        if (view?.pendingApproval === undefined) throw new Error("Expected pending approval.");
+        expect(view.pendingApproval.canRememberForProject).toBe(true);
+
+        // Thread is archived / moved to Plan (ownerIsCurrent turns false) or Computer use disabled.
+        if (drift === "revoked-or-plan") current = false;
+        else enabled = false;
+
+        await expect(
+          service.runtime.decide({
+            ownerWindowId: projectOwner.windowId,
+            threadId: projectOwner.threadId,
+            authority: projectAuthority,
+            sessionId: view.sessionId,
+            actionId: view.pendingApproval.actionId,
+            approvalId: view.pendingApproval.approvalId,
+            decision: "approved",
+            rememberForProject: true,
+          }),
+        ).rejects.toMatchObject({ category: "approval-denied" });
+        expect(await pendingCall).toMatchObject({ isError: true });
+        expect(rememberProjectApp).not.toHaveBeenCalled();
+        expect(execute).not.toHaveBeenCalled();
+      } finally {
+        await service.close();
+      }
+    }
+  });
+
+  it("refuses to persist a Project grant when outside content enters a Strict thread while approval waits", async () => {
+    const projectId = decodeProjectId("55555555-5555-4555-8555-555555555512");
+    const projectOwner = decodeComputerUseOwner({ ...owner, mode: "work" });
+    const projectAuthority = decodeToolActionAuthority({
+      hostId: "44444444-4444-4444-8444-444444444444",
+      mode: "work",
+      projectId,
+      providerInstanceId: owner.providerInstanceId,
+      extension: { kind: "core" },
+    });
+    let tainted = false;
+    const rememberProjectApp = vi.fn();
+    const execute = vi.fn(async () =>
+      decodeComputerControlResult({
+        kind: "windows",
+        appId: "com.example.Fixture",
+        windows: [{ windowId: 9, title: "Fixture" }],
+      }),
+    );
+    const service = createComputerUseToolService({
+      desktop: {
+        status: async () => ({
+          supported: true,
+          enabled: true,
+          automaticUpdates: true,
+          permissions: { accessibility: true, screenRecording: true },
+          driver: "ready",
+          activeSessions: 0,
+          update: "current",
+        }),
+        configure: async () => {},
+        reserve: async () => true,
+        execute,
+        release: async () => {},
+      },
+      settings: () => ({ enabled: true, automaticUpdates: true }),
+      authority: () => projectAuthority,
+      ownerIsCurrent: () => true,
+      toolConstraints: () => [],
+      fullAccess: () => false,
+      strict: () => true,
+      externalContentIngested: () => tainted,
+      rememberProjectApp,
+      threadTitle: () => "Strict project task",
+      record: async () => {},
+      now: () => Date.now(),
+    });
+    try {
+      const tools = service.toolSet(projectOwner);
+      if (tools === undefined) throw new Error("Expected offered tool.");
+      const pendingCall = tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(service.runtime.list(projectOwner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const view = service.runtime.list(projectOwner.windowId)[0];
+      if (view?.pendingApproval === undefined) throw new Error("Expected pending approval.");
+      expect(view.pendingApproval.canRememberForProject).toBe(true);
+
+      // Outside content arrives under Strict before the person clicks Remember for this Project.
+      tainted = true;
+
+      await expect(
+        service.runtime.decide({
+          ownerWindowId: projectOwner.windowId,
+          threadId: projectOwner.threadId,
+          authority: projectAuthority,
+          sessionId: view.sessionId,
+          actionId: view.pendingApproval.actionId,
+          approvalId: view.pendingApproval.approvalId,
+          decision: "approved",
+          rememberForProject: true,
+        }),
+      ).rejects.toMatchObject({ category: "approval-denied" });
+      expect(await pendingCall).toMatchObject({ isError: true });
+      expect(rememberProjectApp).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      await service.close();
+    }
+  });
+
   it("outside Strict lets an app grant carry later actions below Full access after the thread read outside content", async () => {
     const f = fixture({ strict: false });
     const windows = {
