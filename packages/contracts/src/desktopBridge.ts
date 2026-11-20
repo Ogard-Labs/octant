@@ -62,6 +62,15 @@ export interface BackgroundHostChange {
   readonly openAtLogin?: boolean;
 }
 
+/**
+ * Live status of the desktop app's prevent-app-suspension assertion.
+ * Active summaries are built strictly from work counts — never thread titles.
+ */
+export type KeepAwakeStatus =
+  | { readonly state: "active"; readonly summary: string }
+  | { readonly state: "idle"; readonly reason: "disabled" | "on-battery" | "no-work" }
+  | { readonly state: "unavailable" };
+
 export type BoundProjectType = "work" | "code";
 export type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
 

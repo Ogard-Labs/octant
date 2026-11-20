@@ -33,7 +33,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 3       | 6            | 0                   |
 | [Key providers](#key-providers)                                                       | 10        | 7       | 3            | 0                   |
 | [Release scope](#release-scope)                                                       | 8         | 2       | 5            | 1                   |
-| [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
+| [Process topology and local trust](#process-topology-and-local-trust)                 | 8         | 7       | 1            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 6         | 4       | 2            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 0       | 2            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **286**   | **169** | **110**      | **7**               |
+| **All areas**                                                                         | **287**   | **170** | **110**      | **7**               |
 
 ## Principles and hard lines
 
@@ -682,6 +682,18 @@ The host watches its own size and the system's memory pressure and eases itself 
 - Settings > General > Computer resources separately controls new local work, set at a local window or on a device the host's own person paired (built; the device is journaled as actor): Automatic hardware/load heuristics, manual ceilings and Pause; managed commands share worker slots and managed helpers obey the adaptive ceiling. Claude and Codex inherit cooperative worker defaults. Native delegation, arbitrary descendants and external processes have no hard quota. A launch waiting on the queue keeps waiting past 30 minutes, for as long as its own operation allows ([Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on); built). See [local work resource limits](../architecture.md#local-work-resource-limits).
 
 Status: Built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
+
+### Keep the computer awake while agents work
+
+While agent work runs, the desktop app holds a `prevent-app-suspension` assertion so idle system sleep does not cut off in-flight work. It never prevents display sleep, and the renderer holds no assertion.
+
+- The desktop app polls the loopback-only, desktop-principal-only `GET /api/desktop/agent-work` route every 5 seconds for counts by kind (active Chat, Work, and Code turns, running child runs, running coordinator workers) and the earliest enabled routine `nextDueAt`, with no thread titles or paths.
+- The assertion is taken on any active turn, running child run, running coordinator worker, or enabled routine due within 5 minutes, released 10 seconds after the last work ends, and released immediately on desktop quit, host stop, policy `Never`, or switch to battery under `While on power`.
+- The setting lives in the journaled host resource policy (`Settings > General > Computer resources > Keep the computer awake while agents work`) with `While on power` (default), `Always`, and `Never`; changes are journaled with who, when, and the old and new values, and admitted only from a local window or a device the host's own person paired (hub-introduced and restricted devices are refused).
+- `While on power` follows Electron's `powerMonitor.isOnBatteryPower()` and `on-ac`/`on-battery` events, treating an unreadable battery state as on power. If `powerSaveBlocker.isStarted(id)` is `false` immediately after `start` (or `start` throws), status reports `unavailable` and the desktop does not retry until work next starts.
+- Live status lines in Settings are built from counts only (for example, `Kept awake: 2 turns running`), never thread titles. Live macOS `pmset -g assertions` smoke remains owed by the maintainer.
+
+Status: Built. Since: 2026-11-19. Detail: [Architecture: Keeping the computer awake while agents work](../architecture.md#keeping-the-computer-awake-while-agents-work) and [Settings](settings.md#groups-and-pages).
 
 ### Other agents start work through the local CLI
 
