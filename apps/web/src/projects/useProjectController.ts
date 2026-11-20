@@ -17,6 +17,7 @@ import {
   type CodeNewThreadWorkspace,
   type CodeProjectAgentDefaultBranchPush,
   type CodeProjectAgentMerge,
+  type CodeProjectDelegatedCode,
   type CodeProjectOwnToolchain,
   type CodeProjectAgentPullRequestComments,
   type CodeProjectPullRequestBackgroundRefresh,
@@ -423,6 +424,31 @@ export function useProjectController(options: ProjectControllerOptions) {
       agentMerge === "enabled"
         ? "Agents may now merge this Project's pull requests."
         : "Agents no longer merge this Project's pull requests without asking.",
+    );
+  }
+
+  /**
+   * Mark a Code Project as taking delegated Code work from other hub members,
+   * with the delivery target the person confirmed, or take the mark off. The
+   * server accepts it only from this host's person.
+   */
+  async function setCodeDelegatedCode(
+    projectId: ProjectId,
+    delegatedCode: CodeProjectDelegatedCode | undefined,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    if (delegatedCode === undefined && project.delegatedCode === undefined) return true;
+    return execute(
+      {
+        kind: "change-code-project-delegated-code",
+        projectId,
+        expectedVersion: project.version,
+        ...(delegatedCode === undefined ? {} : { delegatedCode }),
+      },
+      delegatedCode === undefined
+        ? "This Project no longer takes delegated Code work."
+        : "This Project now takes delegated Code work.",
     );
   }
 
@@ -1124,6 +1150,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodeAutoReviewer,
     setCodePullRequestBackgroundRefresh,
     setCodeAgentMerge,
+    setCodeDelegatedCode,
     setCodeOwnToolchain,
     setCodeAgentPullRequestComments,
     setCodeAgentDefaultBranchPush,

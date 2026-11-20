@@ -313,6 +313,7 @@ export type ShellActions = {
   readonly setProjectActions: ProjectController["setActions"];
   readonly setProjectWorkStatusFile: ProjectController["setWorkStatusFile"];
   readonly setProjectOwnToolchain: ProjectController["setCodeOwnToolchain"];
+  readonly setProjectDelegatedCode: ProjectController["setCodeDelegatedCode"];
   readonly setProjectWorkDeveloperTools: ProjectController["setWorkDeveloperTools"];
   readonly setProjectsListOpen: Dispatch<SetStateAction<boolean>>;
   readonly setRailPlaceholder: Dispatch<

@@ -443,6 +443,24 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
+      // Opening a Project to other members' Code work is the person's choice
+      // about their own repository, and the mark carries the delivery target
+      // they confirmed, so a device the hub introduced cannot set it.
+      if (
+        command.kind === "change-code-project-delegated-code" &&
+        principal !== undefined &&
+        !principalActsAsHostPerson(principal)
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message:
+              "Whether a Project takes delegated Code work is set by this computer's person.",
+          },
+          403,
+          origin,
+        );
+      }
       // The Project's own toolchain is a program the repository supplies, so
       // choosing to run it is the person's act at the machine, as approving
       // any other repository tooling is.
