@@ -56,11 +56,11 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
   octant_propose_routine:
     "When something should run on a schedule, set up a routine with octant_propose_routine rather than a cron job or a loop.",
   octant_pull_request:
-    "Open and change this thread's pull request with octant_pull_request rather than the gh command, so the person sees what is posted under their name.",
+    "When asked, use octant_pull_request to open or change this thread's pull request, or watch it for checks and reviews instead of polling.",
   octant_report_finished:
-    "When this thread's task is finished, report the summary and check commands for Octant to verify; this does not mark the thread Done.",
+    "When this thread's task is finished, use octant_report_finished to give Octant a summary and checks to verify; this does not mark the thread Done.",
   octant_routines:
-    "See this Project's routines and their runs with octant_routines, and report a routine run's result with it when a routine started this turn.",
+    "Use octant_routines to see Project routines and runs, ask to pause or archive a routine this thread started, or report the result when a routine started this turn.",
   octant_side_chat_list_files:
     "List the files of the thread this side chat is about with octant_side_chat_list_files.",
   octant_side_chat_read_file:

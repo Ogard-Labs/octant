@@ -42,7 +42,6 @@ import type {
 import {
   approvalRequestIsProjectConfined,
   codexExecutionSettings,
-  codexInjectedContext,
   codexReviewRequest,
   codexStrictProjectConfigRefusal,
   CODEX_OCTANT_PROFILE,
@@ -3789,31 +3788,36 @@ describe("Codex execution authority and approvals", () => {
   it("puts what a /review turn carries into the session's own thread before the review starts", async () => {
     const f = fixture();
     const acquired = await startOutsideStrict(f);
+    const [line] = appToolHostLines([{ name: "octant_canvas" }]);
+    if (line === undefined) throw new Error("Missing Canvas guide");
     await Effect.runPromise(
       acquired.connection.send({
         sessionId,
         prompt: "/review",
-        context: [{ kind: "user-message", text: "From the planner: check the parser too." }],
+        context: [
+          { kind: "user-message", text: "From the planner: check the parser too." },
+          { kind: "instructions", text: line.text, tool: line.tool },
+        ],
         attachments: [],
         tools: [],
       }),
     );
     const methods = f.calls.map(({ method }) => method);
     const injected = f.calls.find(({ method }) => method === "thread/inject_items");
-    expect(injected?.input).toMatchObject({ threadId: "thread-1" });
+    expect(injected?.input).toMatchObject({
+      threadId: "thread-1",
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          role: "developer",
+          content: expect.arrayContaining([
+            expect.objectContaining({ text: expect.stringContaining(line.text) }),
+          ]),
+        }),
+      ]),
+    });
     expect(JSON.stringify(injected?.input)).toContain("From the planner: check the parser too.");
     expect(methods.indexOf("thread/inject_items")).toBeLessThan(methods.indexOf("review/start"));
     await acquired.close();
-  });
-
-  it("carries Octant's tool guide into a /review thread as Octant's own rules", () => {
-    const [line] = appToolHostLines([{ name: "octant_canvas" }]);
-    const injected = codexInjectedContext([
-      { kind: "instructions", text: line?.text ?? "missing line", tool: "octant_canvas" },
-    ]);
-    expect(injected).toHaveLength(1);
-    expect(injected[0]?.role).toBe("developer");
-    expect(injected[0]?.content[0]?.text).toContain(line?.text ?? "missing line");
   });
 
   it("hands the images a /review turn carries to the session's own thread and still reviews", async () => {
