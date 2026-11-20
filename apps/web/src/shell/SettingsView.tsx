@@ -1186,6 +1186,8 @@ function ActiveSectionContent({
         <>
           <ComputerUseSettingsView
             settings={props.settings.computerUse}
+            rememberedApps={props.settings.rememberedComputerUseApps}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             onSettingsChange={props.onSettingsChange}
             {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
           />
