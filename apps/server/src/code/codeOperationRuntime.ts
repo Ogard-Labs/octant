@@ -1,6 +1,6 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
 import { strictKeptForLaunch } from "../strictResolution";
-import type { StalledTurnScope } from "../providers/turnBudget";
+import { sanitizeLoopNoticeToolName, type StalledTurnScope } from "../providers/turnBudget";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
@@ -118,6 +118,7 @@ import type {
 import type { Journal } from "../persistence/journal";
 import type { OutlivingSessions } from "../providers/outlivingSessions";
 import { createGhPullRequestPort } from "./ghPullRequestActionPort";
+import type { PullRequestLinkReader, PullRequestLinkRecorder } from "./pullRequestLinkService";
 import { createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
 import {
@@ -526,6 +527,7 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<Pick<ProviderProbeResult, "readiness" | "models">>;
   readonly ghExecutable?: string;
   readonly pullRequestPort?: CodeOperationPullRequestPort;
+  readonly pullRequestLinks?: PullRequestLinkRecorder & Partial<PullRequestLinkReader>;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
   readonly terminalProcessPort?: Pick<TerminalProcessPort, "start"> & {
     readonly reconcile?: () => Promise<void>;
@@ -708,6 +710,7 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly readThread: () => CodeThread | undefined;
     readonly folders: ReadonlyArray<string>;
+    readonly operationId?: string;
     /** The routine run this turn was started for, from the dispatcher only. */
     readonly routineRun?: AutomationRunReference;
     /**
@@ -755,6 +758,8 @@ export interface CodeOperationRuntimeOptions {
   readonly nativeHarnessTools?: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
+    /** The main checkout root when `checkoutRoot` is a selected subdirectory or extra folder. */
+    readonly mainCheckoutRoot?: string;
     readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
     /** The turn's resolved credential values, which a journal read redacts. */
@@ -1650,24 +1655,40 @@ export function createCodeOperationRuntime(
     ...(options.supportsSessionRollback === undefined
       ? {}
       : {
-          supportsSessionRollback: async (thread, lastKeptTurn) => {
+          supportsSessionRollback: async (thread, lastKeptTurn, providerRoot) => {
             if (options.supportsSessionRollback?.(thread) !== true) return false;
             if (lastKeptTurn === undefined) return true;
             // A runtime that copies its own session cuts only at the anchor
-            // the last kept turn journaled; without one the rewind sends the
-            // text handoff, so the preview must not promise a copy. The
-            // harness's transcript copy needs no anchor.
+            // the last kept turn journaled, and only for the same folder and
+            // mode; otherwise the rewind sends the text handoff, so the
+            // preview must not promise a copy. The harness's transcript copy
+            // needs no anchor.
             const driver = await Promise.resolve(options.resolveProviderDriver(thread)).catch(
               () => undefined,
             );
             if (driver?.forkSession === undefined) return true;
             const anchor = options.nativeTurnAnchor?.(thread.id, String(lastKeptTurn));
-            return (
-              anchor !== undefined &&
-              String(anchor.providerInstanceId) === String(thread.providerInstanceId)
-            );
+            if (
+              anchor === undefined ||
+              anchor.anchor.trim().length === 0 ||
+              String(anchor.providerInstanceId) !== String(thread.providerInstanceId)
+            )
+              return false;
+            const binding = anchor.resumeCursor.binding;
+            if (binding !== undefined) {
+              if (
+                String(binding.instanceId) !== String(thread.providerInstanceId) ||
+                binding.mode !== "code" ||
+                (providerRoot !== undefined && binding.projectRoot !== providerRoot)
+              )
+                return false;
+            }
+            return true;
           },
         }),
+    ...(options.pullRequestLinks === undefined
+      ? {}
+      : { pullRequestLinks: options.pullRequestLinks }),
     events,
     ...(options.resolveSideChatReturns === undefined
       ? {}
@@ -6140,6 +6161,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           thread: active.thread,
           readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
           folders: [active.providerRoot, ...active.extraFolders],
+          operationId: String(active.operationId),
           ...(active.routineRun === undefined ? {} : { routineRun: active.routineRun }),
           askPerson: (summary, signal) => {
             const bounded = boundProviderSummary(summary);
@@ -6173,6 +6195,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
           checkoutRoot: active.providerRoot,
+          mainCheckoutRoot: active.checkoutRoot,
           ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           windowId: active.windowId,
           secrets: active.secrets,
@@ -6641,6 +6664,37 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(active.onContextDelivered === undefined
             ? {}
             : { onPromptSent: active.onContextDelivered }),
+          onLoopNotice: (notice) =>
+            Effect.sync(() => {
+              const toolName = sanitizeLoopNoticeToolName(notice.toolName, (value) =>
+                sanitizeProviderText(value, active.checkoutRoot, active.secrets),
+              );
+              const frame = this.#appendTurnEvent(active, {
+                event:
+                  notice.kind === "turn-loop-stopped"
+                    ? {
+                        kind: "turn-loop-stopped",
+                        toolName,
+                        count: notice.count,
+                      }
+                    : {
+                        kind: "turn-loop-noticed",
+                        toolName,
+                        count: notice.count,
+                      },
+              });
+              active.cursor = frame.cursor;
+            }),
+          onStallNotice: (notice) =>
+            Effect.sync(() => {
+              const frame = this.#appendTurnEvent(active, {
+                event: {
+                  kind: "turn-stall-noticed",
+                  idleMs: notice.idleMs,
+                },
+              });
+              active.cursor = frame.cursor;
+            }),
           persistEvent: (event) =>
             // The provider's own completion, interruption, or failure is
             // journaled as the turn's terminal state, ahead of the outcome

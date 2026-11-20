@@ -889,6 +889,83 @@ describe("WorkThreadWorkspace", () => {
     ]);
   });
 
+  it("shows quiet loop and stall notice lines with a working Stop button while running, and omits Stop when stopped under Strict", async () => {
+    const user = userEvent.setup();
+    const stopped = workTurn({
+      status: "cancelled",
+      loopNotice: {
+        kind: "turn-loop-stopped",
+        toolName: "Read",
+        count: 6,
+        occurredAt: "2026-11-19T12:00:00.000Z",
+      },
+    });
+    const running = workTurn({
+      requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      turnId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      status: "running",
+      prompt: "Keep checking",
+      transcript: [
+        { role: "user", text: "Keep checking" },
+        { role: "assistant", text: "Checking…", status: "running" },
+      ],
+      loopNotice: {
+        kind: "turn-loop-noticed",
+        toolName: "octant_read",
+        count: 6,
+        occurredAt: "2026-11-19T12:05:00.000Z",
+      },
+      stallNotice: {
+        kind: "turn-stall-noticed",
+        idleMs: 30 * 60_000,
+        occurredAt: "2026-11-19T12:35:00.000Z",
+      },
+    });
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const cancelFirstTurn = vi.fn(async () => ({
+      kind: "turn-cancelled" as const,
+      requestId: running.requestId,
+      threadId,
+      turnId: running.turnId,
+      status: "cancelled" as const,
+    }));
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns: [stopped, running], liveCursor: 0 })),
+      cancelFirstTurn,
+    };
+
+    render(
+      <WorkThreadWorkspace
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    await screen.findByText("Repeated octant_read 6 times in a row with the same input.");
+    expect(screen.getByText("No activity from the provider for 30 minutes.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Stopped under Strict after Read ran 6 times in a row with the same input."),
+    ).toBeInTheDocument();
+
+    const stopButtons = screen.getAllByRole("button", { name: "Stop" });
+    expect(stopButtons).toHaveLength(2);
+    const firstStop = stopButtons[0];
+    if (firstStop === undefined) throw new Error("Expected Stop button");
+    await user.click(firstStop);
+    expect(cancelFirstTurn).toHaveBeenCalledWith({
+      kind: "cancel-work-turn",
+      requestId: running.requestId,
+      threadId,
+      turnId: running.turnId,
+    });
+  });
+
   it("rewinds a Work thread to a message, conversation only, and returns that message to the composer", async () => {
     const user = userEvent.setup();
     const first = workTurn();

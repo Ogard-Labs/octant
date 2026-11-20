@@ -305,6 +305,7 @@ export const ExtensionComponentKind = Schema.Literal(
   "language-server",
   "debug-adapter",
   "cloud-machine-target",
+  "pull-request-reviewer",
   "theme",
   "ground",
 );

@@ -57,6 +57,35 @@ describe("ComputerUseLifecycleSurface", () => {
     });
   });
 
+  it("sends rememberForProject when Remember for this Project is chosen", async () => {
+    const { pendingApproval: _pending, ...terminal } = view;
+    const rememberable = decodeComputerUseSessionView({
+      ...view,
+      pendingApproval: {
+        ...view.pendingApproval!,
+        scope: "application-session",
+        canRememberForProject: true,
+      },
+    });
+    const client = {
+      list: vi.fn(async () => [rememberable]),
+      inspect: vi.fn(async () => rememberable),
+      decide: vi.fn(async () => ({ ...terminal, state: "completed" })),
+      stop: vi.fn(async () => ({ ...terminal, state: "stopped" })),
+    } as ComputerUseClient;
+    render(<ComputerUseLifecycleSurface client={client} scope={scope} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remember for this Project" }));
+    await waitFor(() => expect(client.decide).toHaveBeenCalledOnce());
+    expect(client.decide).toHaveBeenCalledWith({
+      ...scope,
+      actionId: view.pendingApproval!.actionId,
+      approvalId: view.pendingApproval!.approvalId,
+      decision: "approved",
+      rememberForProject: true,
+    });
+  });
+
   it("shows an interrupted reconnect truthfully with retry", async () => {
     const client = {
       list: vi.fn(async () => [view]),

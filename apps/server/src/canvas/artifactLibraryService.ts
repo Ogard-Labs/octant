@@ -18,7 +18,7 @@ import {
   selectSyncedArtifactLibraryEntries,
   type ClaudePublishRecord,
 } from "@octant/domain";
-import type { ClientPrincipal } from "../clientPrincipal";
+import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
 import type { CanvasProjection, CanvasProjectionEntry } from "./canvasProjection";
 import { renderArtifactThumbnail } from "./artifactRender";
 
@@ -111,10 +111,10 @@ export class ArtifactLibraryService {
       const tagField = tags.length === 0 ? {} : { tags };
       if (definition.provenance.projectId === null) {
         // A Canvas a Chat thread owns outside every Project belongs to the
-        // person's thread, not to a Project a paired device could be clamped
-        // to, so only a window on this host sees it — and only while its
-        // thread still holds it, the same rule that authorizes its tab.
-        if (principal.kind !== "local-window") continue;
+        // person's thread, not to a Project a restricted device could be
+        // clamped to, so only the host's own person sees it — and only while
+        // its thread still holds it, the same rule that authorizes its tab.
+        if (!principalActsAsHostPerson(principal)) continue;
         if (this.#dependencies.threadHoldsCanvas?.(entry) !== true) continue;
         all.push({
           canvasId: entry.canvasId as CanvasId,
@@ -172,10 +172,10 @@ export class ArtifactLibraryService {
     }
     const roster = artifactTagRoster(all);
 
-    // Synced artifacts belong to no Project here, so only a window on this
-    // host, which already sees every Project's artifacts, sees them.
+    // Synced artifacts belong to no Project here, so only the host's own
+    // person (at a local window or on a device they paired) sees them.
     const synced =
-      principal.kind === "local-window" && artifactLibraryQueryListsCanvas(query)
+      principalActsAsHostPerson(principal) && artifactLibraryQueryListsCanvas(query)
         ? selectSyncedArtifactLibraryEntries(
             (this.#dependencies.synced?.() ?? []).filter((entry) => !snapshot.has(entry.canvasId)),
             query,
@@ -276,7 +276,7 @@ export class ArtifactLibraryService {
    * artifacts of a Project, and nothing here widens that.
    */
   #maySee(project: ArtifactLibraryProjectRecord, principal: ClientPrincipal): boolean {
-    if (principal.kind === "local-window") return true;
+    if (principalActsAsHostPerson(principal)) return true;
     // A remote device reads; it never reaches a Project that is not active,
     // because an archived Project's bindings are not being maintained and a
     // companion cannot act on what it finds there.

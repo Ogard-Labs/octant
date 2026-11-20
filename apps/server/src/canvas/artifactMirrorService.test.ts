@@ -12,16 +12,46 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CanvasVersion } from "@octant/contracts";
+import {
+  ARTIFACT_MIRROR_AGGREGATE_TYPE,
+  ARTIFACT_MIRROR_EVENT_NAMES,
+  CANVAS_SCHEMA_VERSION,
+  CanvasCreated,
+  CanvasVersionAppended,
+  decodeCanvasId,
+  decodeCanvasVersion,
+  decodeProjectId,
+  EventActor,
+  LOCAL_HOST_ID,
+  ThreadCreationRootId,
+  type CanvasVersion,
+} from "@octant/contracts";
 import type { ArtifactMirrorCommitOutcome } from "@octant/contracts/artifact-mirror";
+import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
+import { EventRegistry } from "../persistence/eventRegistry";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { ProjectionRegistry } from "../persistence/projection";
+import { openSqlite } from "../persistence/sqlitePort";
+import { appendArtifactMirrorBundleVersion } from "../wiring/canvas";
 import { buildArtifactBundle } from "./artifactBundle";
+import { ArtifactMirrorEventStore, registerArtifactMirrorEvents } from "./artifactMirrorEventStore";
 import { createArtifactMirrorFilePort } from "./artifactMirrorFilePort";
 import {
   ArtifactMirrorService,
   type ArtifactMirrorFilePort,
   type ArtifactMirrorServiceDependencies,
 } from "./artifactMirrorService";
+import {
+  CANVAS_AGGREGATE_TYPE,
+  CANVAS_CREATED,
+  CANVAS_VERSION_APPENDED,
+  CanvasEventStore,
+} from "./canvasEventStore";
+import { CanvasProjection } from "./canvasProjection";
+import { CanvasService } from "./canvasService";
 
 const canvasId = "1a2b3c4d-0000-4000-8000-000000000001";
 const projectId = "20000000-0000-4000-8000-000000000001";
@@ -537,5 +567,192 @@ describe("taking an edited mirrored file back in", () => {
       }),
     ).toMatchObject({ kind: "mirror-refused", reason: "file-not-a-bundle" });
     expect(h.appendVersionFromBundle).not.toHaveBeenCalled();
+  });
+
+  it("re-imports an edited mirrored bundle for a person-paired device through real CanvasService wiring with remote-device journal attribution", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "octant-mirror-reimport-device-"));
+    try {
+      const now = "2026-08-18T10:00:00.000Z";
+      const connection = openSqlite(join(dir, "events.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registry = registerArtifactMirrorEvents(
+        new EventRegistry()
+          .register(CANVAS_CREATED, 1, CanvasCreated)
+          .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended),
+      );
+      const journal = new Journal({
+        connection,
+        registry,
+        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+        clock: () => now as never,
+      });
+      let counter = 0;
+      const nextUuid = () =>
+        `90909090-9090-4090-8090-${(counter += 1).toString(16).padStart(12, "0")}`;
+      const localActor = Schema.decodeUnknownSync(EventActor)({
+        kind: "system",
+        actorId: "50000000-0000-4000-8000-000000000001",
+      });
+      const canvasProjection = new CanvasProjection();
+      const canvasEventStore = new CanvasEventStore({
+        journal,
+        uuid: nextUuid,
+        actor: localActor,
+      });
+      const initial = decodeCanvasVersion({
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        canvasId,
+        versionId: "30000000-0000-4000-8000-000000000001",
+        sequence: 1,
+        definition: {
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          title: "Launch plan",
+          provenance: {
+            hostId: LOCAL_HOST_ID,
+            projectId,
+            actor: { kind: "system", actorId: "50000000-0000-4000-8000-000000000001" },
+            providerInstanceId: "60000000-0000-4000-8000-000000000001",
+            modelId: "model-a",
+            createdAt: "2026-08-18T09:00:00.000Z",
+            mode: "work",
+            threadId: "70000000-0000-4000-8000-000000000001",
+          },
+          sourceManifest: [],
+          blocks: [
+            {
+              blockId: "t1",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "heading",
+              level: 1,
+              text: "Ship it.",
+            },
+          ],
+        },
+        createdBy: { kind: "system", actorId: "50000000-0000-4000-8000-000000000001" },
+        createdAt: "2026-08-18T09:00:00.000Z",
+      });
+      const typedCanvasId = decodeCanvasId(canvasId);
+      const typedProjectId = decodeProjectId(projectId);
+      canvasEventStore.appendCreate({
+        canvasId: typedCanvasId,
+        version: initial,
+        occurredAt: now as never,
+      });
+      canvasProjection.applyCreated({ canvasId: typedCanvasId, version: initial });
+      const canvasService = new CanvasService(
+        {
+          projection: canvasProjection,
+          eventStore: canvasEventStore,
+          uuid: nextUuid,
+          clock: () => now as never,
+        },
+        {
+          authorize: () => true,
+        },
+      );
+      const mirrorEventStore = new ArtifactMirrorEventStore({
+        journal,
+        uuid: nextUuid,
+        clock: () => now as never,
+        actor: { kind: "system", actorId: "50000000-0000-4000-8000-000000000001" },
+      });
+      const files = new Map<string, string>();
+      const mirror = new ArtifactMirrorService({
+        files: {
+          write: async (path, contents) => {
+            files.set(path, contents);
+          },
+          read: async (path) => files.get(path),
+          remove: async (path) => {
+            files.delete(path);
+          },
+          resolveRoot: async (path) => path,
+        },
+        currentVersion: (id) => canvasProjection.getById(id)?.currentVersion,
+        projects: { read: () => ({ name: "Storefront" }) },
+        outsideRootApproved: () => true,
+        planMode: () => false,
+        appendVersionFromBundle: (input) =>
+          appendArtifactMirrorBundleVersion({
+            ...input,
+            readCanvasEntry: (id) => canvasProjection.getById(id),
+            readProject: (id) =>
+              String(id) === projectId
+                ? { id: typedProjectId, type: "work", lifecycle: "active" }
+                : undefined,
+            resolveCanvasWorkspace: () => ({
+              kind: "work-root",
+              projectId: typedProjectId,
+              rootId: Schema.decodeUnknownSync(ThreadCreationRootId)(
+                "80000000-0000-4000-8000-000000000001",
+              ),
+            }),
+            canvasService,
+            uuid: nextUuid,
+          }),
+        journal: mirrorEventStore,
+        clock: () => now as never,
+      });
+
+      const deviceId = "00000000-0000-4000-8000-00000000d901";
+      const remoteActor = Schema.decodeUnknownSync(EventActor)({
+        kind: "remote-device",
+        actorId: deviceId,
+        deviceId,
+      });
+
+      await mirror.execute(
+        {
+          kind: "set-artifact-mirror-fallback",
+          expectedVersion: 0,
+          destination: { kind: "global-folder", canonicalRoot: "/Users/me/Artifacts" },
+        },
+        remoteActor,
+      );
+      await mirror.materialize(initial);
+      const bundlePath = "/Users/me/Artifacts/storefront/launch-plan-1a2b3c4d.octant.json";
+      const written = files.get(bundlePath);
+      expect(written).toBeDefined();
+      files.set(bundlePath, (written ?? "").replace("Ship it.", "Ship it from phone."));
+
+      const result = await mirror.execute(
+        {
+          kind: "reimport-artifact-from-file",
+          canvasId,
+          expectedVersionId: String(initial.versionId),
+        },
+        remoteActor,
+      );
+
+      expect(result).toMatchObject({ kind: "artifact-reimported", canvasId });
+      const head = canvasProjection.getById(typedCanvasId)?.currentVersion;
+      expect(head?.sequence).toBe(2);
+      expect(head?.definition.blocks[0]).toMatchObject({ text: "Ship it from phone." });
+
+      const canvasFrames = journal.replayAggregate({
+        aggregateType: CANVAS_AGGREGATE_TYPE,
+        aggregateId: canvasId,
+        afterVersion: 0,
+        limit: 10,
+      });
+      const appendedFrame = canvasFrames.find(
+        (frame) => frame.eventName === CANVAS_VERSION_APPENDED,
+      );
+      expect(appendedFrame?.actor).toEqual(remoteActor);
+
+      const mirrorFrames = journal.replayAggregate({
+        aggregateType: ARTIFACT_MIRROR_AGGREGATE_TYPE,
+        aggregateId: canvasId,
+        afterVersion: 0,
+        limit: 10,
+      });
+      const reimportedFrame = mirrorFrames.find(
+        (frame) => frame.eventName === ARTIFACT_MIRROR_EVENT_NAMES.reimported,
+      );
+      expect(reimportedFrame?.actor).toEqual(remoteActor);
+      connection.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -5673,6 +5673,59 @@ describe("where Settings lists each provider kind", () => {
       await within(signIn).findByRole("button", { name: "Sign in with ChatGPT" }),
     ).toBeVisible();
   });
+
+  it("shows the deferred install-script message when Connection Check fails before Trust on an added ACP package", async () => {
+    const user = userEvent.setup();
+    const droidId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000972");
+    const droid = decodeProviderInstance({
+      id: droidId,
+      displayName: "Factory Droid",
+      driverKind: "acp-agent",
+      configuration: {
+        kind: "acp-agent",
+        source: {
+          kind: "registry",
+          registryId: "factory-droid",
+          version: "1.12.1",
+          distribution: "npx",
+        },
+        args: ["exec", "--output-format", "acp-daemon"],
+        install: {
+          executable: "/data/acp-agent-installs/droid/1.12.1-abcd1234/node_modules/.bin/droid",
+          integrity: "package-manager",
+          hasInstallScripts: true,
+        },
+        trusted: false,
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 5,
+      createdAt: "2026-11-18T10:00:00.000Z",
+      updatedAt: "2026-11-18T10:00:00.000Z",
+    });
+    const message = "This package needs its install script, which runs when you trust it.";
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture()}
+        instances={[droid]}
+        observedByInstance={
+          new Map([
+            [
+              droidId,
+              {
+                ...observation({ readiness: "unavailable", message }),
+                instanceId: droidId,
+                models: [],
+              },
+            ],
+          ])
+        }
+      />,
+    );
+    const card = screen.getByRole("article", { name: "Factory Droid" });
+    await user.click(within(card).getByRole("button", { name: "Details for Factory Droid" }));
+    expect(within(card).getByText(message)).toBeVisible();
+  });
 });
 
 function ControllerBackedProviderSettings(props: {

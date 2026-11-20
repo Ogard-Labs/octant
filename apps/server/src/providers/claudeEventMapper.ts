@@ -325,18 +325,25 @@ function reportsToolCallContent(state: ClaudeToolState): boolean {
  * path alone: what was written stays out of every event this adapter emits,
  * as it does for the change's diff, and the file itself holds it.
  */
-function recordedInput(
-  content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>,
-): string {
+function recordedInput(content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>): {
+  readonly text: string;
+  readonly partial: boolean;
+} {
   if (content.toolName === "NotebookEdit") {
     const notebook = jsonString(content.input, "notebook_path");
-    return notebook === undefined ? "" : JSON.stringify({ notebook_path: notebook });
+    return {
+      text: notebook === undefined ? "" : JSON.stringify({ notebook_path: notebook }),
+      partial: true,
+    };
   }
   if (content.toolName !== "Edit" && content.toolName !== "Write") {
-    return JSON.stringify(content.input);
+    return { text: JSON.stringify(content.input), partial: false };
   }
   const path = jsonString(content.input, "file_path");
-  return path === undefined ? "" : JSON.stringify({ file_path: path });
+  return {
+    text: path === undefined ? "" : JSON.stringify({ file_path: path }),
+    partial: true,
+  };
 }
 
 /**
@@ -350,6 +357,7 @@ function toolCallContent(
   part: "input" | "output",
   text: string,
   alreadyCut = false,
+  partial = false,
 ): ReadonlyArray<ClaudeMappedMessage> {
   if (text.length === 0) return [];
   const cut = text.length > MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS;
@@ -360,6 +368,7 @@ function toolCallContent(
       part,
       text: cut ? text.slice(0, MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS) : text,
       ...(cut || alreadyCut ? { truncated: true } : {}),
+      ...(partial ? { partial: true } : {}),
     }),
   ];
 }
@@ -716,10 +725,24 @@ function mapToolUse(
   // records a tool it runs itself from the request, so only the runtime's own
   // tools are reported here.
   // Made after the start below, so the events keep the order they are numbered in.
-  const inputContent = () =>
-    authoritativeInput && content.disabled !== true && reportsToolCallContent(resolved.state)
-      ? toolCallContent(context, resolved.state.toolCallId, "input", recordedInput(content))
-      : [];
+  const inputContent = () => {
+    if (
+      !authoritativeInput ||
+      content.disabled === true ||
+      !reportsToolCallContent(resolved.state)
+    ) {
+      return [];
+    }
+    const recorded = recordedInput(content);
+    return toolCallContent(
+      context,
+      resolved.state.toolCallId,
+      "input",
+      recorded.text,
+      false,
+      recorded.partial,
+    );
+  };
   if (!resolved.state.emitsActivity) return [{ kind: "ignored" }];
   if (!resolved.created) {
     // A streamed start carried no input, so a notice that depends on it (a

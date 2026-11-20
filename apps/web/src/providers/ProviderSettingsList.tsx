@@ -2430,9 +2430,14 @@ function guidance(
       </p>
     );
   // Oh My Pi's probe reports `unavailable` after a successful discovery because
-  // turn execution refuses; the generic "verify the binary path" advice would
-  // send the user chasing a problem that does not exist.
-  if (readiness === "unavailable" && driverKind === "oh-my-pi" && message !== undefined)
+  // turn execution refuses; an untrusted added ACP package reports `unavailable`
+  // when its deferred install script has not run yet. In both cases the host's
+  // own sentence is actionable, whereas generic binary-path advice would mislead.
+  if (
+    readiness === "unavailable" &&
+    (driverKind === "oh-my-pi" || driverKind === "acp-agent") &&
+    message !== undefined
+  )
     return <p className="provider-card__guidance">{message}</p>;
   if (readiness === "unavailable") {
     const refusal = providerRefusalGuidance(instance, observed);

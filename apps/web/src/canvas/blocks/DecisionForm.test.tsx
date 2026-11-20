@@ -13,6 +13,7 @@ import {
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { CanvasChoiceAnswersChangeRevisionContext } from "../CanvasChoiceAnswersChangeRevision";
 import { canvasDecisionFormMessage } from "./../canvasChoiceMessage";
 import { ChoiceBlock, type CanvasChoiceAnswersPort, type CanvasChoiceRuntime } from "./ChoiceBlock";
 
@@ -548,6 +549,92 @@ describe("decision form", () => {
     expect(screen.queryByRole("button", { name: /Send to/ })).not.toBeInTheDocument();
     expect(screen.getByText("0 of 4 answered")).toBeInTheDocument();
     for (const radio of screen.getAllByRole("radio")) expect(radio).toBeDisabled();
+  });
+
+  it("reloads an already-mounted form when synced answers or clears arrive from the host", async () => {
+    const user = userEvent.setup();
+    const onSendForm = vi.fn().mockResolvedValue({ status: "sent" });
+    let serverSequence = 0;
+    let serverAnswers: ReadonlyArray<
+      ReturnType<typeof applyCanvasChoiceAnswerEvent>["answers"][number]
+    > = [];
+    const port: CanvasChoiceAnswersPort = {
+      canvasId: canvasId as never,
+      load: async () => ({
+        kind: "ready" as const,
+        canvasId: canvasId as never,
+        sequence: serverSequence,
+        answers: serverAnswers,
+      }),
+      revise: vi.fn(),
+    };
+    const runtime = sendable(port, onSendForm);
+    const { rerender } = render(
+      <CanvasChoiceAnswersChangeRevisionContext.Provider value={0}>
+        <ChoiceBlock block={form} runtime={runtime} />
+      </CanvasChoiceAnswersChangeRevisionContext.Provider>,
+    );
+    expect(await screen.findByText("0 of 4 answered")).toBeInTheDocument();
+
+    // Synced answers for all required questions arrive on the host while the form stays mounted.
+    serverSequence = 3;
+    serverAnswers = [
+      {
+        blockId: form.blockId,
+        questionId: "who",
+        questionFingerprint: fingerprintOf("who"),
+        selectedOptionIds: ["yes"],
+        selectedLabels: ["Yes"],
+        note: "Synced from Studio Mac",
+        author: person,
+        answeredAt: "2026-11-12T10:01:00.000Z" as never,
+      },
+      {
+        blockId: form.blockId,
+        questionId: "reach",
+        questionFingerprint: fingerprintOf("reach"),
+        selectedOptionIds: ["no"],
+        selectedLabels: ["No"],
+        author: person,
+        answeredAt: "2026-11-12T10:01:00.000Z" as never,
+      },
+      {
+        blockId: form.blockId,
+        questionId: "agents",
+        questionFingerprint: fingerprintOf("agents"),
+        selectedOptionIds: ["yes"],
+        selectedLabels: ["Yes"],
+        author: person,
+        answeredAt: "2026-11-12T10:01:00.000Z" as never,
+      },
+    ];
+    rerender(
+      <CanvasChoiceAnswersChangeRevisionContext.Provider value={1}>
+        <ChoiceBlock block={form} runtime={runtime} />
+      </CanvasChoiceAnswersChangeRevisionContext.Provider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("3 of 4 answered")).toBeInTheDocument());
+    const who = screen.getByRole("radiogroup", { name: "Who may set it?" });
+    expect(within(who).getByRole("radio", { name: /Yes/ })).toBeChecked();
+    expect(screen.getByDisplayValue("Synced from Studio Mac")).toBeInTheDocument();
+
+    // Send submits the freshly reloaded synced answers, not stale cached ones.
+    await user.click(screen.getByRole("button", { name: /Send/ }));
+    await waitFor(() => expect(onSendForm).toHaveBeenCalledTimes(1));
+    expect(onSendForm.mock.calls[0]?.[1]).toEqual(serverAnswers);
+
+    // A synced clear arrives on the host and clears the displayed answer without remounting.
+    serverSequence = 4;
+    serverAnswers = serverAnswers.filter((entry) => entry.questionId !== "who");
+    rerender(
+      <CanvasChoiceAnswersChangeRevisionContext.Provider value={2}>
+        <ChoiceBlock block={form} runtime={runtime} />
+      </CanvasChoiceAnswersChangeRevisionContext.Provider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("2 of 4 answered")).toBeInTheDocument());
+    expect(within(who).getByRole("radio", { name: /Yes/ })).not.toBeChecked();
   });
 });
 
