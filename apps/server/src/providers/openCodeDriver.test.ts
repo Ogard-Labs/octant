@@ -1941,6 +1941,116 @@ describe("OpenCode driver", () => {
     expect(refused).toMatchObject({ category: "incompatible", message: WINDOWS_STRICT_REFUSAL });
   });
 
+  it("offers app-managed tools in native Windows Chat outside Strict for a verified release with private config, and keeps unverified releases refused", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-windows-tools-")));
+    try {
+      const writeBinary = (name: string, mode: string) => {
+        const binaryPath = join(root, name);
+        writeFileSync(
+          binaryPath,
+          `#!/bin/sh\nOCTANT_FAKE_OPENCODE_MODE=${mode} exec '${fakeCliPath}' "$@"\n`,
+        );
+        chmodSync(binaryPath, 0o755);
+        return binaryPath;
+      };
+      const verifiedBinary = writeBinary("opencode-verified", "isolation-supported");
+      const unverifiedBinary = writeBinary("opencode-unverified", "ready");
+      const windowsProcessFor = (binaryPath: string): OpenCodeProcessPort => {
+        const live = makeOpenCodeProcessLive({
+          platform: "win32",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 10_000,
+          windowsCatalogUnconfined: () => true,
+        });
+        return { start: (input) => live.start({ ...input, binaryPath }) };
+      };
+      const tools = [{ name: "octant_browser", inputSchema: { type: "object" } }] as const;
+
+      const verified = driverFixture({
+        platform: "win32",
+        sessionDirectory: root,
+        process: windowsProcessFor(verifiedBinary),
+      });
+      const verifiedProbe = await Effect.runPromise(
+        Effect.scoped(verified.driver.probe({ instanceId })),
+      );
+      expect(verifiedProbe.readiness).toBe("ready");
+      expect(verifiedProbe.capabilities.appManagedTools).toBe("supported");
+
+      await Effect.runPromise(
+        Effect.scoped(
+          verified.driver.acquire({ instanceId, projectRoot: root, mode: "chat" }).pipe(
+            Effect.flatMap((connection) =>
+              connection
+                .start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict: false,
+                  tools: [...tools],
+                })
+                .pipe(
+                  Effect.flatMap(() =>
+                    connection.send({
+                      sessionId,
+                      prompt: "Use the browser tool",
+                      attachments: [],
+                      tools: [...tools],
+                    }),
+                  ),
+                ),
+            ),
+          ),
+        ),
+      );
+      expect(verified.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
+      expect(verified.calls).toContain("session.promptAsync");
+      expect(verified.createdPermissions[0]).toEqual([
+        { permission: "*", pattern: "*", action: "deny" },
+        {
+          permission: expect.stringMatching(/^octant-[0-9a-f]{16}_\*$/),
+          pattern: "*",
+          action: "allow",
+        },
+      ]);
+
+      // An unverified release without OS confinement still cannot carry app tools below Full access.
+      const unverified = driverFixture({
+        platform: "win32",
+        sessionDirectory: root,
+        process: windowsProcessFor(unverifiedBinary),
+      });
+      const unverifiedProbe = await Effect.runPromise(
+        Effect.scoped(unverified.driver.probe({ instanceId })),
+      );
+      expect(unverifiedProbe.capabilities.appManagedTools).toBe("unsupported");
+
+      const rejected = await Effect.runPromise(
+        Effect.flip(
+          Effect.scoped(
+            unverified.driver.acquire({ instanceId, projectRoot: root, mode: "chat" }).pipe(
+              Effect.flatMap((connection) =>
+                connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict: false,
+                  tools: [...tools],
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(rejected).toMatchObject({
+        category: "unsupported",
+        message: "OpenCode app tools require a confined provider process.",
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("lists a 2.x runtime without offering turns when its confined server cannot resolve a Git work tree", async () => {
     const fixture = betaDriver({ worktreeSessionCreate: "refused" });
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));

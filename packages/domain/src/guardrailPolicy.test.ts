@@ -388,6 +388,14 @@ describe("levels on a host without Octant's sandbox", () => {
           }),
         ).toEqual({ status: "refused", reason: WINDOWS_STRICT_REFUSAL });
       }
+      expect(
+        windowsProviderLaunch({
+          mode: "chat",
+          executionPolicy,
+          fullAccessSandbox: true,
+          strict: false,
+        }),
+      ).toEqual({ status: "refused", reason: WINDOWS_KEPT_SANDBOX_REFUSAL });
     }
   });
 

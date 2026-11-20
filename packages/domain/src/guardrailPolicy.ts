@@ -246,15 +246,16 @@ export function windowsProviderLaunch(input: {
   readonly strict?: boolean | undefined;
 }): WindowsProviderLaunch {
   if (input.strict === true) return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
+  if (input.fullAccessSandbox === true) {
+    return { status: "refused", reason: WINDOWS_KEPT_SANDBOX_REFUSAL };
+  }
   if (input.mode === "chat") {
     return input.strict === false
       ? { status: "unconfined", approvals: "provider" }
       : { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
   }
   if (input.executionPolicy === "full-access") {
-    return input.fullAccessSandbox === true
-      ? { status: "refused", reason: WINDOWS_KEPT_SANDBOX_REFUSAL }
-      : { status: "unconfined", approvals: "none" };
+    return { status: "unconfined", approvals: "none" };
   }
   if (input.strict !== false) return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
   return { status: "unconfined", approvals: "provider" };

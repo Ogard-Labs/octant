@@ -74,8 +74,14 @@ export interface OpenCodeBinaryProbe {
 export type OpenCodeRuntime = "legacy" | "beta";
 
 export interface OpenCodeServerConnection {
-  /** Attested only when user/project MCP, plugins, and skills cannot enter the process. */
+  /** Attested only when user/project MCP, plugins, and skills cannot enter an OS-confined process. */
   readonly isolatedConfiguration?: true;
+  /**
+   * Attested when a Windows outside-Strict launch runs a verified release with
+   * Octant's private configuration (no Project config loaded), admitting
+   * app-managed tools without claiming OS confinement.
+   */
+  readonly windowsPrivateConfiguration?: true;
   readonly authorization: string;
   readonly pid: number;
   /** Runtime protocol attested by the binary version probe before startup. */
@@ -1973,8 +1979,15 @@ function acquireOpenCodeServer(
                 connection: {
                   authorization,
                   pid: child.pid!,
-                  ...(isolationAttested && launch.command !== input.binaryPath
+                  ...(options.platform !== "win32" &&
+                  isolationAttested &&
+                  launch.command !== input.binaryPath
                     ? { isolatedConfiguration: true as const }
+                    : {}),
+                  ...(options.platform === "win32" &&
+                  isolationAttested &&
+                  (input.purpose === "probe" || input.strict === false)
+                    ? { windowsPrivateConfiguration: true as const }
                     : {}),
                   runtime,
                   version,

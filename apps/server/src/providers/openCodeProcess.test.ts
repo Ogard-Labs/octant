@@ -893,13 +893,14 @@ describe("OpenCodeProcessPort", () => {
     }
   });
 
-  it("starts OpenCode Chat on Windows outside Strict unconfined with a deny-everything permission ruleset", async () => {
-    const fixture = probeWrapper("v2-ready");
+  it("starts OpenCode Chat on Windows outside Strict unconfined with a deny-everything permission ruleset and separates private-config attestation from OS confinement", async () => {
+    const unverified = probeWrapper("v2-ready");
+    const verified = probeWrapper("isolation-supported");
     const prepare = vi.fn((input: { executable: string; args: ReadonlyArray<string> }) => ({
       command: input.executable,
       args: input.args,
     }));
-    const started = await Effect.runPromise(
+    const unverifiedStarted = await Effect.runPromise(
       Effect.scoped(
         makeOpenCodeProcessLive({
           confinement: { prepare },
@@ -907,15 +908,37 @@ describe("OpenCodeProcessPort", () => {
           runtimeConfigResolver: async () => undefined,
           startupTimeoutMs: 2_000,
         }).start({
-          binaryPath: fixture.binaryPath,
-          cwd: fixture.root,
+          binaryPath: unverified.binaryPath,
+          cwd: unverified.root,
           mode: "chat",
           executionPolicy: "approval-gated",
           strict: false,
         }),
       ),
     );
-    expect(started.runtime).toBe("beta");
+    expect(unverifiedStarted.runtime).toBe("beta");
+    expect(unverifiedStarted.isolatedConfiguration).toBeUndefined();
+    expect(unverifiedStarted.windowsPrivateConfiguration).toBeUndefined();
+
+    const verifiedStarted = await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement: { prepare },
+          platform: "win32",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: verified.binaryPath,
+          cwd: verified.root,
+          mode: "chat",
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      ),
+    );
+    expect(verifiedStarted.runtime).toBe("legacy");
+    expect(verifiedStarted.isolatedConfiguration).toBeUndefined();
+    expect(verifiedStarted.windowsPrivateConfiguration).toBe(true);
     expect(prepare).not.toHaveBeenCalled();
   });
 

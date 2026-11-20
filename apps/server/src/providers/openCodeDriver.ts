@@ -570,6 +570,12 @@ function openCodeInputModalities(model: Provider["models"][string]): ProviderInp
 export interface OpenCodeToolProof {
   readonly accepted: boolean;
   readonly exclusive: boolean;
+  /**
+   * True when a Windows outside-Strict probe ran a verified release with
+   * Octant's private configuration (no Project config loaded), admitting
+   * app-managed tools without claiming OS confinement.
+   */
+  readonly windowsPrivateConfiguration?: boolean;
 }
 
 function openCodeChatCapabilities(
@@ -583,7 +589,10 @@ function openCodeChatCapabilities(
     )
       ? "supported"
       : "unsupported",
-    appManagedTools: tools.accepted && tools.exclusive ? "supported" : "unsupported",
+    appManagedTools:
+      tools.accepted && (tools.exclusive || tools.windowsPrivateConfiguration === true)
+        ? "supported"
+        : "unsupported",
     // Full access launches this runtime outside the sandbox the exclusivity
     // proof rests on, so even a proved release is mixed there. Reported only
     // when the runtime accepted the declaration: a runtime that rejects it
@@ -1889,6 +1898,9 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             const normalized = normalizeOpenCodeProbe(instanceId, health, providers, clock(), {
               accepted: mcpAccepted,
               exclusive: runtime.isolatedConfiguration === true,
+              ...(platform === "win32" && runtime.windowsPrivateConfiguration === true
+                ? { windowsPrivateConfiguration: true }
+                : {}),
             });
             if (runtime.runtime === "beta" && normalized.models.length > 0) {
               // A launch that reports no scratch directory cannot be attested.
@@ -2189,9 +2201,22 @@ function makeConnection(
     let runtimeKind: "legacy" | "beta" | undefined;
     let runtimeVersion: string | undefined;
     let runtimeIsolated = false;
+    // The running Windows outside-Strict launch uses a verified release with
+    // Octant's private configuration (no Project config loaded), admitting
+    // app-managed tools without claiming OS confinement.
+    let runtimeWindowsPrivateConfig = false;
     // The running launch loads a trusted Project's own OpenCode configuration.
     let runtimeProjectConfig = false;
     let runtimeLoopbackPorts: ReadonlyArray<number> = [];
+
+    const runtimeAdmitsAppTools = (
+      executionPolicy: ProviderExecutionPolicy,
+      strict: boolean,
+    ): boolean =>
+      runtimeIsolated ||
+      (platform === "win32" && !strict && runtimeWindowsPrivateConfig) ||
+      runtimeProjectConfig ||
+      executionPolicy === "full-access";
 
     const offer = (event: ProviderRuntimeEvent) => {
       Effect.runFork(PubSub.publish(events, event));
@@ -2439,6 +2464,7 @@ function makeConnection(
       runtimeBlockedToolsKey = "[]";
       runtimeVersion = undefined;
       runtimeIsolated = false;
+      runtimeWindowsPrivateConfig = false;
       runtimeProjectConfig = false;
       runtimeLoopbackPorts = [];
       subscriptionReady = undefined;
@@ -2551,6 +2577,7 @@ function makeConnection(
             runtimeKind = started.runtime ?? "legacy";
             runtimeVersion = started.version;
             runtimeIsolated = started.isolatedConfiguration === true;
+            runtimeWindowsPrivateConfig = started.windowsPrivateConfiguration === true;
             runtimeProjectConfig = ownSetup?.projectConfig === true;
             runtimeLoopbackPorts = loopbackPorts;
             client = nextClient;
@@ -2913,14 +2940,14 @@ function makeConnection(
             ),
             Effect.flatMap((runtimeClient) => {
               // Below Full access the tools reach only a runtime that proved
-              // nothing else can enter it. At Full access, and in a trusted
-              // Project whose own OpenCode configuration the launch loads,
-              // they are offered beside whatever the runtime inherited.
+              // nothing else can enter it, or on Windows outside Strict a
+              // verified release using Octant's private configuration. At Full
+              // access, and in a trusted Project whose own OpenCode
+              // configuration the launch loads, they are offered beside
+              // whatever the runtime inherited.
               if (
                 state.managedTools !== undefined &&
-                !runtimeIsolated &&
-                !runtimeProjectConfig &&
-                input.executionPolicy !== "full-access"
+                !runtimeAdmitsAppTools(input.executionPolicy, input.strict !== false)
               ) {
                 return Effect.promise(() => releaseManagedTools(state)).pipe(
                   Effect.zipRight(
@@ -3209,11 +3236,11 @@ function makeConnection(
             const reportedCapabilities = {
               ...(observed?.capabilities ?? capabilities),
               // This gates the turn's own tool offer, so a mixed Full access
+              // session or a Windows outside-Strict verified private-config
               // session carries tools here; the probe is what reports mixed.
-              appManagedTools:
-                runtimeIsolated || runtimeProjectConfig || state.executionPolicy === "full-access"
-                  ? ("supported" as const)
-                  : ("unsupported" as const),
+              appManagedTools: runtimeAdmitsAppTools(state.executionPolicy, runtimeStrict)
+                ? ("supported" as const)
+                : ("unsupported" as const),
             };
             const rejected = validateChatTurnInput(
               input,
