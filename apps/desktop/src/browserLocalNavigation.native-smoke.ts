@@ -184,16 +184,17 @@ async function probe(root: string) {
     };
 
     // An idle page's own script hop onto this computer is refused.
-    await navigate(pub("a.octant.test", "/pub-idle"));
+    // A forbidden request can reach the fixture before navigate resolves.
     const idleBefore = count("/local");
+    await navigate(pub("a.octant.test", "/pub-idle"));
     await settle();
     refused("idle-page-script-hop", idleBefore, "/local", (current) =>
       current.url.startsWith(`http://a.octant.test:${String(port)}`),
     );
 
     // A meta refresh onto this computer is refused.
-    await navigate(pub("a.octant.test", "/pub-meta"));
     const metaBefore = count("/local-meta");
+    await navigate(pub("a.octant.test", "/pub-meta"));
     await settle();
     refused("meta-refresh", metaBefore, "/local-meta", (current) =>
       current.url.startsWith(`http://a.octant.test:${String(port)}`),
@@ -209,8 +210,8 @@ async function probe(root: string) {
     );
 
     // A public page's frame onto this computer is refused.
-    await navigate(pub("a.octant.test", "/pub-framed"));
     const frameBefore = count("/local-frame");
+    await navigate(pub("a.octant.test", "/pub-framed"));
     await settle();
     refused("subframe-to-local", frameBefore, "/local-frame", (current) =>
       current.url.startsWith(`http://a.octant.test:${String(port)}`),
@@ -218,8 +219,8 @@ async function probe(root: string) {
 
     // A frame committed on another public site cannot move itself onto this
     // computer either: its own hop is refused the same way.
-    await navigate(pub("a.octant.test", "/pub-oopif"));
     const moverBefore = count("/local-frame");
+    await navigate(pub("a.octant.test", "/pub-oopif"));
     await settle();
     refused("cross-site-frame-self-hop", moverBefore, "/local-frame", (current) =>
       current.url.startsWith(`http://a.octant.test:${String(port)}`),
@@ -248,8 +249,9 @@ async function probe(root: string) {
 
     // A move to a different local name on the same port is a different origin.
     await navigate(local("/local-away"));
-    await landed("agent-named-local-away", local("/local-away"), "Local away");
     const elseBefore = count("/local-else");
+    await navigate(local("/local-away"));
+    await landed("agent-named-local-away", local("/local-away"), "Local away");
     await settle();
     refused("different-local-origin", elseBefore, "/local-else", (current) =>
       current.url.startsWith(`http://127.0.0.1:${String(port)}/local-away`),
@@ -258,8 +260,9 @@ async function probe(root: string) {
     // A move out to a public name that redirects back is refused on the
     // return hop; the local landing is never observed.
     await navigate(local("/local-round"));
-    await landed("agent-named-local-round", local("/local-round"), "Local round");
     const finalBefore = count("/local-final");
+    await navigate(local("/local-round"));
+    await landed("agent-named-local-round", local("/local-round"), "Local round");
     await settle();
     refused(
       "redirect-back-to-local",
@@ -272,9 +275,9 @@ async function probe(root: string) {
     // but the landing acquired no continuation: its page-started hop is refused.
     // The landing is a local origin no explicit open committed to.
     const named = `http://localhost:${String(port)}`;
+    const shortNextBefore = count("/local-short-next");
     await navigate(pub("a.octant.test", "/short-local"));
     await landed("named-redirect-to-local", `${named}/local-short`, "Local short");
-    const shortNextBefore = count("/local-short-next");
     await settle();
     refused(
       "named-redirect-no-continuation",
