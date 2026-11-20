@@ -333,18 +333,17 @@ thread made.
   open and stopping the thread's own Browser, and refuses every other
   operation ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode));
   a read of a profile page still needs its (origin, profile) approval.
-- **Paired devices.** A paired device opens a profile page, switches a page to
-  a profile, answers a profile site approval, acts on a profile page, lists and
-  clears a profile, and sees a profile page's picture, text, address, and
-  title, as a local window does (maintainer decision, 2026-11-12). A turn that
-  a phone started raises the approval and that phone answers it, as does any
-  window or device that can see the thread. Not built yet: today a paired
-  device may do none of these and sees "Signed-in page — open it on this
-  Mac."; a profile approval from a phone-started turn waits for a local
-  window, and the phone neither sees nor answers it. An approval for a page
-  outside a profile is answered as every Browser approval is. The design that
-  opens these is
-  [What a paired device sees of a signed-in page](#what-a-paired-device-sees-of-a-signed-in-page).
+- **Paired devices.** A person-paired device opens a profile page, switches a
+  page to a profile, answers a profile site approval, acts on a profile page,
+  lists and clears a profile, and sees a profile page's picture, text, address,
+  and title, as a local window does (maintainer decision, 2026-11-12; built
+  under [What a paired device sees of a signed-in page](#what-a-paired-device-sees-of-a-signed-in-page)).
+  A turn that a person-paired phone started raises the approval and that phone
+  answers it, as does any window or person-paired device that can see the
+  thread. A roster-only or restricted device still sees "Signed-in page — open
+  it on this Mac." and neither sees nor answers profile site approvals. An
+  approval for a page outside a profile is answered as every Browser approval
+  is.
 - **Unattended turns.** A routine or managed child uses a stored profile only with
   the explicit, persistent [delegated session permission](#delegated-sessions) below; it
   never inherits another caller's page, sign-in permission or authority.
@@ -371,13 +370,12 @@ floating page preview both show the profile's name. The toolbar's profile
 icon shows the page's profile at all times. The person can take the page
 from the agent with **Take over**
 ([Person and agent together](browser-agent-tool.md#person-and-agent-together));
-a paired device can too (maintainer decision, 2026-11-12; not built yet: today a
-paired device cannot, signed in or not; designed in
+a person-paired device can too (maintainer decision, 2026-11-12; built under
 [A paired device holds the page](browser-agent-tool.md#a-paired-device-holds-the-page)).
 
 ### What a paired device sees of a signed-in page
 
-Designed, not built (maintainer request, 2026-11-18). A device the host's own
+Built (maintainer request, 2026-11-18). A device the host's own
 person paired is the person, so it sees a profile page as the person at the
 Mac does; what changes is how the content travels and what may keep it.
 

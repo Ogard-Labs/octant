@@ -6,7 +6,7 @@ import {
 import { EventEmitter } from "node:events";
 import { createContext, runInContext } from "node:vm";
 import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
-import { decodeOwnerBrowserNativeCommand } from "@octant/contracts/owner-browser";
+import { decodePairedBrowserNativeCommand } from "@octant/contracts/paired-browser-control";
 import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -207,9 +207,19 @@ async function keyboardMenuSurface(selectionStart = 0, selectionEnd = selectionS
 }
 
 describe("BrowserSurfaceHost", () => {
-  it("keeps owner frames volatile, fences earlier agent captures and lets local input reclaim the exact native page", async () => {
+  it("dispatches paired-device touch, scroll, key, text, and IME events without mouse events while letting local input reclaim", async () => {
     const created = view();
     created.webContents.insertText = vi.fn(async () => undefined);
+    const debuggerListeners: Array<
+      (event: unknown, method: string, params?: Record<string, unknown>, sessionId?: string) => void
+    > = [];
+    created.webContents.debugger.on = vi.fn((_event, listener) => {
+      debuggerListeners.push(listener);
+    });
+    created.webContents.debugger.removeListener = vi.fn((_event, listener) => {
+      const idx = debuggerListeners.indexOf(listener);
+      if (idx >= 0) debuggerListeners.splice(idx, 1);
+    });
     vi.mocked(created.webContents.debugger.sendCommand).mockImplementation(
       async (method, params) => {
         // Actual Electron emits before-mouse-event for CDP mouse dispatch too.
@@ -238,22 +248,24 @@ describe("BrowserSurfaceHost", () => {
       createView: () => created,
       isOwnerWindowAvailable: () => true,
     });
-    const id = "a7880000-0000-4000-8000-000000000002";
+    const reclaimedContexts: Array<string> = [];
+    host.onPairedControlReclaimed((ctx) => reclaimedContexts.push(ctx));
+    const leaseId = "a7880000-0000-4000-8000-000000000002";
     const run = (command: Readonly<Record<string, unknown>>) =>
-      host.ownerControl(decodeOwnerBrowserNativeCommand({ contextId, owner, ...command }));
+      host.pairedControl(decodePairedBrowserNativeCommand({ contextId, owner, ...command }));
     try {
       await host.createContext({
         contextId,
         owner,
         policy: {
           profileMode: "isolated",
+          profile: { kind: "personal" },
           allowedOrigins: ["https://example.com"],
           credentialFieldProtection: true,
           maxConcurrentTabs: 1,
           sessionTimeoutMs: 60_000,
         },
       });
-      expect(await run({ operation: "inspect" })).toEqual({ status: "refused" });
       host.attach(
         contextId,
         owner,
@@ -266,89 +278,302 @@ describe("BrowserSurfaceHost", () => {
         { x: 0, y: 0, width: 800, height: 600 },
       );
       const inspect = await run({ operation: "inspect" });
-      if (inspect.status !== "target") throw new Error("Expected visible native target");
+      if (inspect.status !== "target") throw new Error("Expected native target");
       const pending = host.peek(contextId);
-      // Attach rejection handling before the deliberately delayed capture settles.
       const withheld = expect(pending).rejects.toThrow(
-        "Owner Browser control holds agent observations",
+        "Paired Browser hold pauses agent observations",
       );
       await started.promise;
-      expect(
-        await run({
-          operation: "claim",
-          controlId: id,
-          target: inspect.target,
-          expiresAt: new Date(Date.now() + 50_000).toISOString(),
-        }),
-      ).toEqual({ status: "claimed" });
-      expect(
-        (await host.prepareCredentialFill(contextId, owner, "https://example.com")).status,
-      ).toBe("refused");
-      expect(await run({ operation: "release", controlId: id, disposition: "revoke" })).toEqual({
+      expect(await run({ operation: "claim", leaseId, target: inspect.target })).toEqual({
+        status: "claimed",
+      });
+      expect(await run({ operation: "release", leaseId, disposition: "revoke" })).toEqual({
         status: "released",
       });
       captured.resolve();
       await withheld;
       delay = false;
-      expect(
-        (
-          await run({
-            operation: "claim",
-            controlId: id,
-            target: inspect.target,
-            expiresAt: new Date(Date.now() + 50_000).toISOString(),
-          })
-        ).status,
-      ).toBe("claimed");
-      expect((await run({ operation: "frame", controlId: id, sequence: 1 })).status).toBe("frame");
+
+      expect(await run({ operation: "claim", leaseId, target: inspect.target })).toEqual({
+        status: "claimed",
+      });
+      const firstFrame = await run({ operation: "frame", leaseId });
+      if (firstFrame.status !== "frame") throw new Error("Expected paired frame");
       await expect(host.peek(contextId)).rejects.toThrow(
-        "Owner Browser control holds agent observations",
+        "Paired Browser hold pauses agent observations",
       );
+
+      // Dispatch every allowed paired input kind and prove zero mouse events are sent
+      // and the lease remains live across every dispatch.
       expect(
         await run({
           operation: "input",
-          controlId: id,
-          sequence: 2,
-          expectedFrame: 1,
-          input: { kind: "press", key: "Tab" },
+          leaseId,
+          events: [
+            { kind: "tap", frameId: firstFrame.frame.frameId, x: 0.5, y: 0.5 },
+            {
+              kind: "long-press",
+              frameId: firstFrame.frame.frameId,
+              x: 0.4,
+              y: 0.4,
+              durationMs: 300,
+            },
+            {
+              kind: "drag",
+              frameId: firstFrame.frame.frameId,
+              points: [
+                { x: 0.2, y: 0.2 },
+                { x: 0.6, y: 0.6 },
+              ],
+            },
+            {
+              kind: "scroll",
+              frameId: firstFrame.frame.frameId,
+              x: 0.5,
+              y: 0.5,
+              deltaX: 0,
+              deltaY: 120,
+            },
+            { kind: "key", phase: "down", key: "Tab", code: "Tab" },
+            { kind: "key", phase: "up", key: "Tab", code: "Tab" },
+            { kind: "text", text: "hello" },
+            { kind: "composition", phase: "start", text: "ni" },
+            { kind: "composition", phase: "update", text: "nihon" },
+            { kind: "composition", phase: "commit", text: "日本" },
+          ],
         }),
       ).toEqual({ status: "input", effect: "completed" });
-      expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
-        "Input.dispatchKeyEvent",
-        expect.objectContaining({ type: "keyDown", key: "Tab" }),
-      );
-      expect((await run({ operation: "frame", controlId: id, sequence: 3 })).status).toBe("frame");
-      expect(
-        await run({
-          operation: "input",
-          controlId: id,
-          sequence: 4,
-          expectedFrame: 3,
-          input: { kind: "tap", x: 0.5, y: 0.5 },
-        }),
-      ).toEqual({ status: "input", effect: "completed" });
-      expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
-        "Input.dispatchTouchEvent",
-        expect.objectContaining({ type: "touchStart" }),
-      );
-      expect((await run({ operation: "frame", controlId: id, sequence: 5 })).status).toBe("frame");
-      const reclaim = vi
+
+      const sentMethods = vi
+        .mocked(created.webContents.debugger.sendCommand)
+        .mock.calls.map(([method]) => method);
+      expect(sentMethods).not.toContain("Input.dispatchMouseEvent");
+      expect(sentMethods).toContain("Input.dispatchTouchEvent");
+      expect(sentMethods).toContain("Input.synthesizeScrollGesture");
+      expect(sentMethods).toContain("Input.dispatchKeyEvent");
+      expect(sentMethods).toContain("Input.imeSetComposition");
+      expect(created.webContents.insertText).toHaveBeenCalledWith("hello");
+      expect(created.webContents.insertText).toHaveBeenCalledWith("日本");
+      expect(reclaimedContexts).toEqual([]);
+
+      // Native dialog prompt withholds frames until dismissed.
+      for (const listener of debuggerListeners) {
+        listener({}, "Page.javascriptDialogOpening", { type: "alert", message: "Check" });
+      }
+      expect(await run({ operation: "frame", leaseId })).toEqual({
+        status: "withheld",
+        reason: "native-prompt",
+      });
+      for (const listener of debuggerListeners) {
+        listener({}, "Page.javascriptDialogClosed", { result: false });
+      }
+      expect((await run({ operation: "frame", leaseId })).status).toBe("frame");
+
+      // Local mouse click or key immediately reclaims the page and ends the lease.
+      const mouseReclaim = vi
         .mocked(created.webContents.on)
-        .mock.calls.find(([event]) => event === "before-input-event")?.[1];
-      reclaim?.({}, { type: "keyDown" });
+        .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
+      mouseReclaim?.({}, { type: "mouseDown" });
+      expect(reclaimedContexts).toEqual([contextId]);
       expect(
-        (
-          await run({
-            operation: "input",
-            controlId: id,
-            sequence: 6,
-            expectedFrame: 5,
-            input: { kind: "press", key: "Enter" },
-          })
-        ).status,
-      ).toBe("refused");
+        await run({
+          operation: "input",
+          leaseId,
+          events: [{ kind: "key", phase: "down", key: "Enter", code: "Enter" }],
+        }),
+      ).toEqual({ status: "refused", reason: "reclaimed-locally" });
+      expect(await run({ operation: "release", leaseId, disposition: "hand-back" })).toEqual({
+        status: "refused",
+        reason: "reclaimed-locally",
+      });
     } finally {
       captured.resolve();
+      await host.closeAll();
+    }
+  });
+
+  it("keeps frames and subsequent inputs alive after a remote file chooser selection", async () => {
+    const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const stagingDir = mkdtempSync(join(tmpdir(), "octant-desktop-chooser-"));
+    const uploadPath = join(stagingDir, "doc.txt");
+    writeFileSync(uploadPath, "hello-upload");
+    const created = view();
+    created.webContents.insertText = vi.fn(async () => undefined);
+    const debuggerListeners: Array<
+      (event: unknown, method: string, params?: Record<string, unknown>, sessionId?: string) => void
+    > = [];
+    created.webContents.debugger.on = vi.fn((_event, listener) => {
+      debuggerListeners.push(listener);
+    });
+    created.webContents.debugger.removeListener = vi.fn((_event, listener) => {
+      const idx = debuggerListeners.indexOf(listener);
+      if (idx >= 0) debuggerListeners.splice(idx, 1);
+    });
+    vi.mocked(created.webContents.capturePage).mockResolvedValue({
+      isEmpty: () => false,
+      getSize: () => ({ width: 800, height: 600 }),
+      toJPEG: () => Uint8Array.from([1, 2, 3]),
+    });
+    const owner = { windowId: "a7880000-0000-4000-8000-000000000011", threadId };
+    const leaseId = "a7880000-0000-4000-8000-000000000012";
+    const host = createBrowserSurfaceHost({
+      createView: () => created,
+      isOwnerWindowAvailable: () => true,
+    });
+    const run = (command: Readonly<Record<string, unknown>>) =>
+      host.pairedControl(decodePairedBrowserNativeCommand({ contextId, owner, ...command }));
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 60_000,
+        },
+      });
+      host.attach(
+        contextId,
+        owner,
+        {
+          contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+          isDestroyed: () => false,
+          isVisible: () => true,
+          webContents: { send: vi.fn() },
+        },
+        { x: 0, y: 0, width: 800, height: 600 },
+      );
+      const inspect = await run({ operation: "inspect" });
+      if (inspect.status !== "target") throw new Error("Expected native target");
+      expect(await run({ operation: "claim", leaseId, target: inspect.target })).toEqual({
+        status: "claimed",
+      });
+
+      for (const listener of debuggerListeners) {
+        listener({}, "Page.fileChooserOpened", {
+          mode: "selectSingle",
+          backendNodeId: 91,
+          accept: ["text/plain"],
+        });
+      }
+      const frameWithChooser = await run({ operation: "frame", leaseId });
+      if (frameWithChooser.status !== "frame" || frameWithChooser.fileChooser === undefined) {
+        throw new Error("Expected fileChooser in paired frame");
+      }
+
+      expect(
+        await run({
+          operation: "file-choice",
+          leaseId,
+          chooserId: frameWithChooser.fileChooser.chooserId,
+          paths: [uploadPath],
+        }),
+      ).toEqual({ status: "file-chosen" });
+      expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
+        "DOM.setFileInputFiles",
+        { files: [uploadPath], backendNodeId: 91 },
+        undefined,
+      );
+
+      // Subsequent frames and remote inputs must keep working after file selection.
+      const nextFrame = await run({ operation: "frame", leaseId });
+      expect(nextFrame.status).toBe("frame");
+      if (nextFrame.status !== "frame") throw new Error("Expected next paired frame");
+      expect(
+        await run({
+          operation: "input",
+          leaseId,
+          events: [{ kind: "tap", frameId: nextFrame.frame.frameId, x: 0.5, y: 0.5 }],
+        }),
+      ).toEqual({ status: "input", effect: "completed" });
+    } finally {
+      await host.closeAll();
+      rmSync(stagingDir, { recursive: true, force: true });
+    }
+  });
+
+  it("maps normalized paired taps against the actual 2400x1600 native viewport while capping transmitted frames to 1920x1200", async () => {
+    const created = view();
+    const resize = vi.fn(({ width }: { readonly width: number }) => {
+      const height = Math.round((width * 1600) / 2400);
+      return {
+        isEmpty: () => false,
+        getSize: () => ({ width, height }),
+        toJPEG: () => Uint8Array.from([1, 2, 3]),
+      };
+    });
+    vi.mocked(created.webContents.capturePage).mockResolvedValue({
+      isEmpty: () => false,
+      getSize: () => ({ width: 2400, height: 1600 }),
+      resize,
+      toJPEG: () => Uint8Array.from([1, 2, 3]),
+    });
+    const owner = { windowId: "a7880000-0000-4000-8000-000000000021", threadId };
+    const leaseId = "a7880000-0000-4000-8000-000000000022";
+    const host = createBrowserSurfaceHost({
+      createView: () => created,
+      isOwnerWindowAvailable: () => true,
+    });
+    const run = (command: Readonly<Record<string, unknown>>) =>
+      host.pairedControl(decodePairedBrowserNativeCommand({ contextId, owner, ...command }));
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 60_000,
+        },
+      });
+      host.attach(
+        contextId,
+        owner,
+        {
+          contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+          isDestroyed: () => false,
+          isVisible: () => true,
+          webContents: { send: vi.fn() },
+        },
+        { x: 0, y: 0, width: 2400, height: 1600 },
+      );
+      const inspect = await run({ operation: "inspect" });
+      if (inspect.status !== "target") throw new Error("Expected native target");
+      expect(await run({ operation: "claim", leaseId, target: inspect.target })).toEqual({
+        status: "claimed",
+      });
+      const frame = await run({ operation: "frame", leaseId });
+      if (frame.status !== "frame") throw new Error("Expected frame");
+      expect(frame.frame.viewport.width).toBeLessThanOrEqual(1920);
+      expect(frame.frame.viewport.height).toBeLessThanOrEqual(1200);
+      expect(resize).toHaveBeenCalledWith({ width: 1800 });
+
+      expect(
+        await run({
+          operation: "input",
+          leaseId,
+          events: [{ kind: "tap", frameId: frame.frame.frameId, x: 0.75, y: 0.75 }],
+        }),
+      ).toEqual({ status: "input", effect: "completed" });
+
+      const touchStart = vi
+        .mocked(created.webContents.debugger.sendCommand)
+        .mock.calls.find(
+          ([method, params]) =>
+            method === "Input.dispatchTouchEvent" &&
+            (params as { readonly type?: string })?.type === "touchStart",
+        );
+      expect(touchStart?.[1]).toMatchObject({
+        type: "touchStart",
+        touchPoints: [{ x: 1800, y: 1200 }],
+      });
+    } finally {
       await host.closeAll();
     }
   });
@@ -5272,8 +5497,8 @@ describe("the native execution owner boundary", () => {
       ),
     ).toMatchObject({ status: "refused" });
     expect(
-      await host.ownerControl(
-        decodeOwnerBrowserNativeCommand({
+      await host.pairedControl(
+        decodePairedBrowserNativeCommand({
           operation: "inspect",
           contextId: executionId,
           owner: { windowId: contextId, threadId },

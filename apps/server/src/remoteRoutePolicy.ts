@@ -1477,6 +1477,34 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 64 * 1_024,
   },
+  // Paired-device Browser remote control: one long-lived NDJSON frame/status
+  // stream and a bounded 10 MiB file-chooser upload. Matched before the
+  // `/api/browser/` prefix so the stream is not truncated by the default 8 MiB
+  // JSON response cap and file uploads fit the 10 MiB attachment budget.
+  {
+    kind: "exact" as const,
+    path: "/api/browser/remote-control/stream",
+    methods: ["POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+    streamsNdjson: true as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/browser/remote-control/file",
+    methods: ["POST"] as const,
+    allowedRequestHeaders: [
+      ...REMOTE_REQUEST_HEADERS,
+      "x-octant-browser-lease-id",
+      "x-octant-browser-chooser-id",
+      "x-octant-browser-file-name",
+    ] as const,
+    allowedContentTypes: REMOTE_CONTENT_TYPES,
+    acceptsAnyAttachmentType: true as const,
+    maxBodyBytes: REMOTE_ATTACHMENT_UPLOAD_MAX_BODY_BYTES,
+    uploadsAttachment: true as const,
+  },
   ...[
     "/api/agent-profiles",
     "/api/apple/",
@@ -1522,6 +1550,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     ...("acceptsAnyAttachmentType" in match
       ? { acceptsAnyAttachmentType: match.acceptsAnyAttachmentType }
       : {}),
+    ...("streamsNdjson" in match ? { streamsNdjson: match.streamsNdjson } : {}),
     // An exact route takes a query only when it says so: one naming a Project
     // there, or one that declares `allowQuery` because its own handler reads
     // and bounds the query (the load read's `?detail=vitals`, search's
@@ -1584,6 +1613,8 @@ export interface RemoteRouteDefinition {
    * sends natively.
    */
   readonly acceptsAnyAttachmentType?: true;
+  /** Long-lived NDJSON frame/status stream bounded per-frame by its route, not total bytes. */
+  readonly streamsNdjson?: true;
 }
 
 export type RemoteRouteResponse = Response | undefined;
@@ -1879,6 +1910,22 @@ export function createRemoteRouteHandler(
       // The dev server's own response: its headers stand and its body streams
       // uncapped, holding this request's slot until it ends.
       return withAdmissionRelease(response, release);
+    }
+    if (
+      decision.route?.streamsNdjson === true &&
+      response.headers.get("content-type")?.split(";", 1)[0]?.trim() === "application/x-ndjson"
+    ) {
+      const headers = new Headers(response.headers);
+      for (const [name, value] of decision.headers) headers.set(name, value);
+      headers.delete("content-length");
+      return withAdmissionRelease(
+        new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        }),
+        release,
+      );
     }
     return limitResponse(response, decision.headers, decision.maxResponseBytes, release);
   }

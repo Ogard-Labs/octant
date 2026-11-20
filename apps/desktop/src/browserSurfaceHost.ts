@@ -8,12 +8,14 @@ import {
 } from "@octant/host-runtime";
 import { createPersistentBrowserOwner, type BrowserExecutionOwner } from "./persistentBrowserOwner";
 import { BrowserPageScript, type PageScriptTarget } from "./browserPageScript";
-import { BrowserOwnerControl } from "./browserOwnerControl";
+import { BrowserPairedControl } from "./browserPairedControl";
 import {
-  OwnerBrowserTargetVersion,
-  type OwnerBrowserNativeCommand,
-  type OwnerBrowserNativeResult,
-} from "@octant/contracts/owner-browser";
+  PairedBrowserDocumentVersion,
+  type PairedBrowserInput,
+  type PairedBrowserKeyModifiers,
+  type PairedBrowserNativeCommand,
+  type PairedBrowserNativeResult,
+} from "@octant/contracts/paired-browser-control";
 import { Schema } from "effect";
 import type {
   BrowserPageScriptNativeCommand,
@@ -918,6 +920,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   };
   const goneListeners = new Set<(contextId: string) => void>();
   const personInputListeners = new Set<(contextId: string) => void>();
+  const pairedControlReclaimedListeners = new Set<(contextId: string) => void>();
+  const pairedDialogsOpen = new WeakSet<BrowserSurfaceViewPort>();
   const stateChannel = options.stateChannel ?? DESKTOP_IPC_CHANNELS.browserSurfaceState;
   const persistentOwner = createPersistentBrowserOwner({
     exists: (contextId) => surfaces.has(contextId),
@@ -949,37 +953,42 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       readonly listener: SurfaceProtocolListener;
     }
   >();
-  const ownerControls = new BrowserOwnerControl({
+  const pairedControls = new BrowserPairedControl({
+    onReclaim: (contextId) => {
+      for (const listener of pairedControlReclaimedListeners) {
+        try {
+          listener(contextId);
+        } catch {
+          /* Reclaim stays recorded if one observer fails. */
+        }
+      }
+    },
     page: (command) => {
       const owned = surfaces.get(command.contextId);
       if (
         owned === undefined ||
         owned.owner.windowId !== command.owner.windowId ||
         String(owned.owner.threadId) !== String(command.owner.threadId) ||
-        options.isOwnerWindowAvailable?.(owned.owner.windowId) !== true ||
-        owned.policy.profileMode !== "isolated" ||
-        (owned.policy.profile?.kind ?? "private") !== "private" ||
-        owned.shellWindow === undefined ||
-        owned.shellWindow.isDestroyed() ||
-        owned.shellWindow.isVisible?.() !== true ||
-        owned.lastBounds === undefined ||
         owned.tabs.length === 0
       )
         return undefined;
       const view = contentsView(owned);
-      const contents = owned.tabs.find((tab) => tab.view === view)?.contents;
-      if (
-        contents === undefined ||
-        contents.isDestroyed() ||
-        contents.isLoading() ||
-        contents.insertText === undefined
-      )
-        return undefined;
+      const tab = owned.tabs.find((entry) => entry.view === view);
+      const contents = tab?.contents;
+      if (contents === undefined || contents.isDestroyed()) return undefined;
       const origin = originOf(contents.getURL());
       if (origin === undefined || !originAllowed(contents.getURL(), owned.policy.allowedOrigins))
         return undefined;
+      const actualWidth = Math.max(1, Math.round(owned.lastBounds?.width ?? 1280));
+      const actualHeight = Math.max(1, Math.round(owned.lastBounds?.height ?? 800));
+      const width = Math.min(1920, actualWidth);
+      const height = Math.min(1200, actualHeight);
       const documentRevision = scriptGenerations.get(view) ?? 0;
-      const targetVersion = Schema.decodeUnknownSync(OwnerBrowserTargetVersion)(
+      const originPolicyVersion = createHash("sha256")
+        .update(JSON.stringify(owned.policy.allowedOrigins))
+        .digest("hex")
+        .slice(0, 32);
+      const documentVersion = Schema.decodeUnknownSync(PairedBrowserDocumentVersion)(
         createHash("sha256")
           .update(
             JSON.stringify([
@@ -988,22 +997,110 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               contents.id,
               documentRevision,
               contents.getURL(),
-              owned.policy,
-              owned.lastBounds.width,
-              owned.lastBounds.height,
             ]),
           )
           .digest("hex"),
       );
+      let privateCustody = scriptHolds.has(owned);
+      if (!privateCustody) {
+        try {
+          credentialFill.observation(owned)();
+        } catch {
+          privateCustody = true;
+        }
+      }
+      const nativePromptOpen = pairedDialogsOpen.has(view);
       return {
         identity: owned,
-        target: { targetVersion, documentRevision, origin },
+        contextId: String(command.contextId),
+        target: {
+          tabId: owned.activeTabId,
+          documentVersion,
+          origin,
+          originPolicyVersion,
+          viewport: { width, height },
+          devicePixelRatio: 1,
+        },
+        inputViewport: { width: actualWidth, height: actualHeight },
         personInputs: owned.personInputs,
-        width: owned.lastBounds.width,
-        height: owned.lastBounds.height,
+        privateCustody,
+        nativePromptOpen,
         capture: () => contents.capturePage(),
         observe: () => privateObservation(owned),
-        input: async (input, width, height, canContinue) => {
+        startFileChooserInterception: (onChooser) => {
+          const client = contents.debugger;
+          if (contents.isDestroyed()) return () => undefined;
+          let attachedByUs = false;
+          if (!client.isAttached()) {
+            try {
+              client.attach("1.3");
+              agentDebuggers.add(client);
+              attachedByUs = true;
+            } catch {
+              return () => undefined;
+            }
+          }
+          const listener: SurfaceProtocolListener = (_event, method, params, sessionId) => {
+            if (method === "Page.javascriptDialogOpening") {
+              pairedDialogsOpen.add(view);
+              return;
+            }
+            if (method === "Page.javascriptDialogClosed") {
+              pairedDialogsOpen.delete(view);
+              return;
+            }
+            if (method !== "Page.fileChooserOpened") return;
+            const opened = (params ?? {}) as {
+              readonly mode?: unknown;
+              readonly backendNodeId?: unknown;
+              readonly accept?: unknown;
+            };
+            const node = opened.backendNodeId;
+            if (typeof node !== "number" || !Number.isInteger(node)) return;
+            const accept = Array.isArray(opened.accept)
+              ? opened.accept.filter((item): item is string => typeof item === "string")
+              : [];
+            onChooser({
+              accept,
+              multiple: opened.mode === "selectMultiple",
+              resolve: async (paths) => {
+                if (contents.isDestroyed() || surfaces.get(command.contextId) !== owned) {
+                  return false;
+                }
+                await client.sendCommand(
+                  "DOM.setFileInputFiles",
+                  { files: [...paths], backendNodeId: node },
+                  sessionId,
+                );
+                owned.personInputs += 1;
+                owned.control = "user";
+                return true;
+              },
+            });
+          };
+          client.on?.("message", listener);
+          void client.sendCommand("Page.enable").catch(() => undefined);
+          void client
+            .sendCommand("Page.setInterceptFileChooserDialog", { enabled: true })
+            .catch(() => undefined);
+          return () => {
+            client.removeListener?.("message", listener);
+            pairedDialogsOpen.delete(view);
+            if (!contents.isDestroyed() && !humanDebuggers.has(client) && client.isAttached()) {
+              void client
+                .sendCommand("Page.setInterceptFileChooserDialog", { enabled: false })
+                .catch(() => undefined);
+              if (
+                attachedByUs &&
+                !emulationOf(client).held &&
+                (agentDialogGuards.get(client) ?? 0) === 0
+              ) {
+                detachAgentDebugger(client);
+              }
+            }
+          };
+        },
+        input: async (events, viewportWidth, viewportHeight, canContinue) => {
           const check = privateObservation(owned);
           const current = () => {
             check();
@@ -1012,76 +1109,29 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               owned.tabs.length === 0 ||
               contentsView(owned) !== view ||
               contents.isDestroyed() ||
-              (scriptGenerations.get(view) ?? 0) !== documentRevision ||
-              !ownerControls.active(owned)
+              !pairedControls.active(owned)
             )
-              throw new Error("Owner Browser target changed before input.");
+              throw new Error("Paired Browser target changed before input.");
           };
           await withDebugger(view, async (send) => {
             current();
             owned.personInputs += 1;
             for (const listener of personInputListeners) listener(String(command.contextId));
             owned.control = "user";
-            if (input.kind === "type") {
-              await contents.insertText?.(input.text);
-              return;
-            }
-            if (input.kind === "press") {
-              const key = input.key === "Space" ? " " : input.key;
-              const windowsVirtualKeyCode = {
-                Enter: 13,
-                Tab: 9,
-                Backspace: 8,
-                Delete: 46,
-                Escape: 27,
-                ArrowLeft: 37,
-                ArrowUp: 38,
-                ArrowRight: 39,
-                ArrowDown: 40,
-                Home: 36,
-                End: 35,
-                Space: 32,
-              }[input.key];
-              await send("Input.dispatchKeyEvent", {
-                type: "keyDown",
-                key,
-                code: input.key,
-                windowsVirtualKeyCode,
-              });
-              await send("Input.dispatchKeyEvent", {
-                type: "keyUp",
-                key,
-                code: input.key,
-                windowsVirtualKeyCode,
-              });
-              return;
-            }
-            const x = Math.min(width - 1, Math.max(0, Math.floor(input.x * width)));
-            const y = Math.min(height - 1, Math.max(0, Math.floor(input.y * height)));
             const cancelTouch = async () => {
               const client = contents.debugger;
               if (!contents.isDestroyed() && client.isAttached() && agentDebuggers.has(client))
                 await send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
             };
+            const toPoint = (nx: number, ny: number) => ({
+              x: Math.min(viewportWidth - 1, Math.max(0, Math.floor(nx * viewportWidth))),
+              y: Math.min(viewportHeight - 1, Math.max(0, Math.floor(ny * viewportHeight))),
+            });
             try {
-              if (input.kind === "scroll") {
-                await send("Input.synthesizeScrollGesture", {
-                  x,
-                  y,
-                  xDistance: -input.deltaX,
-                  yDistance: -input.deltaY,
-                  gestureSourceType: "touch",
-                  speed: 800,
-                });
-                if (!canContinue()) throw new Error("Owner Browser control changed during scroll.");
-              } else {
-                await send("Input.dispatchTouchEvent", {
-                  type: "touchStart",
-                  touchPoints: [{ x, y }],
-                });
+              for (const event of events) {
                 current();
-                if (!canContinue()) throw new Error("Owner Browser control changed during tap.");
-                await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+                if (!canContinue()) throw new Error("Paired Browser hold changed during input.");
+                await dispatchPairedInputEvent(send, contents, event, toPoint, canContinue);
               }
             } catch (error) {
               await cancelTouch().catch(() => undefined);
@@ -1144,7 +1194,6 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       if (
         owned === undefined ||
         scriptHolds.has(owned) ||
-        ownerControls.holdsPage(owned) ||
         owned.owner.windowId !== owner.windowId ||
         String(owned.owner.threadId) !== String(owner.threadId) ||
         !ownerAvailable(owner) ||
@@ -1177,12 +1226,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     if (owned.owner.kind === "execution" && !persistentOwner.admits(owned.owner))
       throw new Error("Browser execution owner is no longer available.");
     const privateCheck = privateObservation(owned);
-    const ownerCheck = ownerControls.observation(owned);
+    const pairedCheck = pairedControls.observation(owned);
     return () => {
       if (owned.owner.kind === "execution" && !persistentOwner.admits(owned.owner))
         throw new Error("Browser execution owner is no longer available.");
       privateCheck();
-      ownerCheck();
+      pairedCheck();
     };
   };
   const scriptOwnerKey = (command: BrowserPageScriptNativeCommand) =>
@@ -1270,7 +1319,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             } catch {
               return undefined;
             }
-            if (!current() || scriptHolds.has(owned) || ownerControls.holdsPage(owned))
+            if (!current() || scriptHolds.has(owned) || pairedControls.holdsPage(owned))
               return undefined;
             const hold = {};
             scriptHolds.set(owned, hold);
@@ -1507,7 +1556,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       owned.recording === undefined &&
       owned.tabs.length > 0 &&
       !scriptHolds.has(owned) &&
-      !ownerControls.holdsPage(owned)
+      !pairedControls.holdsPage(owned)
     );
   }
 
@@ -1852,7 +1901,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       ) {
         return false;
       }
-      return owned.ownerNavigationRestricted || ownerControls.holdsPage(owned)
+      return owned.ownerNavigationRestricted || pairedControls.holdsPage(owned)
         ? originAllowed(target, owned.policy.allowedOrigins)
         : admitNavigation(
             owned,
@@ -2105,7 +2154,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         }
       }
       if (isPersonInput(input)) {
-        ownerControls.reclaim(owned);
+        pairedControls.reclaim(owned);
         owned.ownerNavigationRestricted = false;
         owned.personInputs += 1;
         if (
@@ -2658,6 +2707,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     onPersonInput: (listener: (contextId: string) => void): (() => void) => {
       personInputListeners.add(listener);
       return () => personInputListeners.delete(listener);
+    },
+    onPairedControlReclaimed: (listener: (contextId: string) => void): (() => void) => {
+      pairedControlReclaimedListeners.add(listener);
+      return () => pairedControlReclaimedListeners.delete(listener);
     },
     onContextGone: (listener: (contextId: string) => void): (() => void) => {
       goneListeners.add(listener);
@@ -3244,18 +3297,23 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       });
     },
     runPageScript,
-    ownerControl: async (
-      command: OwnerBrowserNativeCommand,
+    pairedControl: async (
+      command: PairedBrowserNativeCommand,
       signal?: AbortSignal,
-    ): Promise<OwnerBrowserNativeResult> => {
+    ): Promise<PairedBrowserNativeResult> => {
       const owned = surfaces.get(command.contextId);
-      if ((command.operation === "claim" || command.operation === "input") && owned !== undefined)
+      if (
+        (command.operation === "claim" ||
+          command.operation === "input" ||
+          command.operation === "file-choice") &&
+        owned !== undefined
+      )
         return queueSurfaceAction(owned, async () => {
-          const result = await ownerControls.execute(command, signal);
+          const result = await pairedControls.execute(command, signal);
           if (result.status === "claimed") owned.ownerNavigationRestricted = true;
           return result;
         });
-      return ownerControls.execute(command, signal);
+      return pairedControls.execute(command, signal);
     },
     prepareCredentialFill: (contextId: string, owner: BrowserSurfaceOwner, origin: string) =>
       credentialFill.prepare(contextId, owner, origin),
@@ -4274,7 +4332,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     if (owned === undefined) return;
     clearPointSelection(owned);
     owned.lifetime.abort();
-    ownerControls.reclaim(owned);
+    pairedControls.reclaim(owned);
     credentialFill.forget(owned);
     surfaces.delete(contextId);
     void owned.textComposition.close();
@@ -6508,4 +6566,145 @@ function scriptPageIsClear(value: unknown): boolean {
     if (node.contentDocument !== undefined) return false;
   }
   return true;
+}
+
+const PAIRED_KEY_VIRTUAL_CODES: Readonly<Record<string, number>> = {
+  Enter: 13,
+  Tab: 9,
+  Backspace: 8,
+  Delete: 46,
+  Escape: 27,
+  ArrowLeft: 37,
+  ArrowUp: 38,
+  ArrowRight: 39,
+  ArrowDown: 40,
+  Home: 36,
+  End: 35,
+  " ": 32,
+  Space: 32,
+};
+
+function pairedKeyModifierMask(modifiers: PairedBrowserKeyModifiers | undefined): number {
+  if (modifiers === undefined) return 0;
+  return (
+    (modifiers.alt === true ? 1 : 0) |
+    (modifiers.control === true ? 2 : 0) |
+    (modifiers.meta === true ? 4 : 0) |
+    (modifiers.shift === true ? 8 : 0)
+  );
+}
+
+/**
+ * Dispatches one paired-device input event strictly through touch, scroll-gesture,
+ * key, text, and IME debugger commands — never `Input.dispatchMouseEvent`, which
+ * Electron reports through `before-mouse-event` and would reclaim the lease.
+ */
+async function dispatchPairedInputEvent(
+  send: (method: string, params?: Record<string, unknown>) => Promise<unknown>,
+  contents: BrowserSurfaceViewPort["webContents"],
+  event: PairedBrowserInput,
+  toPoint: (nx: number, ny: number) => { readonly x: number; readonly y: number },
+  canContinue: () => boolean,
+): Promise<void> {
+  if (event.kind === "text") {
+    if (contents.insertText !== undefined) {
+      await contents.insertText(event.text);
+    } else {
+      await send("Input.insertText", { text: event.text });
+    }
+    return;
+  }
+  if (event.kind === "composition") {
+    if (event.phase === "start" || event.phase === "update") {
+      const text = event.text ?? "";
+      await send("Input.imeSetComposition", {
+        text,
+        selectionStart: text.length,
+        selectionEnd: text.length,
+      });
+      return;
+    }
+    await send("Input.imeSetComposition", {
+      text: "",
+      selectionStart: 0,
+      selectionEnd: 0,
+    });
+    if (event.phase === "commit" && event.text !== undefined && event.text.length > 0) {
+      if (contents.insertText !== undefined) {
+        await contents.insertText(event.text);
+      } else {
+        await send("Input.insertText", { text: event.text });
+      }
+    }
+    return;
+  }
+  if (event.kind === "key") {
+    const key = event.key === "Space" ? " " : event.key;
+    const modifiers = pairedKeyModifierMask(event.modifiers);
+    const windowsVirtualKeyCode = PAIRED_KEY_VIRTUAL_CODES[event.key];
+    await send("Input.dispatchKeyEvent", {
+      type: event.phase === "down" ? "keyDown" : "keyUp",
+      key,
+      code: event.code,
+      ...(modifiers === 0 ? {} : { modifiers }),
+      ...(windowsVirtualKeyCode === undefined ? {} : { windowsVirtualKeyCode }),
+    });
+    return;
+  }
+  if (event.kind === "scroll") {
+    const pt = toPoint(event.x, event.y);
+    await send("Input.synthesizeScrollGesture", {
+      x: pt.x,
+      y: pt.y,
+      xDistance: -event.deltaX,
+      yDistance: -event.deltaY,
+      gestureSourceType: "touch",
+      speed: 800,
+    });
+    if (!canContinue()) throw new Error("Paired Browser hold changed during scroll.");
+    return;
+  }
+  if (event.kind === "tap") {
+    const pt = toPoint(event.x, event.y);
+    await send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [pt],
+    });
+    if (!canContinue()) throw new Error("Paired Browser hold changed during tap.");
+    await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    return;
+  }
+  if (event.kind === "long-press") {
+    const pt = toPoint(event.x, event.y);
+    const durationMs = Math.min(1_500, Math.max(300, event.durationMs ?? 500));
+    await send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [pt],
+    });
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, durationMs);
+      timer.unref?.();
+    });
+    if (!canContinue()) throw new Error("Paired Browser hold changed during long press.");
+    await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    return;
+  }
+  // drag: touchStart -> touchMove* -> touchEnd
+  const first = event.points[0];
+  if (first === undefined) return;
+  await send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [toPoint(first.x, first.y)],
+  });
+  for (let index = 1; index < event.points.length; index += 1) {
+    const point = event.points[index];
+    if (point === undefined) continue;
+    if (!canContinue()) throw new Error("Paired Browser hold changed during drag.");
+    await send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [toPoint(point.x, point.y)],
+    });
+  }
+  if (!canContinue()) throw new Error("Paired Browser hold changed before drag end.");
+  await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 }

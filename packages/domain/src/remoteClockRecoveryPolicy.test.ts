@@ -117,6 +117,48 @@ describe("evaluateMonotonicNow", () => {
     expect(result.forwardJumpMs).toBe(jumpMs);
   });
 
+  it("does not stack forward tolerance across repeated observations against one anchored baseline", () => {
+    const baseline = 1_000_000;
+    const jumpedWall = baseline + 20 * 60_000;
+    const first = evaluateMonotonicNow({
+      wallClockMs: jumpedWall,
+      highWaterMarkMs: baseline,
+      forwardBaselineMs: baseline,
+      monotonicElapsedMs: 100,
+      forwardToleranceMs: 1_000,
+    });
+    expect(first.highWaterMarkMs).toBe(baseline + 1_100);
+    expect(first.posture).toBe("recovery-required");
+    expect(first.reason).toBe("forward-jump");
+
+    // Repeated observations at the same steady time stay pinned instead of adding another tolerance.
+    const second = evaluateMonotonicNow({
+      wallClockMs: jumpedWall,
+      highWaterMarkMs: first.highWaterMarkMs,
+      forwardBaselineMs: baseline,
+      monotonicElapsedMs: 100,
+      forwardToleranceMs: 1_000,
+    });
+    expect(second.highWaterMarkMs).toBe(baseline + 1_100);
+    expect(second.effectiveNowMs).toBe(baseline + 1_100);
+    expect(second.advanced).toBe(false);
+    expect(second.posture).toBe("recovery-required");
+    expect(second.reason).toBe("forward-jump");
+
+    // Further steady progress advances 1:1 from the single anchored bound.
+    const later = evaluateMonotonicNow({
+      wallClockMs: jumpedWall,
+      highWaterMarkMs: second.highWaterMarkMs,
+      forwardBaselineMs: baseline,
+      monotonicElapsedMs: 350,
+      forwardToleranceMs: 1_000,
+    });
+    expect(later.highWaterMarkMs).toBe(baseline + 1_350);
+    expect(later.advanced).toBe(true);
+    expect(later.posture).toBe("recovery-required");
+    expect(later.reason).toBe("forward-jump");
+  });
+
   it("does not detect forward jumps without a monotonic baseline", () => {
     // The first observation of a process lifetime has no monotonic baseline; a
     // legitimate long downtime must be accepted as elapsed time.

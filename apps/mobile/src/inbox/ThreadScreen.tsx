@@ -578,6 +578,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           ) : null}
           {!offlineDemo && fullView && activeSurface === "browser" && transport !== undefined ? (
             <BrowserSurfacePanel
+              actsAsHostPerson={standing.actsAsHostPerson}
               mode={selected.mode}
               reach={browserReach}
               threadId={selected.threadId}
@@ -717,6 +718,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
               </Pressable>
             </View>
             <BrowserSurfacePanel
+              actsAsHostPerson={standing.actsAsHostPerson}
               compact={{ onExpand: () => setViewFloating(false) }}
               mode={selected.mode}
               reach={browserReach}

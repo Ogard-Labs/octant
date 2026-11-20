@@ -5,7 +5,12 @@ import {
 import type { ToolActionAuthority } from "@octant/contracts";
 import type { BrowserViewportPoint } from "@octant/contracts/browser-automation";
 import { decodeHostAnswer } from "@octant/contracts";
+import type { PairedBrowserLeaseId } from "@octant/contracts/paired-browser-control";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
+import {
+  createPairedBrowserControlClient,
+  type PairedBrowserControlClient,
+} from "./pairedBrowserControlClient";
 
 /**
  * What the host's browser is showing for one thread, reduced to what a phone
@@ -25,6 +30,9 @@ export interface MobileBrowserSurfaceView {
   readonly observedAt?: string;
   /** Present only while the host holds a live context this device may act in. */
   readonly action?: MobileBrowserActionHandle;
+  readonly waitingForPerson?: BrowserAutomationSnapshot["waitingForPerson"];
+  readonly remoteHolder?: BrowserAutomationSnapshot["remoteHolder"];
+  readonly pairedLease?: BrowserAutomationSnapshot["pairedLease"];
 }
 
 /**
@@ -89,6 +97,11 @@ function viewFrom(
     stale: observation?.stale ?? true,
     ...(observation?.observedAt === undefined ? {} : { observedAt: observation.observedAt }),
     ...(handle === undefined ? {} : { action: handle }),
+    ...(snapshot.waitingForPerson === undefined
+      ? {}
+      : { waitingForPerson: snapshot.waitingForPerson }),
+    ...(snapshot.remoteHolder === undefined ? {} : { remoteHolder: snapshot.remoteHolder }),
+    ...(snapshot.pairedLease === undefined ? {} : { pairedLease: snapshot.pairedLease }),
   };
 }
 
@@ -181,4 +194,82 @@ export async function tapMobileBrowserSurface(input: {
     await decodeSnapshot(response, "The gesture could not be sent."),
     input.handle.authority,
   );
+}
+
+/**
+ * Ask the host to hold the thread's live Browser page for this person-paired
+ * phone and issue a live touch/key control lease.
+ */
+export async function takeOverMobileBrowserSurface(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly threadId: string;
+  readonly authority?: ToolActionAuthority;
+  readonly signal?: AbortSignal;
+}): Promise<MobileBrowserSurfaceView> {
+  const response = await input.transport.authenticatedFetch({
+    method: "POST",
+    path: "/api/browser/contexts/take-over",
+    body: JSON.stringify({ threadId: input.threadId }),
+    contentType: "application/json",
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  return viewFrom(
+    await decodeSnapshot(response, "Only a person-paired device can hold this Browser page."),
+    input.authority,
+  );
+}
+
+/**
+ * Hand back the held Browser page to the agent, releasing this device's paired
+ * control lease.
+ */
+export async function handBackMobileBrowserSurface(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly threadId: string;
+  readonly leaseId?: PairedBrowserLeaseId;
+  readonly authority?: ToolActionAuthority;
+  readonly signal?: AbortSignal;
+}): Promise<MobileBrowserSurfaceView> {
+  const response = await input.transport.authenticatedFetch({
+    method: "POST",
+    path: "/api/browser/contexts/hand-back",
+    body: JSON.stringify({
+      threadId: input.threadId,
+      ...(input.leaseId === undefined ? {} : { leaseId: input.leaseId }),
+    }),
+    contentType: "application/json",
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  return viewFrom(
+    await decodeSnapshot(response, "Could not hand the Browser page back."),
+    input.authority,
+  );
+}
+
+/** Adapt a mobile remote transport for paired Browser frame streaming and touch/key input. */
+export function createMobilePairedBrowserControlClient(
+  transport: MobileRemoteTransport,
+): PairedBrowserControlClient {
+  return createPairedBrowserControlClient({
+    fetch: (path, init) => {
+      const headers: Record<string, string> = {};
+      if (init.headers !== undefined) {
+        const parsed = new Headers(init.headers);
+        parsed.forEach((value, key) => {
+          headers[key] = value;
+        });
+      }
+      const contentType = headers["content-type"];
+      const body =
+        typeof init.body === "string" || init.body instanceof Uint8Array ? init.body : undefined;
+      return transport.authenticatedFetch({
+        method: init.method ?? "POST",
+        path,
+        ...(body === undefined ? {} : { body }),
+        ...(Object.keys(headers).length === 0 ? {} : { headers }),
+        ...(contentType === undefined ? {} : { contentType }),
+        ...(init.signal == null ? {} : { signal: init.signal }),
+      });
+    },
+  });
 }

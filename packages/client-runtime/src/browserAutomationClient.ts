@@ -77,6 +77,10 @@ import {
   type BrowserFlowsCommand,
 } from "@octant/contracts/browser-flows";
 import { decodeHostAnswer } from "@octant/contracts";
+import {
+  createPairedBrowserControlClient,
+  type PairedBrowserControlClient,
+} from "./pairedBrowserControlClient";
 
 export interface BrowserAutomationClientOptions {
   readonly baseUrl: string;
@@ -177,6 +181,8 @@ export interface BrowserAutomationClient {
   ): Promise<BrowserProfilesResult>;
   /** List or delete the Projects' saved Browser flows; the agent saves and runs them. */
   manageFlows?(command: BrowserFlowsCommand, signal?: AbortSignal): Promise<BrowserFlowsResult>;
+  /** Live screencast and touch/key input client for a person-paired device holding a page. */
+  readonly pairedControl?: PairedBrowserControlClient;
 }
 
 export type BrowserAutomationClientFailureCategory =
@@ -197,7 +203,20 @@ export class BrowserAutomationClientFailure extends Error {
 export function createBrowserAutomationClient(
   options: BrowserAutomationClientOptions,
 ): BrowserAutomationClient {
+  const pairedControl = createPairedBrowserControlClient({
+    fetch: (path, init) => {
+      const headers = new Headers(init.headers);
+      if (options.windowCapability.length > 0) {
+        headers.set("x-octant-window-capability", options.windowCapability);
+      }
+      return options.fetch(new URL(path, options.baseUrl), {
+        ...init,
+        headers,
+      });
+    },
+  });
   return {
+    pairedControl,
     readTaskProfile: (input, signal) =>
       post(
         options,
@@ -461,6 +480,19 @@ async function post<T>(
       throw new BrowserAutomationClientFailure(failure.category, failure.message);
     } catch (error) {
       if (error instanceof BrowserAutomationClientFailure) throw error;
+      if (
+        typeof payload === "object" &&
+        payload !== null &&
+        (payload as { readonly status?: unknown }).status === "refused"
+      ) {
+        const reason = (payload as { readonly reason?: unknown }).reason;
+        throw new BrowserAutomationClientFailure(
+          "policy-denied",
+          reason === "remote-control-not-person"
+            ? "Only a person-paired device can control this Browser page."
+            : "This Browser page cannot be controlled remotely right now.",
+        );
+      }
       throw new BrowserAutomationClientFailure(
         "protocol",
         "Browser automation returned an invalid failure.",

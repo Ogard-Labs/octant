@@ -1498,12 +1498,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             ? "download-needs-this-computer"
             : undefined,
         browserSignIn: {
-          // A routine's or subagent's turn has nobody to sign in, and a paired
-          // device cannot see the page.
+          // A routine's or subagent's turn has nobody to sign in, and a
+          // hub-introduced/restricted device cannot hold the Browser page.
           refusal: (windowId) =>
             browserToolApprovalService.isUnattendedScope(windowId)
               ? "sign-in-needs-a-person"
-              : browserToolApprovalService.isPairedDevice(windowId)
+              : browserToolApprovalService.isRestrictedDevice(windowId)
                 ? "sign-in-needs-this-computer"
                 : undefined,
           request: (input) => browserToolApprovalService.request(input),

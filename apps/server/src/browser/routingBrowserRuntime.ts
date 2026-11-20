@@ -110,10 +110,10 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
     }
   }
 
-  ownerControl: NonNullable<BrowserRuntimePort["ownerControl"]> = async (command, signal) => {
+  pairedControl: NonNullable<BrowserRuntimePort["pairedControl"]> = async (command, signal) => {
     const owner = this.#owned(command.contextId);
-    if (owner !== this.#native || owner.ownerControl === undefined) return { status: "refused" };
-    return owner.ownerControl(command, signal);
+    if (owner !== this.#native || owner.pairedControl === undefined) return { status: "refused" };
+    return owner.pairedControl(command, signal);
   };
 
   runPageScript: NonNullable<BrowserRuntimePort["runPageScript"]> = async (command, signal) => {
@@ -225,6 +225,10 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
   /** Only the desktop Browser shows the person its page directly. */
   onPersonInput(listener: (contextId: BrowserContextId) => void): () => void {
     return this.#native.onPersonInput?.(listener) ?? (() => undefined);
+  }
+
+  onPairedControlReclaimed(listener: (contextId: BrowserContextId) => void): () => void {
+    return this.#native.onPairedControlReclaimed?.(listener) ?? (() => undefined);
   }
 
   #owned(contextId: BrowserContextId): BrowserRuntimePort {

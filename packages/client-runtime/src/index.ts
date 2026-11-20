@@ -74,7 +74,7 @@ export * from "./remotePairingClient";
 export * from "./appPairingCode";
 export * from "./hubGuestClient";
 export * from "./hubOwnerClient";
-export * from "./ownerBrowser";
+export * from "./pairedBrowserControlClient";
 export * from "./ownerMergeUnlock";
 export * from "./desktopOwnerUnlock";
 export * from "./ownerAlerts";

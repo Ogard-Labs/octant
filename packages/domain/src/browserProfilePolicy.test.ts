@@ -89,6 +89,13 @@ describe("browser profile partitions", () => {
       }).kind,
     ).toBe("refused");
     expect(
+      evaluateBrowserProfileUse({
+        profile: first,
+        caller: "person-paired-device",
+        nativeBrowserAvailable: true,
+      }).kind,
+    ).toBe("allowed");
+    expect(
       evaluateBrowserProfileUse({ profile: first, caller: "person", nativeBrowserAvailable: false })
         .kind,
     ).toBe("refused");

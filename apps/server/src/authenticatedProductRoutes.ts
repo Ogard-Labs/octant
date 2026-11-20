@@ -15,6 +15,7 @@ export interface AuthenticatedProductDispatchHandoff {
   readonly request: Request;
   readonly principal: ClientPrincipal;
   readonly abortSignal?: AbortSignal;
+  readonly sessionNow?: () => number;
   readonly freshness?: "current" | "rotation-due";
   readonly requestFacts?: unknown;
 }
@@ -53,6 +54,7 @@ export function createAuthenticatedProductDispatch(
       request: handoff.request,
       principal: handoff.principal,
       ...(handoff.abortSignal === undefined ? {} : { abortSignal: handoff.abortSignal }),
+      ...(handoff.sessionNow === undefined ? {} : { sessionNow: handoff.sessionNow }),
     });
     bindPrincipalRouteContext(handoff.request, context);
     const cleaned = await withoutImageMetadata(handoff.request, handoff.principal);

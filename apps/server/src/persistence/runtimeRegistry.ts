@@ -36,9 +36,13 @@ import {
   ThreadWakeupChanged,
 } from "@octant/contracts";
 import {
-  OWNER_BROWSER_AUDIT_EVENT,
-  OwnerBrowserAuditRecord,
-} from "@octant/contracts/owner-browser";
+  LEGACY_OWNER_BROWSER_AUDIT_EVENT,
+  LegacyOwnerBrowserAuditRecord,
+  PAIRED_BROWSER_HOLD_ENDED_EVENT,
+  PAIRED_BROWSER_HOLD_STARTED_EVENT,
+  PairedBrowserHoldEndedPayload,
+  PairedBrowserHoldStartedPayload,
+} from "@octant/contracts/paired-browser-control";
 import {
   registerThreadMessageQueueEvents,
   ThreadMessageQueueProjection,
@@ -882,7 +886,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, 1, TerminalBrowserGrantIssued)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
     .register(HUB_MEMBERSHIP_CHANGED, 1, HubMembershipChangedPayload)
-    .register(OWNER_BROWSER_AUDIT_EVENT, 1, OwnerBrowserAuditRecord)
+    .register(LEGACY_OWNER_BROWSER_AUDIT_EVENT, 1, LegacyOwnerBrowserAuditRecord)
+    .register(PAIRED_BROWSER_HOLD_STARTED_EVENT, 1, PairedBrowserHoldStartedPayload)
+    .register(PAIRED_BROWSER_HOLD_ENDED_EVENT, 1, PairedBrowserHoldEndedPayload)
     .register(OWNER_APPROVAL_AUDIT_EVENT, 1, OwnerApprovalAuditRecord)
     .register(HUB_DELEGATION_RECORDED, 1, HubDelegationRecordedPayload)
     .register(AGENT_ACCESS_EVENT_NAMES.grantCreated, 1, AgentGrantCreatedV1)
