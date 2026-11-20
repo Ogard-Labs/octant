@@ -4,7 +4,7 @@ import type {
   ImageGenerationSettings,
   ProviderInstance,
 } from "@octant/contracts";
-import { listEligibleImageProfiles } from "@octant/domain";
+import { imageProfileSupportsReferences, listEligibleImageProfiles } from "@octant/domain";
 import type { ServiceOfferRules } from "../offers/serviceOfferDecision";
 import type { ImageGenerationOfferOutcome } from "./imageGenerationOfferService";
 import type { KeptImageGenerationChoices } from "./keptImageGenerationChoices";
@@ -28,17 +28,26 @@ export function imageOfferDecisionRules(input: {
       const eligible = listEligibleImageProfiles(
         input.listInstances(),
         input.readImageGenerationSettings().customSources,
-      ).some(
+      ).find(
         (profile) =>
           String(profile.instanceId) === String(decision.profileInstanceId) &&
           profile.modelAllowlist.some((id) => String(id) === String(decision.modelId)),
       );
-      if (!eligible) return { reason: "That image model is not available. Choose another one." };
+      if (eligible === undefined)
+        return { reason: "That image model is not available. Choose another one." };
+      if (offer.references !== undefined) {
+        if (!imageProfileSupportsReferences(eligible)) {
+          return { reason: "That model can't use reference images. Choose another one." };
+        }
+        if (decision.referenceImagesConfirmed !== true) {
+          return { reason: "Open this offer in a client that shows which images will be sent." };
+        }
+      }
       const choice = { profileInstanceId: decision.profileInstanceId, modelId: decision.modelId };
       const kept = input.kept;
       return {
         outcome: { status: "generate", ...choice },
-        ...(kept === undefined || !decision.rememberForThread
+        ...(kept === undefined || !decision.rememberForThread || offer.references !== undefined
           ? {}
           : {
               remember: async (actor) => {

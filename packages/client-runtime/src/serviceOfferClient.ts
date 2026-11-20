@@ -9,6 +9,7 @@ import {
   type ServiceOffer,
   type ServiceOfferDecision,
 } from "@octant/contracts";
+import { imageProfileSupportsReferences } from "@octant/domain";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
 
 export interface ServiceOfferClient {
@@ -63,7 +64,7 @@ function serviceOfferClient(
         await request({
           method: "GET",
           path: SERVICE_OFFERS_PATH,
-          query: `?${new URLSearchParams({ threadKind, scopeId: String(scopeId) }).toString()}`,
+          query: `?${new URLSearchParams({ threadKind, scopeId: String(scopeId), referenceImages: "1" }).toString()}`,
         }),
       );
     },
@@ -90,25 +91,32 @@ function serviceOfferClient(
 export function imageOfferModelChoices(
   profiles: ReadonlyArray<ImageGenerationProfileView>,
   suggested: ImageGenerationGenerateOffer["suggested"],
+  needsReferences = false,
 ) {
-  const choices = profiles.flatMap((profile) =>
-    profile.modelAllowlist.map((modelId) => {
-      const source = profile.sourceLabels?.find(
-        (candidate) => String(candidate.modelId) === String(modelId),
-      )?.label;
-      return {
-        id: `${String(profile.instanceId)}::${String(modelId)}`,
-        label: `${profile.displayName} · ${source ?? String(modelId)}`,
-        profileInstanceId: profile.instanceId,
-        modelId,
-      };
-    }),
-  );
+  const choices = profiles
+    .filter((profile) => !needsReferences || imageProfileSupportsReferences(profile))
+    .flatMap((profile) =>
+      profile.modelAllowlist.map((modelId) => {
+        const source = profile.sourceLabels?.find(
+          (candidate) => String(candidate.modelId) === String(modelId),
+        )?.label;
+        return {
+          id: `${String(profile.instanceId)}::${String(modelId)}`,
+          label: `${profile.displayName} · ${source ?? String(modelId)}`,
+          profileInstanceId: profile.instanceId,
+          modelId,
+        };
+      }),
+    );
   const suggestedId = `${String(suggested.profileInstanceId)}::${String(suggested.modelId)}`;
   const first = choices.find((choice) => choice.id === suggestedId);
   // The profile list can lag; the host validates the choice again before taking it.
-  return [
-    first ?? { ...suggested, id: suggestedId, label: String(suggested.modelId) },
-    ...choices.filter((choice) => choice.id !== suggestedId),
-  ];
+  const preferred =
+    first ??
+    (needsReferences
+      ? undefined
+      : { ...suggested, id: suggestedId, label: String(suggested.modelId) });
+  return preferred === undefined
+    ? choices
+    : [preferred, ...choices.filter((choice) => choice.id !== suggestedId)];
 }

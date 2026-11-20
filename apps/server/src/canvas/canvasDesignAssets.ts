@@ -164,6 +164,27 @@ export async function readCanvasDesignAssetFile(input: {
   readonly path: string;
   readonly maximumBytes: number;
 }): Promise<CanvasDesignAssetRead> {
+  const prepared = await prepareCanvasDesignAssetFile(input);
+  if (prepared.status === "unavailable") return prepared;
+  const bytes = await prepared.read();
+  return bytes === undefined
+    ? { status: "unavailable", reason: "refused" }
+    : { status: "read", bytes };
+}
+
+export async function prepareCanvasDesignAssetFile(input: {
+  readonly filesystem: WorkFilesystemPort;
+  readonly root: string;
+  readonly path: string;
+  readonly maximumBytes: number;
+}): Promise<
+  | Extract<CanvasDesignAssetRead, { status: "unavailable" }>
+  | {
+      readonly status: "ready";
+      readonly size: number;
+      readonly read: () => Promise<Uint8Array | undefined>;
+    }
+> {
   let relative: string;
   try {
     relative = canonicalizeWorkRelativePath(input.path);
@@ -192,13 +213,23 @@ export async function readCanvasDesignAssetFile(input: {
   if (resolved.stat.size > input.maximumBytes) {
     return { status: "unavailable", reason: "too-large" };
   }
-  const bytes = await readConfinedWorkFile({
-    filesystem: input.filesystem,
-    canonicalPath: resolved.canonical,
-    expected: resolved.stat,
-    maximumBytes: input.maximumBytes,
-  });
-  return bytes === undefined
-    ? { status: "unavailable", reason: "refused" }
-    : { status: "read", bytes };
+  return {
+    status: "ready",
+    size: resolved.stat.size,
+    read: async () => {
+      if ((await input.filesystem.realpath(input.root).catch(() => undefined)) !== canonicalRoot)
+        return undefined;
+      const current = await resolveContainedWorkPath(input.filesystem, canonicalRoot, candidate);
+      if (current?.canonical !== resolved.canonical) return undefined;
+      return readConfinedWorkFile({
+        filesystem: input.filesystem,
+        canonicalPath: resolved.canonical,
+        expected: resolved.stat,
+        maximumBytes: resolved.stat.size,
+        ...(resolved.stat.changedAt === undefined
+          ? {}
+          : { unchangedSince: resolved.stat.changedAt }),
+      });
+    },
+  };
 }

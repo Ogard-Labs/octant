@@ -522,6 +522,16 @@ describe("image job service", () => {
       }),
     ).rejects.toThrow("size limit");
     expect(generate).not.toHaveBeenCalled();
+    await expect(
+      service.enqueue({
+        threadKind: "chat-thread",
+        scopeId,
+        profileInstanceId: profileId,
+        modelId,
+        prompt: "edit this",
+        references: Array.from({ length: 5 }, () => ({ bytes: png, mediaType: "image/png" })),
+      }),
+    ).rejects.toThrow("at most four");
   });
 
   it("rejects extra adapter images before staging artifacts", async () => {

@@ -69,6 +69,8 @@ export const ImageArtifactMediaType = Schema.Literal(...IMAGE_ARTIFACT_MEDIA_TYP
 export type ImageArtifactMediaType = typeof ImageArtifactMediaType.Type;
 
 export const MAX_GENERATED_IMAGE_BYTES = 20_971_520;
+export const MAX_IMAGE_REFERENCES = 4;
+export const MAX_IMAGE_REFERENCE_LABEL_LENGTH = 200;
 export const MAX_IMAGE_PROMPT_CHARACTERS = 32_000;
 export const MAX_IMAGE_VARIANTS = 4;
 export const IMAGE_JOB_HOST_CONCURRENCY = 2;
@@ -291,7 +293,9 @@ export const ImageGenerationEnqueueRequest = Schema.Struct({
   aspectRatio: Schema.optional(GeminiImageAspectRatio),
   resolution: Schema.optional(GeminiImageResolution),
   parentArtifactRef: Schema.optional(ImageArtifactRef),
-  references: Schema.optional(Schema.Array(ImageGenerationReferenceInput).pipe(Schema.maxItems(4))),
+  references: Schema.optional(
+    Schema.Array(ImageGenerationReferenceInput).pipe(Schema.maxItems(MAX_IMAGE_REFERENCES)),
+  ),
 }).annotations(strict);
 export type ImageGenerationEnqueueRequest = typeof ImageGenerationEnqueueRequest.Type;
 
@@ -326,6 +330,13 @@ export type ImageGenerationOfferId = typeof ImageGenerationOfferId.Type;
 
 export const MAX_PENDING_IMAGE_GENERATION_OFFERS = 32;
 
+export const ImageOfferReference = Schema.Struct({
+  kind: Schema.Literal("attachment", "browser-capture", "file", "generated-image"),
+  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_IMAGE_REFERENCE_LABEL_LENGTH)),
+  signedIn: Schema.optional(Schema.Literal(true)),
+}).annotations(strict);
+export type ImageOfferReference = typeof ImageOfferReference.Type;
+
 /**
  * An agent asking, in its thread, to generate an image with a configured
  * image model instead of drawing it itself. Nothing is spent until the person
@@ -342,6 +353,12 @@ export const ImageGenerationGenerateOffer = Schema.Struct({
   variantCount: PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_IMAGE_VARIANTS)),
   /** The agent asked to revise an image this thread already generated. */
   revision: Schema.Boolean,
+  references: Schema.optional(
+    Schema.Array(ImageOfferReference).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_IMAGE_REFERENCES),
+    ),
+  ),
   suggested: Schema.Struct({
     profileInstanceId: ProviderInstanceId,
     modelId: ProviderModelId,
@@ -395,6 +412,7 @@ export const ImageGenerationOfferDecision = Schema.Union(
     profileInstanceId: ProviderInstanceId,
     modelId: ProviderModelId,
     rememberForThread: Schema.Boolean,
+    referenceImagesConfirmed: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
   Schema.Struct({
     offerId: ImageGenerationOfferId,
