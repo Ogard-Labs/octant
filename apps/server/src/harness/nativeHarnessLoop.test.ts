@@ -1418,6 +1418,84 @@ describe("fitting a request to the endpoint", () => {
       expect(ledgerUsageCost(model, usage)).toBeUndefined();
     });
 
+    it("reports every request's usage once more when a turn is interrupted while its tools run", async () => {
+      const model = "gpt-5.6-luna" as ProviderModelId;
+      const perRequest = [
+        { inputTokens: 100, outputTokens: 10 },
+        { inputTokens: 200, outputTokens: 20 },
+      ];
+      let sent = 0;
+      const transport: NativeHarnessTransport = {
+        open: async () => ({
+          fits: () => true,
+          send: async (_request, stream) => {
+            const usage = perRequest[sent];
+            sent += 1;
+            if (usage === undefined) throw new Error("The script ran out of responses.");
+            stream.onEvent({ kind: "usage", ...usage });
+            return {
+              text: "",
+              toolCalls: [{ toolCallId: `call-${sent}`, toolName: "read", argumentsJson: "{}" }],
+              usage,
+            };
+          },
+          release: () => undefined,
+        }),
+      };
+      const events = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+            yield* connection.start({
+              sessionId,
+              modelId: model,
+              executionPolicy: "approval-gated",
+            });
+            const first = yield* sendAndCollect(
+              connection,
+              "look",
+              (event) => event.kind === "tool-request",
+            );
+            const secondStep = yield* Effect.fork(
+              Stream.runCollect(
+                (yield* connection.subscribe).pipe(
+                  Stream.takeUntil((event) => event.kind === "tool-request"),
+                ),
+              ),
+            );
+            const rest = yield* Effect.fork(
+              Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+            );
+            yield* connection.answerTool({
+              sessionId,
+              requestId: "call-1",
+              resultJson: "{}",
+              isError: false,
+            });
+            yield* Fiber.join(secondStep);
+            yield* connection.interrupt(sessionId);
+            return [...first, ...Array.from(yield* Fiber.join(rest))];
+          }),
+        ),
+      );
+
+      expect(events.at(-1)?.kind).toBe("interrupted");
+      const reports = events.filter((event) => event.kind === "usage");
+      const last = reports.at(-1);
+      // The last report covers the whole turn, so a reader that keeps the
+      // latest report (the Code ledger) records both requests, not the second.
+      expect(last).toMatchObject({ inputTokens: 300, outputTokens: 30 });
+      expect(last).not.toHaveProperty("requestStartedAt");
+      if (last?.kind !== "usage") throw new Error("Expected usage");
+      expect(last.estimatedCostUsd).not.toBeNull();
+      // A reader that sums per-request reports and lets a whole-turn report
+      // replace them (Chat and Work) still counts each request once.
+      expect(deriveTurnMetrics({ startedAt: now, endedAt: now, events }).usage).toMatchObject({
+        inputTokens: 300,
+        outputTokens: 30,
+      });
+    });
+
     it.each([
       { retried: true, cancelled: false, journalFails: false },
       { retried: true, cancelled: true, journalFails: false },
