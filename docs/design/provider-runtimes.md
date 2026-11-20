@@ -484,11 +484,14 @@ device the host's own person paired, through `/api/shell/settings`, journaled
 as the device (maintainer decisions, 2026-11-12 and 2026-11-13; built). A
 device the hub introduced, and a restricted one, cannot change it.
 Chat, Work and Code read it when a turn starts: a change applies from the
-next turn, and a running turn keeps the limit it started with. A turn cut off
-by the limit ends as it did under the fixed limit. With the setting Off, only
-Stop and Force stop end a silent turn. The tool-call pause limit
-(`providerToolCallPauseLimitMinutes`, `null` for Off) is stored, changed and
-read the same way.
+next turn, and a running turn keeps the limit it started with. Outside Strict,
+reaching the limit does not cut the turn off: the host journals
+`turn-stall-noticed` and the thread shows one quiet line with a **Stop**
+button ([Thread view: Loop and stall notices](thread-view.md#loop-and-stall-notices)).
+Under Strict, a turn cut off by the limit ends as it did under the fixed
+limit. With the setting Off, only Stop and Force stop end a silent turn. The
+tool-call pause limit (`providerToolCallPauseLimitMinutes`, `null` for Off)
+is stored, changed and read the same way.
 
 A provider tool call is running from its normalized `tool-start` until the
 `tool-success` or `tool-failure` with the same `toolCallId`. Claude Code,
@@ -512,6 +515,47 @@ Force stop still end such a turn.
 
 An app-managed tool call in Chat keeps its own deadline of five minutes,
 apart from the stalled-turn limit; it does not follow the setting.
+
+### Loop detection and provider tool inputs
+
+Chat, Work and Code track consecutive identical tool calls within a turn using
+canonical sorted-key JSON comparison of the tool input (same tool name, same
+normalized JSON input, no other tool call in between; pure policy in
+`@octant/domain`).
+
+- **Early warning on Octant's own tools.** On the 3rd identical consecutive
+  call to one of Octant's own app-managed tools (`tool-request`), the tool
+  still runs normally and its result adds one informational sentence noting
+  that it has been called the same way three times. It is information, never a
+  refusal, and has no setting.
+- **Loop threshold (6 consecutive calls).** Outside Strict, at every level,
+  Octant does not stop the turn: it journals `turn-loop-noticed` (tool name
+  and count) once for that streak and the thread shows one quiet line with a
+  **Stop** button. Under Strict, Octant stops the turn immediately, interrupts
+  the provider session, journals `turn-loop-stopped`, and settles the turn so
+  the thread accepts the next message straight away.
+- **Which providers carry tool inputs on normalized runtime events:**
+  - **Octant Harness and direct model endpoints** (OpenAI-compatible,
+    Anthropic-compatible, Ollama, Amazon Bedrock, Azure Foundry): every tool
+    call emits `tool-request` with `toolName` and full `inputJson`, so all
+    calls are loop-checked and receive the 3rd-call early warning.
+  - **Claude Code:** provider-native tools emit `tool-start` paired with
+    `tool-call-content` (`part: "input"`), so they are loop-checked except
+    `Edit`, `Write`, and `NotebookEdit` (whose `tool-call-content` intentionally
+    omits file contents and keeps only the path, marked `partial: true`, so
+    each call resets the consecutive streak instead of falsely matching on path
+    alone) and inputs truncated past `MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS`.
+    Octant's app-managed tools bridged into Claude emit `tool-request` and are
+    checked with the 3rd-call early warning.
+  - **Codex, OpenCode, Pi, Oh-My-Pi, and ACP agents:** provider-native tools
+    emit `tool-start` (at most a redacted one-line display `argument` on Codex)
+    without JSON input on normalized runtime events, so their native tools are
+    not loop-checked and completing one resets any consecutive streak. Octant's
+    app-managed tools bridged into them emit `tool-request` with full
+    `inputJson` and are checked with the 3rd-call early warning.
+  - **Outside provider drivers:** checked for calls emitted as `tool-request`
+    or `tool-start` paired with un-truncated, non-partial `tool-call-content`
+    (`part: "input"`).
 
 Codex sends nothing while the model streams a tool call's arguments: the
 installed 0.163.0 app-server schema has no argument-delta notification, and
@@ -2578,7 +2622,20 @@ The host decides every step:
   run. See the rationale below for how each distribution is checked.
 - **Trust.** Shows what trusting grants and how the install vouched for the
   bytes; an unverified download is said plainly. Trust is refused before an
-  install, and a reinstall drops it.
+  install, and a reinstall drops it. When an installed npm package declares
+  deferred install scripts (`preinstall`, `install`, `postinstall`, or
+  `binding.gyp`) that have not yet completed for that install, clicking
+  **Trust** runs them (`npm rebuild --prefix <folder> --ignore-scripts=false`)
+  with no further prompt (maintainer decision, 2026-11-19): natively outside
+  Strict, and inside Octant's sandbox with writes limited to the agent's own
+  install folder under Strict. Each run is journaled as
+  `provider.acp-agent-install-scripts-ran@1` with its outcome, actor, timestamp
+  and whether it was sandboxed. A failed script journals the failure, returns a
+  clear failure value and leaves the agent untrusted so the person can retry or
+  reinstall; non-package agents and packages with no install script stay clean
+  no-ops. Before Trust, if Connection Check fails because a package's install
+  script has not run yet, Octant reports: `"This package needs its install
+script, which runs when you trust it."`
 - **Enable.** Refused until the agent is installed and trusted
   (`acpAgentEnableRefusal`). Stopping trust later leaves the agent on; its
   next launch is held as an untrusted one.
@@ -2617,14 +2674,18 @@ level, and the Full access "unverified" rule has nothing to offer it. An
 agent whose session lists no model has nothing to select and cannot start a
 thread.
 
-Rationale (lead decision, 2026-11-18), install integrity: an `npx` or
-`uvx` distribution installs the exact pinned release with the package
-manager into Octant's managed folder for that agent
-(`<data>/acp-agent-installs/<instance>`), relying on the package manager's
-own lockfile and integrity checks; npm runs with `--ignore-scripts` and uv
-with `--no-build`, so no package code runs at install time. A package that
-needs its install script to fetch its real binary then fails its
-Connection Check instead. A binary distribution downloads only over HTTPS
+Rationale (lead decision, 2026-11-18; Trust install-script rule, maintainer
+decision, 2026-11-19), install integrity: an `npx` or `uvx` distribution
+installs the exact pinned release with the package manager into Octant's
+managed folder for that agent (`<data>/acp-agent-installs/<instance>`), relying
+on the package manager's own lockfile and integrity checks; npm runs with
+`--ignore-scripts` and uv with `--no-build`, so no package code runs at install
+time. Before Trust, a package that needs its install script to fetch its real
+binary fails Connection Check with `"This package needs its install script,
+which runs when you trust it."` Clicking **Trust** then runs its install
+scripts with no further prompt (natively outside Strict, and inside Octant's
+sandbox with writes limited to the agent's install folder under Strict) and
+journals the run. A binary distribution downloads only over HTTPS
 (a redirect included) from the URL the listing names, capped at 1 GiB. The
 registry schema's `sha256` is optional: an archive that carries one is
 checked and refused on a mismatch, leaving nothing on disk; one without is

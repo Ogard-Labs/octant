@@ -4,6 +4,7 @@ import {
   type IntegrationAuthenticationCommand,
 } from "@octant/contracts/integration";
 import type { IntegrationService } from "./integration/integrationService";
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import { resolvePrincipalRouteContext } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
@@ -72,7 +73,7 @@ export function createIntegrationRouteHandler(dependencies: {
       if (context.principal.kind !== "local-window" && context.principal.kind !== "remote-device") {
         return failure("unauthorized", 403, origin);
       }
-    } else if (context.principal.kind !== "local-window") {
+    } else if (!principalActsAsHostPerson(context.principal)) {
       return failure("unauthorized", 403, origin);
     }
     try {

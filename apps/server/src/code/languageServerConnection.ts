@@ -106,8 +106,12 @@ export interface LanguageServerConnectionOptions {
   readonly output: Writable;
   readonly requestDeadlineMs: number;
   readonly onViolation: (violation: LanguageServerViolation) => void;
-  /** A pushed `textDocument/publishDiagnostics`, unparsed. */
-  readonly onPublishedDiagnostics?: (uri: string, diagnostics: ReadonlyArray<unknown>) => void;
+  /** A pushed `textDocument/publishDiagnostics`, unparsed, with its optional document version. */
+  readonly onPublishedDiagnostics?: (
+    uri: string,
+    diagnostics: ReadonlyArray<unknown>,
+    version?: number,
+  ) => void;
 }
 
 interface PendingRequest {
@@ -120,7 +124,7 @@ export class LanguageServerConnection {
   readonly #requestDeadlineMs: number;
   readonly #onViolation: (violation: LanguageServerViolation) => void;
   readonly #onPublishedDiagnostics:
-    | ((uri: string, diagnostics: ReadonlyArray<unknown>) => void)
+    | ((uri: string, diagnostics: ReadonlyArray<unknown>, version?: number) => void)
     | undefined;
   readonly #pending = new Map<number, PendingRequest>();
   readonly #registrations = new Map<
@@ -263,9 +267,13 @@ export class LanguageServerConnection {
     }
     if (method !== undefined) {
       if (method === "textDocument/publishDiagnostics" && isRecord(message.params)) {
-        const { uri, diagnostics } = message.params;
+        const { uri, diagnostics, version } = message.params;
         if (typeof uri === "string" && Array.isArray(diagnostics)) {
-          this.#onPublishedDiagnostics?.(uri, diagnostics);
+          this.#onPublishedDiagnostics?.(
+            uri,
+            diagnostics,
+            typeof version === "number" && Number.isInteger(version) ? version : undefined,
+          );
         }
       }
       // `window/logMessage`, `telemetry/event`, progress, and anything else

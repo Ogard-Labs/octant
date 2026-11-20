@@ -56,6 +56,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     // Code only: Work has no developer environment and Chat has no folder.
     "language-server",
     "debug-adapter",
+    "pull-request-reviewer",
     "canvas-export-target",
     ...rendererKinds,
     ...providerDriverKind,
@@ -106,8 +107,11 @@ export function isExtensionComponentHostAdmitted(
 ): boolean {
   // A cloud machine target calls a cloud provider on the person's account, and
   // no launch class yet confines a process that needs that network reach, so
-  // no platform runs one from a stored package.
-  if (component.kind === "cloud-machine-target") return false;
+  // no platform runs one from a stored package. Pull request reviewer plugins
+  // likewise have no out-of-process confined worker launch class yet.
+  if (component.kind === "cloud-machine-target" || component.kind === "pull-request-reviewer") {
+    return false;
+  }
   if (component.kind === "provider-driver") {
     return outsideDriverHostLaunch(platform) !== "prohibited";
   }

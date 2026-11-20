@@ -30,6 +30,8 @@ import {
   DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
   DEFAULT_COORDINATOR_ROUNDS,
   DEFAULT_COORDINATOR_WAKES_PER_HOUR,
+  DEFAULT_SIBLING_THREAD_READS_PER_TURN,
+  DEFAULT_SIBLING_THREAD_WAITS_PER_TURN,
   DEFAULT_THREAD_MESSAGES_PER_TURN,
   DEFAULT_THREAD_WAKEUPS_WAITING,
   MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
@@ -40,6 +42,8 @@ import {
   MAX_COORDINATOR_WAKES_PER_HOUR,
   MAX_COORDINATORS_PER_PROJECT,
   MAX_COORDINATORS_PER_PROJECT_SETTING,
+  MAX_SIBLING_THREAD_READS_PER_TURN_SETTING,
+  MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING,
   MAX_THREAD_MESSAGES_PER_TURN_SETTING,
   MAX_THREAD_WAKEUPS_WAITING_SETTING,
 } from "./octantLimits";
@@ -621,8 +625,12 @@ export const DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES: BackgroundSessionIdl
 export const DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT: AutoCompactWindowPercent = 85;
 export {
   DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
+  DEFAULT_SIBLING_THREAD_READS_PER_TURN,
+  DEFAULT_SIBLING_THREAD_WAITS_PER_TURN,
   DEFAULT_THREAD_MESSAGES_PER_TURN,
   MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
+  MAX_SIBLING_THREAD_READS_PER_TURN_SETTING,
+  MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING,
   MAX_THREAD_MESSAGES_PER_TURN_SETTING,
 };
 
@@ -995,12 +1003,22 @@ export const ShellSettings = Schema.Struct({
     Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING)),
     { default: () => CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS },
   ),
-  /** Thread messages one turn may send to other threads. */
+  /** Thread messages one turn may send to other threads under Strict. */
   threadMessagesPerTurn: Schema.optionalWith(
     Schema.Int.pipe(Schema.between(1, MAX_THREAD_MESSAGES_PER_TURN_SETTING)),
     { default: () => DEFAULT_THREAD_MESSAGES_PER_TURN },
   ),
-  /** The longest one Browser wait may last, in minutes. */
+  /** Sibling-thread `read` calls one turn may make under Strict. */
+  siblingThreadReadsPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_SIBLING_THREAD_READS_PER_TURN_SETTING)),
+    { default: () => DEFAULT_SIBLING_THREAD_READS_PER_TURN },
+  ),
+  /** Sibling-thread `wait` calls one turn may make under Strict. */
+  siblingThreadWaitsPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING)),
+    { default: () => DEFAULT_SIBLING_THREAD_WAITS_PER_TURN },
+  ),
+  /** The longest one Browser wait may last under Strict, in minutes. */
   browserWaitLimitMinutes: Schema.optionalWith(
     Schema.Int.pipe(Schema.between(1, MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING)),
     { default: () => DEFAULT_BROWSER_WAIT_LIMIT_MINUTES },

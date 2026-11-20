@@ -30,7 +30,8 @@ import {
   revokeCanvasShareSnapshot,
   validateCanvasShareAccessLogEvent,
 } from "@octant/domain";
-import type { ClientPrincipal } from "../clientPrincipal";
+import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import type { CanvasProjection } from "./canvasProjection";
 import { CanvasShareEventStore, CanvasShareEventStoreError } from "./canvasShareEventStore";
 import type { CanvasAuthorizationContext, CanvasProjectRecord } from "./canvasService";
@@ -180,10 +181,10 @@ export class CanvasShareService {
     project: CanvasProjectRecord | undefined,
     principal: ClientPrincipal,
   ): CanvasShareResult {
-    // Minting a share is an owner action: it records the owner's consent and
-    // names the owner as the actor. A paired device may read a share it is in
-    // the audience of, but it may never issue one in the owner's name.
-    if (this.#reader(principal).kind !== "local-user") {
+    // Minting a share is an owner action: the host's own person may issue one
+    // from a local window or a device they paired (journaled with the device
+    // actor on the envelope); hub-introduced and restricted devices are refused.
+    if (!principalActsAsHostPerson(principal)) {
       return denied("unauthorized", "Canvas sharing requires the host user.");
     }
     let canvasId: CanvasId;
@@ -238,7 +239,11 @@ export class CanvasShareService {
           actor: { kind: "local-user", actorId: this.#owner.actorId },
         },
       });
-      this.#eventStore.appendSnapshotCreated({ record, occurredAt: record.createdAt });
+      this.#eventStore.appendSnapshotCreated({
+        record,
+        occurredAt: record.createdAt,
+        ...(principal.kind === "remote-device" ? { actor: eventActorForPrincipal(principal) } : {}),
+      });
       this.#records.set(String(record.snapshotId), record);
       return accepted(this.#summarize(record, this.#clock()));
     } catch (error) {
@@ -253,8 +258,10 @@ export class CanvasShareService {
     project: CanvasProjectRecord | undefined,
     principal: ClientPrincipal,
   ): CanvasShareResult {
-    // Withdrawal is recorded as the owner's act, so it is the owner's to make.
-    if (this.#reader(principal).kind !== "local-user") {
+    // Withdrawal is an owner action: a local window or a device the host's own
+    // person paired may revoke a share (journaled with the device actor on the
+    // envelope); hub-introduced and restricted devices are refused.
+    if (!principalActsAsHostPerson(principal)) {
       return denied("unauthorized", "Canvas share revoke requires the host user.");
     }
     let snapshotId: string;
@@ -292,6 +299,7 @@ export class CanvasShareService {
           actor: { kind: "local-user", actorId: this.#owner.actorId },
         },
         occurredAt: revokedAt,
+        ...(principal.kind === "remote-device" ? { actor: eventActorForPrincipal(principal) } : {}),
       });
       this.#records.set(String(revoked.snapshotId), revoked);
       return accepted(this.#summarize(revoked, this.#clock()));

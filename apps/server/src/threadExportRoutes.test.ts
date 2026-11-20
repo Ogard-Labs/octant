@@ -6,6 +6,7 @@ import {
 } from "./threadExportRoutes";
 import type { ThreadExportService } from "./threadExportService";
 import type { ThreadHandOffService } from "./threadHandOffService";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const nowMs = Date.parse("2026-08-19T12:00:00.000Z");
@@ -190,5 +191,37 @@ describe("thread export routes", () => {
       error: "Thread hand-off is unauthorized.",
     });
     expect(await handler(makeRequest("/api/threads/export", { capability }))).toBeUndefined();
+  });
+
+  it("treats a person-paired device as a local person for export while keeping hub-introduced devices remote", async () => {
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
+    const exportThread = vi.fn<ThreadExportService["exportThread"]>(
+      async () => ({ kind: "refused", reason: "not-found" }) as const,
+    );
+    const handler = createThreadExportRouteHandler({
+      service: { exportThread } as unknown as ThreadExportService,
+      windowAuthorityStore,
+      now: () => nowMs,
+    });
+
+    const paired = makeRequest("/api/threads/export", { body: { mode: "chat", threadId } });
+    bindPrincipalRouteContext(paired, {
+      principal: { kind: "remote-device", admittedBy: "host-person" } as never,
+      scopeId: windowId as never,
+    });
+    await handler(paired);
+
+    const hub = makeRequest("/api/threads/export", { body: { mode: "chat", threadId } });
+    bindPrincipalRouteContext(hub, {
+      principal: { kind: "remote-device", admittedBy: "hub-roster" } as never,
+      scopeId: windowId as never,
+    });
+    await handler(hub);
+
+    expect(exportThread.mock.calls.map((call) => call[1])).toEqual([
+      "local-window",
+      "remote-device",
+    ]);
   });
 });

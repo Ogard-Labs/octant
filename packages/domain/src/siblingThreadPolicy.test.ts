@@ -209,6 +209,71 @@ describe("sibling thread policy", () => {
     ).toEqual({ status: "admitted" });
   });
 
+  it("imposes no per-turn read or wait cap outside Strict and honors custom limits under Strict", () => {
+    expect(
+      decideSiblingThreadCall({
+        action: "read",
+        readsThisTurn: MAX_SIBLING_THREAD_READS_PER_TURN + 25,
+        waitsThisTurn: 0,
+        strict: false,
+        readLimit: 2,
+      }),
+    ).toEqual({ status: "admitted" });
+    expect(
+      decideSiblingThreadCall({
+        action: "wait",
+        readsThisTurn: 0,
+        waitsThisTurn: MAX_SIBLING_THREAD_WAITS_PER_TURN + 25,
+        strict: false,
+        waitLimit: 1,
+      }),
+    ).toEqual({ status: "admitted" });
+    expect(
+      decideSiblingThreadCall({
+        action: "read",
+        readsThisTurn: 11,
+        waitsThisTurn: 0,
+        strict: true,
+        readLimit: 12,
+      }),
+    ).toEqual({ status: "admitted" });
+    expect(
+      decideSiblingThreadCall({
+        action: "read",
+        readsThisTurn: 12,
+        waitsThisTurn: 0,
+        strict: true,
+        readLimit: 12,
+      }),
+    ).toEqual({
+      status: "refused",
+      reason: "rate-limited",
+      message: "This turn has already read 12 threads.",
+    });
+    expect(
+      decideSiblingThreadCall({
+        action: "wait",
+        readsThisTurn: 0,
+        waitsThisTurn: 5,
+        strict: true,
+        waitLimit: 6,
+      }),
+    ).toEqual({ status: "admitted" });
+    expect(
+      decideSiblingThreadCall({
+        action: "wait",
+        readsThisTurn: 0,
+        waitsThisTurn: 6,
+        strict: true,
+        waitLimit: 6,
+      }),
+    ).toEqual({
+      status: "refused",
+      reason: "rate-limited",
+      message: "This turn has already waited 6 times.",
+    });
+  });
+
   it("blocks a wait for the default when no timeout is named and never past the child-run bound", () => {
     expect(siblingThreadWaitMs(undefined)).toBe(DEFAULT_SIBLING_THREAD_WAIT_MS);
     expect(siblingThreadWaitMs(5_000)).toBe(5_000);

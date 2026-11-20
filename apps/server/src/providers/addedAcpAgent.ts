@@ -16,6 +16,13 @@ import { decideAcpAgentLaunch, type AcpAgentSteps } from "@octant/plugin-host/ac
 import { HOST_PASSTHROUGH_VARIABLES, type AcpProviderProfile } from "./acpProfiles";
 
 /**
+ * Exact user-facing message shown when Connection Check fails before Trust
+ * because an added npm/uv package's deferred install script has not run yet.
+ */
+export const ACP_PACKAGE_NEEDS_INSTALL_SCRIPT_MESSAGE =
+  "This package needs its install script, which runs when you trust it.";
+
+/**
  * The generic profile for one added agent. Its mode is never selected, since
  * no mapping of Chat, Work, Code and Plan onto the agent's own modes was
  * read; Plan's read-only wall and the level's approvals are Octant's sandbox
@@ -78,9 +85,25 @@ function withoutOctantTools(
 export function withAddedAcpAgentLaunch(
   driver: ProviderDriver,
   instance: AddedAcpAgentProviderInstance,
+  options?: {
+    readonly hasPendingInstallScripts?: () => Promise<boolean> | boolean;
+  },
 ): ProviderDriver {
   const steps: AcpAgentSteps = addedAcpAgentSteps(instance);
   const name = instance.displayName;
+  const checkPendingInstallScripts = async (): Promise<boolean> => {
+    if (steps.trusted) return false;
+    if (options?.hasPendingInstallScripts !== undefined) {
+      return options.hasPendingInstallScripts();
+    }
+    const { source, install } = instance.configuration;
+    return (
+      source.kind === "registry" &&
+      (source.distribution === "npx" || source.distribution === "uvx") &&
+      install?.hasInstallScripts === true &&
+      install.installScriptsCompleted !== true
+    );
+  };
   return {
     ...driver,
     probe: (input) =>
@@ -93,6 +116,19 @@ export function withAddedAcpAgentLaunch(
                 capabilities: { ...result.capabilities, appManagedTools: "unsupported" as const },
               },
         ),
+        Effect.catchAll((error) => {
+          if (steps.trusted || error.category === "unauthenticated") return Effect.fail(error);
+          return Effect.promise(checkPendingInstallScripts).pipe(
+            Effect.flatMap((pending) =>
+              pending
+                ? Effect.fail({
+                    category: "unavailable" as const,
+                    message: ACP_PACKAGE_NEEDS_INSTALL_SCRIPT_MESSAGE,
+                  })
+                : Effect.fail(error),
+            ),
+          );
+        }),
       ),
     acquire: (input) => {
       const refusal = decideAcpAgentLaunch({ steps, executionPolicy: "approval-gated" });

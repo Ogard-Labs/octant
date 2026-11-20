@@ -209,7 +209,62 @@ describe("ProviderRoutes", () => {
       });
       expect((await route(remote))?.status).toBe(401);
     }
+    for (const body of bodies) {
+      const hubIntroduced = new Request("http://127.0.0.1/api/providers/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      bindPrincipalRouteContext(hubIntroduced, {
+        principal: {
+          kind: "remote-device",
+          hostId: "local",
+          deviceId,
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "80000000-0000-4000-8000-000000000046",
+          admittedBy: "hub-roster",
+        } as never,
+        scopeId: deviceId as never,
+      });
+      expect((await route(hubIntroduced))?.status).toBe(401);
+    }
     expect(execute).not.toHaveBeenCalled();
+
+    const pairedTrust = new Request("http://127.0.0.1/api/providers/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "set-acp-agent-trust",
+        instanceId,
+        expectedVersion: 2,
+        trusted: true,
+      }),
+    });
+    bindPrincipalRouteContext(pairedTrust, {
+      principal: {
+        kind: "remote-device",
+        hostId: "local",
+        deviceId,
+        credentialGeneration: 1,
+        origin: "https://remote.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "80000000-0000-4000-8000-000000000047",
+        admittedBy: "host-person",
+      } as never,
+      scopeId: deviceId as never,
+    });
+    expect((await route(pairedTrust))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ kind: "set-acp-agent-trust", trusted: true }),
+      expect.objectContaining({ kind: "remote-device", actorId: deviceId }),
+    );
+    execute.mockClear();
+
     for (const body of bodies) {
       const local = await route(
         new Request("http://127.0.0.1/api/providers/commands", {

@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { lstat, realpath, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import {
   decodeBrowserThreadId,
   decodeChatThreadId,
@@ -51,6 +51,7 @@ import {
 } from "../activityHistory/codeHomeForgeRead";
 import { activityHistoryHeld, readActivityFacts } from "../persistence/activityHistoryProjection";
 import { createPairedMergeUnlockSlot } from "../hub/pairedMergeUnlock";
+import { createCodeEditDiagnostics } from "../code/codeEditDiagnostics";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
 import {
   createCodeDebugAgentSessionApprovals,
@@ -77,6 +78,7 @@ import {
   createCodeExternalEditorRouteHandler,
   isCodeCheckoutOpenTargetCurrent,
   isCodeExternalEditorTargetCurrent,
+  resolveConfinedDesktopFilePath,
 } from "../codeExternalEditorRoutes";
 import { createCodeOperationApprovalRouteHandler } from "../codeOperationApprovalRoutes";
 import { suggestProjectActions } from "../code/projectActionSuggestions";
@@ -104,7 +106,7 @@ import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { WorkspaceWiring } from "./workspace";
 import { stableCodeFileId, type CodeWiring } from "./code";
-import { withProjectExtraFolders } from "../code/codeProjectFolderRoot";
+import { pathInResolvedRoot, withProjectExtraFolders } from "../code/codeProjectFolderRoot";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessStateWiring } from "./harnessState";
 import { serverCodeCheckout, serverThreadOf } from "../serverProjects/serverProjectThreads";
@@ -137,6 +139,7 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
   Pick<
     CodeWiring,
     | "canAccessCodeProject"
+    | "codeProjectAccess"
     | "codeFileWatch"
     | "codeWorkingDirectoryProbePath"
     | "listActivityRepositories"
@@ -144,7 +147,11 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<
     CodeRuntimeWiring,
-    "codeOperationRuntime" | "contributeCodeTools" | "routeCodeService" | "terminalProcessPort"
+    | "codeOperationRuntime"
+    | "contributeCodeTools"
+    | "registerCodeEditDiagnostics"
+    | "routeCodeService"
+    | "terminalProcessPort"
   > &
   Pick<
     FoundationsWiring,
@@ -172,6 +179,9 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     repositoryActivitySource,
     listActivityRepositories,
     canAccessCodeProject,
+    codeProjectAccess,
+    isPairedDeviceScope,
+    isRestrictedDeviceScope,
     serverConnection,
     serverProjectStore,
     codeFileWatch,
@@ -181,6 +191,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     resolveChildWorktree,
     codeSessionAuthority,
     contributeCodeTools,
+    registerCodeEditDiagnostics,
     codeWorkingDirectoryProbePath,
     extensionLifecycleService,
     extensionPackageStore,
@@ -687,7 +698,23 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             : root;
         },
         canAccessProject: canAccessCodeProject,
-        effectiveThread: (scopeId, thread) => codeSessionAuthority.effectiveThread(scopeId, thread),
+        // Independent of any current request's AsyncLocalStorage context so
+        // another window's commit does not drop a live Full-access window's
+        // server, and checks window/device liveness so a closed window or
+        // revoked paired device does not retain an unapproved server.
+        canAccessProjectLive: (scopeId, projectId) =>
+          codeProjectAccess.standingAuthority(projectId, () =>
+            codeProjectAccess.canAccessProject(scopeId, projectId),
+          ) ||
+          (isPairedDeviceScope(scopeId) &&
+            !isRestrictedDeviceScope(scopeId) &&
+            codeProjectAccess.hasActiveCodeProject(projectId)),
+        // Read from the level the turn runs at (window session grant clamped
+        // to any active turn posture), never only the thread's stored level.
+        effectiveThread: (scopeId, thread) => {
+          const session = codeSessionAuthority.effectiveThread(scopeId, thread);
+          return codeOperationRuntime?.threadWithActiveTurnPosture?.(session) ?? session;
+        },
         resolveRoot: resolveRootWithExtraFolders,
       },
       approvals: languageServerApprovals,
@@ -709,6 +736,9 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // A previous run's servers are ended before this run starts any.
     yield* Effect.promise(() => languageServerProcesses.reconcile().catch(() => undefined));
     languageService.startSweeping();
+    // Revoking a window discards its in-memory Full access grants; sweep at
+    // once so an unapproved `repo-tooling` server it kept alive stops too.
+    onWindowRevoked(() => void languageService.sweep().catch(() => undefined));
     // An archived or completed thread, a checkout that went away, the Settings
     // switch turned off, a Project's toolchain setting changed, or a server
     // whose trust or switch was withdrawn stops at once rather than at the
@@ -720,6 +750,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             event.aggregateType === "code-thread" ||
             event.aggregateType === "code-checkout" ||
             event.aggregateType === "code-settings" ||
+            event.aggregateType === "window-workspace" ||
             event.eventName === "project.code-own-toolchain-changed@1" ||
             event.aggregateType === EXTENSION_AGGREGATE_TYPE,
         )
@@ -832,6 +863,20 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             .externalContentIngested,
         recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
         language: languageService,
+        uuid: randomUUID,
+      }),
+    );
+    // Octant Harness `write`, `edit`, and `editFiles` return language-server
+    // errors for edited files within the 3.5 s budget under the same authority
+    // and launch rules (docs/design/language-services.md).
+    registerCodeEditDiagnostics(({ windowId, thread, harnessRoot, mainCheckoutRoot }) =>
+      createCodeEditDiagnostics({
+        windowId,
+        thread,
+        harnessRoot,
+        mainCheckoutRoot,
+        language: languageService,
+        recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
         uuid: randomUUID,
       }),
     );
@@ -1141,28 +1186,59 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       desktopBridgeSecret: options.desktopBridgeSecret,
       windowAuthorityStore,
       resolve: async (input) => {
-        const editor = persistence.readCodeSettings()?.settings.externalEditor;
-        if (editor === undefined) return undefined;
+        const editor =
+          input.defaultApplication === true
+            ? undefined
+            : persistence.readCodeSettings()?.settings.externalEditor;
+        if (input.defaultApplication !== true && editor === undefined) return undefined;
         const windowId = decodeWindowId(input.windowId);
-        const thread = persistence.readCodeThread(decodeCodeThreadId(input.threadId));
-        const checkout = persistence.readCodeCheckout(decodeCodeCheckoutId(input.checkoutId));
-        const reference = persistence.readCodeFileReference(decodeCodeFileId(input.fileId));
-        if (
-          thread === undefined ||
-          checkout === undefined ||
-          reference === undefined ||
-          !isCodeExternalEditorTargetCurrent({ thread, checkout, reference })
-        ) {
-          return undefined;
-        }
+        const threadId = decodeCodeThreadId(input.threadId);
+        const checkoutId = decodeCodeCheckoutId(input.checkoutId);
+        const fileId = decodeCodeFileId(input.fileId);
         try {
-          const relativePath = reference.relativePath;
-          if (relativePath === undefined) return undefined;
-          const root = await roots.resolve(windowId, thread, checkout, relativePath);
-          if (root === undefined || root.fileId !== reference.id) return undefined;
-          const file = await realpath(resolve(root.rootPath, relativePath));
-          if (!pathIsProjectConfined(root.rootPath, file)) return undefined;
-          return { file, editor };
+          let target: { readonly rootPath: string; readonly relativePath: string } | undefined;
+          if (routeCodeService.resolveDesktopFileTarget !== undefined) {
+            target = await routeCodeService.resolveDesktopFileTarget(windowId, {
+              threadId,
+              checkoutId,
+              fileId,
+            });
+          } else {
+            const thread = persistence.readCodeThread(threadId);
+            const checkout = persistence.readCodeCheckout(checkoutId);
+            const reference = persistence.readCodeFileReference(fileId);
+            if (
+              thread === undefined ||
+              checkout === undefined ||
+              checkout.kind === "remote-root" ||
+              reference === undefined ||
+              !isCodeExternalEditorTargetCurrent({ thread, checkout, reference }) ||
+              reference.relativePath === undefined
+            ) {
+              return undefined;
+            }
+            const root = await resolveRootWithExtraFolders(
+              windowId,
+              thread,
+              checkout,
+              reference.relativePath,
+            );
+            if (root === undefined || String(root.fileId) !== String(reference.id)) {
+              return undefined;
+            }
+            target = {
+              rootPath: root.rootPath,
+              relativePath: pathInResolvedRoot(root, reference.relativePath),
+            };
+          }
+          if (target === undefined) return undefined;
+          const file = await resolveConfinedDesktopFilePath({
+            rootPath: target.rootPath,
+            relativePath: target.relativePath,
+            isConfined: pathIsProjectConfined,
+          });
+          if (file === undefined) return undefined;
+          return editor === undefined ? { file } : { file, editor };
         } catch {
           return undefined;
         }

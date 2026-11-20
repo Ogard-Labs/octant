@@ -2961,6 +2961,23 @@ describe("desktop lease service spend cap for billed desktops", () => {
       summary: { monthlyCapUsdCents: 400 },
     });
 
+    // A device the host's own person paired reads and changes the cap, journaled as that device.
+    expect(service.spend({ actor: paired, personPairedDevice: true })).toMatchObject({
+      status: "spend",
+      summary: { monthlyCapUsdCents: 400 },
+    });
+    expect(
+      service.setSpendCap({ actor: paired, personPairedDevice: true, monthlyCapUsdCents: 500 }),
+    ).toMatchObject({
+      status: "spend",
+      summary: { monthlyCapUsdCents: 500 },
+    });
+    expect(spendEvents(connection, "desktop.spend-cap-changed@1").at(-1)).toEqual({
+      actor: "remote-device",
+      payload: { monthlyCapUsdCents: 500, previousMonthlyCapUsdCents: 400 },
+    });
+    service.setSpendCap({ actor: person, monthlyCapUsdCents: 400 });
+
     // The person clearing it turns billed desktops off again, journaled as theirs.
     service.setSpendCap({ actor: person, monthlyCapUsdCents: undefined });
     expect(spendEvents(connection, "desktop.spend-cap-changed@1").at(-1)).toEqual({

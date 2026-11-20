@@ -99,7 +99,6 @@ export * from "./agentGrantClient";
 export * from "./protectedFilesClient";
 export * from "./diagnosticsExportClient";
 export * from "./threadExportClient";
-export * from "./validationEvidenceClient";
 export * from "./expoSecureDeviceKeyStore";
 export * from "./mobileInboxClient";
 export * from "./mobileThreadRestClient";

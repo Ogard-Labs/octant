@@ -15,3 +15,4 @@ export type { GitHistoryReader } from "./gitHistory";
 
 export * from "./canvasExportPackage";
 export * from "./codeTools";
+export * from "./pullRequestReviewer";
