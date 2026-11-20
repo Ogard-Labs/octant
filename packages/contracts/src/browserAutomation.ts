@@ -869,6 +869,20 @@ export const BrowserFaviconDataUrl = Schema.String.pipe(
   ),
 );
 
+/**
+ * Person-facing surfaces take a stricter icon than the observation does:
+ * raster types only, since a page's SVG markup does not belong in a window's
+ * tab strip or a Recent row. Same byte bound as the shared favicon shape.
+ */
+export const BrowserSurfaceFaviconDataUrl = Schema.String.pipe(
+  Schema.maxLength(MAX_BROWSER_FAVICON_DATA_URL_CHARACTERS),
+  Schema.pattern(
+    /^data:image\/(?:png|x-icon|vnd\.microsoft\.icon|jpeg|gif|webp);base64,[A-Za-z0-9+/]+=*$/,
+  ),
+);
+export type BrowserSurfaceFaviconDataUrl = typeof BrowserSurfaceFaviconDataUrl.Type;
+export const isBrowserSurfaceFaviconDataUrl = Schema.is(BrowserSurfaceFaviconDataUrl);
+
 export const BrowserObservation = Schema.Struct({
   contextId: BrowserContextId,
   actionId: ToolActionId,

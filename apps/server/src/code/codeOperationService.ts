@@ -45,6 +45,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import {
+  decodeCodeCheckoutHead,
   decodeCodeOperationCommand,
   decodeCodeOperationResult,
   decodeCodeRepositoryTestStatus,
@@ -630,6 +631,7 @@ export interface CodeOperationGitPort {
     readonly checkoutRoot: string;
     readonly maxDiffBytes: number;
     readonly ignoreWhitespace?: boolean;
+    readonly untrackedFiles?: "all";
   }) => Promise<{
     readonly status: "ready" | "unavailable" | "failed";
     readonly head?: {
@@ -706,6 +708,19 @@ export interface CodeOperationGitPort {
       readonly worktree: string;
     }[];
     readonly executionPolicy: CodeThread["executionPolicy"];
+  }) => Promise<GitMutationOutcome>;
+  /**
+   * Point the checkout at another local branch. Optional so a host without
+   * it refuses the switch rather than pretending the branch moved.
+   */
+  readonly switchBranch?: (input: {
+    readonly checkoutId: string;
+    readonly checkoutRoot: string;
+    readonly branch: string;
+    readonly dirty: "refuse" | "stash";
+    readonly expectedStateToken: string;
+    readonly executionPolicy: CodeThread["executionPolicy"];
+    readonly current?: () => boolean;
   }) => Promise<GitMutationOutcome>;
   readonly push: (input: {
     readonly checkoutId: string;
@@ -818,7 +833,7 @@ export interface CodeOperationGitPort {
 }
 
 type GitMutationOutcome =
-  | { readonly status: "applied"; readonly oid?: string }
+  | { readonly status: "applied"; readonly oid?: string; readonly branch?: string }
   | {
       readonly status: "rejected";
       readonly reason?:
@@ -837,7 +852,12 @@ type GitMutationOutcome =
         | "untracked-path"
         | "invalid-hunks"
         | "hunk-offset"
-        | "read-only";
+        | "read-only"
+        | "invalid-branch"
+        | "branch-in-use"
+        | "dirty-checkout"
+        | "status-oversized"
+        | "unsupported-git";
     }
   | { readonly status: "unavailable" }
   | { readonly status: "failed"; readonly detail?: string; readonly unconfirmed?: true };
@@ -1249,6 +1269,18 @@ export interface CodeOperationServiceOptions {
    * Absent reads as Strict.
    */
   readonly threadStrict?: (thread: CodeThread) => boolean;
+  /**
+   * Journal the head an operation established on the checkout it scoped: a
+   * branch switch changes it without an observation event, and thread reads
+   * show the journaled head until one lands. Given the exact checkout, not a
+   * Project — re-observing the Project's folder could name another checkout
+   * entirely where a managed worktree is what moved. Best effort by callers;
+   * absent, nothing is refreshed.
+   */
+  readonly checkoutObserved?: (
+    checkoutId: CodeCheckoutId,
+    head: CodeCheckoutIdentity["head"],
+  ) => Awaitable<void>;
   readonly prepareWorktree?: (
     thread: CodeThread,
     root: string,
@@ -4416,6 +4448,80 @@ export class CodeOperationService {
           await this.#restoreInPlace(thread, checkout, root.checkoutRoot, command.checkpoint),
         );
       }
+      case "switch-git-branch": {
+        if (git === undefined || git.switchBranch === undefined)
+          return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
+        // Which branch the checkout points at is the person's choice to
+        // make; an agent's route never carries this command.
+        if (initiator !== "user")
+          return this.#failed(
+            command.operationId,
+            "unauthorized",
+            "Only the person at an Octant window can switch this thread's branch.",
+          );
+        if (
+          this.#options.turns.holdsTurn?.(String(thread.id)) === true ||
+          [...this.#startingTurns].some((turn) => String(turn.thread.id) === String(thread.id))
+        )
+          return this.#failed(
+            command.operationId,
+            "conflict",
+            "A turn is running in this thread. Wait for it to finish or stop it, then switch branches.",
+          );
+        // A branch switch rewrites the working tree like an overwrite: it
+        // shares the overwrite exclusion with restores and discards, and a
+        // turn starting after this check waits behind the registered write.
+        const refusal = this.#checkoutOverwriteRefusal(thread, root.checkoutRoot, "switch");
+        if (refusal !== undefined) return this.#failed(command.operationId, ...refusal);
+        const switched = this.#gitMutation(
+          command.operationId,
+          command.gitOperationId,
+          "switch-branch",
+          await this.#overwriteCheckout(
+            root.checkoutRoot,
+            git.switchBranch({
+              checkoutId: checkout.id,
+              checkoutRoot: root.checkoutRoot,
+              branch: command.branch,
+              dirty: command.dirty,
+              expectedStateToken: command.expectedStateToken,
+              executionPolicy: thread.executionPolicy,
+              // Asked again inside Git's per-checkout queue, just before the
+              // switch runs: the wait behind another mutation may have
+              // outlived this request's admission.
+              ...(admissionCurrent === undefined ? {} : { current: admissionCurrent }),
+            }),
+          ),
+        );
+        // The branch the checkout holds is journaled as part of its identity,
+        // so the next thread read or Environment shows it rather than the
+        // branch the thread was created on. Best effort: the switch is
+        // applied either way, and the next observe-git still answers truth.
+        if (
+          switched.kind === "git-mutation-state" &&
+          switched.state === "completed" &&
+          switched.headBranch !== undefined &&
+          switched.headOid !== undefined &&
+          this.#options.checkoutObserved !== undefined
+        ) {
+          try {
+            // The refresh is awaited inside the case, so a rejected write
+            // lands here rather than surfacing as an unhandled rejection.
+            await this.#options.checkoutObserved(
+              checkout.id,
+              decodeCodeCheckoutHead({
+                kind: "branch",
+                name: switched.headBranch,
+                oid: switched.headOid,
+              }),
+            );
+          } catch {
+            // A stale answer is refreshed by the next observation; the
+            // journaled switch result is what the person acts on.
+          }
+        }
+        return switched;
+      }
       case "preview-code-rewind":
         return await this.#previewRewind(command, thread, checkout, root.checkoutRoot);
       case "rewind-code-thread":
@@ -5257,6 +5363,7 @@ export class CodeOperationService {
       checkoutRoot,
       maxDiffBytes: command.maxDiffBytes,
       ...(command.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
+      ...(command.untrackedFiles === "all" ? { untrackedFiles: "all" as const } : {}),
     });
     if (
       result.status !== "ready" ||
@@ -5506,6 +5613,7 @@ export class CodeOperationService {
       | "unstage"
       | "discard"
       | "commit"
+      | "switch-branch"
       | "push"
       | "restore-checkpoint"
       | "merge-run",
@@ -5535,6 +5643,11 @@ export class CodeOperationService {
         ? { reason: result.reason }
         : {}),
       ...(result.status === "applied" && result.oid !== undefined ? { headOid: result.oid } : {}),
+      // The branch the checkout actually holds after a switch, read back by
+      // the port rather than echoed from the request.
+      ...(result.status === "applied" && result.branch !== undefined
+        ? { headBranch: result.branch }
+        : {}),
       // A failed restore may have moved files before it stopped, so its undo
       // point travels with it too; only a rejection is certainly untouched.
       ...(result.status !== "rejected" && result.undo !== undefined ? { undo: result.undo } : {}),
@@ -5598,7 +5711,7 @@ export class CodeOperationService {
   #checkoutOverwriteRefusal(
     thread: CodeThread,
     checkoutRoot: string,
-    action: "restore" | "discard" = "restore",
+    action: "restore" | "discard" | "switch" = "restore",
   ): readonly ["unavailable" | "conflict", string] | undefined {
     if (action === "restore" && this.#options.git.restoreCheckpoint === undefined)
       return ["unavailable", "Restoring a checkpoint is unavailable."];
@@ -7401,6 +7514,11 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
     case "merge-run":
       return "merge-run";
     case "commit-git":
+      return "commit";
+    // Switching branches rewrites the checkout like a commit writes to the
+    // repository: a Git effect that Plan never performs and every gated
+    // posture prompts on.
+    case "switch-git-branch":
       return "commit";
     case "push-git":
       return "push";

@@ -3929,6 +3929,200 @@ function providerTurnFixture(
   return { service, turns, events, git, evidence };
 }
 
+describe("CodeOperationService branch switch", () => {
+  const switchCommand = {
+    kind: "switch-git-branch",
+    operationId: ids.operation,
+    threadId: ids.thread,
+    checkoutId: ids.checkout,
+    gitOperationId: decodeCodeOperationId("53535353-5353-4535-8535-535353535353"),
+    branch: "feature/exact",
+    expectedStateToken: "f".repeat(64),
+    dirty: "refuse",
+  } as const;
+
+  function switchFixture(
+    input: {
+      readonly runningTurn?: boolean;
+      readonly remoteRoot?: boolean;
+      readonly writers?: ReadonlyArray<CodeThread>;
+    } = {},
+  ) {
+    const activeThread = thread();
+    const switchBranch = vi.fn(async () => ({
+      status: "applied" as const,
+      oid: "b".repeat(40),
+      branch: "feature/exact",
+    }));
+    const append = vi.fn();
+    const replay = vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 }));
+    const service = new CodeOperationService({
+      authority: {
+        readThread: vi.fn(() => activeThread),
+        readCheckout: vi.fn(() =>
+          decodeCodeCheckoutIdentity(
+            input.remoteRoot === true
+              ? {
+                  id: ids.checkout,
+                  repositoryId: activeThread.repositoryId,
+                  kind: "remote-root",
+                  availability: "available",
+                  head: { kind: "none" },
+                  observedAt: "2026-07-21T10:00:00.000Z",
+                }
+              : {
+                  id: ids.checkout,
+                  repositoryId: activeThread.repositoryId,
+                  kind: "existing-worktree",
+                  availability: "available",
+                  head: { kind: "branch", name: "development", oid: "a".repeat(40) },
+                  observedAt: "2026-07-21T10:00:00.000Z",
+                },
+          ),
+        ),
+        canAccessProject: vi.fn(async () => true),
+        approvalContextDigest: vi.fn(async () => "a".repeat(64)),
+        resolveCheckoutRoot: vi.fn(async () => ({
+          checkoutRoot: "/tmp/repo",
+          credentialReferences: [],
+        })),
+      } as never,
+      approvals: { validate: vi.fn(async () => true) },
+      terminals: {} as never,
+      repositoryTests: {} as never,
+      git: { observe: vi.fn(), switchBranch } as never,
+      pullRequests: {} as never,
+      reviewFindings: {} as never,
+      turns: {
+        start: vi.fn(),
+        answerInput: vi.fn(),
+        answerApproval: vi.fn(),
+        cancel: vi.fn(),
+        holdsTurn: () => input.runningTurn === true,
+        threadsWritingIn: () => input.writers ?? [],
+      },
+      evidence: { put: vi.fn(), read: vi.fn(async () => "prompt") } as never,
+      events: { replay, append } as never,
+    });
+    return { service, switchBranch, append, replay };
+  }
+
+  it("lets the person at the window switch and journals the outcome once", async () => {
+    const { service, switchBranch, append } = switchFixture();
+    await expect(
+      service.execute(ids.window, switchCommand, { initiator: "user" }),
+    ).resolves.toMatchObject({
+      kind: "git-mutation-state",
+      mutation: "switch-branch",
+      state: "completed",
+    });
+    expect(switchBranch).toHaveBeenCalledWith({
+      checkoutId: ids.checkout,
+      checkoutRoot: "/tmp/repo",
+      branch: "feature/exact",
+      dirty: "refuse",
+      expectedStateToken: "f".repeat(64),
+      executionPolicy: "full-access",
+    });
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({ event: expect.objectContaining({ kind: "operation-result" }) }),
+    );
+  });
+
+  it("refuses the switch for an agent initiator", async () => {
+    const { service, switchBranch, append } = switchFixture();
+    await expect(service.execute(ids.window, switchCommand)).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unauthorized" },
+    });
+    expect(switchBranch).not.toHaveBeenCalled();
+    // The refusal itself is the operation's journaled answer; no switch ran.
+    expect(append).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses the switch while a turn runs", async () => {
+    const { service, switchBranch } = switchFixture({ runningTurn: true });
+    await expect(
+      service.execute(ids.window, switchCommand, { initiator: "user" }),
+    ).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "conflict" },
+    });
+    expect(switchBranch).not.toHaveBeenCalled();
+  });
+
+  it("answers a repeated switch from the journal without switching again", async () => {
+    const { service, switchBranch, replay } = switchFixture();
+    const result = {
+      kind: "git-mutation-state",
+      operationId: ids.operation,
+      gitOperationId: switchCommand.gitOperationId,
+      mutation: "switch-branch",
+      state: "completed",
+    };
+    replay.mockReturnValue({
+      status: "ok" as const,
+      frames: [
+        {
+          threadId: ids.thread,
+          operationId: ids.operation,
+          cursor: 1,
+          occurredAt: "2026-07-21T10:00:00.000Z",
+          event: { kind: "operation-result", result },
+        },
+      ] as never,
+      nextCursor: 1,
+    });
+    await expect(
+      service.execute(ids.window, switchCommand, { initiator: "user" }),
+    ).resolves.toMatchObject({ kind: "git-mutation-state", mutation: "switch-branch" });
+    expect(switchBranch).not.toHaveBeenCalled();
+  });
+
+  it("journals the branch Git reports after the switch, not the one requested", async () => {
+    const { service } = switchFixture();
+    const result = await service.execute(ids.window, switchCommand, { initiator: "user" });
+    expect(result).toMatchObject({
+      kind: "git-mutation-state",
+      mutation: "switch-branch",
+      state: "completed",
+      headOid: "b".repeat(40),
+      headBranch: "feature/exact",
+    });
+  });
+
+  it("refuses the switch for a thread on a server", async () => {
+    const { service, switchBranch } = switchFixture({ remoteRoot: true });
+    await expect(
+      service.execute(ids.window, switchCommand, { initiator: "user" }),
+    ).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable" },
+    });
+    expect(switchBranch).not.toHaveBeenCalled();
+  });
+
+  it("refuses the switch while another thread writes in the same checkout, naming it", async () => {
+    const writer = decodeCodeThread({
+      ...thread(),
+      id: decodeCodeThreadId("12121212-1212-4212-8212-121212121212"),
+      projectId: "66666666-6666-4666-8666-666666666666",
+      title: "Rewrite the parser",
+    });
+    const { service, switchBranch } = switchFixture({ writers: [writer] });
+    const result = await service.execute(ids.window, switchCommand, { initiator: "user" });
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "conflict" },
+    });
+    if (result.kind !== "operation-failed") throw new Error("Expected a refusal.");
+    expect(result.failure.message).toContain("Rewrite the parser");
+    expect(result.failure.message).toContain("switch");
+    expect(switchBranch).not.toHaveBeenCalled();
+  });
+});
+
 describe("CodeOperationService terminal readers", () => {
   const second = decodeCodeOperationId("5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a");
 

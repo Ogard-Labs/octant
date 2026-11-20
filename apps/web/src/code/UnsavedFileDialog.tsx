@@ -1,4 +1,5 @@
 import { useId, useRef } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 
@@ -7,9 +8,11 @@ export type UnsavedFileChoice = "save" | "discard" | "cancel";
 /**
  * Asks what to do with a file's unsaved edits as its tab closes. Cancel is the
  * default and the Escape answer, so closing the dialog never loses anything.
+ * When a save already failed, `failure` says so before the question repeats.
  */
 export function UnsavedFileDialog(props: {
   readonly name: string;
+  readonly failure?: string;
   readonly onChoose: (choice: UnsavedFileChoice) => void;
 }) {
   const titleId = useId();
@@ -31,6 +34,9 @@ export function UnsavedFileDialog(props: {
       <p className="octant-confirmation__description" id={descriptionId}>
         {"Your edits will be lost if you don't save them."}
       </p>
+      {props.failure === undefined ? null : (
+        <OctantAlert tone="warning">{props.failure}</OctantAlert>
+      )}
       <div className="octant-dialog__actions">
         <OctantButton onClick={() => props.onChoose("discard")} type="button" variant="outline">
           {"Don't save"}

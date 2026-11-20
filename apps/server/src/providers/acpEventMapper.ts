@@ -217,8 +217,11 @@ function mapTool(
   if (update.sessionUpdate === "tool_call") {
     if (state !== undefined)
       return [protocolFailure(`${context.displayName} repeated a tool start.`)];
-    const title = normalized(update.title, LABEL_MAX_CHARACTERS) ?? "Tool";
+    // A tool_call may carry its kind but no title; the kind is still the
+    // provider's own bounded word for the call and reads better than a bare
+    // fallback. The provider's call ID never doubles as the display name.
     const toolKind = normalized(update.kind, LABEL_MAX_CHARACTERS);
+    const title = normalized(update.title, LABEL_MAX_CHARACTERS) ?? toolKind ?? "Tool";
     const created = {
       toolCallId: `tool-${context.tools.size + 1}`,
       terminal: false,
@@ -670,6 +673,9 @@ export function mapAcpPermissionRequest(
       requestId,
       action: toolKind,
       description: title,
+      // The row's own normalized id, not the agent's provider id — the wait is
+      // billed to that call alone; an unattributed ask gets none.
+      ...(tool === undefined ? {} : { toolCallId: tool.toolCallId }),
     }),
     ...withCall(
       providerApprovalCall({

@@ -110,6 +110,7 @@ export interface ThreadPaneContainerProps {
     | "openCrossContextInNewWindow"
     | "openDraftThread"
     | "openDraftInProject"
+    | "requestMoveToProject"
     | "openInbox"
     | "openSettings"
     | "openSideChat"
@@ -236,6 +237,8 @@ export interface ThreadPaneContainerProps {
   readonly memoryRevision: number;
   readonly navigation: ShellNavigationModel;
   readonly pendingDraftBranch?: string;
+  /** Set by "New task on another branch…": that Project's draft opens with its branch choice shown. */
+  readonly draftStartFrom?: { readonly projectId: string } | undefined;
   /** The Project whose draft New coordinator opened. */
   readonly pendingDraftCoordinator?: ProjectId;
   /** The workers' level and bounds the person chose in that draft. */
@@ -661,7 +664,13 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     draftProjectBinding.current = binding;
                     void binding.catch(() => undefined);
                   }}
-                  onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
+                  onNewThreadInProject={(projectId, options) =>
+                    void openDraftInProject(projectId, options)
+                  }
+                  onRequestMoveToProject={actions.requestMoveToProject}
+                  {...(props.draftStartFrom === undefined
+                    ? {}
+                    : { draftStartFrom: props.draftStartFrom })}
                   appleToolchainClient={appleToolchainClient}
                   agentRunClient={agentRunClient}
                   nativeHarnessClient={nativeHarnessClient}

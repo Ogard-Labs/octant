@@ -3175,6 +3175,32 @@ export class CodeService {
   }
 
   /**
+   * Journal a checkout's head the host just established itself: a branch
+   * switch changes it without any observation event of its own, and thread
+   * reads show the journaled head until one lands. The checkout's own
+   * identity — kind, availability and, for a managed worktree, its ownership
+   * receipt — is kept from the journaled record, never re-derived from the
+   * Project's folder, which may point at a different checkout entirely.
+   */
+  noteCheckoutHead(checkoutId: CodeCheckoutId, head: CodeCheckoutIdentity["head"]): void {
+    const held = this.#persistence.readCodeCheckout(checkoutId);
+    if (held === undefined || held.availability !== "available") return;
+    const observed = decodeCodeCheckoutIdentity({
+      ...held,
+      head,
+      observedAt: decodeTimestamp(this.#clock()),
+    });
+    if (repeatsJournaledCheckout(held, observed)) return;
+    this.#append(
+      "code-checkout",
+      observed.id,
+      this.#persistence.readCodeCheckoutAggregateVersion(observed.id),
+      "code.checkout-observed@1",
+      { kind: "checkout-observed", checkout: observed },
+    );
+  }
+
+  /**
    * Archive one completed thread on the host's own timer. Re-reads the thread
    * and re-decides from the authoritative record, so a thread reopened between
    * the sweep's read and this call is left alone rather than archived on stale

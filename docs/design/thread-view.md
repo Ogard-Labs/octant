@@ -157,7 +157,12 @@ A tool's name is the tool's own display name. The host's internal kinds, which
 are kebab-case ("provider-tool"), read as words ("Provider tool"), and an
 `mcp__server__tool` name reads "tool (server)". Thinking says "Thought for 12s"
 when the turn recorded how long reasoning ran ("Thought briefly" under a
-second) and "Thinking" otherwise.
+second) and "Thinking" otherwise. Every mode records its reasoning as the sum
+of the disjoint stretches between provider events, journaled as a cumulative
+total when each stretch ends, so a rebuilt transcript reads the same figure a
+live one showed. A turn whose host kept only the total — reasoning text is
+never recorded for it — still draws the measured row, as a plain line that
+opens nothing.
 
 The folded "tool calls" group says what ran in marks, not only a count: an icon
 and a number per kind, most frequent first ("terminal 4, file 5, pencil 2"), at
@@ -166,7 +171,14 @@ total and the words ("11 tool calls: 5 reads, 4 commands, 2 edits"). Opened,
 each call is one row of fixed height: the kind icon, the name, a one-line
 preview in the meta ink (a command's first line, a file's name, a search's
 query) clipped with an ellipsis, the call's duration when the host recorded one,
-and the status slot. The preview is drawn, not read: the detail under the row
+and the status slot. A call that paused on the person's approval carries both
+halves instead ("waited 4m · ran 2s"): the wait is the journaled ask-to-answer
+span of the approval that gated that call alone, never time a neighbouring
+call waited. Chat and Work calls carry the same recorded bounds as Code's; a
+call the host ran itself is timed from its own start and finish, and a settle
+that no person made (an automated review, an expiry) is never wait time. A
+call still running, and any call whose bounds are missing or cannot be
+trusted, shows no time rather than an invented one. The preview is drawn, not read: the detail under the row
 stays the one place the summary's words are, and clicking the row opens it as
 before. A call that finishes changes its mark only.
 
