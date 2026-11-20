@@ -1,5 +1,10 @@
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { compactAcpConversation } from "./acpCompaction";
+import {
+  acpListedSessions,
+  makeAcpNativeSessions,
+  type AcpSessionLister,
+} from "./acpNativeSessions";
 import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readAcpFileReview } from "./acpFileReview";
 import { isAbsolute, resolve } from "node:path";
@@ -31,7 +36,11 @@ import {
   type ProviderTurnInput,
 } from "@octant/contracts";
 import { attachedFileText } from "../attachments/attachedFiles";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type {
+  ProviderConnection,
+  ProviderDriver,
+  ProviderSessionOwnership,
+} from "@octant/provider-sdk/driver";
 import {
   normalizeAcpElicitation,
   answerAcpElicitation,
@@ -154,6 +163,8 @@ export interface AcpDriverOptions {
   readonly requestId?: () => string;
   /** The person's setting for how long an approval holds. */
   readonly permissionPersistence?: () => PermissionPersistence;
+  /** Which of the agent's own sessions Octant threads hold, for `importsSessions`. */
+  readonly sessionOwnership?: ProviderSessionOwnership;
 }
 
 function permissionPersistence(options: AcpDriverOptions): PermissionPersistence {
@@ -943,9 +954,50 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       return scratch;
     });
 
+  // The agent's own sessions for a folder, read through a readiness-check
+  // process: `session/list` reads the agent's own store, not the folder.
+  const listAgentSessions: AcpSessionLister = (projectRoot) =>
+    Effect.runPromise(
+      Effect.scoped(
+        managedHomeClient.pipe(
+          Effect.flatMap(({ connection, client }) =>
+            Effect.tryPromise({
+              try: async () => {
+                if (
+                  connection.initialized.agentCapabilities.sessionCapabilities?.list === undefined
+                )
+                  return "unsupported" as const;
+                const reply = await client.call("session/list", { cwd: projectRoot });
+                const listed = acpListedSessions(reply);
+                if (listed === undefined)
+                  throw failure(
+                    "protocol",
+                    `${name} listed its sessions in a shape Octant cannot read.`,
+                  );
+                return listed;
+              },
+              catch: (error) => providerFailure(profile, error),
+            }),
+          ),
+        ),
+      ),
+    );
+  const sessionOwnership = options.sessionOwnership;
+
   return {
     kind: profile.kind,
     conversationOwnership: "provider",
+    ...(profile.importsSessions === true && sessionOwnership !== undefined
+      ? {
+          nativeSessions: makeAcpNativeSessions({
+            instanceId: options.instanceId,
+            driverKind: profile.kind,
+            displayName: name,
+            heldSessions: () => sessionOwnership.held(profile.kind),
+            listSessions: listAgentSessions,
+          }),
+        }
+      : {}),
     ...(hasVerifiedFileReview(profile) ? { fileReviewReads: true as const } : {}),
     ...(profile.authentication.kind === "delegated-browser"
       ? {

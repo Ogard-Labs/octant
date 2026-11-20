@@ -153,6 +153,9 @@ export function makeProviderDriver(
         ? {}
         : { credentialResolver: options.credentialResolver }),
       permissionPersistence: options.permissionPersistence,
+      ...(options.sessionOwnership === undefined
+        ? {}
+        : { sessionOwnership: options.sessionOwnership }),
     });
     const credential = profile.process.hostAuthentication;
     // Antigravity's limits come from its own CLI's usage command.

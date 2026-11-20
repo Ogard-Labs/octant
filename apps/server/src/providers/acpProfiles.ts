@@ -282,6 +282,11 @@ export interface AcpProviderProfile {
   /** The `session/prompt` reply carries that turn's own usage (`acpTurnUsage`). */
   readonly reportsTurnUsage?: true;
   /**
+   * A thread may start from one of the agent's own sessions, which it lists
+   * through `session/list` when its `initialize` advertises it.
+   */
+  readonly importsSessions?: true;
+  /**
    * The agent answers a mode it does not offer with success and keeps its
    * previous mode, so a renamed or dropped mode would leave a turn running
    * under whatever mode the session already had. Octant then refuses a mode
@@ -1800,6 +1805,7 @@ const antigravityProfile: AcpProviderProfile = {
   commandLeadsPrompt: true,
   withholdsClientWrites: true,
   reportsTurnUsage: true,
+  importsSessions: true,
   // The CLI ends a turn with `refusal` when the account's quota is used up.
   refusalMessage:
     "Google Antigravity stopped: your account's usage limit may be reached. Check your plan, then retry.",
