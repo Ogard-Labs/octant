@@ -105,7 +105,8 @@ export type ServerProjectAddress =
   | { readonly kind: "refused"; readonly reason: "project-not-found" | "server-not-registered" };
 
 export interface ServerProjectStoreOptions {
-  readonly journal: Pick<Journal, "append" | "replayAggregateType" | "aggregateVersions">;
+  readonly journal: Pick<Journal, "append" | "replayAggregateType" | "aggregateVersions"> &
+    Partial<Pick<Journal, "transaction">>;
   readonly personActor: EventActorValue;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -310,6 +311,13 @@ export class ServerProjectStore {
   remove(input: {
     readonly projectId: string;
     readonly principal: ServerProjectPrincipal;
+    /**
+     * Appends companion events inside the same journal transaction as
+     * `server-projects.removed@1`, returning a callback to publish their
+     * in-memory state only after the transaction commits. Any failure rolls
+     * back both companion appends and catalog removal together.
+     */
+    readonly withinTransaction?: (project: ServerProject) => () => void;
   }): ServerProjectsChange {
     const admitted = this.#admit(input.principal);
     if (admitted === undefined) return refused("needs-person");
@@ -320,8 +328,25 @@ export class ServerProjectStore {
         ? SERVER_PROJECTS_EVENT_NAMES_V2.removed
         : SERVER_PROJECTS_EVENT_NAMES.removed;
     const payload = { projectId: existing.id, principal: admitted.payloadPrincipal };
-    if (!this.#append(eventName, payload, admitted.actor)) return refused("unavailable");
+    let publishCompanion: (() => void) | undefined;
+    const run = (): void => {
+      if (input.withinTransaction !== undefined) {
+        publishCompanion = input.withinTransaction(existing);
+      }
+      this.#appendRaw(eventName, payload, admitted.actor);
+    };
+    try {
+      if (this.#options.journal.transaction !== undefined) {
+        this.#options.journal.transaction(run);
+      } else {
+        run();
+      }
+    } catch {
+      return refused("unavailable");
+    }
+    this.#version += 1;
     this.#apply(eventName, payload);
+    publishCompanion?.();
     return { kind: "changed" };
   }
 
@@ -509,29 +534,33 @@ export class ServerProjectStore {
 
   #append(eventName: string, payload: unknown, actor: EventActorValue): boolean {
     try {
-      this.#options.journal.append({
-        aggregate: {
-          aggregateType: SERVER_PROJECTS_AGGREGATE,
-          aggregateId: decodeAggregateId(SERVER_PROJECTS_AGGREGATE_ID),
-        },
-        expectedVersion: decodeAggregateVersion(this.#version),
-        events: [
-          {
-            eventId: decodeEventId(this.#options.uuid()),
-            eventName: decodeEventName(eventName),
-            eventVersion: 1,
-            correlationId: decodeCorrelationId(this.#options.uuid()),
-            actor,
-            occurredAt: decodeTimestamp(this.#options.clock()),
-            payload,
-          },
-        ],
-      });
+      this.#appendRaw(eventName, payload, actor);
     } catch {
       return false;
     }
     this.#version += 1;
     return true;
+  }
+
+  #appendRaw(eventName: string, payload: unknown, actor: EventActorValue): void {
+    this.#options.journal.append({
+      aggregate: {
+        aggregateType: SERVER_PROJECTS_AGGREGATE,
+        aggregateId: decodeAggregateId(SERVER_PROJECTS_AGGREGATE_ID),
+      },
+      expectedVersion: decodeAggregateVersion(this.#version),
+      events: [
+        {
+          eventId: decodeEventId(this.#options.uuid()),
+          eventName: decodeEventName(eventName),
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#options.uuid()),
+          actor,
+          occurredAt: decodeTimestamp(this.#options.clock()),
+          payload,
+        },
+      ],
+    });
   }
 }
 

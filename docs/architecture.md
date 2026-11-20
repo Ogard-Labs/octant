@@ -749,8 +749,7 @@ local window approves it for a checkout or the Code Project (a journaled
 `POST /api/code/language/approvals`, which a device the host's own person
 paired also answers and is journaled for; maintainer decision, 2026-11-12),
 with no approval at Full access, read from the level the turn runs at
-([the Full access rule](#security-and-authority); not built yet: today the
-approval is asked at every level), never in Plan or for any other
+([the Full access rule](#security-and-authority); built), never in Plan or for any other
 device session,
 may then write the checkout and run programs as a terminal does, and reaches
 the network through its own `proxied` egress proxy under the Project's rules,
@@ -768,13 +767,14 @@ Agents read the same servers through one read-only app-managed tool,
 `octant_code` (`code-language` in the closed catalog), whose `diagnostics`,
 `definition`, and `references` operations are allowed in Plan and ask nothing.
 It is offered on a Code turn whose provider carries Octant's tools only when a
-server an agent may start (`static` and effective, so the Settings switch is
-honoured) covers a file a bounded scan finds in the turn's checkout or extra
-folders, or a server that runs repository tooling is already running there
-for a turn outside Plan. It reads the saved file, never an editor's draft,
-returns at most 200 references, never starts a server that runs
-repository tooling, and reads through one only while it is already approved
-and running, outside Plan, marking that answer as outside content
+server an agent may start (`static` and effective, or `repo-tooling` at Full
+access, so the Settings switch is honoured) covers a file a bounded scan finds
+in the turn's checkout or extra folders, or an approved server that runs
+repository tooling is already running there for a turn outside Plan. It reads
+the saved file, never an editor's draft, returns at most 200 references, starts
+a `repo-tooling` server with no approval at Full access, and below Full access
+never starts one and reads through one only while it is already approved and
+running, outside Plan, marking that answer as outside content
 (maintainer request, 2026-11-12)
 ([agent read rules](design/language-services.md#agent-read-rules)).
 The debugger's seam and session host are built: the `debug-adapter`
@@ -907,6 +907,48 @@ not hard-limited. Native runtime/session admission and OS-enforced descendant
 quotas are not built. The panel states this boundary rather than claiming control
 of all Node processes. Existing host memory relief still stops idle reusable
 provider runtimes and trims caches under pressure.
+
+### Keeping the computer awake while agents work
+
+While agent work runs, the desktop app (`apps/desktop`) holds a single
+`prevent-app-suspension` power-save assertion (`powerSaveBlocker.start('prevent-app-suspension')`)
+so idle system sleep does not cut off in-flight work. It never prevents display
+sleep, and the renderer holds no assertion of its own (maintainer decision,
+2026-11-19; built).
+
+- **Signal:** The local host serves `GET /api/desktop/agent-work` on loopback
+  for the desktop bridge principal alone (`x-octant-desktop-secret`, no `Origin`,
+  no forwarded remote principal, no Nightly native-main token). The response
+  carries only the effective keep-awake setting, running counts by kind (active
+  Chat, Work, and Code turns, running child runs, and running coordinator
+  workers), the earliest enabled routine `nextDueAt` (or `null`), and the host's
+  observation timestamp — never thread titles, routine names, or paths. The
+  desktop polls it every 5 seconds while attached to a running host.
+- **When held and released:** The assertion is taken as soon as any turn, child
+  run, or coordinator worker is running, or an enabled routine is due within the
+  next 5 minutes. It is released 10 seconds after the last work ends so a brief
+  gap between turns does not drop and re-take it, and released immediately when
+  the desktop quits, the host stops, the setting becomes Never, or the computer
+  switches to battery power under While on power.
+- **Setting and authority:** The choice (`While on power` default, `Always`,
+  `Never`) lives in the host resource policy inside the journaled
+  `agent-run-settings` aggregate (`Settings > General > Computer resources >
+Keep the computer awake while agents work`). Changes are journaled with who,
+  when, and the old and new values, and are admitted only from a local window or
+  a device the host's own person paired (`actsAsHostPerson`); a hub-introduced
+  or restricted device is refused. Old journals without a choice default to
+  `While on power`.
+- **Battery and platform limits:** `While on power` reads Electron's
+  `powerMonitor.isOnBatteryPower()` and watches `on-ac` and `on-battery` events;
+  when battery state cannot be read, the computer counts as on power. Linux and
+  Windows use the same Electron `powerSaveBlocker` API where supported. If
+  `powerSaveBlocker.isStarted(id)` is `false` immediately after `start` (or
+  `start` throws), the desktop reports `unavailable`, never `active`, and does
+  not try again until work next starts. Live status lines in Settings are built
+  strictly from work counts (for example, `Kept awake: 2 turns running` or
+  `Kept awake: routine due soon`) and never include thread titles.
+- **Out of scope:** Closed-lid operation, Low Power Mode switching, privileged
+  helpers or sudoers changes, Wi-Fi recovery, and pausing other apps.
 
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through
@@ -2060,9 +2102,9 @@ except where a bullet says otherwise.
 - **Written instructions.** Instructions the person writes for Octant itself,
   per person, per Project, and for coordinator threads, travel beside each
   provider's own instruction files as standing blocks placed before person
-  memory. Unlike person memory they reach every turn, including the turns the
-  host starts as itself; orchestration reaches only coordinator threads and
-  a Project's designated planner
+  memory. Unlike person memory they reach every turn even in Projects kept out
+  of memory or threads marked Leave no trace; orchestration reaches only
+  coordinator threads and a Project's designated planner
   ([Octant instructions](design/octant-instructions.md)).
 - **Searching past threads.** `octant_past_threads` is a read-only host tool,
   offered in Chat (not a Side Chat), Work, and Code beside the thread's other
@@ -2095,20 +2137,34 @@ except where a bullet says otherwise.
   setting. Entries were redacted before storage, so the export adds nothing
   beyond what Settings › Memory shows.
 - **Who may read it.**
-  - A local window or a paired device: read and change everything in Settings ›
-    Memory, and a turn either sends gets the block and the tool (maintainer
-    decision, 2026-11-12). Not built yet: today the memory routes refuse a
-    paired device, and a turn it sends gets no block and no tool.
-  - A turn the host starts as itself (a routine's run, a delivered child
-    result, a turn resumed after a usage limit): no block and no tool, since
-    no person is at the window. A provider session that held the block is
-    sent its standing context again once without it.
-  - A subagent (child run): neither; it receives only what its lead passes it.
+  - A local window or a paired device the host's own person approved: read and
+    change everything in Settings › Memory, and a turn either sends gets the
+    block and `octant_past_threads` under the thread's own participation rules
+    (memory on, Project not kept out, thread not Leave no trace). A device known
+    only through a hub's roster (and any subagent it spawns), a peer-delegated
+    Work turn (and any subagent it spawns), and a turn with no scope (such as a
+    benchmark runner's Chat turn) get neither.
+  - A routine's run or another turn the host starts as itself (a delivered child
+    result, a turn resumed after a usage limit, a goal round): gets the block
+    and `octant_past_threads` under the thread's own participation rules, so a
+    provider session keeps a stable standing-context prefix across person and
+    host-started turns.
+  - A subagent (child run): inherits its originating turn's scope restriction
+    and gets its lead thread's person-memory block once on start (never
+    duplicated on a continuation that already holds it) and
+    `octant_past_threads` scoped to its lead thread when its clamped authority
+    allows tools and its provider carries Octant's tools, so a child sees what
+    its lead sees and never more. A child whose originating scope is absent or
+    restricted, or whose lead is peer-delegated, in a kept-out Project, or in a
+    Leave no trace thread, gets neither.
+  - Only turns with the person's own message can write person memory (through
+    distillation of ended threads); routines, host-started turns, and subagents
+    read it without writing to it, and all caps stay unchanged.
   - A hub, spoke, or peer host: person memory stays on the host that wrote
     it and is never synced or relayed.
-  - A provider: sees memory only in a thread on that provider that uses it.
-    Memory learned in a thread on one provider can reach a thread on another,
-    and Settings › Memory says so in those words.
+  - A provider: sees memory only in a thread (or its subagent) on that provider
+    that uses it. Memory learned in a thread on one provider can reach a thread
+    on another, and Settings › Memory says so in those words.
 - **First run.** The first-run flow explains memory across threads and links
   to Settings › Memory without assuming that the host's current setting is on.
   The optional [Your first task capability card](design/start-screen.md#optional-capability-card-in-your-first-task)
@@ -3189,6 +3245,30 @@ callers are refused when they try to reopen a thread a person marked. An optiona
 kept as the thread's completion evidence; without one the thread carries no
 evidence record.
 
+A Work or Code lead outside Plan may call `octant_report_finished` to say a
+thread is finished with proof built by the host (maintainer decision,
+2026-11-19). The tool is never offered in Chat, in Plan, or to a child run.
+It accepts a summary (at most 1,000 characters) and up to 12 check commands
+(each at most 200 characters). The host runs each named check and any goal
+criterion check once in the thread's checkout or folder under the thread's
+guardrail level (no prompt at Full access, normal approval rules below it),
+marks goal criteria without a check `claimed`, and records the observed diff
+file and line counts (or `unavailable` when no folder exists). If any check
+fails, nothing is recorded as finished and each failed check returns with the
+last 2,000 characters of its output in the same turn so the agent can fix and
+report again; outside Strict Octant adds no retry cap and never starts a new
+turn on its own. When no check fails, the host journals
+`thread.finished-receipt-recorded@1` (`thread-finished-receipt` aggregate).
+The receipt renders as a "Finished, with proof" card at the end of the turn
+and above the last reply on the Review page (whose Send back prefills any
+failed or claimed items), and places a compact "Finished" mark with the proven
+check count on the board card without changing its column and without adding
+Work threads to To review. Any later file-change journal event marks the
+receipt `stale` (ordered strictly by journal sequence) and clears the board
+mark. Marking a Work or Code thread Done while a fresh receipt stands attaches
+that receipt (`completionReceiptId`) as the thread's completion evidence, and
+Reopen clears it. Reporting finished never marks a thread Done.
+
 The Work mark locks the thread on the host until the person reopens it
 (archiving and reactivating the thread clears it too); a lock only in the window let a queued message,
 a routine, or a child's result start a turn anyway. Work turn admission, the
@@ -3301,6 +3381,36 @@ hold for every action in it:
   [Merge when ready and Auto-fix](#modes-chat-work-and-code) below.
 - **Record.** Each action journals the actor, the repository, the number, and
   the head SHA, as Octant's own record beside the forge's history.
+- **Forge identity.** A linked `github.com` pull request's stable identity is
+  its GitHub GraphQL node ID (`pullRequestNodeId`) together with the **base**
+  repository's node ID (`baseRepositoryNodeId`; for a fork pull request, the
+  head owner remains a display field only). Owner/name and number stay mutable
+  display and lookup fields. Built: `GhPullRequestPort` reads both node IDs
+  (falling back cleanly when offline, rate-limited, or unavailable, never
+  refusing an action for a missing ID); operation results carry them as optional
+  fields so pre-existing journals replay identically; the journal-backed
+  `code-pull-request-link` stream (`PullRequestLinkService`) is the single forge
+  identity owner—recording links on creation or first observation, backfilling
+  missing forge IDs idempotently once, updating display fields via
+  `code.pull-request-link-display-updated@1` when an observation reports a
+  renamed or transferred owner/name while preserving the link, threads, watches,
+  and switches, and reconciling duplicate pre-backfill links resolving to the
+  same PR node ID within a Project by keeping the earliest link, appending
+  `code.pull-request-link-merged-into@1` to the later link without deleting
+  journal history, moving its linked threads to the survivor, keeping Merge when
+  ready, Auto-fix, and pull-request watch ON only when ON in both links, turning
+  mixed switches OFF, and notifying affected threads naming each disabled switch
+  and why. Every pull-request reader—the Project pull-request list and detail
+  snapshots, thread board joins and operational metadata, failing-checks
+  follow-ups, Merge when ready, Auto-fix, pull-request watch, operation
+  settlement, and pull-request actions/merges—resolves canonical identity
+  through `PullRequestLinkService` (collapsing a stale second remote pointing at
+  the old repository name when GitHub confirms the same base repository node ID,
+  while continuing to fail closed for distinct repositories). Merges, Merge when
+  ready, and Auto-fix wakes still check the reviewed head SHA and required
+  checks after a rename, and refuse or ignore any forge response whose pull
+  request node ID disagrees with the linked pull request so a head check never
+  passes against another pull request's row.
 - **Credential.** Octant stores no forge token, as under the merge rules
   below.
 - **Approval shows the whole text.** Below Full access, a title or body change
@@ -11861,7 +11971,12 @@ download was unverified) and **Turn on**, each its own journaled command that
 the host decides and refuses out of order, and that only a client acting as
 the host's own person may send. A registry agent is named by its registry id
 alone; its package, release, archive address and checksum come from the
-host's listing. The install runs nothing it fetched. Until trusted, the
+host's listing. The install runs nothing it fetched; for a package with
+deferred install scripts, Connection Check before Trust reports that the
+package needs its install script, and clicking **Trust** runs those scripts
+with no further prompt (natively outside Strict, and inside Octant's sandbox
+with writes limited to the agent's install folder under Strict), journaling the
+outcome, actor, timestamp and sandbox state. Until trusted, the
 agent runs in Octant's sandbox at every level with nothing remembered and
 none of Octant's tools
 ([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
@@ -13882,6 +13997,7 @@ and the marketplace and plugin registry are no longer extraction candidates.
 | Zen                                                                   | Switchable bundled plugin; appearance contributions and their scoped state                                                 |
 | Linear, Azure Resource Manager reads                                  | Bundled Integration plugins with no switch; integration ports and contributed views                                        |
 | Declarative Code tools                                                | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned |
+| Pull request reviewers                                                | Code-only plugin seam (`pull-request-reviewer`); host owns Plan read-only turns, head-staleness, findings, and opt-ins     |
 | Canvas, preview viewers, backgrounds, theme presets                   | Core; scoped artifact contracts, registered viewers, and appearance contributions                                          |
 | Usage, diagnostics, Navigator, automations UI                         | Core; underlying authority stays in the host                                                                               |
 | Project memory and its agent tool                                     | Core; the journal, the person's confirmation, and purge stay host-owned                                                    |
@@ -14054,6 +14170,26 @@ port and family composer as installed declarations. Its existing name, help,
 schema, offered-side rules and task-owned command presentation are unchanged.
 The core's additional command presentation stays in a private server adapter;
 it is not added to the installed-plugin port's fixed metadata types.
+
+**Pull request reviewers** (seam built; no reviewer plugin ships yet). A plugin
+may contribute a Code-only `pull-request-reviewer` component through
+`@octant/plugin-api/pull-request-reviewer` and `@octant/plugin-host/pull-request-reviewers`.
+Installation, trust, and enablement stay separate preconditions evaluated on
+every lookup, and colliding reviewer ids are withheld together. Stored
+third-party packages remain host-prohibited until an out-of-process confined
+worker launch class exists. A reviewer receives one immutable
+`PullRequestReviewRequest` for a specific pushed PR head and one
+capability-scoped `PullRequestReviewHostPort` carrying no raw filesystem path,
+shell handle, credential, forge token, or direct host-service access. The host
+enforces effectiveness and PR head currency before and after every await, runs
+any model review turn at Plan's read-only gate under the configured route
+without silent fallback, verifies finding anchors and run ownership before
+writing `CodeReviewFinding` records, caps PR publication to at most one summary
+comment behind a default-off Project opt-in (formal forge reviews — approve or
+request changes — are structurally absent from the port), and gates blocking
+finding hand-back to the worker behind a default-off per-PR opt-in. If the head
+moves or the plugin becomes inactive during a review, the host withholds
+publication and records the outcome as `stale` or `refused`.
 
 Preserve the sequence: establish a provider-neutral port and renderer seam
 before moving a feature behind them, and keep that work separate from unrelated
@@ -15083,11 +15219,29 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     without the warning, confirmed or not (built).
   - **Stalled-turn limit.** At Full access the stalled-turn limit defaults
     to Off; below Full access it stays 30 minutes, and the person may set
-    either. Strict keeps 30 minutes at every level (built: Settings ›
-    Providers & Models › Stalled-turn limit at Full access,
+    either. Outside Strict, reaching the stalled-turn limit never stops the
+    turn: it journals `turn-stall-noticed` (`chat.turn-stall-noticed@1`,
+    `work.turn-stall-noticed@1`, or Code's `turn-stall-noticed` operation
+    event) and shows one quiet line in the thread with a **Stop** button
+    ([Thread view: Loop and stall notices](design/thread-view.md#loop-and-stall-notices)).
+    Strict keeps 30 minutes at every level and stops the turn as before
+    (built: Settings › Providers & Models › Stalled-turn limit at Full access,
     `fullAccessStalledTurnLimitMinutes`, Off by default; a Full access turn
     under Strict, and every turn below Full access, takes the stalled-turn
-    limit).
+    limit, noticing outside Strict and stopping only under Strict).
+  - **Loop detection.** Six consecutive identical tool calls in one turn —
+    same tool name and same canonical sorted-key JSON input, with no other
+    tool call in between — on providers whose runtime events carry tool inputs
+    ([Provider runtimes: Loop detection and provider tool inputs](design/provider-runtimes.md#loop-detection-and-provider-tool-inputs))
+    are handled without stopping outside Strict: at every level outside Strict,
+    Octant journals `turn-loop-noticed` (`chat.turn-loop-noticed@1`,
+    `work.turn-loop-noticed@1`, or Code's `turn-loop-noticed`) with the tool
+    name and count and shows one quiet line in the thread with a **Stop**
+    button; under Strict, Octant stops the turn, journals `turn-loop-stopped`,
+    and leaves the thread ready to accept a new message straight away. On
+    Octant's own tools, the 3rd identical consecutive call still runs and adds
+    one informational sentence to its real result noting the repetition (never
+    a refusal, no setting). Built.
   - **Opt-in extras.** A per-person list of provider tools to block, and in
     Strict a notice saying what Strict withheld. Built: Settings ›
     Permissions › Blocked tools holds the list, empty by default, per
@@ -15153,11 +15307,17 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Strict, read as each turn starts (built).
   - **Pull requests.** A pull-request watch's end after ten started wakes or
     three days, and Auto-fix's three attempts per failure.
-  - **Agent messages and children.** A turn's three thread messages, and a
-    child run's `wait` limit (120 seconds by default, up to an hour).
-  - **Browser.** A wait's 10 minutes (up to an hour; the host refuses a wait
-    past the setting, and a Claude Code thread still ends one tool call at
-    eleven minutes).
+  - **Agent messages and children.** A turn's three thread messages
+    (`octant_ask_thread`), eight sibling-thread reads, and four sibling-thread
+    waits apply under Strict only (no limit outside Strict; under Strict they
+    are host settings with defaults 3, 8, and 4; maintainer decision,
+    2026-11-19; built), and a child run's `wait` limit (120 seconds by default,
+    up to an hour).
+  - **Browser.** A wait's 10 minutes applies under Strict only (no limit
+    outside Strict; under Strict it is a host setting with default 10 minutes,
+    up to an hour, and the host refuses a wait past the setting; a Claude Code
+    thread still ends one tool call at eleven minutes; maintainer decision,
+    2026-11-19; built).
   - **Routines.** A file routine's 64-run activity window can be cleared or
     raised, and a setting, off by default, **Start agent-created routines
     active at Full access** lets a routine an agent creates at Full access
@@ -15176,29 +15336,48 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   use first. Built: stopping computer use, which such a device does for every
   session on the host
   ([Computer use plugin](#extensions-and-skills)); the Project switches for
-  agents writing Project memory, pushing to the default branch and commenting
-  on pull requests; a thread's wake-ups
-  ([wake-ups](#modes-chat-work-and-code)); Safe networks and Network limits;
-  local work resource limits; growing an MCP grant by answering any prompt
-  whose thread still stands in its Project; a Project terminal, the device's
-  own shell, ended when the device is revoked or goes quiet; a Private
-  Project browser page; making and changing agent grants, over the forwarded
-  `/api/agent-grants/commands` route and the paired browser's Agent access
-  settings; approving or declining a coordinator's proposed worker from the
-  paired browser and phone, as the coordinator asked for it; Canvas HTML
-  import, whose request names its Project in its workspace scope; and Full
-  access and extension install, built earlier. Each is journaled with the
-  device as the actor. The paired browser offers the Project terminal and
+  agents writing Project memory, pushing to the default branch, commenting
+  on pull requests, Project own toolchain, and Project image generation; a
+  thread's wake-ups ([wake-ups](#modes-chat-work-and-code)); Safe networks and
+  Network limits; local work resource limits; growing an MCP grant by
+  answering any prompt whose thread still stands in its Project; a Project
+  terminal, the device's own shell, ended when the device is revoked or goes
+  quiet; a Private Project browser page; making and changing agent grants,
+  over the forwarded `/api/agent-grants/commands` route and the paired
+  browser's Agent access settings; approving or declining a coordinator's
+  proposed worker from the paired browser and phone, as the coordinator asked
+  for it; Canvas HTML import, whose request names its Project in its workspace
+  scope; Full access and extension install; and server policy parity across
+  Settings › Permissions › Servers (including displaying an `octant-key`
+  public key, journaled as that device), Settings › Code › Worktrees and Xcode
+  cleanup, local leftover server confirmation and stop, billed desktop spend
+  cap, recipe machine listing, and disposable desktop preview grants, routine
+  notification and push-gateway settings, Canvas Allow network, answers,
+  boards, comments, design-system switches, refresh/action/share/export/public-link
+  controls, and unconfirmed export notice dismissal, Artifact library/tags/Claude
+  page copy/mirror/synced routes, thread export with captures and tool-call
+  records, Preview text editing, Browser task-profile, profile list/account-create/clear,
+  extensions, saved flows, captures/steps, download-save, take-over/hand-back,
+  and signed-in page snapshots, Provider OAuth/Cloud IAM/tooling/integration
+  authentication routes, Code and Work live tasks and native session adoption,
+  Project memory proposals, and replica store settings and membership
+  (maintainer decision, 2026-11-19). Each is journaled with the device as the
+  actor. Native-only hardware acts stay local-window-only (`/api/desktop/*`,
+  `/api/secret-stores/*`, Keychain browser cookie import,
+  `/api/browser/credential-use`, Finder/external-editor Preview handoff,
+  host-speaker read-aloud, native file-picker receipts, and desktop Browser
+  pane mouse input). The paired browser offers the Project terminal and
   Private page under **Project tools** in Work and Code, as a list of the
   Project's own tools, and **Import HTML…** alone in a Chat thread's Canvas
-  tools. The phone offers the same three from a thread's Views and panes
-  (the terminal as plain lines of output and a line to run), and answers
+  tools; paired web/phone UI screens for the remaining newly admitted surfaces
+  are UI follow-ups. The phone offers the same three from a thread's Views and
+  panes (the terminal as plain lines of output and a line to run), and answers
   every Work request a window can: the Plan block, a provider's tool
   approval, its questions and questionnaires, each with the version read and
   a tool or plan approval behind the phone's own confirmation.
   Designed, not built (maintainer request, 2026-11-18): the Browser's
-  Take over and Hand back, `sign-in`, profile pages and saved flows, through
-  a one-page lease carrying a closed input stream and person-only frames
+  dedicated streaming lease and UI for Take over, Hand back, `sign-in`,
+  profile pages and saved flows
   ([A paired device holds the page](design/browser-agent-tool.md#a-paired-device-holds-the-page),
   [what a device sees of a signed-in page](design/browser-profiles.md#what-a-paired-device-sees-of-a-signed-in-page));
   and finishing a connector sign-in, by device authorization where the issuer
@@ -15210,8 +15389,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   [Server Projects: Paired devices](design/server-projects.md#paired-devices)).
   Each is listed in
   [Decisions and requirements](design/decisions.md#paired-devices-act-as-the-person).
-  Each owning section keeps its own "not built yet" line until it is
-  built. A device the host knows only through the hub's roster is unchanged.
+  Each owning section keeps its own UI or protocol follow-up note until
+  finished. A device the host knows only through the hub's roster is unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
   2026-11-16; partly built: Ollama off loopback, Bedrock's AWS profile and
@@ -15401,9 +15580,15 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
       it, and another thread's tools do not read it, even through a Project
       folder that holds the login's home. The copy is made before the turn's
       start is journaled, and a copy that fails refuses the turn before it is
-      accepted, with a sentence saying so;
-      images and natively taken files go as before. Not built: removing the
-      server copies when the thread is deleted or purged.
+      accepted, with a sentence saying so; images and natively taken files go
+      as before. Deleting or purging the thread, or marking it Leave no trace,
+      removes `~/.octant/thread-attachments/<thread>/` over the Project's SSH
+      connection with safe-path guards; an unreachable server never holds up
+      local deletion, instead journaling a pending removal that retries and
+      settles on the next regular SSH connection to that server, and removing a
+      whole server Project while its server is unreachable succeeds with a
+      notice naming the remote attachment folder left behind
+      ([Server Projects](design/server-projects.md#threads)).
     - **Chat.** Chat has no folder, so no file is named by a path. A file the
       provider and model take natively goes natively; an image goes to a
       model that reads images or to Sees images as before; any other file

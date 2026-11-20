@@ -7,6 +7,7 @@ import type {
   CanvasId,
 } from "@octant/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useCanvasChoiceAnswersChangeRevision } from "../CanvasChoiceAnswersChangeRevision";
 
 /** Where a decision form's saved answers are read and written; the host owns both. */
 export interface CanvasChoiceAnswersPort {
@@ -40,12 +41,29 @@ export type CanvasChoiceSaveResult =
  */
 export function useCanvasChoiceAnswers(port: CanvasChoiceAnswersPort) {
   const [state, setState] = useState<CanvasChoiceAnswersState>({ status: "loading" });
+  const revision = useCanvasChoiceAnswersChangeRevision();
   const sequence = useRef(0);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const mounted = useRef(true);
+  const loadRequestId = useRef(0);
+  const latestApplied = useRef(0);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const load = useCallback(async (): Promise<boolean> => {
+    const requestId = loadRequestId.current + 1;
+    loadRequestId.current = requestId;
     try {
       const outcome = await port.load();
+      if (!mounted.current) return false;
+      // A newer load already resolved and wrote fresher state; do not replace it.
+      if (requestId < latestApplied.current) return true;
+      latestApplied.current = requestId;
       if (outcome.kind === "ready") {
         sequence.current = outcome.sequence;
         setState({ status: "ready", sequence: outcome.sequence, answers: outcome.answers });
@@ -59,6 +77,8 @@ export function useCanvasChoiceAnswers(port: CanvasChoiceAnswersPort) {
             : "Saved answers are not available in this workspace.",
       });
     } catch {
+      if (!mounted.current || requestId < latestApplied.current) return false;
+      latestApplied.current = requestId;
       setState({ status: "unavailable", reason: "The saved answers could not be loaded." });
     }
     return false;
@@ -66,7 +86,7 @@ export function useCanvasChoiceAnswers(port: CanvasChoiceAnswersPort) {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, revision]);
 
   const save = useCallback(
     (changes: ReadonlyArray<CanvasChoiceAnswerChange>): Promise<CanvasChoiceSaveResult> => {

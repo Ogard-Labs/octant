@@ -48,6 +48,7 @@ import {
 } from "../process/secretGuard";
 import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
 import { createPersonMemoryRouteHandler } from "../personMemory/personMemoryRoutes";
+import { readReceivedDelegationThreadIds } from "../hub/delegationJournal";
 import { createTodoRouteHandler } from "../todos/todoRoutes";
 import { privateListenerHostId } from "../remote/privateListenerHostIdentity";
 import { TodoStore } from "../todos/todoStore";
@@ -259,10 +260,20 @@ export function wireAuthority(deps: AuthorityDependencies) {
     }
     return true;
   };
+  // Peer-delegated Work threads run under the host scope for a peer granted
+  // one Project, so host-wide person memory is withheld from those threads and
+  // any subagent they spawn — live before the first turn starts and rebuilt
+  // from the delegation journal after a restart.
+  const peerDelegatedThreads = new Set<string>(
+    readReceivedDelegationThreadIds(persistence.journal),
+  );
+  const withholdThreadFromPersonMemory = (threadId: string): void => {
+    peerDelegatedThreads.add(threadId);
+  };
   const personMemoryAccess = createPersonMemoryAccess({
     store: personMemory,
-    isPairedDeviceScope: isRestrictedDeviceScope,
-    isHostScope: isRoutineHostScope,
+    isRestrictedDeviceScope,
+    isThreadWithheld: (threadId) => peerDelegatedThreads.has(threadId),
     projectLabel: (projectId) => persistence.readProject(decodeProjectId(projectId))?.name,
   });
   // The asks these services hold are not journaled when raised, so each says
@@ -534,6 +545,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     personMemory,
     personMemoryAccess,
     personMemoryRoutes,
+    withholdThreadFromPersonMemory,
     octantInstructions,
     octantInstructionsRoutes,
     protectedFilesRoutes,

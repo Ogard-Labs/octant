@@ -278,9 +278,22 @@ export class ServerConnection {
   #controlDirectory: string | undefined;
   /** What each pinned file holds now, so an unchanged pin is not rewritten on every call. */
   readonly #pinnedWritten = new Map<string, string>();
+  readonly #connectedListeners = new Set<(server: ServerAddress) => void>();
 
   constructor(options: ServerConnectionOptions) {
     this.#options = options;
+  }
+
+  /**
+   * Notified whenever a regular SSH call reaches the server (`status === "ran"`).
+   * Read-only setup diagnostics (`freshConnection: true`) never trigger this so
+   * diagnostics never mutate server or journal state.
+   */
+  subscribeConnected(listener: (server: ServerAddress) => void): () => void {
+    this.#connectedListeners.add(listener);
+    return () => {
+      this.#connectedListeners.delete(listener);
+    };
   }
 
   /** Why no call may go to this server now, or nothing. */
@@ -472,6 +485,15 @@ export class ServerConnection {
           return;
         }
         finish({ status: "ran", exitCode: code ?? 1, output, truncated, errorOutput: errorText });
+        if (input.freshConnection !== true) {
+          for (const listener of this.#connectedListeners) {
+            try {
+              listener(server);
+            } catch {
+              // A listener failure never disrupts the SSH call that succeeded.
+            }
+          }
+        }
       });
     });
   }

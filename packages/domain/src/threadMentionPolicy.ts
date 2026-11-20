@@ -1,4 +1,5 @@
 import {
+  DEFAULT_THREAD_MESSAGES_PER_TURN,
   MAX_THREAD_MENTIONS_PER_TURN,
   MAX_THREAD_MENTION_CANDIDATES,
   MAX_THREAD_MENTION_TRANSCRIPT_CHARACTERS,
@@ -364,4 +365,29 @@ function collapseChipTitle(title: string): string {
     .replace(/[[\]]/g, "")
     .trim();
   return collapsed.length <= 120 ? collapsed : `${collapsed.slice(0, 119)}…`;
+}
+
+export type ThreadDialogueAskDecision =
+  | { readonly status: "admitted" }
+  | { readonly status: "refused"; readonly message: string };
+
+/**
+ * Whether this turn may make another `octant_ask_thread` call. Outside Strict
+ * there is no cap; under Strict the per-turn Settings limit (default 3) holds.
+ * Absent `strict` reads as Strict.
+ */
+export function decideThreadDialogueAsk(input: {
+  readonly asksThisTurn: number;
+  readonly strict?: boolean;
+  readonly askLimit?: number;
+}): ThreadDialogueAskDecision {
+  if (input.strict === false) return { status: "admitted" };
+  const limit = input.askLimit ?? DEFAULT_THREAD_MESSAGES_PER_TURN;
+  if (input.asksThisTurn >= limit) {
+    return {
+      status: "refused",
+      message: `This turn reached its limit of ${String(limit)} thread messages, set in Settings.`,
+    };
+  }
+  return { status: "admitted" };
 }

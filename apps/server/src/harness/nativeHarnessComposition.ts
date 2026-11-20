@@ -387,6 +387,8 @@ export interface NativeHarnessComposition {
      * what it returns; without them the lead is not offered `journal-lookup`.
      */
     readonly secrets?: ReadonlyArray<string>;
+    /** Language-server errors checked after a successful `write`, `edit`, or `editFiles`. */
+    readonly editDiagnostics?: NativeHarnessToolPorts["editDiagnostics"];
   }) => AppManagedToolSet | undefined;
   /**
    * A Code thread's tools in a server Project: the same tools as `forCode`,
@@ -424,6 +426,23 @@ export interface NativeHarnessComposition {
     readonly authority: AgentRunAuthority;
     readonly projectRoot: string;
   }) => AppManagedToolSet | undefined;
+  /**
+   * Posture-, sandbox-, Strict-, and egress-aware shell for a Code thread's
+   * host-run commands (such as `octant_report_finished` proof checks).
+   */
+  readonly shellForCode: (input: {
+    readonly windowId: string;
+    readonly threadId: string;
+    readonly projectId: string;
+  }) => NativeHarnessShellPort | undefined;
+  /**
+   * Posture-, sandbox-, Strict-, and egress-aware shell for a Work thread's
+   * host-run commands (such as `octant_report_finished` proof checks).
+   */
+  readonly shellForWork: (input: {
+    readonly threadId: string;
+    readonly projectId: string;
+  }) => NativeHarnessShellPort | undefined;
 }
 
 /**
@@ -969,7 +988,8 @@ export function createNativeHarnessComposition(
           executionPolicy,
           fullAccessSandbox:
             activeSandboxPolicy(threadId) !== undefined ||
-            options.readFullAccessSandbox?.(threadId),
+            options.readFullAccessSandbox?.(threadId) ||
+            options.readStrict?.(threadId) === true,
         });
   };
   const codeShell = (
@@ -1005,7 +1025,8 @@ export function createNativeHarnessComposition(
           executionPolicy,
           fullAccessSandbox:
             activeSandboxPolicy(threadId) !== undefined ||
-            options.readFullAccessSandbox?.(threadId),
+            options.readFullAccessSandbox?.(threadId) ||
+            options.readStrict?.(threadId) === true,
         });
   };
   // Work and Code share the shell at the thread's level, so a Work thread's
@@ -1264,7 +1285,7 @@ export function createNativeHarnessComposition(
         fullAccess: () => options.readWorkExecutionPolicy?.(threadId) === "full-access",
       });
     },
-    forCode: ({ thread, checkoutRoot, extraFolders, windowId, secrets }) => {
+    forCode: ({ thread, checkoutRoot, extraFolders, windowId, secrets, editDiagnostics }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       const shell = codeShell({ threadId, projectId: String(thread.projectId) }, windowId);
@@ -1299,6 +1320,7 @@ export function createNativeHarnessComposition(
             fullAccess: () =>
               options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
           }),
+          ...(editDiagnostics === undefined ? {} : { editDiagnostics }),
           readsImages: () => options.readsImages?.(thread) === true,
           ...(shell === undefined ? {} : { shell }),
           ...webPorts(),
@@ -1589,5 +1611,8 @@ export function createNativeHarnessComposition(
           : { protectedSecretPath: options.protectedSecretPath }),
       });
     },
+    shellForCode: ({ windowId, threadId, projectId }) =>
+      codeShell({ threadId, projectId }, windowId),
+    shellForWork: ({ threadId, projectId }) => workShell({ threadId, projectId }),
   };
 }

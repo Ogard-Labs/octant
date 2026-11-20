@@ -1,4 +1,5 @@
 import { decodeRemoveArchivedWorktreeRequest } from "@octant/contracts/archived-worktrees";
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import { refused, type ArchivedWorktrees } from "./code/archivedWorktrees";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -68,7 +69,7 @@ export function createArchivedWorktreeRouteHandler(
       }
       throw error;
     }
-    if (principal.kind !== "local-window") {
+    if (!principalActsAsHostPerson(principal)) {
       return json(refused("unauthorized"), 403, origin);
     }
     if (url.pathname === ARCHIVED_WORKTREES_PATH && request.method === "GET") {

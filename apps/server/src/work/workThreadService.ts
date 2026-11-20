@@ -12,6 +12,7 @@ import {
   DEFAULT_WORK_ACCESS,
   WorkSettings as WorkSettingsSchema,
   type ThreadLiveStep,
+  type ThreadFinishedReceipt,
   type AggregateVersion,
   type WorkSettings,
   type WorkThread,
@@ -56,6 +57,7 @@ import {
 } from "../persistence/transcriptSearchText";
 import { Schema } from "effect";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
+import { selectCompletionReceiptId } from "@octant/domain/finished-receipt-policy";
 import {
   defaultFullAccessSandboxFor,
   guardrailLowered,
@@ -268,6 +270,8 @@ export interface WorkThreadServiceDependencies {
    */
   readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
   readonly serverProjects?: ServerWorkProjectThreads;
+  /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
+  readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
 }
 
 /**
@@ -329,9 +333,13 @@ export class WorkThreadService {
   readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
   readonly #serverProjects: ServerWorkProjectThreads | undefined;
+  readonly #readLatestFinishedReceipt:
+    | ((threadId: string) => ThreadFinishedReceipt | undefined)
+    | undefined;
 
   constructor(dependencies: WorkThreadServiceDependencies) {
     this.#moveHold = dependencies.moveHold;
+    this.#readLatestFinishedReceipt = dependencies.readLatestFinishedReceipt;
     this.#persistence = dependencies.persistence;
     this.#projects = dependencies.projects;
     this.#projection = dependencies.projection;
@@ -1065,7 +1073,11 @@ export class WorkThreadService {
           );
         }
         // No note, no evidence record: an older paired phone decodes the
-        // thread strictly and requires the note inside that record.
+        // thread strictly and requires the note inside that record. A fresh
+        // finished receipt is recorded separately as completionReceiptId.
+        const completionReceiptId = selectCompletionReceiptId(
+          this.#readLatestFinishedReceipt?.(String(current.id)),
+        );
         const confirmed = decodeWorkThread({
           ...current,
           completionConfirmed: true,
@@ -1077,6 +1089,7 @@ export class WorkThreadService {
                   satisfactionEvidence: command.satisfactionEvidence,
                 },
               }),
+          ...(completionReceiptId === undefined ? {} : { completionReceiptId }),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -2583,6 +2596,7 @@ function withoutDoneMark(current: WorkThread): WorkThread {
   const {
     completionConfirmed: _completionConfirmed,
     completionEvidence: _completionEvidence,
+    completionReceiptId: _completionReceiptId,
     ...unmarked
   } = current;
   return unmarked as WorkThread;

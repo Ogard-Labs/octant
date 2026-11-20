@@ -18,6 +18,7 @@ import {
   WorkProjectDeveloperTools,
 } from "./projects";
 import { RemoteServerGrantId } from "./remoteServerGrants";
+import { ShieldServerAlias, ShieldServerUser } from "./shieldServers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -40,6 +41,58 @@ export const SERVER_PROJECTS_EVENT_NAMES_V2 = {
   developerToolsChanged: "server-projects.work-developer-tools-changed@2",
   previewOutcome: "server-projects.preview-outcome@2",
 } as const;
+
+/**
+ * Pending removals of thread attachment folders copied onto a registered server
+ * (`~/.octant/thread-attachments/<threadId>/`). Kept in an aggregate of its own
+ * so a thread purge never erases an owed remote cleanup before the server is
+ * reached again.
+ */
+export const SERVER_ATTACHMENT_CLEANUP_AGGREGATE = "server-attachment-cleanup";
+export const SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES = {
+  pending: "server-attachment-cleanup.pending@1",
+  settled: "server-attachment-cleanup.settled@1",
+} as const;
+
+/**
+ * A single safe path segment under `~/.octant/thread-attachments/` on a server:
+ * alphanumeric start, no slashes, no `..`, no whitespace or shell syntax.
+ */
+export const ServerAttachmentThreadId = Schema.String.pipe(
+  Schema.minLength(1),
+  Schema.maxLength(128),
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  Schema.filter((id) => !id.includes("..")),
+);
+export type ServerAttachmentThreadId = typeof ServerAttachmentThreadId.Type;
+
+export const ServerAttachmentCleanupPendingPayload = Schema.Struct({
+  serverId: AggregateId,
+  alias: ShieldServerAlias,
+  user: ShieldServerUser,
+  projectId: ProjectId,
+  threadId: ServerAttachmentThreadId,
+  queuedAt: UtcTimestamp,
+}).annotations(strict);
+export type ServerAttachmentCleanupPendingPayload =
+  typeof ServerAttachmentCleanupPendingPayload.Type;
+
+export const ServerAttachmentCleanupSettledPayload = Schema.Struct({
+  serverId: AggregateId,
+  projectId: ProjectId,
+  threadId: ServerAttachmentThreadId,
+  settledAt: UtcTimestamp,
+}).annotations(strict);
+export type ServerAttachmentCleanupSettledPayload =
+  typeof ServerAttachmentCleanupSettledPayload.Type;
+
+export const decodeServerAttachmentThreadId = Schema.decodeUnknownSync(ServerAttachmentThreadId);
+export const decodeServerAttachmentCleanupPendingPayload = Schema.decodeUnknownSync(
+  ServerAttachmentCleanupPendingPayload,
+);
+export const decodeServerAttachmentCleanupSettledPayload = Schema.decodeUnknownSync(
+  ServerAttachmentCleanupSettledPayload,
+);
 
 export const MAX_SERVER_PROJECTS = 64;
 export const MAX_SERVER_FOLDER_LENGTH = 1_024;
@@ -274,6 +327,8 @@ export const ServerProjectsCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("server-projects-updated"),
     view: ServerProjectsView,
+    /** Returned when removing a Project could not reach its server to remove attached files left there. */
+    notice: Schema.optional(Schema.NonEmptyTrimmedString),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("server-projects-refused"),

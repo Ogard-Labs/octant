@@ -77,6 +77,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
   const [actionProblem, setActionProblem] = useState<string | undefined>(undefined);
   const [actionsChanged, setActionsChanged] = useState(false);
   const [name, setName] = useState("");
@@ -146,12 +147,14 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
     const actionSave = command.kind === "set-server-project-actions";
     const reportProblem = actionSave ? setActionProblem : setProblem;
     reportProblem(undefined);
+    if (!actionSave) setNotice(undefined);
     if (actionSave) setActionsChanged(false);
     setBusy(true);
     try {
       const result = await client.command(command);
       if (result.kind === "server-projects-updated") {
         setView(result.view);
+        if (!actionSave) setNotice(result.notice);
         setEditingActions((current) =>
           result.view.projects.some((project) => String(project.id) === current)
             ? current
@@ -226,7 +229,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
     <div className="shield-servers" data-setting-id="server-projects" ref={root} tabIndex={-1}>
       <SettingsPanel
         collapse={{
-          open: view.projects.length > 0,
+          open: view.projects.length > 0 || notice !== undefined,
           summary:
             view.projects.length === 0
               ? "No folders on a server are bound"
@@ -237,6 +240,9 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
         description={SERVER_PROJECTS_INTRO}
         title="Projects on your servers"
       >
+        <div aria-live="polite">
+          {notice === undefined ? null : <OctantAlert tone="warning">{notice}</OctantAlert>}
+        </div>
         {view.projects.length === 0 ? (
           <p className="shield-servers__empty">No folders on a server are bound.</p>
         ) : (

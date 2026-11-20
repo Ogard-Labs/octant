@@ -233,6 +233,18 @@ describe("ServerProjectsSettings", () => {
     await user.click(within(form).getByRole("button", { name: "Bind folder" }));
     expect(await screen.findByText("That folder is missing on the server.")).toBeVisible();
   });
+  it("shows the removal notice naming the remote folder when removing a Project whose server is unreachable", async () => {
+    const notice =
+      "Removed Website, but web-1 could not be reached to delete attached files left in ~/.octant/thread-attachments/thread-1/. You can remove that folder on the server when it is reachable.";
+    const { user } = setup({
+      answer: (command) =>
+        command.kind === "remove-server-project"
+          ? { kind: "server-projects-updated", view: { projects: [] }, notice }
+          : { kind: "server-projects-updated", view: { projects: [] } },
+    });
+    await user.click(await screen.findByRole("button", { name: "Remove Website" }));
+    expect(await screen.findByText(notice)).toBeVisible();
+  });
   it("reveals a server Work Project's saved actions only after its presentation switch is chosen", async () => {
     const project = { ...SITE, mode: "work" as const };
     const { user, command } = setup({

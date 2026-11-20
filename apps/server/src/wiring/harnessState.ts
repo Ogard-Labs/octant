@@ -17,8 +17,11 @@ import {
 import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
+import { ServerAttachmentCleanup } from "../serverProjects/serverAttachmentCleanup";
 import { ServerConnection, type ServerAddress } from "../serverProjects/serverConnection";
 import { ServerProjectStore } from "../serverProjects/serverProjectStore";
+import { serverProjectOf } from "../serverProjects/serverProjectThreads";
+import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 import { personSshAgentSocket } from "../shield/shieldServerStore";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -194,10 +197,45 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     connection: serverConnection,
   });
   serverProjectStore.load();
+  const serverAttachmentCleanup = new ServerAttachmentCleanup({
+    journal: persistence.journal,
+    personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    connection: serverConnection,
+    store: serverProjectStore,
+    serverProjectForThread: (mode, threadId) => {
+      try {
+        if (mode === "code") {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          return thread === undefined ? undefined : serverProjectOf(serverProjectStore, thread);
+        }
+        if (mode === "work") {
+          const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+          return thread === undefined ? undefined : serverWorkProjectOf(serverProjectStore, thread);
+        }
+      } catch {
+        return undefined;
+      }
+      return undefined;
+    },
+    listThreadsForProject: (projectId) => [
+      ...persistence
+        .readCodeThreads()
+        .filter((thread) => String(thread.projectId) === projectId)
+        .map((thread) => String(thread.id)),
+      ...workThreadProjection
+        .list()
+        .filter((thread) => String(thread.projectId) === projectId)
+        .map((thread) => String(thread.id)),
+    ],
+  });
+  serverAttachmentCleanup.load();
 
   return {
     agentRunInteractions,
     cloudMachineServers,
+    serverAttachmentCleanup,
     serverConnection,
     serverProjectStore,
     serverRegistry,
