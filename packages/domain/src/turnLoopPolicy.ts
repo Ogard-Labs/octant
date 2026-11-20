@@ -103,7 +103,11 @@ export type TurnLoopRuntimeEvent =
       readonly toolCallId: string;
     }
   | {
-      readonly kind: "task-progress" | "task-list" | "user-input-request";
+      readonly kind: "task-list";
+      readonly synthesized?: boolean;
+    }
+  | {
+      readonly kind: "user-input-request";
     }
   | {
       readonly kind: string;
@@ -421,11 +425,29 @@ export function observeTurnRuntimeEvent(
         loop: undefined,
       };
     }
-    // Claude's task/checklist and AskUserQuestion tools suppress `tool-start`
-    // and emit task or question events instead; treat them as an intervening
-    // tool call so they break any preceding consecutive streak.
-    case "task-progress":
-    case "task-list":
+    // Checklist/task-list tools (such as Claude's TodoWrite, TaskCreate, and
+    // TaskUpdate) and AskUserQuestion suppress `tool-start` and emit `task-list`
+    // or `user-input-request` instead. Treat live updates as an intervening tool
+    // call so they break any preceding consecutive streak. Standalone
+    // `task-progress` notifications come from already-running background tasks
+    // without a new tool call, so they must not reset the streak.
+    case "task-list": {
+      const taskList = event as Extract<TurnLoopRuntimeEvent, { readonly kind: "task-list" }>;
+      if (taskList.synthesized === true) {
+        return {
+          next: state,
+          count: state.consecutiveCount,
+          earlyWarning: false,
+          loop: undefined,
+        };
+      }
+      return {
+        next: resetTurnLoopStreak(state),
+        count: 0,
+        earlyWarning: false,
+        loop: undefined,
+      };
+    }
     case "user-input-request":
       return {
         next: resetTurnLoopStreak(state),

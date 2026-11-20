@@ -329,9 +329,8 @@ describe("turn loop and stall policy", () => {
     expect(sixthRead.loop).toBeUndefined();
   });
 
-  it("resets the consecutive streak when Claude task or question events intervene", () => {
+  it("resets the consecutive streak when checklist task-list or question events intervene", () => {
     for (const intervening of [
-      { kind: "task-progress" as const },
       { kind: "task-list" as const },
       { kind: "user-input-request" as const },
     ]) {
@@ -359,7 +358,7 @@ describe("turn loop and stall policy", () => {
         ).next;
       }
 
-      // Claude's TodoWrite / task tools / AskUserQuestion emit task or question events without tool-start.
+      // Claude's TodoWrite / task tools / AskUserQuestion emit task-list or question events without tool-start.
       state = observeTurnRuntimeEvent(state, intervening, { strict: true }).next;
 
       state = observeTurnRuntimeEvent(
@@ -380,6 +379,59 @@ describe("turn loop and stall policy", () => {
       expect(sixth.count).toBe(1);
       expect(sixth.loop).toBeUndefined();
     }
+  });
+
+  it("keeps the consecutive streak across standalone background task-progress notifications", () => {
+    let state = INITIAL_TURN_LOOP_STATE;
+    for (let i = 1; i <= 5; i += 1) {
+      state = observeTurnRuntimeEvent(
+        state,
+        { kind: "tool-start", toolCallId: `read-${i}`, toolName: "Read" },
+        { strict: true },
+      ).next;
+      state = observeTurnRuntimeEvent(
+        state,
+        {
+          kind: "tool-call-content",
+          toolCallId: `read-${i}`,
+          part: "input",
+          text: '{"file_path":"a.ts"}',
+        },
+        { strict: true },
+      ).next;
+      state = observeTurnRuntimeEvent(
+        state,
+        { kind: "tool-success", toolCallId: `read-${i}` },
+        { strict: true },
+      ).next;
+    }
+
+    // Background task status notifications emit standalone task-progress without a new tool call.
+    state = observeTurnRuntimeEvent(state, { kind: "task-progress" }, { strict: true }).next;
+    // Synthesized stored task lists are restored session state, not an intervening tool call.
+    state = observeTurnRuntimeEvent(
+      state,
+      { kind: "task-list", synthesized: true },
+      { strict: true },
+    ).next;
+
+    state = observeTurnRuntimeEvent(
+      state,
+      { kind: "tool-start", toolCallId: "read-6", toolName: "Read" },
+      { strict: true },
+    ).next;
+    const sixth = observeTurnRuntimeEvent(
+      state,
+      {
+        kind: "tool-call-content",
+        toolCallId: "read-6",
+        part: "input",
+        text: '{"file_path":"a.ts"}',
+      },
+      { strict: true },
+    );
+    expect(sixth.count).toBe(6);
+    expect(sixth.loop).toEqual({ kind: "stop", toolName: "Read", count: 6 });
   });
 
   it("appends one informational sentence to an Octant tool result without discarding the result", () => {
