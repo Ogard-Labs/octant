@@ -12,6 +12,7 @@ import {
   type ProviderExecutionPolicy,
   type ProviderFailure,
   type ProviderRuntimeEvent,
+  type ProviderToolDefinition,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, Scope, Stream } from "effect";
 import {
@@ -3756,7 +3757,10 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
-  const startOutsideStrict = async (f: ReturnType<typeof fixture>) => {
+  const startOutsideStrict = async (
+    f: ReturnType<typeof fixture>,
+    tools: ReadonlyArray<ProviderToolDefinition> = [],
+  ) => {
     const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
     await Effect.runPromise(
       acquired.connection.start({
@@ -3764,6 +3768,7 @@ describe("Codex execution authority and approvals", () => {
         modelId: "gpt-5.4" as never,
         executionPolicy: "approval-gated",
         strict: false,
+        tools,
       }),
     );
     return acquired;
@@ -3787,8 +3792,9 @@ describe("Codex execution authority and approvals", () => {
 
   it("puts what a /review turn carries into the session's own thread before the review starts", async () => {
     const f = fixture();
-    const acquired = await startOutsideStrict(f);
-    const [line] = appToolHostLines([{ name: "octant_canvas" }]);
+    const tool = { name: "octant_canvas", description: "Draw a chart", inputSchema: {} };
+    const acquired = await startOutsideStrict(f, [tool]);
+    const [line] = appToolHostLines([tool]);
     if (line === undefined) throw new Error("Missing Canvas guide");
     await Effect.runPromise(
       acquired.connection.send({
@@ -3797,9 +3803,10 @@ describe("Codex execution authority and approvals", () => {
         context: [
           { kind: "user-message", text: "From the planner: check the parser too." },
           { kind: "instructions", text: line.text, tool: line.tool },
+          { kind: "instructions", text: "An unavailable tool.", tool: "octant_browser" },
         ],
         attachments: [],
-        tools: [],
+        tools: [tool],
       }),
     );
     const methods = f.calls.map(({ method }) => method);
@@ -3816,6 +3823,7 @@ describe("Codex execution authority and approvals", () => {
       ]),
     });
     expect(JSON.stringify(injected?.input)).toContain("From the planner: check the parser too.");
+    expect(JSON.stringify(injected?.input)).not.toContain("An unavailable tool.");
     expect(methods.indexOf("thread/inject_items")).toBeLessThan(methods.indexOf("review/start"));
     await acquired.close();
   });
