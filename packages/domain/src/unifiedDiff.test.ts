@@ -60,3 +60,27 @@ it("keeps header-like removed and added source lines inside their hunk", () => {
     expect(diffSourceLines(file, "modified")).toEqual([{ line: 1, text: "++ new comment" }]);
   }
 });
+
+it("preserves old and new file modes for mode-only and mixed mode-and-content diffs", () => {
+  const patch = [
+    "diff --git a/scripts/check.sh b/scripts/check.sh",
+    "old mode 100644",
+    "new mode 100755",
+    "diff --git a/scripts/run.sh b/scripts/run.sh",
+    "old mode 100755",
+    "new mode 100644",
+    "index aaaaaaa..bbbbbbb",
+    "--- a/scripts/run.sh",
+    "+++ b/scripts/run.sh",
+    "@@ -1 +1 @@",
+    "-echo old",
+    "+echo new",
+  ].join("\n");
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]?.path).toBe("scripts/check.sh");
+  expect(files[0]?.binary).toBe(true);
+  expect(files[0]?.modeChange).toEqual({ oldMode: "100644", newMode: "100755" });
+  expect(files[1]?.path).toBe("scripts/run.sh");
+  expect(files[1]?.binary).toBe(false);
+  expect(files[1]?.modeChange).toEqual({ oldMode: "100755", newMode: "100644" });
+});

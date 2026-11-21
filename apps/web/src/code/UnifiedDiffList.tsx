@@ -470,6 +470,11 @@ function renderFileSection(input: {
         {file.previousPath === undefined ? null : (
           <span className="unified-diff__renamed">from {file.previousPath}</span>
         )}
+        {file.modeChange === undefined ? null : (
+          <span className="unified-diff__mode">
+            mode {file.modeChange.oldMode} → {file.modeChange.newMode}
+          </span>
+        )}
         <span className="unified-diff__change">{CHANGE_LABELS[file.change]}</span>
         {input.onReadProviderFile === undefined ? null : (
           <OctantButton
@@ -504,7 +509,9 @@ function renderFileSection(input: {
           data-index={input.binaryVirtualIndex}
           ref={input.binaryVirtualIndex === undefined ? undefined : input.measureRef}
         >
-          This file changed without a textual diff, so there is nothing to compare.
+          {file.modeChange === undefined
+            ? "This file changed without a textual diff, so there is nothing to compare."
+            : `File mode changed from ${file.modeChange.oldMode} to ${file.modeChange.newMode} with no content changes.`}
         </p>
       ) : (
         <table aria-label={`Diff for ${file.path}`} className="unified-diff__table">

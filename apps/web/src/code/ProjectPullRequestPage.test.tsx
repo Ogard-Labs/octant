@@ -440,4 +440,74 @@ describe("the pull-request reading pane", () => {
     await waitFor(() => expect(onSendLineNotes).toHaveBeenCalledTimes(2));
     expect(onSendLineNotes.mock.calls[1]?.[0]).toBe(linkedThreadTwo.threadId);
   });
+
+  it("preserves mode-change metadata in the pull request diff for mode-only and mixed changes", async () => {
+    const user = userEvent.setup();
+    const modeDiff = [
+      "diff --git a/scripts/check.sh b/scripts/check.sh",
+      "old mode 100644",
+      "new mode 100755",
+      "diff --git a/scripts/run.sh b/scripts/run.sh",
+      "old mode 100755",
+      "new mode 100644",
+      "--- a/scripts/run.sh",
+      "+++ b/scripts/run.sh",
+      "@@ -1 +1 @@",
+      "-echo old",
+      "+echo new",
+    ].join("\n");
+    const view = detailView("Adds executable script.", {
+      diff: modeDiff,
+      linkedThreads: [linkedThreadOne],
+    });
+    renderPage({
+      load: async () => view,
+      refresh: async () => view,
+    });
+
+    await user.click(await screen.findByRole("tab", { name: /Changes/ }));
+    expect(screen.getByText("mode 100644 → 100755")).toBeVisible();
+    expect(
+      screen.getByText("File mode changed from 100644 to 100755 with no content changes."),
+    ).toBeVisible();
+    expect(screen.getByText("mode 100755 → 100644")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Comment on scripts/run.sh modified line 1" }),
+    ).toBeVisible();
+  });
+
+  it("keeps pending line notes when refreshing returns an empty diff", async () => {
+    const user = userEvent.setup();
+    let current = detailView("Adds manual refresh.", {
+      diff: sampleDiff,
+      linkedThreads: [linkedThreadOne],
+    });
+    renderPage({
+      load: async () => current,
+      refresh: async () => current,
+      onSendLineNotes: async () => ({ status: "sent" as const }),
+    });
+
+    await user.click(await screen.findByRole("tab", { name: /Changes/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Comment on src/refresh.ts modified line 12" }),
+    );
+    const notes = screen.getByRole("region", { name: "Line notes" });
+    await user.type(within(notes).getByLabelText("Note"), "Survives empty refresh");
+    await user.click(within(notes).getByRole("button", { name: "Add note" }));
+    expect(within(notes).getByText("Survives empty refresh")).toBeVisible();
+
+    current = detailView("Adds manual refresh.", {
+      diff: "",
+      linkedThreads: [linkedThreadOne],
+    });
+    await user.click(screen.getByRole("button", { name: "Refresh detail" }));
+
+    expect(await screen.findByText("No diff observed.")).toBeVisible();
+    expect(
+      within(screen.getByRole("region", { name: "Line notes" })).getByText(
+        "Survives empty refresh",
+      ),
+    ).toBeVisible();
+  });
 });

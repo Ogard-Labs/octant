@@ -13192,6 +13192,9 @@ function runtimeFixture(options: {
   recordExternalContentIngestion?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["recordExternalContentIngestion"];
+  resolvePullRequestLineNotesAuthorship?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["resolvePullRequestLineNotesAuthorship"];
   forkProviderSession?: Parameters<typeof createCodeOperationRuntime>[0]["forkProviderSession"];
   supportsSessionRollback?: Parameters<
     typeof createCodeOperationRuntime
@@ -13546,6 +13549,11 @@ function runtimeFixture(options: {
     ...(options.recordExternalContentIngestion === undefined
       ? {}
       : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
+    ...(options.resolvePullRequestLineNotesAuthorship === undefined
+      ? {}
+      : {
+          resolvePullRequestLineNotesAuthorship: options.resolvePullRequestLineNotesAuthorship,
+        }),
     ...(options.forkProviderSession === undefined
       ? {}
       : { forkProviderSession: options.forkProviderSession }),
@@ -19266,6 +19274,91 @@ describe("continuing a Code turn a restart cut off", () => {
       expect(next.connection.send).not.toHaveBeenCalled();
     } finally {
       for (const host of hosts) host.close();
+    }
+  });
+});
+
+describe("pull request line notes runtime admission", () => {
+  it("does not record an outside-content mark when a busy thread refuses pull request line notes, and records it once admitted", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["pull-request-line-notes"] },
+    }));
+    const host = runtimeFixture({
+      provider: providerDriver(connection),
+      recordExternalContentIngestion,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+    });
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    try {
+      await expect(
+        host.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(71),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: evidence(40),
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+
+      // While the first turn is still running, sending outside-author PR line
+      // notes must be refused without permanently marking the thread.
+      await expect(
+        host.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(72),
+          threadId,
+          checkoutId,
+          sessionId: decodeProviderSessionId("b0000000-0000-4000-8000-000000000072"),
+          prompt: evidence(40),
+          pullRequestLineNotesSource: source,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "failed" });
+      expect(recordExternalContentIngestion).not.toHaveBeenCalled();
+
+      // Finish the first turn so the thread can admit the line-notes follow-up.
+      await expect(
+        host.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(73),
+          threadId,
+          checkoutId,
+        }),
+      ).resolves.toMatchObject({ state: "interrupted" });
+
+      await expect(
+        host.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(74),
+          threadId,
+          checkoutId,
+          sessionId: decodeProviderSessionId("b0000000-0000-4000-8000-000000000074"),
+          prompt: evidence(40),
+          pullRequestLineNotesSource: source,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      expect(recordExternalContentIngestion).toHaveBeenCalledTimes(1);
+      expect(recordExternalContentIngestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId,
+          provenance: { origin: "external-content", sourceLabel: "pull-request-line-notes" },
+          correlationId: operationId(74),
+          authorized: true,
+        }),
+      );
+    } finally {
+      host.close();
     }
   });
 });

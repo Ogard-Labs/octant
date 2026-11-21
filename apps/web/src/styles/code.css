@@ -948,9 +948,14 @@ html:not([data-octant-reduced-transparency="true"])
 }
 
 .unified-diff__renamed,
+.unified-diff__mode,
 .unified-diff__change {
   flex: none;
   color: var(--oct-muted);
+}
+
+.unified-diff__mode {
+  font-family: var(--oct-font-mono);
 }
 
 .unified-diff__counts {

@@ -43,12 +43,19 @@ export interface DiffHunk {
   readonly source?: DiffSourceRange;
 }
 
+export interface DiffFileModeChange {
+  readonly oldMode: string;
+  readonly newMode: string;
+}
+
 export interface ParsedDiffFile {
   /** Stable key for lists and model URIs. */
   readonly id: string;
   /** Path as the user knows it: the new path, or the old one for a deletion. */
   readonly path: string;
   readonly previousPath?: string;
+  /** Present when git recorded an `old mode` → `new mode` permission change. */
+  readonly modeChange?: DiffFileModeChange;
   readonly change: DiffFileChange;
   readonly additions: number;
   readonly deletions: number;
@@ -78,6 +85,8 @@ interface HunkAccumulator {
 interface FileAccumulator {
   oldPath?: string;
   newPath?: string;
+  oldMode?: string;
+  newMode?: string;
   change: DiffFileChange;
   additions: number;
   deletions: number;
@@ -133,10 +142,17 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
         : renamed
           ? "renamed"
           : accumulator.change;
+  const modeChange =
+    accumulator.oldMode !== undefined &&
+    accumulator.newMode !== undefined &&
+    accumulator.oldMode !== accumulator.newMode
+      ? { oldMode: accumulator.oldMode, newMode: accumulator.newMode }
+      : undefined;
   return {
     id: `${String(index)}:${path}`,
     path,
     ...(renamed && oldPath !== undefined ? { previousPath: oldPath } : {}),
+    ...(modeChange === undefined ? {} : { modeChange }),
     change,
     additions: accumulator.additions,
     deletions: accumulator.deletions,
@@ -186,6 +202,16 @@ export function parseUnifiedDiff(
       continue;
     }
     if (accumulator === undefined) continue;
+    if (!accumulator.sawHunk && line.startsWith("old mode ")) {
+      const mode = line.slice("old mode ".length).trim();
+      if (mode.length > 0) accumulator.oldMode = mode;
+      continue;
+    }
+    if (!accumulator.sawHunk && line.startsWith("new mode ")) {
+      const mode = line.slice("new mode ".length).trim();
+      if (mode.length > 0) accumulator.newMode = mode;
+      continue;
+    }
     if (!accumulator.sawHunk && line.startsWith("--- ")) {
       accumulator.oldPath = stripPrefix(line.slice(4));
       continue;

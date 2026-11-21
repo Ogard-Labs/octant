@@ -49,8 +49,11 @@ export function PullRequestDiffWithNotes(props: PullRequestDiffWithNotesProps) {
         ? "Open this pull request in a Code window to send notes."
         : undefined;
 
+  // Keep CodeLineNotes mounted across empty or raw-fallback refreshes so
+  // unsent pending notes and open drafts are never discarded while the review
+  // stays open.
   return (
-    <>
+    <div className="code-pr-review__diff-notes">
       {props.diffTruncated ? (
         <p className={props.noticeClassName} role="note">
           This diff is truncated and is not complete.
@@ -65,49 +68,47 @@ export function PullRequestDiffWithNotes(props: PullRequestDiffWithNotesProps) {
           <CodeBlock code={props.diff} language="diff" />
         </div>
       ) : (
-        <div className="code-pr-review__diff-notes">
-          <div className="code-pr-review__diff">
-            <UnifiedDiffList
-              files={files}
-              onSelectLine={(selection) =>
-                setNoteAnchor({
-                  path: selection.path,
-                  side: selection.side,
-                  line: selection.line,
-                  text: selection.text,
-                })
-              }
-            />
-          </div>
-          <CodeLineNotes
-            {...(noteAnchor === undefined ? {} : { anchor: noteAnchor })}
-            {...(selectedThread === undefined || sendLineNotes === undefined
-              ? {}
-              : {
-                  onSend: (message) => sendLineNotes(selectedThread.threadId, message),
-                })}
-            {...(sendUnavailable === undefined ? {} : { sendUnavailable })}
-            {...(props.linkedThreads.length === 0 || selectedThread === undefined
-              ? {}
-              : {
-                  sendFooter: (
-                    <div className="code-line-notes__thread-picker">
-                      <OctantSelectField
-                        aria-label="Send notes to thread"
-                        className="code-line-notes__thread-select"
-                        onValueChange={(value) => setChosenThreadId(decodeCodeThreadId(value))}
-                        options={props.linkedThreads.map((thread) => ({
-                          id: String(thread.threadId),
-                          label: thread.title,
-                        }))}
-                        value={String(selectedThread.threadId)}
-                      />
-                    </div>
-                  ),
-                })}
+        <div className="code-pr-review__diff">
+          <UnifiedDiffList
+            files={files}
+            onSelectLine={(selection) =>
+              setNoteAnchor({
+                path: selection.path,
+                side: selection.side,
+                line: selection.line,
+                text: selection.text,
+              })
+            }
           />
         </div>
       )}
-    </>
+      <CodeLineNotes
+        {...(noteAnchor === undefined ? {} : { anchor: noteAnchor })}
+        {...(selectedThread === undefined || sendLineNotes === undefined
+          ? {}
+          : {
+              onSend: (message) => sendLineNotes(selectedThread.threadId, message),
+            })}
+        {...(sendUnavailable === undefined ? {} : { sendUnavailable })}
+        {...(props.linkedThreads.length === 0 || selectedThread === undefined
+          ? {}
+          : {
+              sendFooter: (
+                <div className="code-line-notes__thread-picker">
+                  <OctantSelectField
+                    aria-label="Send notes to thread"
+                    className="code-line-notes__thread-select"
+                    onValueChange={(value) => setChosenThreadId(decodeCodeThreadId(value))}
+                    options={props.linkedThreads.map((thread) => ({
+                      id: String(thread.threadId),
+                      label: thread.title,
+                    }))}
+                    value={String(selectedThread.threadId)}
+                  />
+                </div>
+              ),
+            })}
+      />
+    </div>
   );
 }

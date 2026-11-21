@@ -4254,6 +4254,19 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await serverTools?.close?.().catch(() => undefined);
       return refuseRevokedAdmission();
     }
+    // Outside-content provenance for pull-request line notes is recorded only
+    // after every busy, move, driver, session, and admission check passes, and
+    // synchronously before owning the turn or launching the provider.
+    if (input.recordOutsideContent !== undefined && !input.recordOutsideContent()) {
+      await serverTools?.close?.().catch(() => undefined);
+      await input.extensionTools?.close?.().catch(() => undefined);
+      return {
+        ...failStart(
+          "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
+        ),
+        admission: "refused" as const,
+      };
+    }
     // Feedback stays pending through every preparation refusal. Consuming it
     // here does not yield between the final admission check and owning the turn.
     let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;

@@ -388,10 +388,10 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     IntegrationsWiring,
     | "agentMessageService"
     | "consumeCreateFromIssueFramed"
-    | "githubCapabilityService"
     | "githubExtensionSnapshot"
     | "githubReadToolService"
     | "peekCreateFromIssueFramed"
+    | "repositoryActivitySource"
     | "siblingThreadsService"
     | "threadOutsideContentMarks"
   > &
@@ -538,9 +538,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     extensionPackageStore,
     externalContentIngestionStore,
     fileMentionService,
-    githubCapabilityService,
     githubExtensionSnapshot,
     githubReadToolService,
+    repositoryActivitySource,
     isCodeProviderModelAllowed,
     liveTurns,
     machineChangeFeed,
@@ -1884,9 +1884,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           if (pullRequestAuthor === undefined) {
             return { pullRequestAuthor: undefined, viewerLogin: undefined };
           }
-          const viewerLogin = (
-            await githubCapabilityService.snapshot(signal).catch(() => undefined)
-          )?.account?.login;
+          // Read the signed-in GitHub login through the integration's
+          // registered port so disabling the GitHub integration fails closed
+          // without wiring concrete GitHub host services into Code runtime.
+          const account = await repositoryActivitySource()
+            ?.account("prs-merged", signal)
+            .catch(() => undefined);
+          const viewerLogin = account?.status === "connected" ? account.account : undefined;
           return { pullRequestAuthor, viewerLogin };
         },
         outsideContentMarks: runtimeOutsideContentMarks,

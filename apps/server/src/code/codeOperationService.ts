@@ -1131,6 +1131,12 @@ export interface CodeOperationTurnPort {
       readonly context?: string;
       readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     };
+    /**
+     * Records outside-content provenance synchronously only after every busy,
+     * move, driver, session, and admission check has passed, before owning the
+     * turn or launching the provider. Returning `false` refuses fail-closed.
+     */
+    readonly recordOutsideContent?: () => boolean;
   }) => Promise<{
     readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
     readonly evidence?: string;
@@ -6939,6 +6945,7 @@ export class CodeOperationService {
         );
       }
     }
+    let recordPullRequestLineNotesOutsideContent: (() => boolean) | undefined;
     if (command.pullRequestLineNotesSource !== undefined) {
       const source = command.pullRequestLineNotesSource;
       const authorship = await this.#options
@@ -6967,7 +6974,8 @@ export class CodeOperationService {
         viewer.length > 0 &&
         author.toLowerCase() === viewer.toLowerCase();
       if (!authoredBySignedInUser) {
-        if (this.#options.recordReviewContent === undefined) {
+        const recordReviewContent = this.#options.recordReviewContent;
+        if (recordReviewContent === undefined) {
           await extensionTools?.close?.().catch(() => undefined);
           return this.#failed(
             command.operationId,
@@ -6976,22 +6984,18 @@ export class CodeOperationService {
             "refused",
           );
         }
-        const recorded = this.#options.recordReviewContent({
-          threadId: thread.id,
-          provenance: { origin: "external-content", sourceLabel: "pull-request-line-notes" },
-          contentReference: `pull-request-line-notes:${source.repositoryOwner}/${source.repositoryName}#${source.number}:${command.operationId}`,
-          correlationId: command.operationId,
-          authorized: true,
-        });
-        if (recorded.kind !== "recorded" && recorded.kind !== "already-recorded") {
-          await extensionTools?.close?.().catch(() => undefined);
-          return this.#failed(
-            command.operationId,
-            "unavailable",
-            "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
-            "refused",
-          );
-        }
+        // Deferred to the runtime's atomic admission boundary so a refused
+        // start (such as a busy thread) never leaves a permanent taint mark.
+        recordPullRequestLineNotesOutsideContent = () => {
+          const recorded = recordReviewContent({
+            threadId: thread.id,
+            provenance: { origin: "external-content", sourceLabel: "pull-request-line-notes" },
+            contentReference: `pull-request-line-notes:${source.repositoryOwner}/${source.repositoryName}#${source.number}:${command.operationId}`,
+            correlationId: command.operationId,
+            authorized: true,
+          });
+          return recorded.kind === "recorded" || recorded.kind === "already-recorded";
+        };
       }
     }
     // Read last, after every refusal above: carrying a message marks this
@@ -7057,6 +7061,9 @@ export class CodeOperationService {
             },
           }),
       ...(preparedFeedback === undefined ? {} : { takeProductFeedback: preparedFeedback.take }),
+      ...(recordPullRequestLineNotesOutsideContent === undefined
+        ? {}
+        : { recordOutsideContent: recordPullRequestLineNotesOutsideContent }),
     });
     if (turn.admission !== "refused") {
       this.#options.consumeIssueContextFramed?.(String(thread.id));
