@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -25,7 +25,7 @@ const audio = Buffer.alloc(2 * 1024 * 1024);
 audio.write("ftypM4A ", 4);
 const path = "recording.m4a";
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), "octant-speech-"));
+  dir = await realpath(await mkdtemp(join(tmpdir(), "octant-speech-")));
   folder = join(dir, "folder");
   await mkdir(folder);
   await writeFile(join(folder, path), audio);
