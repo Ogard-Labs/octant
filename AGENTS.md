@@ -320,6 +320,15 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
   push. If a tool opens one anyway, it stays a draft until it is ready: drafts
   run no CI, and marking it ready for review starts the run. Batch review fixes
   into one push rather than pushing each fix on its own.
+- Every commit an agent writes, in the cloud or on a person's computer, ends
+  with a trailer naming the session that wrote it:
+  `Agent-Session: <tool>:<session id or URL>`. A tool that already writes its
+  own session trailer keeps that trailer instead. Write your own session, never
+  one copied from a handoff or an earlier session. This is how a maintainer
+  traces a burst of pull requests back to the session that opened them. (In
+  November 2026, 45 of 100 recent pull requests carried no session trailer and
+  could not be traced, and a local agent working from a handoff kept an
+  archived session's trailer on new commits.)
 - Before creating a branch or pull request, inspect open and recently closed
   pull requests (by title and changed files, not only branch name) and branch
   ancestry for the same task or user-visible outcome. If an existing pull

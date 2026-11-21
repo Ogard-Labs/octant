@@ -113,6 +113,9 @@ Once applicable checks pass, proceed to delivery under the
   skip the advisory macOS and Windows jobs in the `CI` workflow. Use separate `main` PRs for
   independent work. The full rules are in
   [AGENTS.md](AGENTS.md#delivery-and-completion).
+- A commit an agent writes, cloud or local, ends with a trailer naming its own
+  session, `Agent-Session: <tool>:<session id or URL>`, unless the tool already
+  writes a session trailer of its own.
 - CI must be green on the exact head being merged. If `main` has moved, a
   standalone PR may rebase or merge `main`. A native stacked PR must
   cascading-rebase onto the new `main` (`Rebase stack`, or `gh stack rebase`
