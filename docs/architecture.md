@@ -18819,8 +18819,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   never as one of its own Browser tabs; while that computer is not connected
   the card reads nothing and says so, never this computer's rows. A thread on
   a paired computer that the window follows (the Code start screen for that
-  computer) lists the thread's own servers that computer can open, and opens
-  one the same way, live in Octant's own window or the default browser,
+  computer) lists the thread's own servers that computer can open (one
+  Octant started, in the thread's own worktree; any other row says why it
+  opens only there), and opens one the same way, live in Octant's own window or the default browser,
   through a grant for that thread's listing (`local-servers` source), so the
   host re-observes the row and the thread's authority there decides
   (maintainer decision, 2026-11-20: a remote page stays out of this window's

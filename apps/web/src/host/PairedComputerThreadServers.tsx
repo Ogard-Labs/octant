@@ -23,6 +23,11 @@ export function PairedComputerThreadServers(props: {
   readonly client: LocalServerClient;
   readonly threadId: CodeThreadId;
   readonly projectId: ProjectId;
+  /**
+   * The thread runs in its own worktree on that computer. A server in the
+   * shared Project folder is no one thread's, so the host refuses its grant.
+   */
+  readonly inOwnWorktree: boolean;
   readonly hostName: string;
   readonly open: (
     source: RemoteServerGrantSource,
@@ -38,10 +43,33 @@ export function PairedComputerThreadServers(props: {
   });
   const [message, setMessage] = useState<string>();
   const [busy, setBusy] = useState<string>();
-  const listeners = (controller.snapshot?.currentCheckout ?? []).filter(
-    (listener) => listener.openAvailable,
+  // A listing still in hand from another thread would offer that thread's
+  // servers under this one's ids, which the host refuses as not listed.
+  const snapshot =
+    controller.snapshot !== undefined &&
+    String(controller.snapshot.threadId) === String(props.threadId)
+      ? controller.snapshot
+      : undefined;
+  const listeners = (snapshot?.currentCheckout ?? []).filter(
+    (listener) => listener.openAvailable && listener.health === "listening",
   );
-  if (listeners.length === 0) return null;
+  if (listeners.length === 0) {
+    return controller.status === "error" && controller.errorMessage !== undefined ? (
+      <section aria-label={`Servers on ${props.hostName}`} className="local-servers">
+        <p className="local-servers__state" role="status">
+          {`Couldn't list this thread's servers on ${props.hostName}. ${controller.errorMessage}`}
+        </p>
+      </section>
+    ) : null;
+  }
+  // The same facts the host's grant policy refuses on, so a row never offers
+  // a control that is certain to fail; the host still decides every grant.
+  const refusal = (listener: LocalServerListener): string | undefined =>
+    listener.startSource !== "octant"
+      ? `Octant didn't start this server, so it opens only on ${props.hostName}.`
+      : props.inOwnWorktree
+        ? undefined
+        : `This server runs in the Project folder, not this thread's own worktree, so it opens only on ${props.hostName}.`;
 
   const open = async (listener: LocalServerListener, mode: RemoteOpenMode) => {
     setBusy(String(listener.listenerId));
@@ -68,6 +96,15 @@ export function PairedComputerThreadServers(props: {
         {listeners.map((listener) => {
           const name = `${listener.framework ?? listener.processName} on port ${String(listener.port)}`;
           const working = busy === String(listener.listenerId);
+          const reason = refusal(listener);
+          if (reason !== undefined) {
+            return (
+              <li className="local-servers__row" key={String(listener.listenerId)}>
+                <span>{name}</span>
+                <span className="local-servers__state">{reason}</span>
+              </li>
+            );
+          }
           return (
             <li className="local-servers__row" key={String(listener.listenerId)}>
               <span>{name}</span>

@@ -2509,6 +2509,7 @@ A paired device may ask for a grant to open one dev server from its own computer
 - The host gathers every fact itself and rechecks the grant, device, thread and owning process before every relayed request, closing the grant on any lost check.
 - Opening and closing are journaled with the grant, device, thread and port, never the endpoint; revoking the device, archiving the thread or disabling the listener closes the grant.
 - Only the desktop app opens a page live, through a loopback forwarder that holds no key and relays only what the window signs.
+- A Code thread on a paired computer that the desktop window follows lists the thread's servers and opens one the same way, through a grant for that thread's listing, and only for a server Octant started in the thread's own worktree; the page stays out of this window's Browser tabs (maintainer decision, 2026-11-20).
 - A paired device stops a server as a local window does, the confirmation for one Octant does not own included (maintainer decision, 2026-11-12; not built yet: today a paired device may stop only a server Octant owns), and a server outside active Code Project roots gets no row and no health probe.
 
 Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Proxy sessions and server grants](../architecture.md#security-and-authority) and [Local servers and Running services](../architecture.md#security-and-authority).

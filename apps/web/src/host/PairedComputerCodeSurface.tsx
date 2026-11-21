@@ -7,7 +7,7 @@ import {
   type RemoteSessionBridge,
   type RemoteSessionStanding,
 } from "@octant/client-runtime";
-import type { CodeThread } from "@octant/contracts/code";
+import type { CodeCheckoutIdentity, CodeThread } from "@octant/contracts/code";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import { buildModelPickerGroups, type CreateHostViewScope } from "@octant/domain";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
@@ -123,9 +123,14 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
         {...(openServer === undefined
           ? {}
           : {
-              renderThreadExtras: (thread: CodeThread) => (
+              renderThreadExtras: (
+                thread: CodeThread,
+                checkout: CodeCheckoutIdentity | undefined,
+              ) => (
                 <PairedComputerThreadServers
+                  key={String(thread.id)}
                   client={localServers}
+                  inOwnWorktree={checkout?.kind === "managed-worktree"}
                   hostName={hostName}
                   open={openServer}
                   projectId={thread.projectId}

@@ -3,7 +3,7 @@ import { readContinuationLink } from "../continuity/continuationLink";
 import { decodeChatThreadId, decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
 import { ConversationInputClientContext } from "../continuity/ConversationInputs";
 import type { ChatThread, ChatThreadId } from "@octant/contracts/chat";
-import type { CodeThread, CodeThreadId } from "@octant/contracts/code";
+import type { CodeCheckoutIdentity, CodeThread, CodeThreadId } from "@octant/contracts/code";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -445,7 +445,11 @@ export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "client
    */
   readonly followsContinuationLink?: boolean;
   /** What the open thread shows above its conversation, such as its servers on that computer. */
-  readonly renderThreadExtras?: (thread: CodeThread) => ReactNode;
+  /** `checkout` is the thread's checkout as the host's bootstrap names it, when it does. */
+  readonly renderThreadExtras?: (
+    thread: CodeThread,
+    checkout: CodeCheckoutIdentity | undefined,
+  ) => ReactNode;
 }
 
 /**
@@ -502,7 +506,14 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
     >
       {activeThreadId === undefined ? null : (
         <>
-          {activeThread === undefined ? null : props.renderThreadExtras?.(activeThread)}
+          {activeThread === undefined
+            ? null
+            : props.renderThreadExtras?.(
+                activeThread,
+                controller.bootstrap?.checkouts.find(
+                  (checkout) => String(checkout.id) === String(activeThread.checkoutId),
+                ),
+              )}
           {activeThread === undefined ? null : (
             <RemoteCoordinatorProposals
               actsAsHostPerson={props.actsAsHostPerson}
