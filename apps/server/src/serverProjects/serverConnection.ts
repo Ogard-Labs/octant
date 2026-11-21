@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { SERVER_CONTROL_SOCKET_PREFIX } from "../process/seatbeltProfile";
@@ -55,6 +56,38 @@ export interface ServerCallInput {
   readonly maxOutputBytes: number;
   readonly signal?: AbortSignal;
 }
+
+/**
+ * A process kept running on the server with its standard streams carried
+ * here, for a program that speaks over stdio for as long as it runs.
+ */
+export type ServerStream =
+  | {
+      readonly status: "open";
+      readonly stdin: Writable;
+      readonly stdout: Readable;
+      readonly stderr: Readable;
+      /** The local `ssh` process carrying the stream. */
+      readonly pid: number | undefined;
+      /** Ends the stream: closes standard input, then stops the connection if it is still open. */
+      readonly stop: () => void;
+      /** Settles once the connection has closed, with the exit code ssh reported. */
+      readonly exited: Promise<{ readonly exitCode: number | null }>;
+    }
+  | { readonly status: "unreachable"; readonly message: string };
+
+export interface ServerStreamInput {
+  /**
+   * A POSIX `sh` script whose arguments arrive as `$1`, `$2`, …. It should
+   * end by `exec`-ing the program, so the program reads standard input
+   * directly and ends when the stream closes it.
+   */
+  readonly script: string;
+  readonly args?: ReadonlyArray<string>;
+}
+
+/** How long a stopped stream's connection has to close on its own before it is ended. */
+const STREAM_STOP_GRACE_MS = 2_000;
 
 export interface ServerConnectionOptions {
   readonly sshPath?: string;
@@ -496,6 +529,78 @@ export class ServerConnection {
         }
       });
     });
+  }
+
+  /**
+   * Starts a process on the server and keeps its standard streams open here.
+   * It rides the server's shared connection, with the same pinned host key,
+   * options and encoded `sh` call as {@link run}, and no terminal, so bytes
+   * pass through unchanged. Nothing is forwarded and no secret is placed in
+   * the command line, which the server's process list shows.
+   */
+  openStream(server: ServerAddress, input: ServerStreamInput): ServerStream {
+    const refusal = this.refusal(server);
+    if (refusal !== undefined) return { status: "unreachable", message: refusal };
+    const words = input.args ?? [];
+    if ([input.script, ...words].some((word) => word.includes("\0"))) {
+      return {
+        status: "unreachable",
+        message: "This call holds a NUL byte, which no server command can carry. Nothing ran.",
+      };
+    }
+    const remoteCommand = serverRemoteCommand(input.script, words);
+    if (remoteCommand.length > MAX_REMOTE_COMMAND_BYTES) {
+      return {
+        status: "unreachable",
+        message: "This call is too long to send to the server. Nothing ran.",
+      };
+    }
+    const pinned = this.#options.pinnedHostKeys?.(server) ?? [];
+    let controlSocket: string;
+    try {
+      controlSocket = this.#controlSocket(server, pinned);
+    } catch {
+      return {
+        status: "unreachable",
+        message: "Octant could not make the folder its server connections share.",
+      };
+    }
+    const child = spawn(
+      this.#options.sshPath ?? "ssh",
+      [
+        ...serverSshArguments(server, remoteCommand, {
+          terminal: false,
+          configFile: this.#options.configFile,
+          controlSocket,
+          pinnedKnownHosts: this.pinnedKnownHostsFile(server, pinned),
+        }),
+      ],
+      { env: this.#environment(), stdio: ["pipe", "pipe", "pipe"] },
+    );
+    child.stdin.on("error", () => undefined);
+    const exited = new Promise<{ readonly exitCode: number | null }>((resolve) => {
+      child.once("close", (code) => resolve({ exitCode: code }));
+      child.once("error", () => resolve({ exitCode: null }));
+    });
+    let stopping = false;
+    return {
+      status: "open",
+      stdin: child.stdin,
+      stdout: child.stdout,
+      stderr: child.stderr,
+      pid: child.pid,
+      stop: () => {
+        if (stopping) return;
+        stopping = true;
+        // Closing standard input ends a program that `exec`ed; a connection
+        // still open after the grace is ended here.
+        child.stdin.end();
+        const force = setTimeout(() => child.kill("SIGTERM"), STREAM_STOP_GRACE_MS);
+        force.unref();
+        void exited.then(() => clearTimeout(force));
+      },
+      exited,
+    };
   }
 
   /**
