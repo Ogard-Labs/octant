@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -27,10 +27,25 @@ import { makeCodexProcessLive, SERVER_STRICT_REFUSAL } from "./codexProcess";
 import { codexServerSignInRefusal } from "./codexServerProcess";
 
 const scratches: string[] = [];
-/** Programs a test left running on purpose, stopped when it ends. */
-const leftovers: number[] = [];
+/**
+ * Programs a test left running on purpose, stopped when it ends, each only
+ * while its PID still has the start identity recorded for it, so a PID the
+ * system has since given to another process is never signalled.
+ */
+const leftovers: Array<{ readonly pid: number; readonly started: string }> = [];
+function startedOf(pid: number): string {
+  try {
+    return execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim();
+  } catch {
+    return "";
+  }
+}
+function leaveRunning(pid: number): void {
+  leftovers.push({ pid, started: startedOf(pid) });
+}
 afterEach(() => {
-  for (const pid of leftovers.splice(0)) {
+  for (const { pid, started } of leftovers.splice(0)) {
+    if (started === "" || startedOf(pid) !== started) continue;
     try {
       process.kill(pid, "SIGKILL");
     } catch {
@@ -255,7 +270,7 @@ async function startHanging(stand: StandIn) {
     .trim()
     .split(" ");
   const recorded = Number(pid);
-  leftovers.push(recorded);
+  leaveRunning(recorded);
   return {
     name,
     pid: recorded,
@@ -421,8 +436,10 @@ describe.skipIf(process.platform === "win32")("Codex on a server Project's serve
     const other = spawn("sleep", ["60"], { stdio: "ignore" });
     const otherPid = other.pid;
     if (otherPid === undefined) throw new Error("sleep did not start");
-    leftovers.push(otherPid);
-    writeFileSync(recordPath(stand.home, left.name), `${otherPid} ${left.started}\n`);
+    leaveRunning(otherPid);
+    // A start identity that cannot be the new program's, since two programs
+    // started in the same second would share a coarse one.
+    writeFileSync(recordPath(stand.home, left.name), `${otherPid} ${left.started}-earlier\n`);
 
     await left.stop();
     await waitFor(() => (recordsOn(stand.home).includes(left.name) ? undefined : true));

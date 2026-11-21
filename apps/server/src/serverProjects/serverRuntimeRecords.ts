@@ -214,7 +214,10 @@ export class ServerRuntimeRecords {
           login.swept = true;
           for (const sequence of ended) login.ended.delete(sequence);
         }
-        if (login.again && swept) this.#sweep(server, login);
+        // A call that came in meanwhile asked for its own sweep; it is run
+        // even after a failed one, since that call may have reached the
+        // server. Each retry answers one real call, so none loops alone.
+        if (login.again) this.#sweep(server, login);
       });
   }
 

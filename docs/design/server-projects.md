@@ -289,7 +289,8 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     login, which of this run's programs it still holds open. When a stream
     ends without the program's own exit (the connection dropped, or the host
     ended a connection whose program ignored the end of its input), and at the
-    next call to that login, the host runs a sweep there that takes every
+    next provider call to that login (a program a runtime starts or runs
+    there; Files and Git calls do not sweep), the host runs a sweep there that takes every
     record of its tag from an earlier run and every record of this run whose
     stream has ended. A recorded PID that is alive, not a zombie, and still
     has its recorded start identity gets TERM, then KILL if it is still that
