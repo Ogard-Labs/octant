@@ -6945,8 +6945,36 @@ ls-remote` against the thread's remote and the GitHub reads they already
   discovery only, so a queue still waiting on a slow admission never stops a
   later pass from advancing the others. Per-thread ordering
   and current-authority checks still precede admission.
-  Queuing a future message is distinct from steering a running turn; steering
-  remains subject to the active runtime's actual capability.
+  A Work or Code message sent while the thread's turn runs steers that turn
+  where its runtime steers (maintainer decision, 2026-11-21). The dispatcher,
+  once its next message has passed every dispatch check and found the thread
+  busy, offers it to the running turn's provider connection (`steer`, as the
+  person's note, `source: "person"`), only when the turn runs on the thread's
+  own provider instance, no compaction or recovery holds the thread, the
+  message is text alone and does not open with `/`, and it waits under a
+  person's own window at this host. A paired device's message keeps the
+  limits of a turn the device sends itself, which a turn a window admitted
+  does not carry, and the host's own scope speaks for no one, so neither is
+  steered; Chat is never steered. A message the runtime takes settles in the
+  queue as `steered` and is journaled as `thread.message-steered@1` on its
+  own aggregate (the mode, the thread, the running turn's key: a Work request
+  id or a Code operation id, the queue message id and the text), which the
+  Work turn projection and the Code conversation read attach to that turn as
+  `steeredMessages`, once per message, so replay and a rebuild show it
+  where it was. The transcript shows it as the person's message labelled
+  "Sent while the turn ran", on the desktop and the phone alike. Its journal
+  append invalidates the turn's mode on the change feed (`work-navigation` or
+  `code-navigation`), as any turn change does, so it shows in the turn as soon
+  as it leaves the queue rather than at the next unrelated refresh. A message
+  the runtime refuses, or a steer that
+  fails, leaves it queued for the next turn, and the queue does not offer that
+  message again; a connection with no `steer`, or one not yet acquired, offers
+  nothing and changes nothing. The message is not marked as dispatching
+  before the steer: a restart while the runtime takes it also ends the turn
+  that took it, and the still-queued message then follows the ordinary
+  restart rules rather than being lost. Which runtimes steer is the provider
+  connection's own answer
+  ([Provider runtimes](design/provider-runtimes.md#approvals-kept-for-the-session-and-steering)).
 
 - **Composer placeholder.** An empty follow-up composer in a Chat, Work, or
   Code thread says "Reply…" and nothing else: a rotating feature tip in the

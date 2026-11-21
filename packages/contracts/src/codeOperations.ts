@@ -25,6 +25,7 @@ import {
   AgentRunResultDeliveryMark,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
 } from "./agentRun";
+import { ThreadMessagesSteeredIntoTurn } from "./threadMessageSteering";
 import { ExtensionSelection } from "./extensions";
 import { ComputerUseDestinationSelection } from "./desktopLease";
 import { AppleActionRequest } from "./appleToolchain";
@@ -2684,6 +2685,11 @@ export const CodeConversationTurn = Schema.Struct({
    * ran, in arrival order. Absent on a turn that took none.
    */
   steeredResults: Schema.optional(AgentResultsSteeredIntoTurn),
+  /**
+   * The person's messages the runtime took into this turn while it ran, in
+   * arrival order. Absent on a turn that took none.
+   */
+  steeredMessages: Schema.optional(ThreadMessagesSteeredIntoTurn),
   status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
   /**
    * Why a failed turn failed, or the usage limit a waiting turn stopped at, as

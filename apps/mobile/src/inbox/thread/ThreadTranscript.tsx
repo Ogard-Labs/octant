@@ -44,6 +44,35 @@ export interface ThreadTranscriptProps {
   readonly focus?: { readonly turnId: string; readonly onFound: (y: number) => void };
 }
 
+/**
+ * The person's messages the runtime took into a turn while it ran. The agent
+ * read them mid-turn rather than in a turn of their own, so they sit inside
+ * that turn, after its reply, and say so, as on the desktop.
+ */
+function SteeredMessages(props: {
+  readonly steered: WorkTurnState["steeredMessages"];
+  readonly replyDetail: ReplyDetailLevel;
+  readonly testID: string;
+}) {
+  const { colors } = useTheme();
+  if (props.steered === undefined || props.steered.length === 0) return null;
+  return props.steered.map((entry) => (
+    // No accessibilityLabel: on a View it would replace the message's own text
+    // for a screen reader, and the visible heading already says how it was sent.
+    <View key={entry.messageId} testID={`${props.testID}-${entry.messageId}`}>
+      <Text style={{ color: colors.textSecondary, fontSize: 12, textAlign: "right" }}>
+        {MOBILE_COPY.steeredMessage}
+      </Text>
+      <MessageBubble
+        body={entry.body}
+        replyDetail={props.replyDetail}
+        role="user"
+        showActions={false}
+      />
+    </View>
+  ));
+}
+
 export function ThreadTranscript(props: ThreadTranscriptProps) {
   const { colors } = useTheme();
   const styles = useMemo(
@@ -209,6 +238,11 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                   turn.status === "waiting" ? (
                   <Text style={styles.metaText}>{MOBILE_COPY.turnRunning}</Text>
                 ) : null}
+                <SteeredMessages
+                  replyDetail={props.replyDetail}
+                  steered={turn.steeredMessages}
+                  testID={`mobile-work-steered-${String(turn.turnId)}`}
+                />
                 {threadRoutineReceipts(turn.toolSteps).map((routine) => (
                   <RoutineReceiptCard
                     key={routine.routineId}
@@ -263,6 +297,11 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                       : {})}
                   />
                 ))}
+                <SteeredMessages
+                  replyDetail={props.replyDetail}
+                  steered={turn.steeredMessages}
+                  testID={`mobile-code-steered-${turn.operationId}`}
+                />
                 {turn.status === "waiting" ? (
                   <Text style={styles.metaText}>
                     {turn.usageLimit === undefined

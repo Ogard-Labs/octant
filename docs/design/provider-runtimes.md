@@ -1164,7 +1164,10 @@ context inline as on a runtime without the prompt hook; one that carries
 images is refused with a reason (send them once the turn ends) rather than
 sent without them. `steer` answers `unsupported`
 when no turn is held, and the thread's message queue keeps the message for
-the next turn as it does for any running turn. A `Monitor` call that asks for a WebSocket (opened by the
+the next turn as it does for any running turn whose runtime does not steer.
+A Work or Code person's turn is never held (it completes with its reply), so
+a message sent into a running Claude Code turn there always waits for the
+next turn. A `Monitor` call that asks for a WebSocket (opened by the
 runtime process, outside the command sandbox and its network rules) or a
 watch for the whole session is refused before the gate. Plan keeps its
 read-only commands in the foreground: `run_in_background` is refused there.
@@ -2447,11 +2450,14 @@ agent, shipped profile or added.
   turn running, while compacting, for an empty note, and for a note that
   opens with `/`, which would run an agent command no review admitted.
   The host steers through it where it steers any runtime: a person's note
-  to a running child run, and a finished child's result into a running
-  parent turn. Every other ACP agent offers no `steer`, so those wait for a
-  turn of their own, and a prompt `send` delivers while a turn runs is
-  refused for every ACP agent; a person's message to a running thread goes
-  into the host's queue for the next turn either way. Rationale: other ACP
+  to a running child run, a finished child's result into a running parent
+  turn, and a message the person sends into a running Work or Code thread
+  (maintainer decision, 2026-11-21; the queue offers it,
+  [Architecture](../architecture.md#persistence)). Every other ACP agent
+  offers no `steer`, so those wait for a turn of their own, and a prompt
+  `send` delivers while a turn runs is refused for every ACP agent; a
+  person's message to such an agent's running thread waits in the host's
+  queue for the next turn. Rationale: other ACP
   clients either steer this way or cancel the turn and resend; cancelling
   would discard the work under way, and an agent that does not take a
   second prompt would fail the turn, so the flag is per profile.
