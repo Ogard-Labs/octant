@@ -7,6 +7,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import type { ServiceOfferService } from "../offers/serviceOfferService";
+import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
 
 export interface ImageGenerationChoice {
   readonly profileInstanceId: ProviderInstanceId;
@@ -46,18 +47,18 @@ export type ImageGenerationOfferRequest = ImageGenerationOffer extends infer Off
  */
 export class ImageGenerationOfferService {
   readonly #remembered = new Map<string, ImageGenerationChoice>();
-  readonly #offers: Pick<ServiceOfferService<ImageGenerationOffer, ImageOfferAnswer>, "wait">;
+  readonly #offers: Pick<ServiceOfferService<ImageGenerationOffer, ServiceOfferAnswer>, "wait">;
 
-  constructor(offers: Pick<ServiceOfferService<ImageGenerationOffer, ImageOfferAnswer>, "wait">) {
+  constructor(offers: Pick<ServiceOfferService<ImageGenerationOffer, ServiceOfferAnswer>, "wait">) {
     this.#offers = offers;
   }
 
-  offer(input: {
+  async offer(input: {
     readonly windowId: WindowId;
     readonly offer: ImageGenerationOfferRequest;
     readonly signal?: AbortSignal;
   }): Promise<ImageGenerationOfferOutcome> {
-    return this.#offers.wait({
+    const outcome = await this.#offers.wait({
       ...input,
       stamp: (offerId, requestedAt) =>
         decodeImageGenerationOffer({
@@ -66,6 +67,7 @@ export class ImageGenerationOfferService {
           requestedAt,
         }),
     });
+    return outcome.status === "transcribe" ? { status: "cancelled" } : outcome;
   }
 
   remember(scope: ThreadScope, choice: ImageGenerationChoice): void {

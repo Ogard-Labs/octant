@@ -18,6 +18,71 @@ vi.mock("../../design-system", async () => ({
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
+it.each(["Transcribe", "Don't transcribe"])(
+  "discloses the Voice destination on the phone and sends only the confirmed choice: %s",
+  async (action) => {
+    const threadId = "00000000-0000-4000-8000-000000000020";
+    const offerId = "00000000-0000-4000-8000-000000000021";
+    const offer = {
+      kind: "transcribe",
+      threadKind: "work-thread",
+      scopeId: threadId,
+      offerId,
+      requestedAt: "2026-10-15T06:00:00.000Z",
+      relativePath: "notes.wav",
+      sizeBytes: 123,
+      endpointName: "Studio",
+      modelId: "meeting",
+    };
+    const answers: string[] = [];
+    const authenticatedFetch: MobileRemoteTransport["authenticatedFetch"] = async (request) => {
+      if (request.method === "GET")
+        return Response.json({ offers: answers.length === 0 ? [offer] : [] });
+      answers.push(String(request.body));
+      return Response.json({ kind: "offer-answered" });
+    };
+    const authenticate = vi.fn().mockResolvedValueOnce("denied").mockResolvedValueOnce("confirmed");
+    const node = document.createElement("div");
+    document.body.append(node);
+    const root = createRoot(node);
+    try {
+      await act(async () =>
+        root.render(
+          createElement(ThemeProvider, {
+            preference: "light",
+            children: createElement(ServiceOfferCard, {
+              transport: { hostId: "studio", authenticatedFetch },
+              authenticator: { hasDeviceCredential: async () => true, authenticate },
+              threadId,
+              threadKind: "work-thread",
+              inProject: true,
+            }),
+          }),
+        ),
+      );
+      expect(node.textContent).toContain("notes.wav");
+      expect(node.textContent).toContain("123 bytes · Sent to Studio (meeting)");
+      expect(node.textContent).toContain("Don't ask again in this thread");
+      const button = node.querySelector<HTMLElement>(`[aria-label="${action}"]`);
+      expect(button).not.toBeNull();
+      await act(async () => button?.click());
+      if (action === "Transcribe") {
+        expect(answers).toEqual([]);
+        await act(async () => button?.click());
+        expect(answers.map((s) => JSON.parse(s))).toEqual([
+          { offerId, decision: "transcribe", rememberForThread: false },
+        ]);
+      } else {
+        expect(authenticate).not.toHaveBeenCalled();
+        expect(answers.map((s) => JSON.parse(s))).toEqual([{ offerId, decision: "cancel" }]);
+      }
+    } finally {
+      act(() => root.unmount());
+      node.remove();
+    }
+  },
+);
+
 it.each([false, true])(
   "requires confirmation on the phone, with reference images: %s",
   async (references) => {
@@ -96,7 +161,7 @@ it.each([false, true])(
       expect(authenticatedFetch.mock.calls[0]?.[0]).toMatchObject({
         method: "GET",
         path: "/api/offers",
-        query: `?threadKind=chat-thread&scopeId=${threadId}&referenceImages=1`,
+        query: `?threadKind=chat-thread&scopeId=${threadId}&referenceImages=1&transcription=1`,
       });
       if (references) {
         expect(node.textContent).toContain(

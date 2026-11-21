@@ -17,7 +17,10 @@ import {
   type StableHostId,
 } from "@octant/contracts";
 import { listEligibleImageProfiles } from "@octant/domain";
-import { ImageGenerationOfferService, type ImageOfferAnswer } from "./imageGenerationOfferService";
+import { ImageGenerationOfferService } from "./imageGenerationOfferService";
+import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
+import { transcriptionDecision } from "../speech/transcriptionTool";
+import { decodeTranscriptionOffer } from "@octant/contracts";
 import { createImageRouteHandler } from "./imageRoutes";
 import type { ImageJobService } from "./imageJobService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -87,7 +90,7 @@ function setup(
   }));
   const authorizeScope = vi.fn(async () => options.authorized !== false);
   let uuid = 0;
-  const serviceOffers = new ServiceOfferService<ServiceOffer, ImageOfferAnswer>(
+  const serviceOffers = new ServiceOfferService<ServiceOffer, ServiceOfferAnswer>(
     MAX_PENDING_IMAGE_GENERATION_OFFERS,
     {
       uuid: () => `b3000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`,
@@ -105,10 +108,13 @@ function setup(
   const offerRoute = createServiceOfferRouteHandler({
     offers: serviceOffers,
     listImageProfiles: () => listEligibleImageProfiles(imageProfiles.listInstances()),
-    rules: imageOfferDecisionRules({
-      ...imageProfiles,
-      kept: { remember },
-    }),
+    rules: {
+      transcribe: transcriptionDecision,
+      ...imageOfferDecisionRules({
+        ...imageProfiles,
+        kept: { remember },
+      }),
+    },
     authorizeScope,
     windowAuthorityStore,
     now: () => nowMs,
@@ -312,6 +318,51 @@ describe("image routes", () => {
       await expect(outcome).resolves.toEqual({ status: "cancelled" });
       const legacy = await handler(request("/api/image/offers/decide", { method: "POST", body }));
       expect(await legacy?.json()).toMatchObject({ kind: "image-offer-gone" });
+    });
+
+    it("shows a recording only to clients with its disclosure and permits one matching answer", async () => {
+      const { handler, serviceOffers } = setup();
+      const pending = serviceOffers.wait({
+        windowId: decodeWindowId(windowId),
+        stamp: (offerId, requestedAt) =>
+          decodeTranscriptionOffer({
+            kind: "transcribe",
+            threadKind: "code-thread",
+            scopeId,
+            offerId,
+            requestedAt,
+            relativePath: "audio.m4a",
+            sizeBytes: 123,
+            endpointName: "Studio",
+            modelId: "voice",
+          }),
+      });
+      const query = `threadKind=code-thread&scopeId=${scopeId}`;
+      for (const path of ["/api/image/offers?", "/api/offers?referenceImages=1&"]) {
+        const response = await handler(request(path + query));
+        expect(await response?.json()).toEqual({ offers: [] });
+      }
+      const [offer] = decodeServiceOffersResponse(
+        await (await handler(request("/api/offers?transcription=1&" + query)))?.json(),
+      ).offers;
+      expect(offer?.kind).toBe("transcribe");
+      const decide = async (body: object) =>
+        (
+          await handler(
+            request("/api/offers/decide", {
+              method: "POST",
+              body: { offerId: offer?.offerId, ...body },
+            }),
+          )
+        )?.json();
+      expect(await decide({ decision: "save" })).toMatchObject({ kind: "offer-refused" });
+      expect(await decide({ decision: "transcribe", rememberForThread: true })).toEqual({
+        kind: "offer-answered",
+      });
+      expect(await decide({ decision: "transcribe", rememberForThread: true })).toEqual({
+        kind: "offer-gone",
+      });
+      expect(await pending).toEqual({ status: "transcribe", rememberForThread: true });
     });
 
     it("shows reference offers only to current clients and requires disclosure and a compatible model", async () => {

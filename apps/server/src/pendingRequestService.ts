@@ -64,6 +64,7 @@ export interface PendingRequestSources {
    */
   readonly asks?: (
     reader: PendingRequestReader,
+    imageOffersOnly: boolean,
   ) => ReadonlyArray<WaitingAsk> | Promise<ReadonlyArray<WaitingAsk>>;
   readonly offerHostRun?: string;
 }
@@ -113,6 +114,7 @@ export class PendingRequestService {
   async list(
     windowId: WindowId,
     readerKind: PendingRequestReader["kind"] = "local-window",
+    imageOffersOnly = false,
   ): Promise<PendingRequestList> {
     const modes = enabledModes(this.#sources.readSettings());
     const reader = { kind: readerKind, scopeId: windowId };
@@ -120,7 +122,7 @@ export class PendingRequestService {
       modes.includes("work") ? this.#sources.work(windowId) : [],
       this.#sources.code(windowId),
       this.#sources.children(reader),
-      this.#sources.asks?.(reader) ?? [],
+      this.#sources.asks?.(reader, imageOffersOnly) ?? [],
     ]);
     const asks = waiting
       .filter((ask) => modes.includes(ask.mode))
