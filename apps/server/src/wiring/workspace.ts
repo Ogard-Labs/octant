@@ -164,14 +164,13 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
         return workThreadProjection.read(input.threadId as never) !== undefined;
       },
       projectExists: (projectId) => persistence.readProject(projectId as never) !== undefined,
-      notMeasuredProvider: (providerInstanceId, ranAtFullAccess) =>
+      notMeasuredProvider: (providerInstanceId) =>
         notMeasuredProvider(
           {
             readProviderInstances: () => persistence.readProviderInstances(),
             observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
           },
           providerInstanceId,
-          ranAtFullAccess,
         ),
     });
     spendCeilingHolder.service = spendCeilingService;

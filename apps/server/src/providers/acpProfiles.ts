@@ -83,7 +83,20 @@ export interface AcpProcessProfile {
    * it. A reviewed profile fails closed on a version it cannot read.
    */
   readonly versionProbe?: "best-effort";
+  /**
+   * The earliest release this profile was probed on; an older one is refused,
+   * since nothing shows it speaks the wire the profile reads (Mistral Vibe's
+   * is also a protocol requirement: its mode ids moved in 2.23.3 and 2.24.1).
+   * Every later release runs unless `brokenVersions` lists it.
+   */
   readonly minimumVersion: readonly [number, number, number];
+  /**
+   * Releases known to break with Octant, each `major.minor.patch`. A launch
+   * on one is refused with a sentence that names it; every other release at
+   * or above `minimumVersion` runs. Empty for every profile until a release
+   * is found broken.
+   */
+  readonly brokenVersions?: ReadonlyArray<string>;
   /** When set, version is read from the matching npm `package.json` instead of `--version`. */
   readonly npmPackageName?: string;
   readonly passthroughVariables: ReadonlyArray<string>;
@@ -185,24 +198,24 @@ export interface AcpSessionMetaReasoning {
 
 export interface AcpProviderProfile {
   /**
-   * Exact releases whose cumulative usage/context update semantics were
-   * verified. A profile that pins them is read only by that reviewed rule;
-   * every other agent's usage is read by ACP's standard schema
-   * (`acpTurnUsage`, `finishAcpReportedTurn`).
+   * Releases whose cumulative usage/context update semantics were reviewed.
+   * A profile that names them is read only by that rule, from the earliest of
+   * them on (`acpReleaseClaim`); every other agent's usage is read by ACP's
+   * standard schema (`acpTurnUsage`, `finishAcpReportedTurn`).
    */
   readonly usageVersions?: ReadonlyArray<string>;
-  /** Exact releases whose signed-in supplementary read and cold-resume semantics passed. */
+  /** Releases whose signed-in supplementary read and cold-resume semantics passed. */
   readonly fileReviewVersions?: ReadonlyArray<string>;
-  /** Exact releases whose signed-in nonempty compaction and resume semantics passed. */
+  /** Releases whose signed-in nonempty compaction and resume semantics passed. */
   readonly compactionVersions?: ReadonlyArray<string>;
-  /** Exact releases whose native session lifecycle has passed warm-reuse evidence. */
+  /** Releases whose native session lifecycle has passed warm-reuse evidence. */
   readonly retainedSessionVersions?: ReadonlyArray<string>;
   /**
    * The process stays open between turns on every release, as other ACP
    * clients of the agent keep it, without a pinned one.
    */
   readonly retainsSessions?: true;
-  /** Verified HTTP MCP implementations that omit, rather than deny, negotiation. */
+  /** Reviewed HTTP MCP implementations that omit, rather than deny, negotiation. */
   readonly unadvertisedHttpMcpVersions?: ReadonlyArray<string>;
   readonly kind: AcpProviderKind;
   readonly displayName: string;
@@ -346,7 +359,7 @@ export interface AcpProviderProfile {
   /** Chat sessions run in the managed home unless the agent needs a real Project root. */
   readonly chatSessionRoot: "managed-home" | "project-root";
   readonly userQuestions: "supported" | "unsupported";
-  /** Exact native versions accepted by signed-in session-form verification. */
+  /** Native releases accepted by signed-in session-form verification. */
   readonly elicitationVersions?: ReadonlyArray<string>;
   /** ACP method used to reattach to a prior session. */
   readonly resumeMethod: "session/load" | "session/resume";
@@ -355,13 +368,13 @@ export interface AcpProviderProfile {
   /** Whether the probe calls `authenticate` before opening a scratch session. */
   readonly authenticateOnProbe: boolean;
   /**
-   * When present, the probe fails closed unless the agent advertises exactly
-   * this embedded command inventory. A prompt starting with `/` runs one of
-   * those commands in Work and Code outside Plan, as in the agent's own app
-   * (maintainer decision, 2026-11-14); Plan and Chat refuse it, since a
-   * command such as `update-config` writes.
+   * A prompt starting with `/` runs only a command the agent listed (its
+   * session's `available_commands_update`, or the readiness check's until the
+   * session lists any), whatever the release lists (maintainer decisions,
+   * 2026-11-14 and 2026-11-21); an unlisted one is refused before it reaches
+   * the agent. The level's tool rules decide what a command does.
    */
-  readonly reviewedCommands?: ReadonlyArray<string>;
+  readonly listedCommandsOnly?: true;
   /** Provider-owned CLI login, with delegated browser auth reserved for legacy profiles. */
   readonly authentication:
     | { readonly kind: "provider-owned" }
@@ -371,39 +384,37 @@ export interface AcpProviderProfile {
 }
 
 /**
- * What a feature pinned to exact reviewed releases (`usageVersions`,
- * `compactionVersions` and the like) may do on the release that runs.
- * `reviewed`: the release is one of them. `unverified`: at Full access, a
- * release newer than every reviewed one keeps the feature, offered as
- * unverified instead of lost, since a person who runs the agent open already
- * gives it more than the feature reaches. `absent`: below Full access the pin
- * holds, and an older or unparseable release never inherits newer evidence.
+ * What a feature reviewed on named releases (`usageVersions`,
+ * `compactionVersions` and the like) may do on the release that runs, at
+ * every level alike (maintainer decision, 2026-11-21). `reviewed`: the
+ * release is one of them. `unverified`: a release at or above the earliest
+ * of them keeps the feature, and the runtime card says so. `absent`: an
+ * older or unreadable release never inherits newer evidence. A release known
+ * to break is refused at launch (`brokenVersions`), not here.
  */
-export type AcpExactReleaseClaim = "reviewed" | "unverified" | "absent";
+export type AcpReleaseClaim = "reviewed" | "unverified" | "absent";
 
-export function acpExactReleaseClaim(
+export function acpReleaseClaim(
   reviewed: ReadonlyArray<string> | undefined,
   version: string | undefined,
-  executionPolicy: ProviderExecutionPolicy | undefined,
-): AcpExactReleaseClaim {
+): AcpReleaseClaim {
   if (reviewed === undefined || reviewed.length === 0 || version === undefined) return "absent";
   if (reviewed.includes(version)) return "reviewed";
-  if (executionPolicy !== "full-access") return "absent";
-  return reviewed.every((release) => newerRelease(version, release)) ? "unverified" : "absent";
+  return reviewed.some((release) => releaseAtLeast(version, release)) ? "unverified" : "absent";
 }
 
-/** Whether `candidate` is a later major.minor.patch release than `than`. */
-function newerRelease(candidate: string, than: string): boolean {
+/** Whether `candidate` is the same major.minor.patch release as `floor` or a later one. */
+export function releaseAtLeast(candidate: string, floor: string): boolean {
   const parse = (text: string) => /^(\d+)\.(\d+)\.(\d+)$/.exec(text)?.slice(1, 4).map(Number);
   const left = parse(candidate);
-  const right = parse(than);
+  const right = parse(floor);
   if (left === undefined || right === undefined) return false;
   for (let index = 0; index < 3; index += 1) {
     const a = left[index] ?? 0;
     const b = right[index] ?? 0;
     if (a !== b) return a > b;
   }
-  return false;
+  return true;
 }
 
 export const HOST_PASSTHROUGH_VARIABLES: ReadonlyArray<string> = [
@@ -1680,23 +1691,6 @@ const fxProfile: AcpProviderProfile = {
   },
 };
 
-const KIMI_REVIEWED_COMMANDS = [
-  "compact",
-  "status",
-  "usage",
-  "mcp",
-  "tasks",
-  "help",
-  "mcp-config",
-  "import-from-cc-codex",
-  "update-config",
-  "custom-theme",
-  "write-goal",
-  "check-kimi-code-docs",
-  "sub-skill",
-  "sub-skill.review",
-  "sub-skill.consolidate",
-] as const;
 const kimiProfile: AcpProviderProfile = {
   kind: "kimi-code",
   displayName: "Kimi Code",
@@ -1711,7 +1705,7 @@ const kimiProfile: AcpProviderProfile = {
   resumeMethod: "session/resume",
   closesSessions: false,
   authenticateOnProbe: true,
-  reviewedCommands: KIMI_REVIEWED_COMMANDS,
+  listedCommandsOnly: true,
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage: "Kimi Code is not authenticated. Run kimi login, then retry.",
   nativeSetupSupport: acpOwnSetupSupport(["skills", "toolServers", "hooks"]),

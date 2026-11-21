@@ -46,12 +46,15 @@ afterEach(() => {
   }
 });
 
-function openDatabase(): { connection: SqliteConnection; journal: Journal } {
+function openDatabase(migrations: typeof MIGRATIONS = MIGRATIONS): {
+  connection: SqliteConnection;
+  journal: Journal;
+} {
   const directory = mkdtempSync(join(tmpdir(), "octant-usage-proj-"));
   directories.push(directory);
   const path = join(directory, "octant.sqlite3");
   const connection = openSqlite(path);
-  applyMigrations(connection, MIGRATIONS, () => now);
+  applyMigrations(connection, migrations, () => now);
   const runtime = createPhase1RuntimeRegistries();
   const journal = new Journal({
     connection,
@@ -566,9 +569,13 @@ describe("UsageProjection", () => {
     connection.close();
   });
 
-  it("records whether a Code turn ran at Full access, only for turns started after the ledger began recording it", () => {
-    const { connection, journal } = openDatabase();
-    const turn = (operationId: string, executionPolicy?: string) =>
+  it("keeps a store's Code usage through the upgrade that drops the Full access column, and rebuilds it", () => {
+    // A store from before the column was dropped, holding rows that recorded
+    // the level, as the build that wrote it did.
+    const { connection, journal } = openDatabase(
+      MIGRATIONS.filter((migration) => migration.version <= 110),
+    );
+    const turn = (operationId: string, executionPolicy: string) =>
       journal.append({
         aggregate: { aggregateType: "code-operation", aggregateId: operationId },
         expectedVersion: 0,
@@ -579,8 +586,9 @@ describe("UsageProjection", () => {
             modelId: "acp-agent",
             sessionId: ids.entry,
             prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
-            ...(executionPolicy === undefined ? {} : { executionPolicy }),
+            executionPolicy,
           },
+          { kind: "usage", inputTokens: 30, outputTokens: 6 },
           { kind: "operation-state", state: "completed" },
         ].map((event, index) =>
           pending("code.operation-event-recorded@1", {
@@ -592,40 +600,51 @@ describe("UsageProjection", () => {
           }),
         ),
       });
-    // Journaled and projected before this build, which had no level to
-    // write; the migration then places the boundary after it.
     turn(ids.usage, "full-access");
-    connection.prepare("UPDATE usage_record_projection SET ran_at_full_access = NULL").run();
-    connection.prepare("UPDATE usage_turn_level_boundary SET global_sequence = ?").run(
-      (
-        connection.prepare("SELECT MAX(global_sequence) AS sequence FROM event_journal").get() as {
-          readonly sequence: number;
-        }
-      ).sequence,
-    );
-    turn(ids.usage2, "full-access");
-    turn(ids.usage3, "approval-gated");
-    // A turn whose start recorded no level is read as before too.
-    turn(ids.checkout);
+    turn(ids.usage2, "approval-gated");
+    connection
+      .prepare(
+        "UPDATE usage_record_projection SET ran_at_full_access = 1 WHERE reconciliation_id = ?",
+      )
+      .run(ids.usage);
+    connection
+      .prepare(
+        "UPDATE usage_record_projection SET ran_at_full_access = 0 WHERE reconciliation_id = ?",
+      )
+      .run(ids.usage2);
 
+    applyMigrations(connection, MIGRATIONS, () => now);
+
+    const columns = connection
+      .prepare("PRAGMA table_info(usage_record_projection)")
+      .all() as ReadonlyArray<{ readonly name: string }>;
+    expect(columns.map((column) => column.name)).not.toContain("ran_at_full_access");
+    expect(
+      connection
+        .prepare("SELECT name FROM sqlite_master WHERE name = 'usage_turn_level_boundary'")
+        .all(),
+    ).toEqual([]);
     const rows = () =>
       connection
         .prepare(
-          `SELECT reconciliation_id, ran_at_full_access
+          `SELECT reconciliation_id, quality, input_tokens, output_tokens
           FROM usage_record_projection ORDER BY last_sequence`,
         )
         .all();
     const expected = [
-      { reconciliation_id: ids.usage, ran_at_full_access: null },
-      { reconciliation_id: ids.usage2, ran_at_full_access: 1 },
-      { reconciliation_id: ids.usage3, ran_at_full_access: 0 },
-      { reconciliation_id: ids.checkout, ran_at_full_access: null },
+      { reconciliation_id: ids.usage, quality: "exact", input_tokens: 30, output_tokens: 6 },
+      { reconciliation_id: ids.usage2, quality: "exact", input_tokens: 30, output_tokens: 6 },
     ];
     expect(rows()).toEqual(expected);
     const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
     if (projection === undefined) throw new Error("Usage projection is missing");
     rebuildProjection({ connection, journal, projection, clock: () => now });
     expect(rows()).toEqual(expected);
+    turn(ids.usage3, "full-access");
+    expect(rows()).toEqual([
+      ...expected,
+      { reconciliation_id: ids.usage3, quality: "exact", input_tokens: 30, output_tokens: 6 },
+    ]);
     connection.close();
   });
 
