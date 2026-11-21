@@ -574,7 +574,12 @@ it checks the signed release build placed in its data folder's
 checked, and runs that build's own `octant server install` into the login's
 state folder, which checks the signature again; it never passes
 `--self-built`, never runs sudo, and does not download the build itself yet.
-Update and Remove over SSH are not built.
+It updates such a member the same way, through the installed copy's
+`octant server upgrade`, then reads the member's signed hello and restores
+the previous `current` link when the hello does not confirm the build; and it
+removes Octant with `octant hub leave`, `octant server disable
+--remove-service` and `octant server uninstall`, keeping the data folder
+unless the person ticks it.
 An installed CLI starts that server under the same runtime with
 `OCTANT_ARTIFACT_ROOT` and `OCTANT_ARTIFACT_VERSION` set. The server verifies
 every listed file before it opens the store, and reports that version on
@@ -19614,8 +19619,16 @@ aggregate under the server's own id, as
 `shield-servers.member-install-requested@1` (build version and ring, target,
 listen address and port) and `shield-servers.member-install-step@1` (step,
 outcome, and a closed failure reason), with the person or their paired device
-as the actor and never a join code, ticket, comparison code or key; startup
-replays neither into the registry. The Judge, the confined path below, the
+as the actor and never a join code, ticket, comparison code or key. Such a
+server's row then offers **Update** and **Remove Octant** on the same route,
+journaled the same way as `shield-servers.member-update-requested@1` (both
+versions, ring, target, drain), `shield-servers.member-update-step@1` (copy,
+verify, drain, swap, confirm or roll-back, with outcome and a closed failure
+reason, among them why the swapped build was rolled back),
+`shield-servers.member-removal-requested@1` (whether the data folder is
+deleted) and `shield-servers.member-removal-step@1` (leave, stop or delete).
+Startup replays these only to know which servers are Octant computers and at
+which version; none changes the registry. The Judge, the confined path below, the
 record, and the notes all read the thread's Project's list. An alias is unique without regard to case, as ssh
 matches `Host` patterns, and a runbook inside a key or credential folder is
 refused. The rules are pure policy in `packages/domain/src/shieldServerPolicy.ts`,

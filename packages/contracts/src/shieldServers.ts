@@ -25,6 +25,10 @@ export const SHIELD_SERVERS_EVENT_NAMES = {
   projectOverrideCleared: "shield-servers.project-override-cleared@1",
   memberInstallRequested: "shield-servers.member-install-requested@1",
   memberInstallStepRecorded: "shield-servers.member-install-step@1",
+  memberUpdateRequested: "shield-servers.member-update-requested@1",
+  memberUpdateStepRecorded: "shield-servers.member-update-step@1",
+  memberRemovalRequested: "shield-servers.member-removal-requested@1",
+  memberRemovalStepRecorded: "shield-servers.member-removal-step@1",
 } as const;
 
 /** Remote commands are journaled per thread, on the thread's own aggregate id. */
@@ -371,6 +375,175 @@ export const MemberInstallProgress = Schema.Struct({
 }).annotations(strict);
 export type MemberInstallProgress = typeof MemberInstallProgress.Type;
 
+/**
+ * Updating a member Octant installed over SSH, and removing Octant from it.
+ * Canonical: docs/design/hub-and-spokes.md § Adding a computer over SSH.
+ */
+
+/** A server this computer made an Octant computer, as the journal holds it. */
+export const MemberComputer = Schema.Struct({
+  serverId: AggregateId,
+  target: MemberInstallTarget,
+  /** The version the last confirmed install or update left running. */
+  artifactVersion: MemberInstallVersion,
+  listenAddress: MemberInstallAddress,
+  listenPort: MemberInstallPort,
+}).annotations(strict);
+export type MemberComputer = typeof MemberComputer.Type;
+
+/** The update's steps in the order they run; `roll-back` runs only after a failed swap or confirmation. */
+export const MEMBER_UPDATE_STEPS = ["copy", "verify", "drain", "swap", "confirm"] as const;
+export const MemberUpdateStep = Schema.Literal(...MEMBER_UPDATE_STEPS, "roll-back");
+export type MemberUpdateStep = typeof MemberUpdateStep.Type;
+
+/**
+ * Why an update step failed, as a closed list. The last four are why the
+ * confirmation refused the swapped build, and so why it was rolled back.
+ */
+export const MemberUpdateFailure = Schema.Literal(
+  "server-unreachable",
+  "digest-mismatch",
+  "build-mismatch",
+  "command-failed",
+  "timed-out",
+  /** `octant server upgrade` stopped the build and left the store for a person to restore. */
+  "recovery-required",
+  /** The store was migrated, so the previous build is not started against it. */
+  "rollback-unsafe",
+  "health-check-failed",
+  "hello-unproven",
+  "version-mismatch",
+  "protocol-not-covered",
+);
+export type MemberUpdateFailure = typeof MemberUpdateFailure.Type;
+
+/**
+ * How the member stops admitting turns before the swap. Only stopping now is
+ * built: the member's owner stops gracefully, and the turns that stop cuts
+ * off continue by themselves once it starts again.
+ */
+export const MemberUpdateDrain = Schema.Literal("stop-now");
+export type MemberUpdateDrain = typeof MemberUpdateDrain.Type;
+
+/** The person confirmed an update. Journaled before anything runs on the server; it names builds, never a key. */
+export const MemberUpdateRequestedPayload = Schema.Struct({
+  updateId: AggregateId,
+  serverId: AggregateId,
+  target: MemberInstallTarget,
+  fromVersion: MemberInstallVersion,
+  toVersion: MemberInstallVersion,
+  ring: MemberInstallReleaseRing,
+  drain: MemberUpdateDrain,
+}).annotations(strict);
+export type MemberUpdateRequestedPayload = typeof MemberUpdateRequestedPayload.Type;
+
+export const MemberUpdateStepRecordedPayload = Schema.Struct({
+  updateId: AggregateId,
+  serverId: AggregateId,
+  step: MemberUpdateStep,
+  outcome: Schema.Literal("succeeded", "failed"),
+  failure: Schema.optional(MemberUpdateFailure),
+}).annotations(strict);
+export type MemberUpdateStepRecordedPayload = typeof MemberUpdateStepRecordedPayload.Type;
+
+export const MEMBER_REMOVAL_STEPS = ["leave", "stop", "delete"] as const;
+export const MemberRemovalStep = Schema.Literal(...MEMBER_REMOVAL_STEPS);
+export type MemberRemovalStep = typeof MemberRemovalStep.Type;
+
+export const MemberRemovalFailure = Schema.Literal(
+  "server-unreachable",
+  "command-failed",
+  "timed-out",
+);
+export type MemberRemovalFailure = typeof MemberRemovalFailure.Type;
+
+/** The person confirmed removing Octant; `deleteData` is true only when they ticked it. */
+export const MemberRemovalRequestedPayload = Schema.Struct({
+  removalId: AggregateId,
+  serverId: AggregateId,
+  deleteData: Schema.Boolean,
+}).annotations(strict);
+export type MemberRemovalRequestedPayload = typeof MemberRemovalRequestedPayload.Type;
+
+export const MemberRemovalStepRecordedPayload = Schema.Struct({
+  removalId: AggregateId,
+  serverId: AggregateId,
+  step: MemberRemovalStep,
+  outcome: Schema.Literal("succeeded", "failed"),
+  failure: Schema.optional(MemberRemovalFailure),
+}).annotations(strict);
+export type MemberRemovalStepRecordedPayload = typeof MemberRemovalStepRecordedPayload.Type;
+
+const MemberStepRunState = Schema.Literal("waiting", "running", "succeeded", "failed", "not-run");
+const MemberStepMessage = Schema.String.pipe(Schema.maxLength(1_024));
+const MemberInstallPath = Schema.String.pipe(Schema.minLength(2), Schema.maxLength(1_024));
+
+/** What the Update sheet states before anything runs, every fact read now. */
+export const MemberUpdatePlan = Schema.Struct({
+  planId: AggregateId,
+  serverId: AggregateId,
+  alias: ShieldServerAlias,
+  user: ShieldServerUser,
+  target: MemberInstallTarget,
+  /** The version the server's `current` link names now. */
+  fromVersion: MemberInstallVersion,
+  toVersion: MemberInstallVersion,
+  ring: MemberInstallReleaseRing,
+  signature: Schema.Literal("verified"),
+  installRoot: MemberInstallPath,
+  /** The new build migrates the member's store; `octant server upgrade` takes a verified backup first. */
+  storeMigration: Schema.Boolean,
+  /** The ways to drain on offer; waiting for running turns is not built. */
+  drains: Schema.Array(MemberUpdateDrain).pipe(Schema.minItems(1), Schema.maxItems(1)),
+}).annotations(strict);
+export type MemberUpdatePlan = typeof MemberUpdatePlan.Type;
+
+export const MemberUpdateStepState = Schema.Struct({
+  step: MemberUpdateStep,
+  state: MemberStepRunState,
+  message: Schema.optional(MemberStepMessage),
+}).annotations(strict);
+export type MemberUpdateStepState = typeof MemberUpdateStepState.Type;
+
+export const MemberUpdateProgress = Schema.Struct({
+  updateId: AggregateId,
+  serverId: AggregateId,
+  state: Schema.Literal("running", "updated", "rolled-back", "failed"),
+  steps: Schema.Array(MemberUpdateStepState).pipe(Schema.maxItems(MEMBER_UPDATE_STEPS.length + 1)),
+  /** Why the swapped build was rolled back, when it was. */
+  rollbackReason: Schema.optional(MemberUpdateFailure),
+}).annotations(strict);
+export type MemberUpdateProgress = typeof MemberUpdateProgress.Type;
+
+/** What the Remove Octant sheet states before anything runs. */
+export const MemberRemovalPlan = Schema.Struct({
+  planId: AggregateId,
+  serverId: AggregateId,
+  alias: ShieldServerAlias,
+  user: ShieldServerUser,
+  installRoot: MemberInstallPath,
+  /** The login's Octant data folder: kept unless the person ticks to delete it. */
+  dataFolder: MemberInstallPath,
+  service: Schema.Literal("systemd-user", "launchd-agent"),
+}).annotations(strict);
+export type MemberRemovalPlan = typeof MemberRemovalPlan.Type;
+
+export const MemberRemovalStepState = Schema.Struct({
+  step: MemberRemovalStep,
+  state: MemberStepRunState,
+  message: Schema.optional(MemberStepMessage),
+}).annotations(strict);
+export type MemberRemovalStepState = typeof MemberRemovalStepState.Type;
+
+export const MemberRemovalProgress = Schema.Struct({
+  removalId: AggregateId,
+  serverId: AggregateId,
+  state: Schema.Literal("running", "removed", "failed"),
+  deleteData: Schema.Boolean,
+  steps: Schema.Array(MemberRemovalStepState).pipe(Schema.maxItems(MEMBER_REMOVAL_STEPS.length)),
+}).annotations(strict);
+export type MemberRemovalProgress = typeof MemberRemovalProgress.Type;
+
 export const MemberInstallCommand = Schema.Union(
   /** Reads the server and this computer's build, and states the plan; changes nothing. */
   Schema.Struct({
@@ -386,6 +559,36 @@ export const MemberInstallCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("read-member-install"),
     installId: AggregateId,
+  }).annotations(strict),
+  /** The servers this computer made Octant computers, which offer Update and Remove Octant. */
+  Schema.Struct({ kind: Schema.Literal("list-member-computers") }).annotations(strict),
+  /** Reads the server's install and this computer's newer build; changes nothing. */
+  Schema.Struct({
+    kind: Schema.Literal("prepare-member-update"),
+    serverId: AggregateId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("confirm-member-update"),
+    planId: AggregateId,
+    drain: MemberUpdateDrain,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("read-member-update"),
+    updateId: AggregateId,
+  }).annotations(strict),
+  /** Reads where Octant is installed on the server; changes nothing. */
+  Schema.Struct({
+    kind: Schema.Literal("prepare-member-removal"),
+    serverId: AggregateId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("confirm-member-removal"),
+    planId: AggregateId,
+    deleteData: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("read-member-removal"),
+    removalId: AggregateId,
   }).annotations(strict),
 );
 export type MemberInstallCommand = typeof MemberInstallCommand.Type;
@@ -406,6 +609,11 @@ export const MemberInstallRefusalReason = Schema.Literal(
   "install-not-found",
   "already-installing",
   "unavailable",
+  /** The server is not one this computer made an Octant computer, or its install is gone. */
+  "not-a-member",
+  "no-newer-build",
+  "update-not-found",
+  "removal-not-found",
 );
 export type MemberInstallRefusalReason = typeof MemberInstallRefusalReason.Type;
 
@@ -417,6 +625,26 @@ export const MemberInstallResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("member-install-progress"),
     progress: MemberInstallProgress,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("member-computers"),
+    members: Schema.Array(MemberComputer).pipe(Schema.maxItems(MAX_SHIELD_SERVERS)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("member-update-plan"),
+    plan: MemberUpdatePlan,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("member-update-progress"),
+    progress: MemberUpdateProgress,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("member-removal-plan"),
+    plan: MemberRemovalPlan,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("member-removal-progress"),
+    progress: MemberRemovalProgress,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("member-install-refused"),
@@ -432,6 +660,18 @@ export const decodeMemberInstallRequestedPayload = Schema.decodeUnknownSync(
 );
 export const decodeMemberInstallStepRecordedPayload = Schema.decodeUnknownSync(
   MemberInstallStepRecordedPayload,
+);
+export const decodeMemberUpdateRequestedPayload = Schema.decodeUnknownSync(
+  MemberUpdateRequestedPayload,
+);
+export const decodeMemberUpdateStepRecordedPayload = Schema.decodeUnknownSync(
+  MemberUpdateStepRecordedPayload,
+);
+export const decodeMemberRemovalRequestedPayload = Schema.decodeUnknownSync(
+  MemberRemovalRequestedPayload,
+);
+export const decodeMemberRemovalStepRecordedPayload = Schema.decodeUnknownSync(
+  MemberRemovalStepRecordedPayload,
 );
 
 export const decodeShieldServersCommand = Schema.decodeUnknownSync(ShieldServersCommand);

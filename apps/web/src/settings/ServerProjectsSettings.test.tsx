@@ -401,6 +401,7 @@ describe("ServerProjectsSettings", () => {
           view: { servers: registry, sshAgent: "available" as const },
         };
       }),
+      memberInstall: vi.fn(async () => ({ kind: "member-computers" as const, members: [] })),
     };
     const projects = {
       read: vi.fn(async () => ({ projects: [] })),

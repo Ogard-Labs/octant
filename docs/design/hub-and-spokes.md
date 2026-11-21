@@ -564,8 +564,9 @@ Decided 2026-11-19 ([decision H26](#decisions)): a person turns one of their
 registered SSH servers into a full Octant computer from Settings, without
 visiting it. Octant installs the signed headless build over SSH after the
 person confirms, starts it as a user service, turns on its private listener,
-and joins it to the hub. Built for a hub, in slice 18 below; what is not built
-is listed at the end.
+and joins it to the hub. Later the same row updates it and removes Octant
+from it, over the same connection. Built for a hub, in slice 18 below; what is
+not built is listed at the end.
 
 **Who may.** In Settings › Permissions › Servers a registered server's row
 offers **Make this an Octant computer**. The host decides on its own route
@@ -645,6 +646,76 @@ with the person or their paired device as the actor. They name the build, the
 target and the address, never a join code, ticket, comparison code or key,
 and no credential is copied to the server.
 
+**Update.** A server this computer made an Octant computer (the journal holds
+an install whose join succeeded, and no removal since) offers **Update** and
+**Remove Octant** in place of Make this an Octant computer, for the same
+principals on the same route, decided before anything is read. Preparing
+reads the install over SSH (the version its `current` link names, that
+version's manifest, and the login's state and data folders) and this
+computer's build, and changes nothing. It refuses a server this hub does not
+list as a member, a build that is not newer than the installed one, and an
+unsigned or untrusted build, exactly as the install does. The sheet states
+the two versions and the ring, that the signature and every file were checked
+here, how running turns stop, that the store is migrated when the new build's
+store version is higher, and what makes Octant roll back. The one
+confirmation journals the request, then runs over the same connection:
+
+1. **Copy** and **Verify**, exactly as the install does.
+2. **Drain.** `octant server stop` from the installed copy: the member's owner
+   stops gracefully, and the turns that stop cuts off continue by themselves
+   once it starts again (restart continuation). Only **stop now** is built;
+   waiting up to a chosen number of minutes for running turns is not, because
+   no host stops admitting new turns while letting running ones finish.
+3. **Swap.** The installed copy's `octant server upgrade --artifact …
+--install-root …`, so the user service it rewrites keeps naming the
+   install's `current` link. It checks the signature again, stages the new
+   version, takes a verified backup when the store migrates, swaps, starts it,
+   and puts the previous version back itself when its health polls fail.
+4. **Confirm.** This hub reads the member's signed hello
+   (`/api/remote/hello` with a fresh nonce) over its connection pinned to the
+   member's listener, found by the address and port the install recorded, and
+   believes it only when the identity key the hub admitted the member with
+   signed it. The update is confirmed when the hello names the installed
+   version and its protocol range covers this computer.
+
+**Roll back.** After a failed swap that left the previous version current, or
+a confirmation that fails because the hello does not come within two minutes
+(the health check), is not signed by the member's key, names another version,
+or has a protocol range that does not cover this computer, the **Roll back**
+step points `current` at the previous version again, starts it, and deletes
+the refused version so the update can be tried again; the sheet says why. A
+swap that `octant server upgrade` left stopped for a store restore
+(`recovery-required`) is not rolled back, and neither is a confirmed swap
+whose store was migrated: Octant never starts the previous build against a
+migrated store, and the sheet tells the person to restore the backup. There
+is no separate CLI rollback command; this is the previous `current` link
+restored and the service started.
+
+**Remove Octant.** Preparing reads the same facts; the sheet says plainly
+what is deleted (the user service, the install folder, and the data folder
+only if ticked) and what stays (the data folder, with the member's threads,
+settings and keys, unless ticked; the server stays registered here). The one
+confirmation journals the request and runs:
+
+1. **Leave.** `octant hub leave` on the member. When it cannot (its service
+   may be stopped), this hub removes it from its roster instead.
+2. **Stop.** `octant server disable --remove-service`: stops the service,
+   disables it, and deletes its unit or launch agent.
+3. **Delete.** `octant server uninstall --install-root …`, and the install's
+   work folders. Only when the person ticked it, `--remove-data --confirm
+<data folder>`, where the CLI deletes the data folder only when it is that
+   exact canonical folder the sheet named.
+
+**Journal.** An update journals `shield-servers.member-update-requested@1`
+(both versions, ring, target, and the drain chosen) and
+`shield-servers.member-update-step@1` for each step including Roll back (step,
+outcome, a closed failure reason); a removal journals
+`shield-servers.member-removal-requested@1` (whether the data folder is
+deleted) and `shield-servers.member-removal-step@1`. Both go on the server's
+own id with the person or their paired device as the actor, and name no key,
+code, path or server output. Startup reads them back only to know which
+servers are Octant computers now and at which version.
+
 **Not built yet.**
 
 - Downloading the build from its ring: today the person places the signed
@@ -656,8 +727,14 @@ and no credential is copied to the server.
   computer's claim lives in the desktop app, not in the server, so a computer
   with no hub role refuses with a sentence.
 - Starting a Mac at boot with no login; the sheet says so.
-- Update (drain, swap and roll back after a failed handshake) and Remove
-  Octant.
+- Draining by waiting for running turns: an update stops the member now, and
+  restart continuation resumes the turns the stop cut off.
+- Rolling back after a confirmed swap that migrated the store, which needs a
+  store restore on the member; the sheet names the backup instead.
+- Reading the hello again after a roll-back: the roll-back step succeeds when
+  the previous version is current and its start command succeeded.
+- Updating or removing a member from a computer that did not install it, or
+  whose install record is gone.
 
 Rationale: the SSH login is the person on that machine, so the install needs
 no new credential and copies none; the comparison code read over that pinned
@@ -3545,11 +3622,17 @@ headless build installed over SSH after the person confirms, the join code
 passed in the same session and the join approved for its one ticket when the
 comparison code read over SSH matches, then updates that drain, swap and roll
 back. Built for a hub: Make this an Octant computer on a registered server's
-row, the sheet, the six steps, and their journal events. Not built: the
-download from the ring, a join made from a member's window, pairing with no
-hub, Update and Remove. Verification: server tests against a stand-in `ssh`
-that runs the remote command in `sh` with a stand-in signed build, and a
-component test of the sheet; a real machine is a maintainer gate.
+row, the sheet, the six steps, and their journal events; then Update (copy,
+verify, stop now, `octant server upgrade`, the signed hello confirmed, and a
+roll-back when the hello does not come, is not the member's, names another
+version or does not cover this computer) and Remove Octant (leave, stop and
+remove the service, delete the install, the data folder only when ticked),
+with their journal events. Not built: the download from the ring, a join made
+from a member's window, pairing with no hub, draining by waiting for running
+turns, and rolling back a swap that migrated the store. Verification: server
+tests against a stand-in `ssh` that runs the remote command in `sh` with a
+stand-in signed build and a stand-in hello, and component tests of the
+sheets; a real machine is a maintainer gate.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

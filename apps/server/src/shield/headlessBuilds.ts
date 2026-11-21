@@ -45,6 +45,8 @@ export type HeadlessBuildCheck =
       readonly manifestSha256: string;
       readonly signatureSha256: string;
       readonly version: string;
+      /** The store version the build migrates to, so an update can tell whether it migrates. */
+      readonly storeVersion: number;
       readonly ring: ReleaseRing;
     }
   | {
@@ -139,6 +141,7 @@ export function createHeadlessBuilds(options: {
           manifestSha256: sha256(manifestBytes),
           signatureSha256: sha256(signatureBytes),
           version: inspection.manifest.artifactVersion,
+          storeVersion: inspection.manifest.storeVersion,
           ring: signature.ring,
         };
       } finally {

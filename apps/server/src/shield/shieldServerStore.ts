@@ -20,6 +20,11 @@ import {
   type EventActor as EventActorValue,
 } from "@octant/contracts";
 import {
+  decodeMemberInstallRequestedPayload,
+  decodeMemberInstallStepRecordedPayload,
+  decodeMemberRemovalStepRecordedPayload,
+  decodeMemberUpdateRequestedPayload,
+  decodeMemberUpdateStepRecordedPayload,
   decodeShieldProjectServersClearedPayload,
   decodeShieldProjectServersSetPayload,
   decodeShieldServerRemovedPayload,
@@ -31,8 +36,13 @@ import {
   SHIELD_SERVERS_AGGREGATE,
   SHIELD_SERVERS_AGGREGATE_ID,
   SHIELD_SERVERS_EVENT_NAMES,
+  type MemberComputer,
   type MemberInstallRequestedPayload,
   type MemberInstallStepRecordedPayload,
+  type MemberRemovalRequestedPayload,
+  type MemberRemovalStepRecordedPayload,
+  type MemberUpdateRequestedPayload,
+  type MemberUpdateStepRecordedPayload,
   type ShieldRemoteCommandStatus,
   type ShieldServer,
   type ShieldServerFields,
@@ -66,9 +76,10 @@ import { redactSecretShaped } from "@octant/domain/secret-shaped-text-policy";
  * (`shield-servers.project-servers-set@1`, under the Project's id), which
  * replaces the account list for that Project's threads until
  * `shield-servers.project-override-cleared@1`. Only a person at a local
- * window changes either. Making a server an Octant computer journals its
- * request and each step's outcome under the server's own id; those records
- * change nothing in the registry.
+ * window changes either. Making a server an Octant computer, updating it,
+ * and removing Octant from it journal each request and each step's outcome
+ * under the server's own id; those records change nothing in the registry,
+ * and are read back only to know which servers are Octant computers now.
  */
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
@@ -121,6 +132,11 @@ export class ShieldServerStore {
   readonly #servers = new Map<string, ShieldServer>();
   readonly #projectServers = new Map<string, ReadonlyArray<ShieldServer>>();
   readonly #versions = new Map<string, number>();
+  /** The servers a confirmed install made Octant computers, by server id. */
+  readonly #members = new Map<string, MemberComputer>();
+  /** Requests whose last step has not been read yet, by install or update id. */
+  readonly #installRequests = new Map<string, MemberInstallRequestedPayload>();
+  readonly #updateRequests = new Map<string, MemberUpdateRequestedPayload>();
 
   constructor(options: ShieldServerStoreOptions) {
     this.#options = options;
@@ -132,6 +148,9 @@ export class ShieldServerStore {
   load(): void {
     this.#servers.clear();
     this.#projectServers.clear();
+    this.#members.clear();
+    this.#installRequests.clear();
+    this.#updateRequests.clear();
     let after = 0;
     for (;;) {
       const batch = this.#options.journal.replayAggregateType({
@@ -315,11 +334,22 @@ export class ShieldServerStore {
     return { kind: "changed" };
   }
 
+  /** The servers this computer made Octant computers and has not removed Octant from since. */
+  memberComputers(): ReadonlyArray<MemberComputer> {
+    return [...this.#members.values()].filter((member) =>
+      this.#servers.has(String(member.serverId)),
+    );
+  }
+
+  memberComputer(serverId: string): MemberComputer | undefined {
+    return this.#servers.has(serverId) ? this.#members.get(serverId) : undefined;
+  }
+
   /**
    * Journals a request to make a registered server an Octant computer, or how
    * one of its steps ended, on that server's own stream of the registry so a
    * server's installs read in order. The actor is the person or the device
-   * they paired that confirmed it. Nothing replays these into the registry.
+   * they paired that confirmed it.
    */
   recordMemberInstall(
     record:
@@ -327,15 +357,61 @@ export class ShieldServerStore {
       | { readonly event: "step"; readonly payload: MemberInstallStepRecordedPayload },
     actor: EventActorValue,
   ): boolean {
-    return this.#append(
-      SHIELD_SERVERS_AGGREGATE,
-      String(record.payload.serverId),
+    return this.#recordMember(
+      record.payload.serverId,
       record.event === "requested"
         ? SHIELD_SERVERS_EVENT_NAMES.memberInstallRequested
         : SHIELD_SERVERS_EVENT_NAMES.memberInstallStepRecorded,
       record.payload,
       actor,
     );
+  }
+
+  /** Journals a request to update a member, or how one of its steps ended, as installs are. */
+  recordMemberUpdate(
+    record:
+      | { readonly event: "requested"; readonly payload: MemberUpdateRequestedPayload }
+      | { readonly event: "step"; readonly payload: MemberUpdateStepRecordedPayload },
+    actor: EventActorValue,
+  ): boolean {
+    return this.#recordMember(
+      record.payload.serverId,
+      record.event === "requested"
+        ? SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequested
+        : SHIELD_SERVERS_EVENT_NAMES.memberUpdateStepRecorded,
+      record.payload,
+      actor,
+    );
+  }
+
+  /** Journals a request to remove Octant from a member, or how one of its steps ended. */
+  recordMemberRemoval(
+    record:
+      | { readonly event: "requested"; readonly payload: MemberRemovalRequestedPayload }
+      | { readonly event: "step"; readonly payload: MemberRemovalStepRecordedPayload },
+    actor: EventActorValue,
+  ): boolean {
+    return this.#recordMember(
+      record.payload.serverId,
+      record.event === "requested"
+        ? SHIELD_SERVERS_EVENT_NAMES.memberRemovalRequested
+        : SHIELD_SERVERS_EVENT_NAMES.memberRemovalStepRecorded,
+      record.payload,
+      actor,
+    );
+  }
+
+  #recordMember(
+    serverId: AggregateId,
+    eventName: string,
+    payload: unknown,
+    actor: EventActorValue,
+  ): boolean {
+    if (!this.#append(SHIELD_SERVERS_AGGREGATE, String(serverId), eventName, payload, actor)) {
+      return false;
+    }
+    this.#apply(eventName, payload);
+    return true;
   }
 
   /**
@@ -583,6 +659,61 @@ export class ShieldServerStore {
       this.#projectServers.delete(
         String(decodeShieldProjectServersClearedPayload(payload).projectId),
       );
+      return;
+    }
+    this.#applyMember(eventName, payload);
+  }
+
+  /**
+   * A server is an Octant computer from the install whose join succeeded; an
+   * update whose confirmation succeeded moves its version on, and a removal
+   * whose delete succeeded ends it. Anything else leaves it as it was.
+   */
+  #applyMember(eventName: string, payload: unknown): void {
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberInstallRequested) {
+      const requested = decodeMemberInstallRequestedPayload(payload);
+      this.#installRequests.set(String(requested.installId), requested);
+      return;
+    }
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberInstallStepRecorded) {
+      const step = decodeMemberInstallStepRecordedPayload(payload);
+      const requested = this.#installRequests.get(String(step.installId));
+      if (requested === undefined || step.step !== "join" || step.outcome !== "succeeded") return;
+      this.#installRequests.delete(String(step.installId));
+      this.#members.set(String(requested.serverId), {
+        serverId: requested.serverId,
+        target: requested.target,
+        artifactVersion: requested.artifactVersion,
+        listenAddress: requested.listenAddress,
+        listenPort: requested.listenPort,
+      });
+      return;
+    }
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequested) {
+      const requested = decodeMemberUpdateRequestedPayload(payload);
+      this.#updateRequests.set(String(requested.updateId), requested);
+      return;
+    }
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberUpdateStepRecorded) {
+      const step = decodeMemberUpdateStepRecordedPayload(payload);
+      const requested = this.#updateRequests.get(String(step.updateId));
+      const member = this.#members.get(String(step.serverId));
+      if (requested === undefined || step.step !== "confirm" || step.outcome !== "succeeded")
+        return;
+      this.#updateRequests.delete(String(step.updateId));
+      if (member !== undefined) {
+        this.#members.set(String(step.serverId), {
+          ...member,
+          artifactVersion: requested.toVersion,
+        });
+      }
+      return;
+    }
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberRemovalStepRecorded) {
+      const step = decodeMemberRemovalStepRecordedPayload(payload);
+      if (step.step === "delete" && step.outcome === "succeeded") {
+        this.#members.delete(String(step.serverId));
+      }
     }
   }
 

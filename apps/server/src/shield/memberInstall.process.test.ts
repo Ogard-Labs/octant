@@ -6,16 +6,21 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { decodeEventActor } from "@octant/contracts";
 import {
   decodeMemberInstallRequestedPayload,
   decodeMemberInstallStepRecordedPayload,
+  decodeMemberRemovalRequestedPayload,
+  decodeMemberRemovalStepRecordedPayload,
+  decodeMemberUpdateRequestedPayload,
+  decodeMemberUpdateStepRecordedPayload,
   SHIELD_SERVERS_AGGREGATE,
   SHIELD_SERVERS_EVENT_NAMES,
   MemberInstallResult,
@@ -39,10 +44,17 @@ import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createHeadlessBuilds } from "./headlessBuilds";
 import {
   MemberInstallService,
+  MemberServerWork,
   type MemberInstallHub,
   type MemberInstallRequester,
 } from "./memberInstall";
 import { createMemberInstallRouteHandler, MEMBER_INSTALL_PATH } from "./memberInstallRoutes";
+import {
+  MemberUpkeepService,
+  type MemberHelloReading,
+  type MemberListener,
+  type MemberUpkeepHub,
+} from "./memberUpkeep";
 import { ShieldServerStore } from "./shieldServerStore";
 
 const scratches: string[] = [];
@@ -67,17 +79,45 @@ const decodeMemberInstallResult = Schema.decodeUnknownSync(MemberInstallResult);
  * `$HOME/octant-calls.log` and does what the real one would to the login's
  * folders, and its `hub join` prints a comparison code and waits for this
  * computer's approval, which the stand-in hub writes as `$HOME/approved`.
+ * Its `server upgrade` swaps the `current` link, and when `$HOME/unhealthy`
+ * exists it fails its health check and puts the previous version back, as
+ * the real one does.
  */
 const STAND_IN_CLI = `#!/bin/sh
 printf '%s\\n' "$*" >> "$HOME/octant-calls.log"
+version_of() { sed -n 's/.*"artifactVersion": *"\\([^"]*\\)".*/\\1/p' "$1/octant-artifact.json"; }
 case "$1 $2" in
   "server install")
-    artifact=$4; root=$6
+    artifact=$4; root=$6; v=$(version_of "$artifact")
     [ -f "$artifact/octant-artifact.sig" ] || { echo "Octant refuses an unsigned build." >&2; exit 1; }
-    mkdir -p "$root/versions/1.2.3" && cp -R "$artifact/." "$root/versions/1.2.3/" && ln -sfn "$root/versions/1.2.3" "$root/current"
-    echo "Octant 1.2.3 installed at $root." ;;
-  "server enable") echo "enabled" ;;
+    mkdir -p "$root/versions/$v" && cp -R "$artifact/." "$root/versions/$v/" && ln -sfn "$root/versions/$v" "$root/current"
+    echo "Octant $v installed at $root." ;;
+  "server upgrade")
+    artifact=$4; root=$6; v=$(version_of "$artifact"); from=$(readlink "$root/current")
+    [ -f "$artifact/octant-artifact.sig" ] || { echo "Octant refuses an unsigned build." >&2; exit 1; }
+    [ -e "$root/versions/$v" ] && { echo "Octant version $v is already installed; refusing to overwrite it." >&2; exit 1; }
+    mkdir -p "$root/versions/$v" && cp -R "$artifact/." "$root/versions/$v/" && ln -sfn "$root/versions/$v" "$root/current"
+    if [ -f "$HOME/unhealthy" ]; then
+      ln -sfn "$from" "$root/current"
+      echo "Octant $v failed its health check and was rolled back to \${from##*/}." >&2
+      exit 1
+    fi
+    echo "Octant upgraded from \${from##*/} to $v." ;;
+  "server enable")
+    mkdir -p "$HOME/.config/systemd/user" && echo "[Unit]" > "$HOME/.config/systemd/user/octant.service"
+    echo "enabled" ;;
   "server start") echo "ready" ;;
+  "server stop") echo "stopped" ;;
+  "server disable")
+    if [ "$3" = "--remove-service" ]; then rm -f "$HOME/.config/systemd/user/octant.service"; fi
+    echo "disabled" ;;
+  "server uninstall")
+    root=$4; rm -rf "$root"; echo "Octant uninstalled from $root; user data preserved."
+    if [ "$5" = "--remove-data" ]; then
+      [ "$7" = "$HOME/.local/share/octant" ] || { echo "User-data removal requires confirming the exact canonical data directory path." >&2; exit 1; }
+      rm -rf "$7"; echo "Octant user data removed from $7."
+    fi ;;
+  "hub leave") echo "Left the hub." ;;
   "listener enable") echo "listening on $4:$6" ;;
   "hub join")
     # The real CLI reads the code from standard input when given a dash.
@@ -105,9 +145,14 @@ function keyPair() {
 }
 
 /** A headless build for linux-x64 signed with `signingKey`, packed as the release names it. */
-function signedBuild(folder: string, signingKey: string): string {
+function signedBuild(
+  folder: string,
+  signingKey: string,
+  version = "1.2.3",
+  storeVersion = 1,
+): string {
   const work = scratchDirectory();
-  const name = "octant-1.2.3-linux-x64";
+  const name = `octant-${version}-linux-x64`;
   const root = join(work, name);
   const files: ReadonlyArray<
     readonly [HeadlessArtifactManifest["components"][number]["role"], string, string, number]
@@ -131,16 +176,16 @@ function signedBuild(folder: string, signingKey: string): string {
       path,
       sha256: createHash("sha256").update(body).digest("hex"),
       byteLength: Buffer.byteLength(body),
-      ...(role === "server" || role === "cli" || role === "web-assets" ? { version: "1.2.3" } : {}),
+      ...(role === "server" || role === "cli" || role === "web-assets" ? { version } : {}),
     };
   });
   const manifest: HeadlessArtifactManifest = {
     schemaVersion: 1,
     product: "octant",
-    artifactVersion: "1.2.3",
+    artifactVersion: version,
     target: { platform: "linux", arch: "x64" },
     wireVersion: "1",
-    storeVersion: 1,
+    storeVersion,
     components,
   };
   writeFileSync(join(root, "octant-artifact.json"), encodeHeadlessArtifactManifest(manifest));
@@ -238,6 +283,35 @@ function standInHub(home: string, claimCode: string | undefined = COMPARISON_COD
   return { hub, decisions };
 }
 
+/**
+ * The hub as an update and a removal see it. The member's signed hello names
+ * the version its `current` link points at, with the protocol range the test
+ * sets, unless the test makes it unreachable or unproven.
+ */
+function standInUpkeepHub(state: string) {
+  const hello: {
+    answer: "signed" | "unreachable" | "unproven";
+    protocolRange: { readonly min: number; readonly max: number };
+  } = { answer: "signed", protocolRange: { min: 1, max: 1 } };
+  const removed: MemberListener[] = [];
+  const hub: MemberUpkeepHub = {
+    listed: () => true,
+    readHello: async (): Promise<MemberHelloReading> => {
+      if (hello.answer !== "signed") return { status: hello.answer };
+      return {
+        status: "read",
+        buildVersion: basename(readlinkSync(join(state, "install", "current"))),
+        protocolRange: hello.protocolRange,
+      };
+    },
+    removeMember: async (listener) => {
+      removed.push(listener);
+      return "removed";
+    },
+  };
+  return { hub, hello, removed };
+}
+
 function setUp(
   options: {
     readonly addresses?: ReadonlyArray<string>;
@@ -268,17 +342,20 @@ function setUp(
   });
   const serverId = String(store.servers()[0]?.serverId);
   const { hub, decisions } = standInHub(server.home, options.claimCode);
+  const headlessBuilds = createHeadlessBuilds({
+    folder: builds,
+    trustedKeys: {
+      stable: [],
+      preview: [releaseKey.publicKeyBase64],
+      candidate: [releaseKey.publicKeyBase64],
+    },
+  });
+  const work = new MemberServerWork();
   const service = new MemberInstallService({
     servers: () => store.servers(),
     connection: server.connection,
-    builds: createHeadlessBuilds({
-      folder: builds,
-      trustedKeys: {
-        stable: [],
-        preview: [releaseKey.publicKeyBase64],
-        candidate: [releaseKey.publicKeyBase64],
-      },
-    }),
+    builds: headlessBuilds,
+    work,
     hub,
     journal: store,
     uuid: randomUUID,
@@ -286,6 +363,20 @@ function setUp(
     sleep: (milliseconds) => new Promise((done) => setTimeout(done, Math.min(milliseconds, 50))),
     joinClaimMs: 10_000,
     joinFinishMs: 10_000,
+  });
+  const upkeepHub = standInUpkeepHub(server.state);
+  const upkeep = new MemberUpkeepService({
+    servers: () => store.servers(),
+    connection: server.connection,
+    builds: headlessBuilds,
+    hub: upkeepHub.hub,
+    journal: store,
+    work,
+    protocolVersion: 1,
+    uuid: randomUUID,
+    now: Date.now,
+    sleep: (milliseconds) => new Promise((done) => setTimeout(done, Math.min(milliseconds, 50))),
+    helloWaitMs: 500,
   });
   const records = () =>
     journal
@@ -298,6 +389,9 @@ function setUp(
   return {
     server,
     service,
+    upkeep,
+    upkeepHub,
+    store,
     serverId,
     decisions,
     records,
@@ -324,6 +418,7 @@ async function askAsDevice(
   const route = createMemberInstallRouteHandler({
     windowAuthorityStore: new WindowAuthorityStore(),
     service: setup.service,
+    upkeep: setup.upkeep,
   });
   const request = new Request(`http://127.0.0.1${MEMBER_INSTALL_PATH}`, {
     method: "POST",
@@ -604,5 +699,461 @@ describe("making a registered server an Octant computer over SSH", () => {
     const paired = await ask(PERSON_PAIRED);
     expect(paired.status).toBe(200);
     expect(await paired.json()).toMatchObject({ kind: "member-install-plan" });
+  });
+});
+
+/** Makes the stand-in server a member at 1.2.3; the calls it has seen so far. */
+async function memberAt123(setup: ReturnType<typeof setUp>): Promise<number> {
+  const { progress } = await installOver(setup);
+  if (progress.state !== "joined") throw new Error(JSON.stringify(progress));
+  return setup.server.calls().length;
+}
+
+/** The CLI calls the server saw after `offset`, one per line. */
+function callsSince(setup: ReturnType<typeof setUp>, offset: number): ReadonlyArray<string> {
+  return setup.server
+    .calls()
+    .slice(offset)
+    .split("\n")
+    .filter((line) => line.length > 0);
+}
+
+function currentVersion(setup: ReturnType<typeof setUp>): string {
+  return basename(readlinkSync(join(setup.server.state, "install", "current")));
+}
+
+function upkeepRecords(setup: ReturnType<typeof setUp>) {
+  return setup
+    .records()
+    .filter(
+      (envelope) =>
+        envelope.eventName.includes("member-update") ||
+        envelope.eventName.includes("member-removal"),
+    );
+}
+
+function updatePlanOf(result: MemberInstallResult) {
+  if (result.kind !== "member-update-plan") throw new Error(JSON.stringify(result));
+  return result.plan;
+}
+
+function removalPlanOf(result: MemberInstallResult) {
+  if (result.kind !== "member-removal-plan") throw new Error(JSON.stringify(result));
+  return result.plan;
+}
+
+/** Reads an update's steps, as the sheet does, until it stops running. */
+async function settledUpdate(setup: ReturnType<typeof setUp>, updateId: string) {
+  for (;;) {
+    const read = setup.upkeep.updateProgress(updateId, person);
+    if (read.kind !== "member-update-progress") throw new Error(JSON.stringify(read));
+    if (read.progress.state !== "running") return read.progress;
+    await new Promise((done) => setTimeout(done, 10));
+  }
+}
+
+async function settledRemoval(setup: ReturnType<typeof setUp>, removalId: string) {
+  for (;;) {
+    const read = setup.upkeep.removalProgress(removalId, person);
+    if (read.kind !== "member-removal-progress") throw new Error(JSON.stringify(read));
+    if (read.progress.state !== "running") return read.progress;
+    await new Promise((done) => setTimeout(done, 10));
+  }
+}
+
+async function updateOver(setup: ReturnType<typeof setUp>) {
+  const plan = updatePlanOf(await setup.upkeep.prepareUpdate(setup.serverId, person));
+  const confirmed = await setup.upkeep.confirmUpdate(
+    { planId: String(plan.planId), drain: "stop-now" },
+    person,
+  );
+  if (confirmed.kind !== "member-update-progress") throw new Error(JSON.stringify(confirmed));
+  return { plan, progress: await settledUpdate(setup, String(confirmed.progress.updateId)) };
+}
+
+async function removeOver(setup: ReturnType<typeof setUp>, deleteData: boolean) {
+  const plan = removalPlanOf(await setup.upkeep.prepareRemoval(setup.serverId, person));
+  const confirmed = setup.upkeep.confirmRemoval(
+    { planId: String(plan.planId), deleteData },
+    person,
+  );
+  if (confirmed.kind !== "member-removal-progress") throw new Error(JSON.stringify(confirmed));
+  return { plan, progress: await settledRemoval(setup, String(confirmed.progress.removalId)) };
+}
+
+describe("updating a member and removing Octant from it over SSH", () => {
+  it("updates a member by draining, swapping and confirming its signed hello", async () => {
+    const setup = setUp();
+    const before = await memberAt123(setup);
+    signedBuild(setup.builds, setup.releaseKey.privateKeyBase64, "1.2.4");
+    const plan = updatePlanOf(await setup.upkeep.prepareUpdate(setup.serverId, person));
+    // Preparing reads the install and changes nothing on the server.
+    expect(callsSince(setup, before)).toEqual([]);
+    expect(plan).toMatchObject({
+      alias: "devbox",
+      user: "build",
+      target: "linux-x64",
+      fromVersion: "1.2.3",
+      toVersion: "1.2.4",
+      ring: "preview",
+      signature: "verified",
+      installRoot: `${setup.server.state}/install`,
+      storeMigration: false,
+      drains: ["stop-now"],
+    });
+    const confirmed = await setup.upkeep.confirmUpdate(
+      { planId: String(plan.planId), drain: "stop-now" },
+      person,
+    );
+    if (confirmed.kind !== "member-update-progress") throw new Error(JSON.stringify(confirmed));
+    const progress = await settledUpdate(setup, String(confirmed.progress.updateId));
+    expect(progress.state).toBe("updated");
+    expect(progress.steps.map((step) => [step.step, step.state])).toEqual([
+      ["copy", "succeeded"],
+      ["verify", "succeeded"],
+      ["drain", "succeeded"],
+      ["swap", "succeeded"],
+      ["confirm", "succeeded"],
+    ]);
+    const root = `${setup.server.state}/install`;
+    expect(callsSince(setup, before)).toEqual([
+      // The member stops admitting turns before the swap.
+      "server stop",
+      expect.stringMatching(new RegExp(`^server upgrade --artifact /.+ --install-root ${root}$`)),
+    ]);
+    expect(currentVersion(setup)).toBe("1.2.4");
+    expect(setup.store.memberComputer(setup.serverId)?.artifactVersion).toBe("1.2.4");
+    expect(existsSync(join(setup.server.state, "member-update"))).toBe(true);
+    expect(
+      existsSync(join(setup.server.state, "member-update", String(confirmed.progress.updateId))),
+    ).toBe(false);
+    // The confirmation was spent, and there is nothing newer to update to.
+    expect(
+      await setup.upkeep.confirmUpdate({ planId: String(plan.planId), drain: "stop-now" }, person),
+    ).toMatchObject({ reason: "plan-expired" });
+    expect(await setup.upkeep.prepareUpdate(setup.serverId, person)).toMatchObject({
+      kind: "member-install-refused",
+      reason: "no-newer-build",
+    });
+  });
+
+  it("rolls back to the previous version when the updated member's hello does not cover this computer", async () => {
+    const setup = setUp();
+    const before = await memberAt123(setup);
+    signedBuild(setup.builds, setup.releaseKey.privateKeyBase64, "1.2.4");
+    setup.upkeepHub.hello.protocolRange = { min: 2, max: 3 };
+    const { progress } = await updateOver(setup);
+    expect(progress.state).toBe("rolled-back");
+    expect(progress.rollbackReason).toBe("protocol-not-covered");
+    expect(progress.steps.map((step) => [step.step, step.state])).toEqual([
+      ["copy", "succeeded"],
+      ["verify", "succeeded"],
+      ["drain", "succeeded"],
+      ["swap", "succeeded"],
+      ["confirm", "failed"],
+      ["roll-back", "succeeded"],
+    ]);
+    expect(progress.steps.find((step) => step.step === "confirm")?.message).toContain(
+      "does not cover this computer's 1",
+    );
+    // The previous version runs again, and the refused one is gone so the
+    // update can be tried again.
+    expect(currentVersion(setup)).toBe("1.2.3");
+    expect(existsSync(join(setup.server.state, "install", "versions", "1.2.4"))).toBe(false);
+    expect(callsSince(setup, before)).toEqual([
+      "server stop",
+      expect.stringMatching(/^server upgrade --artifact /),
+      "server stop",
+      "server start",
+    ]);
+    expect(setup.store.memberComputer(setup.serverId)?.artifactVersion).toBe("1.2.3");
+    const steps = upkeepRecords(setup)
+      .slice(1)
+      .map((envelope) => decodeMemberUpdateStepRecordedPayload(envelope.payload));
+    expect(steps.slice(-2)).toMatchObject([
+      { step: "confirm", outcome: "failed", failure: "protocol-not-covered" },
+      { step: "roll-back", outcome: "succeeded" },
+    ]);
+  });
+
+  it("rolls back when the health check fails after the swap", async () => {
+    // `octant server upgrade`'s own health polls fail: it puts the previous
+    // version back, and the roll-back starts it and deletes the failed one.
+    const unhealthy = setUp();
+    const before = await memberAt123(unhealthy);
+    signedBuild(unhealthy.builds, unhealthy.releaseKey.privateKeyBase64, "1.2.4");
+    writeFileSync(join(unhealthy.server.home, "unhealthy"), "");
+    const failed = await updateOver(unhealthy);
+    expect(failed.progress.state).toBe("rolled-back");
+    expect(failed.progress.rollbackReason).toBe("health-check-failed");
+    expect(failed.progress.steps.map((step) => [step.step, step.state])).toEqual([
+      ["copy", "succeeded"],
+      ["verify", "succeeded"],
+      ["drain", "succeeded"],
+      ["swap", "failed"],
+      ["confirm", "not-run"],
+      ["roll-back", "succeeded"],
+    ]);
+    expect(currentVersion(unhealthy)).toBe("1.2.3");
+    expect(existsSync(join(unhealthy.server.state, "install", "versions", "1.2.4"))).toBe(false);
+    expect(callsSince(unhealthy, before).at(-1)).toBe("server start");
+
+    // The swap succeeded but the member never answers its hello.
+    const silent = setUp();
+    await memberAt123(silent);
+    signedBuild(silent.builds, silent.releaseKey.privateKeyBase64, "1.2.4");
+    silent.upkeepHub.hello.answer = "unreachable";
+    const unanswered = await updateOver(silent);
+    expect(unanswered.progress.state).toBe("rolled-back");
+    expect(unanswered.progress.rollbackReason).toBe("health-check-failed");
+    expect(unanswered.progress.steps.at(-1)).toMatchObject({
+      step: "roll-back",
+      state: "succeeded",
+    });
+    expect(currentVersion(silent)).toBe("1.2.3");
+    expect(silent.store.memberComputer(silent.serverId)?.artifactVersion).toBe("1.2.3");
+  });
+
+  it("refuses an update build whose signature does not verify, and changes nothing", async () => {
+    const untrusted = setUp();
+    const before = await memberAt123(untrusted);
+    signedBuild(untrusted.builds, untrusted.otherKey.privateKeyBase64, "1.2.4");
+    expect(await untrusted.upkeep.prepareUpdate(untrusted.serverId, person)).toMatchObject({
+      kind: "member-install-refused",
+      reason: "build-unverified",
+    });
+    expect(callsSince(untrusted, before)).toEqual([]);
+    expect(existsSync(join(untrusted.server.state, "member-update"))).toBe(false);
+    expect(currentVersion(untrusted)).toBe("1.2.3");
+    expect(upkeepRecords(untrusted)).toEqual([]);
+
+    // A build swapped for one no trusted key signed after the sheet was read
+    // is refused at the confirmation, before anything is copied or journaled.
+    const swapped = setUp();
+    const swappedBefore = await memberAt123(swapped);
+    signedBuild(swapped.builds, swapped.releaseKey.privateKeyBase64, "1.2.4");
+    const plan = updatePlanOf(await swapped.upkeep.prepareUpdate(swapped.serverId, person));
+    signedBuild(swapped.builds, swapped.otherKey.privateKeyBase64, "1.2.4");
+    expect(
+      await swapped.upkeep.confirmUpdate(
+        { planId: String(plan.planId), drain: "stop-now" },
+        person,
+      ),
+    ).toMatchObject({ kind: "member-install-refused", reason: "build-unverified" });
+    expect(callsSince(swapped, swappedBefore)).toEqual([]);
+    expect(currentVersion(swapped)).toBe("1.2.3");
+    expect(upkeepRecords(swapped)).toEqual([]);
+  });
+
+  it("removes Octant, leaving the data folder unless asked to delete it", async () => {
+    const keep = setUp();
+    const before = await memberAt123(keep);
+    const data = join(keep.server.home, ".local", "share", "octant");
+    mkdirSync(data, { recursive: true });
+    writeFileSync(join(data, "events.sqlite3"), "threads");
+    const unit = join(keep.server.home, ".config", "systemd", "user", "octant.service");
+    expect(existsSync(unit)).toBe(true);
+    const root = `${keep.server.state}/install`;
+    const plan = removalPlanOf(await keep.upkeep.prepareRemoval(keep.serverId, person));
+    expect(callsSince(keep, before)).toEqual([]);
+    expect(plan).toMatchObject({
+      alias: "devbox",
+      user: "build",
+      installRoot: root,
+      dataFolder: data,
+      service: "systemd-user",
+    });
+    const confirmed = keep.upkeep.confirmRemoval(
+      { planId: String(plan.planId), deleteData: false },
+      person,
+    );
+    if (confirmed.kind !== "member-removal-progress") throw new Error(JSON.stringify(confirmed));
+    const progress = await settledRemoval(keep, String(confirmed.progress.removalId));
+    expect(progress.state).toBe("removed");
+    expect(progress.steps.map((step) => [step.step, step.state])).toEqual([
+      ["leave", "succeeded"],
+      ["stop", "succeeded"],
+      ["delete", "succeeded"],
+    ]);
+    expect(callsSince(keep, before)).toEqual([
+      "hub leave",
+      "server disable --remove-service",
+      `server uninstall --install-root ${root}`,
+    ]);
+    expect(existsSync(root)).toBe(false);
+    expect(existsSync(unit)).toBe(false);
+    expect(existsSync(join(keep.server.state, "member-install"))).toBe(false);
+    expect(readFileSync(join(data, "events.sqlite3"), "utf8")).toBe("threads");
+    // The member left by itself, so the hub removed nothing.
+    expect(keep.upkeepHub.removed).toEqual([]);
+    expect(keep.store.memberComputer(keep.serverId)).toBeUndefined();
+    expect(keep.upkeep.members(person)).toEqual({ kind: "member-computers", members: [] });
+
+    const wipe = setUp();
+    const wipeBefore = await memberAt123(wipe);
+    const wipeData = join(wipe.server.home, ".local", "share", "octant");
+    mkdirSync(wipeData, { recursive: true });
+    writeFileSync(join(wipeData, "events.sqlite3"), "threads");
+    const wiped = await removeOver(wipe, true);
+    expect(wiped.progress).toMatchObject({ state: "removed", deleteData: true });
+    expect(callsSince(wipe, wipeBefore).at(-1)).toBe(
+      `server uninstall --install-root ${wipe.server.state}/install --remove-data --confirm ${wipeData}`,
+    );
+    expect(existsSync(wipeData)).toBe(false);
+  });
+
+  it("the update and removal requests and each step are journaled with the actor, with no secrets", async () => {
+    const setup = setUp();
+    await memberAt123(setup);
+    signedBuild(setup.builds, setup.releaseKey.privateKeyBase64, "1.2.4");
+    // Updated and removed from a device the person paired, through the route.
+    const askResult = async (body: unknown) =>
+      decodeMemberInstallResult(await (await askAsDevice(setup, PERSON_PAIRED, body)).json());
+    const listed = await askResult({ kind: "list-member-computers" });
+    expect(listed).toMatchObject({
+      kind: "member-computers",
+      members: [{ serverId: setup.serverId, artifactVersion: "1.2.3" }],
+    });
+    const plan = updatePlanOf(
+      await askResult({ kind: "prepare-member-update", serverId: setup.serverId }),
+    );
+    const updating = await askResult({
+      kind: "confirm-member-update",
+      planId: plan.planId,
+      drain: "stop-now",
+    });
+    if (updating.kind !== "member-update-progress") throw new Error(JSON.stringify(updating));
+    expect((await settledUpdate(setup, String(updating.progress.updateId))).state).toBe("updated");
+    const removal = removalPlanOf(
+      await askResult({ kind: "prepare-member-removal", serverId: setup.serverId }),
+    );
+    const removing = await askResult({
+      kind: "confirm-member-removal",
+      planId: removal.planId,
+      deleteData: false,
+    });
+    if (removing.kind !== "member-removal-progress") throw new Error(JSON.stringify(removing));
+    expect((await settledRemoval(setup, String(removing.progress.removalId))).state).toBe(
+      "removed",
+    );
+
+    const records = upkeepRecords(setup);
+    const deviceActor = decodeEventActor({
+      kind: "remote-device",
+      actorId: PAIRED_DEVICE,
+      deviceId: PAIRED_DEVICE,
+    });
+    expect(records.map((envelope) => envelope.actor)).toEqual(
+      Array.from({ length: 10 }, () => deviceActor),
+    );
+    expect(records.map((envelope) => envelope.eventName)).toEqual([
+      SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequested,
+      ...Array.from({ length: 5 }, () => SHIELD_SERVERS_EVENT_NAMES.memberUpdateStepRecorded),
+      SHIELD_SERVERS_EVENT_NAMES.memberRemovalRequested,
+      ...Array.from({ length: 3 }, () => SHIELD_SERVERS_EVENT_NAMES.memberRemovalStepRecorded),
+    ]);
+    const [updateRequested, ...rest] = records;
+    const updateSteps = rest.slice(0, 5);
+    const [removalRequested, ...removalSteps] = rest.slice(5);
+    const requestedPayload = decodeMemberUpdateRequestedPayload(updateRequested?.payload);
+    expect(requestedPayload).toMatchObject({
+      serverId: setup.serverId,
+      target: "linux-x64",
+      fromVersion: "1.2.3",
+      toVersion: "1.2.4",
+      ring: "preview",
+      drain: "stop-now",
+    });
+    expect(
+      updateSteps.map((envelope) => {
+        const payload = decodeMemberUpdateStepRecordedPayload(envelope.payload);
+        return [payload.step, payload.outcome];
+      }),
+    ).toEqual([
+      ["copy", "succeeded"],
+      ["verify", "succeeded"],
+      ["drain", "succeeded"],
+      ["swap", "succeeded"],
+      ["confirm", "succeeded"],
+    ]);
+    expect(decodeMemberRemovalRequestedPayload(removalRequested?.payload)).toMatchObject({
+      serverId: setup.serverId,
+      deleteData: false,
+    });
+    expect(
+      removalSteps.map((envelope) => {
+        const payload = decodeMemberRemovalStepRecordedPayload(envelope.payload);
+        return [payload.step, payload.outcome];
+      }),
+    ).toEqual([
+      ["leave", "succeeded"],
+      ["stop", "succeeded"],
+      ["delete", "succeeded"],
+    ]);
+    // The shapes are strict: a field they do not name is refused.
+    expect(() =>
+      decodeMemberUpdateRequestedPayload({ ...requestedPayload, joinCode: JOIN_CODE }),
+    ).toThrow();
+    // No join code, ticket, comparison code, key or folder is ever journaled.
+    const journaled = JSON.stringify(records);
+    expect(journaled).not.toContain(JOIN_CODE);
+    expect(journaled).not.toContain(TICKET_ID);
+    expect(journaled).not.toContain(COMPARISON_CODE);
+    expect(journaled).not.toContain(setup.releaseKey.privateKeyBase64);
+    expect(journaled).not.toContain(setup.server.home);
+  });
+
+  it("a hub-introduced device, a routine and an agent are refused", async () => {
+    const setup = setUp();
+    const before = await memberAt123(setup);
+    signedBuild(setup.builds, setup.releaseKey.privateKeyBase64, "1.2.4");
+    const update = updatePlanOf(await setup.upkeep.prepareUpdate(setup.serverId, person));
+    const removal = removalPlanOf(await setup.upkeep.prepareRemoval(setup.serverId, person));
+    for (const requester of [
+      { kind: "restricted-device" },
+      { kind: "routine" },
+      { kind: "agent-grant" },
+    ] satisfies ReadonlyArray<MemberInstallRequester>) {
+      const refusal = { kind: "member-install-refused", reason: "not-the-person" };
+      expect(setup.upkeep.members(requester)).toMatchObject(refusal);
+      expect(await setup.upkeep.prepareUpdate(setup.serverId, requester)).toMatchObject(refusal);
+      expect(
+        await setup.upkeep.confirmUpdate(
+          { planId: String(update.planId), drain: "stop-now" },
+          requester,
+        ),
+      ).toMatchObject(refusal);
+      expect(await setup.upkeep.prepareRemoval(setup.serverId, requester)).toMatchObject(refusal);
+      expect(
+        setup.upkeep.confirmRemoval(
+          { planId: String(removal.planId), deleteData: true },
+          requester,
+        ),
+      ).toMatchObject(refusal);
+    }
+    // The route reads who is asking from the authenticated principal.
+    for (const body of [
+      { kind: "prepare-member-update", serverId: setup.serverId },
+      { kind: "confirm-member-update", planId: update.planId, drain: "stop-now" },
+      { kind: "prepare-member-removal", serverId: setup.serverId },
+      { kind: "confirm-member-removal", planId: removal.planId, deleteData: true },
+    ]) {
+      for (const principal of [
+        { origin: "https://phone.example", admittedBy: "hub-roster" },
+        { origin: AGENT_ACCESS_ORIGIN, admittedBy: "host-person" },
+      ]) {
+        expect((await askAsDevice(setup, principal, body)).status).toBe(403);
+      }
+    }
+    expect(callsSince(setup, before)).toEqual([]);
+    expect(upkeepRecords(setup)).toEqual([]);
+    expect(currentVersion(setup)).toBe("1.2.3");
+    expect(existsSync(join(setup.server.state, "install"))).toBe(true);
+    const paired = await askAsDevice(setup, PERSON_PAIRED, {
+      kind: "prepare-member-update",
+      serverId: setup.serverId,
+    });
+    expect(paired.status).toBe(200);
+    expect(await paired.json()).toMatchObject({ kind: "member-update-plan" });
   });
 });
