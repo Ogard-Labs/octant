@@ -400,6 +400,8 @@ export class NativeHarnessSessionStore {
     outcome: {
       readonly status: Exclude<NativeHarnessApprovalStatus, "pending">;
       readonly remembered?: boolean;
+      /** Why an approval given was denied instead; only with `denied`. */
+      readonly refusal?: string;
     },
     /** Who decided, when a person did; an expiry or a cancellation names nobody. */
     actor?: typeof EventActor.Type,
@@ -417,6 +419,7 @@ export class NativeHarnessSessionStore {
       ...current,
       status: outcome.status,
       ...(outcome.remembered === true ? { remembered: true } : {}),
+      ...(outcome.refusal === undefined ? {} : { refusal: outcome.refusal }),
       settledAt,
     });
     this.#append(
@@ -428,6 +431,7 @@ export class NativeHarnessSessionStore {
         approvalId,
         status: outcome.status,
         ...(outcome.remembered === true ? { remembered: true } : {}),
+        ...(outcome.refusal === undefined ? {} : { refusal: outcome.refusal }),
         settledAt,
       },
       actor,
@@ -847,6 +851,7 @@ export class NativeHarnessSessionStore {
           ...current,
           status: body.status as NativeHarnessApprovalStatus,
           ...(body.remembered === true ? { remembered: true } : {}),
+          ...(typeof body.refusal === "string" ? { refusal: body.refusal } : {}),
           settledAt: body.settledAt as NativeHarnessApproval["settledAt"],
         };
       }

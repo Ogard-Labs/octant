@@ -83,6 +83,8 @@ export const NativeHarnessApprovalSettled = Schema.Struct({
   approvalId: NativeHarnessApprovalId,
   status: NativeHarnessApprovalStatus,
   remembered: Schema.optional(Schema.Boolean),
+  /** Set on a denial that replaced an approval the runtime could not take as given. */
+  refusal: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
   settledAt: UtcTimestamp,
 }).annotations(strict);
 

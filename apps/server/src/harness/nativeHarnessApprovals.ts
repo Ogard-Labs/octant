@@ -68,6 +68,15 @@ interface Waiter {
   readonly signal: AbortSignal | undefined;
 }
 
+/**
+ * What became of an answer handed to the runtime before it was journaled: it
+ * went as decided, or an approval the runtime could not take as given was
+ * denied instead and is journaled denied with the reason.
+ */
+export type NativeHarnessApprovalDelivery =
+  | { readonly status: "as-decided" }
+  | { readonly status: "denied-instead"; readonly refusal: string };
+
 export interface NativeHarnessApprovalAsk {
   readonly threadId: string;
   readonly mode: OctantMode;
@@ -81,6 +90,12 @@ export interface NativeHarnessApprovalAsk {
   readonly signal?: AbortSignal | undefined;
   /** Why Octant Shield handed this call to the person, at Auto with Shield reviewing. */
   readonly shield?: ShieldDecision | undefined;
+  /**
+   * Hands an approval or a denial to the runtime before it is journaled, so
+   * an approval the runtime refused is never journaled approved. Absent, the
+   * decision is journaled at once and the caller delivers it.
+   */
+  readonly deliver?: (approved: boolean) => Promise<NativeHarnessApprovalDelivery>;
 }
 
 function commandHostKey(host: string, port: number): string {
@@ -180,6 +195,8 @@ export class NativeHarnessApprovalStore {
   recordReviewed(
     input: NativeHarnessApprovalAsk,
     shield: ShieldDecision & { readonly verdict: "allow" | "deny" },
+    /** Set when Shield's allow could not be delivered and the call was denied instead. */
+    refusal?: string,
   ): void {
     this.#options.sessions.ensure({
       threadId: input.threadId,
@@ -199,7 +216,8 @@ export class NativeHarnessApprovalStore {
         approvalClass: input.approvalClass,
         ...(input.singleUse === true ? { singleUse: true } : {}),
         shield,
-        status: shield.verdict === "allow" ? "approved" : "denied",
+        status: shield.verdict === "allow" && refusal === undefined ? "approved" : "denied",
+        ...(refusal === undefined ? {} : { refusal }),
         askedAt: at,
         settledAt: at,
       }),
@@ -274,7 +292,7 @@ export class NativeHarnessApprovalStore {
     // says nothing ran, so a restart continues the turn and asks again.
     return whileAwaitingToolApproval(
       () =>
-        new Promise<NativeHarnessCommandApprovalOutcome>((resolve) => {
+        new Promise<NativeHarnessCommandApprovalOutcome>((resolve, reject) => {
           const settle = (
             outcome: SettledApprovalOutcome,
             remembered?: boolean,
@@ -285,16 +303,35 @@ export class NativeHarnessApprovalStore {
             if (waiter === undefined) return;
             this.#waiters.delete(String(approvalId));
             waiter.signal?.removeEventListener("abort", waiter.onAbort);
-            this.#options.sessions.settleApproval(
-              input.threadId,
-              approvalId,
-              { status: outcome, ...(remembered === true ? { remembered: true } : {}) },
-              actor,
-            );
-            resolve(
-              outcome === "approved" && confirmed !== undefined
+            const journal = (
+              delivery: NativeHarnessApprovalDelivery,
+            ): NativeHarnessCommandApprovalOutcome => {
+              const denied = delivery.status === "denied-instead";
+              this.#options.sessions.settleApproval(
+                input.threadId,
+                approvalId,
+                denied
+                  ? { status: "denied", refusal: delivery.refusal }
+                  : { status: outcome, ...(remembered === true ? { remembered: true } : {}) },
+                actor,
+              );
+              if (denied) return { outcome: "denied" };
+              return outcome === "approved" && confirmed !== undefined
                 ? { outcome, confirmed }
-                : { outcome },
+                : { outcome };
+            };
+            if (input.deliver === undefined || outcome === "cancelled") {
+              resolve(journal({ status: "as-decided" }));
+              return;
+            }
+            // A deliver that throws broke its own contract; the decision is
+            // journaled as made and the ask rejects so its caller sees it.
+            input.deliver(outcome === "approved").then(
+              (delivery) => resolve(journal(delivery)),
+              (error: unknown) => {
+                journal({ status: "as-decided" });
+                reject(error);
+              },
             );
           };
           const waiter: Waiter = {

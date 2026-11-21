@@ -245,6 +245,14 @@ function dependencyResultBlocks(
   return blocks;
 }
 
+/** What became of a decision the host handed the child's connection. */
+export type AgentRunChildApprovalDelivery =
+  | { readonly status: "delivered" }
+  /** Only Always allow was offered, which a one-call answer cannot choose; the reject went instead. */
+  | { readonly status: "denied-instead" }
+  /** The connection refused it otherwise; the run fails on that refusal. */
+  | { readonly status: "failed" };
+
 export interface AgentRunSessionInteractions {
   /** The host checks current child authority and asks the person; this port never grants it. */
   readonly approve?: (input: {
@@ -253,6 +261,12 @@ export interface AgentRunSessionInteractions {
     /** The pending call, from the child's connection, for an automatic reviewer. */
     readonly call?: ProviderApprovalCall | undefined;
     readonly signal: AbortSignal;
+    /**
+     * Sends the decision to the child before the host records it, so the
+     * record matches what the agent received. Not called, the runtime
+     * sends the decision `approve` resolves with.
+     */
+    readonly deliver?: (approved: boolean) => Promise<AgentRunChildApprovalDelivery>;
   }) => Promise<boolean>;
   readonly askUser?: (input: {
     readonly run: AgentRun;
@@ -2231,6 +2245,42 @@ function collectSessionEvents(
               yield* forkInteraction(
                 Effect.gen(function* () {
                   let interactionSignal: AbortSignal | undefined;
+                  // A child's request is answered for that one call, by the
+                  // person or by its parent's reviewer; nothing is remembered.
+                  const answer = (approved: boolean) =>
+                    connection.answerApproval({
+                      sessionId: input.sessionId,
+                      requestId: event.requestId,
+                      approved,
+                      scope: "once",
+                    });
+                  let delivered: { readonly failure?: ProviderFailure } | undefined;
+                  // An agent offering only Always allow refuses a one-call
+                  // approval and keeps the request; the child denies it so the
+                  // agent can carry on without that call.
+                  const deliver = (approved: boolean) => {
+                    delivered = {};
+                    return Effect.runPromise(
+                      answer(approved).pipe(
+                        Effect.as<AgentRunChildApprovalDelivery>({ status: "delivered" }),
+                        Effect.catchAll((failure) =>
+                          approved && failure.category === "unsupported"
+                            ? answer(false).pipe(
+                                Effect.as<AgentRunChildApprovalDelivery>({
+                                  status: "denied-instead",
+                                }),
+                              )
+                            : Effect.fail(failure),
+                        ),
+                        Effect.catchAll((failure) =>
+                          Effect.sync((): AgentRunChildApprovalDelivery => {
+                            delivered = { failure };
+                            return { status: "failed" };
+                          }),
+                        ),
+                      ),
+                    );
+                  };
                   const approved = yield* Effect.tryPromise({
                     try: async (signal) => {
                       interactionSignal = AbortSignal.any([signal, toolAbort.signal]);
@@ -2245,6 +2295,7 @@ function collectSessionEvents(
                               requestId: event.requestId,
                             }),
                             signal: interactionSignal,
+                            deliver,
                           })) ?? false
                         );
                       } finally {
@@ -2256,15 +2307,10 @@ function collectSessionEvents(
                       message: "The child permission request could not be answered.",
                     }),
                   });
-                  if (interactionSignal?.aborted) return;
-                  yield* connection.answerApproval({
-                    sessionId: input.sessionId,
-                    requestId: event.requestId,
-                    approved,
-                    // A child's request is answered for that one call, by the
-                    // person or by its parent's reviewer; nothing is remembered.
-                    scope: "once",
-                  });
+                  if (delivered?.failure !== undefined)
+                    return yield* Effect.fail(delivered.failure);
+                  if (delivered !== undefined || interactionSignal?.aborted) return;
+                  yield* answer(approved);
                 }),
               );
               return;

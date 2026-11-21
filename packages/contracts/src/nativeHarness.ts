@@ -1160,6 +1160,12 @@ export const NativeHarnessApproval = Schema.Struct({
    * handed the call to the person, who answers it as any other approval.
    */
   shield: Schema.optional(ShieldDecision),
+  /**
+   * Why an approval that was given was denied instead: the runtime could not
+   * take it as given (a helper run's one-call answer to an agent that offers
+   * only Always allow), so the agent was sent the reject.
+   */
+  refusal: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
   askedAt: UtcTimestamp,
   settledAt: Schema.optional(UtcTimestamp),
 })
@@ -1167,7 +1173,10 @@ export const NativeHarnessApproval = Schema.Struct({
   .pipe(
     Schema.filter(
       (approval) =>
-        (approval.shield?.verdict !== "allow" || approval.status === "approved") &&
+        (approval.shield?.verdict !== "allow" ||
+          approval.status === "approved" ||
+          approval.refusal !== undefined) &&
+        (approval.refusal === undefined || approval.status === "denied") &&
         (approval.shield?.verdict !== "deny" || approval.status === "denied") &&
         (approval.status === "pending") === (approval.settledAt === undefined) &&
         (approval.outsideContent === undefined || approval.singleUse === true) &&

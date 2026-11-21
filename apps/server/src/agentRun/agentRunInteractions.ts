@@ -22,13 +22,17 @@ import {
 } from "@octant/domain/shield-judge-policy";
 import type {
   NativeHarnessApprovalAsk,
+  NativeHarnessApprovalDelivery,
   NativeHarnessApprovalStore,
   NativeHarnessCommandApprovalOutcome,
 } from "../harness/nativeHarnessApprovals";
 import type { NativeHarnessChildInteractions } from "../harness/nativeHarnessComposition";
 import type { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
 import type { ShieldReviewPort } from "../shield/octantShield";
-import { clampAgentRunSessionAuthority } from "./agentRunSessionRuntime";
+import {
+  clampAgentRunSessionAuthority,
+  type AgentRunChildApprovalDelivery,
+} from "./agentRunSessionRuntime";
 
 export interface AgentRunInteractionOptions {
   readonly getById: (id: AgentRunId) => AgentRun | undefined;
@@ -131,6 +135,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     readonly approvalClass: string;
     readonly shieldCall?: (boundRoot: string) => ShieldCall;
     readonly signal?: AbortSignal;
+    readonly deliver?: NativeHarnessApprovalAsk["deliver"];
   }) => (await approveListing(input)).outcome;
   const childRoot = (run: AgentRun): string | undefined =>
     run.workspaceReceipt.kind === "code-worktree" ? run.workspaceReceipt.worktreeRoot : undefined;
@@ -147,6 +152,8 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     readonly commandHosts?: ReadonlyArray<NativeHarnessCommandHost>;
     readonly shieldCall?: (boundRoot: string) => ShieldCall;
     readonly signal?: AbortSignal;
+    /** Hands the decision to the child before it is journaled; see the store's `deliver`. */
+    readonly deliver?: NativeHarnessApprovalAsk["deliver"];
   }): Promise<NativeHarnessCommandApprovalOutcome | { readonly outcome: "shield-denied" }> => {
     if (!current(input.run, input.signal)) return { outcome: "cancelled" };
     // A provider's opaque prompt cannot widen Plan or the child's admitted
@@ -165,6 +172,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       summary: input.summary,
       approvalClass: input.approvalClass,
       signal: input.signal,
+      ...(input.deliver === undefined ? {} : { deliver: input.deliver }),
     };
     const shield = options.shield?.();
     const boundRoot = childRoot(input.run);
@@ -186,8 +194,15 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
           decision,
         });
         if (decision.verdict === "allow" || decision.verdict === "deny") {
-          options.approvals.recordReviewed?.(ask, { ...decision, verdict: decision.verdict });
-          return { outcome: decision.verdict === "allow" ? "approved" : "shield-denied" };
+          const delivery = await input.deliver?.(decision.verdict === "allow");
+          const refusal = delivery?.status === "denied-instead" ? delivery.refusal : undefined;
+          const reviewed = { ...decision, verdict: decision.verdict };
+          if (refusal === undefined) options.approvals.recordReviewed?.(ask, reviewed);
+          else options.approvals.recordReviewed?.(ask, reviewed, refusal);
+          return {
+            outcome:
+              decision.verdict === "allow" && refusal === undefined ? "approved" : "shield-denied",
+          };
         }
         ask = { ...ask, shield: decision };
       }
@@ -225,6 +240,32 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     });
     return current(input.run, input.signal) ? outcome : { status: "cancelled" as const };
   };
+  /**
+   * A child's answer holds for one call, so an agent offering only Always
+   * allow can never be granted one; the child sends the reject instead and
+   * the parent's record says so, rather than claiming an approval. A child
+   * that lapsed while the person decided is handed nothing.
+   */
+  const deliverToChild = (input: {
+    readonly run: AgentRun;
+    readonly signal: AbortSignal;
+    readonly deliver?: (approved: boolean) => Promise<AgentRunChildApprovalDelivery>;
+  }): NativeHarnessApprovalAsk["deliver"] => {
+    const deliver = input.deliver;
+    if (deliver === undefined) return undefined;
+    return async (approved): Promise<NativeHarnessApprovalDelivery> => {
+      if (!current(input.run, input.signal)) return { status: "as-decided" };
+      const delivered = await deliver(approved);
+      if (delivered.status !== "denied-instead") return { status: "as-decided" };
+      const target = effectiveAgentRunExecutionTarget(input.run.routingReceipt);
+      const agent =
+        options.providerName?.(target.providerInstanceId)?.slice(0, 128).trim() || "The agent";
+      return {
+        status: "denied-instead",
+        refusal: `${agent} only offers Always allow, which a helper run can't grant; denied.`,
+      };
+    };
+  };
   return {
     isCurrent: (run: AgentRun) => authorized(run),
     canReviewSession: (run: AgentRun) => authorized(run, true),
@@ -234,9 +275,11 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       /** The pending call, from the child's connection, for Shield. */
       readonly call?: ProviderApprovalCall | undefined;
       readonly signal: AbortSignal;
+      readonly deliver?: (approved: boolean) => Promise<AgentRunChildApprovalDelivery>;
     }): Promise<boolean> =>
       (await approve({
         ...input,
+        deliver: deliverToChild(input),
         toolName: "provider-action",
         summary: `${input.event.action}: ${input.event.description}`,
         approvalClass: "child-provider-action",

@@ -151,6 +151,20 @@ describe("a child under a parent Octant Shield reviews", () => {
     expect(ask).not.toHaveBeenCalled();
   });
 
+  it("records Shield's allow of a request the agent offers only as Always allow as denied, saying why", async () => {
+    const { interactions, recordReviewed } = interactionsWith("allow");
+    const deliver = vi.fn(async () => ({ status: "denied-instead" as const }));
+    expect(
+      await interactions.approve({ run, event, signal: new AbortController().signal, deliver }),
+    ).toBe(false);
+    expect(deliver).toHaveBeenCalledWith(true);
+    expect(recordReviewed).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ verdict: "allow" }),
+      "The agent only offers Always allow, which a helper run can't grant; denied.",
+    );
+  });
+
   it("hands what Shield escalates to the person on the parent thread", async () => {
     const { interactions, ask } = interactionsWith("ask");
     await interactions
