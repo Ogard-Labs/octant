@@ -252,3 +252,4 @@ export * from "./codeProviderFileReview";
 export * from "./persistentBrowserOwner";
 
 export * from "./hostResourcePolicy";
+export * from "./providerFolderScan";

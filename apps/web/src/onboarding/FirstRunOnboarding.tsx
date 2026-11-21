@@ -19,7 +19,7 @@ import {
 } from "./firstRunHandoffModel";
 import { FirstRunModeStep } from "./FirstRunModeStep";
 import { FirstRunModelStep } from "./FirstRunModelStep";
-import { FirstRunProjectStep } from "./FirstRunProjectStep";
+import { FirstRunProjectStep, type FirstRunProviderFolderScan } from "./FirstRunProjectStep";
 import { FirstRunProviderStep } from "./FirstRunProviderStep";
 import { FirstRunReadinessStep } from "./FirstRunReadinessStep";
 import type { FirstRunDiscoveryNotice, FirstRunReadinessSummary } from "./firstRunReadinessModel";
@@ -91,6 +91,8 @@ export interface FirstRunOnboardingProps {
   readonly onSetUpdateChecks?: ((allowed: boolean) => Promise<boolean>) | undefined;
 
   readonly projects: ReadonlyArray<FirstRunHandoffProject>;
+  /** Optional host-side read-only scan of folders local providers already used. */
+  readonly providerFolderScan?: FirstRunProviderFolderScan | undefined;
   /** Open the Project create surface — the same Choose a folder flow the shell uses. */
   readonly onCreateProject: (mode: FirstRunTaskMode) => void;
   /** Open the new-task composer for this Project. It creates no thread by itself. */
@@ -484,6 +486,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               onSelectMode={setSelectedMode}
               onSelectProject={setChosenProjectId}
               projects={projectsForMode(props.projects, mode)}
+              {...(props.providerFolderScan === undefined
+                ? {}
+                : { providerFolderScan: props.providerFolderScan })}
               selectedProjectId={handoff.project?.id}
               workEnabled={props.workEnabled}
             />

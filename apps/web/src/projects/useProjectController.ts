@@ -1,3 +1,8 @@
+import type {
+  DiscoveredProviderFolderId,
+  ImportProviderFoldersResult,
+  ProviderFolderScanResult,
+} from "@octant/contracts/provider-folder-scan";
 import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
 import type { DesignSystemChoice } from "@octant/contracts/design-systems";
 import type { AutoReviewer } from "@octant/contracts/shield";
@@ -1085,6 +1090,29 @@ export function useProjectController(options: ProjectControllerOptions) {
     [state.availability],
   );
 
+  const scanProviderFolders = useCallback(
+    (signal?: AbortSignal): Promise<ProviderFolderScanResult> | undefined =>
+      fallbackClient.scanProviderFolders?.(signal),
+    [fallbackClient],
+  );
+
+  const importProviderFolders = useCallback(
+    async (
+      folderIds: readonly [DiscoveredProviderFolderId, ...DiscoveredProviderFolderId[]],
+    ): Promise<ImportProviderFoldersResult | undefined> => {
+      if (fallbackClient.importProviderFolders === undefined) return undefined;
+      const result = await fallbackClient.importProviderFolders({ folderIds });
+      if (
+        result.status === "completed" &&
+        result.results.some((item) => item.status === "created")
+      ) {
+        await load("retry");
+      }
+      return result;
+    },
+    [fallbackClient, load],
+  );
+
   return {
     activeProject,
     allProjects,
@@ -1095,6 +1123,8 @@ export function useProjectController(options: ProjectControllerOptions) {
     client: fallbackClient,
     create,
     ensureDefault,
+    importProviderFolders,
+    scanProviderFolders,
     createMemory,
     clearMemory,
     errorMessage,

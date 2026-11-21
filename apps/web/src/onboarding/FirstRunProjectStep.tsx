@@ -1,11 +1,29 @@
-import type { ProjectId } from "@octant/contracts/projects";
+import {
+  type DiscoveredFolderProvider,
+  type DiscoveredProviderFolder,
+  type DiscoveredProviderFolderGroup,
+  type DiscoveredProviderFolderId,
+  type ImportProviderFoldersResult,
+  type ProjectId,
+  type ProviderFolderScanResult,
+  type ProviderFolderScanStopReason,
+} from "@octant/contracts";
 import { FolderPlus } from "../ui/icons";
 import { SettingRow } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
-import type { KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { FirstRunHandoffProject, FirstRunTaskMode } from "./firstRunHandoffModel";
+
+export interface FirstRunProviderFolderScan {
+  readonly strict: boolean;
+  readonly scan: (signal?: AbortSignal) => Promise<ProviderFolderScanResult>;
+  readonly importFolders: (
+    folderIds: readonly [DiscoveredProviderFolderId, ...DiscoveredProviderFolderId[]],
+  ) => Promise<ImportProviderFoldersResult>;
+}
 
 export interface FirstRunProjectStepProps {
   /** Work can be turned off in Settings; Code is always available. */
@@ -17,6 +35,8 @@ export interface FirstRunProjectStepProps {
   readonly selectedProjectId: ProjectId | undefined;
   readonly onSelectProject: (projectId: ProjectId) => void;
   readonly onChooseFolder: () => void;
+  /** Optional host-side read-only scan of folders local providers already used. */
+  readonly providerFolderScan?: FirstRunProviderFolderScan | undefined;
 }
 
 const MODE_COPY: Record<FirstRunTaskMode, { readonly label: string; readonly lead: string }> = {
@@ -30,6 +50,23 @@ const MODE_COPY: Record<FirstRunTaskMode, { readonly label: string; readonly lea
   },
 };
 
+const PROVIDER_LABELS: Record<DiscoveredFolderProvider, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  opencode: "OpenCode",
+  pi: "Pi",
+};
+
+type ScanState =
+  | { readonly status: "idle" }
+  | { readonly status: "scanning" }
+  | { readonly status: "hidden" }
+  | {
+      readonly status: "ready";
+      readonly result: Extract<ProviderFolderScanResult, { readonly status: "ready" }>;
+    }
+  | { readonly status: "failed" };
+
 /**
  * These toggle groups present as radio groups, and the toggle group's own
  * arrows only move focus: the choice stayed where it was until Space. Radio
@@ -41,6 +78,58 @@ function chooseWithArrows(event: KeyboardEvent<HTMLElement>): void {
   if (event.defaultPrevented) event.stopPropagation();
 }
 
+function formatProviders(providers: ReadonlyArray<DiscoveredFolderProvider>): string {
+  return providers.map((provider) => PROVIDER_LABELS[provider]).join(", ");
+}
+
+function formatSessionCount(count: number): string {
+  return count === 1 ? "1 session" : `${String(count)} sessions`;
+}
+
+function formatLastActivity(isoTimestamp: string): string {
+  const parsed = Date.parse(isoTimestamp);
+  if (!Number.isFinite(parsed)) return "";
+  const date = new Date(parsed);
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function formatFolderMeta(folder: DiscoveredProviderFolder): string {
+  const parts: string[] = [];
+  if (folder.alreadyImported) parts.push("Already added");
+  parts.push(formatProviders(folder.providers));
+  parts.push(formatSessionCount(folder.sessionCount));
+  const activity = formatLastActivity(folder.lastActivityAt);
+  if (activity !== "") parts.push(activity);
+  return parts.join(" · ");
+}
+
+function stoppedEarlyCopy(reason: ProviderFolderScanStopReason | undefined): string {
+  if (reason === "file-limit") {
+    return "The scan stopped early after reaching its file limit, so some older folders may not be listed. You can still choose any folder below.";
+  }
+  if (reason === "entry-limit") {
+    return "The scan stopped early after reaching its folder limit, so some folders may not be listed. You can still choose any folder below.";
+  }
+  if (reason === "time-limit") {
+    return "The scan stopped early after reaching its time limit, so some folders may not be listed. You can still choose any folder below.";
+  }
+  return "The scan stopped early, so some folders may not be listed. You can still choose any folder below.";
+}
+
+function markFoldersImported(
+  groups: ReadonlyArray<DiscoveredProviderFolderGroup>,
+  importedIds: ReadonlySet<string>,
+): ReadonlyArray<DiscoveredProviderFolderGroup> {
+  return groups.map((group) => {
+    const updated = group.folders.map((folder) =>
+      importedIds.has(String(folder.id)) ? { ...folder, alreadyImported: true } : folder,
+    );
+    const [first, ...rest] = updated;
+    if (first === undefined) return group;
+    return { ...group, folders: [first, ...rest] };
+  });
+}
+
 /**
  * The folder the first task works in.
  *
@@ -48,10 +137,156 @@ function chooseWithArrows(event: KeyboardEvent<HTMLElement>): void {
  * Code pages, so first run grants nothing that surface would not, and making
  * the folder a Git repository stays the explicit choice it is there. That
  * surface conceals first run and returns here when it closes.
+ *
+ * In Code mode (outside Strict), this step also offers a read-only scan of
+ * folders the person's providers already used, importing only ticked opaque
+ * IDs as Code Projects through the existing Project create path and receipts.
  */
 export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
   const modes: ReadonlyArray<FirstRunTaskMode> = props.workEnabled ? ["work", "code"] : ["code"];
   const hasProjects = props.projects.length > 0;
+  const providerScan = props.providerFolderScan;
+  const providerScanRef = useRef(providerScan);
+  providerScanRef.current = providerScan;
+  const scanAllowed = props.mode === "code" && providerScan !== undefined && !providerScan.strict;
+
+  const [scanState, setScanState] = useState<ScanState>({ status: "idle" });
+  const [tickedIds, setTickedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [importing, setImporting] = useState(false);
+  const [importNotice, setImportNotice] = useState<string>();
+
+  const runScan = useCallback(async (signal?: AbortSignal) => {
+    const active = providerScanRef.current;
+    if (active === undefined || active.strict) return;
+    setScanState({ status: "scanning" });
+    setImportNotice(undefined);
+    try {
+      const result = await active.scan(signal);
+      if (signal?.aborted) return;
+      if (result.status === "hidden") {
+        setScanState({ status: "hidden" });
+        setTickedIds(new Set());
+        return;
+      }
+      setScanState({ status: "ready", result });
+      setTickedIds(new Set());
+    } catch {
+      if (signal?.aborted) return;
+      setScanState({ status: "failed" });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!scanAllowed) {
+      setScanState({ status: "idle" });
+      setTickedIds(new Set());
+      return;
+    }
+    const controller = new AbortController();
+    void runScan(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [scanAllowed, runScan]);
+
+  function toggleFolder(id: DiscoveredProviderFolderId, checked: boolean): void {
+    setTickedIds((previous) => {
+      const next = new Set(previous);
+      if (checked) {
+        next.add(String(id));
+      } else {
+        next.delete(String(id));
+      }
+      return next;
+    });
+  }
+
+  async function handleImport(): Promise<void> {
+    if (providerScan === undefined || scanState.status !== "ready" || importing) return;
+    const allFolders = scanState.result.groups.flatMap((group) => group.folders);
+    const chosen = allFolders
+      .filter((folder) => !folder.alreadyImported && tickedIds.has(String(folder.id)))
+      .map((folder) => folder.id);
+    const [first, ...rest] = chosen;
+    if (first === undefined) return;
+
+    setImporting(true);
+    setImportNotice(undefined);
+    try {
+      const outcome = await providerScan.importFolders([first, ...rest]);
+      if (outcome.status === "refused") {
+        if (outcome.reason === "strict") {
+          setScanState({ status: "hidden" });
+          setTickedIds(new Set());
+        } else {
+          setImportNotice(outcome.message);
+        }
+        return;
+      }
+      const importedIds = new Set(
+        outcome.results
+          .filter((item) => item.status === "created" || item.status === "already-imported")
+          .map((item) => String(item.folderId)),
+      );
+      const createdCount = outcome.results.filter((item) => item.status === "created").length;
+      const refusedCount = outcome.results.filter((item) => item.status === "refused").length;
+
+      setScanState((previous) =>
+        previous.status === "ready"
+          ? {
+              status: "ready",
+              result: {
+                ...previous.result,
+                groups: markFoldersImported(previous.result.groups, importedIds),
+              },
+            }
+          : previous,
+      );
+      setTickedIds((previous) => {
+        const next = new Set(previous);
+        for (const id of importedIds) next.delete(id);
+        return next;
+      });
+      if (createdCount > 0 && refusedCount === 0) {
+        setImportNotice(
+          createdCount === 1
+            ? "Imported 1 Code Project."
+            : `Imported ${String(createdCount)} Code Projects.`,
+        );
+      } else if (createdCount > 0 && refusedCount > 0) {
+        setImportNotice(
+          `Imported ${String(createdCount)} Code ${createdCount === 1 ? "Project" : "Projects"}; ${String(refusedCount)} could not be imported.`,
+        );
+      } else if (refusedCount > 0) {
+        const firstRefusal = outcome.results.find((item) => item.status === "refused");
+        setImportNotice(
+          firstRefusal?.status === "refused"
+            ? firstRefusal.message
+            : "Selected folders could not be imported.",
+        );
+      }
+    } catch {
+      setImportNotice("Could not import the selected folders.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  const readyGroups = scanState.status === "ready" ? scanState.result.groups : [];
+  const showScanSection =
+    scanAllowed &&
+    (scanState.status === "scanning" ||
+      scanState.status === "failed" ||
+      (scanState.status === "ready" && (readyGroups.length > 0 || scanState.result.stoppedEarly)));
+
+  const tickedCount = tickedIds.size;
+  const importButtonLabel = importing
+    ? "Importing…"
+    : tickedCount === 1
+      ? "Import 1 Code Project"
+      : tickedCount > 1
+        ? `Import ${String(tickedCount)} Code Projects`
+        : "Import selected";
 
   return (
     <div className="first-run__step">
@@ -132,6 +367,134 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
               </SettingRow>
             ) : null}
           </div>
+        </section>
+      ) : null}
+
+      {showScanSection ? (
+        <section
+          aria-label="Folders from your providers"
+          className="settings-card-section settings-card-section--open"
+        >
+          <h2>Folders from your providers</h2>
+          {scanState.status === "scanning" ? (
+            <p className="first-run__caveat" role="status">
+              Looking for folders your providers already used…
+            </p>
+          ) : null}
+          {scanState.status === "failed" ? (
+            <div className="first-run__discovered-footer">
+              <p className="first-run__caveat" role="status">
+                Could not scan provider folders on this computer.
+              </p>
+              <OctantButton onClick={() => void runScan()} type="button" variant="ghost">
+                Scan again
+              </OctantButton>
+            </div>
+          ) : null}
+          {scanState.status === "ready" ? (
+            <>
+              <p className="first-run__caveat">
+                Tick folders to import as Code Projects at your first-run access level. Octant reads
+                provider session lists only and never changes another tool’s files.
+              </p>
+              {readyGroups.length > 0 ? (
+                <ul
+                  aria-label="Discovered provider folders"
+                  className="setgroup first-run__discovered-list"
+                >
+                  {readyGroups.map((group) => {
+                    const single = group.folders.length === 1 ? group.folders[0] : undefined;
+                    if (single !== undefined) {
+                      const checked = single.alreadyImported || tickedIds.has(String(single.id));
+                      return (
+                        <li className="setrow first-run__discovered-row" key={String(single.id)}>
+                          <label className="first-run__discovered-choice">
+                            <OctantCheckbox
+                              aria-label={group.label}
+                              checked={checked}
+                              disabled={single.alreadyImported || importing}
+                              onChange={(event) => toggleFolder(single.id, event.target.checked)}
+                            />
+                            <span className="first-run__discovered-text">
+                              <span className="first-run__discovered-title">{group.label}</span>
+                              <span className="first-run__discovered-meta">
+                                {formatFolderMeta(single)}
+                              </span>
+                            </span>
+                          </label>
+                        </li>
+                      );
+                    }
+                    return (
+                      <li
+                        className="setrow first-run__discovered-group"
+                        key={`${group.label}:${String(group.folders[0]?.id)}`}
+                      >
+                        <div className="first-run__discovered-group-header">
+                          <span className="first-run__discovered-title">{group.label}</span>
+                          <span className="first-run__discovered-meta">
+                            {`${String(group.folders.length)} clones · ${formatProviders(group.providers)} · ${formatSessionCount(group.sessionCount)}`}
+                          </span>
+                        </div>
+                        <ul
+                          aria-label={`Clones of ${group.label}`}
+                          className="first-run__discovered-clones"
+                        >
+                          {group.folders.map((clone) => {
+                            const checked =
+                              clone.alreadyImported || tickedIds.has(String(clone.id));
+                            return (
+                              <li className="first-run__discovered-clone" key={String(clone.id)}>
+                                <label className="first-run__discovered-choice">
+                                  <OctantCheckbox
+                                    aria-label={`${group.label} (${clone.folderName})`}
+                                    checked={checked}
+                                    disabled={clone.alreadyImported || importing}
+                                    onChange={(event) =>
+                                      toggleFolder(clone.id, event.target.checked)
+                                    }
+                                  />
+                                  <span className="first-run__discovered-text">
+                                    <span className="first-run__discovered-clone-name">
+                                      {clone.folderName}
+                                    </span>
+                                    <span className="first-run__discovered-meta">
+                                      {formatFolderMeta(clone)}
+                                    </span>
+                                  </span>
+                                </label>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+              {scanState.result.stoppedEarly ? (
+                <p className="first-run__caveat" role="note">
+                  {stoppedEarlyCopy(scanState.result.stoppedEarlyReason)}
+                </p>
+              ) : null}
+              {readyGroups.length > 0 ? (
+                <div className="first-run__discovered-footer">
+                  <OctantButton
+                    disabled={tickedCount === 0 || importing}
+                    onClick={() => void handleImport()}
+                    type="button"
+                  >
+                    {importButtonLabel}
+                  </OctantButton>
+                  {importNotice === undefined ? null : (
+                    <p className="first-run__caveat" role="status">
+                      {importNotice}
+                    </p>
+                  )}
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </section>
       ) : null}
 
