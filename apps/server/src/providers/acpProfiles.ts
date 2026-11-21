@@ -1932,6 +1932,21 @@ export const acpProviderProfiles: Readonly<
   antigravity: antigravityProfile,
 };
 
+/**
+ * Whether a runtime's release keeps its pinned usage reading unverified: a
+ * release newer than the one Octant reviewed it on. The spend ceiling reads
+ * it for unreported turns run below Full access while such a release still
+ * read usage at Full access only.
+ */
+export function acpUsageUnverified(
+  driverKind: ProviderDriverKind,
+  version: string | undefined,
+): boolean {
+  const profiles: Readonly<Partial<Record<ProviderDriverKind, AcpProviderProfile>>> =
+    acpProviderProfiles;
+  return acpReleaseClaim(profiles[driverKind]?.usageVersions, version) === "unverified";
+}
+
 export function isAcpProviderKind(kind: ProviderDriverKind): kind is AcpProviderKind {
   return kind === "acp-agent" || kind in acpProviderProfiles;
 }

@@ -648,6 +648,62 @@ describe("UsageProjection", () => {
     connection.close();
   });
 
+  it("remembers which unreported turns ran below Full access when the upgrade drops the level, through a rebuild", () => {
+    const { connection, journal } = openDatabase(
+      MIGRATIONS.filter((migration) => migration.version <= 110),
+    );
+    const unreportedTurn = (operationId: string, executionPolicy: string) =>
+      journal.append({
+        aggregate: { aggregateType: "code-operation", aggregateId: operationId },
+        expectedVersion: 0,
+        events: [
+          {
+            kind: "conversation-turn-started",
+            providerInstanceId: ids.provider,
+            modelId: "acp-agent",
+            sessionId: ids.entry,
+            prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+            executionPolicy,
+          },
+          { kind: "operation-state", state: "completed" },
+        ].map((event, index) =>
+          pending("code.operation-event-recorded@1", {
+            threadId: ids.aggregate,
+            operationId,
+            cursor: index + 1,
+            occurredAt: now,
+            event,
+          }),
+        ),
+      });
+    unreportedTurn(ids.usage, "full-access");
+    unreportedTurn(ids.usage2, "approval-gated");
+    unreportedTurn(ids.usage3, "approval-gated");
+    const level = connection.prepare(
+      "UPDATE usage_record_projection SET ran_at_full_access = ? WHERE reconciliation_id = ?",
+    );
+    level.run(1, ids.usage);
+    level.run(0, ids.usage2);
+    // A turn that recorded no level, which the earlier rule read as below Full access.
+    level.run(null, ids.usage3);
+
+    applyMigrations(connection, MIGRATIONS, () => now);
+
+    const kept = () =>
+      connection
+        .prepare(
+          "SELECT reconciliation_id FROM usage_unreported_guarded_turn ORDER BY reconciliation_id",
+        )
+        .all();
+    const expected = [{ reconciliation_id: ids.usage2 }, { reconciliation_id: ids.usage3 }];
+    expect(kept()).toEqual(expected);
+    const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(kept()).toEqual(expected);
+    connection.close();
+  });
+
   it("keeps a completed request without provider usage as unavailable, not zero", () => {
     const { connection, journal } = openDatabase();
     appendFullUsageCycle(journal, {

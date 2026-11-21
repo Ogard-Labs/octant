@@ -2841,7 +2841,20 @@ CREATE INDEX validation_evidence_authority_idx
     // for it. The column's only constraint is its own CHECK and no index,
     // view, or trigger names it, so SQLite drops it in place; every other
     // column of a projected row is kept, and a rebuild writes the same rows.
+    // Before it goes, the unreported turns it read below Full access (a NULL
+    // level read so too) are kept by id: the earlier rule left those turns
+    // out on an ACP release whose usage was then read at Full access only,
+    // and that release now reports usage at every level. Reading them as
+    // measured would make a lifetime ceiling refuse forever over spend no
+    // report can recover. The table is not a projection, so a rebuild, which
+    // writes the same ids, keeps it.
     sql: `
+      CREATE TABLE usage_unreported_guarded_turn (
+        reconciliation_id TEXT PRIMARY KEY
+      ) STRICT;
+      INSERT INTO usage_unreported_guarded_turn (reconciliation_id)
+        SELECT reconciliation_id FROM usage_record_projection
+        WHERE quality = 'unavailable' AND COALESCE(ran_at_full_access, 0) = 0;
       ALTER TABLE usage_record_projection DROP COLUMN ran_at_full_access;
       DROP TABLE usage_turn_level_boundary;
     `,

@@ -21,6 +21,7 @@ import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite } from "./persistence/sqlitePort";
 import { readProviderInstances } from "./providers/providerProjection";
+import { acpUsageUnverified } from "./providers/acpProfiles";
 import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
 import {
   decodeSpendCeilingReservationId,
@@ -92,7 +93,11 @@ function insertUsage(
     readonly id: string;
     readonly subjectType: string;
     readonly subjectId: string;
-    readonly tokens: { readonly input: number; readonly output: number };
+    readonly tokens: {
+      readonly input: number;
+      readonly output: number;
+      readonly reasoning?: number;
+    };
     readonly quality?: string;
     readonly sequence: number;
     readonly observedAt?: string;
@@ -122,7 +127,7 @@ function insertUsage(
       input.quality ?? "exact",
       input.tokens.input,
       input.tokens.output,
-      null,
+      input.tokens.reasoning ?? null,
       null,
       null,
       null,
@@ -321,6 +326,31 @@ describe("SpendCeilingService", () => {
     expect(admission.status).toBe("refused");
     if (admission.status !== "refused") return;
     expect(admission.refusal.kind).toBe("exhausted");
+  });
+
+  it("counts reasoning once, as the part of output it already is", () => {
+    const { connection, service } = openService();
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "code-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { tokenBudget: 1_000 },
+      window: { kind: "lifetime" },
+    });
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000102",
+      subjectType: "code-thread",
+      subjectId: ids.thread,
+      tokens: { input: 500, output: 300, reasoning: 250 },
+      sequence: 1,
+    });
+    const admission = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "code-thread",
+      turnUpperBoundTokens: 200,
+    });
+    expect(admission.status).toBe("admitted");
   });
 
   it("counts Octant Shield's reviews against the reviewed Code thread's ceiling", () => {
@@ -1827,11 +1857,13 @@ describe("notMeasuredProvider", () => {
     registry: ProviderRuntimeRegistry,
     id: string,
     usage: ProviderCapabilitySupport,
+    detectedVersion?: string,
   ): void {
     registry.setObservedState({
       instanceId: id,
       readiness: "ready",
       processState: "stopped",
+      ...(detectedVersion === undefined ? {} : { detectedVersion }),
       models: [],
       capabilities: {
         streaming: "supported",
@@ -1926,6 +1958,94 @@ describe("notMeasuredProvider", () => {
           turnUpperBoundTokens: 100,
         }),
       ).toMatchObject({
+        status: "refused",
+        refusal: { kind: "unknown-spend", dimension },
+      });
+    },
+  );
+
+  it.each(["tokens", "monetary"] as const)(
+    "keeps leaving out a guarded Vibe turn from before the upgrade under a %s ceiling while its release keeps usage unverified, and refuses one at Full access",
+    (dimension) => {
+      const registry = new ProviderRuntimeRegistry();
+      const { connection, journal, service } = openService({
+        notMeasuredProvider: (id, keptBelowFullAccess) =>
+          notMeasuredProvider(
+            {
+              readProviderInstances: () => readProviderInstances(connection),
+              observedState: registry.observedState.bind(registry),
+              usageUnverified: (instance, version) =>
+                acpUsageUnverified(instance.driverKind, version),
+            },
+            id,
+            keptBelowFullAccess,
+          ),
+      });
+      const providerId = providerIds.measuredOut;
+      append(journal, providerId, 0, "provider.instance-created@1", {
+        instance: instance(providerId, {
+          displayName: "Mistral Vibe",
+          driverKind: "mistral-vibe",
+          configuration: {
+            kind: "mistral-vibe-acp",
+            binaryPath: "/usr/local/bin/vibe-acp",
+            authentication: "api-key",
+          },
+        }),
+      });
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "code-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: dimension === "tokens" ? { tokenBudget: 1_000 } : { costBudgetUsdCents: 25_00 },
+        window: { kind: "lifetime" },
+      });
+      const unreported = (id: string, sequence: number) =>
+        insertUsage(connection, {
+          id,
+          subjectType: "code-thread",
+          subjectId: ids.thread,
+          providerInstanceId: providerId,
+          tokens: { input: 0, output: 0 },
+          quality: "unavailable",
+          sequence,
+        });
+      // A guarded turn the upgrade that dropped the ledger's level kept.
+      unreported("73000000-0000-4000-8000-000000000521", 1);
+      connection
+        .prepare("INSERT INTO usage_unreported_guarded_turn (reconciliation_id) VALUES (?)")
+        .run("73000000-0000-4000-8000-000000000521");
+      const admit = (reservationId: typeof ids.reservationA) =>
+        service.admit({
+          reservationId,
+          threadId: ids.thread,
+          threadType: "code-thread",
+          turnUpperBoundTokens: 100,
+        });
+      // The reviewed release measured guarded turns then too, so the turn counts.
+      observe(registry, providerId, "supported", "3.0.3");
+      expect(admit(ids.reservationA)).toMatchObject({
+        status: "refused",
+        refusal: { kind: "unknown-spend", dimension },
+      });
+      observe(registry, providerId, "supported", "3.0.4");
+      expect(
+        remainingOf(
+          service.snapshot({
+            principalKind: "local-window",
+            threadId: ids.thread,
+            threadType: "code-thread",
+          }),
+          "thread",
+        ),
+      ).toMatchObject({
+        notMeasuredProviders: [{ providerInstanceId: providerId, displayName: "Mistral Vibe" }],
+      });
+      expect(admit(ids.reservationA)).toMatchObject({ status: "admitted" });
+      service.release(ids.reservationA);
+      // A Full access turn from the same release was measured, so its missing report refuses.
+      unreported("73000000-0000-4000-8000-000000000522", 2);
+      expect(admit(ids.reservationB)).toMatchObject({
         status: "refused",
         refusal: { kind: "unknown-spend", dimension },
       });

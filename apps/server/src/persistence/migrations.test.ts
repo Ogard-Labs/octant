@@ -298,6 +298,7 @@ describe("applyMigrations", () => {
         "usage_audit_log",
         "usage_record_projection",
         "usage_resume_projection",
+        "usage_unreported_guarded_turn",
         "validation_evidence_projection",
         "web_search_settings_projection",
         "window_workspace_projection",
