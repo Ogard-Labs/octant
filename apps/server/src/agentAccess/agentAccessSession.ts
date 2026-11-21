@@ -374,6 +374,8 @@ export function guardAgentRequest(input: {
   }
   if (path === "/api/work/threads/commands") {
     if (kind === "create-work-thread") {
+      if (body["access"] !== undefined && !workAccessAllowed(scope.highestLevel, body["access"]))
+        return refused(`This agent's grant allows at most ${scope.highestLevel}.`);
       if (!scope.modes.includes("work")) return refused("This agent's grant has no Work.");
       if (!projectAllowed(grant, body["projectId"])) {
         return refused("That Project is not in this agent's grant.");

@@ -7095,7 +7095,13 @@ The exact API, account limitations and verification boundary are owned by
 
 - **CLI model selection.** An explicit `octant agent --model` selects the
   provider account and model for a new Chat thread before its first prompt.
-  Work and Code retain their harness-endpoint selection. Unknown or ambiguous
+  Work and Code also list enabled text providers, including native coding runtimes.
+  Code and Work read their host-configured provider/model defaults. The Code
+  first-run model choice and Settings › Code's Default model are saved in Code settings (`defaultModel`), shared
+  with the terminal; the app's current draft choice remains a local preference.
+  Without a usable default,
+  an interactive terminal offers a picker. Noninteractive callers without a usable default must supply
+  a unique model, even when there is only one catalogued choice. Unknown or ambiguous
   names refuse before inference; a qualified name must identify exactly one
   account/model pair. The creation flag cannot silently override or be ignored
   when attaching with `--thread` or `--last`; that combination is refused.
@@ -10903,7 +10909,29 @@ the model at another size.
   and Code adapters over the modes' own routes, plus creation), `agentHost.ts`
   the harness calls, `agentTuiModel.ts` the pure presentation (transcript,
   footer, palette projected from `@octant/theme` tokens), and `agentTui.ts`
-  the OpenTUI screen, loaded only when stdout is a terminal and `--plain` or
+  the OpenTUI screen. The terminal reads each mode's lightweight navigation
+  projection, preserves its mode when switching, and opens the destination
+  through the host's window commands. At 100 columns it shows the thread list;
+  at 140 it also shows thread information. `/threads` remains available at
+  smaller widths; Ctrl+B and Ctrl+G reveal the hidden panels. `/next-waiting` opens another pending thread in the current
+  mode; an unavailable navigation read retains the last list with a notice.
+  Ctrl+P opens the command palette; Ctrl+O pauses or resumes. `/model` sends
+  the mode's versioned provider-change command and preserves host refusals.
+  The composer names access and the model's effort; `/effort` changes a
+  declared selection through that same versioned provider command. Cost and
+  speed use reported host metrics and remain unreported when absent. The
+  information panel reads host MCP connection states and bounded current
+  checkout evidence; its files are not attributed to the thread. Approvals and
+  questions remain in the conversation, with the full host-selection and
+  single-use details retained. Plain streaming text appends to the native
+  buffer; styled replies coalesce adjacent spans and use a bounded render cache.
+  The native-renderer benchmark exercises a growing 2,000-line reply with a
+  16 ms p95 refresh/render budget; this is measured in its recorded environment,
+  not promised for every terminal or host.
+  Source-path mentions remain prompt context for Code and Work, whose runtimes
+  read their bound Project. Image mentions stage through their attachment routes
+  and the next turn carries those identifiers. The screen is loaded only when
+  stdout is a terminal and `--plain` or
   `--json` was not asked for. Starting needs no subcommand: `octant` alone at
   a terminal, a run that begins with one of the agent's flags
   (`octant --last`), or a quoted prompt (`octant "fix the tests"`, which no
@@ -10929,7 +10957,12 @@ the model at another size.
   events — and only uses it as a wake-up: every redraw still reads the
   thread through the mode's routes, so the stream never becomes a second
   source of truth. Harness questions and approvals have no stream and are
-  picked up by a one-second fallback read. A Browser site ask is not a
+  picked up by a one-second fallback read. On a Code thread `/diff` observes
+  the bound checkout through the host and resolves its bounded diff evidence.
+  The view labels this as current checkout changes, which may include work
+  outside the thread, and names truncation and changed paths without diff text.
+  Escape returns to the transcript; a pending question or approval also closes
+  review so that the request is visible. A Browser site ask is not a
   harness approval, so `agentSiteApprovals.ts` reads it on the same tick
   from the route the app's thread view uses: `/api/browser/approvals` for
   Work, and for Code the `/api/pending-requests` approvals that carry

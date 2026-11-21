@@ -24,7 +24,7 @@ import {
   WorkThreadTranscript,
   decodeHostAnswer,
 } from "@octant/contracts";
-import { threadAccessOf, workThreadAccessOfMode } from "@octant/domain";
+import { fullAccessSandboxSupported, threadAccessOf, workThreadAccessOfMode } from "@octant/domain";
 import {
   answerAgentTurnQuestion,
   changeAgentModel,
@@ -33,6 +33,7 @@ import {
   refusalMessage,
   sendAgentPrompt,
   type HostRefusal,
+  type AgentModelChoice,
 } from "./agentHost";
 import type { OpenedLocalControlSession } from "./localControl";
 import { openAgentWindow } from "./agentWindow";
@@ -59,6 +60,7 @@ export interface AgentThreadTurn {
   readonly replyAt: string;
   readonly outcome: AgentTurnOutcome;
   readonly inputTokens?: number;
+  readonly failure?: string;
 }
 
 /**
@@ -81,6 +83,13 @@ export interface AgentThreadSnapshot {
   readonly providerInstanceId: string;
   readonly modelId: string;
   readonly version: number;
+  /** The checkout bound to a Code thread, for host-authorized review. */
+  readonly checkoutId?: string;
+  /** Its kind: a managed worktree is not the Project root's folder. */
+  readonly checkoutKind?: string;
+  readonly projectId?: string;
+  readonly access?: string;
+  readonly modelOptionValues?: Readonly<Record<string, string>>;
   /** The thread's turns, oldest first: all of them, or its newest when `hasEarlier`. */
   readonly turns: ReadonlyArray<AgentThreadTurn>;
   /** The thread has turns older than the first in `turns`. */
@@ -145,9 +154,13 @@ export function snapshotFromChat(view: ChatThreadView): AgentThreadSnapshot {
     id: String(view.thread.id),
     mode: "chat",
     title: view.thread.title,
+    ...(view.thread.projectId === undefined ? {} : { projectId: String(view.thread.projectId) }),
     providerInstanceId: String(view.thread.providerInstanceId),
     modelId: String(view.thread.modelId),
     version: view.thread.version,
+    ...(view.thread.modelOptionValues === undefined
+      ? {}
+      : { modelOptionValues: view.thread.modelOptionValues }),
     turns: view.turns.map((turn) => {
       const attempt = turn.attempts.at(-1);
       return {
@@ -267,9 +280,14 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
         id: threadId,
         mode: "work",
         title: current.title,
+        projectId: String(current.projectId),
         providerInstanceId: String(current.providerInstanceId),
         modelId: String(current.modelId),
         version: current.version,
+        access: current.access,
+        ...(current.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: current.modelOptionValues }),
         turns: turns.turns.map((turn) => ({
           id: String(turn.turnId),
           at: turn.acceptedAt,
@@ -290,7 +308,7 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
         workItems: [],
       };
     },
-    send: async (prompt) => {
+    send: async (prompt, extras) => {
       const current = thread ?? (await loadThread());
       if (current === undefined)
         return { kind: "refused", message: "The Work thread could not be read." };
@@ -313,6 +331,7 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
           threadId,
           turnId: randomUUID(),
           prompt,
+          ...(extras?.attachmentIds?.length ? { attachmentIds: extras.attachmentIds } : {}),
           authority: {
             hostId: "local",
             projectId: String(current.projectId),
@@ -472,9 +491,16 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
         id: threadId,
         mode: "code",
         title: current.thread.title,
+        projectId: String(current.thread.projectId),
+        checkoutId: String(current.checkout.id),
+        checkoutKind: current.checkout.kind,
         providerInstanceId: String(current.thread.providerInstanceId),
         modelId: String(current.thread.modelId),
         version: current.thread.version,
+        access: current.thread.executionPolicy,
+        ...(current.thread.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: current.thread.modelOptionValues }),
         ...(page.hasEarlier ? { hasEarlier: true } : {}),
         turns: turns.map((turn) => ({
           id: String(turn.operationId),
@@ -491,11 +517,12 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
                 ? "streaming"
                 : turn.status,
           ...(turn.usage?.inputTokens === undefined ? {} : { inputTokens: turn.usage.inputTokens }),
+          ...(turn.failure === undefined ? {} : { failure: turn.failure.message }),
         })),
         workItems: [],
       };
     },
-    send: async (prompt) => {
+    send: async (prompt, extras) => {
       const current = await view();
       if (current === undefined)
         return { kind: "refused", message: "The Code thread could not be read." };
@@ -524,6 +551,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
           checkoutId: String(current.checkout.id),
           sessionId: randomUUID(),
           prompt: decodeHostAnswer(CodeEvidenceReference)(staged.body),
+          ...(extras?.attachmentIds?.length ? { attachmentIds: extras.attachmentIds } : {}),
         },
       });
       if (response.status !== 200) {
@@ -595,8 +623,11 @@ export async function createAgentThread(
     readonly title: string;
     readonly projectName?: string | undefined;
     readonly cwd?: string | undefined;
-    /** `model` or `endpoint/model`; the first harness model when absent. */
+    /** A unique `model` or `endpoint/model` selection. */
     readonly model?: string | undefined;
+    readonly chooseModel?: (
+      models: readonly AgentModelChoice[],
+    ) => Promise<AgentModelChoice | undefined>;
     /**
      * The access a new Work or Code thread starts at, as the composer's mode
      * picker names it. `full-access` is remembered for the Code Project first,
@@ -725,16 +756,47 @@ export async function createAgentThread(
     return { kind: "refused", message: "The Project for this thread is unavailable." };
   }
   const models = await listAgentModels(session);
-  const model = input.model === undefined ? models[0] : pickAgentModel(models, input.model);
+  let model = input.model === undefined ? undefined : pickAgentModel(models, input.model);
+  if (input.model === undefined && mode === "code") {
+    const bootstrap = await session.send({ path: "/api/code/bootstrap", method: "GET" });
+    if (bootstrap.status === 200) {
+      const selected = decodeHostAnswer(CodeBootstrap)(bootstrap.body).settings.defaultModel;
+      if (selected !== undefined)
+        model = models.find(
+          (entry) =>
+            entry.instanceId === String(selected.providerInstanceId) &&
+            entry.modelId === String(selected.modelId),
+        );
+    }
+  }
+  if (input.model === undefined && mode === "work") {
+    const bootstrap = await session.send({ path: "/api/work/threads/bootstrap", method: "GET" });
+    if (bootstrap.status === 200) {
+      const settings = decodeHostAnswer(WorkThreadBootstrap)(bootstrap.body).settings;
+      if (settings?.defaultProviderInstanceId !== undefined)
+        model = models.find(
+          (entry) =>
+            entry.instanceId === String(settings.defaultProviderInstanceId) &&
+            entry.modelId === String(settings.defaultModelId),
+        );
+    }
+  }
+  if (input.model === undefined && model === undefined)
+    model = input.chooseModel === undefined ? undefined : await input.chooseModel(models);
   if (model === undefined) {
     return {
       kind: "refused",
       message:
         input.model === undefined
-          ? "No harness endpoint offers a model yet. Add one in Settings → Providers."
-          : `No harness endpoint offers "${input.model}". Models here: ${models.map((entry) => `${entry.endpoint}/${entry.modelId}`).join(", ") || "none"}.`,
+          ? "Choose a provider/model with --model <account/model>, or configure an enabled provider in Settings → Providers."
+          : `No unique provider/model matches "${input.model}". Models here: ${models.map((entry) => `${entry.endpoint}/${entry.modelId}`).join(", ") || "none"}.`,
     };
   }
+  if (
+    input.sandbox === true &&
+    (model.driverKind === undefined || !fullAccessSandboxSupported(model.driverKind))
+  )
+    return { kind: "refused", message: "This provider cannot keep the sandbox at Full access." };
   const projectOpened = await openAgentWindow(session, {
     mode,
     projectId: String(project.id),
@@ -751,6 +813,7 @@ export async function createAgentThread(
       method: "POST",
       body: {
         kind: "create-work-thread",
+        ...(workAccess === undefined || workAccess === "plan" ? {} : { access: workAccess }),
         threadId,
         projectId: String(project.id),
         title: input.title,
@@ -771,7 +834,11 @@ export async function createAgentThread(
     if (!("kind" in created) || created.kind !== "thread-created") {
       return { kind: "refused", message: "The host did not create the Work thread." };
     }
-    if (workAccess !== undefined) {
+    // The create command sets every other level in its first event. Plan is
+    // entered by a change, which records the level it returns to, and the
+    // per-run Full access flag exists only on the change command.
+    const runFlag = input.fullAccessScope === "run" && workAccess === "full-access";
+    if (workAccess === "plan" || runFlag) {
       const changed = await session.send({
         path: "/api/work/threads/commands",
         method: "POST",
@@ -781,9 +848,7 @@ export async function createAgentThread(
           expectedVersion: 1,
           access: workAccess,
           ...(input.sandbox === true ? { fullAccessSandbox: true } : {}),
-          ...(input.fullAccessScope === "run" && workAccess === "full-access"
-            ? { fullAccessRunFlag: true }
-            : {}),
+          ...(runFlag ? { fullAccessRunFlag: true } : {}),
         },
       });
       if (changed.status !== 200) {

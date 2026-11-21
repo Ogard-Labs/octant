@@ -360,6 +360,27 @@ describe("WorkThreadService", () => {
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
   });
 
+  it("journals an explicit initial access with creation, without a later mutation", async () => {
+    const fixture = serviceFixture({ threads: [] });
+    const result = await fixture.service.execute(ids.window, {
+      kind: "create-work-thread",
+      threadId: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: ids.binding,
+      access: "full-access",
+      fullAccessSandbox: true,
+    });
+    expect(result).toMatchObject({
+      kind: "thread-created",
+      thread: { access: "full-access", fullAccessSandbox: true, version: 1 },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledTimes(1);
+  });
+
   it("creates a thread for the active Work Project with a local-user event", async () => {
     const fixture = serviceFixture({ threads: [] });
 

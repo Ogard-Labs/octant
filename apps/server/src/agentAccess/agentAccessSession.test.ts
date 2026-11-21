@@ -272,6 +272,21 @@ describe("the agent grant guard", () => {
     ).toBe("refused");
   });
 
+  it("keeps an explicit Work creation level within the grant ceiling", () => {
+    const request = {
+      path: "/api/work/threads/commands",
+      method: "POST" as const,
+      body: {
+        kind: "create-work-thread",
+        projectId: granted,
+        modelId: "fake-model",
+        access: "full-access",
+      },
+    };
+    expect(guard(request)).toBe("refused");
+    expect(guard({ ...request, body: { ...request.body, access: "ask-first" } })).toBe("allowed");
+  });
+
   it("refuses a mode, a tool, a model, or a route the grant does not name", () => {
     expect(
       guard({ path: "/api/chat/commands", method: "POST", body: { kind: "create-chat-thread" } }),

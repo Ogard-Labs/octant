@@ -1,3 +1,9 @@
+import {
+  readCodeRequests,
+  answerCodeRequest,
+  codeRequestId,
+  type AgentCodeRequest,
+} from "./agentCodeRequests";
 import type {
   NativeHarnessApproval,
   NativeHarnessSessionView,
@@ -16,6 +22,9 @@ import {
 } from "./agentChildren";
 import {
   agentThreadPort,
+  createAgentThread,
+  openAgentThreadById,
+  pickAgentModel,
   attachAgentThread,
   isAgentSnapshotRunning,
   type AgentThreadPort,
@@ -29,7 +38,7 @@ import {
   activateAgentFollowUp,
   answerAgentQuestion,
   attachmentMediaType,
-  changeAgentModel,
+  changeAgentThreadModel,
   commandAgentSession,
   contextPercent,
   approvalDecisionBody,
@@ -38,7 +47,8 @@ import {
   decideAgentApproval,
   preselectedCommandHosts,
   listAgentModels,
-  listAgentThreads,
+  listAgentNavigation,
+  type AgentNavigationThread,
   openAgentSideChat,
   previewAgentFollowUp,
   readAgentGoal,
@@ -81,9 +91,19 @@ import {
   type TuiToolLine,
   type TuiTranscriptEntry,
   approvalPanelOutsideContent,
+  mentionAttachmentPath,
 } from "./agentTuiModel";
-import type { ChatNavigationThread } from "@octant/contracts";
+import { ProjectBootstrap, McpServerConnectionListing, decodeHostAnswer } from "@octant/contracts";
+import { agentTuiMark } from "./agentTuiMark";
+import { compactTextChunks, terminalMarkdownTables } from "./agentTuiMarkdown";
+import { agentTuiLayout } from "./agentTuiLayout";
 import type { OpenedLocalControlSession } from "./localControl";
+import {
+  readAgentDiff,
+  searchAgentCheckoutPaths,
+  selectAgentDiff,
+  type AgentDiff,
+} from "./agentDiff";
 
 export interface RunAgentTuiInput {
   readonly session: OpenedLocalControlSession;
@@ -111,7 +131,15 @@ const HINT =
 const REASONING_FENCE = /```(?:reasoning|thinking)\n([\s\S]*?)```|<think>([\s\S]*?)<\/think>/g;
 const QUIT_WINDOW_MS = 1_500;
 /** Which list or panel the screen shows in place of the hint, if any. */
-type TuiListing = "threads" | "models" | "agents" | "agent" | "goal" | undefined;
+type TuiListing =
+  | "threads"
+  | "models"
+  | "agents"
+  | "agent"
+  | "goal"
+  | "palette"
+  | "files"
+  | undefined;
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 const SHOWN_TOOL_LINES = 4;
@@ -172,8 +200,16 @@ class AgentScreen {
   #hostTicks:
     | { readonly approvalId: string; readonly ticked: ReadonlySet<number>; readonly page: number }
     | undefined;
+  #codeRequest: AgentCodeRequest | undefined;
+  #destroyed = false;
+  #refreshSequence = 0;
+  #lastAskId: string | undefined;
+  #staleAnswer = false;
   #note = "";
   #drawn = "";
+  #streamingStructure = "";
+  #updateStreaming: ((text: string) => void) | undefined;
+  #streamingText = "";
   #ticks = 0;
   #lastCtrlC = 0;
   #flushingSteering = false;
@@ -188,7 +224,7 @@ class AgentScreen {
    * Steering and goal changes are refused here: Side Chat only reads.
    */
   #home: { readonly threadId: string; readonly mode: OctantMode } | undefined;
-  #threads: ReadonlyArray<ChatNavigationThread> = [];
+  #threads: ReadonlyArray<AgentNavigationThread> = [];
   #models: ReadonlyArray<AgentModelChoice> = [];
   readonly #wake = new AgentWake();
   /** Ends the live feed of the thread on screen; a switch starts a new one. */
@@ -199,22 +235,37 @@ class AgentScreen {
   #childLines: ReadonlyArray<string> = [];
   /** The goal ledger the Goal panel shows, read when /goal opened it. */
   #goalLines: ReadonlyArray<string> = [];
+  #diff: Extract<AgentDiff, { kind: "ready" }> | undefined;
+  #checkoutChanges: AgentDiff | undefined;
+  #lastDiffRead = 0;
+  #readingDiff = false;
+  #mcpLines = ["MCP: unreported"];
+  #lastMcpRead = 0;
+  #showSidebar: boolean | undefined;
+  #showInfo: boolean | undefined;
+  #markdownCache = new Map<string, import("@opentui/core").StyledText>();
   #suggestions:
     | { readonly kind: "file" | "thread"; readonly items: ReadonlyArray<string> }
     | undefined;
   #files: ReadonlyArray<string> | undefined;
+  #filesRoot: string | undefined = process.cwd();
+  /** The Project and checkout the file cache and root belong to. */
+  #filesKey: string | undefined;
   #wasRunning = false;
   #pendingFollowUp:
     | { readonly suggestionId: string; readonly turnId: string; readonly prompt: string }
     | undefined;
   #resolveExit: ((code: number) => void) | undefined;
 
+  readonly #sidebar;
+  readonly #info;
   readonly #header;
   readonly #transcript;
   readonly #panel;
   readonly #panelText;
   readonly #tasks;
   readonly #tasksText;
+  readonly #composerBox;
   readonly #composer;
   readonly #noteText;
   readonly #footer;
@@ -227,6 +278,9 @@ class AgentScreen {
   ) {
     this.#tui = tui;
     this.#renderer = renderer;
+    renderer.on("destroy", () => {
+      this.#destroyed = true;
+    });
     this.#palette = palette;
     this.#input = input;
     this.#verbose = input.verbose === true;
@@ -301,15 +355,41 @@ class AgentScreen {
         { name: "return", action: "submit" },
         { name: "return", shift: true, action: "newline" },
       ],
-      onSubmit: () => void this.#submit(),
+      onSubmit: () =>
+        void this.#submit().catch(() => {
+          this.#note = "The host request failed. Retry the command.";
+          this.#draw();
+        }),
     });
+    this.#composerBox = composerBox;
     composerBox.add(this.#composer);
     this.#noteText = new TextRenderable(renderer, { content: "", height: 1, paddingLeft: 2 });
     this.#footer = new TextRenderable(renderer, { content: "", height: 1, paddingLeft: 2 });
     root.add(this.#header);
-    root.add(this.#transcript);
+    const body = new BoxRenderable(renderer, { flexDirection: "row", flexGrow: 1, flexShrink: 1 });
+    this.#sidebar = new TextRenderable(renderer, {
+      width: 26,
+      paddingLeft: 1,
+      paddingRight: 1,
+      wrapMode: "word",
+      content: "",
+      fg: palette.textSecondary,
+    });
+    this.#info = new TextRenderable(renderer, {
+      width: 28,
+      paddingLeft: 1,
+      paddingRight: 1,
+      wrapMode: "word",
+      content: "",
+      fg: palette.textSecondary,
+    });
+    body.add(this.#sidebar);
+    body.add(this.#transcript);
+    body.add(this.#info);
+    root.add(body);
+    renderer.on("resize", () => this.#draw());
     root.add(this.#tasks);
-    root.add(this.#panel);
+    this.#transcript.add(this.#panel);
     root.add(composerBox);
     root.add(this.#noteText);
     root.add(this.#footer);
@@ -336,9 +416,30 @@ class AgentScreen {
           if (again || !isAgentSnapshotRunning(this.#thread)) resolve(0);
           else void this.#interrupt();
         } else if (key.name === "escape") {
-          void this.#interrupt();
+          if (this.#diff !== undefined) {
+            this.#diff = undefined;
+            this.#draw();
+          } else void this.#interrupt();
+        } else if (key.ctrl && key.name === "b") {
+          this.#showSidebar = !(this.#showSidebar ?? agentTuiLayout(this.#renderer.width).sidebar);
+          this.#draw();
+        } else if (key.ctrl && key.name === "g") {
+          this.#showInfo = !(this.#showInfo ?? agentTuiLayout(this.#renderer.width).info);
+          this.#draw();
+        } else if (key.ctrl && key.name === "j") {
+          this.#composer.setText("/next-waiting");
+          void this.#submit();
         } else if (key.ctrl && key.name === "p") {
+          this.#listing = this.#listing === "palette" ? undefined : "palette";
+          this.#draw();
+        } else if (key.ctrl && key.name === "o") {
           void this.#pauseOrResume();
+        } else if (key.name === "tab" && this.#suggestions?.items[0] !== undefined) {
+          this.#composer.setText(
+            this.#composer.plainText.replace(/(?:@|#)[^\s@#]*$/, this.#suggestions.items[0] + " "),
+          );
+          this.#suggestions = undefined;
+          this.#draw();
         } else if (key.ctrl && key.name === "e") {
           this.#verbose = !this.#verbose;
           this.#draw();
@@ -404,14 +505,63 @@ class AgentScreen {
   }
 
   async refresh(): Promise<void> {
-    const [thread, session, sites] = await Promise.all([
+    const refreshSequence = ++this.#refreshSequence;
+    const readingThreadId = this.#threadId;
+    const readingMode = this.#mode;
+    const [thread, session, sites, codeRequests] = await Promise.all([
       this.#port.read(),
       readAgentSession(this.#input.session, this.#threadId),
       listAgentSiteApprovals(this.#input.session, this.#port.mode, this.#threadId).catch(() => []),
+      readingMode === "code"
+        ? readCodeRequests(this.#input.session, readingThreadId)
+        : Promise.resolve([]),
     ]);
+    let navigationFailed = false;
+    const navigation = await listAgentNavigation(this.#input.session, readingMode).catch(() => {
+      navigationFailed = true;
+      return this.#threads;
+    });
+    if (
+      this.#destroyed ||
+      refreshSequence !== this.#refreshSequence ||
+      readingThreadId !== this.#threadId ||
+      readingMode !== this.#mode
+    )
+      return;
+    if (navigationFailed) this.#note = "Thread list unavailable; retrying.";
+    else if (this.#note === "Thread list unavailable; retrying.") this.#note = "";
+    this.#threads = navigation;
+    // A Code thread's checkout can change without its Project changing, and a
+    // managed worktree is not the Project root, so the cache follows both.
+    const filesKey = `${thread?.projectId ?? ""}\u0000${thread?.checkoutId ?? ""}`;
+    if (filesKey !== this.#filesKey) {
+      this.#filesKey = filesKey;
+      this.#files = undefined;
+      this.#filesRoot = thread?.mode === "chat" ? process.cwd() : undefined;
+      if (thread?.projectId !== undefined && thread.checkoutKind !== "managed-worktree") {
+        const projects = await this.#input.session.send({
+          path: "/api/projects/bootstrap",
+          method: "GET",
+        });
+        if (
+          this.#destroyed ||
+          refreshSequence !== this.#refreshSequence ||
+          readingThreadId !== this.#threadId
+        )
+          return;
+        if (projects.status === 200) {
+          const project = decodeHostAnswer(ProjectBootstrap)(projects.body).active.find(
+            (project) => String(project.id) === thread.projectId,
+          );
+          if (project?.type === "code" || project?.type === "work")
+            this.#filesRoot = project.binding?.canonicalRoot;
+        }
+      }
+    }
     this.#thread = thread;
     this.#session = session === "unavailable" ? undefined : session;
     this.#siteApproval = sites[0];
+    this.#codeRequest = codeRequests[0];
     const running = isAgentSnapshotRunning(thread);
     if (this.#wasRunning && !running && this.#input.quiet !== true) {
       const outcome = thread?.turns.at(-1)?.outcome ?? "ended";
@@ -421,6 +571,43 @@ class AgentScreen {
       );
     }
     this.#wasRunning = running;
+    if (Date.now() - this.#lastMcpRead >= 10000) {
+      this.#lastMcpRead = Date.now();
+      void this.#input.session
+        .send({ path: "/api/extensions/connections", method: "POST", body: { kind: "list" } })
+        .then((response) => {
+          this.#mcpLines =
+            response.status === 200
+              ? decodeHostAnswer(McpServerConnectionListing)(response.body).servers.map(
+                  (server) => `${server.serverName}: ${server.state}`,
+                )
+              : ["MCP: unreported"];
+          if (this.#mcpLines.length === 0) this.#mcpLines = ["No host MCP servers"];
+          this.#draw();
+        })
+        .catch(() => {
+          this.#mcpLines = ["MCP: unavailable"];
+        });
+    }
+    if (
+      thread?.mode === "code" &&
+      thread.checkoutId !== undefined &&
+      !this.#readingDiff &&
+      Date.now() - this.#lastDiffRead >= 5000
+    ) {
+      this.#readingDiff = true;
+      this.#lastDiffRead = Date.now();
+      void readAgentDiff(this.#input.session, thread.id, thread.checkoutId)
+        .then((diff) => {
+          if (readingThreadId === this.#threadId) {
+            this.#checkoutChanges = diff;
+            this.#draw();
+          }
+        })
+        .finally(() => {
+          this.#readingDiff = false;
+        });
+    }
     this.#draw();
     // Not awaited: a Chat send answers only when its turn ends, and the
     // redraws that show the reply arriving are this same loop.
@@ -429,6 +616,7 @@ class AgentScreen {
 
   /** Live matches for an `@file` or `#thread` token at the end of the composer. */
   async #suggest(): Promise<void> {
+    if (this.#destroyed) return;
     const text = this.#composer.plainText;
     const token = /(?:^|\s)([@#])([^\s@#]*)$/.exec(text);
     if (token === null) {
@@ -440,7 +628,8 @@ class AgentScreen {
     }
     const needle = (token[2] ?? "").toLowerCase();
     if (token[1] === "#") {
-      if (this.#threads.length === 0) this.#threads = await listAgentThreads(this.#input.session);
+      if (this.#threads.length === 0)
+        this.#threads = await listAgentNavigation(this.#input.session, this.#mode);
       const items = this.#threads
         .filter((thread) => String(thread.id) !== this.#threadId)
         .filter((thread) => thread.title.toLowerCase().includes(needle))
@@ -448,8 +637,18 @@ class AgentScreen {
         .map((thread) => `#${thread.title}`);
       this.#suggestions = { kind: "thread", items };
     } else {
-      if (this.#files === undefined) this.#files = await scanFiles(process.cwd());
-      const items = this.#files
+      const thread = this.#thread;
+      const files =
+        thread?.mode === "code" && thread.checkoutId !== undefined
+          ? await searchAgentCheckoutPaths(
+              this.#input.session,
+              thread.id,
+              thread.checkoutId,
+              token[2] ?? "",
+            )
+          : (this.#files ??= this.#filesRoot === undefined ? [] : await scanFiles(this.#filesRoot));
+      if (this.#destroyed) return;
+      const items = files
         .filter((file) => file.toLowerCase().includes(needle))
         .slice(0, MAX_FILE_SUGGESTIONS)
         .map((file) => `@${file}`);
@@ -471,18 +670,32 @@ class AgentScreen {
     for (const match of text.matchAll(/(?:^|\s)@([^\s@#]+)/g)) {
       const path = match[1] ?? "";
       if (attachmentMediaType(path) === undefined) continue;
-      if (this.#port.mode !== "chat") {
-        refused.push(`Attach files to a ${this.#port.mode} thread from the app.`);
+      // Coding runtimes read source paths inside the bound Project. Images use
+      // the mode's staged attachment route, as in the app composer.
+      if (this.#port.mode !== "chat" && !attachmentMediaType(path)?.startsWith("image/")) continue;
+      const attached = mentionAttachmentPath({
+        path,
+        filesRoot: this.#filesRoot,
+        checkoutKind: this.#thread?.checkoutKind,
+      });
+      if (attached.kind === "refused") {
+        refused.push(attached.message);
         continue;
       }
-      const uploaded = await uploadAgentAttachment(this.#input.session, this.#threadId, path);
+      const uploaded = await uploadAgentAttachment(
+        this.#input.session,
+        this.#threadId,
+        attached.path,
+        this.#port.mode,
+      );
       if (uploaded.kind === "uploaded") attachmentIds.push(uploaded.attachmentId);
       else refused.push(uploaded.message);
     }
     let prompt = text;
     for (const match of text.matchAll(/(?:^|\s)#([^\s@#]+)/g)) {
       const fragment = (match[1] ?? "").toLowerCase();
-      if (this.#threads.length === 0) this.#threads = await listAgentThreads(this.#input.session);
+      if (this.#threads.length === 0)
+        this.#threads = await listAgentNavigation(this.#input.session, this.#mode);
       const byNumber = /^\d+$/.test(fragment) ? this.#threads[Number(fragment) - 1] : undefined;
       const thread =
         byNumber ??
@@ -503,17 +716,34 @@ class AgentScreen {
   }
 
   async #switchThread(threadId: string, mode: OctantMode = "chat"): Promise<void> {
+    this.#diff = undefined;
+    this.#checkoutChanges = undefined;
+    this.#lastDiffRead = 0;
+    const opened = await openAgentThreadById(this.#input.session, threadId);
+    if (opened.kind === "refused") {
+      this.#note = opened.message;
+      this.#draw();
+      return;
+    }
+    mode = opened.mode;
     this.#threadId = threadId;
     this.#mode = mode;
     this.#port = agentThreadPort(this.#input.session, mode, threadId);
     this.#follow(mode);
     this.#drawn = "";
+    this.#updateStreaming = undefined;
+    this.#streamingStructure = "";
+    this.#lastAskId = undefined;
+    this.#staleAnswer = false;
     this.#listing = undefined;
     this.#children = [];
     this.#childLines = [];
     this.#pendingFollowUp = undefined;
-    for (const child of this.#transcript.getChildren()) child.destroyRecursively();
+    for (const child of this.#transcript.getChildren()) {
+      if (child !== this.#panel) child.destroyRecursively();
+    }
     await this.refresh();
+    if (!this.#destroyed) this.#transcript.scrollTo(this.#transcript.scrollHeight);
   }
 
   /**
@@ -602,9 +832,75 @@ class AgentScreen {
   }
 
   #draw(): void {
+    if (this.#destroyed) return;
     const { t, fg, bold, dim } = this.#tui;
     const p = this.#palette;
     const session = this.#session;
+    const layout = agentTuiLayout(this.#renderer.width);
+    this.#sidebar.visible = this.#showSidebar ?? layout.sidebar;
+    this.#info.visible = this.#showInfo ?? layout.info;
+    const projectThreads = this.#threads.filter(
+      (thread) => thread.projectId === this.#thread?.projectId,
+    );
+    const groupOf = (thread: AgentNavigationThread) =>
+      thread.awaitingInput
+        ? "Needs input"
+        : thread.executing
+          ? "Working"
+          : thread.readyForReview
+            ? "Ready for review"
+            : "Idle";
+    this.#sidebar.content = [
+      "Threads · /new",
+      "",
+      ...["Needs input", "Working", "Ready for review", "Idle"].flatMap((group) => {
+        const threads = projectThreads.filter((thread) => groupOf(thread) === group);
+        return threads.length === 0
+          ? []
+          : [
+              group,
+              ...threads
+                .slice(0, 16)
+                .map(
+                  (thread) =>
+                    `${thread.id === this.#threadId ? "●" : "○"} ${this.#threads.indexOf(thread) + 1}. ${thread.title}`,
+                ),
+              "",
+            ];
+      }),
+    ].join("\n");
+    const cost = session?.session.usage?.costUsd;
+    const percentUsed = contextPercent(this.#thread, this.#models);
+    const contextLabel =
+      percentUsed === undefined ? "Context: unreported" : `Context: ${percentUsed}%`;
+    const costLabel = cost === undefined ? "Cost: unreported" : `Cost: $${cost.toFixed(4)}`;
+    this.#composerBox.title = ` ${this.#mode} · ${this.#thread?.modelId ?? "model"} · ${this.#thread?.modelOptionValues?.effort ?? this.#thread?.modelOptionValues?.reasoning_effort ?? this.#thread?.modelOptionValues?.reasoning ?? "default effort"} · ${this.#thread?.access ?? "access unreported"} `;
+    this.#info.content = [
+      this.#thread?.title ?? "Thread",
+      "",
+      `Mode: ${this.#mode}`,
+      `Model: ${this.#thread?.modelId ?? "Unavailable"}`,
+      "",
+      "Context and usage",
+      contextLabel,
+      costLabel,
+      ...this.#mcpLines,
+      "",
+      "Current checkout changes",
+      ...(this.#checkoutChanges?.kind === "ready"
+        ? [
+            ...this.#checkoutChanges.files.map(
+              (file) => `${file.path} +${file.additions}/−${file.deletions}`,
+            ),
+            ...this.#checkoutChanges.missingPaths.map((path) => `${path} (no diff text)`),
+            ...(this.#checkoutChanges.truncated ? ["Truncated"] : []),
+          ]
+        : [this.#checkoutChanges?.kind === "refused" ? this.#checkoutChanges.message : "Reading…"]),
+      "/files lists files · /diff reviews",
+      "",
+      "/model changes model",
+      "/next-waiting opens an ask",
+    ].join("\n");
     const title = this.#thread?.title ?? "Octant";
     const status = session?.session.status ?? "";
     const statusColor =
@@ -637,21 +933,132 @@ class AgentScreen {
     const pending =
       session?.questions.find((question) => question.status === "pending") ??
       this.#thread?.pendingQuestion;
-    const digest = JSON.stringify([
-      entries,
-      pending?.id,
-      this.#pendingFollowUp?.suggestionId,
-      session?.steering,
-      this.#verbose,
-      this.#showReasoning,
-    ]);
+    if (
+      pending !== undefined ||
+      session?.approvals?.some((entry) => entry.status === "pending") ||
+      this.#siteApproval !== undefined ||
+      this.#codeRequest !== undefined
+    ) {
+      this.#listing = undefined;
+      this.#suggestions = undefined;
+      this.#showHelp = false;
+    }
+    const nextAskId =
+      (this.#codeRequest === undefined ? undefined : codeRequestId(this.#codeRequest)) ??
+      pending?.id ??
+      session?.approvals?.find((entry) => entry.status === "pending")?.id ??
+      this.#siteApproval?.id;
+    if (
+      this.#lastAskId !== undefined &&
+      nextAskId !== this.#lastAskId &&
+      this.#composer.plainText.trim().length > 0
+    )
+      this.#staleAnswer = true;
+    this.#lastAskId = nextAskId;
+    // A new ask must not be hidden behind review.
+    if (
+      pending !== undefined ||
+      session?.approvals?.some((entry) => entry.status === "pending") ||
+      this.#siteApproval !== undefined ||
+      this.#codeRequest !== undefined
+    )
+      this.#diff = undefined;
+    const digest = JSON.stringify(
+      this.#diff === undefined
+        ? [
+            entries,
+            pending?.id,
+            this.#pendingFollowUp?.suggestionId,
+            session?.steering,
+            this.#verbose,
+            this.#showReasoning,
+          ]
+        : ["checkout-diff", this.#diff],
+    );
     const live = entries.some((entry) => entry.kind === "lead" && entry.live !== undefined);
-    if (digest !== this.#drawn || live) {
+    const lastEntry = entries.at(-1);
+    const plainLive =
+      this.#diff === undefined &&
+      lastEntry?.kind === "lead" &&
+      lastEntry.outcome === "streaming" &&
+      !lastEntry.text.includes("|") &&
+      !lastEntry.text.includes("<think>");
+    const structure = plainLive
+      ? JSON.stringify([
+          entries.slice(0, -1),
+          { ...lastEntry, text: "" },
+          this.#verbose,
+          this.#showReasoning,
+          pending?.id,
+        ])
+      : "";
+    if (
+      plainLive &&
+      structure === this.#streamingStructure &&
+      this.#updateStreaming !== undefined &&
+      lastEntry.text.startsWith(this.#streamingText)
+    ) {
+      const delta = lastEntry.text.slice(this.#streamingText.length);
+      if (delta.length > 0) this.#updateStreaming(lastEntry.text);
+      this.#streamingText = lastEntry.text;
       this.#drawn = digest;
-      for (const child of this.#transcript.getChildren()) child.destroyRecursively();
-      for (const entry of entries) this.#transcript.add(this.#entryBox(entry, spinner));
+    } else if (digest !== this.#drawn || (live && this.#diff === undefined)) {
+      this.#drawn = digest;
+      this.#streamingStructure = structure;
+      this.#updateStreaming = undefined;
+      for (const child of this.#transcript.getChildren()) {
+        if (child !== this.#panel) child.destroyRecursively();
+      }
+      if (this.#diff === undefined) {
+        if (entries.length === 0) {
+          this.#transcript.add(
+            new this.#tui.TextRenderable(this.#renderer, {
+              content: this.#renderer.width >= 100 ? agentTuiMark : "◆",
+              fg: p.accent,
+            }),
+          );
+          this.#transcript.add(
+            new this.#tui.TextRenderable(this.#renderer, {
+              content: `Octant ${process.env.OCTANT_CLI_VERSION ?? "source"} · ${this.#thread?.modelId ?? "Reading model…"}\nDescribe a task to start. Ctrl+P opens commands.`,
+              fg: p.textSecondary,
+            }),
+          );
+        }
+        for (const entry of entries) this.#transcript.add(this.#entryBox(entry, spinner));
+      } else {
+        const diff = this.#diff;
+        const lines = [
+          `Current checkout changes${diff.branch === undefined ? "" : ` · ${diff.branch}`}`,
+          "May include changes from outside this thread. Esc or /diff returns.",
+          ...(diff.truncated ? ["Diff truncated by the host; later changes may be missing."] : []),
+          ...diff.missingPaths.map((path) => `No diff text available: ${path}`),
+          ...(diff.text.length === 0 && diff.missingPaths.length === 0
+            ? ["No uncommitted changes."]
+            : diff.text.split("\n")),
+        ];
+        const chunks = lines.map((line, i) => {
+          const color =
+            line.startsWith("+") && !line.startsWith("+++")
+              ? p.success
+              : line.startsWith("-") && !line.startsWith("---")
+                ? p.danger
+                : line.startsWith("@@")
+                  ? p.accent
+                  : p.textSecondary;
+          return fg(color)(`${line}${i === lines.length - 1 ? "" : "\n"}`);
+        });
+        this.#transcript.add(
+          new this.#tui.TextRenderable(this.#renderer, {
+            content: new this.#tui.StyledText(chunks),
+            wrapMode: "word",
+          }),
+        );
+        this.#transcript.scrollTo(0);
+      }
     }
 
+    this.#transcript.remove(this.#panel);
+    this.#transcript.add(this.#panel);
     const tasks = tasksFrom(this.#thread, session);
     if (tasks.total > 0) {
       this.#tasks.title = ` Tasks ${tasks.done}/${tasks.total} `;
@@ -663,10 +1070,42 @@ class AgentScreen {
 
     const approval = session?.approvals?.find((entry) => entry.status === "pending");
     const site = this.#siteApproval;
-    if (this.#suggestions !== undefined && this.#suggestions.items.length > 0) {
+    if (this.#codeRequest !== undefined) {
+      const request = this.#codeRequest;
+      this.#panel.title =
+        request.kind === "approval" ? " Provider approval " : " Provider question ";
+      this.#panelText.content =
+        request.text +
+        "\n" +
+        (request.kind === "approval"
+          ? "y allow once · n deny — then Enter"
+          : request.options.map((option, index) => `${index + 1}. ${option.label}`).join("\n") +
+            "\nType an answer, then Enter.");
+      this.#panel.visible = true;
+    } else if (this.#listing === "files") {
+      this.#panel.title = " Current checkout files ";
+      const paths =
+        this.#checkoutChanges?.kind === "ready"
+          ? [
+              ...this.#checkoutChanges.files.map((file) => file.path),
+              ...this.#checkoutChanges.missingPaths,
+            ]
+          : [];
+      this.#panelText.content =
+        paths.length === 0
+          ? "No changed files reported yet."
+          : paths.map((path, index) => `${index + 1}. ${path}`).join("\n") +
+            "\nType a number and Enter to review the file.";
+      this.#panel.visible = true;
+    } else if (this.#listing === "palette") {
+      this.#panel.title = " Command palette ";
+      this.#panelText.content =
+        "diff · review checkout changes\nthreads · list sessions\nnew · start a session\nmodel · choose provider/model\nnext-waiting · open a pending ask\nagents · helper agents\ngoal · objective\nType a command and Enter. Ctrl+P closes.";
+      this.#panel.visible = true;
+    } else if (this.#suggestions !== undefined && this.#suggestions.items.length > 0) {
       this.#panel.title = this.#suggestions.kind === "file" ? " Files " : " Threads ";
       this.#panel.borderColor = p.border;
-      this.#panelText.content = t`${fg(p.textSecondary)(this.#suggestions.items.join("\n"))}\n${dim(fg(p.muted)(this.#suggestions.kind === "file" ? "Type the rest of the name; images, PDFs, and text files attach to the prompt." : "Type the rest of the title; the thread's transcript is read-only context for this turn."))}`;
+      this.#panelText.content = t`${fg(p.textSecondary)(this.#suggestions.items.join("\n"))}\n${dim(fg(p.muted)(this.#suggestions.kind === "file" ? "Tab completes the first match; finish the path to attach it." : "Type the rest of the title; the thread's transcript is read-only context for this turn."))}`;
       this.#panel.visible = true;
     } else if (this.#listing === "threads") {
       this.#panel.title = " Threads ";
@@ -696,7 +1135,7 @@ class AgentScreen {
           model.modelId === this.#thread.modelId;
         return `${here ? "●" : "○"} ${index + 1}. ${model.displayName}  ${model.endpoint}${model.contextLimit === undefined ? "" : `  ${Math.round(model.contextLimit / 1000)}k`}`;
       });
-      this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No harness endpoint offers a model yet. Add one in Settings → Providers." : lines.join("\n"))}\n${dim(fg(p.muted)("/model N switches the thread's model."))}`;
+      this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No enabled provider offers a model yet. Add one in Settings → Providers." : lines.join("\n"))}\n${dim(fg(p.muted)("/model N switches the thread's model."))}`;
       this.#panel.visible = true;
     } else if (this.#listing === "goal") {
       this.#panel.title = " Goal ";
@@ -712,8 +1151,11 @@ class AgentScreen {
           "Shift+Enter  new line",
           "Esc          stop the running turn        Ctrl+C  stop, twice to quit",
           "Ctrl+E       show / hide diffs and output  Ctrl+R  show / hide reasoning",
-          "Ctrl+P       pause / resume the run        PgUp/PgDn · Ctrl+Home/End  scroll",
+          "Ctrl+B/G     thread list / information · Ctrl+J next waiting",
+          "Ctrl+P       command palette · Ctrl+O pause / resume        PgUp/PgDn · Ctrl+Home/End  scroll",
           "/next N      take a suggested follow-up    /pause /resume /model /threads /open N /quit",
+          "/files       list files · /diff N reviews one · Esc returns",
+          "/effort value changes a reported effort setting",
           "/side text   ask Side Chat, which only reads  /back  return to the thread",
           "/steer text  note for the lead's next step    /goal · /goal revise text",
           "/notes       show retained notes · /notes copy · /notes discard",
@@ -793,7 +1235,7 @@ class AgentScreen {
       this.#note.length === 0 ? t`${dim(fg(p.muted)(HINT))}` : t`${fg(p.warning)(this.#note)}`;
     const detail = session?.session.detail;
     const retrying = retryFooterText(session, Date.now());
-    this.#footer.content = t`${dim(fg(p.muted)(statusLineFrom(this.#thread, session)))}${retrying === undefined ? "" : dim(fg(p.muted)(`  ${retrying}`))}${detail === undefined ? "" : fg(p.warning)(`  ${detail}`)}`;
+    this.#footer.content = t`${dim(fg(p.muted)(`${statusLineFrom(this.#thread, session)} · ${contextLabel} · ${costLabel} · Ctrl+P`))}${retrying === undefined ? "" : dim(fg(p.muted)(`  ${retrying}`))}${detail === undefined ? "" : fg(p.warning)(`  ${detail}`)}`;
     this.#renderer.requestRender();
   }
 
@@ -856,7 +1298,15 @@ class AgentScreen {
         content: t`${fg(p.accent)("●")} ${fg(p.text)(bold("Lead"))} ${dim(fg(p.muted)(`· ${entry.at}`))}${live ? fg(p.accent)("  working…") : entry.outcome === "completed" ? "" : fg(outcomeColor)(`  ${entry.outcome}`)}`,
       }),
     );
-    if (entry.text.length > 0) box.add(this.#body(entry.text));
+    if (entry.text.length > 0) box.add(this.#body(entry.text, true, entry.outcome === "streaming"));
+    if (entry.failure !== undefined)
+      box.add(
+        new TextRenderable(this.#renderer, {
+          content: `Provider failure: ${entry.failure}`,
+          fg: p.danger,
+          wrapMode: "word",
+        }),
+      );
     if (entry.actions !== undefined) {
       const a = entry.actions;
       const routeNote = a.route === "primary" ? "" : ` · ${a.route}`;
@@ -868,7 +1318,7 @@ class AgentScreen {
       box.add(tree);
       tree.add(
         new TextRenderable(this.#renderer, {
-          content: t`${fg(p.textSecondary)(counts.join(" · "))}${a.failed > 0 ? fg(p.danger)(` · ${a.failed} failed`) : ""} ${dim(fg(p.muted)(`· ${a.model}${routeNote} · ${a.duration}`))}`,
+          content: t`${fg(p.textSecondary)(counts.join(" · "))}${a.failed > 0 ? fg(p.danger)(` · ${a.failed} failed`) : ""} ${dim(fg(p.muted)(`· ${this.#mode} · ${a.model}${routeNote} · ${a.duration}${a.speed === undefined ? "" : ` · ${a.speed}`}`))}`,
         }),
       );
       this.#toolTree(tree, a.tools, a.toolCalls, undefined);
@@ -901,13 +1351,22 @@ class AgentScreen {
   ): void {
     const { TextRenderable, t, fg, dim } = this.#tui;
     const p = this.#palette;
-    const shown = tools.slice(-SHOWN_TOOL_LINES);
+    if (!this.#verbose && total > 0) {
+      const failed = tools.filter((tool) => tool.status !== "ok").length;
+      into.add(
+        new TextRenderable(this.#renderer, {
+          content: t`${fg(failed > 0 ? p.warning : p.textSecondary)(`${spinner ?? "+"} ${total} actions${failed === 0 ? "" : ` · ${failed} failed/refused`} · Ctrl+E expands`)}`,
+        }),
+      );
+      return;
+    }
+    const shown = this.#verbose ? tools : tools.slice(-SHOWN_TOOL_LINES);
     const folded = total - shown.length;
     const width = Math.max(4, ...shown.map((tool) => tool.name.length));
     if (folded > 0) {
       into.add(
         new TextRenderable(this.#renderer, {
-          content: t`${dim(fg(p.muted)("├"))} ${fg(p.success)("✓")} ${dim(fg(p.muted)(`+${folded} completed`))}`,
+          content: t`${dim(fg(p.muted)("├"))} ${fg(p.success)("✓")} ${dim(fg(p.muted)(`+${folded} earlier actions`))}`,
         }),
       );
     }
@@ -980,7 +1439,7 @@ class AgentScreen {
    * A reply as markdown, with any reasoning the model wrote in a fenced
    * block or think tags folded into one dim line until Ctrl+R opens it.
    */
-  #body(text: string, markdown = true) {
+  #body(text: string, markdown = true, streaming = false) {
     const { BoxRenderable, TextRenderable, t, fg, dim } = this.#tui;
     const p = this.#palette;
     const box = new BoxRenderable(this.#renderer, { paddingLeft: 2, flexDirection: "column" });
@@ -1007,13 +1466,46 @@ class AgentScreen {
       );
     }
     if (visible.length === 0) return box;
-    box.add(
-      new TextRenderable(this.#renderer, {
-        content: markdown ? this.#markdown(visible) : visible,
-        fg: p.text,
-        wrapMode: "word",
-      }),
-    );
+    if (streaming && reasoning.length === 0 && !visible.includes("|")) {
+      const blocks: {
+        source: string;
+        fence: boolean;
+        node: import("@opentui/core").TextRenderable;
+      }[] = [];
+      const update = (source: string) => {
+        const lines = source.split("\n");
+        let fence = false;
+        for (let start = 0, index = 0; start < lines.length; start += 32, index++) {
+          const part = lines.slice(start, start + 32);
+          const text = part.join("\n");
+          const previous = blocks[index];
+          if (previous === undefined) {
+            const node = new TextRenderable(this.#renderer, {
+              content: this.#markdown(text, fence),
+              fg: p.text,
+              wrapMode: "word",
+            });
+            box.add(node);
+            blocks.push({ source: text, fence, node });
+          } else if (previous.source !== text || previous.fence !== fence) {
+            previous.node.content = this.#markdown(text, fence);
+            previous.source = text;
+            previous.fence = fence;
+          }
+          for (const line of part) if (line.startsWith("```")) fence = !fence;
+        }
+      };
+      update(visible);
+      this.#updateStreaming = update;
+      this.#streamingText = visible;
+      return box;
+    }
+    const bodyText = new TextRenderable(this.#renderer, {
+      content: markdown && /[`*_#>|]|^\s*[-+]\s/m.test(visible) ? this.#markdown(visible) : visible,
+      fg: p.text,
+      wrapMode: "word",
+    });
+    box.add(bodyText);
     return box;
   }
 
@@ -1022,12 +1514,14 @@ class AgentScreen {
    * bold, inline code, bullets, and fenced code. Deterministic and cheap, so
    * a streaming reply restyles on every poll without a parser in the way.
    */
-  #markdown(text: string): import("@opentui/core").StyledText {
+  #markdown(text: string, startsInFence = false): import("@opentui/core").StyledText {
+    const cached = this.#markdownCache.get(`${startsInFence}:${text}`);
+    if (cached !== undefined) return cached;
     const { StyledText, fg, bold, dim } = this.#tui;
     const p = this.#palette;
     const chunks: import("@opentui/core").TextChunk[] = [];
-    let inFence = false;
-    const lines = text.split("\n");
+    let inFence = startsInFence;
+    const lines = terminalMarkdownTables(text).split("\n");
     lines.forEach((line, index) => {
       const eol = index < lines.length - 1 ? "\n" : "";
       if (line.startsWith("```")) {
@@ -1037,7 +1531,14 @@ class AgentScreen {
         return;
       }
       if (inFence) {
-        chunks.push(fg(p.success)(`│ ${line}${eol}`));
+        chunks.push(fg(p.muted)("│ "));
+        const tokens = line.split(
+          /(\b(?:const|let|function|return|import|from|export|class|interface|type|async|await|if|else|throw|new|def|fn|pub|use)\b|"[^"\n]*"|'[^'\n]*'|\b\d+(?:\.\d+)?\b)/g,
+        );
+        tokens.forEach((token, index) =>
+          chunks.push(fg(index % 2 === 1 ? p.accent : p.textSecondary)(token)),
+        );
+        chunks.push(fg(p.muted)(eol));
         return;
       }
       const heading = /^(#{1,6})\s+(.*)$/.exec(line);
@@ -1064,11 +1565,23 @@ class AgentScreen {
       rest = "";
       chunks.push(fg(p.text)(eol));
     });
-    return new StyledText(chunks);
+    const styled = new StyledText(compactTextChunks(chunks));
+    if (this.#markdownCache.size >= 128) this.#markdownCache.clear();
+    this.#markdownCache.set(`${startsInFence}:${text}`, styled);
+    return styled;
   }
 
   async #submit(): Promise<void> {
-    const text = this.#composer.plainText.trim();
+    const entered = this.#composer.plainText.trim();
+    const text =
+      this.#listing === "files" && /^\d+$/.test(entered)
+        ? `/diff ${entered}`
+        : this.#listing === "palette" && entered.length > 0
+          ? entered.startsWith("/")
+            ? entered
+            : `/${entered}`
+          : entered;
+    if (this.#listing === "palette") this.#listing = undefined;
     this.#composer.setText("");
     if (this.#showHelp) {
       this.#showHelp = false;
@@ -1080,6 +1593,12 @@ class AgentScreen {
       return;
     }
     if (text.length === 0) return;
+    if (this.#staleAnswer && !text.startsWith("/")) {
+      this.#staleAnswer = false;
+      this.#note = "The request changed or was answered elsewhere. Review the current request.";
+      this.#draw();
+      return;
+    }
     this.#note = "";
     if (text === "/notes" || text.startsWith("/notes ")) {
       const threadId = this.#threadId;
@@ -1098,6 +1617,62 @@ class AgentScreen {
       this.#resolveExit?.(0);
       return;
     }
+    if (text === "/info") {
+      this.#showInfo = !(this.#showInfo ?? agentTuiLayout(this.#renderer.width).info);
+      this.#draw();
+      return;
+    }
+    if (text === "/sidebar") {
+      this.#showSidebar = !(this.#showSidebar ?? agentTuiLayout(this.#renderer.width).sidebar);
+      this.#draw();
+      return;
+    }
+    if (text === "/files") {
+      this.#listing = this.#listing === "files" ? undefined : "files";
+      this.#draw();
+      return;
+    }
+    if (text === "/diff" || text.startsWith("/diff ")) {
+      if (this.#diff !== undefined) this.#diff = undefined;
+      else if (this.#thread?.mode !== "code" || this.#thread.checkoutId === undefined)
+        this.#note = "Checkout review is available on Code threads.";
+      else if (
+        this.#session?.approvals?.some((entry) => entry.status === "pending") ||
+        this.#session?.questions.some((entry) => entry.status === "pending") ||
+        this.#siteApproval !== undefined ||
+        this.#codeRequest !== undefined
+      )
+        this.#note = "Answer the pending request before opening checkout review.";
+      else {
+        const threadId = this.#threadId;
+        const argument = text.slice("/diff".length).trim();
+        const listed =
+          this.#checkoutChanges?.kind === "ready"
+            ? [
+                ...this.#checkoutChanges.files.map((file) => file.path),
+                ...this.#checkoutChanges.missingPaths,
+              ]
+            : [];
+        const path = /^\d+$/.test(argument) ? listed[Number(argument) - 1] : argument;
+        let diff = await readAgentDiff(this.#input.session, threadId, this.#thread.checkoutId);
+        if (argument.length > 0 && diff.kind === "ready")
+          diff =
+            path === undefined
+              ? { kind: "refused", message: "Choose a file number from /files." }
+              : selectAgentDiff(diff, path);
+        if (threadId === this.#threadId) {
+          if (diff.kind === "refused") this.#note = diff.message;
+          else {
+            this.#diff = diff;
+            this.#listing = undefined;
+            this.#suggestions = undefined;
+            this.#showHelp = false;
+          }
+        }
+      }
+      this.#draw();
+      return;
+    }
     if (text === "/pause" || text === "/resume") {
       await this.#pauseOrResume(text === "/pause" ? "pause" : "resume");
       return;
@@ -1112,8 +1687,49 @@ class AgentScreen {
       this.#draw();
       return;
     }
+    if (text === "/new") {
+      const response = await this.#input.session.send({
+        path: "/api/projects/bootstrap",
+        method: "GET",
+      });
+      const project =
+        response.status === 200
+          ? decodeHostAnswer(ProjectBootstrap)(response.body).active.find(
+              (entry) => String(entry.id) === this.#thread?.projectId,
+            )
+          : undefined;
+      if (this.#mode !== "chat" && project === undefined) {
+        this.#note = "The Project is unavailable.";
+        this.#draw();
+        return;
+      }
+      const model = this.#models.find(
+        (entry) =>
+          entry.instanceId === this.#thread?.providerInstanceId &&
+          entry.modelId === this.#thread?.modelId,
+      );
+      const created = await createAgentThread(this.#input.session, {
+        mode: this.#mode,
+        title: "New session",
+        projectName: project?.name,
+        ...(model === undefined ? {} : { model: `${model.endpoint}/${model.modelId}` }),
+      });
+      if (created.kind === "refused") this.#note = created.message;
+      else await this.#switchThread(created.threadId, created.mode);
+      this.#draw();
+      return;
+    }
+    if (text === "/next-waiting") {
+      const next = this.#threads.find(
+        (thread) => thread.awaitingInput && thread.id !== this.#threadId,
+      );
+      if (next === undefined) this.#note = "No other waiting thread is currently reported.";
+      else await this.#switchThread(next.id, next.mode);
+      this.#draw();
+      return;
+    }
     if (text === "/threads") {
-      this.#threads = await listAgentThreads(this.#input.session);
+      this.#threads = await listAgentNavigation(this.#input.session, this.#mode);
       this.#listing = this.#listing === "threads" ? undefined : "threads";
       this.#draw();
       return;
@@ -1143,6 +1759,32 @@ class AgentScreen {
       await this.#switchThread(String(target.id));
       return;
     }
+    if (text === "/effort" || text.startsWith("/effort ")) {
+      const thread = this.#thread;
+      const model = this.#models.find(
+        (entry) =>
+          entry.instanceId === thread?.providerInstanceId && entry.modelId === thread?.modelId,
+      );
+      const option = model?.options?.find(
+        (option) => option.kind === "selection" && /effort|reasoning/i.test(option.id),
+      );
+      const value = text.slice("/effort".length).trim();
+      if (thread === undefined || option?.kind !== "selection")
+        this.#note = "This model does not report an effort setting.";
+      else if (!option.values.includes(value))
+        this.#note = `Choose an effort: ${option.values.join(", ")}`;
+      else {
+        const changed = await changeAgentThreadModel(this.#input.session, thread, {
+          instanceId: thread.providerInstanceId,
+          modelId: thread.modelId,
+          modelOptionValues: { ...thread.modelOptionValues, [option.id]: value },
+        });
+        this.#note = changed.kind === "refused" ? changed.message : `Effort: ${value}`;
+        await this.refresh();
+      }
+      this.#draw();
+      return;
+    }
     if (text === "/model" || text.startsWith("/model ")) {
       const argument = text.slice("/model".length).trim();
       if (argument.length === 0) {
@@ -1153,27 +1795,13 @@ class AgentScreen {
       }
       const choice = /^\d+$/.test(argument)
         ? this.#models[Number(argument) - 1]
-        : this.#models.find(
-            (model) =>
-              model.modelId === argument ||
-              model.displayName.toLowerCase() === argument.toLowerCase(),
-          );
+        : pickAgentModel(this.#models, argument);
       if (choice === undefined || this.#thread === undefined) {
         this.#note = "Pick a model by number from /model: /model 2";
         this.#draw();
         return;
       }
-      if (this.#thread.mode !== "chat") {
-        this.#note =
-          "Change a Work or Code thread's model from the app; the terminal switches Chat threads only.";
-        this.#draw();
-        return;
-      }
-      const changed = await changeAgentModel(
-        this.#input.session,
-        { thread: { id: this.#thread.id, version: this.#thread.version } } as never,
-        choice,
-      );
+      const changed = await changeAgentThreadModel(this.#input.session, this.#thread, choice);
       this.#note = changed.kind === "refused" ? changed.message : `Now on ${choice.displayName}.`;
       this.#listing = undefined;
       await this.refresh();
@@ -1224,6 +1852,11 @@ class AgentScreen {
     }
     if (text.startsWith("/steer ")) {
       await this.#steer(text.slice("/steer".length).trim());
+      return;
+    }
+    if (this.#codeRequest !== undefined) {
+      this.#note = (await answerCodeRequest(this.#input.session, this.#codeRequest, text)) ?? "";
+      await this.refresh();
       return;
     }
     const approval = this.#session?.approvals?.find((entry) => entry.status === "pending");
@@ -1329,6 +1962,7 @@ class AgentScreen {
     }
     const resolved = await this.#resolveMentions(text);
     if (resolved.refused.length > 0) {
+      this.#composer.setText(text);
       this.#note = resolved.refused.join(" ");
       this.#draw();
       return;
@@ -1337,7 +1971,10 @@ class AgentScreen {
       attachmentIds: resolved.attachmentIds,
       threadMentionIds: resolved.threadMentionIds,
     });
-    if (sent.kind === "refused") this.#note = sent.message;
+    if (sent.kind === "refused") {
+      this.#composer.setText(text);
+      this.#note = sent.message;
+    }
     await this.refresh();
   }
 
@@ -1384,7 +2021,10 @@ class AgentScreen {
       return;
     }
     const sent = await this.#port.send(question);
-    if (sent.kind === "refused") this.#note = sent.message;
+    if (sent.kind === "refused") {
+      this.#composer.setText(question);
+      this.#note = sent.message;
+    }
     await this.refresh();
   }
 
@@ -1657,7 +2297,10 @@ class AgentScreen {
       );
       if (suggestion !== undefined && this.#thread !== undefined) {
         const sent = await this.#port.send(suggestion.prompt);
-        if (sent.kind === "refused") this.#note = sent.message;
+        if (sent.kind === "refused") {
+          this.#composer.setText(suggestion.prompt);
+          this.#note = sent.message;
+        }
       }
     } else if (created.threadId !== undefined) {
       this.#note = `Created ${created.mode} thread ${created.threadId} — octant agent --thread ${created.threadId}`;

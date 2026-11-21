@@ -7,7 +7,8 @@ import {
   createAgentThread,
   openAgentThreadById,
 } from "./agentThread";
-import { statusLineFrom } from "./agentTuiModel";
+import { changeAgentThreadModel } from "./agentHost";
+import { statusLineFrom, transcriptFrom } from "./agentTuiModel";
 import type { LocalControlRequest, OpenedLocalControlSession } from "./localControl";
 
 const now = "2026-10-09T09:00:00.000Z";
@@ -118,6 +119,21 @@ function host(codeAccessPersistence: "current-session" | "project-default") {
         return { status: 200, body: projects(codeAccessPersistence) };
       }
       if (request.path === "/api/providers/bootstrap") return { status: 200, body: providers };
+      if (request.path === "/api/code/bootstrap")
+        return {
+          status: 200,
+          body: {
+            settings: {
+              defaultExecutionPolicy: "approval-gated",
+              defaultPermissionPersistence: "current-session",
+              defaultModel: { providerInstanceId: ids.provider, modelId: "loopback-model" },
+              version: 0,
+              updatedAt: now,
+            },
+            threads: [],
+            checkouts: [],
+          },
+        };
       if (request.path === "/api/shell/bootstrap") {
         return { status: 200, body: { workspaceVersion: 1 } };
       }
@@ -202,6 +218,34 @@ function workHost() {
         };
       }
       if (request.path === "/api/providers/bootstrap") return { status: 200, body: providers };
+      if (request.path === "/api/code/bootstrap")
+        return {
+          status: 200,
+          body: {
+            settings: {
+              defaultExecutionPolicy: "approval-gated",
+              defaultPermissionPersistence: "current-session",
+              version: 0,
+              updatedAt: now,
+            },
+            threads: [],
+            checkouts: [],
+          },
+        };
+      if (request.path === "/api/work/threads/bootstrap")
+        return {
+          status: 200,
+          body: {
+            threads: [],
+            settings: {
+              defaultProviderInstanceId: ids.provider,
+              defaultModelId: "loopback-model",
+              defaultAccess: "ask-first",
+              version: 0,
+              updatedAt: now,
+            },
+          },
+        };
       if (request.path === "/api/shell/bootstrap") {
         return { status: 200, body: { workspaceVersion: 1 } };
       }
@@ -424,7 +468,7 @@ describe("starting a Code thread from the terminal", () => {
 });
 
 describe("starting a Work thread from the terminal with an asked-for access", () => {
-  it("moves a new Work thread to Full access through the composer's access command", async () => {
+  it("creates a Work thread with its requested access atomically", async () => {
     const fake = workHost();
 
     const result = await createAgentThread(fake.session, {
@@ -435,13 +479,11 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
     });
 
     expect(result).toMatchObject({ kind: "created", mode: "work", projectName: "Client" });
-    const change = fake
-      .workCommands()
-      .find((command) => command.kind === "change-work-thread-access");
-    expect(change).toMatchObject({ access: "full-access", expectedVersion: 1 });
+    const change = fake.workCommands().find((command) => command.kind === "create-work-thread");
+    expect(change).toMatchObject({ access: "full-access" });
   });
 
-  it("carries the sandbox with the Work thread's raise to Full access, so it is not dropped at creation", async () => {
+  it("carries the sandbox with the Work thread's initial Full access", async () => {
     const fake = workHost();
 
     const result = await createAgentThread(fake.session, {
@@ -453,9 +495,7 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
     });
 
     expect(result).toMatchObject({ kind: "created", mode: "work" });
-    const change = fake
-      .workCommands()
-      .find((command) => command.kind === "change-work-thread-access");
+    const change = fake.workCommands().find((command) => command.kind === "create-work-thread");
     expect(change).toMatchObject({ access: "full-access", fullAccessSandbox: true });
   });
 
@@ -474,6 +514,29 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
       .workCommands()
       .find((command) => command.kind === "change-work-thread-access");
     expect(change).toMatchObject({ access: "plan", expectedVersion: 1 });
+  });
+
+  it("keeps the per-run Full access flag on a Work thread created at Full access", async () => {
+    const fake = workHost();
+
+    const result = await createAgentThread(fake.session, {
+      mode: "work",
+      title: "Run the terminal",
+      projectName: "Client",
+      access: "full-access",
+      fullAccessScope: "run",
+    });
+
+    expect(result).toMatchObject({ kind: "created", mode: "work" });
+    const commands = fake.workCommands();
+    expect(commands.find((command) => command.kind === "create-work-thread")).toMatchObject({
+      access: "full-access",
+    });
+    expect(commands.find((command) => command.kind === "change-work-thread-access")).toMatchObject({
+      access: "full-access",
+      fullAccessRunFlag: true,
+      expectedVersion: 1,
+    });
   });
 
   it("refuses --access on a Chat thread", async () => {
@@ -1010,6 +1073,44 @@ describe("Code threads in the terminal", () => {
     return { session, paths };
   }
 
+  it("carries a failed provider's host message to the transcript without inventing a reply", async () => {
+    const base = longThreadHost(() => 1, true).session;
+    const session = {
+      ...base,
+      send: async (request: LocalControlRequest) =>
+        request.path.includes("/conversation/window")
+          ? {
+              status: 200,
+              body: {
+                version: 1,
+                threadId,
+                turns: [
+                  {
+                    ...turn(1),
+                    status: "failed",
+                    failure: {
+                      category: "failed",
+                      message: "Provider authentication was refused (401).",
+                    },
+                  },
+                ],
+                hasEarlier: false,
+                hasLater: false,
+              },
+            }
+          : base.send(request),
+    };
+    const snapshot = await agentThreadPort(session, "code", threadId).read();
+    expect(snapshot?.turns[0]).toMatchObject({
+      reply: "",
+      failure: "Provider authentication was refused (401).",
+    });
+    expect(transcriptFrom(snapshot, null)[1]).toMatchObject({
+      kind: "lead",
+      failure: "Provider authentication was refused (401).",
+    });
+  });
+
   const expectedPrompts = (total: number) =>
     Array.from(
       { length: CODE_THREAD_TURNS },
@@ -1237,4 +1338,145 @@ describe("stopping a Work turn from the terminal", () => {
       { kind: "cancel-work-turn", requestId: request, threadId: workThread, turnId: turn },
     ]);
   });
+});
+
+describe("coding provider selection from the terminal", () => {
+  it("starts Code on a native provider through the same host create command", async () => {
+    const fake = host("current-session");
+    const session = {
+      ...fake.session,
+      send: async (request: LocalControlRequest) => {
+        if (request.path === "/api/providers/bootstrap")
+          return {
+            status: 200,
+            body: {
+              ...providers,
+              instances: [
+                {
+                  ...providers.instances[0],
+                  driverKind: "codex",
+                  displayName: "Codex",
+                  configuration: { kind: "codex-cli", binaryPath: "codex" },
+                },
+              ],
+            },
+          };
+        return fake.session.send(request);
+      },
+    };
+    const result = await createAgentThread(session, {
+      mode: "code",
+      title: "Fix",
+      projectName: "Repo",
+      model: "Codex/loopback-model",
+    });
+    expect(result.kind).toBe("created");
+    expect(fake.created()).toBeDefined();
+  });
+
+  it("refuses noninteractive creation without a default even with one eligible model", async () => {
+    const fake = host("current-session");
+    const session = {
+      ...fake.session,
+      send: async (request: LocalControlRequest) =>
+        request.path === "/api/code/bootstrap"
+          ? {
+              status: 200,
+              body: {
+                settings: {
+                  defaultExecutionPolicy: "approval-gated",
+                  defaultPermissionPersistence: "current-session",
+                  version: 0,
+                  updatedAt: now,
+                },
+                threads: [],
+                checkouts: [],
+              },
+            }
+          : fake.session.send(request),
+    };
+    expect(
+      await createAgentThread(session, { mode: "code", title: "No default", projectName: "Repo" }),
+    ).toMatchObject({ kind: "refused" });
+    expect(fake.created()).toBeUndefined();
+  });
+
+  it("uses the host Code default before offering an interactive model choice", async () => {
+    const fake = host("current-session");
+    let picked = false;
+    const session = {
+      ...fake.session,
+      send: async (request: LocalControlRequest) => {
+        if (request.path === "/api/code/bootstrap")
+          return {
+            status: 200,
+            body: {
+              settings: {
+                defaultExecutionPolicy: "approval-gated",
+                defaultPermissionPersistence: "current-session",
+                defaultModel: { providerInstanceId: ids.provider, modelId: "loopback-model" },
+                version: 0,
+                updatedAt: now,
+              },
+              threads: [],
+              checkouts: [],
+            },
+          };
+        return fake.session.send(request);
+      },
+    };
+    expect(
+      await createAgentThread(session, {
+        mode: "code",
+        title: "Default model",
+        projectName: "Repo",
+        chooseModel: async () => {
+          picked = true;
+          return undefined;
+        },
+      }),
+    ).toMatchObject({ kind: "created" });
+    expect(picked).toBe(false);
+  });
+
+  it.each(["code", "work"] as const)(
+    "changes a %s model through its versioned command and preserves refusals",
+    async (mode) => {
+      const seen: LocalControlRequest[] = [];
+      let refuse = false;
+      const session: OpenedLocalControlSession = {
+        kind: "opened",
+        windowId: "window",
+        close: async () => undefined,
+        send: async (request) => {
+          seen.push(request);
+          return refuse
+            ? { status: 409, body: { message: "A turn is running." } }
+            : {
+                status: 200,
+                body: {
+                  kind: "thread-updated",
+                  thread: {
+                    id: ids.project,
+                    providerInstanceId: ids.provider,
+                    modelId: "new-model",
+                  },
+                },
+              };
+        },
+      };
+      const thread = { id: ids.project, version: 3, mode };
+      const choice = { instanceId: ids.provider, modelId: "new-model" };
+      expect(await changeAgentThreadModel(session, thread, choice)).toEqual({ kind: "changed" });
+      expect(seen[0]).toMatchObject({
+        path: mode === "code" ? "/api/code/commands" : "/api/work/threads/commands",
+        body: { kind: `change-${mode}-thread-provider`, expectedVersion: 3 },
+      });
+      refuse = true;
+      expect(await changeAgentThreadModel(session, thread, choice)).toEqual({
+        kind: "refused",
+        message: "A turn is running.",
+      });
+    },
+  );
 });

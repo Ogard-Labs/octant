@@ -18,7 +18,12 @@ import {
   type SideChatSidecar,
   ThreadGoal,
   ChatNavigation,
+  CodeNavigation,
+  CodeBoardView,
+  WorkThreadNavigation,
   ChatAttachment,
+  CodeAttachmentReference,
+  WorkAttachmentReference,
   ProviderRegistrySnapshot,
   ProviderProbeResult,
   NativeHarnessSteeringTaken,
@@ -530,18 +535,85 @@ export async function listAgentThreads(
   );
 }
 
+export interface AgentNavigationThread {
+  readonly id: string;
+  readonly title: string;
+  readonly mode: "chat" | "work" | "code";
+  readonly projectId?: string | undefined;
+  readonly updatedAt: string;
+  readonly executing: boolean;
+  readonly awaitingInput: boolean;
+  readonly readyForReview?: boolean;
+}
+
+/** Lightweight projections; these reads never observe Git or change the active window. */
+export async function listAgentNavigation(
+  session: OpenedLocalControlSession,
+  mode: "chat" | "work" | "code",
+): Promise<readonly AgentNavigationThread[]> {
+  const response = await session.send({ path: `/api/${mode}/navigation`, method: "GET" });
+  if (response.status !== 200)
+    throw new Error(refusalMessage(response, "Thread navigation is unavailable."));
+  if (mode === "chat")
+    return decodeHostAnswer(ChatNavigation)(response.body).threads.map((thread) => ({
+      ...thread,
+      mode,
+      awaitingInput: thread.awaitingInput === true,
+    }));
+  const view =
+    mode === "code"
+      ? decodeHostAnswer(CodeNavigation)(response.body)
+      : decodeHostAnswer(WorkThreadNavigation)(response.body);
+  const reviewIds = new Set<string>();
+  if (mode === "code") {
+    const board = await session.send({
+      path: "/api/code/board",
+      method: "POST",
+      body: { version: 1 },
+    });
+    if (board.status === 200) {
+      for (const card of decodeHostAnswer(CodeBoardView)(board.body).cards) {
+        if (
+          !card.executing &&
+          card.reviewState.freshness === "fresh" &&
+          card.reviewState.state === "pending"
+        )
+          reviewIds.add(String(card.threadId));
+      }
+    }
+  }
+  return view.threads
+    .filter((thread) => thread.lifecycle === "active")
+    .map((thread) => {
+      const runtime = view.runtime.find((entry) => entry.threadId === thread.id);
+      return {
+        id: String(thread.id),
+        title: thread.title,
+        mode,
+        projectId: String(thread.projectId),
+        updatedAt: thread.updatedAt,
+        executing: runtime?.executing === true,
+        awaitingInput: runtime?.awaitingInput === true,
+        readyForReview: reviewIds.has(String(thread.id)),
+      };
+    })
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
 export interface AgentModelChoice {
   readonly instanceId: string;
+  readonly driverKind?: import("@octant/contracts").ProviderDriverKind;
   readonly endpoint: string;
   readonly modelId: string;
   readonly displayName: string;
   readonly contextLimit: number | undefined;
+  readonly options?: import("@octant/contracts").ProviderModel["options"];
 }
 
-/** Models offered by enabled providers; harness-only unless selecting a new Chat thread. */
+/** Models offered by enabled providers, including native coding runtimes. */
 export async function listAgentModels(
   session: OpenedLocalControlSession,
-  scope: "harness" | "chat" = "harness",
+  scope: "harness" | "chat" | "coding" = "coding",
 ): Promise<ReadonlyArray<AgentModelChoice>> {
   const response = await session.send({ path: "/api/providers/bootstrap", method: "GET" });
   if (response.status !== 200) return [];
@@ -550,10 +622,10 @@ export async function listAgentModels(
     (instance) =>
       instance.enabled &&
       !isImageProfileDriverKind(instance.driverKind) &&
-      (scope === "chat" || isNativeHarnessDriverKind(instance.driverKind)),
+      (scope !== "harness" || isNativeHarnessDriverKind(instance.driverKind)),
   );
   const observations = [...snapshot.observedStates];
-  if (scope === "chat") {
+  if (scope !== "harness") {
     // The listener starts before provider warming finishes. Join the host's
     // deduplicated probes so missing cold observations cannot hide a match or
     // make a model shared by two accounts appear unique.
@@ -579,10 +651,12 @@ export async function listAgentModels(
     for (const model of observed?.models ?? []) {
       choices.push({
         instanceId: String(instance.id),
+        driverKind: instance.driverKind,
         endpoint: instance.displayName,
         modelId: String(model.id),
         displayName: model.displayName ?? String(model.id),
         contextLimit: model.contextLimit,
+        options: model.options,
       });
     }
   }
@@ -592,7 +666,9 @@ export async function listAgentModels(
 export async function changeAgentModel(
   session: OpenedLocalControlSession,
   thread: Pick<ChatThreadView, "thread">,
-  choice: Pick<AgentModelChoice, "instanceId" | "modelId">,
+  choice: Pick<AgentModelChoice, "instanceId" | "modelId"> & {
+    readonly modelOptionValues?: Readonly<Record<string, string>>;
+  },
 ): Promise<HostRefusal | { readonly kind: "changed" }> {
   const response = await session.send({
     path: "/api/chat/commands",
@@ -603,9 +679,60 @@ export async function changeAgentModel(
       expectedVersion: thread.thread.version,
       providerInstanceId: choice.instanceId,
       modelId: choice.modelId,
+      ...(choice.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: choice.modelOptionValues }),
     },
   });
   if (response.status !== 200) {
+    return { kind: "refused", message: refusalMessage(response, "The model was not changed.") };
+  }
+  return { kind: "changed" };
+}
+
+/** Change a coding thread through the same versioned command its composer sends. */
+export async function changeAgentThreadModel(
+  session: OpenedLocalControlSession,
+  thread: {
+    readonly id: string;
+    readonly version: number;
+    readonly mode: "chat" | "work" | "code";
+  },
+  choice: Pick<AgentModelChoice, "instanceId" | "modelId"> & {
+    readonly modelOptionValues?: Readonly<Record<string, string>>;
+  },
+): Promise<HostRefusal | { readonly kind: "changed" }> {
+  if (thread.mode === "chat")
+    return changeAgentModel(
+      session,
+      { thread: { id: thread.id, version: thread.version } } as Pick<ChatThreadView, "thread">,
+      choice,
+    );
+  const response = await session.send({
+    path: thread.mode === "code" ? "/api/code/commands" : "/api/work/threads/commands",
+    method: "POST",
+    body: {
+      kind: `change-${thread.mode}-thread-provider`,
+      threadId: thread.id,
+      expectedVersion: thread.version,
+      providerInstanceId: choice.instanceId,
+      modelId: choice.modelId,
+      ...(choice.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: choice.modelOptionValues }),
+    },
+  });
+  const body = response.body as {
+    kind?: string;
+    thread?: { id?: string; providerInstanceId?: string; modelId?: string };
+  } | null;
+  if (
+    response.status !== 200 ||
+    body?.kind !== "thread-updated" ||
+    body.thread?.id !== thread.id ||
+    body.thread.providerInstanceId !== choice.instanceId ||
+    body.thread.modelId !== choice.modelId
+  ) {
     return { kind: "refused", message: refusalMessage(response, "The model was not changed.") };
   }
   return { kind: "changed" };
@@ -646,6 +773,7 @@ export async function uploadAgentAttachment(
   session: OpenedLocalControlSession,
   threadId: string,
   path: string,
+  mode: "chat" | "work" | "code" = "chat",
 ): Promise<HostRefusal | { readonly kind: "uploaded"; readonly attachmentId: string }> {
   const mediaType = attachmentMediaType(path);
   if (mediaType === undefined) {
@@ -659,14 +787,14 @@ export async function uploadAgentAttachment(
   }
   const attachmentId = randomUUID();
   const response = await session.send({
-    path: "/api/chat/attachments",
-    method: "POST",
+    path: `/api/${mode}/attachments`,
+    method: mode === "chat" ? "POST" : "PUT",
     bytes,
     headers: {
       "content-type": mediaType,
-      "x-octant-chat-thread-id": threadId,
-      "x-octant-chat-attachment-id": attachmentId,
-      "x-octant-chat-display-name": encodeURIComponent(basename(path)),
+      [`x-octant-${mode}-thread-id`]: threadId,
+      [`x-octant-${mode}-attachment-id`]: attachmentId,
+      [`x-octant-${mode}-display-name`]: encodeURIComponent(basename(path)),
     },
   });
   if (response.status !== 200) {
@@ -677,7 +805,12 @@ export async function uploadAgentAttachment(
   }
   return {
     kind: "uploaded",
-    attachmentId: String(decodeHostAnswer(ChatAttachment)(response.body).id),
+    attachmentId:
+      mode === "chat"
+        ? String(decodeHostAnswer(ChatAttachment)(response.body).id)
+        : mode === "code"
+          ? String(decodeHostAnswer(CodeAttachmentReference)(response.body).attachmentId)
+          : String(decodeHostAnswer(WorkAttachmentReference)(response.body).attachmentId),
   };
 }
 

@@ -3970,6 +3970,18 @@ function LaunchedShell(
       hostPlatform,
     ],
   );
+  const codeDefaultProviderId = codeController.bootstrap?.settings.defaultModel?.providerInstanceId;
+  const codeDefaultModelId = codeController.bootstrap?.settings.defaultModel?.modelId;
+  useEffect(() => {
+    if (
+      activeMode !== "code" ||
+      codeDefaultProviderId === undefined ||
+      codeDefaultModelId === undefined
+    )
+      return;
+    setDraftProviderInstanceId(codeDefaultProviderId);
+    setDraftModelId(codeDefaultModelId);
+  }, [activeMode, codeDefaultProviderId, codeDefaultModelId]);
   const firstRunDiscoveryNotice = describeDiscoveryNotice(firstRunDiscovery, hostPlatform);
   const recordFirstRunOutcome = useCallback(
     (outcome: FirstRunOnboardingOutcome) =>
@@ -3988,10 +4000,17 @@ function LaunchedShell(
       // Without Work's settings there is no version to write against yet, so
       // the choice has not been taken rather than merely deferred.
       if (mode === "work" && workSettings.status === "loading") return false;
-      rememberModelChoice(selection);
-      return true;
+      const settings = codeController.bootstrap?.settings;
+      if (settings === undefined) return false;
+      const saved = await codeController.updateSettings({
+        defaultExecutionPolicy: settings.defaultExecutionPolicy,
+        defaultPermissionPersistence: settings.defaultPermissionPersistence,
+        defaultModel: selection,
+      });
+      if (saved) rememberModelChoice(selection);
+      return saved;
     },
-    [workSettings],
+    [workSettings, codeController],
   );
   const workDefaultModel = workSettings.settings;
   const firstRunWorkModel = useMemo(() => {
@@ -4208,7 +4227,9 @@ function LaunchedShell(
   const rawDraftSelection =
     draftProviderInstanceId !== undefined && draftModelId !== undefined
       ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-      : undefined;
+      : activeMode === "code"
+        ? codeController.bootstrap?.settings.defaultModel
+        : undefined;
   const preferredChatSelection =
     resolveDraftProviderSelection(chatProviderGroups, rawDraftSelection) ??
     resolveDraftProviderSelection(chatProviderGroups, firstRunChatDefault) ??
@@ -7576,7 +7597,7 @@ function LaunchedShell(
         draftProviderGroups,
         draftProviderInstanceId !== undefined && draftModelId !== undefined
           ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-          : undefined,
+          : codeController.bootstrap?.settings.defaultModel,
       );
       const providerInstanceId =
         codeSelection?.providerInstanceId ?? codeProviderChoices[0]?.instanceId;
@@ -7982,7 +8003,7 @@ function LaunchedShell(
           draftProviderGroups,
           draftProviderInstanceId !== undefined && draftModelId !== undefined
             ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-            : undefined,
+            : codeController.bootstrap?.settings.defaultModel,
         );
         const providerInstanceId =
           codeDraftSelection?.providerInstanceId ?? codeProviderChoices[0]?.instanceId;
