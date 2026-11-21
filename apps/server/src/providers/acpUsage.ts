@@ -287,6 +287,12 @@ export interface AcpReportedUsageState {
    * read as a provider-priced zero for a turn whose cost is unknown.
    */
   costUnsettled?: boolean;
+  /**
+   * Whether a turn settled with no cost of its own since `charged` was set.
+   * That turn falls back to the ledger's estimate, so the next growth spans
+   * it too and cannot be charged to one turn without counting it twice.
+   */
+  chargedStale?: boolean;
   /** Context reported during the running turn; an earlier turn's is stale. */
   context?: { readonly used: number; readonly size: number } | undefined;
 }
@@ -335,7 +341,8 @@ export function beginAcpReportedTurn(state: AcpReportedUsageState): void {
  * the session's cumulative cost grew by since the last settled turn, so a
  * cost update that arrives after a reply is charged to the next turn rather
  * than lost. A turn with no cost update since the last settlement is left
- * unpriced rather than charged zero. Only US dollars become `costUsd`; another currency or unit
+ * unpriced rather than charged zero, and the next turn's growth spans both
+ * turns, so it is left unpriced too and only resets the baseline. Only US dollars become `costUsd`; another currency or unit
  * ("credits") leaves the turn unpriced by the provider, as does a cost that
  * fell or changed unit. A reply without whole token counts reports nothing,
  * so the turn records an unavailable row.
@@ -349,13 +356,18 @@ export function finishAcpReportedTurn(
   const latest = state.latestCost;
   const context = state.context;
   const unsettled = state.costUnsettled === true;
+  const stale = state.chargedStale === true;
   state.charged = latest ?? charged;
   state.costUnsettled = false;
+  // A cost arriving while the baseline is stale resets it, and exact
+  // attribution resumes on the following turn.
+  state.chargedStale = !unsettled;
   state.context = undefined;
   const tokens = acpTurnUsage(receipt, withoutTotal);
   if (tokens === undefined) return;
   const costUsd =
     unsettled &&
+    !stale &&
     charged !== undefined &&
     latest !== undefined &&
     latest.currency === "USD" &&

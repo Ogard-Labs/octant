@@ -307,9 +307,50 @@ describe("standard ACP usage updates", () => {
     const silent = finishAcpReportedTurn(state, reply);
     expect(silent).toMatchObject({ inputTokens: 100, outputTokens: 20 });
     expect(silent).not.toHaveProperty("costUsd");
+  });
+
+  it("charges no provider cost for the turn after an unpriced one, whose growth spans both turns, and charges exactly again after that", () => {
+    // The unpriced turn is estimated by the ledger; charging the next turn the
+    // $0.30 the total grew by would count that turn a second time.
+    const state = acpReportedUsageState("new");
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(0.5));
+    expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0.5 });
+    beginAcpReportedTurn(state);
+    expect(finishAcpReportedTurn(state, reply)).not.toHaveProperty("costUsd");
     beginAcpReportedTurn(state);
     observeAcpUsageUpdate(state, update(0.8));
-    expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0.3 });
+    const spanning = finishAcpReportedTurn(state, reply);
+    expect(spanning).toMatchObject({ inputTokens: 100, outputTokens: 20 });
+    expect(spanning).not.toHaveProperty("costUsd");
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(1));
+    expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0.2 });
+  });
+
+  it("keeps charging exact growth while the agent reports a cost every turn", () => {
+    const state = acpReportedUsageState("new");
+    for (const [amount, expected] of [
+      [0.25, 0.25],
+      [0.4, 0.15],
+      [0.4, 0],
+      [1, 0.6],
+    ] as const) {
+      beginAcpReportedTurn(state);
+      observeAcpUsageUpdate(state, update(amount));
+      expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: expected });
+    }
+  });
+
+  it("charges a loaded session's first turn from the cost reported while it loaded", () => {
+    const state = acpReportedUsageState("existing");
+    observeAcpUsageUpdate(state, update(2));
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(2.4));
+    expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0.4 });
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(2.5));
+    expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0.1 });
   });
 
   it("charges zero when the agent restates an unchanged cumulative cost", () => {

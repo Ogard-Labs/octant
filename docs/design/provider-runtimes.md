@@ -2502,7 +2502,12 @@ by ACP's standard usage, and its probe declares `usage: "supported"`
   it grew by since the last settled turn, so an update that arrives after a
   reply is charged to the next turn rather than lost. A turn with no cost
   update since the last settlement is left without a provider cost rather
-  than charged zero; an update restating the same total charges zero. A
+  than charged zero, so the ledger estimates it. The next cost update then
+  grows across that turn as well, and charging it to one turn would count
+  the estimated turn twice: that turn is left without a provider cost too
+  (it is estimated), its update only resets the baseline, and exact
+  charging resumes on the turn after it. An update restating the same
+  total charges zero. A
   session Octant opened
   with `session/new` starts from zero; one it loaded or resumed is priced
   from the second cost it sees, and a cost the agent reports while
