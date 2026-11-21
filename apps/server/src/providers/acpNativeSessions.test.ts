@@ -7,6 +7,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   acpListedSessions,
+  acpReplayCollector,
   acpReplayedMessages,
   makeAcpNativeSessions,
   readAcpSessionPages,
@@ -214,6 +215,49 @@ describe("an ACP agent's session history", () => {
       { role: "person", text: "Find the flaky test" },
       { role: "agent", text: "It is timing out.", tools: ["Run tests"] },
     ]);
+  });
+
+  it("keeps the newest messages of a replay longer than its bound and counts the earlier ones as omitted", async () => {
+    const replay = acpReplayCollector(5);
+    const chunk = (role: "user" | "agent", text: string) => ({
+      sessionUpdate: `${role}_message_chunk`,
+      content: { type: "text", text },
+    });
+    for (const update of [
+      chunk("user", "first question"),
+      chunk("agent", "first "),
+      chunk("agent", "answer"),
+      chunk("user", "second "),
+      chunk("user", "question"),
+      { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "hm" } },
+      chunk("agent", "second answer"),
+      chunk("user", "newest question"),
+      chunk("agent", "newest answer"),
+    ])
+      replay.add(update);
+    const sessions = makeAcpNativeSessions({
+      instanceId,
+      driverKind: "antigravity",
+      displayName: "Antigravity",
+      heldSessions: () => new Set(),
+      listSessions: async () => ({ sessions: [], truncated: false }),
+      readHistory: async () => replay.collected(),
+    });
+    const history = sessions.history;
+    if (history === undefined) throw new Error("A reader was given");
+    // The bound keeps the second question's last chunk; its earlier chunk was
+    // dropped, so the partial message is left out with the ones before it.
+    expect(
+      await Effect.runPromise(history({ instanceId, projectRoot: "/work", nativeSessionId: "s1" })),
+    ).toEqual({
+      status: "read",
+      messages: [
+        { role: "agent", text: "second answer" },
+        { role: "person", text: "newest question" },
+        { role: "agent", text: "newest answer" },
+      ],
+      omitted: 3,
+    });
   });
 
   it("imports none from an agent that cannot load its sessions", async () => {

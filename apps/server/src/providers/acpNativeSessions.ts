@@ -56,21 +56,92 @@ export interface AcpSessionPages {
 export type AcpSessionLister = (projectRoot: string) => Promise<AcpSessionPages | "unsupported">;
 
 /**
- * The `session/update` payloads an agent replayed for one session while it
- * loaded it, in order, or `unsupported` when its `initialize` advertised no
- * `loadSession`.
+ * The newest `session/update` payloads an agent replayed for one session
+ * while it loaded it, in order, and how many earlier messages the bound left
+ * out; `unsupported` when its `initialize` advertised no `loadSession`.
  */
 export type AcpSessionHistoryReader = (
   projectRoot: string,
   sessionId: string,
-) => Promise<ReadonlyArray<Readonly<Record<string, unknown>>> | "unsupported">;
+) => Promise<AcpReplayedHistory | "unsupported">;
 
-/** The most replayed updates a history read keeps; the rest are counted as omitted. */
+export interface AcpReplayedHistory {
+  readonly updates: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  readonly omittedMessages: number;
+}
+
+/** The most replayed updates a history read keeps; earlier ones are counted as omitted. */
 export const MAX_ACP_REPLAYED_UPDATES = 20_000;
+
+/** Which imported message an update adds to, as `acpReplayedMessages` joins them. */
+function replayedRole(update: Readonly<Record<string, unknown>>): "person" | "agent" | undefined {
+  const kind = update.sessionUpdate;
+  if (kind === "user_message_chunk" || kind === "agent_message_chunk")
+    return chunkText(update) === undefined
+      ? undefined
+      : kind === "user_message_chunk"
+        ? "person"
+        : "agent";
+  return kind === "tool_call" && toolTitle(update) !== undefined ? "agent" : undefined;
+}
+
+/**
+ * Collects a replay, keeping only its newest `limit` updates: the replay runs
+ * oldest first, and keeping its first updates dropped the newest
+ * conversation, which is the part a thread taken up from the session needs.
+ * Each evicted update is counted into the messages it belonged to, and a
+ * message whose earlier chunks were evicted is left out whole and counted
+ * with them rather than imported cut short.
+ */
+export function acpReplayCollector(limit: number = MAX_ACP_REPLAYED_UPDATES): {
+  readonly add: (update: Readonly<Record<string, unknown>>) => void;
+  readonly collected: () => AcpReplayedHistory;
+} {
+  const ring: Array<Readonly<Record<string, unknown>>> = [];
+  let start = 0;
+  let evictedMessages = 0;
+  let evictedRole: "person" | "agent" | undefined;
+  return {
+    add: (update) => {
+      if (ring.length < limit) {
+        ring.push(update);
+        return;
+      }
+      const evicted = ring[start];
+      ring[start] = update;
+      start = (start + 1) % limit;
+      const role = evicted === undefined ? undefined : replayedRole(evicted);
+      if (role !== undefined && role !== evictedRole) {
+        evictedMessages += 1;
+        evictedRole = role;
+      }
+    },
+    collected: () => {
+      const ordered = [...ring.slice(start), ...ring.slice(0, start)];
+      if (evictedRole === undefined) return { updates: ordered, omittedMessages: 0 };
+      const first = ordered.findIndex((update) => {
+        const role = replayedRole(update);
+        return role !== undefined && role !== evictedRole;
+      });
+      return {
+        updates: first === -1 ? [] : ordered.slice(first),
+        omittedMessages: evictedMessages,
+      };
+    },
+  };
+}
 
 function chunkText(update: Readonly<Record<string, unknown>>): string | undefined {
   const content = record(update.content);
   return content?.type === "text" && typeof content.text === "string" ? content.text : undefined;
+}
+
+function toolTitle(update: Readonly<Record<string, unknown>>): string | undefined {
+  return typeof update.title === "string" && update.title.trim().length > 0
+    ? update.title
+    : typeof update.kind === "string"
+      ? update.kind
+      : undefined;
 }
 
 /**
@@ -97,12 +168,7 @@ export function acpReplayedMessages(
       if (text !== undefined)
         current(kind === "user_message_chunk" ? "person" : "agent").text += text;
     } else if (kind === "tool_call") {
-      const title =
-        typeof update.title === "string" && update.title.trim().length > 0
-          ? update.title
-          : typeof update.kind === "string"
-            ? update.kind
-            : undefined;
+      const title = toolTitle(update);
       if (title !== undefined) current("agent").tools.push(title);
     }
   }
@@ -303,7 +369,13 @@ export function makeAcpNativeSessions(options: {
                   try: async () => {
                     const replayed = await readHistory(input.projectRoot, input.nativeSessionId);
                     if (replayed === "unsupported") return { status: "unsupported" as const };
-                    return { status: "read" as const, messages: acpReplayedMessages(replayed) };
+                    return {
+                      status: "read" as const,
+                      messages: acpReplayedMessages(replayed.updates),
+                      ...(replayed.omittedMessages > 0
+                        ? { omitted: replayed.omittedMessages }
+                        : {}),
+                    };
                   },
                   catch: (error) => asFailure(error, `${name}'s session could not be read.`),
                 });

@@ -3,7 +3,7 @@ import { compactAcpConversation } from "./acpCompaction";
 import {
   readAcpSessionPages,
   makeAcpNativeSessions,
-  MAX_ACP_REPLAYED_UPDATES,
+  acpReplayCollector,
   type AcpSessionHistoryReader,
   type AcpSessionLister,
 } from "./acpNativeSessions";
@@ -1013,20 +1013,17 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
               try: async () => {
                 if (connection.initialized.agentCapabilities.loadSession !== true)
                   return "unsupported" as const;
-                const replayed: Array<Readonly<Record<string, unknown>>> = [];
+                const replay = acpReplayCollector();
                 const stop = client.onNotification((notification) => {
-                  if (
-                    notification.params.sessionId === sessionId &&
-                    replayed.length < MAX_ACP_REPLAYED_UPDATES
-                  )
-                    replayed.push(notification.params.update);
+                  if (notification.params.sessionId === sessionId)
+                    replay.add(notification.params.update);
                 });
                 try {
                   await client.loadSession(sessionId, projectRoot);
                 } finally {
                   stop();
                 }
-                return replayed;
+                return replay.collected();
               },
               catch: (error) => providerFailure(profile, error),
             }),
