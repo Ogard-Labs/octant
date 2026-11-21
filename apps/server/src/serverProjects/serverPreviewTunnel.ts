@@ -73,6 +73,8 @@ export type ServerPreviewRelayStreamResult =
   | { readonly kind: "refused"; readonly reason: "grant-closed" | "server-unreachable" | "busy" };
 
 const CLEANUP_WAIT_MS = 3_000;
+/** How long a normally ended connection may take to flush its reply before it is cut. */
+const FLUSH_AFTER_EXIT_MS = 30_000;
 const DEVICE_PREVIEW_QUIET_MS = 60_000;
 
 interface PreviewDeviceOwnership {
@@ -693,7 +695,17 @@ export class ServerPreviewTunnels {
     });
     child.on("close", (code) => {
       preview.streams.delete(socket);
-      socket.destroy();
+      if (code === 0 && !socket.destroyed) {
+        // SSH closing is not the socket flushing: a client still reading a
+        // large reply would lose its tail to destroy(). The stdout pipe ends
+        // the socket; a client that never drains it is cut after a bound.
+        const flushed = setTimeout(() => socket.destroy(), FLUSH_AFTER_EXIT_MS);
+        flushed.unref();
+        socket.once("close", () => clearTimeout(flushed));
+        socket.end();
+      } else {
+        socket.destroy();
+      }
       if (code !== 0 && !clientClosed && preview.status === "listening")
         void this.#end(preview, "lost");
     });

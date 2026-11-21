@@ -53,8 +53,11 @@ vi.mock("node:net", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:net")>();
   return {
     ...actual,
-    createServer: (connection: (socket: Socket) => void) => {
-      const listener = actual.createServer(connection);
+    createServer: (
+      options: { readonly allowHalfOpen?: boolean },
+      connection: (socket: Socket) => void,
+    ) => {
+      const listener = actual.createServer(options, connection);
       const listen = listener.listen.bind(listener);
       Object.assign(listener, {
         listen(port: number, host: string, ready: () => void) {
