@@ -213,8 +213,8 @@ checks never change registry/configuration or journal state.
   program, so the program reads standard input directly; stopping the stream
   closes standard input and ends the connection if it is still open two
   seconds later. Nothing is forwarded, and no secret goes in the command line,
-  which the server's process list shows. Built as the connection's primitive;
-  no provider uses it yet.
+  which the server's process list shows. Built; Codex's app-server runs over
+  it ([Providers running on the server](#providers-running-on-the-server)).
 - **Fail closed.** When a call cannot reach the server (the connection drops,
   times out, is refused, or the host key does not match), that call is refused
   with `server-unreachable` and nothing runs anywhere else. There is no local
@@ -231,12 +231,49 @@ checks never change registry/configuration or journal state.
   The Git, Files, and Tests panels reach it only through the server
   ([Panels](#panels)), and a thread's own worktree is made there
   ([Worktrees and pull requests](#worktrees-and-pull-requests)).
-- **Octant Harness only.** A thread there runs on the Octant Harness, whose
-  inference stays on this host and whose hands are on the server. Every other
-  runtime is refused before it launches, naming why: its own tools act on this
-  host's files. Delegation, Browser, Computer, connectors, and forks are not
+- **Octant Harness, or a provider on the server.** A thread there runs on the
+  Octant Harness, whose inference stays on this host and whose hands are on
+  the server, or in a Code Project on a provider runtime that runs on the
+  server itself ([Providers running on the server](#providers-running-on-the-server)).
+  Every other runtime is refused before it launches, naming why: its own tools
+  act on this host's files. Delegation, Browser, Computer, connectors, and forks are not
   offered there, since each acts on this host. The routine tools are offered,
   since they act only on this host's routine records ([Routines](#routines)).
+- **Providers running on the server.** A provider runtime that reports
+  `serverPlacement: "supported"` runs a Code turn on the server with no Octant
+  installed there (maintainer decisions, 2026-11-19 and 2026-11-20). Built for
+  Codex; Claude Code follows. OpenCode, Pi and the ACP agents report it
+  unsupported, because their Octant tools reach this host's loopback.
+  - The runtime's program starts in the Project's folder on the server through
+    the Project's connection as a stream to a long-running program (`codex
+app-server --listen stdio://` after `codex --version` there), and speaks its
+    protocol over that stream. Octant's own tools travel inside that protocol,
+    so nothing on the server reaches this host. The provider SDK hands the
+    runtime a placement (`ProviderServerPlacement`) that names only the program
+    and its arguments; the host owns the connection, its pinned host key and
+    its quoting, and no secret goes on the command line.
+  - It uses the server login's own sign-in; no credential of this host goes
+    there. It keeps the thread's level, which maps to its own sandbox and
+    approval policy as on this host; at Full access Codex runs on that server
+    with no sandbox, as it would there on its own.
+  - Strict refuses it, naming why: Octant's own sandbox cannot run on a
+    server, and Octant claims no sandbox there.
+  - The thread gets none of this host's checkout tools, extensions,
+    attachments folder, Browser, Computer or forks; only the routine tools,
+    which act on this host's records, join its own. Checkpoints and change
+    observation stay off, as for any server thread.
+  - The composer offers such a runtime in a Code Project on a server, and the
+    first time a person picks it for a server, says once what it means: the
+    provider runs there as itself with its own sandbox and plan mode; its
+    model requests leave from the server, so this computer's network limits
+    don't cover them; approvals, Stop and the thread's history stay on this
+    computer. Details keeps it one click away after that. The provider is
+    listed only once this host has probed it; its models come from this
+    host's catalog for it.
+  - Not built yet: reading sign-in with the provider's own status command
+    before the first turn, recording the remote process to stop an orphan
+    after a dropped connection, and Work Projects, which stay on the Octant
+    Harness.
 - **Attached files.** A file the turn names by path rather than sends (any
   file but an image or a file the model takes natively) is copied before the
   turn is accepted, over the Project's own SSH connection, into the thread's
@@ -456,7 +493,8 @@ checks never change registry/configuration or journal state.
   terminal session at creation. _Rationale:_ the issue readers and the session
   reader read this host's accounts and folders on the thread's behalf; the
   narrower choice keeps the thread's sources on the server it works on.
-- **Turns.** A turn runs on the Octant Harness only, with the same file tools
+- **Turns.** A turn runs on the Octant Harness only (a Code Project may also
+  run a provider on the server; Work stays on the Harness), with the same file tools
   and shell on the server as a Code thread there ([Threads](#threads)): the
   same access levels and approvals, every command asking again below Full
   access, every command journaled as `shield-remote-commands.ran@1`, and no
