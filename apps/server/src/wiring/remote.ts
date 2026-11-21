@@ -151,7 +151,7 @@ import {
   readHandoverNote,
   remoteNamedFor,
 } from "../hub/codeThreadHandoverGit";
-import { branchExists } from "../hub/codeThreadMoveGit";
+import { branchExists, remoteFetchUrl } from "../hub/codeThreadMoveGit";
 import { createThreadMoveSenders } from "../hub/threadMoveSenders";
 import { createThreadMoveTicketClient } from "../hub/threadMoveTicketClient";
 import {
@@ -1009,6 +1009,7 @@ export function wireRemote(deps: RemoteDependencies) {
             readProviderInstances: () => persistence.readProviderInstances(),
             readProviderDefaults: () => persistence.readProviderDefaults(),
             readProviderCatalogs: () => persistence.readProviderCatalogs?.() ?? [],
+            remoteUrl: remoteFetchUrl,
             code: deps.routeCodeService,
           }),
         ),
@@ -1305,6 +1306,8 @@ export function wireRemote(deps: RemoteDependencies) {
     readThread: (threadId) => persistence.readCodeThread(threadId),
     isBusy: (threadId) =>
       deps.liveTurns.read(String(threadId)) !== undefined || childWorkGoing(String(threadId)),
+    isDelegated: (threadId) =>
+      delegationState.load().received.some((received) => received.threadId === String(threadId)),
     checkoutRoot: codeCheckoutRoot,
     ownsManagedWorktree: (threadId) => {
       const thread = persistence.readCodeThread(threadId);

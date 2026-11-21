@@ -36,6 +36,15 @@ export interface CodeDelegationServices {
   readonly defaultProvider: (
     projectId: ProjectId,
   ) => { readonly providerInstanceId: string; readonly modelId: string } | undefined;
+  /**
+   * The `owner/repository` the named remote of the Project's checkout points
+   * at, as a pull request names its base. Undefined when the remote is missing
+   * or is not a GitHub repository.
+   */
+  readonly deliveryRepository: (
+    projectId: ProjectId,
+    remoteName: string,
+  ) => Promise<string | undefined>;
   /** Creates the managed thread with the outside-content mark it starts with. */
   readonly createThread: (
     command: unknown,
@@ -50,6 +59,11 @@ export interface CodeDelegationServices {
     readonly operationId: string;
     readonly sessionId: string;
     readonly prompt: string;
+    /**
+     * The live admission check, asked again immediately before the provider
+     * turn starts, after any awaited preparation.
+     */
+    readonly admissionCurrent: () => boolean;
   }) => Promise<"accepted" | "refused">;
   /** The delegated turn, not whatever turn the thread has run since. */
   readonly readTurn: (threadId: string, operationId: string) => Promise<ChildReading | undefined>;
@@ -108,6 +122,15 @@ export function createCodeDelegationHost(services: CodeDelegationServices): Peer
       if (binding === undefined || provider === undefined) {
         return { status: "refused", kind: "provider-unavailable" };
       }
+      // A pull request names its base as `owner/repository`, so a pull-request
+      // outcome needs the repository the confirmed remote points at; without
+      // one the outcome could never be reached. Other outcomes keep the
+      // Project's own identity, as other managed threads here do.
+      const repository = await services.deliveryRepository(input.projectId, mark.remoteName);
+      const wantsPullRequest = mark.outcomeKind === "opened-pr" || mark.outcomeKind === "merged-pr";
+      if (wantsPullRequest && repository === undefined) {
+        return { status: "refused", kind: "start-failed" };
+      }
       if (!input.admissionCurrent()) return { status: "refused", kind: "delegation-not-granted" };
       const threadId = uuid();
       try {
@@ -125,7 +148,7 @@ export function createCodeDelegationHost(services: CodeDelegationServices): Peer
             deliveryTarget: {
               branchIntent: delegatedCodeBranch(input.requestId, input.task),
               remoteName: mark.remoteName,
-              proposedBaseRepository: String(input.projectId),
+              proposedBaseRepository: repository ?? String(input.projectId),
               proposedBaseBranch: mark.baseBranch,
               outcomeKind: mark.outcomeKind,
               confirmedAt: mark.confirmedAt,
@@ -154,7 +177,11 @@ export function createCodeDelegationHost(services: CodeDelegationServices): Peer
           operationId,
           sessionId: uuid(),
           prompt: input.task,
+          admissionCurrent: input.admissionCurrent,
         });
+        if (started === "refused" && !input.admissionCurrent()) {
+          return { status: "refused", kind: "delegation-not-granted" };
+        }
         return started === "accepted"
           ? { status: "started", threadId: created.thread?.id ?? threadId, turnId: operationId }
           : { status: "refused", kind: "start-failed" };

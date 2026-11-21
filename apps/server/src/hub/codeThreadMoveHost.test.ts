@@ -60,6 +60,7 @@ function host(input: {
   readonly laptop: string;
   readonly desktop: string;
   readonly marked?: boolean;
+  readonly delegated?: boolean;
 }) {
   const created: Array<Parameters<CodeThreadMoveHostOptions["createThread"]>[0]> = [];
   const histories: Array<Parameters<CodeThreadMoveHostOptions["journalHistory"]>[0]> = [];
@@ -75,6 +76,7 @@ function host(input: {
   const moveHost = createCodeThreadMoveHost({
     readThread: (id) => (String(id) === THREAD && !purged.includes(THREAD) ? thread : undefined),
     isBusy: () => false,
+    isDelegated: () => input.delegated === true,
     checkoutRoot: async () => input.laptop,
     ownsManagedWorktree: () => false,
     providerDriverKind: () => "claude",
@@ -126,6 +128,13 @@ const offerFor = (
   }) as unknown as ThreadMoveOffer;
 
 describe("moving a Code thread", () => {
+  it("never moves a Code thread a peer delegated here", async () => {
+    const { laptop, desktop } = world();
+    const { moveHost } = host({ laptop, desktop, delegated: true });
+    const read = await moveHost.source.read({ mode: "code", threadId: THREAD });
+    expect(read.status === "found" && read.delegated).toBe(true);
+  });
+
   it("sizes the history and the checkout before a move without freezing or packing anything", async () => {
     const { laptop, desktop, parts } = world();
     writeFileSync(join(laptop, "app.ts"), `export const version = "${"2".repeat(5_000)}";\n`);

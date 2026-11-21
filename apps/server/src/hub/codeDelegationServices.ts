@@ -17,8 +17,13 @@ import {
   type ProviderInstance,
   type WindowId,
 } from "@octant/contracts";
-import { orderProviderInstances, orderProviderModels } from "@octant/domain";
+import {
+  isProviderAllowedByProjectPolicy,
+  orderProviderInstances,
+  orderProviderModels,
+} from "@octant/domain";
 import type { CodeRouteService } from "../codeRoutes";
+import { repositoryFromRemote } from "../work/workPromotionProjectPort";
 import type { ChildReading } from "./peerDelegationService";
 import type { CodeDelegationServices } from "./codeDelegationHost";
 
@@ -28,6 +33,8 @@ export function createCodeDelegationServices(input: {
   readonly readProviderInstances: () => ReadonlyArray<ProviderInstance>;
   readonly readProviderDefaults: () => ProviderDefaults;
   readonly readProviderCatalogs: () => ReadonlyArray<ProviderCatalogSnapshot>;
+  /** The fetch URL of a remote in a checkout, or undefined when it has none. */
+  readonly remoteUrl: (canonicalRoot: string, remoteName: string) => Promise<string | undefined>;
   readonly code: Pick<
     CodeRouteService,
     "execute" | "read" | "stageEvidence" | "executeOperation" | "conversationWindow"
@@ -39,30 +46,34 @@ export function createCodeDelegationServices(input: {
     defaultProvider: (projectId) => {
       const project = input.readProject(projectId);
       if (project === undefined || project.type === "chat") return undefined;
-      const policy = project.providerPolicy;
-      const allowed = (instance: ProviderInstance) =>
-        policy === undefined ||
-        policy.mode !== "whitelist" ||
-        policy.providerInstanceIds.some((id) => String(id) === String(instance.id));
       const catalogs = input.readProviderCatalogs();
-      // The provider the person ranks first that the Project allows, at the
-      // first model its catalog lists in the person's order, as the composer
-      // preselects for a new thread.
+      // The provider the person ranks first that is turned on, at the first
+      // model in its catalog's order the Project's whole provider policy
+      // allows (whitelist and EU/ZDR tags), as the composer preselects for a
+      // new thread. Thread creation and driver startup refuse a disabled
+      // provider or a disallowed model, so a later qualifying pair is used
+      // rather than failing the delegation on the first one.
       for (const instance of orderProviderInstances(
         input.readProviderInstances(),
         input.readProviderDefaults().providerOrder ?? [],
       )) {
-        if (!allowed(instance)) continue;
+        if (!instance.enabled) continue;
         const catalog = catalogs.find((each) => String(each.instanceId) === String(instance.id));
-        const model =
-          catalog === undefined
-            ? undefined
-            : orderProviderModels(catalog.models, catalog.manualModelOrder)[0];
+        if (catalog === undefined) continue;
+        const model = orderProviderModels(catalog.models, catalog.manualModelOrder).find(
+          (candidate) => isProviderAllowedByProjectPolicy(project, instance, candidate),
+        );
         if (model !== undefined) {
           return { providerInstanceId: String(instance.id), modelId: String(model.id) };
         }
       }
       return undefined;
+    },
+    deliveryRepository: async (projectId, remoteName) => {
+      const project = input.readProject(projectId);
+      if (project?.type !== "code") return undefined;
+      const url = await input.remoteUrl(project.binding.canonicalRoot, remoteName);
+      return url === undefined ? undefined : repositoryFromRemote(url);
     },
     createThread: async (command, mark) => {
       const result = await code.execute(scope, decodeCodeCommand(command), undefined, {
@@ -79,6 +90,9 @@ export function createCodeDelegationServices(input: {
       if (code.stageEvidence === undefined || code.executeOperation === undefined) return "refused";
       const threadId = decodeCodeThreadId(turn.threadId);
       const prompt = await code.stageEvidence(scope, threadId, turn.prompt);
+      // Staging awaits; the sender's grant or the Project's mark may have
+      // ended meanwhile, and nothing later checks before the provider starts.
+      if (!turn.admissionCurrent()) return "refused";
       const result = await code.executeOperation(scope, {
         kind: "start-provider-turn",
         operationId: decodeCodeOperationId(turn.operationId),

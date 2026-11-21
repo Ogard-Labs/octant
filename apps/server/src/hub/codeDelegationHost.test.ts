@@ -40,7 +40,10 @@ function codeProject(
   };
 }
 
-function fixture(project: CodeDelegationProjectFacts | undefined = codeProject()) {
+function fixture(
+  project: CodeDelegationProjectFacts | undefined = codeProject(),
+  repository: { readonly name: string | undefined } = { name: "acme/widget" },
+) {
   let next = 0;
   const createThread = vi.fn<CodeDelegationServices["createThread"]>(async () => ({
     kind: "managed-thread-created",
@@ -50,6 +53,7 @@ function fixture(project: CodeDelegationProjectFacts | undefined = codeProject()
   const host = createCodeDelegationHost({
     readProject: () => project,
     defaultProvider: () => ({ providerInstanceId: "provider-1", modelId: "model-a" }),
+    deliveryRepository: async () => repository.name,
     createThread,
     startTurn,
     readTurn: async () => undefined,
@@ -100,6 +104,7 @@ describe("a delegated Code thread", () => {
       deliveryTarget: {
         branchIntent: delegatedCodeBranch(REQUEST, "Fix the flaky login test"),
         remoteName: "origin",
+        proposedBaseRepository: "acme/widget",
         proposedBaseBranch: "main",
         outcomeKind: "opened-pr",
       },
@@ -140,6 +145,31 @@ describe("a delegated Code thread", () => {
     ).toEqual({ status: "refused", kind: "provider-unavailable" });
     expect(unmarked.createThread).not.toHaveBeenCalled();
     expect(marked.createThread).not.toHaveBeenCalled();
+  });
+
+  it("refuses a pull-request outcome before creating anything when the confirmed remote names no repository", async () => {
+    const { host, createThread } = fixture(codeProject(), { name: undefined });
+    expect(await start(host)).toEqual({ status: "refused", kind: "start-failed" });
+    expect(createThread).not.toHaveBeenCalled();
+  });
+
+  it("refuses as not granted when the grant ends before the provider turn starts", async () => {
+    const { host, startTurn } = fixture();
+    let granted = true;
+    startTurn.mockImplementation(async (turn) => {
+      granted = false;
+      return turn.admissionCurrent() ? "accepted" : "refused";
+    });
+    expect(
+      await host.startThread({
+        requestId: REQUEST,
+        senderName: "Studio",
+        projectId: PROJECT,
+        task: "Fix the flaky login test",
+        authority: CODE,
+        admissionCurrent: () => granted,
+      }),
+    ).toEqual({ status: "refused", kind: "delegation-not-granted" });
   });
 
   it("names its branch from the task and the request, under a prefix of its own", () => {

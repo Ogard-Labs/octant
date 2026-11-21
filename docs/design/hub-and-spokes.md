@@ -1127,14 +1127,19 @@ mark is built, as a `project.code-delegated-code-changed@1` event the
 host's person sets from the Project overview and a device the hub
 introduced is refused; the receiving Code thread is built; the listing
 route is not built yet). A delegated Code thread runs on the first
-provider in the person's provider order that the Project allows, at the
-first model that provider's catalog lists, as the composer preselects, and
-a request naming a provider profile is refused. Its branch is
+turned-on provider in the person's provider order, at the first model in
+that provider's catalog order the Project's provider policy allows
+(whitelist and EU/ZDR tags alike), as the composer preselects, and a
+request naming a provider profile is refused. Its branch is
 `octant/delegated/<slug>-<request id>`, made from the marked remote and base
-branch. The delegating member reads the thread's state, and on completion
+branch. A pull-request outcome names its base as the `owner/repository` the
+marked remote points at; when that remote names no GitHub repository the
+request is refused before any thread is made. The sender's grant and the
+Project's mark are checked again immediately before the provider turn
+starts. The delegating member reads the thread's state, and on completion
 is told the changes are on the thread's own branch on this computer; the
-thread's text stays here. Today
-only a Work Project takes delegated work, because a Code thread needs a
+thread's text stays here. A Code Project takes delegated work only once
+marked, because a Code thread needs a
 managed worktree and a delivery target a person confirmed. B offers Code for a
 Code Project only after its person marks that Project as accepting delegated
 Code work, which records the delivery target they confirmed (the remote, base
