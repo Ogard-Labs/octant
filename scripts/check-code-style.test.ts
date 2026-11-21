@@ -60,6 +60,10 @@ describe("code-style check", () => {
     const source = [
       'process.on("uncaughtException", () => undefined);',
       "process.once('unhandledRejection', () => undefined);",
+      "process.addListener(`uncaughtExceptionMonitor`, () => undefined);",
+      "process.setUncaughtExceptionCaptureCallback(() => undefined);",
+      'const isRejectionRecord = record.exitReason === "unhandledRejection";',
+      'const label = "uncaughtException";',
     ].join("\n");
     expect(
       findTextFindings({
@@ -69,6 +73,8 @@ describe("code-style check", () => {
     ).toEqual([
       { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 1 },
       { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 2 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 3 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 4 },
     ]);
     const findings = [
       { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 1 },

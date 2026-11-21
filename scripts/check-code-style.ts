@@ -58,7 +58,8 @@ const WINDOW_LEAD_READ = /\bcontextByMode\b/g;
 const SERVER_SOURCE = /^apps\/server\//;
 /** Only the shared process error net may register process-level crash listeners. */
 export const PROCESS_ERROR_NET_OWNER = "packages/host-runtime/src/processErrorNet.ts";
-const PROCESS_ERROR_LISTENER = /(["'`])(?:uncaughtException(?:Monitor)?|unhandledRejection)\1/g;
+const PROCESS_ERROR_LISTENER =
+  /(?:\.\s*(?:on|once|addListener|prependListener|prependOnceListener)\s*\(\s*(["'`])(?:uncaughtException(?:Monitor)?|unhandledRejection)\1|\bsetUncaughtExceptionCaptureCallback\s*\()/g;
 
 const SOURCE_EXTENSION = /\.(?:ts|tsx|mts|cts)$/;
 
