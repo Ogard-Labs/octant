@@ -22,6 +22,7 @@ import {
 } from "../providers/modelContextWindowFacts";
 import type { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import type { NativeHarnessEndpointHooks } from "./nativeHarnessEndpointRegistry";
+import type { NativeHarnessSendContext } from "./nativeHarnessTransport";
 import { createNativeHarnessConnection, sortToolDefinitionsByName } from "./nativeHarnessLoop";
 import {
   MemoryNativeHarnessTranscriptStore,
@@ -158,7 +159,7 @@ function hostedTransport(
       const session = await endpoint.open(modelId);
       return {
         fits: (request) => session.fits(request),
-        send: (request, stream) => {
+        send: (request, stream: NativeHarnessSendContext) => {
           // What the endpoint reports is untrusted and the observation it
           // lands in is schema-checked, so a lesson the host cannot keep (a
           // blank or overlong model name, a fractional token count) is
@@ -186,12 +187,15 @@ function hostedTransport(
                 // The host announces its own retries; a notice the driver
                 // streams would report a retry the host never ran, or report
                 // one twice.
-                response = await session.send(withSearchStillGranted(request, host), {
-                  signal: attempt.signal,
-                  onEvent: (event) => {
-                    if (event.kind !== "retrying") attempt.onEvent(event);
+                response = await session.send(
+                  withSearchStillGranted(request, host, stream.liveSessionId),
+                  {
+                    signal: attempt.signal,
+                    onEvent: (event) => {
+                      if (event.kind !== "retrying") attempt.onEvent(event);
+                    },
                   },
-                });
+                );
               } catch (error) {
                 const refusal = decodedFailure(error);
                 if (refusal !== undefined) learn({ kind: "refused", failure: refusal });
@@ -227,9 +231,10 @@ function hostedTransport(
 function withSearchStillGranted(
   request: HarnessEndpointRequest,
   host: NativeHarnessEndpointHost,
+  liveSessionId = request.sessionId,
 ): HarnessEndpointRequest {
   if (request.providerWebSearch !== true) return request;
-  const asked = host.harness?.providerSearch?.now(request.sessionId, host.instanceId);
+  const asked = host.harness?.providerSearch?.now(liveSessionId, host.instanceId);
   if (asked === undefined || asked.status === "untracked" || asked.grant !== undefined) {
     return request;
   }

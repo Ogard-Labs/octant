@@ -10490,6 +10490,15 @@ the model at another size.
   module, apart from the retry policy. Verify tools sends its capability echo
   outside any session, so a session never offers an unverified model even the
   echo.
+- **OpenCode Go request identity.** On the official Go OpenAI-compatible
+  endpoint, the harness identifies itself with `User-Agent: octant-harness/<host version>`.
+  Responses and Chat Completions requests carry the transcript's opaque ID in
+  `x-opencode-session`. Tool results, retries, resume and Code's in-place
+  compaction keep that ID. A fork has its own transcript. Chat and Work
+  start a new transcript when they rebuild history after host compaction. Each Verify tools
+  check gets a fresh ID shared by all attempts of that check. Listing models
+  identifies the client only. The host matches the Go base URL, including
+  for an endpoint added by hand. [OpenCode Go client guidelines](https://opencode.ai/docs/console/go/#where-can-i-use-it).
 - **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
   each step as it happens (`native-harness-transcript`, one aggregate per
   session): the user message once the request is known to fit, each reply,
