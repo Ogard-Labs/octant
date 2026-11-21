@@ -610,6 +610,12 @@ export const CodeProjectPullRequestRow = Schema.Struct({
   baseBranch: branchName,
   headBranch: branchName,
   updatedAt: githubUpdatedAt,
+  /**
+   * When the pull request was opened, from the same list read. Absent on a
+   * snapshot taken before that fact was recorded, and on a pull request known
+   * only from a thread.
+   */
+  createdAt: Schema.optional(githubUpdatedAt),
   checks: CodeProjectPullRequestChecksSummary,
   review: CodeProjectPullRequestReviewSummary,
   /**

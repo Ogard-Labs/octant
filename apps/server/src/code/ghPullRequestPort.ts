@@ -195,6 +195,8 @@ export interface GhActivePullRequestRow {
   readonly baseBranch: string;
   readonly headBranch: string;
   readonly updatedAt: string;
+  /** When the pull request was opened; absent when the read did not carry a usable time. */
+  readonly createdAt?: string;
   readonly url: string;
   readonly checks: "unknown" | "pending" | "passing" | "failing";
   readonly review: "unknown" | "none" | "pending" | "approved" | "changes-requested";
@@ -247,6 +249,7 @@ const ACTIVE_PR_LIST_FIELDS = [
   "state",
   "mergeable",
   "author",
+  "createdAt",
   "updatedAt",
   "url",
   "baseRefName",
@@ -1540,6 +1543,13 @@ function decodeActivePullRequests(
       return undefined;
     }
     const pullRequestNodeId = validNodeId(item.id);
+    // An unreadable opening time only costs the creation-time sorts their
+    // place for this row; it does not make the rest of the row untrustworthy.
+    const createdAt =
+      typeof item.createdAt === "string" &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(item.createdAt)
+        ? item.createdAt
+        : undefined;
     rows.push({
       number,
       title,
@@ -1550,6 +1560,7 @@ function decodeActivePullRequests(
       baseBranch,
       headBranch,
       updatedAt,
+      ...(createdAt === undefined ? {} : { createdAt }),
       url,
       checks: summarizeChecks(item.statusCheckRollup),
       review: summarizeReview(item.reviewDecision),

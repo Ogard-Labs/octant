@@ -846,9 +846,30 @@ describe("GhPullRequestPort active list", () => {
       "--limit",
       "100",
       "--json",
-      "id,number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests,additions,deletions,autoMergeRequest",
+      "id,number,title,isDraft,state,mergeable,author,createdAt,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests,additions,deletions,autoMergeRequest",
     ]);
     expect(vi.mocked(command.run).mock.calls.some(([args]) => args.includes("merge"))).toBe(false);
+  });
+
+  it("keeps when each listed pull request was opened, and leaves an unreadable time unrecorded", async () => {
+    const { port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          { ...activeRow, createdAt: "2026-08-01T09:30:00Z" },
+          { ...activeRow, number: 13, createdAt: "yesterday" },
+        ]),
+      },
+    ]);
+
+    const result = await port.listActive(
+      { owner: "octant", name: "octant", limit: 100 },
+      new AbortController().signal,
+    );
+    const rows = result.status === "ok" ? result.rows : [];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.createdAt).toBe("2026-08-01T09:30:00Z");
+    expect(rows[1]).not.toHaveProperty("createdAt");
   });
 
   it("reads line counts, passed-of-counted checks and auto-merge from the list", async () => {

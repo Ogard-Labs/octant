@@ -140,7 +140,7 @@ describe("fake-gh project pull-request port", () => {
       "--limit",
       "101",
       "--json",
-      "id,number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests,additions,deletions,autoMergeRequest",
+      "id,number,title,isDraft,state,mergeable,author,createdAt,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests,additions,deletions,autoMergeRequest",
     ]);
     expect(lists[1]?.[3]).toBe("octant/r2");
     expect(lists.every((arguments_) => arguments_[1] === "list")).toBe(true);

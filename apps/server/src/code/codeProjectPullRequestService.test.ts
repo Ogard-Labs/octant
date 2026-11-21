@@ -1793,6 +1793,21 @@ describe("CodeProjectPullRequestService", () => {
     expect(listActive.mock.calls.length).toBe(callsAfterRefresh);
   });
 
+  it("carries when each pull request was opened into the snapshot the page reads", async () => {
+    const { service } = serviceFixture({
+      list: async () => ({
+        status: "ok",
+        rows: [ghRow({ createdAt: "2026-08-01T09:30:00Z" }), ghRow({ number: 13 })],
+      }),
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const view = await service.query(windowId, { version: 1 });
+
+    expect(view.rows.find((row) => row.number === 12)?.createdAt).toBe("2026-08-01T09:30:00Z");
+    expect(view.rows.find((row) => row.number === 13)).not.toHaveProperty("createdAt");
+  });
+
   it("says which pull request comes from a fork and leaves a same-repository row as it was", async () => {
     const { service } = serviceFixture({
       list: async () => ({
