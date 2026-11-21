@@ -110,12 +110,10 @@ export type HarnessEndpointStreamEvent =
 
 /** Everything one model request is made of. */
 export interface HarnessEndpointRequest {
-  /**
-   * The harness session's stable identity. A provider that caches by request
-   * routes on it, so every step of one conversation reaches the same cache
-   * while a different session never shares one.
-   */
+  /** The live harness session, also used for the host's per-session grants. */
   readonly sessionId: ProviderSessionId;
+  /** The conversation across resumes, for endpoints that route by conversation. Defaults to sessionId. */
+  readonly conversationId?: ProviderSessionId;
   readonly modelId: ProviderModelId;
   /** Stable instructions, sent where the protocol keeps a system prompt so its cache survives. */
   readonly system: string | undefined;

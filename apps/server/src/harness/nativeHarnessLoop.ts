@@ -1149,6 +1149,7 @@ export function createNativeHarnessConnection(
       for (let turns = latest; turns >= 1 && chosen === undefined; turns -= 1) {
         const request: NativeHarnessRequest = {
           sessionId: state.sessionId,
+          conversationId: state.transcriptId,
           modelId: state.modelId,
           system: compactionInstruction(options.mode),
           history: [
@@ -1465,6 +1466,7 @@ export function createNativeHarnessConnection(
         state.endpoint,
         {
           sessionId: state.sessionId,
+          conversationId: state.transcriptId,
           modelId: state.modelId,
           system: state.system,
           history,
