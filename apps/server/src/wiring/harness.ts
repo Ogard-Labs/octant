@@ -1173,6 +1173,7 @@ export function wireHarness(deps: HarnessDependencies) {
       runningWorkTurnAccess,
       readThreadTaint: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId),
+      readStrict: (threadId) => resolveThreadStrict(threadId),
       holdsServerCodeThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
       holdsServerWorkThread: (thread) =>
         serverWorkProjectOf(serverProjectStore, thread) !== undefined,

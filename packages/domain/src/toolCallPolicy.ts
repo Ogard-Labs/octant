@@ -97,6 +97,12 @@ export type ToolCallPolicyInput = {
      */
     readonly externalContentIngested: boolean;
     /**
+     * Whether Strict is on for the thread now. Only Strict refuses a tainted
+     * thread's search query that looks like it carries data; absent reads as
+     * Strict, so a caller that cannot say keeps the refusal.
+     */
+    readonly strict?: boolean;
+    /**
      * Snapshotted profile tool allowlist. Empty or absent means no constraint.
      * Reloading the live profile here would let an edit change a running thread.
      */
@@ -222,10 +228,13 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
     guardrail.outsideContent === "recorded";
   const outsideContentGates = input.thread.externalContentIngested && !asksNobody;
   // A tainted thread's web search does not ask a person; it reaches only the
-  // endpoint the person configured, so a query that looks like it carries
-  // data is refused outright, below Full access.
+  // endpoint the person configured, so under Strict a query that looks like
+  // it carries data is refused outright, below Full access. Outside Strict
+  // Octant adds no restriction of its own: the query goes and the mark stays
+  // (maintainer decision, 2026-11-21).
   if (
     outsideContentGates &&
+    input.thread.strict !== false &&
     String(catalogEntry.capabilityId) === nativeHarnessToolCapabilityId("web-search")
   ) {
     const query = searchQueryOf(input.arguments);

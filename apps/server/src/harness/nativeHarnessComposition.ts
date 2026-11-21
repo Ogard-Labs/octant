@@ -1486,6 +1486,8 @@ export function createNativeHarnessComposition(
           executionPolicy: authority.executionPolicy,
           approvalSatisfied: authority.executionPolicy === "full-access",
           externalContentIngested: options.readThreadTaint(runId),
+          // A child is held to its parent's Strict value.
+          strict: options.readStrict?.(String(run.parentThreadId)) ?? true,
         }),
       });
       // A child without network authority must not reach it through a command

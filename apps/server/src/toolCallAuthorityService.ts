@@ -39,6 +39,8 @@ export type ToolCallLiveFacts = {
    * Thread-lifetime taint rebuilt from `thread.external-content-ingested@1`.
    */
   readonly externalContentIngested: boolean;
+  /** Whether Strict is on for the thread now; absent reads as Strict. */
+  readonly strict?: boolean;
   /**
    * Snapshotted profile tool allowlist from the live Code thread. Empty or
    * absent means no constraint.
@@ -249,6 +251,7 @@ export class ToolCallAuthorityService {
           input.request.approval.kind !== "pending" &&
           input.request.approval.kind !== "denied",
         externalContentIngested: live.externalContentIngested,
+        ...(live.strict === undefined ? {} : { strict: live.strict }),
         ...(live.toolConstraints === undefined ? {} : { toolConstraints: live.toolConstraints }),
         ...(live.profileDisplayName === undefined
           ? {}
