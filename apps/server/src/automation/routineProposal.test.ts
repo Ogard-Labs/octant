@@ -75,13 +75,13 @@ const profile = Schema.decodeUnknownSync(AgentProfile)({
   modelConstraints: [],
   defaultExecutionPolicy: "approval-gated",
   defaultPermissionPersistence: "project-default",
-  compatibleModes: ["work", "code"],
+  compatibleModes: ["chat", "work", "code"],
   version: 1,
   createdAt: NOW,
   updatedAt: NOW,
 });
 
-function harness(options: { readonly mode?: "work" | "code" } = {}) {
+function harness(options: { readonly mode?: "chat" | "work" | "code" } = {}) {
   const mode = options.mode ?? "work";
   const directory = mkdtempSync(join(tmpdir(), "octant-routine-proposal-"));
   directories.push(directory);
@@ -134,7 +134,7 @@ function harness(options: { readonly mode?: "work" | "code" } = {}) {
           mode,
           active: true,
           version: 1,
-          bindingRevisionId: BINDING_REVISION,
+          bindingRevisionId: mode === "chat" ? undefined : BINDING_REVISION,
         }),
         checkoutAvailable: () => true,
         profiles: () => [profile],
@@ -748,9 +748,9 @@ describe("one-time follow-ups in the same thread", () => {
     });
   });
 
-  it("refuses a follow-up for a Chat thread", async () => {
-    const h = harness();
-    const refused = await followUps(h.handler, {
+  it("sets up a follow-up for a Chat thread that keeps Chat's authority", async () => {
+    const h = harness({ mode: "chat" });
+    const created = await followUps(h.handler, {
       kind: "schedule-follow-up",
       threadId: THREAD,
       mode: "chat",
@@ -758,10 +758,19 @@ describe("one-time follow-ups in the same thread", () => {
       scheduledAt: "2026-11-01T08:00:00.000Z",
       taskPrompt: "See what changed.",
     });
-    expect(refused.status).toBe(400);
-    expect(
-      h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
-    ).toEqual([]);
+    expect(created.body).toMatchObject({
+      kind: "automation-created",
+      automation: {
+        mode: "chat",
+        targetPolicy: "same-thread",
+        originThreadId: THREAD,
+        binding: { kind: "chat" },
+        trigger: { kind: "once", scheduledAt: "2026-11-01T08:00:00.000Z" },
+        authorityProfile: {
+          effective: { filesystem: false, shell: false, git: false, subagents: false },
+        },
+      },
+    });
   });
 
   it("refuses a routine created through the editor that claims to be a follow-up", async () => {

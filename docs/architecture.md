@@ -4137,9 +4137,11 @@ file, shell, or Git authority for a routine to widen: its definition binds an
 active Chat Project (the receipt names the Project and its version, with no
 folder or binding revision), its authority snapshot grants no filesystem,
 shell, Git, or subagents, and the contract refuses a Chat definition that
-does. It has no level to pick and no follow-up (`same-thread`) target, and no
-thread's agent proposes one, because a Chat thread has no Environment to
-propose from. Each run creates a Chat thread in the Project through
+does. It has no level to pick, and no thread's agent proposes one, because
+Chat is offered no routine tool. A follow-up (`same-thread`) may target a Chat
+thread (maintainer decision, 2026-11-21): the person sets it up from the Chat
+thread's Environment, and its one turn goes into that thread on the thread's
+own model, as below. Every other run creates a Chat thread in the Project through
 `create-chat-thread`, puts it on the routine's provider and model, and sends
 the task as one `send-chat-turn` under a submission identity derived from the
 occurrence, so a retry after a crash finds the turn it already sent. Each occurrence creates
@@ -4533,8 +4535,13 @@ the thread it came from.
   chip, or the person sets it up from the thread with
   `POST /api/automations/follow-ups` (`schedule-follow-up`: thread, time,
   prompt), which builds the definition from the thread's live facts exactly as
-  a confirmed proposal does. Chat threads cannot have one, and the proposal
-  refusals above apply. Moving it (`reschedule-follow-up`) is an ordinary
+  a confirmed proposal does. A Chat thread in a Chat Project may have one too
+  (maintainer decision, 2026-11-21): the person sets it up from the Chat
+  thread's Environment, the host builds it with Chat's authority from the
+  Chat thread's live facts (`AutomationFollowUpRequest.mode` takes `chat`),
+  and the Chat dispatcher sends its one turn into that thread under the same
+  heading, on the thread's own model; no agent proposes a Chat follow-up,
+  since Chat has no routine tool. The proposal refusals above apply. Moving it (`reschedule-follow-up`) is an ordinary
   update of its time; cancelling it is the ordinary archive. An edit cannot
   change any routine's target policy, and Run now is refused for a follow-up,
   because its one turn is its scheduled one. Its turn runs as the host under
