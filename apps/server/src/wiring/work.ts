@@ -51,6 +51,7 @@ import {
 } from "../serverProjects/serverWorkThreads";
 import { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueService";
 import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueuePorts";
+import { journalThreadMessageSteered } from "../messageQueue/threadMessageSteeredRecord";
 import { createThreadMessageQueueAuthority } from "../messageQueue/threadMessageQueueAuthority";
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
 import { createThreadMessageQueueRouteHandler } from "../messageQueue/threadMessageQueueRoutes";
@@ -1898,6 +1899,40 @@ export function wireWork(deps: WorkDependencies) {
       recoveryRequired: (threadId) =>
         nativeHarnessSessions.read(threadId)?.session.status === "recovery-required",
       attachments: queueAttachments,
+      steering: {
+        liveTurn: (threadId) => liveTurns.connection(threadId),
+        isPersonWindow: (windowId) =>
+          !isPairedDeviceScope(windowId) && !isRoutineHostScope(windowId),
+        // The turn that took the message is the thread's newest: it was
+        // running when the runtime accepted it.
+        recordSteered: ({ scope, messageId, body }) => {
+          const threadId = String(scope.threadId);
+          const turnKey =
+            scope.mode === "work"
+              ? workTurnProjection.latestForThread(decodeWorkThreadId(threadId))?.requestId
+              : scope.mode === "code"
+                ? persistence.journal.latestThreadEvents({
+                    aggregateType: "code-operation",
+                    threadId,
+                    kind: "conversation-turn-started",
+                    limit: 1,
+                  })[0]?.aggregateId
+                : undefined;
+          if (turnKey === undefined || scope.mode === "chat") return;
+          const record = journalThreadMessageSteered(persistence.journal, {
+            mode: scope.mode,
+            threadId,
+            turnKey: String(turnKey),
+            messageId: String(messageId),
+            body,
+            steeredAt: new Date().toISOString(),
+            uuid: randomUUID,
+            actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+          });
+          // Work keeps its turns in memory; the journal rebuilds them at start.
+          if (scope.mode === "work") workTurnProjection.applySteeredMessage(record);
+        },
+      },
     });
     const threadMessageQueue = new ThreadMessageQueueService({
       connection: persistence.connection,

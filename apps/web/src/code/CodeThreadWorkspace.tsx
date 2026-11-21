@@ -102,6 +102,7 @@ import { serverCodeThreadProviderGroups } from "./composer/serverCodeComposer";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
+import { SteeredMessages } from "../messageQueue/SteeredMessages";
 import { isChildResultDelivery } from "../agents/childResultDelivery";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
@@ -2481,6 +2482,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     <SteeredChildResults
                       providerGroups={providerGroups}
                       steered={message.steeredResults}
+                    />
+                    <SteeredMessages
+                      className="code-thread-workspace__message"
+                      steered={message.steeredMessages}
                     />
                     {message.role === "assistant" && message.operationId !== undefined ? (
                       <>
