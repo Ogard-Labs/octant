@@ -191,3 +191,60 @@ describe("Pi native sessions", () => {
     expect(readdirSync(fixture.octant)).toHaveLength(1);
   });
 });
+
+describe("Pi native session history", () => {
+  it("reads the person's messages on the session's current branch, naming tool calls and leaving out tool results", async () => {
+    const fixture = piSessions();
+    const folder = join(fixture.person, piSessionFolderName(projectRoot));
+    mkdirSync(folder, { recursive: true });
+    const lines = [
+      { type: "session", version: 3, id: "branched", timestamp: "t", cwd: projectRoot },
+      {
+        type: "message",
+        id: "a",
+        parentId: null,
+        message: { role: "user", content: "Fix the build" },
+      },
+      {
+        type: "message",
+        id: "b",
+        parentId: "a",
+        message: { role: "assistant", content: [{ type: "text", text: "Abandoned branch" }] },
+      },
+      {
+        type: "message",
+        id: "c",
+        parentId: "a",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "hm" },
+            { type: "text", text: "Fixed it." },
+            { type: "toolCall", id: "t1", name: "bash", arguments: {} },
+          ],
+        },
+      },
+      {
+        type: "message",
+        id: "d",
+        parentId: "c",
+        message: { role: "toolResult", content: [{ type: "text", text: "ok" }] },
+      },
+    ];
+    writeFileSync(
+      join(folder, "2026-11-01T10-00-00-000Z_branched.jsonl"),
+      `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+    );
+    const history = fixture.sessions.history;
+    if (history === undefined) throw new Error("Pi reads its sessions' history");
+    expect(
+      await Effect.runPromise(history({ instanceId, projectRoot, nativeSessionId: "branched" })),
+    ).toEqual({
+      status: "read",
+      messages: [
+        { role: "person", text: "Fix the build" },
+        { role: "agent", text: "Fixed it.", tools: ["bash"] },
+      ],
+    });
+  });
+});

@@ -3,6 +3,8 @@ import { compactAcpConversation } from "./acpCompaction";
 import {
   acpListedSessions,
   makeAcpNativeSessions,
+  MAX_ACP_REPLAYED_UPDATES,
+  type AcpSessionHistoryReader,
   type AcpSessionLister,
 } from "./acpNativeSessions";
 import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
@@ -48,10 +50,15 @@ import {
 } from "./acpElicitation";
 import { outputStopReason } from "./outputStopReason";
 import {
-  acpTurnUsage,
+  acpReportedUsageState,
+  beginAcpReportedTurn,
   beginAcpUsageTurn,
+  finishAcpReportedTurn,
   finishAcpUsageTurn,
   observeAcpUsage,
+  observeAcpUsageUpdate,
+  observedAcpUsageTurn,
+  type AcpReportedUsageState,
   type AcpUsageState,
 } from "./acpUsage";
 import { ACP_CLIENT_TERMINAL_TOOL_NAMES, ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
@@ -200,7 +207,10 @@ interface PendingQuestion {
 }
 
 interface AcpRetainedRuntime {
+  /** A pinned profile's reviewed reading of its cumulative usage updates. */
   readonly usage?: AcpUsageState;
+  /** Every other agent's usage, read by ACP's standard schema. */
+  readonly reported?: AcpReportedUsageState;
   readonly source: AcpNewSessionResult;
   readonly scope: Scope.CloseableScope;
   readonly client: AcpClientPort;
@@ -315,8 +325,10 @@ function baseCapabilities(
           ? "supported"
           : "unavailable",
     reasoning: "unavailable",
+    // A profile that pins its usage reading reports it only on those
+    // releases; every other agent's usage is read by ACP's standard schema.
     usage:
-      profile.reportsTurnUsage === true || claims(profile.usageVersions)
+      profile.usageVersions === undefined || claims(profile.usageVersions)
         ? "supported"
         : "unsupported",
     toolActivity: "supported",
@@ -982,6 +994,40 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
         ),
       ),
     );
+  // A session's earlier conversation, read by loading it in a readiness-check
+  // process of its own: `session/load` replays the history as session
+  // updates before it answers (the ACP session setup reference), and the
+  // process closes with the read, so nothing runs a turn in it.
+  const readAgentSessionHistory: AcpSessionHistoryReader = (projectRoot, sessionId) =>
+    Effect.runPromise(
+      Effect.scoped(
+        managedHomeClient.pipe(
+          Effect.flatMap(({ connection, client }) =>
+            Effect.tryPromise({
+              try: async () => {
+                if (connection.initialized.agentCapabilities.loadSession !== true)
+                  return "unsupported" as const;
+                const replayed: Array<Readonly<Record<string, unknown>>> = [];
+                const stop = client.onNotification((notification) => {
+                  if (
+                    notification.params.sessionId === sessionId &&
+                    replayed.length < MAX_ACP_REPLAYED_UPDATES
+                  )
+                    replayed.push(notification.params.update);
+                });
+                try {
+                  await client.loadSession(sessionId, projectRoot);
+                } finally {
+                  stop();
+                }
+                return replayed;
+              },
+              catch: (error) => providerFailure(profile, error),
+            }),
+          ),
+        ),
+      ),
+    );
   const sessionOwnership = options.sessionOwnership;
 
   return {
@@ -995,6 +1041,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
             displayName: name,
             heldSessions: () => sessionOwnership.held(profile.kind),
             listSessions: listAgentSessions,
+            readHistory: readAgentSessionHistory,
           }),
         }
       : {}),
@@ -1248,6 +1295,14 @@ function makeConnection(
     const offer = (event: ProviderRuntimeEvent) => {
       Effect.runFork(PubSub.publish(queue, event));
     };
+    // A turn's consumer stops reading at its failure, and a failed turn's
+    // reply (if one ever comes) arrives after that, so the usage a pinned
+    // profile's snapshots showed so far is offered before the failure.
+    const offerObservedUsage = (state: SessionState) => {
+      if (state.runtime.usage === undefined) return;
+      const usage = observedAcpUsageTurn(state.runtime.usage);
+      if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
+    };
 
     const requestManagedTool = async (
       state: SessionState | undefined,
@@ -1396,12 +1451,21 @@ function makeConnection(
         observeAcpUsage(state.runtime.usage, notification.params.update);
         return;
       }
+      if (
+        state.runtime.reported !== undefined &&
+        notification.params.sessionId === state.sourceSessionId &&
+        notification.params.update.sessionUpdate === "usage_update"
+      ) {
+        observeAcpUsageUpdate(state.runtime.reported, notification.params.update);
+        return;
+      }
       if (state.compacting) return;
       for (const mapped of mapAcpNotification(state.context, notification)) {
         if (mapped.kind === "event") offer(mapped.event);
         else if (mapped.kind === "protocol-failure") {
           state.completed = false;
           state.context.terminal = true;
+          offerObservedUsage(state);
           offer(
             eventFor(state, factories.clock, {
               kind: "failed",
@@ -1464,6 +1528,7 @@ function makeConnection(
             if (pending.id === requestMessage.id) {
               state.forms.delete(key);
               state.context.terminal = true;
+              offerObservedUsage(state);
               offer(
                 eventFor(state, factories.clock, {
                   kind: "failed",
@@ -1501,6 +1566,7 @@ function makeConnection(
       if (mapped.kind === "protocol-failure") {
         state.completed = false;
         state.context.terminal = true;
+        offerObservedUsage(state);
         offer(eventFor(state, factories.clock, { kind: "failed", failure: mapped.failure }));
         void state.client.respondPermission(requestMessage.id).catch(() => undefined);
         return;
@@ -1522,6 +1588,7 @@ function makeConnection(
           .respondPermission(mapped.providerRequestId, mapped.skipOptionId)
           .catch(() => undefined);
         state.context.terminal = true;
+        offerObservedUsage(state);
         offer(
           eventFor(state, factories.clock, {
             kind: "failed",
@@ -2178,6 +2245,13 @@ function makeConnection(
                 : {
                     usage: usageMismatch || usageSessionId !== source.sessionId ? {} : initialUsage,
                   }),
+              ...(profile.usageVersions === undefined
+                ? {
+                    reported: acpReportedUsageState(
+                      sourceSessionId === undefined ? "new" : "existing",
+                    ),
+                  }
+                : {}),
               source,
               scope: runtimeScope,
               client,
@@ -2509,6 +2583,8 @@ function makeConnection(
                   );
                 }
                 if (state.runtime.usage !== undefined) beginAcpUsageTurn(state.runtime.usage);
+                if (state.runtime.reported !== undefined)
+                  beginAcpReportedTurn(state.runtime.reported);
                 state.promptActive = true;
                 void state.client
                   .prompt(state.sourceSessionId, promptBlocks, attachments)
@@ -2516,13 +2592,23 @@ function makeConnection(
                     state.promptActive = false;
                     void cancelForms(state);
                     if (result.stopReason === "cancelled") cancelPendingTools(state);
+                    // The reply settles the session's cumulative cost even
+                    // when the turn already failed, so the next turn is
+                    // charged only its own share.
+                    const reported =
+                      state.runtime.reported === undefined
+                        ? undefined
+                        : finishAcpReportedTurn(
+                            state.runtime.reported,
+                            result.usage,
+                            profile.turnUsageWithoutTotal,
+                          );
                     if (state.closed || state.context.terminal) return;
                     if (state.runtime.usage !== undefined) {
                       const usage = finishAcpUsageTurn(state.runtime.usage, result.usage);
                       if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
-                    } else if (profile.reportsTurnUsage === true) {
-                      const usage = acpTurnUsage(result.usage);
-                      if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
+                    } else if (reported !== undefined) {
+                      offer(eventFor(state, factories.clock, reported));
                     }
                     state.context.terminal = true;
                     if (result.stopReason === "cancelled") {
@@ -2586,8 +2672,11 @@ function makeConnection(
                   .catch((error: unknown) => {
                     state.promptActive = false;
                     void cancelForms(state);
+                    if (state.runtime.reported !== undefined)
+                      finishAcpReportedTurn(state.runtime.reported, undefined);
                     if (state.closed || state.context.terminal) return;
                     state.context.terminal = true;
+                    offerObservedUsage(state);
                     offer(
                       eventFor(state, factories.clock, {
                         kind: "failed",
@@ -2724,6 +2813,7 @@ function makeConnection(
                 } catch (error) {
                   state.completed = false;
                   state.context.terminal = true;
+                  offerObservedUsage(state);
                   offer(
                     eventFor(state, factories.clock, {
                       kind: "failed",

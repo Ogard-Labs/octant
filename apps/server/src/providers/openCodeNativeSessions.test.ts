@@ -11,6 +11,7 @@ import {
   type OpenCodeClientPort,
   type OpenCodeListedSession,
 } from "./openCodeDriver";
+import { openCodeSessionMessages } from "./openCodeNativeSessions";
 import type { OpenCodeProcessStartInput } from "./openCodeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -286,5 +287,32 @@ describe("OpenCode's own sessions", () => {
     const cannotFork = fixture({ forks: false }).driver.forkSession;
     if (cannotFork === undefined) throw new Error("OpenCode offers no fork");
     expect(await Effect.runPromise(cannotFork(request))).toBeUndefined();
+  });
+});
+
+describe("OpenCode native session history", () => {
+  it("imports text parts and names tool parts, leaving synthetic text and reasoning out", () => {
+    expect(
+      openCodeSessionMessages([
+        {
+          role: "user",
+          parts: [
+            { type: "text", text: "Tidy the README" },
+            { type: "text", text: "injected", synthetic: true },
+          ],
+        },
+        {
+          role: "assistant",
+          parts: [
+            { type: "reasoning", text: "think" },
+            { type: "tool", tool: "edit", callID: "c1", state: {} },
+            { type: "text", text: "Tidied." },
+          ],
+        },
+      ]),
+    ).toEqual([
+      { role: "person", text: "Tidy the README" },
+      { role: "agent", text: "Tidied.", tools: ["edit"] },
+    ]);
   });
 });

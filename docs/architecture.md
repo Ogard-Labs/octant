@@ -7651,7 +7651,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and `ideogram-image`, and for an OpenAI-compatible custom image source, a
   bounded generated-image attachment scope, and usage rows attributed as
   `image-generation` (a provider that returns no token counts leaves its row
-  `unavailable`, never a measured zero; Usage lists each job with its provider, model, and quality, under the Project and mode of the thread it was made in, and a library job is unfiled). A job uses exactly one profile; a safety refusal ends it
+  `unavailable`, never a measured zero; OpenAI and an OpenAI-compatible source
+  report `usage.input_tokens` and `output_tokens`, and Gemini reports
+  `usageMetadata.promptTokenCount` as input and `candidatesTokenCount` plus
+  `thoughtsTokenCount` as output, while Black Forest Labs and Ideogram return
+  no token counts. No image response states a cost in US dollars — Black
+  Forest Labs states one in its own credits — so an image row is never
+  `provider-recorded` and Octant does not convert credits or price images
+  from a list; a job refused or failed after its provider answered leaves one unreported, unpriced row with no image units, since it may have been billed, and a job that failed before any provider answer leaves none; Usage lists each job with its provider, model, and quality, under the Project and mode of the thread it was made in, and a library job is unfiled). A job uses exactly one profile; a safety refusal ends it
   and is never retried elsewhere; a job found queued or running after a
   restart fails as interrupted and is never resent. A stored image must fit
   20 MiB and, when its header declares dimensions, 16,384 pixels a side and
@@ -8340,10 +8347,12 @@ Octant sent inside the prompt is counted. Per runtime:
   the occupancy is the last message's input, cache and output) report one
   figure and no categories. Verified Mistral Vibe 3.0.3 ACP updates also report
   an independent context reading and per-turn token deltas, as specified in
-  [Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface). Other
-  ACP runtimes report no usage through the driver, so their context meters
-  say the runtime reports no usage (from integration `context.usage`) rather
-  than that none has arrived yet. That holds in every mode: a Work or Chat thread is planned by
+  [Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface). Every
+  other ACP agent reports ACP's standard usage: the prompt reply's tokens and
+  a `usage_update`'s context ([Provider runtimes](design/provider-runtimes.md#usage-an-acp-agent-reports)).
+  A runtime that reports no usage through the driver (Vibe on another
+  release) has a context meter that says the runtime reports no usage (from
+  integration `context.usage`) rather than that none has arrived yet. That holds in every mode: a Work or Chat thread is planned by
   Octant, so its meter still shows Octant's own estimate, and the line stands
   where a window's share would be. Lists of tools, MCP servers, skills or instruction
   files exist in some runtimes but carry no token weight, so they are not parts.
@@ -8383,7 +8392,7 @@ the turn runner reports `compacted` for the rest of a turn once the adapter's
 | Codex app-server  | Each turn's input is a `userMessage` in the thread and is sent with every later request. Compaction rebuilds the thread from a summary and as many recent user messages as fit in 20,000 tokens, so what survives is Codex's choice. Octant sees compaction as the `contextCompaction` item.                                                                                                                               | `kept`, or `compacted` for the rest of a turn in which a `contextCompaction` item arrived | `build_compacted_history` and `COMPACT_USER_MESSAGE_MAX_TOKENS` in codex-rs `core/src/compact.rs`; the item in `codexProtocol.ts` |
 | OpenCode          | Each prompt is a user message sent again with every request. A completed compaction sends the summary and at most a recent tail of messages. Octant sees `session.compacted` (1.x), `session.next.compaction.ended` (2.x) and `session.compaction.ended` (2.0.22).                                                                                                                                                         | `kept`, or `compacted` for the rest of a prompt in which compaction ended                 | `filterCompacted` in opencode `packages/opencode/src/session/message-v2.ts`; the events in `@opencode-ai/sdk`                     |
 | Pi                | Each prompt is a session entry sent with every request. A compaction keeps a summary and the entries from `firstKeptEntryId` on. Octant sees `compaction_end`; one without `result` (aborted or failed) changed nothing.                                                                                                                                                                                                   | `kept`, or `compacted` when a `compaction_end` with a `result` arrived during the prompt  | Pi's JSON event stream docs (`packages/coding-agent/docs/json.md`, `compaction_start`/`compaction_end`)                           |
-| ACP agents        | Each agent manages its own history; Octant has no verified prompt-retention or compaction evidence. Vibe 3.0.3 reports usage and context without that breakdown; other ACP runtimes report no usage.                                                                                                                                                                                                                       | absent                                                                                    | ACP driver; verified Vibe usage in [Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)                          |
+| ACP agents        | Each agent manages its own history; Octant has no verified prompt-retention or compaction evidence. Vibe 3.0.3 reports usage and context without that breakdown; other ACP agents report ACP's standard usage.                                                                                                                                                                                                             | absent                                                                                    | ACP driver; verified Vibe usage in [Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)                          |
 | Any other adapter | Not determined.                                                                                                                                                                                                                                                                                                                                                                                                            | absent                                                                                    | —                                                                                                                                 |
 
 From that the turn runner builds the parts (`octantWindowBreakdown` in
@@ -9619,10 +9628,14 @@ that reason. The per-turn detail says "Cut off at the output limit". The
 transcript shows a quiet note with Continue, which drafts a follow-up into
 the composer and sends nothing until the person does.
 
-The ACP and RPC mappers (Devin, Kimi, Grok, Copilot, Mistral Vibe, Oh My Pi)
-report no usage today: the prompt result is read only for its stop reason, and
-the capability is declared `unsupported`, so their turns are recorded as
-unreported and no cache figure is invented. A driver declares usage
+Mistral Vibe outside its verified release reports no usage: the capability is
+declared `unsupported`, so its turns are recorded as unreported and no cache
+figure is invented. Every other ACP agent reads ACP's standard usage from its
+prompt reply ([Provider runtimes](design/provider-runtimes.md#usage-an-acp-agent-reports)).
+Oh My Pi declares usage and tool activity `unsupported` for a different
+reason: its driver runs no turns, so no RPC event of its is read. Its RPC is
+Pi's, whose completed assistant messages carry usage, so turn execution, when
+it lands, can read usage as the Pi driver does. A driver declares usage
 `unsupported` only when it never reports usage for that instance, because a
 spend ceiling leaves such a provider's unreported turns out (below); one
 response without usage is not that evidence, so a runtime observed per turn
@@ -9651,7 +9664,14 @@ resumable and compactable. A removed identity or a removed provider stays
 refused as `stale-resume` after a restart. A reconfigured provider keeps its
 identities, as it did within one host lifetime; the resume checks (instance,
 authentication, Project root, account directory history) still decide. A
-thread purge erases the identity of the session the thread recorded. Codex restates the model and its
+thread purge erases the identity of the session the thread recorded. A Work
+or Code thread started from a provider session begun outside Octant journals
+that session's earlier conversation once, bounded, under its own
+`native-session-history` aggregate in the adoption's unit, as the thread's
+record only: no turn, handoff, or usage read folds it, so it is never sent
+back to the provider, which already holds it, and is never billed; replay and
+thread search read it, and a thread purge erases it
+([Imported history](design/provider-runtimes.md#imported-history)). Codex restates the model and its
 reasoning effort on each turn, and Claude resumes the SDK session under the new
 model. Another model on any other driver still fails closed. A change of
 provider instance starts a new session with a provider-switch handoff in Code
@@ -10032,8 +10052,22 @@ report replaces them, and the sum has a cost only when every request in it
 reported one. The Claude mapper reports the turn so far after each model call,
 summed by message id. Every turn that reached the provider leaves exactly one
 ledger row however it ended — completed, failed, cancelled, or interrupted —
-and Work keeps usage the provider reports after a cancel. A turn that reached
-the provider and reported nothing (most ACP agents in Code report no usage) is
+and Work keeps usage the provider reports after a cancel. A Code row keeps the
+turn's latest usage report, so a runtime whose reports cover one request each
+reports the whole turn once more before it ends: the Octant Harness does so
+when a turn of several requests completes or is interrupted during its tool
+phase, and Chat and Work let that whole-turn report replace their per-request
+sum, so no request counts twice. A Code row carries the same reasoning and
+cache read and write tokens a Chat or Work row does, NULL where the report
+named none; Code rows projected before they were filled stay NULL, since a
+purged thread's operation events are gone and a rebuild would drop its spend.
+A Pi turn whose process disconnects or breaks its protocol reports the usage
+its finished requests summed to before the failure, when every request
+reported whole counts; one request without counts leaves the turn unreported
+rather than understated. A Codex token report that lands after the turn's
+terminal event is ignored, not a protocol failure: the row already holds the
+last report sent before it. A turn that reached
+the provider and reported nothing (an ACP agent whose reply carries no usage) is
 recorded as unreported and unpriced; whether token and money ceilings refuse
 after it depends on its provider (below). A turn refused or failed before the
 provider leaves no row. A Code turn
@@ -10053,8 +10087,10 @@ ceiling. The host decides by provider and level, not by row: a ledger row's
 `provider_instance_id` names the instance, and the instance's runtime
 capability as the host observes it now (`ProviderRuntimeRegistry`, the same
 observation that gates app-managed tools and model switches) decides whether
-its unreported rows count. Only `usage: "unsupported"` leaves them out: the ACP
-mappers and Oh My Pi declare it because they never emit usage. A Code turn's
+its unreported rows count. Only `usage: "unsupported"` leaves them out: Mistral
+Vibe outside its verified release declares it because it never emits usage,
+and Oh My Pi because it runs no turns; every other ACP agent declares usage
+supported, so its unreported turns count. A Code turn's
 row records whether the turn ran at Full access (`ran_at_full_access`, from
 the `executionPolicy` its `conversation-turn-started` event journals), and a
 Full access row reads `capabilities.atFullAccess.usage` where the probe gives
@@ -17003,7 +17039,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | `approvals`                   | `supported`                                                                                                                        | `supported`                                                                                                                                                                                                                                   | `supported`                                                                                                                                             | `supported`                                                                                       | `supported`                                                                                                                                                                                                     | `unsupported`; every Harness tool call passes the server instead                        | `unsupported`; every Harness tool call passes the server instead                                          | `unsupported`; every Harness tool call passes the server instead                             | `unsupported`                         |
   | `userQuestions`               | `supported`                                                                                                                        | `supported`; asked in Plan, a secret question refused                                                                                                                                                                                         | `supported`; on the 2.x route from 2.0.22, through its question forms, a secret question refused                                                        | `unsupported`                                                                                     | `varies`: `unsupported` on fx; Mistral Vibe `supported` on 3.0.3 through its form, `unavailable` on other releases                                                                                              | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
   | `reasoning`                   | `supported`                                                                                                                        | `supported`                                                                                                                                                                                                                                   | `supported`                                                                                                                                             | `supported`                                                                                       | `unavailable`; `supported` when the agent reports a reasoning option or model                                                                                                                                   | `varies`: from each model's reported thinking                                           | `unavailable` until a response carries reasoning                                                          | `unavailable` until a response carries reasoning                                             | `supported`                           |
-  | `usage`                       | `supported`                                                                                                                        | `supported`                                                                                                                                                                                                                                   | `supported`                                                                                                                                             | `supported`                                                                                       | `varies`; verified Vibe 3.0.3 reports turn usage; other ACP runtimes are unsupported                                                                                                                            | `unavailable` until a reply reports counts                                              | `unavailable` until a response reports usage                                                              | `unavailable` until a response reports usage                                                 | `unsupported`; turns are not measured |
+  | `usage`                       | `supported`                                                                                                                        | `supported`                                                                                                                                                                                                                                   | `supported`                                                                                                                                             | `supported`                                                                                       | `varies`: supported from ACP's standard usage; Vibe only on verified 3.0.3                                                                                                                                      | `unavailable` until a reply reports counts                                              | `unavailable` until a response reports usage                                                              | `unavailable` until a response reports usage                                                 | `unsupported`; turns are not measured |
   | `toolActivity`                | `supported`                                                                                                                        | `supported`                                                                                                                                                                                                                                   | `supported`                                                                                                                                             | `supported`                                                                                       | `supported`                                                                                                                                                                                                     | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
   | `turnModes`                   | `absent`                                                                                                                           | `absent`                                                                                                                                                                                                                                      | `absent`; a 2.x probe on a host other than macOS, Linux, or Windows reports Chat and Plan `unsupported` (`host-confinement`), Work and Code `supported` | `absent`                                                                                          | `absent`                                                                                                                                                                                                        | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `cloudSessions`               | `absent`                                                                                                                           | `absent`                                                                                                                                                                                                                                      | `absent`                                                                                                                                                | `absent`                                                                                          | `absent`                                                                                                                                                                                                        | `absent`                                                                                | `absent`; eligible official API endpoints offer separate Code cloud jobs through the optional driver seam | `absent`; a matching observed outside protocol may report `supported` for separate Code jobs | `absent`                              |
@@ -17084,10 +17120,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
     context from verified `vibe-acp` 3.0.3 are read, and reading compaction,
     review, and questions from its own ACP extensions is allowed, not built
     yet.
-  - **ACP agents** report no usage except verified Mistral Vibe 3.0.3. Its
-    cumulative counters become per-turn deltas; provider cost stays absent
-    ([Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)).
-    A spend ceiling leaves other ACP turns out and says so. They report no file changes or diffs, ask no user
+  - **ACP agents** report ACP's standard usage: the prompt reply's tokens,
+    a `usage_update`'s context and a US-dollar cost's growth
+    ([Provider runtimes](design/provider-runtimes.md#usage-an-acp-agent-reports)).
+    Mistral Vibe reports only on verified 3.0.3, its cumulative counters
+    becoming per-turn deltas with provider cost absent
+    ([Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface));
+    a spend ceiling leaves its other releases out and says so. They report no file changes or diffs, ask no user
     questions on Mistral Vibe and fx, resume only when the agent offers load or
     resume, and offer Octant's tools only on macOS and Linux when the agent
     serves HTTP MCP (Linux under

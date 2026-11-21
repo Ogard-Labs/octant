@@ -169,7 +169,7 @@ export class ImageJobService {
   readonly #clock: () => string;
   readonly #actor: typeof EventActor.Type;
   readonly #fetch: ImageHttpFetch | undefined;
-  readonly #createAdapter: (instance: ProviderInstance) => ImageGenerationAdapter;
+  readonly #createAdapter: ((instance: ProviderInstance) => ImageGenerationAdapter) | undefined;
   readonly #imageDrivers: ReadonlyArray<ImageGenerationDriver>;
   readonly #admittedImageDriverKinds: ReadonlySet<ProviderDriverKind>;
   readonly #concurrency: number;
@@ -191,7 +191,7 @@ export class ImageJobService {
     this.#clock = options.clock;
     this.#actor = decodeActor(options.actor);
     this.#fetch = options.fetch;
-    this.#createAdapter = options.createAdapter ?? ((instance) => this.#defaultAdapter(instance));
+    this.#createAdapter = options.createAdapter;
     this.#imageDrivers = options.imageDrivers ?? BUNDLED_IMAGE_DRIVERS;
     this.#admittedImageDriverKinds =
       options.admittedImageDriverKinds ?? admittedBundledImageDriverKinds();
@@ -507,7 +507,24 @@ export class ImageJobService {
     }
   >();
 
-  #defaultAdapter(instance: ProviderInstance): ImageGenerationAdapter {
+  /**
+   * The job's adapter, with a fetch that notes when the provider answered. A
+   * job that failed or was refused after that may have been billed, so it is
+   * recorded as unreported usage; one that failed before any answer spent
+   * nothing and is not.
+   */
+  #adapterFor(instance: ProviderInstance, providerAnswered: () => void): ImageGenerationAdapter {
+    if (this.#createAdapter !== undefined) return this.#createAdapter(instance);
+    const send = this.#fetch;
+    const fetch: ImageHttpFetch = async (input, init) => {
+      const response = await (send ?? globalThis.fetch)(input, init);
+      providerAnswered();
+      return response;
+    };
+    return this.#defaultAdapter(instance, fetch);
+  }
+
+  #defaultAdapter(instance: ProviderInstance, fetch: ImageHttpFetch): ImageGenerationAdapter {
     if (
       isImageProfileDriverKind(instance.driverKind) &&
       !this.#admittedImageDriverKinds.has(instance.driverKind)
@@ -528,7 +545,7 @@ export class ImageJobService {
             providerHosts: driver.providerHosts,
             ...(baseUrl === undefined ? {} : { baseUrl }),
           },
-          ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
+          fetch,
         }),
       });
     }
@@ -536,7 +553,7 @@ export class ImageJobService {
       return makeOpenAiCompatibleImageAdapter({
         instance: instance as OpenAiCompatibleProviderInstance,
         credentialResolver: this.#credentialResolver,
-        ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
+        fetch,
       });
     }
     throw new ImageJobServiceError("ineligible", "The selected provider is not an image profile.");
@@ -580,6 +597,7 @@ export class ImageJobService {
     }
     const running = this.#transition(queued, "running");
     const controller = new AbortController();
+    let reachedProvider = false;
     this.#abort.set(String(running.id), controller);
     try {
       const instance = this.#readProviderInstance(running.profileInstanceId);
@@ -593,7 +611,9 @@ export class ImageJobService {
         this.#resolve(failed);
         return;
       }
-      const adapter = this.#createAdapter(instance);
+      const adapter = this.#adapterFor(instance, () => {
+        reachedProvider = true;
+      });
       const request = this.#adapterRequest(instance, running, work, controller.signal);
       const result = await adapter.generate(request);
       if (controller.signal.aborted) {
@@ -602,7 +622,10 @@ export class ImageJobService {
         return;
       }
       if (result.status === "refused") {
-        const failed = this.#transition(running, "failed", { safetyRefusal: result.safetyRefusal });
+        const failed = this.#transition(running, "failed", {
+          safetyRefusal: result.safetyRefusal,
+          reachedProvider,
+        });
         this.#resolve(failed);
         return;
       }
@@ -611,18 +634,27 @@ export class ImageJobService {
           result.providerFailure.category === "interrupted" ? "cancelled" : "failed";
         const next =
           toStatus === "failed"
-            ? this.#transition(running, toStatus, { failure: result.providerFailure })
+            ? this.#transition(running, toStatus, {
+                failure: result.providerFailure,
+                reachedProvider,
+              })
             : this.#transition(running, toStatus);
         this.#resolve(next);
         return;
       }
       if (result.images.length > work.variantCount) {
-        const failed = this.#transition(running, "failed", {
-          failure: {
-            category: "protocol",
-            message: "The provider returned more images than requested.",
+        const failed = this.#transition(
+          running,
+          "failed",
+          {
+            failure: {
+              category: "protocol",
+              message: "The provider returned more images than requested.",
+            },
+            reachedProvider,
           },
-        });
+          result,
+        );
         this.#resolve(failed);
         return;
       }
@@ -648,6 +680,7 @@ export class ImageJobService {
       }
       const failed = this.#transition(running, "failed", {
         failure: storageOrGenericFailure(error),
+        reachedProvider,
       });
       this.#resolve(failed);
     } finally {
@@ -778,6 +811,8 @@ export class ImageJobService {
       readonly safetyRefusal?: string;
       readonly failure?: ImageJob["failure"];
       readonly artifacts?: ImageJob["artifacts"];
+      /** The provider answered this job's request, so a failure may have been billed. */
+      readonly reachedProvider?: boolean;
     } = {},
     adapterResult?: {
       readonly usage?: {
@@ -791,7 +826,9 @@ export class ImageJobService {
     assertImageJobTransitionAllowed(job.status, toStatus);
     assertImageJobExpectedVersion(job, job.version);
     const updatedAt = decodeUtcTimestamp(this.#clock());
-    const includeUsage = toStatus === "completed" && extras.artifacts !== undefined;
+    const includeUsage =
+      (toStatus === "completed" && extras.artifacts !== undefined) ||
+      (toStatus === "failed" && extras.reachedProvider === true);
     const version = includeUsage
       ? ((job.version + 2) as ImageJob["version"])
       : nextImageJobVersion(job.version);
@@ -817,7 +854,7 @@ export class ImageJobService {
         occurredAt: updatedAt,
       },
     ];
-    if (includeUsage && extras.artifacts !== undefined) {
+    if (includeUsage) {
       events.push({
         eventName: "context.usage-reconciled@1",
         payload: {
@@ -838,7 +875,7 @@ export class ImageJobService {
 
   #usageReconciliation(
     job: ImageJob,
-    artifacts: ImageJob["artifacts"],
+    artifacts: ImageJob["artifacts"] | undefined,
     observedAt: UtcTimestamp,
     adapterResult:
       | {
@@ -872,12 +909,18 @@ export class ImageJobService {
       adapterResult?.usage?.outputTokens === undefined
         ? { providerReported: false }
         : {}),
-      imageUnits: {
-        count: artifacts.length,
-        quality: "exact" as const,
-        ...(typeof size === "string" && size.length > 0 ? { size } : {}),
-        ...(outputQuality === undefined ? {} : { outputQuality }),
-      },
+      // A failed job made no image the person can count; its row carries
+      // only what the provider reported, or nothing, unpriced.
+      ...(artifacts === undefined
+        ? {}
+        : {
+            imageUnits: {
+              count: artifacts.length,
+              quality: "exact" as const,
+              ...(typeof size === "string" && size.length > 0 ? { size } : {}),
+              ...(outputQuality === undefined ? {} : { outputQuality }),
+            },
+          }),
     };
   }
 

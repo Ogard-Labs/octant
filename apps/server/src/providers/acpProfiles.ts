@@ -24,6 +24,7 @@ import type {
   ProviderNativeSetup,
 } from "@octant/contracts";
 import type { AcpInitializeResult } from "./acpProtocol";
+import type { AcpTurnUsageWithoutTotal } from "./acpUsage";
 
 /**
  * Every ACP agent, plus OpenCode, whose 2.x turns run on this stack, and any
@@ -183,7 +184,12 @@ export interface AcpSessionMetaReasoning {
 }
 
 export interface AcpProviderProfile {
-  /** Exact releases whose cumulative usage/context update semantics were verified. */
+  /**
+   * Exact releases whose cumulative usage/context update semantics were
+   * verified. A profile that pins them is read only by that reviewed rule;
+   * every other agent's usage is read by ACP's standard schema
+   * (`acpTurnUsage`, `finishAcpReportedTurn`).
+   */
   readonly usageVersions?: ReadonlyArray<string>;
   /** Exact releases whose signed-in supplementary read and cold-resume semantics passed. */
   readonly fileReviewVersions?: ReadonlyArray<string>;
@@ -279,8 +285,11 @@ export interface AcpProviderProfile {
    * which its own edit approvals already ask for.
    */
   readonly withholdsClientWrites?: true;
-  /** The `session/prompt` reply carries that turn's own usage (`acpTurnUsage`). */
-  readonly reportsTurnUsage?: true;
+  /**
+   * How to read a `session/prompt` reply whose usage leaves out ACP's
+   * required `totalTokens`, as reviewed on the agent (`acpTurnUsage`).
+   */
+  readonly turnUsageWithoutTotal?: AcpTurnUsageWithoutTotal;
   /**
    * A thread may start from one of the agent's own sessions, which it lists
    * through `session/list` when its `initialize` advertises it.
@@ -1804,7 +1813,7 @@ const antigravityProfile: AcpProviderProfile = {
   retainsSessions: true,
   commandLeadsPrompt: true,
   withholdsClientWrites: true,
-  reportsTurnUsage: true,
+  turnUsageWithoutTotal: "input-excludes-cache-reads",
   importsSessions: true,
   // The CLI ends a turn with `refusal` when the account's quota is used up.
   refusalMessage:

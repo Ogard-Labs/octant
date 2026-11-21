@@ -197,11 +197,17 @@ async function generateGeminiImage(input: {
       providerFailure: imageFailure("protocol", "The provider returned an invalid image response."),
     };
   }
-  return { status: "completed", images };
+  return {
+    status: "completed",
+    images,
+    ...(decoded.usage === undefined ? {} : { usage: decoded.usage }),
+  };
 }
 
+type GeminiUsage = { readonly inputTokens?: number; readonly outputTokens?: number };
+
 type GeminiDecoded =
-  | { readonly kind: "ok"; readonly images: ReadonlyArray<string> }
+  | { readonly kind: "ok"; readonly images: ReadonlyArray<string>; readonly usage?: GeminiUsage }
   | { readonly kind: "refused"; readonly message: string }
   | { readonly kind: "url-rejected" }
   | { readonly kind: "invalid" };
@@ -264,7 +270,34 @@ function decodeGeminiImageResponse(value: unknown): GeminiDecoded {
     }
   }
   if (images.length === 0) return { kind: "invalid" };
-  return { kind: "ok", images };
+  const usage = decodeGeminiUsage(value.usageMetadata);
+  return { kind: "ok", images, ...(usage === undefined ? {} : { usage }) };
+}
+
+/**
+ * `usageMetadata` covers every candidate of the call. Gemini bills thinking
+ * tokens (`thoughtsTokenCount`) at the output rate but reports them apart from
+ * `candidatesTokenCount`, so output is their sum; `promptTokenCount` already
+ * includes any cached prompt tokens. The response states no price.
+ */
+function decodeGeminiUsage(value: unknown): GeminiUsage | undefined {
+  if (!isRecord(value)) return undefined;
+  const inputTokens = asNonNegativeInt(value.promptTokenCount);
+  const candidates = asNonNegativeInt(value.candidatesTokenCount);
+  const thoughts = asNonNegativeInt(value.thoughtsTokenCount);
+  const outputTokens =
+    candidates === undefined && thoughts === undefined
+      ? undefined
+      : (candidates ?? 0) + (thoughts ?? 0);
+  if (inputTokens === undefined && outputTokens === undefined) return undefined;
+  return {
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+  };
+}
+
+function asNonNegativeInt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 async function readGeminiSafetyRefusal(response: Response): Promise<string | undefined> {

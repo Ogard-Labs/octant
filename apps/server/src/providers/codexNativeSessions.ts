@@ -22,9 +22,17 @@
  * shows.
  */
 import type { ProviderFailure, ProviderInstanceId, ProviderResumeCursor } from "@octant/contracts";
-import type { ProviderDriver, ProviderNativeSession } from "@octant/provider-sdk/driver";
+import type {
+  ProviderDriver,
+  ProviderNativeSession,
+  ProviderNativeSessionMessage,
+} from "@octant/provider-sdk/driver";
 import { Effect } from "effect";
-import type { CodexStoredThread, CodexThreadListResult } from "./codexProtocol";
+import type {
+  CodexStoredThread,
+  CodexThreadListResult,
+  CodexThreadTurnsReadResult,
+} from "./codexProtocol";
 import { providerResumeBinding } from "./resumeBinding";
 
 /** How many of the person's sessions in a folder a thread is offered to start from. */
@@ -50,6 +58,77 @@ export interface CodexSessionCatalog {
   readonly threadRead?: (input: {
     readonly threadId: string;
   }) => Promise<{ readonly thread: CodexStoredThread }>;
+  readonly threadReadTurns?: (input: {
+    readonly threadId: string;
+  }) => Promise<CodexThreadTurnsReadResult>;
+}
+
+function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
+}
+
+/** What one tool-like Codex item is named as in an imported message. */
+function codexToolName(item: Readonly<Record<string, unknown>>): string | undefined {
+  switch (item.type) {
+    case "commandExecution":
+      return typeof item.command === "string" ? `Ran ${item.command}` : "Ran a command";
+    case "fileChange":
+      return "Changed files";
+    case "mcpToolCall":
+      return typeof item.tool === "string"
+        ? typeof item.server === "string"
+          ? `${item.server}: ${item.tool}`
+          : item.tool
+        : "Called a tool";
+    case "dynamicToolCall":
+      return typeof item.tool === "string" ? item.tool : "Called a tool";
+    case "webSearch":
+      return typeof item.query === "string" ? `Searched ${item.query}` : "Searched the web";
+    case "imageView":
+      return "Viewed an image";
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * A Codex thread's turns as imported messages: each `userMessage` item's
+ * text, and each `agentMessage` item's text with the tool items before it
+ * named. Reasoning and every other item are left out; tool items after a
+ * turn's last reply are named on a message of their own.
+ */
+export function codexThreadMessages(
+  turns: ReadonlyArray<{ readonly items: ReadonlyArray<unknown> }>,
+): ReadonlyArray<ProviderNativeSessionMessage> {
+  const messages: ProviderNativeSessionMessage[] = [];
+  for (const turn of turns) {
+    let tools: string[] = [];
+    for (const candidate of turn.items) {
+      const item = record(candidate);
+      if (item === undefined) continue;
+      if (item.type === "userMessage") {
+        const texts = (Array.isArray(item.content) ? item.content : []).flatMap(
+          (input: unknown) => {
+            const part = record(input);
+            return part?.type === "text" && typeof part.text === "string" ? [part.text] : [];
+          },
+        );
+        messages.push({ role: "person", text: texts.join("\n") });
+        continue;
+      }
+      if (item.type === "agentMessage" && typeof item.text === "string") {
+        messages.push({ role: "agent", text: item.text, ...(tools.length === 0 ? {} : { tools }) });
+        tools = [];
+        continue;
+      }
+      const tool = codexToolName(item);
+      if (tool !== undefined) tools.push(tool);
+    }
+    if (tools.length > 0) messages.push({ role: "agent", text: "", tools });
+  }
+  return messages;
 }
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
@@ -214,6 +293,23 @@ export function makeCodexNativeSessions(options: {
         )
         .pipe(Effect.mapError(passRefusal("The Codex session could not be taken up.")));
     },
+    // `thread/read` with its turns reads Codex's stored rollout without
+    // loading the thread, as the adoption's own read does.
+    history: (input) =>
+      wrongInstance(input.instanceId)
+        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
+        : options
+            .catalog(async (client) => {
+              const threadReadTurns = client.threadReadTurns;
+              if (threadReadTurns === undefined || !THREAD_ID.test(input.nativeSessionId))
+                return { status: "unsupported" as const };
+              const { thread } = await threadReadTurns({ threadId: input.nativeSessionId });
+              if (thread.id !== input.nativeSessionId)
+                throw refuse("stale-resume", "That Codex session is not one of this folder's.");
+              if (thread.turns === undefined) return { status: "unsupported" as const };
+              return { status: "read" as const, messages: codexThreadMessages(thread.turns) };
+            })
+            .pipe(Effect.mapError(passRefusal("The Codex session's messages could not be read."))),
     // Taken in turn with adoptions of the same thread, so a release never
     // gives back a claim a later adoption made.
     release: (input) =>

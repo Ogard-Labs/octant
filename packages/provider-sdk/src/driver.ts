@@ -409,6 +409,33 @@ export interface ProviderNativeSession {
 }
 
 /**
+ * One earlier message of a runtime's own session, normalized: the person's
+ * words or the agent's reply, with the tools the agent called named (a tool's
+ * name or the runtime's short title for the call), never their input or
+ * output. A message that is only tool calls has empty text.
+ */
+export interface ProviderNativeSessionMessage {
+  readonly role: "person" | "agent";
+  readonly text: string;
+  readonly tools?: ReadonlyArray<string>;
+}
+
+/**
+ * A runtime's own session's earlier conversation, oldest first, as the runtime
+ * stores it. `omitted` counts earlier messages the driver did not read (a read
+ * it bounds itself). `unsupported` means this runtime, or this release of it,
+ * keeps no history the driver can read; the host then imports none and says
+ * so rather than guessing.
+ */
+export type ProviderNativeSessionHistory =
+  | {
+      readonly status: "read";
+      readonly messages: ReadonlyArray<ProviderNativeSessionMessage>;
+      readonly omitted?: number;
+    }
+  | { readonly status: "unsupported" };
+
+/**
  * The runtime's own sessions a thread may be started from. `list` names the
  * sessions of the instance's account in one folder, newest first, leaving out
  * any an Octant thread already holds. `adopt` records that an Octant session
@@ -428,6 +455,18 @@ export interface ProviderNativeSessions {
     readonly nativeSessionId: string;
     readonly modelId: ProviderModelId;
   }) => Effect.Effect<ProviderResumeCursor, ProviderFailure>;
+  /**
+   * Reads the earlier conversation of a session this instance just adopted,
+   * so the host can journal it as the thread's imported history. Read-only:
+   * it never resumes, loads for writing, or changes the session. The host
+   * bounds what it keeps and never sends it back to the runtime, which
+   * already holds it. Absent, the runtime offers no readable history.
+   */
+  readonly history?: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly projectRoot: string;
+    readonly nativeSessionId: string;
+  }) => Effect.Effect<ProviderNativeSessionHistory, ProviderFailure>;
   /**
    * Withdraws an adoption the host could not record (the thread changed
    * before it committed): removes the record `adopt` wrote for that Octant
