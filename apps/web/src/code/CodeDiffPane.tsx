@@ -419,7 +419,7 @@ function AvailableDiff(
   const selected =
     files.find((file) => file.path === selectedPath) ?? (selectionMissing ? undefined : files[0]);
   const trackedPath =
-    selected === undefined || selected.nonUtf8Path === true
+    selected === undefined || selected.nonUtf8Path === true || selected.nonUtf8PreviousPath === true
       ? undefined
       : tracked.get(selected.path);
   const changedCount = files.length > 0 ? files.length : props.snapshot.changedPaths.length;

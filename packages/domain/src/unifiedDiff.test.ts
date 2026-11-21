@@ -341,6 +341,7 @@ it("sets nonUtf8Path from the destination path on renames", () => {
     path: "report.txt",
     previousPath: "file-\\303.txt",
     change: "renamed",
+    nonUtf8PreviousPath: true,
   });
   expect(files[0]?.nonUtf8Path).toBeUndefined();
 
@@ -350,4 +351,5 @@ it("sets nonUtf8Path from the destination path on renames", () => {
     change: "renamed",
     nonUtf8Path: true,
   });
+  expect(files[1]?.nonUtf8PreviousPath).toBeUndefined();
 });

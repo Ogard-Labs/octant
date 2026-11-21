@@ -706,6 +706,42 @@ describe("CodeDiffPane", () => {
     expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
   });
 
+  it("blocks Discard changes while keeping Open in editor when a staged rename has a non-UTF-8 source and valid destination", async () => {
+    const renameDiff = [
+      'diff --git "a/file-\\303.txt" b/report.txt',
+      "similarity index 100%",
+      'rename from "file-\\303.txt"',
+      "rename to report.txt",
+      "",
+    ].join("\n");
+    const base = available();
+    const diffWithRename: Extract<CodeDiffProjection, { readonly state: "available" }> = {
+      ...base,
+      observation: {
+        ...base.observation,
+        status: [{ path: "report.txt", index: "R", worktree: " " }],
+        changedPaths: ["report.txt"],
+      } as unknown as CodeOperationResult & { readonly kind: "git-observed" },
+    };
+
+    render(
+      <CodeDiffPane
+        client={client({ bytes: new TextEncoder().encode(renameDiff) })}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        defaultLayout="side-by-side"
+        diff={diffWithRename}
+        executionPolicy="full-access"
+        loadRuntime={runtime().loadRuntime}
+        onOpenFile={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "report.txt" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open in editor" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
+  });
+
   it("uses the Settings default until a thread stores its own layout", async () => {
     render(
       <CodeDiffPane

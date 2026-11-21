@@ -75,6 +75,11 @@ export interface ParsedDiffFile {
    * so `path` retains the escaped form rather than substituting U+FFFD.
    */
   readonly nonUtf8Path?: true;
+  /**
+   * True when a rename or copy source (`previousPath`) failed UTF-8 decoding,
+   * so destructive checkout restoration cannot safely restore the source path.
+   */
+  readonly nonUtf8PreviousPath?: true;
   readonly change: DiffFileChange;
   readonly additions: number;
   readonly deletions: number;
@@ -332,6 +337,7 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     newPath !== undefined && newPath !== "/dev/null"
       ? accumulator.newPathNonUtf8
       : accumulator.oldPathNonUtf8;
+  const nonUtf8PreviousPath = renamed && accumulator.oldPathNonUtf8;
   return {
     id: `${String(index)}:${path}`,
     path,
@@ -341,6 +347,7 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     ...(modeOnly ? { modeOnly: true as const } : {}),
     ...(emptyFile ? { emptyFile: true as const } : {}),
     ...(nonUtf8Path ? { nonUtf8Path: true as const } : {}),
+    ...(nonUtf8PreviousPath ? { nonUtf8PreviousPath: true as const } : {}),
     change,
     additions: accumulator.additions,
     deletions: accumulator.deletions,
