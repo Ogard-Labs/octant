@@ -9,6 +9,7 @@ import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/
 import { describe, expect, it } from "vitest";
 import { AGENT_ACCESS_ORIGIN, createRemoteDevicePrincipal } from "../clientPrincipal";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
+import { createPairedDeviceRouteSlot } from "../remote/pairedDeviceRouteSlot";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createNewDeviceAlertRouteHandler, NEW_DEVICE_ALERTS_PATH } from "./newDeviceAlertRoutes";
 
@@ -148,5 +149,27 @@ describe("new-device alerts for every connected device", () => {
     );
     expect(fromPhone?.status).toBe(403);
     expect(dismissed).toEqual([String(phoneAlert.alertId)]);
+  });
+
+  it("answers a hub guest through the paired-device chain the private listener dispatches to", async () => {
+    const slot = createPairedDeviceRouteSlot();
+    slot.bind([route()]);
+    const response = await slot.routes(fromDevice({ admittedBy: "hub-roster" }));
+    expect(response?.status).toBe(200);
+    expect((await response?.json()).alerts).toHaveLength(1);
+  });
+
+  it("lets a renderer on another origin dismiss an alert by answering the browser's preflight", async () => {
+    const origin = "http://localhost:5173";
+    const preflight = await route()(
+      new Request(`http://127.0.0.1${NEW_DEVICE_ALERTS_PATH}/dismiss`, {
+        method: "OPTIONS",
+        headers: { origin },
+      }),
+    );
+    expect(preflight?.status).toBe(204);
+    expect(preflight?.headers.get("access-control-allow-origin")).toBe(origin);
+    expect(preflight?.headers.get("access-control-allow-methods")).toContain("POST");
+    expect(preflight?.headers.get("access-control-allow-headers")).toContain("content-type");
   });
 });

@@ -2598,6 +2598,9 @@ export function wireRemote(deps: RemoteDependencies) {
     localDeviceAdministrationRoutes,
     hostControlRoutes,
     externalContentRoutes,
+    // Paired browsers and hub guests reach this chain, not the loopback
+    // listener's own handlers, so the alert read must be bound here too.
+    newDeviceAlertRoutes,
   ]);
   return {
     ownerBrowserControlService,

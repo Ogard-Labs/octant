@@ -89,11 +89,18 @@ export function createNewDeviceAlertRouteHandler(dependencies: NewDeviceAlertRou
   async function dismiss(request: Request, url: URL): Promise<Response> {
     const origin = request.headers.get("origin");
     if (
-      request.method !== "POST" ||
       !isLoopbackHostname(url.hostname) ||
       (origin !== null && !isAllowedRendererOrigin(origin))
     ) {
-      return refuse(405, "Dismiss an alert with a POST from a window on this host.", null);
+      return refuse(400, "Dismiss an alert from a window on this host.", null);
+    }
+    // A renderer on another origin sends JSON with the capability header, so
+    // the browser asks first; refusing that preflight would drop the POST.
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    }
+    if (request.method !== "POST") {
+      return refuse(405, "Dismiss an alert with a POST from a window on this host.", origin);
     }
     try {
       const { principal } = authenticateRoutePrincipal({
@@ -130,8 +137,8 @@ function refuse(status: number, message: string, origin: string | null): Respons
 
 function corsHeaders(origin: string | null): Headers {
   const headers = new Headers({
-    "access-control-allow-methods": "GET, OPTIONS",
-    "access-control-allow-headers": "x-octant-window-capability",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "content-type, x-octant-window-capability",
     "cache-control": "no-store",
     vary: "Origin",
   });
