@@ -776,21 +776,31 @@ describe("forge switch port", () => {
       }).port;
     const oldFail = {
       __typename: "CheckRun",
+      databaseId: 101,
       name: "ci",
       status: "COMPLETED",
       conclusion: "FAILURE",
       startedAt: "2026-11-21T10:00:00Z",
       completedAt: "2026-11-21T10:01:00Z",
-      checkSuite: { app: { databaseId: 15368 }, workflowRun: { workflow: { name: "CI" } } },
+      checkSuite: {
+        id: "CS_1",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
     };
     const newPass = {
       __typename: "CheckRun",
+      databaseId: 102,
       name: "ci",
       status: "COMPLETED",
       conclusion: "SUCCESS",
       startedAt: "2026-11-21T10:05:00Z",
       completedAt: "2026-11-21T10:06:00Z",
-      checkSuite: { app: { databaseId: 15368 }, workflowRun: { workflow: { name: "CI" } } },
+      checkSuite: {
+        id: "CS_2",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
     };
     expect(
       await rerunPort([oldFail, newPass]).observePullRequestCondition(
@@ -805,6 +815,182 @@ describe("forge switch port", () => {
         { requiredChecks: true },
         signal,
       ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+
+    // A queued rerun without startedAt/completedAt stays pending over an earlier passing run.
+    const queuedRerun = {
+      __typename: "CheckRun",
+      databaseId: 103,
+      name: "ci",
+      status: "QUEUED",
+      conclusion: null,
+      startedAt: null,
+      completedAt: null,
+      checkSuite: {
+        id: "CS_3",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    expect(
+      await rerunPort([newPass, queuedRerun]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    expect(
+      await rerunPort([queuedRerun, newPass]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    const undatedPass = {
+      __typename: "CheckRun",
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      startedAt: "2026-11-21T10:05:00Z",
+      completedAt: "2026-11-21T10:06:00Z",
+      checkSuite: {
+        id: "CS_4",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    const undatedQueued = {
+      __typename: "CheckRun",
+      name: "ci",
+      status: "QUEUED",
+      conclusion: null,
+      startedAt: null,
+      completedAt: null,
+      checkSuite: {
+        id: "CS_5",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    expect(
+      await rerunPort([undatedPass, undatedQueued]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    expect(
+      await rerunPort([undatedQueued, undatedPass]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+
+    // Distinct workflows with different workflow ids never hide each other's failures.
+    const workflowAFail = {
+      __typename: "CheckRun",
+      databaseId: 201,
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      startedAt: "2026-11-21T10:00:00Z",
+      completedAt: "2026-11-21T10:01:00Z",
+      checkSuite: {
+        id: "CS_a",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_1" } },
+      },
+    };
+    const workflowBPass = {
+      __typename: "CheckRun",
+      databaseId: 202,
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      startedAt: "2026-11-21T10:05:00Z",
+      completedAt: "2026-11-21T10:06:00Z",
+      checkSuite: {
+        id: "CS_b",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_2" } },
+      },
+    };
+    expect(
+      await rerunPort([workflowAFail, workflowBPass]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "failing" });
+
+    // When a context has both an any-source rule and an app-pinned rule, an isRequired
+    // StatusContext satisfies only the any-source rule and leaves the app pin pending.
+    const overlappingRulesPort = (headNodes: ReadonlyArray<unknown>) =>
+      port((args) => {
+        if (args[1] === "checks") {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([{ name: "deploy-check", bucket: "pass" }]),
+          };
+        }
+        if (args[0] === "api" && args[1] === "graphql") {
+          return rollupResponse(headNodes);
+        }
+        if (
+          args[0] === "api" &&
+          args.includes("--paginate") &&
+          args.includes("--slurp") &&
+          args.some((arg) => arg.includes("/rules/branches/main"))
+        ) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([
+              [
+                {
+                  type: "required_status_checks",
+                  parameters: {
+                    required_status_checks: [
+                      { context: "deploy-check" },
+                      { context: "deploy-check", integration_id: 300 },
+                    ],
+                  },
+                },
+              ],
+            ]),
+          };
+        }
+        if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+          return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+        }
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            baseRefName: "main",
+            mergeStateStatus: "BLOCKED",
+          }),
+        };
+      }).port;
+    const statusOnly = {
+      __typename: "StatusContext",
+      context: "deploy-check",
+      state: "SUCCESS",
+      createdAt: "2026-11-21T10:00:00Z",
+      isRequired: true,
+    };
+    expect(
+      await overlappingRulesPort([statusOnly]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    expect(
+      await overlappingRulesPort([
+        statusOnly,
+        passRun("deploy-check", 300),
+      ]).observePullRequestCondition(request, { requiredChecks: true }, signal),
     ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
 
     // Multi-page commit rollups paginate through pullRequest(number:) so fork head commits work.

@@ -1116,9 +1116,11 @@ interface RequiredStatusCheck {
 
 interface ObservedCommitCheck {
   readonly kind: "check-run" | "status-context";
+  readonly databaseId?: number;
   readonly context: string;
   readonly appId?: number;
-  readonly workflowName?: string;
+  readonly checkSuiteId?: string;
+  readonly workflowId?: string;
   readonly isRequired?: boolean;
   readonly timestampMs?: number;
   readonly bucket: "pass" | "pending" | "failing";
@@ -1130,6 +1132,7 @@ const ROLLUP_CONTEXT_NODES_SELECTION = `
   nodes {
     __typename
     ... on CheckRun {
+      databaseId
       name
       status
       conclusion
@@ -1137,8 +1140,9 @@ const ROLLUP_CONTEXT_NODES_SELECTION = `
       completedAt
       isRequired(pullRequestNumber: $number)
       checkSuite {
+        id
         app { databaseId }
-        workflowRun { workflow { name } }
+        workflowRun { workflow { id } }
       }
     }
     ... on StatusContext {
@@ -1252,7 +1256,15 @@ function parseCommitRollupPage(rollup: unknown):
       if (typeof node.name !== "string" || node.name.length === 0) return "invalid";
       const bucket = classifyCheckRun(node.status, node.conclusion);
       if (bucket === undefined) return "invalid";
+      const databaseId =
+        typeof node.databaseId === "number" &&
+        Number.isSafeInteger(node.databaseId) &&
+        node.databaseId > 0
+          ? node.databaseId
+          : undefined;
       const suite = isRecord(node.checkSuite) ? node.checkSuite : undefined;
+      const checkSuiteId =
+        typeof suite?.id === "string" && suite.id.length > 0 ? suite.id : undefined;
       const app = suite !== undefined && isRecord(suite.app) ? suite.app : undefined;
       const appId =
         typeof app?.databaseId === "number" &&
@@ -1266,16 +1278,18 @@ function parseCommitRollupPage(rollup: unknown):
         workflowRun !== undefined && isRecord(workflowRun.workflow)
           ? workflowRun.workflow
           : undefined;
-      const workflowName =
-        typeof workflow?.name === "string" && workflow.name.length > 0 ? workflow.name : undefined;
+      const workflowId =
+        typeof workflow?.id === "string" && workflow.id.length > 0 ? workflow.id : undefined;
       const isRequired = typeof node.isRequired === "boolean" ? node.isRequired : undefined;
       const timestampMs = parseTimestampMs(node.completedAt) ?? parseTimestampMs(node.startedAt);
       checks.push({
         kind: "check-run",
         context: node.name,
         bucket,
+        ...(databaseId === undefined ? {} : { databaseId }),
         ...(appId === undefined ? {} : { appId }),
-        ...(workflowName === undefined ? {} : { workflowName }),
+        ...(checkSuiteId === undefined ? {} : { checkSuiteId }),
+        ...(workflowId === undefined ? {} : { workflowId }),
         ...(isRequired === undefined ? {} : { isRequired }),
         ...(timestampMs === undefined ? {} : { timestampMs }),
       });
@@ -1353,26 +1367,56 @@ function classifyStatusContext(state: unknown): "pass" | "pending" | "failing" |
   return undefined;
 }
 
+function pickNewerCommitCheck(
+  existing: ObservedCommitCheck,
+  candidate: ObservedCommitCheck,
+): ObservedCommitCheck {
+  if (existing.databaseId !== undefined && candidate.databaseId !== undefined) {
+    if (candidate.databaseId !== existing.databaseId) {
+      return candidate.databaseId > existing.databaseId ? candidate : existing;
+    }
+  }
+  if (existing.timestampMs !== undefined && candidate.timestampMs !== undefined) {
+    if (candidate.timestampMs !== existing.timestampMs) {
+      return candidate.timestampMs > existing.timestampMs ? candidate : existing;
+    }
+  } else if (existing.timestampMs !== undefined || candidate.timestampMs !== undefined) {
+    // When ordering cannot be established (for example, a queued rerun with no
+    // startedAt/completedAt and no databaseId alongside a dated earlier pass),
+    // never let a dated pass erase an undated pending or failing run.
+    const undated = existing.timestampMs === undefined ? existing : candidate;
+    const dated = existing.timestampMs === undefined ? candidate : existing;
+    if (undated.bucket !== "pass" && dated.bucket === "pass") return undated;
+    return dated;
+  }
+  if (existing.bucket !== "pass" && candidate.bucket === "pass") return existing;
+  return candidate;
+}
+
 function selectLatestCommitChecks(
   observed: ReadonlyArray<ObservedCommitCheck>,
 ): ReadonlyArray<ObservedCommitCheck> {
   const latestByIdentity = new Map<string, ObservedCommitCheck>();
-  for (const entry of observed) {
-    const key =
-      entry.kind === "check-run"
-        ? `check-run\0${entry.context}\0${entry.appId === undefined ? "*" : String(entry.appId)}\0${entry.workflowName ?? ""}`
-        : `status-context\0${entry.context}`;
+  for (let index = 0; index < observed.length; index += 1) {
+    const entry = observed[index];
+    if (entry === undefined) continue;
+    let key: string;
+    if (entry.kind === "status-context") {
+      key = `status-context\0${entry.context}`;
+    } else if (entry.workflowId !== undefined) {
+      key = `check-run-workflow\0${entry.context}\0${entry.appId === undefined ? "*" : String(entry.appId)}\0${entry.workflowId}`;
+    } else if (entry.checkSuiteId !== undefined) {
+      key = `check-run-suite\0${entry.context}\0${entry.appId === undefined ? "*" : String(entry.appId)}\0${entry.checkSuiteId}`;
+    } else {
+      // Without a workflow id or check-suite id, keep runs distinct so
+      // unrelated failing checks cannot be collapsed by another run.
+      key = `check-run-unkeyed\0${String(index)}`;
+    }
     const existing = latestByIdentity.get(key);
-    if (existing === undefined) {
-      latestByIdentity.set(key, entry);
-      continue;
-    }
-    if (
-      existing.timestampMs === undefined ||
-      (entry.timestampMs !== undefined && entry.timestampMs >= existing.timestampMs)
-    ) {
-      latestByIdentity.set(key, entry);
-    }
+    latestByIdentity.set(
+      key,
+      existing === undefined ? entry : pickNewerCommitCheck(existing, entry),
+    );
   }
   return [...latestByIdentity.values()];
 }
@@ -1382,19 +1426,20 @@ function evaluateCommitRequiredChecks(
   observed: ReadonlyArray<ObservedCommitCheck>,
 ): "green" | "pending" | "failing" {
   const latest = selectLatestCommitChecks(observed);
-  const pinnedAppCountByContext = new Map<string, number>();
+  const ruleCountByContext = new Map<string, number>();
   for (const requirement of required) {
-    if (requirement.appId === undefined) continue;
-    pinnedAppCountByContext.set(
+    ruleCountByContext.set(
       requirement.context,
-      (pinnedAppCountByContext.get(requirement.context) ?? 0) + 1,
+      (ruleCountByContext.get(requirement.context) ?? 0) + 1,
     );
   }
   let pending = false;
   for (const requirement of required) {
+    // Only allow StatusContext.isRequired to satisfy an app-pinned rule when
+    // no other rule (any-source or another app pin) shares the same context
+    // name, so isRequired unambiguously attributes to this pinned app.
     const allowsRequiredStatusContext =
-      requirement.appId !== undefined &&
-      (pinnedAppCountByContext.get(requirement.context) ?? 0) === 1;
+      requirement.appId !== undefined && (ruleCountByContext.get(requirement.context) ?? 0) === 1;
     const matches = latest.filter((entry) => {
       if (entry.context !== requirement.context) return false;
       if (requirement.appId === undefined) return true;
