@@ -73,6 +73,7 @@ export * from "./remoteSurfaceMatrix";
 export * from "./remotePairingClient";
 export * from "./appPairingCode";
 export * from "./hubGuestClient";
+export * from "./hubWindowComputers";
 export * from "./hubOwnerClient";
 export * from "./ownerBrowser";
 export * from "./ownerMergeUnlock";

@@ -146,6 +146,23 @@ describe("FederatedHostsLifecyclePanel", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
   });
+
+  it("says which computers this window reaches through the hub and which it paired itself", async () => {
+    const member: FederatedHostLifecycleSnapshot = {
+      ...OFFICE,
+      displayName: "Studio",
+      through: "hub",
+      state: "ready",
+      health: "healthy",
+    };
+    const lifecycle = createLifecycle([LOCAL, member, LAPTOP]);
+    render(<FederatedHostsLifecyclePanel lifecycle={lifecycle} />);
+
+    const studio = (await screen.findByText("Studio")).closest("[data-host-id]");
+    const laptop = screen.getByText("Laptop").closest("[data-host-id]");
+    expect(studio).toHaveTextContent("Through the hub");
+    expect(laptop).not.toHaveTextContent("Through the hub");
+  });
 });
 
 describe("FederatedHostsLifecycleStrip", () => {

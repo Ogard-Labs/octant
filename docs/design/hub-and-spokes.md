@@ -83,7 +83,9 @@ coding session on any member from one window, the hub as the front door, Code
 delegation, adding a computer over SSH and placement advice, were added on
 2026-11-19; slice 13 is built for a directly paired computer, slice 16 is
 partly built (the Act item bounds where a hub-introduced device starts
-threads), and the rest are designed, not built
+threads, unticking Act ends such a device's sessions, and a desktop window on
+a member or the hub lists the hub's spokes as its computers), and the rest
+are designed, not built
 ([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work)).
 What remains of slices 1 to 10 is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
@@ -548,8 +550,9 @@ otherwise.
   shows that computer's own Code start screen and threads, the paired
   browser's Code surface over that computer's session, and an open thread is
   followed by short reads through the desktop's paired-computer channel. A
-  computer the hub introduced follows in slice 16; choosing a folder there,
-  merged lists across computers, and image attachments are not built yet.
+  spoke the hub introduced is built the same way in slice 16 (below);
+  choosing a folder there, merged lists across computers, and image
+  attachments are not built yet.
 - **What a hub-introduced device may do.** A device the member's own person
   paired acts as that person there. A device that only the hub introduced acts
   within the member's **Act** hub-grant item: the Projects it names, the
@@ -562,9 +565,37 @@ otherwise.
   Act or a Project refuses the next one with a sentence; a Code fork from
   such a device is refused, because its Project is its source's and the
   route does not read it. The hub settings name those Projects under Act. A
-  host in no hub keeps its own rules for such a device. Not built yet: a
-  desktop window adding the hub's other members to its computers, so the
-  window reaches each member directly as a browser guest does.
+  host in no hub keeps its own rules for such a device. Unticking Act also
+  ends every open session of the devices the hub introduced on that member
+  (maintainer decision, 2026-11-20); they stay paired, so a new session opens
+  under the rules then in force and its next start is refused. Built (slice
+  16): a desktop window on a member, or on the hub, lists the hub's other
+  spokes and standbys as its computers. The window makes a device key of its
+  own; its host asks the hub to list that key as a guest (the hub's own
+  window, or a spoke's signed request naming its own window), named for the
+  member whose window it is; and the window then asks each member, directly
+  over the private network, to admit it, as a phone that joined does. Each
+  member issues its own device and session, so no credential is shared
+  between members, and the hub carries none of that traffic. The member
+  holds the window to its Act item because the hub, not its person,
+  introduced it. The desktop pins each member from the roster its own host
+  names, never from the window, and a computer the person paired directly
+  stays theirs. A member the roster drops leaves the window's list at its
+  next read (on opening and every five minutes), and its device there is
+  revoked with the roster; a member's window leaves the roster with that
+  member, and a newer window of the same member replaces the older one. The
+  hub itself is not listed for a spoke's window: it has no Act item of its
+  own to bound a device it introduced to itself. Not built yet: answering
+  approvals and Stop held to the Act item, and the hub as one of a spoke
+  window's computers.
+
+  Rationale: a spoke asks the hub to list its own window without the hub's
+  person approving it again, because the hub's person already approved that
+  member, the window is that member's person at that member, and every
+  member that admits it still holds it to its own Introduce and Act items;
+  the alternative, a join code per window, would ask the person to pair each
+  window with the hub by hand, which is what the front door removes.
+
 - **A computer without Octant.** A server the person reaches only over SSH
   is a [server Project](server-projects.md), not a member. Adding a computer
   as a member over SSH, without visiting it, is [decision H26](#decisions).
@@ -3561,11 +3592,20 @@ a numbered slice. Built, with these narrower readings:
     member through introductions and reaches each directly; the Act item is
     enforced on each member. Partly built: the Act item bounds where a
     hub-introduced device starts Code and Work threads, with server route
-    and domain tests, and the hub settings name its Projects; a desktop
-    window does not yet add the hub's members to its computers, and the
-    three-host smoke has not run. Acceptance: a hub-introduced device starts a
-    Code thread only in a Project the Act item names; removing the item
-    refuses the next create. Verification: server tests and a three-host
+    and domain tests, and the hub settings name its Projects; unticking Act
+    ends such a device's open sessions on that member; and a desktop window
+    on a member or the hub adds the hub's spokes to its computers, each
+    reached directly with a device that member issued. A loopback smoke with
+    a hub and three spokes in one process, each a real gateway behind its own
+    TLS listener, runs the window's client runtime against them: the window
+    lists the other spokes, starts a Code thread on one in a Project its Act
+    item names through that spoke's real Code route and product dispatch and
+    is refused in another, the spoke's list shows it, unticking Act ends the
+    window's session there and refuses its next start, and a removed member
+    leaves the list. Not built: approvals and Stop held to the Act item, and
+    the hub as a spoke window's computer. Acceptance: a hub-introduced device
+    starts a Code thread only in a Project the Act item names; removing the
+    item refuses the next create. Verification: server tests and a three-host
     loopback smoke.
 17. **Code delegation.** The Project mark, the receiving Code host, the
     member and Project list route, cancel and move as above. Acceptance: B

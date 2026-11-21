@@ -173,7 +173,8 @@ describe("a window's request to a paired computer", () => {
       expect(answer.status, JSON.stringify(change)).toBe("refused");
       expect(fetchFor).not.toHaveBeenCalled();
     }
-    for (const { method, path, requiredQuery } of PAIRED_COMPUTER_ALLOWED_REQUESTS) {
+    for (const { method, path, requiredQuery, hubMemberOnly } of PAIRED_COMPUTER_ALLOWED_REQUESTS) {
+      if (hubMemberOnly === true) continue;
       const filled = path.replaceAll(":id", "a1b2c3d4-0000-4000-8000-000000000001");
       const query = new URLSearchParams(requiredQuery).toString();
       const { answer } = await ask({
@@ -219,8 +220,48 @@ describe("a window's request to a paired computer", () => {
         "GET /api/projects/bootstrap",
         "GET /api/providers/bootstrap",
         "GET /api/pending-requests",
+        "POST /api/hub/guest",
       ],
     );
+  });
+
+  it("asks a member of this host's hub to admit the window as its guest, and never a computer paired directly", async () => {
+    const pins = pinsWith([ORIGIN]);
+    pins.replaceHubMembers([
+      { origin: OTHER_ORIGIN, displayName: "Mini PC", pin: PIN, hostId: "member-b" },
+    ]);
+    const admission = (origin: string) => ({
+      origin,
+      method: "POST",
+      path: "/api/hub/guest",
+      headers: { "content-type": "application/json", "x-octant-hub-link": "signed" },
+      body: "{}",
+    });
+
+    const toMember = await ask(admission(OTHER_ORIGIN), { pins });
+    const toPaired = await ask(admission(ORIGIN), { pins });
+
+    expect(toMember.answer).toMatchObject({ status: "answered", httpStatus: 200 });
+    expect(toMember.fetchFor).toHaveBeenCalledWith(OTHER_ORIGIN, {
+      current: { kind: "pinned", pin: PIN },
+    });
+    expect(toPaired.answer).toEqual({
+      status: "refused",
+      message: "Octant doesn't send that request to another computer.",
+    });
+    expect(toPaired.fetchFor).not.toHaveBeenCalled();
+    // The hub member is reached like a paired computer for everything else on the list.
+    const read = await ask(
+      { origin: OTHER_ORIGIN, method: "GET", path: "/api/code/navigation" },
+      { pins },
+    );
+    expect(read.answer.status).toBe("answered");
+    // A member the host no longer names is no longer reachable.
+    pins.replaceHubMembers([]);
+    expect((await ask(admission(OTHER_ORIGIN), { pins })).answer).toEqual({
+      status: "refused",
+      message: "Octant isn't paired with that computer.",
+    });
   });
 
   it("carries a Code thread's reads and commands to a paired computer", async () => {
@@ -438,6 +479,9 @@ describe("the request channel", () => {
       pins: () => pinsWith(),
       webBuildVersion: "0.1.0",
       fetchFor,
+      hubAdministration: () => {
+        throw new Error("No hub administration in this test.");
+      },
     });
     const handler = handlers.get(PAIRED_COMPUTER_CHANNELS.request);
 

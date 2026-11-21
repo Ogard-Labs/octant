@@ -144,6 +144,7 @@ export const DESKTOP_IPC_CHANNELS = {
   pairedComputerForget: "octant:paired-computers:forget",
   pairedComputerSettle: "octant:paired-computers:settle",
   pairedComputerRequest: "octant:paired-computers:request",
+  pairedComputerIntroduceToHub: "octant:paired-computers:introduce-to-hub",
   remoteServerPageOpen: "octant:remote-server-page:open",
   remoteServerPageSign: "octant:remote-server-page:sign",
   remoteServerPageSigned: "octant:remote-server-page:signed",

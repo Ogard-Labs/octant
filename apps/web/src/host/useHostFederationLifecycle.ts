@@ -18,7 +18,11 @@ import {
 } from "@octant/client-runtime/remote-pairing-client";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { createBrowserHostRegistryStorage } from "./browserHostRegistryStorage";
+import { syncHubComputersInWindow } from "./hubWindowComputers";
 import { createPairedComputerFetch } from "./pairedComputerFetch";
+
+/** How often a window on a hub member reads the hub's members again, so one the hub drops leaves. */
+const HUB_COMPUTERS_REFRESH_MS = 5 * 60 * 1_000;
 
 /**
  * Boot the shared Post-preview B6 lifecycle stack for Settings / shell chrome.
@@ -37,7 +41,10 @@ export interface HostFederationStack {
 export function useHostFederationLifecycle(
   hostBridge?: Pick<
     OctantHostBridge,
-    "forgetRemoteServerPages" | "forgetPairedComputer" | "requestPairedComputer"
+    | "forgetRemoteServerPages"
+    | "forgetPairedComputer"
+    | "requestPairedComputer"
+    | "introduceWindowToHub"
   >,
 ): HostFederationStack | undefined {
   const [stack, setStack] = useState<HostFederationStack | undefined>();
@@ -49,12 +56,15 @@ export function useHostFederationLifecycle(
   forgetComputer.current = hostBridge?.forgetPairedComputer;
   const requestComputer = useRef(hostBridge?.requestPairedComputer);
   requestComputer.current = hostBridge?.requestPairedComputer;
+  const introduceToHub = useRef(hostBridge?.introduceWindowToHub);
+  introduceToHub.current = hostBridge?.introduceWindowToHub;
 
   const built = useMemo(() => {
     if (typeof window === "undefined") return undefined;
     try {
       const deviceKeyStore = createDefaultDeviceKeyStore();
-      const registry = createClientHostRegistry(createBrowserHostRegistryStorage());
+      const storage = createBrowserHostRegistryStorage();
+      const registry = createClientHostRegistry(storage);
       const transports = createHostFederationTransports({
         registry,
         deviceKeyStore,
@@ -94,6 +104,7 @@ export function useHostFederationLifecycle(
         transports,
         registry,
         deviceKeyStore,
+        storage,
       };
     } catch {
       return undefined;
@@ -103,11 +114,28 @@ export function useHostFederationLifecycle(
   useEffect(() => {
     if (built === undefined) return;
     let cancelled = false;
+    const { storage, ...stackOnly } = built;
+    // A desktop window on a hub member lists the hub's other members too. Only
+    // the desktop offers the introduction; a browser joins a hub as a guest.
+    const syncHubComputers = async (): Promise<void> => {
+      const introduce = introduceToHub.current;
+      const request = requestComputer.current;
+      if (introduce === undefined || request === undefined) return;
+      await syncHubComputersInWindow({
+        bridge: { introduceWindowToHub: introduce, requestPairedComputer: request },
+        stack: stackOnly,
+        storage,
+      }).catch(() => undefined);
+    };
     void built.lifecycle.sync().then(() => {
-      if (!cancelled) setStack(built);
+      if (cancelled) return;
+      setStack(stackOnly);
+      void syncHubComputers();
     });
+    const refresh = setInterval(() => void syncHubComputers(), HUB_COMPUTERS_REFRESH_MS);
     return () => {
       cancelled = true;
+      clearInterval(refresh);
     };
   }, [built]);
 

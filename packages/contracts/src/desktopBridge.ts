@@ -447,6 +447,34 @@ export type PairedComputerAnswer =
   | { readonly status: "refused"; readonly message: string }
   | { readonly status: "unreachable"; readonly message: string };
 
+/** The window's guest key, the member id it chose, and its label, for its introduction to the hub. */
+export interface HubWindowIntroductionRequest {
+  readonly memberId: string;
+  readonly devicePublicKey: string;
+  readonly deviceLabel: string;
+}
+
+/**
+ * The host's answer to a window's introduction, as main passes it on after
+ * recording the members' pins: no hub, the members the window may reach, or
+ * `unavailable` when the host could not be asked.
+ */
+export type HubWindowIntroductionOutcome =
+  | { readonly membership: "none" }
+  | { readonly membership: "unavailable" }
+  | {
+      readonly membership: "member";
+      readonly introduction: "introduced" | "unchanged" | "refused" | "hub-unreachable";
+      readonly hubMemberId: string;
+      readonly members: ReadonlyArray<{
+        readonly memberId: string;
+        readonly name: string;
+        readonly origin: string;
+        readonly pin: string;
+        readonly identityKeyFingerprint: string;
+      }>;
+    };
+
 /** Closed human presentation, available only through an authenticated native main. */
 export interface EmbeddedBrowserBridge {
   readonly presentBrowser?: (request: HumanBrowserRequest) => Promise<HumanBrowserResult>;
