@@ -161,7 +161,10 @@ wins.
   approved dependency with a compatible license and explicit architectural fit.
 - Do not name other agent workspaces or apps in code, comments, docs, tests,
   commits, branch names, or GitHub pull-request and issue text. Name an AI provider or
-  an integration only where the product really uses it.
+  an integration only where the product really uses it. Attribution trailers a
+  tool writes on its own commits (co-author and session lines) are exempt: they
+  record who wrote the commit and are required by
+  [Delivery And Completion](#delivery-and-completion).
 - Dependencies point inward: apps may consume packages; contracts and domain
   do not import apps. Provider-specific payloads stop at adapters.
 - Authority checks occur on the server before side effects, never only in React.
