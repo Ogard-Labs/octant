@@ -1070,7 +1070,7 @@ describe("ProviderFolderScanService", () => {
     expect(nowCalls).toBeLessThanOrEqual(8);
   });
 
-  it("expires closed-window candidates after the TTL without interfering with subsequent scans", async () => {
+  it("evicts expired closed-window candidates during a later scan and imports the later scan's folder", async () => {
     const home = makeTempDir("octant-scan-expiry-");
     const repo = join(home, "code", "ephemeral");
     createGitRepo(repo, "https://github.com/acme/ephemeral.git");
@@ -1081,7 +1081,8 @@ describe("ProviderFolderScanService", () => {
       "2026-11-21T10:00:00.000Z",
     );
 
-    let currentTimeMs = 10_000;
+    const initialTimeMs = Date.now() - 11 * 60_000;
+    let currentTimeMs = initialTimeMs;
     const receipts = new BindingReceiptStore();
     const fakeProjects = createFakeProjectService(receipts);
     const scanner = new ProviderFolderScanService({
@@ -1105,11 +1106,19 @@ describe("ProviderFolderScanService", () => {
     if (expiredFolderId === undefined) return;
 
     // Advance past the 10-minute candidate TTL and scan from a different window.
-    currentTimeMs += 11 * 60_000;
+    const activeScanTimeMs = initialTimeMs + 11 * 60_000;
+    currentTimeMs = activeScanTimeMs;
     const activeWindowId = decodeWindowId(randomUUID());
     const second = await scanner.scan(activeWindowId);
     expect(second.status).toBe("ready");
+    if (second.status !== "ready") return;
+    const freshFolderId = second.groups[0]?.folders[0]?.id;
+    expect(freshFolderId).toBeDefined();
+    if (freshFolderId === undefined) return;
 
+    // Rewind the clock before the first scan's TTL so importFolders' own expiry
+    // check cannot mask a missing scan-time eviction.
+    currentTimeMs = initialTimeMs;
     const staleImport = await scanner.importFolders(closedWindowId, {
       folderIds: [expiredFolderId],
     });
@@ -1117,5 +1126,17 @@ describe("ProviderFolderScanService", () => {
     if (staleImport.status === "completed") {
       expect(staleImport.results[0]).toMatchObject({ status: "refused", reason: "not-found" });
     }
+    expect(fakeProjects.created).toHaveLength(0);
+
+    // Importing the fresh folder ID from the second scan still succeeds.
+    currentTimeMs = activeScanTimeMs;
+    const freshImport = await scanner.importFolders(activeWindowId, {
+      folderIds: [freshFolderId],
+    });
+    expect(freshImport.status).toBe("completed");
+    if (freshImport.status === "completed") {
+      expect(freshImport.results[0]).toMatchObject({ status: "created" });
+    }
+    expect(fakeProjects.created.map((entry) => entry.canonicalRoot)).toEqual([repo]);
   });
 });
