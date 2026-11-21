@@ -145,7 +145,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
   readonly #now: () => number;
   readonly #limits: ProviderFolderScanLimits;
   readonly #candidates = new Map<string, StoredCandidate>();
-  readonly #scanGenerationByWindow = new Map<string, number>();
+  readonly #windowScanStates = new Map<string, { generation: number; activeScans: number }>();
 
   constructor(options: ProviderFolderScanServiceOptions) {
     this.#homeDirectory = options.homeDirectory;
@@ -171,10 +171,8 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     const windowKey = String(windowId);
     const hiddenIfStrict = (): ProviderFolderScanResult | undefined => {
       if (!this.#isHostStrict()) return undefined;
-      this.#scanGenerationByWindow.set(
-        windowKey,
-        (this.#scanGenerationByWindow.get(windowKey) ?? 0) + 1,
-      );
+      const activeState = this.#windowScanStates.get(windowKey);
+      if (activeState !== undefined) activeState.generation += 1;
       this.#clearWindowCandidates(windowId);
       return decodeProviderFolderScanResult({ status: "hidden", reason: "strict" });
     };
@@ -194,181 +192,198 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     // An already-aborted request must not supersede an active scan or wipe its listing.
     if (signal?.aborted === true) return emptyResult();
 
-    const generation = (this.#scanGenerationByWindow.get(windowKey) ?? 0) + 1;
-    this.#scanGenerationByWindow.set(windowKey, generation);
+    const existingState = this.#windowScanStates.get(windowKey);
+    const windowState =
+      existingState ??
+      (() => {
+        const created = { generation: 0, activeScans: 0 };
+        this.#windowScanStates.set(windowKey, created);
+        return created;
+      })();
+    windowState.generation += 1;
+    windowState.activeScans += 1;
+    const generation = windowState.generation;
     const isSuperseded = (): boolean =>
-      this.#scanGenerationByWindow.get(windowKey) !== generation || signal?.aborted === true;
+      windowState.generation !== generation || signal?.aborted === true;
+    const shouldStopDiscovery = (): boolean => this.#isHostStrict() || isSuperseded();
     const emptyIfSuperseded = (): ProviderFolderScanResult | undefined =>
       isSuperseded() ? emptyResult() : undefined;
 
-    this.#purgeExpired();
-    const canonicalHome = await realpath(this.#homeDirectory).catch(() =>
-      resolve(this.#homeDirectory),
-    );
-    const budget: ScanBudget = {
-      limits: this.#limits,
-      startedAtMs: this.#now(),
-      now: this.#now,
-      filesScanned: 0,
-      entriesCounted: 0,
-      stoppedReason: undefined,
-    };
+    try {
+      this.#purgeExpired();
+      const canonicalHome = await realpath(this.#homeDirectory).catch(() =>
+        resolve(this.#homeDirectory),
+      );
+      const budget: ScanBudget = {
+        limits: this.#limits,
+        startedAtMs: this.#now(),
+        now: this.#now,
+        filesScanned: 0,
+        entriesCounted: 0,
+        stoppedReason: undefined,
+      };
 
-    const rawByCwd = new Map<string, RawFolderActivity>();
-    const recordSession = (
-      cwd: string,
-      provider: DiscoveredFolderProvider,
-      sessionKey: string,
-      activityMs: number,
-    ): boolean => {
-      if (this.#isHostStrict() || isSuperseded()) return false;
-      if (!isAbsolute(cwd)) return true;
-      const existing = rawByCwd.get(cwd);
-      if (existing !== undefined) {
-        existing.providers.add(provider);
-        existing.sessionKeys.add(`${provider}\0${sessionKey}`);
-        if (activityMs > existing.lastActivityMs) existing.lastActivityMs = activityMs;
-        return true;
-      }
-      if (rawByCwd.size >= budget.limits.maxEntries) {
-        markStopped(budget, "entry-limit");
-        return false;
-      }
-      rawByCwd.set(cwd, {
-        providers: new Set([provider]),
-        sessionKeys: new Set([`${provider}\0${sessionKey}`]),
-        lastActivityMs: activityMs,
-      });
-      budget.entriesCounted = rawByCwd.size;
-      return true;
-    };
-
-    const roots = await this.#collectProviderHomes(canonicalHome);
-    for (const runPhase of [
-      () => this.#scanClaudeHomes(roots.claude, budget, recordSession),
-      () => this.#scanCodexHomes(roots.codex, budget, recordSession),
-      () => this.#scanOpenCodeHomes(roots.opencode, budget, recordSession),
-      () => this.#scanPiHomes(roots.pi, budget, recordSession),
-    ]) {
-      const strictNow = hiddenIfStrict();
-      if (strictNow !== undefined) return strictNow;
-      const supersededNow = emptyIfSuperseded();
-      if (supersededNow !== undefined) return supersededNow;
-      if (isDiscoveryStopped(budget)) break;
-      await runPhase();
-    }
-
-    const strictBeforeInspect = hiddenIfStrict();
-    if (strictBeforeInspect !== undefined) return strictBeforeInspect;
-    const supersededBeforeInspect = emptyIfSuperseded();
-    if (supersededBeforeInspect !== undefined) return supersededBeforeInspect;
-
-    // Canonicalize every working directory already collected even when
-    // discovery stopped at a file or entry cap, stopping here only if the
-    // wall-clock deadline expires, the scan is superseded/aborted, or Strict turns on.
-    const mergedByRoot = new Map<
-      string,
-      {
-        readonly providers: Set<DiscoveredFolderProvider>;
-        readonly sessionKeys: Set<string>;
-        lastActivityMs: number;
-        readonly device: number;
-        readonly inode: number;
-        readonly isGitRepository: boolean;
-        readonly remote?: ParsedRemoteOwnerName;
-      }
-    >();
-
-    for (const [cwd, activity] of rawByCwd) {
-      const strictNow = hiddenIfStrict();
-      if (strictNow !== undefined) return strictNow;
-      const supersededNow = emptyIfSuperseded();
-      if (supersededNow !== undefined) return supersededNow;
-      if (isTimeExpired(budget)) {
-        markStopped(budget, "time-limit");
-        break;
-      }
-      const inspected = await inspectFolder(cwd, canonicalHome);
-      if (inspected === undefined) continue;
-      const existing = mergedByRoot.get(inspected.canonicalRoot);
-      if (existing !== undefined) {
-        for (const provider of activity.providers) existing.providers.add(provider);
-        for (const key of activity.sessionKeys) existing.sessionKeys.add(key);
-        if (activity.lastActivityMs > existing.lastActivityMs) {
-          existing.lastActivityMs = activity.lastActivityMs;
+      const rawByCwd = new Map<string, RawFolderActivity>();
+      const recordSession = (
+        cwd: string,
+        provider: DiscoveredFolderProvider,
+        sessionKey: string,
+        activityMs: number,
+      ): boolean => {
+        if (shouldStopDiscovery()) return false;
+        if (!isAbsolute(cwd)) return true;
+        const existing = rawByCwd.get(cwd);
+        if (existing !== undefined) {
+          existing.providers.add(provider);
+          existing.sessionKeys.add(`${provider}\0${sessionKey}`);
+          if (activityMs > existing.lastActivityMs) existing.lastActivityMs = activityMs;
+          return true;
         }
-        continue;
+        if (rawByCwd.size >= budget.limits.maxEntries) {
+          markStopped(budget, "entry-limit");
+          return false;
+        }
+        rawByCwd.set(cwd, {
+          providers: new Set([provider]),
+          sessionKeys: new Set([`${provider}\0${sessionKey}`]),
+          lastActivityMs: activityMs,
+        });
+        budget.entriesCounted = rawByCwd.size;
+        return true;
+      };
+
+      const roots = await this.#collectProviderHomes(canonicalHome);
+      for (const runPhase of [
+        () => this.#scanClaudeHomes(roots.claude, budget, shouldStopDiscovery, recordSession),
+        () => this.#scanCodexHomes(roots.codex, budget, shouldStopDiscovery, recordSession),
+        () => this.#scanOpenCodeHomes(roots.opencode, budget, shouldStopDiscovery, recordSession),
+        () => this.#scanPiHomes(roots.pi, budget, shouldStopDiscovery, recordSession),
+      ]) {
+        const strictNow = hiddenIfStrict();
+        if (strictNow !== undefined) return strictNow;
+        const supersededNow = emptyIfSuperseded();
+        if (supersededNow !== undefined) return supersededNow;
+        if (isDiscoveryStopped(budget)) break;
+        await runPhase();
       }
-      if (mergedByRoot.size >= budget.limits.maxEntries) {
-        markStopped(budget, "entry-limit");
-        break;
+
+      const strictBeforeInspect = hiddenIfStrict();
+      if (strictBeforeInspect !== undefined) return strictBeforeInspect;
+      const supersededBeforeInspect = emptyIfSuperseded();
+      if (supersededBeforeInspect !== undefined) return supersededBeforeInspect;
+
+      // Canonicalize every working directory already collected even when
+      // discovery stopped at a file or entry cap, stopping here only if the
+      // wall-clock deadline expires, the scan is superseded/aborted, or Strict turns on.
+      const mergedByRoot = new Map<
+        string,
+        {
+          readonly providers: Set<DiscoveredFolderProvider>;
+          readonly sessionKeys: Set<string>;
+          lastActivityMs: number;
+          readonly device: number;
+          readonly inode: number;
+          readonly isGitRepository: boolean;
+          readonly remote?: ParsedRemoteOwnerName;
+        }
+      >();
+
+      for (const [cwd, activity] of rawByCwd) {
+        const strictNow = hiddenIfStrict();
+        if (strictNow !== undefined) return strictNow;
+        const supersededNow = emptyIfSuperseded();
+        if (supersededNow !== undefined) return supersededNow;
+        if (isTimeExpired(budget)) {
+          markStopped(budget, "time-limit");
+          break;
+        }
+        const inspected = await inspectFolder(cwd, canonicalHome);
+        if (inspected === undefined) continue;
+        const existing = mergedByRoot.get(inspected.canonicalRoot);
+        if (existing !== undefined) {
+          for (const provider of activity.providers) existing.providers.add(provider);
+          for (const key of activity.sessionKeys) existing.sessionKeys.add(key);
+          if (activity.lastActivityMs > existing.lastActivityMs) {
+            existing.lastActivityMs = activity.lastActivityMs;
+          }
+          continue;
+        }
+        if (mergedByRoot.size >= budget.limits.maxEntries) {
+          markStopped(budget, "entry-limit");
+          break;
+        }
+        mergedByRoot.set(inspected.canonicalRoot, {
+          providers: new Set(activity.providers),
+          sessionKeys: new Set(activity.sessionKeys),
+          lastActivityMs: activity.lastActivityMs,
+          device: inspected.device,
+          inode: inspected.inode,
+          isGitRepository: inspected.isGitRepository,
+          ...(inspected.remote === undefined ? {} : { remote: inspected.remote }),
+        });
       }
-      mergedByRoot.set(inspected.canonicalRoot, {
-        providers: new Set(activity.providers),
-        sessionKeys: new Set(activity.sessionKeys),
-        lastActivityMs: activity.lastActivityMs,
-        device: inspected.device,
-        inode: inspected.inode,
-        isGitRepository: inspected.isGitRepository,
-        ...(inspected.remote === undefined ? {} : { remote: inspected.remote }),
+
+      // Recheck Strict and scan generation right before committing candidates so
+      // an older or aborted scan can never clear a newer scan's visible IDs.
+      const strictBeforeReturn = hiddenIfStrict();
+      if (strictBeforeReturn !== undefined) return strictBeforeReturn;
+      const supersededBeforeCommit = emptyIfSuperseded();
+      if (supersededBeforeCommit !== undefined) return supersededBeforeCommit;
+
+      const activeRoots = new Set(
+        this.#activeCodeProjects().map((project) => project.binding.canonicalRoot),
+      );
+
+      this.#clearWindowCandidates(windowId);
+      const expiresAt = this.#now() + CANDIDATE_TTL_MS;
+      const observed: ObservedProviderFolder[] = [];
+
+      for (const [canonicalRoot, entry] of mergedByRoot) {
+        const folderName = safeDiscoveredFolderName(canonicalRoot);
+        if (folderName === undefined) continue;
+        const sessionCount = entry.sessionKeys.size;
+        if (sessionCount < 1) continue;
+        const id = decodeDiscoveredProviderFolderId(this.#uuid());
+        this.#candidates.set(String(id), {
+          id,
+          windowId,
+          canonicalPath: canonicalRoot,
+          device: entry.device,
+          inode: entry.inode,
+          folderName,
+          isGitRepository: entry.isGitRepository,
+          expiresAt,
+        });
+        const lastActivityAt = toUtcTimestamp(entry.lastActivityMs, this.#clock);
+        observed.push({
+          id,
+          folderName,
+          ...(entry.remote === undefined
+            ? {}
+            : { repository: { slug: entry.remote.slug, groupKey: entry.remote.groupKey } }),
+          providers: [...entry.providers],
+          sessionCount,
+          lastActivityAt,
+          isGitRepository: entry.isGitRepository,
+          alreadyImported: activeRoots.has(canonicalRoot),
+        });
+      }
+
+      const groups = groupDiscoveredProviderFolders(observed);
+      return decodeProviderFolderScanResult({
+        status: "ready",
+        groups,
+        requireGitRepository: this.#requireGitRepository(),
+        stoppedEarly: budget.stoppedReason !== undefined,
+        ...(budget.stoppedReason === undefined ? {} : { stoppedEarlyReason: budget.stoppedReason }),
+        scannedAt: this.#clock() as UtcTimestamp,
       });
+    } finally {
+      windowState.activeScans -= 1;
+      if (windowState.activeScans <= 0 && this.#windowScanStates.get(windowKey) === windowState) {
+        this.#windowScanStates.delete(windowKey);
+      }
     }
-
-    // Recheck Strict and scan generation right before committing candidates so
-    // an older or aborted scan can never clear a newer scan's visible IDs.
-    const strictBeforeReturn = hiddenIfStrict();
-    if (strictBeforeReturn !== undefined) return strictBeforeReturn;
-    const supersededBeforeCommit = emptyIfSuperseded();
-    if (supersededBeforeCommit !== undefined) return supersededBeforeCommit;
-
-    const activeRoots = new Set(
-      this.#activeCodeProjects().map((project) => project.binding.canonicalRoot),
-    );
-
-    this.#clearWindowCandidates(windowId);
-    const expiresAt = this.#now() + CANDIDATE_TTL_MS;
-    const observed: ObservedProviderFolder[] = [];
-
-    for (const [canonicalRoot, entry] of mergedByRoot) {
-      const folderName = safeDiscoveredFolderName(canonicalRoot);
-      if (folderName === undefined) continue;
-      const sessionCount = entry.sessionKeys.size;
-      if (sessionCount < 1) continue;
-      const id = decodeDiscoveredProviderFolderId(this.#uuid());
-      this.#candidates.set(String(id), {
-        id,
-        windowId,
-        canonicalPath: canonicalRoot,
-        device: entry.device,
-        inode: entry.inode,
-        folderName,
-        isGitRepository: entry.isGitRepository,
-        expiresAt,
-      });
-      const lastActivityAt = toUtcTimestamp(entry.lastActivityMs, this.#clock);
-      observed.push({
-        id,
-        folderName,
-        ...(entry.remote === undefined
-          ? {}
-          : { repository: { slug: entry.remote.slug, groupKey: entry.remote.groupKey } }),
-        providers: [...entry.providers],
-        sessionCount,
-        lastActivityAt,
-        isGitRepository: entry.isGitRepository,
-        alreadyImported: activeRoots.has(canonicalRoot),
-      });
-    }
-
-    const groups = groupDiscoveredProviderFolders(observed);
-    return decodeProviderFolderScanResult({
-      status: "ready",
-      groups,
-      requireGitRepository: this.#requireGitRepository(),
-      stoppedEarly: budget.stoppedReason !== undefined,
-      ...(budget.stoppedReason === undefined ? {} : { stoppedEarlyReason: budget.stoppedReason }),
-      scannedAt: this.#clock() as UtcTimestamp,
-    });
   }
 
   async importFolders(
@@ -647,6 +662,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
   async #scanClaudeHomes(
     homes: ReadonlyArray<string>,
     budget: ScanBudget,
+    shouldStop: () => boolean,
     record: (
       cwd: string,
       provider: DiscoveredFolderProvider,
@@ -655,16 +671,16 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     ) => boolean,
   ): Promise<void> {
     for (const claudeHome of homes) {
-      if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
+      if (shouldStop() || isDiscoveryStopped(budget)) return;
       const projectsDir = join(claudeHome, "projects");
       const folders = await safeReaddirWithTypes(projectsDir);
       for (const folder of folders) {
-        if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
+        if (shouldStop() || isDiscoveryStopped(budget)) return;
         if (!folder.isDirectory() || folder.isSymbolicLink()) continue;
         const folderPath = join(projectsDir, folder.name);
         const entries = await safeReaddirWithTypes(folderPath);
         for (const entry of entries) {
-          if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
+          if (shouldStop() || isDiscoveryStopped(budget)) return;
           if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".jsonl")) continue;
           if (!consumeFileBudget(budget)) return;
           const filePath = join(folderPath, entry.name);
@@ -682,6 +698,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
   async #scanCodexHomes(
     homes: ReadonlyArray<string>,
     budget: ScanBudget,
+    shouldStop: () => boolean,
     record: (
       cwd: string,
       provider: DiscoveredFolderProvider,
@@ -690,7 +707,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     ) => boolean,
   ): Promise<void> {
     const visitRollout = async (filePath: string, fileName: string): Promise<boolean> => {
-      if (this.#isHostStrict()) return false;
+      if (shouldStop()) return false;
       if (!consumeFileBudget(budget)) return false;
       const read = await readFileHead(filePath, SESSION_HEAD_BYTES);
       if (read === undefined) return true;
@@ -701,20 +718,14 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     };
 
     for (const codexHome of homes) {
-      if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
-      await walkCodexDateTree(
-        join(codexHome, "sessions"),
-        0,
-        budget,
-        this.#isHostStrict,
-        visitRollout,
-      );
-      if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
+      if (shouldStop() || isDiscoveryStopped(budget)) return;
+      await walkCodexDateTree(join(codexHome, "sessions"), 0, budget, shouldStop, visitRollout);
+      if (shouldStop() || isDiscoveryStopped(budget)) return;
       await walkCodexArchiveTree(
         join(codexHome, "archived_sessions"),
         0,
         budget,
-        this.#isHostStrict,
+        shouldStop,
         visitRollout,
       );
     }
@@ -723,6 +734,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
   async #scanOpenCodeHomes(
     homes: ReadonlyArray<string>,
     budget: ScanBudget,
+    shouldStop: () => boolean,
     record: (
       cwd: string,
       provider: DiscoveredFolderProvider,
@@ -731,7 +743,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     ) => boolean,
   ): Promise<void> {
     for (const dataDir of homes) {
-      if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
+      if (shouldStop() || isDiscoveryStopped(budget)) return;
       const names = await safeReaddir(dataDir);
       const channelDbs = names
         .filter(
@@ -740,21 +752,22 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
         .sort();
       const dbNames = [...(names.includes("opencode.db") ? ["opencode.db"] : []), ...channelDbs];
       for (const dbName of dbNames) {
-        if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
+        if (shouldStop() || isDiscoveryStopped(budget)) return;
         const dbPath = join(dataDir, dbName);
         if (!(await isRegularFile(dbPath))) continue;
-        scanOpenCodeSqlite(dbPath, budget, this.#isHostStrict, record);
+        scanOpenCodeSqlite(dbPath, budget, shouldStop, record);
       }
 
-      if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
+      if (shouldStop() || isDiscoveryStopped(budget)) return;
       const legacySessions = join(dataDir, "storage", "session");
-      await scanOpenCodeLegacyJson(legacySessions, budget, this.#isHostStrict, record);
+      await scanOpenCodeLegacyJson(legacySessions, budget, shouldStop, record);
     }
   }
 
   async #scanPiHomes(
     sessionDirs: ReadonlyArray<string>,
     budget: ScanBudget,
+    shouldStop: () => boolean,
     record: (
       cwd: string,
       provider: DiscoveredFolderProvider,
@@ -763,15 +776,15 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     ) => boolean,
   ): Promise<void> {
     for (const sessionsDir of sessionDirs) {
-      if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
+      if (shouldStop() || isDiscoveryStopped(budget)) return;
       const folders = await safeReaddirWithTypes(sessionsDir);
       for (const folder of folders) {
-        if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
+        if (shouldStop() || isDiscoveryStopped(budget)) return;
         if (!folder.isDirectory() || folder.isSymbolicLink()) continue;
         const folderPath = join(sessionsDir, folder.name);
         const entries = await safeReaddirWithTypes(folderPath);
         for (const entry of entries) {
-          if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
+          if (shouldStop() || isDiscoveryStopped(budget)) return;
           if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".jsonl")) continue;
           if (!consumeFileBudget(budget)) return;
           const filePath = join(folderPath, entry.name);

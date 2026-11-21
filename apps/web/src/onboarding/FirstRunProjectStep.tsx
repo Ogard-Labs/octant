@@ -194,15 +194,28 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
   const [tickedIds, setTickedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [importing, setImporting] = useState(false);
   const [importNotice, setImportNotice] = useState<string>();
+  const scanControllerRef = useRef<AbortController | undefined>(undefined);
+  const scanSeqRef = useRef(0);
 
-  const runScan = useCallback(async (signal?: AbortSignal) => {
+  const cancelActiveScan = useCallback(() => {
+    scanSeqRef.current += 1;
+    scanControllerRef.current?.abort();
+    scanControllerRef.current = undefined;
+  }, []);
+
+  const runScan = useCallback(async () => {
     const active = providerScanRef.current;
     if (active === undefined || active.strict) return;
+    scanControllerRef.current?.abort();
+    const controller = new AbortController();
+    scanControllerRef.current = controller;
+    const seq = scanSeqRef.current + 1;
+    scanSeqRef.current = seq;
     setScanState({ status: "scanning" });
     setImportNotice(undefined);
     try {
-      const result = await active.scan(signal);
-      if (signal?.aborted) return;
+      const result = await active.scan(controller.signal);
+      if (controller.signal.aborted || scanSeqRef.current !== seq) return;
       if (result.status === "hidden") {
         setScanState({ status: "hidden" });
         setTickedIds(new Set());
@@ -211,23 +224,27 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
       setScanState({ status: "ready", result });
       setTickedIds(new Set());
     } catch {
-      if (signal?.aborted) return;
+      if (controller.signal.aborted || scanSeqRef.current !== seq) return;
       setScanState({ status: "failed" });
+    } finally {
+      if (scanControllerRef.current === controller) {
+        scanControllerRef.current = undefined;
+      }
     }
   }, []);
 
   useEffect(() => {
     if (!scanAllowed) {
+      cancelActiveScan();
       setScanState({ status: "idle" });
       setTickedIds(new Set());
       return;
     }
-    const controller = new AbortController();
-    void runScan(controller.signal);
+    void runScan();
     return () => {
-      controller.abort();
+      cancelActiveScan();
     };
-  }, [scanAllowed, runScan]);
+  }, [scanAllowed, runScan, cancelActiveScan]);
 
   function toggleFolder(id: DiscoveredProviderFolderId, checked: boolean): void {
     setTickedIds((previous) => {
