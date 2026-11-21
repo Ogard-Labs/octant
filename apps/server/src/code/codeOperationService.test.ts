@@ -5573,9 +5573,14 @@ it("revalidates a returned Side Chat reference at the Code turn boundary and ref
 });
 
 describe("CodeOperationService provider terminal", () => {
-  function providerFixture() {
+  function providerFixture(
+    options: {
+      readonly strict?: boolean;
+      readonly thread?: Partial<CodeThread>;
+    } = {},
+  ) {
     const terminals = {
-      launch: vi.fn(async () => ({
+      launch: vi.fn(async (_input: Readonly<Record<string, unknown>>) => ({
         terminalId: ids.terminal,
         status: "running" as const,
         canRerun: false,
@@ -5602,7 +5607,7 @@ describe("CodeOperationService provider terminal", () => {
     const service = new CodeOperationService({
       authority: {
         readThread: vi.fn(() =>
-          decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+          decodeCodeThread({ ...thread(), executionPolicy: "approval-gated", ...options.thread }),
         ),
         readCheckout: vi.fn(() =>
           decodeCodeCheckoutIdentity({
@@ -5628,6 +5633,7 @@ describe("CodeOperationService provider terminal", () => {
       approvals: { validate: vi.fn(async () => true) } as never,
       terminals: terminals as never,
       providerTerminal,
+      ...(options.strict === undefined ? {} : { threadStrict: () => options.strict }),
       repositoryTests: {} as never,
       git: {} as never,
       pullRequests: {} as never,
@@ -5689,6 +5695,31 @@ describe("CodeOperationService provider terminal", () => {
       credentialReferences: [],
       executionPolicy: "approval-gated",
     });
+  });
+
+  it("runs the provider terminal unconfined outside Strict, as the thread's turns run, and confined under Strict", async () => {
+    const outside = providerFixture({ strict: false });
+    await outside.service.execute(ids.window, start, { initiator: "user" });
+    expect(outside.terminals.launch).toHaveBeenCalledWith(
+      expect.objectContaining({ command: "exec '/opt/tools/claude'", strict: false }),
+    );
+
+    // Under Strict the program gets the confinement an ordinary Code terminal
+    // has: no Strict value is passed down, which the terminal reads as Strict.
+    const strict = providerFixture({ strict: true });
+    await strict.service.execute(ids.window, start, { initiator: "user" });
+    expect(strict.terminals.launch).toHaveBeenCalledWith(
+      expect.objectContaining({ command: "exec '/opt/tools/claude'" }),
+    );
+    expect(strict.terminals.launch.mock.calls[0]?.[0]).not.toHaveProperty("strict", false);
+
+    // A Full access thread that kept its sandbox keeps it outside Strict too.
+    const kept = providerFixture({
+      strict: false,
+      thread: { executionPolicy: "full-access", fullAccessSandbox: true },
+    });
+    await kept.service.execute(ids.window, start, { initiator: "user" });
+    expect(kept.terminals.launch.mock.calls[0]?.[0]).not.toHaveProperty("strict", false);
   });
 
   it("refuses to open a provider terminal for an agent even when an approval would pass", async () => {

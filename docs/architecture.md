@@ -155,9 +155,11 @@ The design rests on a small set of invariants that every package obeys:
   calls bypass Octant's approvals and never reach the journal. Excluding it
   also blocked workflows only a provider's own interface offers. A Code
   thread's terminal tab may therefore run its provider's program, but only as
-  a person-operated terminal: only the person opens or types into it, it is
-  confined as that thread's terminals are, and the thread claims nothing that
-  happens in it, so the journal never holds a record it does not have
+  a person-operated terminal: only the person opens or types into it, it runs
+  the way the thread's turns do (outside Strict without Octant's sandbox, on
+  the provider's own approvals; under Strict confined as that thread's
+  terminals are), and the thread claims nothing that happens in it, so the
+  journal never holds a record it does not have
   ([Workspace: provider terminal](design/workspace.md)).
 - **Contracts are schema-only, domain is pure.** `@octant/contracts` holds
   Effect Schema definitions and nothing else. `@octant/domain` holds pure
@@ -17370,9 +17372,17 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `program: "provider"`. The host then resolves the thread's provider's own
   command-line program (Claude Code, Codex) with the account binary, folder
   and launch environment its turns use at the thread's Strict value, and runs
-  it in place of the interactive shell, in the thread's folder, under the
-  thread terminal's confinement, unwidened. The command names no program,
-  path or variable. The host refuses the start, and any write to such a
+  it in place of the interactive shell, in the thread's folder. It runs the
+  way the thread's turns do (maintainer decision, 2026-11-21): where a turn
+  runs without Octant's sandbox (`providerHoldsLevelWithoutSandbox`: Work or
+  Code outside Strict, outside Plan, with no kept Full-access sandbox and no
+  chosen sandbox policy), the program starts with no confinement wall and no
+  egress proxy, on the provider's own approvals. Under Strict, or where the
+  thread kept its sandbox or a turn holds a chosen sandbox policy, it starts
+  under the thread terminal's confinement, unwidened: an account folder
+  outside the thread's folders stays unwritable there, so a program that must
+  write it can fail to sign in, and the person opens it outside Strict
+  instead. The command names no program, path or variable. The host refuses the start, and any write to such a
   terminal, for every caller but the person (their local window or a device
   they paired), before any approval is consulted, since keystrokes there
   reach the provider past Octant's approvals. Plan, a Project on a server, a
