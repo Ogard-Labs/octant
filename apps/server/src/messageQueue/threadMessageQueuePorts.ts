@@ -83,6 +83,11 @@ export interface ThreadMessageQueuePortDependencies {
    * it every message waits for a turn of its own.
    */
   readonly steering?: {
+    /**
+     * The running turn's connection once its runtime is answering the prompt;
+     * nothing while the turn is still starting, so a message offered then is
+     * `unavailable` and offered again, not refused for good.
+     */
     readonly liveTurn: (threadId: string) => LiveTurnConnection | undefined;
     /**
      * Whether the scope is a person's own window at this host. A paired

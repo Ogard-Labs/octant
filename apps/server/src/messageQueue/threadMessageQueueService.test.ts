@@ -863,12 +863,12 @@ describe("durable ordinary thread queue", () => {
     await f.service.execute(windowId, first);
     await f.service.execute(windowId, second);
     await f.service.tick();
+    await vi.waitFor(async () => expect((await snapshot(f.service)).items).toEqual([]));
     expect(steer.mock.calls.map(([input]) => [input.messageId, input.payload.prompt])).toEqual([
       [first.messageId, "look at the failing test first"],
       [second.messageId, "then rerun it"],
     ]);
     expect(steer.mock.calls[0]?.[0].windowId).toBe(windowId);
-    expect((await snapshot(f.service)).items).toEqual([]);
     const settled = f.connection
       .prepare("SELECT status FROM thread_message_queue_identity WHERE message_id IN (?, ?)")
       .all(first.messageId, second.messageId);
@@ -892,6 +892,8 @@ describe("durable ordinary thread queue", () => {
     const message = enqueue();
     await f.service.execute(windowId, message);
     await f.service.tick();
+    await vi.waitFor(() => expect(steer).toHaveBeenCalledTimes(1));
+    await f.service.tick();
     await f.service.tick();
     expect(steer).toHaveBeenCalledTimes(1);
     expect(f.p.admit).not.toHaveBeenCalled();
@@ -904,6 +906,94 @@ describe("durable ordinary thread queue", () => {
     await f.service.tick();
     expect(f.p.admit).toHaveBeenCalledTimes(1);
     expect(f.p.admit.mock.calls[0]?.[0].messageId).toBe(message.messageId);
+  });
+  it("steers a message into a running turn this queue started itself", async () => {
+    const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(async () => "steered");
+    const f = fixture({ ...port(), steer });
+    const first = enqueue(0, randomUUID(), "add the attachment's numbers to the report");
+    await f.service.execute(windowId, first);
+    await f.service.tick();
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    // The admitted message stays at the head as `accepted` while its turn runs.
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    const correction = enqueue(
+      (await snapshot(f.service)).version,
+      randomUUID(),
+      "use last quarter's figures",
+    );
+    await expect(f.service.execute(windowId, correction)).resolves.toMatchObject({
+      status: "applied",
+    });
+    await f.service.tick();
+    await vi.waitFor(async () =>
+      expect((await snapshot(f.service)).items.map((item) => item.messageId)).toEqual([
+        first.messageId,
+      ]),
+    );
+    expect(steer.mock.calls.map(([input]) => input.messageId)).toEqual([correction.messageId]);
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+  });
+  it("keeps the queue usable while the running turn's runtime has not yet taken a message", async () => {
+    let answer: (outcome: "steered") => void = () => undefined;
+    const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const f = fixture({ ...port(), steer });
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    const offered = enqueue(0, randomUUID(), "stop after the first file");
+    await f.service.execute(windowId, offered);
+    await f.service.tick();
+    await vi.waitFor(() => expect(steer).toHaveBeenCalledOnce());
+    // A tool approval can keep the runtime from answering for as long as the
+    // person takes; queuing and pausing go on meanwhile.
+    const later = enqueue(1, randomUUID(), "and summarize it");
+    await expect(f.service.execute(windowId, later)).resolves.toMatchObject({
+      status: "applied",
+    });
+    await expect(
+      f.service.execute(windowId, command("remove", 2, { messageId: offered.messageId })),
+    ).resolves.toMatchObject({ status: "refused", reason: "not-editable" });
+    await expect(f.service.execute(windowId, command("pause", 2))).resolves.toMatchObject({
+      status: "applied",
+    });
+    answer("steered");
+    await vi.waitFor(async () =>
+      expect((await snapshot(f.service)).items.map((item) => item.messageId)).toEqual([
+        later.messageId,
+      ]),
+    );
+    expect(steer).toHaveBeenCalledOnce();
+  });
+  it("offers a message again when the running turn could not yet be asked", async () => {
+    const steer = vi
+      .fn<NonNullable<ThreadMessageQueueModePort["steer"]>>()
+      .mockResolvedValueOnce("unavailable")
+      .mockResolvedValue("steered");
+    const f = fixture({ ...port(), steer });
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    await f.service.execute(windowId, enqueue());
+    await f.service.tick();
+    await vi.waitFor(() => expect(steer).toHaveBeenCalledOnce());
+    await vi.waitFor(async () => {
+      await f.service.tick();
+      expect((await snapshot(f.service)).items).toEqual([]);
+    });
+    expect(steer).toHaveBeenCalledTimes(2);
   });
   it("keeps paused and busy queues idle until explicit resume and ordinary mode readiness", async () => {
     const f = fixture();

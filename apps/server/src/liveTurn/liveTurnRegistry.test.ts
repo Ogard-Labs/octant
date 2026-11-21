@@ -44,6 +44,20 @@ describe("a thread's live turn", () => {
     expect(registry.connection("t1")).toBeUndefined();
   });
 
+  it("offers a person's note only once the runtime is answering the turn's prompt", () => {
+    const registry = new LiveTurnRegistry();
+    const tracker = registry.tracker("t1", "code-navigation");
+    const held = { sessionId: "session-a" } as unknown as LiveTurnConnection;
+    tracker.begin(START);
+    // Connected while the session opens: the prompt is not sent yet.
+    tracker.connect(held);
+    expect(registry.answeringConnection("t1")).toBeUndefined();
+    tracker.observe(event("text-delta", { text: "Looking" }));
+    expect(registry.answeringConnection("t1")).toBe(held);
+    tracker.end();
+    expect(registry.answeringConnection("t1")).toBeUndefined();
+  });
+
   it("carries the start time from the moment the turn begins", () => {
     const registry = new LiveTurnRegistry();
     registry.tracker("t1", "code-navigation").begin(START);

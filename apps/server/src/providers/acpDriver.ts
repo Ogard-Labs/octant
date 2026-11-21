@@ -181,9 +181,14 @@ export interface AcpDriverOptions {
   readonly sessionOwnership?: ProviderSessionOwnership;
 }
 
+/**
+ * The setting decides whether an approval may choose the agent's own
+ * `allow_always`, so a driver built without it (as added agents once were)
+ * fails closed to `project-default`, which keeps every answer to one call.
+ */
 function permissionPersistence(options: AcpDriverOptions): PermissionPersistence {
   try {
-    return options.permissionPersistence?.() ?? "current-session";
+    return options.permissionPersistence?.() ?? "project-default";
   } catch {
     return "project-default";
   }

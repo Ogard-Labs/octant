@@ -73,6 +73,8 @@ interface LiveTurn {
   readonly startedAt: UtcTimestamp;
   state: LiveTurnState;
   connection?: LiveTurnConnection;
+  /** Whether the runtime has answered the turn's prompt with any event yet. */
+  answering?: true;
 }
 
 /**
@@ -138,6 +140,7 @@ export class LiveTurnRegistry {
       observe: (event) => {
         const turn = own();
         if (turn === undefined) return;
+        if (turn.connection !== undefined) turn.answering = true;
         // Text deltas arrive many times a second and never move the step; the
         // fold hands back the same state for them, so they cost one comparison.
         const next = observeLiveTurn(turn.state, event);
@@ -162,6 +165,18 @@ export class LiveTurnRegistry {
   /** The connection of the thread's running turn, once the turn acquired one. */
   connection(threadId: string): LiveTurnConnection | undefined {
     return this.#turns.get(threadId)?.connection;
+  }
+
+  /**
+   * The connection of the thread's running turn once its runtime is answering
+   * the prompt. A runner records the connection before it opens the session
+   * and sends the prompt, and a runtime refuses a person's note until the
+   * prompt is open, so a note offered sooner is not refused for good, just
+   * offered again later. Every event a runner observes follows the send.
+   */
+  answeringConnection(threadId: string): LiveTurnConnection | undefined {
+    const turn = this.#turns.get(threadId);
+    return turn?.answering === true ? turn.connection : undefined;
   }
 
   /** The thread's live-turn facts, or nothing when no turn is running. */

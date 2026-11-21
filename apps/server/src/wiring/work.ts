@@ -1900,7 +1900,7 @@ export function wireWork(deps: WorkDependencies) {
         nativeHarnessSessions.read(threadId)?.session.status === "recovery-required",
       attachments: queueAttachments,
       steering: {
-        liveTurn: (threadId) => liveTurns.connection(threadId),
+        liveTurn: (threadId) => liveTurns.answeringConnection(threadId),
         isPersonWindow: (windowId) =>
           !isPairedDeviceScope(windowId) && !isRoutineHostScope(windowId),
         // The turn that took the message is the thread's newest: it was

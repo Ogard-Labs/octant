@@ -2566,7 +2566,15 @@ agent, shipped profile or added.
   (permission persistence `current-session`), an approval chooses it, so the
   agent stops asking for that call as Octant itself would. A one-call answer
   (`scope: "once"`: an automatic reviewer's, or one on a child run's behalf)
-  and persistence `project-default` choose `allow_once`. Offered
+  and persistence `project-default` choose `allow_once`. The driver reads
+  the host's default persistence, which every ACP driver (shipped profile or
+  added agent) is given; one built without it fails closed to
+  `project-default`. A Code thread keeps its own persistence: one set to
+  `project-default` sends each answer as a one-call answer, so a host
+  default of `current-session` cannot widen it. The reverse, a
+  `current-session` thread under a `project-default` host default, still
+  chooses `allow_once` and the agent may ask again; carrying the thread's
+  setting on each answer needs a provider SDK change. Offered
   `allow_always` with no `allow_once`, any other approval is refused and
   nothing is sent, and a helper run denies such a request on arrival, as
   described for [Google Antigravity](#google-antigravity). Before this, only

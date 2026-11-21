@@ -2539,12 +2539,15 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     },
   );
 
-  it("chooses the agent's own allow-always when approvals hold for the session, and allow-once for a one-call answer or a Project default", async () => {
+  it("chooses the agent's own allow-always when approvals hold for the session, and allow-once for a one-call answer, a Project default, or a driver built without the setting", async () => {
     const answered = async (
-      persistence: "current-session" | "project-default",
+      persistence: "current-session" | "project-default" | undefined,
       scope: "once" | undefined,
     ) => {
-      const { driver, client } = fixture(profile, { permissionPersistence: () => persistence });
+      const { driver, client } = fixture(
+        profile,
+        persistence === undefined ? {} : { permissionPersistence: () => persistence },
+      );
       await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
@@ -2573,6 +2576,10 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       "allow_once",
     );
     expect(await answered("project-default", undefined)).toHaveBeenCalledWith(
+      "permission-always",
+      "allow_once",
+    );
+    expect(await answered(undefined, undefined)).toHaveBeenCalledWith(
       "permission-always",
       "allow_once",
     );

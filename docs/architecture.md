@@ -7054,12 +7054,29 @@ ls-remote` against the thread's remote and the GitHub reads they already
   where it was. The transcript shows it as the person's message labelled
   "Sent while the turn ran", on the desktop and the phone alike. Its journal
   append invalidates the turn's mode on the change feed (`work-navigation` or
-  `code-navigation`), as any turn change does, so it shows in the turn as soon
-  as it leaves the queue rather than at the next unrelated refresh. A message
+  `code-navigation`), as any turn change does, so readers of the thread list
+  and of a transcript read afresh see it at once. A desktop transcript
+  already open follows its turn's stream, which carries no steered message,
+  and shows it when the turn settles or the transcript is read again;
+  carrying it on the turn stream is a follow-up. When the running turn is
+  one the queue admitted itself, that message stays at the head as
+  `accepted` until its turn settles, and the message behind it is offered to
+  that turn under the same checks, one at a time, in order. A message
   the runtime refuses, or a steer that
   fails, leaves it queued for the next turn, and the queue does not offer that
-  message again; a connection with no `steer`, or one not yet acquired, offers
-  nothing and changes nothing. The message is not marked as dispatching
+  message again; a connection with no `steer`, or a turn whose runtime has
+  not yet answered its prompt with any event (it is still opening the
+  session), offers nothing and changes nothing, so the message is offered
+  again on a later pass rather than refused for good. The runtime is asked
+  outside the queue's per-thread lock, since the Octant Harness answers only
+  once the note is in the conversation, which a pending tool approval can
+  delay indefinitely: meanwhile the person can still queue, pause and edit
+  or remove other messages, and the offered message alone can be neither
+  edited, removed, moved nor dispatched until the runtime answers, so it
+  never reaches two turns. A provider-switch handoff, a child's parent
+  context and a thread export carry each steered message as a user message
+  of its turn, after that turn's prompt, with the time it was sent, under the
+  same limits and redaction as the turn's other messages. The message is not marked as dispatching
   before the steer: a restart while the runtime takes it also ends the turn
   that took it, and the still-queued message then follows the ordinary
   restart rules rather than being lost. Which runtimes steer is the provider
