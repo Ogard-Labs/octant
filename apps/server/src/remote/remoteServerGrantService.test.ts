@@ -295,6 +295,24 @@ describe("RemoteServerGrantService", () => {
     expect(grant).toMatchObject({ threadId, port: 5171 });
   });
 
+  it("refuses to forward a thread's server that answers only on IPv6 loopback, where the forward does not connect", async () => {
+    const harness = setup();
+    harness.targets.set(listenerId(1), listed(1));
+    harness.targets.set(
+      listenerId(2),
+      listed(2, {
+        endpoint: { url: "http://[::1]:5172/", port: 5172, pid: 4002, processName: "node" },
+      }),
+    );
+    const observe = (index: number) =>
+      harness.grants.observeThreadServer({
+        scopeId: scopeA,
+        source: fromLocalServers(index).source,
+      });
+    expect(await observe(1)).toEqual({ kind: "held", threadId, port: 5171 });
+    expect(await observe(2)).toEqual({ kind: "refused", reason: "not-found" });
+  });
+
   it("refuses a local window without reading anything about the server", async () => {
     const harness = setup();
     harness.targets.set(listenerId(1), listed(1));

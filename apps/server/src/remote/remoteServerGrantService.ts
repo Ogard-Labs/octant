@@ -468,6 +468,13 @@ export class RemoteServerGrantService {
     if (this.#options.readThread(threadId)?.lifecycle !== "active") {
       return { kind: "refused", reason: "thread-unreadable" };
     }
+    // A forward's bridge dials 127.0.0.1. A server the scan found answering
+    // only on [::1] is not what that dial reaches, and another service may
+    // hold the same IPv4 port outside the device's grant, so it is refused
+    // as not found where the forward connects.
+    if (new URL(target.endpoint.url).hostname !== "127.0.0.1") {
+      return { kind: "refused", reason: "not-found" };
+    }
     return { kind: "held", threadId, port: target.endpoint.port };
   }
 

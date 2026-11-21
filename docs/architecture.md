@@ -19352,7 +19352,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     observed (thread readable, listener listed for it, Octant-owned, in that
     thread's own worktree, answering, and opening under the thread's Open
     rule; the same refusal reasons, and `unavailable` when it could not look),
-    and forwards the port it saw that server hold, never one the client sent.
+    and forwards the port it saw that server hold, never one the client sent;
+    a server it saw answering only on `[::1]` is refused `not-found`, since
+    the forward connects to `127.0.0.1`, where another service may hold the
+    same port.
     An agent grant is refused `not-the-person`. A forward of a thread's server
     is checked again at every connection: the Act item for that Project, and
     that the thread's server still holds the port; failing either closes the
