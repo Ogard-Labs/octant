@@ -96,7 +96,7 @@ function client(initial: ReadonlyArray<AutomationSummary>) {
 function renderRoutines(
   automationClient: AutomationClient,
   options: {
-    readonly mode?: "work" | "code";
+    readonly mode?: "chat" | "work" | "code";
     readonly onOpenRoutine?: (automationId: string) => void;
   } = {},
 ) {
@@ -373,6 +373,23 @@ describe("EnvironmentRoutines", () => {
       taskPrompt: "Did the reply arrive?",
     });
     expect(await screen.findByText(/^Follows up tomorrow at/)).toBeInTheDocument();
+  });
+
+  it("sets up a follow-up from a Chat thread, which offers no new routine of its own", async () => {
+    const fake = client([]);
+    renderRoutines(fake, { mode: "chat" });
+    await waitFor(() => expect(fake.list).toHaveBeenCalled());
+    await userEvent.click(screen.getByRole("button", { name: "Routines" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Add a routine" }));
+    expect(await screen.findByRole("menuitem", { name: "Follow up later" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "New routine" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Follow up later" }));
+    await userEvent.click(screen.getByRole("button", { name: "Schedule follow-up" }));
+
+    expect(fake.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "schedule-follow-up", mode: "chat", threadId: thisThread }),
+    );
   });
 
   it("offers an hour from now", async () => {

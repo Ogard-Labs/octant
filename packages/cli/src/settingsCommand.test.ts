@@ -58,7 +58,7 @@ function host(options: { refuse?: boolean } = {}) {
 }
 
 describe("settings access", () => {
-  it("parses the mode and the --work flag, and refuses unknown modes and Plan for Work", () => {
+  it("parses the mode and the --work flag, Plan for Work included, and refuses unknown modes", () => {
     expect(resolveSettingsCliCommand(["access", "full-access"], {})).toEqual({
       action: "access",
       mode: "full-access",
@@ -68,7 +68,10 @@ describe("settings access", () => {
       mode: "auto",
       work: true,
     });
-    expect(resolveSettingsCliCommand(["access", "plan"], { work: true })).toBeUndefined();
+    expect(resolveSettingsCliCommand(["access", "plan"], { work: true })).toMatchObject({
+      mode: "plan",
+      work: true,
+    });
     expect(resolveSettingsCliCommand(["access", "yolo"], {})).toBeUndefined();
     expect(resolveSettingsCliCommand(["access"], {})).toBeUndefined();
     expect(resolveSettingsCliCommand(["other", "auto"], {})).toBeUndefined();

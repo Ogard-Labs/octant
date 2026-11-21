@@ -63,19 +63,46 @@ const definition: ProviderToolDefinition = {
   },
 };
 
+/**
+ * A Chat thread's proposal: only a follow-up in the thread itself. Chat has no
+ * folder to give a routine that starts new threads, and a follow-up always
+ * waits on the person's card, so there is no requested or missed-run choice.
+ */
+const chatDefinition: ProviderToolDefinition = {
+  name: ROUTINE_PROPOSAL_TOOL_NAME,
+  description: [
+    'Propose a follow-up: once, at `at` (an ISO time with Z or an offset), the prompt is sent as a new turn in this same Chat thread, so you will have this conversation then (for example "check whether the reply arrived and summarise").',
+    "The person sees a card with exactly what will be sent and when, and only their confirmation creates it; this call waits for that answer and reports confirmed (with the routine id), declined, or why the host refused.",
+    "The follow-up runs with this thread's Chat access and nothing more. It does not run if the thread is busy, archived, or changed by then.",
+    "Only a follow-up in this thread can be proposed from Chat; mention any other schedule in your reply instead.",
+  ].join(" "),
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", maxLength: MAX_AUTOMATION_DISPLAY_NAME_LENGTH },
+      prompt: { type: "string", maxLength: MAX_AUTOMATION_TASK_PROMPT_LENGTH },
+      trigger: { type: "string", enum: ["follow-up"] },
+      at: { type: "string" },
+    },
+    required: ["name", "prompt", "trigger", "at"],
+    additionalProperties: false,
+  },
+};
+
 function refused(reason: string, message: string) {
   return { result: { status: "refused", reason, message }, isError: true } as const;
 }
 
 /**
- * The routine-proposal tool for one Work or Code thread's turn. It only asks:
- * the proposal waits for the person in the thread, and the routine, if any,
- * is created by their confirmation through the ordinary Automation create
- * path, never by this tool. Plan mode may propose, as it may offer a side
- * task: recording a proposal changes nothing, and the routine the person
- * confirms takes none of the thread's posture. Chat is never offered it, and
- * a routine's own unattended turn is refused it, because automation-origin
- * execution cannot author a routine.
+ * The routine-proposal tool for one thread's turn. It only asks: the proposal
+ * waits for the person in the thread, and the routine, if any, is created by
+ * their confirmation through the ordinary Automation create path, never by
+ * this tool. Plan mode may propose, as it may offer a side task: recording a
+ * proposal changes nothing, and the routine the person confirms takes none of
+ * the thread's posture. A Chat thread in a Chat Project may propose only a
+ * follow-up in itself (maintainer decision, 2026-11-21), which always waits on
+ * the card. A routine's own unattended turn is refused it, because
+ * automation-origin execution cannot author a routine.
  */
 export function createRoutineProposalTools(input: {
   readonly windowId: WindowId;
@@ -104,16 +131,8 @@ export function createRoutineProposalTools(input: {
   readonly now: () => number;
 }): AppManagedToolSet {
   const mode = input.thread.mode;
-  // Chat has no routines, so a Chat thread is never offered the tool, and a
-  // call that names it anyway is refused here rather than reaching the host.
-  if (mode === "chat") {
-    return {
-      definitions: [],
-      execute: async () => refused("chat-has-no-routines", "Chat threads cannot create routines."),
-    };
-  }
   return {
-    definitions: [definition],
+    definitions: [mode === "chat" ? chatDefinition : definition],
     execute: async ({ inputJson, signal }) => {
       if (signal?.aborted) return refused("tool-interrupted", "The turn was cancelled.");
       if (input.isAutomationOrigin) {
@@ -124,6 +143,14 @@ export function createRoutineProposalTools(input: {
       }
       const parsed = parseInput(inputJson, input.now());
       if (parsed.kind === "invalid") return refused("invalid-routine-input", parsed.message);
+      // The schema offers Chat only a follow-up, but a model may send what it
+      // likes; the draft refuses it again when the person confirms.
+      if (mode === "chat" && !parsed.followUp) {
+        return refused(
+          "chat-follow-up-only",
+          "A Chat thread can only propose a follow-up in this same thread. Mention any other schedule in your reply instead.",
+        );
+      }
       const proposal = {
         threadId: decodeAutomationThreadId(input.thread.id),
         mode,

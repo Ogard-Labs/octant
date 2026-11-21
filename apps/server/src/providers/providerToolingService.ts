@@ -28,7 +28,8 @@ import {
 } from "./providerToolingAccount";
 import type { ProviderToolingRunner } from "./providerToolingRunner";
 
-const PLAN_LIFETIME_MS = 10 * 60_000;
+/** Settings' default, used when the host gives no reading of its own. */
+const DEFAULT_PLAN_LIFETIME_MINUTES = 10;
 const MAXIMUM_PLANS = 32;
 const LIST_TIMEOUT_MS = 45_000;
 const COMMAND_TIMEOUT_MS = 120_000;
@@ -49,6 +50,11 @@ export interface ProviderToolingServiceOptions {
   readonly record: (change: ProviderToolingAppliedRecord, actor?: EventActor) => void;
   readonly now?: () => number;
   readonly uuid?: () => string;
+  /**
+   * Settings' `toolingCommandConfirmMinutes`: how long a shown command may
+   * still run, read when it is shown. Absent is ten minutes.
+   */
+  readonly confirmMinutes?: () => number;
 }
 
 interface StoredPlan {
@@ -188,11 +194,13 @@ export class ProviderToolingService {
     }
     const digest = randomBytes(32).toString("hex");
     const binding = bindingOf(id, account, command);
+    const lifetimeMs = (this.#options.confirmMinutes?.() ?? DEFAULT_PLAN_LIFETIME_MINUTES) * 60_000;
+    const expiresAt = this.#now() + lifetimeMs;
     this.#plans.set(planId, {
       planId,
       digest,
       binding,
-      expiresAt: this.#now() + PLAN_LIFETIME_MS,
+      expiresAt,
       windowId: caller.windowId,
       instanceId: id,
       // The stored command never keeps the secret: it stays in the broker.
@@ -206,14 +214,14 @@ export class ProviderToolingService {
       const expiry = setTimeout(() => {
         const waiting = this.#plans.get(planId);
         if (waiting !== undefined && !waiting.used) void this.#discard(waiting);
-      }, PLAN_LIFETIME_MS + 1000);
+      }, lifetimeMs + 1000);
       expiry.unref();
     }
     return {
       status: "planned",
       planId,
       digest,
-      expiresAt: new Date(this.#now() + PLAN_LIFETIME_MS).toISOString(),
+      expiresAt: new Date(expiresAt).toISOString(),
       provider: account.provider,
       commandKind: command.commandKind,
       commandLine: shownCommandLine(account, command),

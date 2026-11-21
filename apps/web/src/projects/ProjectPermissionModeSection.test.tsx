@@ -29,16 +29,14 @@ function project(type: "code" | "work", extra: object = {}): BoundSummary {
 afterEach(cleanup);
 
 describe("Project default mode", () => {
-  it("lets a Work Project override the mode new threads start in, without a Plan option", async () => {
+  it("lets a Work Project start its new threads in Plan", async () => {
     const onChange = vi.fn(async () => true);
     render(<ProjectPermissionModeSection onChange={onChange} project={project("work")} />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Default mode for this Project" }));
-    const auto = await screen.findByRole("option", { name: "Auto" });
-    expect(screen.queryByRole("option", { name: "Plan" })).toBeNull();
-    await userEvent.click(auto);
+    await userEvent.click(await screen.findByRole("option", { name: "Plan" }));
 
-    expect(onChange).toHaveBeenCalledWith("auto");
+    expect(onChange).toHaveBeenCalledWith("plan");
   });
 
   it("shows the mode a Work Project already overrides", () => {

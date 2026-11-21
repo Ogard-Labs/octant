@@ -278,6 +278,62 @@ describe("createCanvasAgentTools", () => {
     expect(activeContext).not.toHaveBeenCalled();
   });
 
+  it("binds a host-run Chat turn's Canvas to the thread's own Chat Project, never a window's, and refuses one no longer active", async () => {
+    const create = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+      kind: "accepted" as const,
+      card: { canvasId: "canvas-1", versionId: "version-1" },
+    }));
+    // A routine's or a follow-up's turn has no window; what any window shows
+    // is not where its Canvas goes.
+    const activeContext = vi.fn(() => {
+      throw new Error("A host-run turn never reads a window's Project.");
+    });
+    const project = vi.fn(async () => {
+      throw new Error("A host-run turn never reads a window's Project list.");
+    });
+    const host = (lifecycle: string, type = "chat") =>
+      createCanvasAgentTools({
+        windowId,
+        hostRun: true,
+        thread,
+        port: {
+          activeContext,
+          project,
+          threadProject: vi.fn((id: string) =>
+            id === projectId ? { id: projectId, type, lifecycle } : undefined,
+          ),
+          canvas: { create, revise: vi.fn(), get: vi.fn() },
+          markReader: vi.fn(() => ({ status: "nothing-to-mark" })),
+          uuid: vi.fn(() => "55555555-5555-4555-8555-555555555555"),
+          hostId: "66666666-6666-4666-8666-666666666666",
+        } as never,
+      });
+    const createMemo = (set: ReturnType<typeof host>) =>
+      set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "create", title: "Memo", blocks: [diagram] }),
+      });
+
+    expect((await createMemo(host("active"))).isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "chat",
+        workspace: { kind: "chat-virtual", projectId },
+        originThreadId: threadId,
+      }),
+      { mode: "chat", projectId, originThreadId: threadId },
+      { id: projectId, type: "chat", lifecycle: "active" },
+      [expect.objectContaining({ blockId: "authored-diagram" })],
+    );
+
+    create.mockClear();
+    expect((await createMemo(host("archived"))).isError).toBe(true);
+    expect((await createMemo(host("active", "work"))).isError).toBe(true);
+    expect(create).not.toHaveBeenCalled();
+    expect(activeContext).not.toHaveBeenCalled();
+    expect(project).not.toHaveBeenCalled();
+  });
+
   it("keeps the always-visible definition small in every mode and for a managed child", () => {
     const port = {
       activeContext: vi.fn(),

@@ -71,7 +71,7 @@ export function DefaultLevelsPanel(props: DefaultLevelsPanelProps) {
     );
   }
   const { project, defaults } = levels;
-  const choices = mobileDefaultLevelChoices(mode);
+  const choices = mobileDefaultLevelChoices();
   return (
     <View style={{ gap: mobileSpacing.md }} testID="mobile-default-levels">
       {project === undefined ? null : (

@@ -1,5 +1,4 @@
 import {
-  AGENT_MESSAGE_LIFETIME_MS,
   AGENT_MESSAGE_AGGREGATE,
   AGENT_MESSAGE_EVENT_NAMES,
   AggregateVersion,
@@ -542,7 +541,6 @@ export class AgentMessageService {
         AGENT_MESSAGE_EVENT_NAMES.sent,
         {
           kind: "message-sent",
-          expiresAt: new Date(Date.parse(admittedAt) + AGENT_MESSAGE_LIFETIME_MS).toISOString(),
           messageId,
           correlationId,
           senderThreadId: request.senderThreadId,

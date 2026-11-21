@@ -1525,6 +1525,7 @@ export function startOctantServer(
       capacityScheduler,
       chatService,
       codeCompletedThreadSource,
+      contributeChatTools,
       contributeCodeTools,
       contributeServerCodeTools,
       liveTurns,

@@ -13,7 +13,12 @@ import {
   type ThreadMoveEnvironment,
 } from "./threadMove/ThreadMoveComputerCard";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
-import type { UsageDashboardClient, UsageQueryFilter } from "@octant/client-runtime";
+import type {
+  AutomationClient,
+  UsageDashboardClient,
+  UsageQueryFilter,
+} from "@octant/client-runtime";
+import { EnvironmentRoutines } from "./EnvironmentRoutines";
 
 type ChatThreadWorkspaceTab = Extract<WorkspaceTab, { readonly kind: "chat-thread" }>;
 type ChatProject = Extract<ProjectSummary, { readonly type: "chat" }>;
@@ -35,6 +40,9 @@ export interface ChatThreadEnvironmentProps {
   /** Whether the Usage group shows its spend ceiling row when no ceiling is set. */
   readonly spendCeilingShown?: boolean;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
+  /** Offers Follow up later in a Chat Project's thread; absent, no Routines row. */
+  readonly automationClient?: AutomationClient;
+  readonly onOpenRoutine?: (automationId: string) => void;
 }
 
 /**
@@ -85,6 +93,15 @@ export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
           unavailableMessage={projection.identity.detail}
         />
         <EnvironmentCard>
+          {props.automationClient === undefined || project === undefined ? null : (
+            <EnvironmentRoutines
+              client={props.automationClient}
+              mode="chat"
+              {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
+              projectId={String(project.id)}
+              threadId={String(props.tab.threadId)}
+            />
+          )}
           {props.agentRunClient === undefined ? null : (
             <EnvironmentSubagents
               client={props.agentRunClient}
