@@ -53,11 +53,14 @@ export const DEFAULT_PROVIDER_FOLDER_SCAN_LIMITS: ProviderFolderScanLimits = {
 
 const CANDIDATE_TTL_MS = 10 * 60_000;
 const SESSION_HEAD_BYTES = 64 * 1024;
+const GIT_FILE_MAX_BYTES = 64 * 1024;
 const GIT_CONFIG_MAX_BYTES = 256 * 1024;
 const OPENCODE_JSON_MAX_BYTES = 256 * 1024;
 const MAX_GIT_ANCESTOR_DEPTH = 20;
 const DATE_SEGMENT = /^\d{2,4}$/;
 const CODEX_ROLLOUT_FILE = /^rollout-.+\.jsonl$/;
+const STRICT_IMPORT_REFUSAL_MESSAGE =
+  "Importing discovered provider folders is unavailable while Strict is on.";
 
 export interface ProviderFolderScanApi {
   readonly scan: (windowId: WindowId) => Promise<ProviderFolderScanResult>;
@@ -74,6 +77,8 @@ export interface ProviderFolderScanServiceOptions {
   readonly readProviderInstances: () => ReadonlyArray<ProviderInstance>;
   readonly readActiveCodeProjects: () => ReadonlyArray<Project>;
   readonly isHostStrict: () => boolean;
+  /** Whether Code currently requires a Git repository; defaults to true. */
+  readonly requireGitRepository?: () => boolean;
   readonly bindingReceiptStore: Pick<BindingReceiptStorePort, "issue">;
   readonly projectRootPort: Pick<ProjectRootPort, "validate">;
   readonly projectService: Pick<ProjectServiceApi, "executeProject">;
@@ -87,7 +92,10 @@ interface StoredCandidate {
   readonly id: DiscoveredProviderFolderId;
   readonly windowId: WindowId;
   readonly canonicalPath: string;
+  readonly device: number;
+  readonly inode: number;
   readonly folderName: string;
+  readonly isGitRepository: boolean;
   readonly expiresAt: number;
 }
 
@@ -113,9 +121,10 @@ interface ScanBudget {
  * Scanning reads session metadata only, never writes to another tool's files,
  * never leaves the machine, and sends only opaque IDs and safe display labels
  * (`owner/name` or single-segment folder name) to the renderer. Importing
- * ticked opaque IDs creates Code Projects through the existing Project create
- * path and its folder receipts. Under Strict, scanning is hidden and importing
- * is refused on the server.
+ * ticked opaque IDs re-verifies each directory's canonical path and inode
+ * before creating Code Projects through the existing Project create path and
+ * its folder receipts. Under Strict, scanning is hidden and importing is
+ * refused on the server, re-checked throughout async steps.
  */
 export class ProviderFolderScanService implements ProviderFolderScanApi {
   readonly #homeDirectory: string;
@@ -123,6 +132,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
   readonly #readProviderInstances: () => ReadonlyArray<ProviderInstance>;
   readonly #readActiveCodeProjects: () => ReadonlyArray<Project>;
   readonly #isHostStrict: () => boolean;
+  readonly #requireGitRepository: () => boolean;
   readonly #bindingReceiptStore: Pick<BindingReceiptStorePort, "issue">;
   readonly #projectRootPort: Pick<ProjectRootPort, "validate">;
   readonly #projectService: Pick<ProjectServiceApi, "executeProject">;
@@ -138,6 +148,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     this.#readProviderInstances = options.readProviderInstances;
     this.#readActiveCodeProjects = options.readActiveCodeProjects;
     this.#isHostStrict = options.isHostStrict;
+    this.#requireGitRepository = options.requireGitRepository ?? (() => true);
     this.#bindingReceiptStore = options.bindingReceiptStore;
     this.#projectRootPort = options.projectRootPort;
     this.#projectService = options.projectService;
@@ -152,10 +163,14 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
   }
 
   async scan(windowId: WindowId): Promise<ProviderFolderScanResult> {
-    if (this.#isHostStrict()) {
+    const hiddenIfStrict = (): ProviderFolderScanResult | undefined => {
+      if (!this.#isHostStrict()) return undefined;
       this.#clearWindowCandidates(windowId);
       return decodeProviderFolderScanResult({ status: "hidden", reason: "strict" });
-    }
+    };
+
+    const initialStrict = hiddenIfStrict();
+    if (initialStrict !== undefined) return initialStrict;
 
     this.#purgeExpired();
     const canonicalHome = await realpath(this.#homeDirectory).catch(() =>
@@ -177,6 +192,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
       sessionKey: string,
       activityMs: number,
     ): boolean => {
+      if (this.#isHostStrict()) return false;
       if (!isAbsolute(cwd)) return true;
       const existing = rawByCwd.get(cwd);
       if (existing !== undefined) {
@@ -199,26 +215,44 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     };
 
     const roots = await this.#collectProviderHomes(canonicalHome);
-    await this.#scanClaudeHomes(roots.claude, budget, recordSession);
-    await this.#scanCodexHomes(roots.codex, budget, recordSession);
-    await this.#scanOpenCodeHomes(roots.opencode, budget, recordSession);
-    await this.#scanPiHomes(roots.pi, budget, recordSession);
+    for (const runPhase of [
+      () => this.#scanClaudeHomes(roots.claude, budget, recordSession),
+      () => this.#scanCodexHomes(roots.codex, budget, recordSession),
+      () => this.#scanOpenCodeHomes(roots.opencode, budget, recordSession),
+      () => this.#scanPiHomes(roots.pi, budget, recordSession),
+    ]) {
+      const strictNow = hiddenIfStrict();
+      if (strictNow !== undefined) return strictNow;
+      if (isDiscoveryStopped(budget)) break;
+      await runPhase();
+    }
 
-    // Canonicalize each discovered working directory, exclude linked worktrees
-    // and Downloads, roll repo subfolders up to the main checkout root, and
-    // merge activity across aliases of the same canonical folder.
+    const strictBeforeInspect = hiddenIfStrict();
+    if (strictBeforeInspect !== undefined) return strictBeforeInspect;
+
+    // Canonicalize every working directory already collected even when
+    // discovery stopped at a file or entry cap, stopping here only if the
+    // wall-clock deadline expires or Strict turns on.
     const mergedByRoot = new Map<
       string,
       {
         readonly providers: Set<DiscoveredFolderProvider>;
         readonly sessionKeys: Set<string>;
         lastActivityMs: number;
+        readonly device: number;
+        readonly inode: number;
+        readonly isGitRepository: boolean;
         readonly remote?: ParsedRemoteOwnerName;
       }
     >();
 
     for (const [cwd, activity] of rawByCwd) {
-      if (checkTimeBudget(budget)) break;
+      const strictNow = hiddenIfStrict();
+      if (strictNow !== undefined) return strictNow;
+      if (isTimeExpired(budget)) {
+        markStopped(budget, "time-limit");
+        break;
+      }
       const inspected = await inspectFolder(cwd, canonicalHome);
       if (inspected === undefined) continue;
       const existing = mergedByRoot.get(inspected.canonicalRoot);
@@ -238,9 +272,16 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
         providers: new Set(activity.providers),
         sessionKeys: new Set(activity.sessionKeys),
         lastActivityMs: activity.lastActivityMs,
+        device: inspected.device,
+        inode: inspected.inode,
+        isGitRepository: inspected.isGitRepository,
         ...(inspected.remote === undefined ? {} : { remote: inspected.remote }),
       });
     }
+
+    // Recheck Strict right before committing candidates or returning labels.
+    const strictBeforeReturn = hiddenIfStrict();
+    if (strictBeforeReturn !== undefined) return strictBeforeReturn;
 
     const activeRoots = new Set(
       this.#activeCodeProjects().map((project) => project.binding.canonicalRoot),
@@ -260,7 +301,10 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
         id,
         windowId,
         canonicalPath: canonicalRoot,
+        device: entry.device,
+        inode: entry.inode,
         folderName,
+        isGitRepository: entry.isGitRepository,
         expiresAt,
       });
       const lastActivityAt = toUtcTimestamp(entry.lastActivityMs, this.#clock);
@@ -273,6 +317,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
         providers: [...entry.providers],
         sessionCount,
         lastActivityAt,
+        isGitRepository: entry.isGitRepository,
         alreadyImported: activeRoots.has(canonicalRoot),
       });
     }
@@ -281,6 +326,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     return decodeProviderFolderScanResult({
       status: "ready",
       groups,
+      requireGitRepository: this.#requireGitRepository(),
       stoppedEarly: budget.stoppedReason !== undefined,
       ...(budget.stoppedReason === undefined ? {} : { stoppedEarlyReason: budget.stoppedReason }),
       scannedAt: this.#clock() as UtcTimestamp,
@@ -293,10 +339,11 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     actor?: EventActor,
   ): Promise<ImportProviderFoldersResult> {
     if (this.#isHostStrict()) {
+      this.#clearWindowCandidates(windowId);
       return decodeImportProviderFoldersResult({
         status: "refused",
         reason: "strict",
-        message: "Importing discovered provider folders is unavailable while Strict is on.",
+        message: STRICT_IMPORT_REFUSAL_MESSAGE,
       });
     }
 
@@ -307,7 +354,32 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     );
     const results: ImportedProviderFolderOutcome[] = [];
 
-    for (const folderId of request.folderIds) {
+    for (let index = 0; index < request.folderIds.length; index += 1) {
+      const folderId = request.folderIds[index];
+      if (folderId === undefined) continue;
+
+      if (this.#isHostStrict()) {
+        this.#clearWindowCandidates(windowId);
+        if (results.length === 0) {
+          return decodeImportProviderFoldersResult({
+            status: "refused",
+            reason: "strict",
+            message: STRICT_IMPORT_REFUSAL_MESSAGE,
+          });
+        }
+        for (let remaining = index; remaining < request.folderIds.length; remaining += 1) {
+          const pendingId = request.folderIds[remaining];
+          if (pendingId === undefined) continue;
+          results.push({
+            folderId: pendingId,
+            status: "refused",
+            reason: "strict",
+            message: STRICT_IMPORT_REFUSAL_MESSAGE,
+          });
+        }
+        break;
+      }
+
       const candidate = this.#candidates.get(String(folderId));
       if (
         candidate === undefined ||
@@ -319,6 +391,20 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
           status: "refused",
           reason: "not-found",
           message: "That folder is no longer listed. Scan again.",
+        });
+        continue;
+      }
+
+      // Verify the path has not been replaced with a symlink or swapped for
+      // a different directory since the scan listed it.
+      const unchanged = await verifyCandidateIdentity(candidate);
+      if (!unchanged) {
+        this.#candidates.delete(String(folderId));
+        results.push({
+          folderId,
+          status: "refused",
+          reason: "unavailable",
+          message: "That folder changed since the scan. Scan again.",
         });
         continue;
       }
@@ -337,9 +423,21 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
         continue;
       }
 
+      if (canonicalBinding.canonicalRoot !== candidate.canonicalPath) {
+        this.#candidates.delete(String(folderId));
+        results.push({
+          folderId,
+          status: "refused",
+          reason: "unavailable",
+          message: "That folder changed since the scan. Scan again.",
+        });
+        continue;
+      }
+
+      const gitContext = await inspectGitContext(canonicalBinding.canonicalRoot, canonicalHome);
       if (
         isExcludedProviderFolder(canonicalBinding.canonicalRoot, canonicalHome) ||
-        (await isInsideLinkedWorktree(canonicalBinding.canonicalRoot, canonicalHome))
+        gitContext.kind === "linked-worktree"
       ) {
         this.#candidates.delete(String(folderId));
         results.push({
@@ -349,6 +447,40 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
           message: "That folder cannot be imported.",
         });
         continue;
+      }
+
+      if (this.#requireGitRepository() && gitContext.kind !== "git-repo") {
+        results.push({
+          folderId,
+          status: "refused",
+          reason: "requires-git",
+          message:
+            "This folder is not a Git repository. Use Choose a folder… to initialize Git, or allow non-Git folders in Settings › Code.",
+        });
+        continue;
+      }
+
+      // Recheck Strict after async validation right before issuing a receipt.
+      if (this.#isHostStrict()) {
+        this.#clearWindowCandidates(windowId);
+        if (results.length === 0) {
+          return decodeImportProviderFoldersResult({
+            status: "refused",
+            reason: "strict",
+            message: STRICT_IMPORT_REFUSAL_MESSAGE,
+          });
+        }
+        for (let remaining = index; remaining < request.folderIds.length; remaining += 1) {
+          const pendingId = request.folderIds[remaining];
+          if (pendingId === undefined) continue;
+          results.push({
+            folderId: pendingId,
+            status: "refused",
+            reason: "strict",
+            message: STRICT_IMPORT_REFUSAL_MESSAGE,
+          });
+        }
+        break;
       }
 
       const existing = this.#activeCodeProjects().find(
@@ -485,16 +617,16 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     ) => boolean,
   ): Promise<void> {
     for (const claudeHome of homes) {
-      if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+      if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
       const projectsDir = join(claudeHome, "projects");
       const folders = await safeReaddirWithTypes(projectsDir);
       for (const folder of folders) {
-        if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+        if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
         if (!folder.isDirectory() || folder.isSymbolicLink()) continue;
         const folderPath = join(projectsDir, folder.name);
         const entries = await safeReaddirWithTypes(folderPath);
         for (const entry of entries) {
-          if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+          if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
           if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".jsonl")) continue;
           if (!consumeFileBudget(budget)) return;
           const filePath = join(folderPath, entry.name);
@@ -519,18 +651,34 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
       activityMs: number,
     ) => boolean,
   ): Promise<void> {
+    const visitRollout = async (filePath: string, fileName: string): Promise<boolean> => {
+      if (this.#isHostStrict()) return false;
+      if (!consumeFileBudget(budget)) return false;
+      const read = await readFileHead(filePath, SESSION_HEAD_BYTES);
+      if (read === undefined) return true;
+      const meta = extractCodexMeta(read.text);
+      if (meta === undefined) return true;
+      const activityMs = Math.max(read.mtimeMs, meta.timestampMs ?? 0);
+      return record(meta.cwd, "codex", meta.sessionId ?? fileName, activityMs);
+    };
+
     for (const codexHome of homes) {
-      if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
-      const sessionsRoot = join(codexHome, "sessions");
-      await walkCodexDateTree(sessionsRoot, 0, budget, async (filePath, fileName) => {
-        if (!consumeFileBudget(budget)) return false;
-        const read = await readFileHead(filePath, SESSION_HEAD_BYTES);
-        if (read === undefined) return true;
-        const meta = extractCodexMeta(read.text);
-        if (meta === undefined) return true;
-        const activityMs = Math.max(read.mtimeMs, meta.timestampMs ?? 0);
-        return record(meta.cwd, "codex", meta.sessionId ?? fileName, activityMs);
-      });
+      if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
+      await walkCodexDateTree(
+        join(codexHome, "sessions"),
+        0,
+        budget,
+        this.#isHostStrict,
+        visitRollout,
+      );
+      if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
+      await walkCodexArchiveTree(
+        join(codexHome, "archived_sessions"),
+        0,
+        budget,
+        this.#isHostStrict,
+        visitRollout,
+      );
     }
   }
 
@@ -545,7 +693,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     ) => boolean,
   ): Promise<void> {
     for (const dataDir of homes) {
-      if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+      if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
       const names = await safeReaddir(dataDir);
       const channelDbs = names
         .filter(
@@ -554,15 +702,15 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
         .sort();
       const dbNames = [...(names.includes("opencode.db") ? ["opencode.db"] : []), ...channelDbs];
       for (const dbName of dbNames) {
-        if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+        if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
         const dbPath = join(dataDir, dbName);
         if (!(await isRegularFile(dbPath))) continue;
-        scanOpenCodeSqlite(dbPath, budget, record);
+        scanOpenCodeSqlite(dbPath, budget, this.#isHostStrict, record);
       }
 
-      if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+      if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
       const legacySessions = join(dataDir, "storage", "session");
-      await scanOpenCodeLegacyJson(legacySessions, budget, record);
+      await scanOpenCodeLegacyJson(legacySessions, budget, this.#isHostStrict, record);
     }
   }
 
@@ -577,15 +725,15 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     ) => boolean,
   ): Promise<void> {
     for (const sessionsDir of sessionDirs) {
-      if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+      if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
       const folders = await safeReaddirWithTypes(sessionsDir);
       for (const folder of folders) {
-        if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+        if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
         if (!folder.isDirectory() || folder.isSymbolicLink()) continue;
         const folderPath = join(sessionsDir, folder.name);
         const entries = await safeReaddirWithTypes(folderPath);
         for (const entry of entries) {
-          if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+          if (this.#isHostStrict() || isDiscoveryStopped(budget)) return;
           if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".jsonl")) continue;
           if (!consumeFileBudget(budget)) return;
           const filePath = join(folderPath, entry.name);
@@ -614,24 +762,27 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
   }
 }
 
+function isTimeExpired(budget: ScanBudget): boolean {
+  return budget.now() - budget.startedAtMs >= budget.limits.maxTimeMs;
+}
+
+function isDiscoveryStopped(budget: ScanBudget): boolean {
+  if (budget.stoppedReason !== undefined) return true;
+  if (isTimeExpired(budget)) {
+    markStopped(budget, "time-limit");
+    return true;
+  }
+  return false;
+}
+
 function consumeFileBudget(budget: ScanBudget): boolean {
-  if (budget.stoppedReason !== undefined) return false;
-  if (checkTimeBudget(budget)) return false;
+  if (isDiscoveryStopped(budget)) return false;
   if (budget.filesScanned >= budget.limits.maxFiles) {
     markStopped(budget, "file-limit");
     return false;
   }
   budget.filesScanned += 1;
   return true;
-}
-
-function checkTimeBudget(budget: ScanBudget): boolean {
-  if (budget.stoppedReason !== undefined) return true;
-  if (budget.now() - budget.startedAtMs >= budget.limits.maxTimeMs) {
-    markStopped(budget, "time-limit");
-    return true;
-  }
-  return false;
 }
 
 function markStopped(budget: ScanBudget, reason: ProviderFolderScanStopReason): void {
@@ -642,9 +793,10 @@ async function walkCodexDateTree(
   directory: string,
   depth: number,
   budget: ScanBudget,
+  isStrict: () => boolean,
   visit: (filePath: string, fileName: string) => Promise<boolean>,
 ): Promise<void> {
-  if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+  if (isStrict() || isDiscoveryStopped(budget)) return;
   const entries = await safeReaddirWithTypes(directory);
   if (depth < 3) {
     const dirs = entries
@@ -653,8 +805,8 @@ async function walkCodexDateTree(
       )
       .sort((left, right) => right.name.localeCompare(left.name));
     for (const dir of dirs) {
-      if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
-      await walkCodexDateTree(join(directory, dir.name), depth + 1, budget, visit);
+      if (isStrict() || isDiscoveryStopped(budget)) return;
+      await walkCodexDateTree(join(directory, dir.name), depth + 1, budget, isStrict, visit);
     }
     return;
   }
@@ -664,15 +816,51 @@ async function walkCodexDateTree(
     )
     .sort((left, right) => right.name.localeCompare(left.name));
   for (const file of files) {
-    if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+    if (isStrict() || isDiscoveryStopped(budget)) return;
     const keepGoing = await visit(join(directory, file.name), file.name);
     if (!keepGoing) return;
+  }
+}
+
+/**
+ * Walks Codex's `archived_sessions` folder, which may hold flat `rollout-*.jsonl`
+ * files or dated subdirectories up to depth 3, newest first.
+ */
+async function walkCodexArchiveTree(
+  directory: string,
+  depth: number,
+  budget: ScanBudget,
+  isStrict: () => boolean,
+  visit: (filePath: string, fileName: string) => Promise<boolean>,
+): Promise<void> {
+  if (isStrict() || isDiscoveryStopped(budget)) return;
+  const entries = await safeReaddirWithTypes(directory);
+  const files = entries
+    .filter(
+      (entry) => entry.isFile() && !entry.isSymbolicLink() && CODEX_ROLLOUT_FILE.test(entry.name),
+    )
+    .sort((left, right) => right.name.localeCompare(left.name));
+  for (const file of files) {
+    if (isStrict() || isDiscoveryStopped(budget)) return;
+    const keepGoing = await visit(join(directory, file.name), file.name);
+    if (!keepGoing) return;
+  }
+  if (depth >= 3) return;
+  const dirs = entries
+    .filter(
+      (entry) => entry.isDirectory() && !entry.isSymbolicLink() && DATE_SEGMENT.test(entry.name),
+    )
+    .sort((left, right) => right.name.localeCompare(left.name));
+  for (const dir of dirs) {
+    if (isStrict() || isDiscoveryStopped(budget)) return;
+    await walkCodexArchiveTree(join(directory, dir.name), depth + 1, budget, isStrict, visit);
   }
 }
 
 function scanOpenCodeSqlite(
   dbPath: string,
   budget: ScanBudget,
+  isStrict: () => boolean,
   record: (
     cwd: string,
     provider: DiscoveredFolderProvider,
@@ -680,6 +868,7 @@ function scanOpenCodeSqlite(
     activityMs: number,
   ) => boolean,
 ): void {
+  if (isStrict() || isDiscoveryStopped(budget)) return;
   let db;
   try {
     db = openReadOnlySqlite(dbPath);
@@ -718,6 +907,7 @@ function scanOpenCodeSqlite(
     );
 
     for (const row of rows) {
+      if (isStrict()) return;
       if (!isRecord(row) || typeof row.directory !== "string") continue;
       if (!consumeFileBudget(budget)) return;
       const id =
@@ -738,6 +928,7 @@ function scanOpenCodeSqlite(
 async function scanOpenCodeLegacyJson(
   sessionsRoot: string,
   budget: ScanBudget,
+  isStrict: () => boolean,
   record: (
     cwd: string,
     provider: DiscoveredFolderProvider,
@@ -747,7 +938,7 @@ async function scanOpenCodeLegacyJson(
 ): Promise<void> {
   const top = await safeReaddirWithTypes(sessionsRoot);
   for (const entry of top) {
-    if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+    if (isStrict() || isDiscoveryStopped(budget)) return;
     if (entry.isSymbolicLink()) continue;
     const entryPath = join(sessionsRoot, entry.name);
     if (entry.isFile() && entry.name.endsWith(".json")) {
@@ -761,7 +952,7 @@ async function scanOpenCodeLegacyJson(
     if (!entry.isDirectory()) continue;
     const nested = await safeReaddirWithTypes(entryPath);
     for (const file of nested) {
-      if (budget.stoppedReason !== undefined || checkTimeBudget(budget)) return;
+      if (isStrict() || isDiscoveryStopped(budget)) return;
       if (!file.isFile() || file.isSymbolicLink() || !file.name.endsWith(".json")) continue;
       if (!consumeFileBudget(budget)) return;
       const parsed = await readOpenCodeJsonSession(join(entryPath, file.name));
@@ -796,16 +987,39 @@ async function readOpenCodeJsonSession(
   return { id, cwd: value.directory, activityMs };
 }
 
+async function verifyCandidateIdentity(candidate: StoredCandidate): Promise<boolean> {
+  try {
+    const linkInfo = await lstat(candidate.canonicalPath);
+    if (linkInfo.isSymbolicLink() || !linkInfo.isDirectory()) return false;
+    const resolved = await realpath(candidate.canonicalPath);
+    if (resolved !== candidate.canonicalPath) return false;
+    const current = await stat(resolved);
+    return (
+      current.isDirectory() && current.dev === candidate.device && current.ino === candidate.inode
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function inspectFolder(
   candidatePath: string,
   canonicalHome: string,
 ): Promise<
-  { readonly canonicalRoot: string; readonly remote?: ParsedRemoteOwnerName } | undefined
+  | {
+      readonly canonicalRoot: string;
+      readonly device: number;
+      readonly inode: number;
+      readonly isGitRepository: boolean;
+      readonly remote?: ParsedRemoteOwnerName;
+    }
+  | undefined
 > {
   let canonicalPath: string;
+  let info;
   try {
     canonicalPath = await realpath(candidatePath);
-    const info = await stat(canonicalPath);
+    info = await stat(canonicalPath);
     if (!info.isDirectory()) return undefined;
   } catch {
     return undefined;
@@ -816,18 +1030,30 @@ async function inspectFolder(
   if (git.kind === "linked-worktree") return undefined;
   if (git.kind === "git-repo") {
     if (isExcludedProviderFolder(git.repoRoot, canonicalHome)) return undefined;
-    const remote = await readGitRemoteOwnerName(join(git.repoRoot, ".git", "config"));
-    return { canonicalRoot: git.repoRoot, ...(remote === undefined ? {} : { remote }) };
+    let rootStat = info;
+    if (git.repoRoot !== canonicalPath) {
+      try {
+        rootStat = await stat(git.repoRoot);
+        if (!rootStat.isDirectory()) return undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    const remote = await readGitRemoteOwnerName(git.gitConfigPath);
+    return {
+      canonicalRoot: git.repoRoot,
+      device: rootStat.dev,
+      inode: rootStat.ino,
+      isGitRepository: true,
+      ...(remote === undefined ? {} : { remote }),
+    };
   }
-  return { canonicalRoot: canonicalPath };
-}
-
-async function isInsideLinkedWorktree(
-  canonicalPath: string,
-  canonicalHome: string,
-): Promise<boolean> {
-  const git = await inspectGitContext(canonicalPath, canonicalHome);
-  return git.kind === "linked-worktree";
+  return {
+    canonicalRoot: canonicalPath,
+    device: info.dev,
+    inode: info.ino,
+    isGitRepository: false,
+  };
 }
 
 async function inspectGitContext(
@@ -835,7 +1061,7 @@ async function inspectGitContext(
   canonicalHome: string,
 ): Promise<
   | { readonly kind: "linked-worktree" }
-  | { readonly kind: "git-repo"; readonly repoRoot: string }
+  | { readonly kind: "git-repo"; readonly repoRoot: string; readonly gitConfigPath: string }
   | { readonly kind: "plain-folder" }
 > {
   let cursor = canonicalPath;
@@ -852,8 +1078,22 @@ async function inspectGitContext(
       if (info.isFile()) {
         const common = await commonOfLinkedWorktree(dotGit);
         if (common !== undefined) return { kind: "linked-worktree" };
+        // Non-worktree `.git` file (such as an initialized Git submodule) binds
+        // this checkout itself rather than walking up into the parent repo.
+        const gitDir = await resolveGitDirPointer(dotGit);
+        if (gitDir !== undefined) {
+          return {
+            kind: "git-repo",
+            repoRoot: cursor,
+            gitConfigPath: join(gitDir, "config"),
+          };
+        }
       } else if (info.isDirectory()) {
-        return { kind: "git-repo", repoRoot: cursor };
+        return {
+          kind: "git-repo",
+          repoRoot: cursor,
+          gitConfigPath: join(dotGit, "config"),
+        };
       }
     }
     const parent = dirname(cursor);
@@ -861,6 +1101,28 @@ async function inspectGitContext(
     cursor = parent;
   }
   return { kind: "plain-folder" };
+}
+
+/**
+ * Resolves a non-worktree `.git` pointer file (`gitdir: <path>`) to its target
+ * directory, returning undefined if malformed or missing.
+ */
+async function resolveGitDirPointer(dotGitPath: string): Promise<string | undefined> {
+  const read = await readSmallFile(dotGitPath, GIT_FILE_MAX_BYTES);
+  if (read === undefined) return undefined;
+  const match = /^gitdir:\s*(.+)$/m.exec(read.text);
+  const rawTarget = match?.[1]?.trim();
+  if (rawTarget === undefined || rawTarget === "") return undefined;
+  const resolved = isAbsolute(rawTarget)
+    ? resolve(rawTarget)
+    : resolve(dirname(dotGitPath), rawTarget);
+  try {
+    const canonical = await realpath(resolved);
+    const info = await stat(canonical);
+    return info.isDirectory() ? canonical : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

@@ -1139,6 +1139,7 @@ describe("Project icon change route", () => {
     const scan = vi.fn(async () => ({
       status: "ready" as const,
       groups: [],
+      requireGitRepository: true,
       stoppedEarly: false,
       scannedAt: "2026-11-21T10:00:00.000Z" as never,
     }));

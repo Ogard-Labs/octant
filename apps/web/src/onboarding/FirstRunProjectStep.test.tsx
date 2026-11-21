@@ -3,8 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  MAX_IMPORTED_PROVIDER_FOLDERS,
   decodeDiscoveredProviderFolderId,
   decodeProjectId,
+  type DiscoveredProviderFolderGroup,
   type ImportProviderFoldersResult,
   type ProviderFolderScanResult,
   type UtcTimestamp,
@@ -16,6 +18,11 @@ const FOLDER_A = decodeDiscoveredProviderFolderId("11111111-1111-4111-8111-11111
 const FOLDER_B = decodeDiscoveredProviderFolderId("22222222-2222-4222-8222-222222222222");
 const FOLDER_C = decodeDiscoveredProviderFolderId("33333333-3333-4333-8333-333333333333");
 const PROJECT_A = decodeProjectId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+
+function folderIdAt(index: number) {
+  const hex = index.toString(16).padStart(12, "0");
+  return decodeDiscoveredProviderFolderId(`11111111-1111-4111-8111-${hex}`);
+}
 
 function Step(props: {
   readonly initial: FirstRunTaskMode;
@@ -65,10 +72,11 @@ describe("FirstRunProjectStep mode choice", () => {
 });
 
 describe("FirstRunProjectStep provider folder scan", () => {
-  it("lists folders the person's providers used, grouped by remote, with no host paths shown", async () => {
+  it("lists folders the person's providers used, grouped by remote, with distinct labels for same-name clones", async () => {
     const scan = vi.fn(
       async (): Promise<ProviderFolderScanResult> => ({
         status: "ready",
+        requireGitRepository: true,
         groups: [
           {
             repository: "acme/alpha",
@@ -83,14 +91,16 @@ describe("FirstRunProjectStep provider folder scan", () => {
                 providers: ["claude"],
                 sessionCount: 3,
                 lastActivityAt: "2026-11-21T10:00:00.000Z" as UtcTimestamp,
+                isGitRepository: true,
                 alreadyImported: false,
               },
               {
                 id: FOLDER_B,
-                folderName: "alpha-backup",
+                folderName: "alpha",
                 providers: ["codex"],
                 sessionCount: 2,
                 lastActivityAt: "2026-11-20T10:00:00.000Z" as UtcTimestamp,
+                isGitRepository: true,
                 alreadyImported: false,
               },
             ],
@@ -107,6 +117,7 @@ describe("FirstRunProjectStep provider folder scan", () => {
                 providers: ["opencode", "pi"],
                 sessionCount: 4,
                 lastActivityAt: "2026-11-19T10:00:00.000Z" as UtcTimestamp,
+                isGitRepository: false,
                 alreadyImported: false,
               },
             ],
@@ -130,13 +141,61 @@ describe("FirstRunProjectStep provider folder scan", () => {
 
     expect(await screen.findByText("acme/alpha")).toBeInTheDocument();
     expect(screen.getByText(/2 clones/i)).toBeInTheDocument();
-    expect(screen.getByText("alpha-backup")).toBeInTheDocument();
-    expect(screen.getByText("local-notes")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "acme/alpha (alpha (1))" })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: "acme/alpha (alpha (2))" })).toBeEnabled();
+    // Plain non-Git folder is disabled with guidance while Code requires Git.
+    expect(screen.getByRole("checkbox", { name: "local-notes" })).toBeDisabled();
+    expect(screen.getByText(/Not a Git repository/i)).toBeInTheDocument();
     expect(screen.getByText(/OpenCode, Pi/i)).toBeInTheDocument();
   });
 
-  it("imports only the ticked folders as Code Projects", async () => {
+  it("imports only the ticked folders as Code Projects and offers rescan in the ready view", async () => {
     const user = userEvent.setup();
+    const scan = vi.fn(
+      async (): Promise<ProviderFolderScanResult> => ({
+        status: "ready",
+        requireGitRepository: true,
+        groups: [
+          {
+            repository: "acme/alpha",
+            label: "acme/alpha",
+            providers: ["claude"],
+            sessionCount: 2,
+            lastActivityAt: "2026-11-21T10:00:00.000Z" as UtcTimestamp,
+            folders: [
+              {
+                id: FOLDER_A,
+                folderName: "alpha",
+                providers: ["claude"],
+                sessionCount: 2,
+                lastActivityAt: "2026-11-21T10:00:00.000Z" as UtcTimestamp,
+                isGitRepository: true,
+                alreadyImported: false,
+              },
+            ],
+          },
+          {
+            label: "beta",
+            providers: ["codex"],
+            sessionCount: 1,
+            lastActivityAt: "2026-11-20T10:00:00.000Z" as UtcTimestamp,
+            folders: [
+              {
+                id: FOLDER_B,
+                folderName: "beta",
+                providers: ["codex"],
+                sessionCount: 1,
+                lastActivityAt: "2026-11-20T10:00:00.000Z" as UtcTimestamp,
+                isGitRepository: true,
+                alreadyImported: false,
+              },
+            ],
+          },
+        ],
+        stoppedEarly: false,
+        scannedAt: "2026-11-21T10:05:00.000Z" as UtcTimestamp,
+      }),
+    );
     const importFolders = vi.fn(
       async (): Promise<ImportProviderFoldersResult> => ({
         status: "completed",
@@ -156,46 +215,7 @@ describe("FirstRunProjectStep provider folder scan", () => {
         initial="code"
         providerFolderScan={{
           strict: false,
-          scan: async () => ({
-            status: "ready",
-            groups: [
-              {
-                repository: "acme/alpha",
-                label: "acme/alpha",
-                providers: ["claude"],
-                sessionCount: 2,
-                lastActivityAt: "2026-11-21T10:00:00.000Z" as UtcTimestamp,
-                folders: [
-                  {
-                    id: FOLDER_A,
-                    folderName: "alpha",
-                    providers: ["claude"],
-                    sessionCount: 2,
-                    lastActivityAt: "2026-11-21T10:00:00.000Z" as UtcTimestamp,
-                    alreadyImported: false,
-                  },
-                ],
-              },
-              {
-                label: "beta",
-                providers: ["codex"],
-                sessionCount: 1,
-                lastActivityAt: "2026-11-20T10:00:00.000Z" as UtcTimestamp,
-                folders: [
-                  {
-                    id: FOLDER_B,
-                    folderName: "beta",
-                    providers: ["codex"],
-                    sessionCount: 1,
-                    lastActivityAt: "2026-11-20T10:00:00.000Z" as UtcTimestamp,
-                    alreadyImported: false,
-                  },
-                ],
-              },
-            ],
-            stoppedEarly: false,
-            scannedAt: "2026-11-21T10:05:00.000Z" as UtcTimestamp,
-          }),
+          scan,
           importFolders,
         }}
       />,
@@ -213,6 +233,95 @@ describe("FirstRunProjectStep provider folder scan", () => {
       expect(importFolders).toHaveBeenCalledWith([FOLDER_A]);
     });
     expect(await screen.findByText(/imported 1 code project/i)).toBeInTheDocument();
+
+    // Rescan button stays available in the ready view (e.g. if IDs expire).
+    await user.click(screen.getByRole("button", { name: "Scan again" }));
+    await waitFor(() => {
+      expect(scan).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("batches selections exceeding the per-request folder import limit sequentially", async () => {
+    const user = userEvent.setup();
+    const total = MAX_IMPORTED_PROVIDER_FOLDERS + 1;
+    const groups: DiscoveredProviderFolderGroup[] = Array.from({ length: total }, (_, index) => {
+      const id = folderIdAt(index + 1);
+      const name = `repo-${String(index + 1)}`;
+      return {
+        label: name,
+        providers: ["claude"],
+        sessionCount: 1,
+        lastActivityAt: "2026-11-21T10:00:00.000Z" as UtcTimestamp,
+        folders: [
+          {
+            id,
+            folderName: name,
+            providers: ["claude"],
+            sessionCount: 1,
+            lastActivityAt: "2026-11-21T10:00:00.000Z" as UtcTimestamp,
+            isGitRepository: true,
+            alreadyImported: false,
+          },
+        ],
+      };
+    });
+
+    const batchSizes: number[] = [];
+    const importFolders = vi.fn(
+      async (
+        folderIds: readonly [
+          ReturnType<typeof decodeDiscoveredProviderFolderId>,
+          ...ReturnType<typeof decodeDiscoveredProviderFolderId>[],
+        ],
+      ): Promise<ImportProviderFoldersResult> => {
+        batchSizes.push(folderIds.length);
+        return {
+          status: "completed",
+          results: folderIds.map((folderId) => ({
+            folderId,
+            status: "created",
+            projectId: PROJECT_A,
+            name: "repo",
+          })),
+        };
+      },
+    );
+
+    render(
+      <Step
+        initial="code"
+        providerFolderScan={{
+          strict: false,
+          scan: async () => ({
+            status: "ready",
+            requireGitRepository: true,
+            groups,
+            stoppedEarly: false,
+            scannedAt: "2026-11-21T10:05:00.000Z" as UtcTimestamp,
+          }),
+          importFolders,
+        }}
+      />,
+    );
+
+    const checkboxes = await screen.findAllByRole("checkbox");
+    expect(checkboxes).toHaveLength(total);
+    for (const checkbox of checkboxes) {
+      await user.click(checkbox);
+    }
+
+    await user.click(
+      screen.getByRole("button", {
+        name: new RegExp(`import ${String(total)} code projects`, "i"),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(batchSizes).toEqual([MAX_IMPORTED_PROVIDER_FOLDERS, 1]);
+    });
+    expect(
+      await screen.findByText(new RegExp(`imported ${String(total)} code projects`, "i")),
+    ).toBeInTheDocument();
   });
 
   it("says when the scan stopped early", async () => {
@@ -223,6 +332,7 @@ describe("FirstRunProjectStep provider folder scan", () => {
           strict: false,
           scan: async () => ({
             status: "ready",
+            requireGitRepository: true,
             groups: [],
             stoppedEarly: true,
             stoppedEarlyReason: "file-limit",
@@ -234,6 +344,7 @@ describe("FirstRunProjectStep provider folder scan", () => {
     );
 
     expect(await screen.findByText(/scan stopped early/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scan again" })).toBeEnabled();
   });
 
   it("hides the first-run project scan under Strict", async () => {

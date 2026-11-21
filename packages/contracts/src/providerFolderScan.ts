@@ -65,6 +65,7 @@ export const DiscoveredProviderFolder = Schema.Struct({
   ),
   sessionCount: Schema.Int.pipe(Schema.positive()),
   lastActivityAt: UtcTimestamp,
+  isGitRepository: Schema.Boolean,
   alreadyImported: Schema.Boolean,
 }).annotations(strict);
 export type DiscoveredProviderFolder = typeof DiscoveredProviderFolder.Type;
@@ -96,6 +97,7 @@ export const ProviderFolderScanResult = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("ready"),
     groups: Schema.Array(DiscoveredProviderFolderGroup),
+    requireGitRepository: Schema.Boolean,
     stoppedEarly: Schema.Boolean,
     stoppedEarlyReason: Schema.optional(ProviderFolderScanStopReason),
     scannedAt: UtcTimestamp,
@@ -131,7 +133,7 @@ export const ImportedProviderFolderOutcome = Schema.Union(
   Schema.Struct({
     folderId: DiscoveredProviderFolderId,
     status: Schema.Literal("refused"),
-    reason: Schema.Literal("not-found", "unavailable", "excluded", "strict"),
+    reason: Schema.Literal("not-found", "unavailable", "excluded", "requires-git", "strict"),
     message: Schema.NonEmptyTrimmedString,
   }).annotations(strict),
 );

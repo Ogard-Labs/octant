@@ -1,12 +1,17 @@
-import type {
-  DiscoveredFolderProvider,
-  DiscoveredProviderFolder,
-  DiscoveredProviderFolderGroup,
-  DiscoveredProviderFolderId,
-  DiscoveredRepositorySlug,
-  SafeDiscoveredFolderName,
-  UtcTimestamp,
+import {
+  SafeDiscoveredFolderName as SafeDiscoveredFolderNameSchema,
+  type DiscoveredFolderProvider,
+  type DiscoveredProviderFolder,
+  type DiscoveredProviderFolderGroup,
+  type DiscoveredProviderFolderId,
+  type DiscoveredRepositorySlug,
+  type SafeDiscoveredFolderName,
+  type UtcTimestamp,
 } from "@octant/contracts";
+import { Either, Schema } from "effect";
+
+const decodeSafeDiscoveredFolderName = Schema.decodeUnknownEither(SafeDiscoveredFolderNameSchema);
+const MAX_FOLDER_NAME_CODE_UNITS = 128;
 
 export interface ParsedRemoteOwnerName {
   readonly host: string;
@@ -27,6 +32,7 @@ export interface ObservedProviderFolder {
   readonly providers: ReadonlyArray<DiscoveredFolderProvider>;
   readonly sessionCount: number;
   readonly lastActivityAt: UtcTimestamp;
+  readonly isGitRepository: boolean;
   readonly alreadyImported: boolean;
 }
 
@@ -113,7 +119,8 @@ function isSafeRemoteSegment(segment: string): boolean {
 
 /**
  * Derive a safe single-segment display name for a folder path. Never returns a
- * full path, parent segments, or control characters.
+ * full path, parent segments, control characters, trailing whitespace after
+ * truncation, or strings exceeding the contract's UTF-16 length limit.
  */
 export function safeDiscoveredFolderName(folderPath: string): SafeDiscoveredFolderName | undefined {
   const normalized = stripTrailingSlashes(folderPath.replaceAll("\\", "/").trim());
@@ -122,16 +129,18 @@ export function safeDiscoveredFolderName(folderPath: string): SafeDiscoveredFold
   const raw = lastSlash >= 0 ? normalized.slice(lastSlash + 1) : normalized;
   // oxlint-disable-next-line no-control-regex -- strip C0 and DEL from display labels.
   const cleaned = raw.replace(/[\u0000-\u001f\u007f]/g, "").trim();
-  if (
-    cleaned === "" ||
-    cleaned === "." ||
-    cleaned === ".." ||
-    cleaned.includes("/") ||
-    cleaned.includes("\\")
-  ) {
-    return undefined;
+  if (cleaned === "") return undefined;
+  // Truncate on Unicode code-point boundaries while keeping UTF-16 `.length`
+  // within `SafeDiscoveredFolderName`'s maxLength bound, then re-trim so an
+  // interior space exposed by truncation never fails NonEmptyTrimmedString.
+  let truncated = "";
+  for (const ch of cleaned) {
+    if (truncated.length + ch.length > MAX_FOLDER_NAME_CODE_UNITS) break;
+    truncated += ch;
   }
-  return Array.from(cleaned).slice(0, 128).join("") as SafeDiscoveredFolderName;
+  const candidate = truncated.trim();
+  const decoded = decodeSafeDiscoveredFolderName(candidate);
+  return Either.isRight(decoded) ? decoded.right : undefined;
 }
 
 /**
@@ -206,6 +215,7 @@ export function groupDiscoveredProviderFolders(
         providers: sortedProviders,
         sessionCount: entry.sessionCount,
         lastActivityAt: entry.lastActivityAt,
+        isGitRepository: entry.isGitRepository,
         alreadyImported: entry.alreadyImported,
       });
     }
