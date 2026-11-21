@@ -44,6 +44,8 @@ import type {
   CodeOperationApprovalAnchor,
   ForgetPairedComputerOutcome,
   HostCapabilities,
+  HubWindowIntroductionOutcome,
+  HubWindowIntroductionRequest,
   LocalPluginFolderPickerResult,
   MenuBarOpenThread,
   OpenInApplicationDescriptor,
@@ -171,6 +173,17 @@ export interface PairedComputersBridge {
     outcome: "approved" | "abandoned",
   ) => Promise<SettlePairedComputerOutcome>;
   readonly requestPairedComputer: (request: PairedComputerRequest) => Promise<PairedComputerAnswer>;
+}
+
+/**
+ * The hub's other members as this desktop window's computers. Present only in
+ * the desktop app: main asks this computer's host to have the hub list the
+ * window as a guest, and keeps the pins of the members the host names.
+ */
+export interface HubComputersBridge {
+  readonly introduceWindowToHub: (
+    request: HubWindowIntroductionRequest,
+  ) => Promise<HubWindowIntroductionOutcome>;
 }
 
 const pairedComputersByBridge = new WeakMap<OctantHostBridge, PairedComputersBridge>();
@@ -417,6 +430,7 @@ export interface OctantHostBridge
     EmbeddedBrowserBridge,
     Partial<RemoteAccessAdministrationBridge>,
     Partial<PairedComputersBridge>,
+    Partial<HubComputersBridge>,
     Partial<HubAdministrationBridge>,
     Partial<AgentAccessAdministrationBridge>,
     Partial<ProviderDeviceSignInBridge>,

@@ -50,6 +50,9 @@ function identityFacts(snapshot: FederatedHostLifecycleSnapshot): string {
   if (snapshot.origin !== undefined) {
     parts.push(snapshot.origin);
   }
+  // That computer admitted this device because the hub introduced it, so it
+  // acts there only within that computer's Act item.
+  if (snapshot.through === "hub") parts.push("Through the hub");
   return parts.join(" · ");
 }
 

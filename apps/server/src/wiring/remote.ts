@@ -221,6 +221,7 @@ import type { WorkWiring } from "./work";
 import type { CanvasWiring } from "./canvas";
 import type { AutomationWiring } from "./automation";
 import type { RoutesWiring } from "./routes";
+import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
 
 /** How often a hub member looks for the hub; the failover time itself is the hub's setting in the roster. */
 const FAILOVER_LOOK_MS = 15_000;
@@ -690,6 +691,9 @@ export function wireRemote(deps: RemoteDependencies) {
           administration.revokeDevice({ deviceId });
         },
         deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
+        endActSessions: (deviceIds) => {
+          gateway.endDeviceSessions(deviceIds, HUB_ACT_WITHDRAWN_REASON);
+        },
       };
     },
     record: recordHubMembership,

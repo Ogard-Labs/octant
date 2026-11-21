@@ -17954,7 +17954,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
       `.../operations/:id/events`, and `.../events` only with `wait=0`;
       `POST /api/code/commands`; `PUT /api/code/evidence`; and
       `GET /api/projects/bootstrap`, `/api/providers/bootstrap` and
-      `/api/pending-requests`. An `:id` segment matches only a lowercase UUID.
+      `/api/pending-requests`; and, only to a member of this host's hub (below),
+      `POST /api/hub/guest`. An `:id` segment matches only a lowercase UUID.
       Thread events are carried only with `wait=0` because without it the
       computer holds the read open until the next change, past this channel's
       time limit; with it the computer answers once it has caught up, and the
@@ -17967,8 +17968,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
       request has (`accept`, `content-type`, `cookie` naming only the
       computer's Octant session cookies, `origin` equal to the computer's
       origin, `sec-fetch-site: same-origin`, `x-octant-device-proof`,
-      `x-octant-csrf`, `x-octant-command-id`, and `x-octant-code-thread-id`
-      for a thread's first prompt); any other header refuses the request. A body is text or bytes, at most 8 MiB, and not on `GET`. A
+      `x-octant-csrf`, `x-octant-command-id`, `x-octant-code-thread-id`
+      for a thread's first prompt, and `x-octant-hub-link` for a guest
+      admission the window signs with its guest key); any other header refuses
+      the request. A body is text or bytes, at most 8 MiB, and not on `GET`. A
       redirect is returned and never followed. A reply's cookies and any header
       whose name reads as a credential (`authorization`, `credential`,
       `secret`, `token`, `key`) are removed, a reply over 16 MiB or slower than
@@ -17991,6 +17994,24 @@ approval-gated` command that undoes it. The terminal shows no one-time
       computer keeps listing the device until it is revoked there. The shared
       helper `clearRemotePageStorage` stays the one way a remote page's data is
       cleared.
+      When this host is a hub member or the hub, the window also lists the
+      hub's other members as computers, as a guest of the hub
+      ([Hub and spokes: what a hub-introduced device may do](design/hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
+      Through `octant:paired-computers:introduce-to-hub` the window hands main
+      only its own guest public key, the member id it chose, and a label; main
+      sends them to the host's loopback hub route under that window's
+      capability, and the host answers with the spokes and standbys of the
+      roster it holds, each with a private origin and the listener pin the
+      roster names (the hub itself is not one). Main replaces its hub members'
+      pins whole with those, marked as through the hub, never over a computer
+      paired directly, and never from anything the window names; a member the
+      host stops naming is no longer reachable. The window then asks each
+      member directly, over this same channel, to admit its guest key
+      (`POST /api/hub/guest`, carried only to such a member), records the
+      device that member issued with that member's pin and identity key
+      fingerprint, and opens a session there as for any paired computer. The
+      registry marks such a host `through: hub`, and the window takes it off
+      when the host stops naming it or the member refuses the window.
     - **Phone.** The pairing screen reads a code from the app's own QR
       scanner or its paste field; typing the origin and ticket stays for a
       listener with a pasted certificate. Once a claim is pending the

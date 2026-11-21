@@ -44,7 +44,10 @@ export const PAIRED_COMPUTER_REQUEST_LIMITS = {
  * computer and follow it there. A `:id` segment matches only a lowercase
  * UUID, which is how the host names threads and operations. Thread events
  * are carried only with `wait=0`, because without it the host holds the read
- * open until the next change, past this channel's time limit. Anything else,
+ * open until the next change, past this channel's time limit. A member of
+ * this host's hub, pinned from the host's roster, may also be asked to admit
+ * the window as the guest the hub introduced, a request the window signs with
+ * its guest key; a computer paired directly is never sent it. Anything else,
  * including the relay under `/api/server-proxy/<grant>/`, which the desktop's
  * own forwarder drives, is refused.
  */
@@ -53,6 +56,8 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   readonly path: string;
   /** Query parameters the request must carry with exactly these values. */
   readonly requiredQuery?: Readonly<Record<string, string>>;
+  /** Sent only to a member of this host's hub, never to a computer paired directly. */
+  readonly hubMemberOnly?: true;
 }> = [
   { method: "GET", path: "/api/remote/hello" },
   { method: "POST", path: "/api/remote/pairing" },
@@ -82,6 +87,7 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   { method: "GET", path: "/api/projects/bootstrap" },
   { method: "GET", path: "/api/providers/bootstrap" },
   { method: "GET", path: "/api/pending-requests" },
+  { method: "POST", path: "/api/hub/guest", hubMemberOnly: true },
 ];
 
 const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -116,6 +122,7 @@ const ALLOWED_REQUEST_HEADERS: ReadonlySet<string> = new Set([
   "x-octant-csrf",
   "x-octant-command-id",
   "x-octant-code-thread-id",
+  "x-octant-hub-link",
 ]);
 
 /** Octant's own session cookies for a paired computer, and nothing else. */
@@ -234,7 +241,10 @@ function decodeRequest(value: unknown, pins: PairedComputerPins): DecodedRequest
   if (typeof origin !== "string" || pins.reachPinFor(origin, true) === undefined) {
     return refuse(NOT_PAIRED);
   }
-  if (typeof method !== "string" || !isAllowedRequest(origin, path, method)) {
+  if (
+    typeof method !== "string" ||
+    !isAllowedRequest(origin, path, method, pins.isThroughHub(origin))
+  ) {
     return refuse("Octant doesn't send that request to another computer.");
   }
   // Held to the recorded pin unless this is a pairing route.
@@ -275,7 +285,12 @@ function decodeRequest(value: unknown, pins: PairedComputerPins): DecodedRequest
  * list all see the same string. Dot segments, a second slash, a scheme or
  * authority, and control characters never pass.
  */
-function isAllowedRequest(origin: string, path: unknown, method: string): boolean {
+function isAllowedRequest(
+  origin: string,
+  path: unknown,
+  method: string,
+  hubMember: boolean,
+): boolean {
   if (typeof path !== "string" || path.length === 0) return false;
   if (path.length > PAIRED_COMPUTER_REQUEST_LIMITS.pathChars) return false;
   if (!path.startsWith("/") || path.startsWith("//") || /[\\#]/.test(path)) return false;
@@ -290,6 +305,7 @@ function isAllowedRequest(origin: string, path: unknown, method: string): boolea
   return PAIRED_COMPUTER_ALLOWED_REQUESTS.some(
     (allowed) =>
       allowed.method === method &&
+      (allowed.hubMemberOnly !== true || hubMember) &&
       pathMatches(allowed.path, url.pathname) &&
       Object.entries(allowed.requiredQuery ?? {}).every(
         ([name, value]) => url.searchParams.get(name) === value,
