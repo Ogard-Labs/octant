@@ -5599,8 +5599,8 @@ unless the call asks for 1 to 10. It opens no page.
   ending the turn.
 - **Outside content.** A successful result marks the thread as having read
   outside content. On a harness thread the call also passes the harness's
-  tool-call policy, which refuses a tainted thread's query that looks like it
-  carries data ([Search queries on a tainted thread](design/search-query-taint.md));
+  tool-call policy, which under Strict refuses a tainted thread's query that
+  looks like it carries data ([Search queries on a tainted thread](design/search-query-taint.md));
   a Chat thread on another provider searches through its research route, as
   its search did before, without that refusal.
 - **Rationale for the name.** `web-search` was already the harness's tool, with
@@ -10565,9 +10565,12 @@ the model at another size.
   the thread; [Persistence](#persistence), Untrusted-content taint). A person's clear ends this until the next
   result that taints ([Persistence](#persistence), Clearing taint).
   `web-search` does not ask under taint: it
-  reaches only the search endpoint the person configured, so the tool-call
-  policy instead refuses a tainted thread's query that looks like it carries
-  data, before any request leaves, at every level below Full access. It is a
+  reaches only the search endpoint the person configured, so under Strict the
+  tool-call policy instead refuses a tainted thread's query that looks like it
+  carries data, before any request leaves, at every level below Full access;
+  outside Strict the query goes and the mark stays (maintainer decision,
+  2026-11-21; `resolveToolCall` reads the thread's Strict value, and a caller
+  that cannot say reads as Strict). Under Strict it is a
   guard, not a privacy rule, so the person lowers it with the
   outside-content gate above: choosing Full access for a thread, or for a
   Project's new threads, in Work and Code alike, turns the refusal off and
