@@ -51,6 +51,11 @@ const UNWRAPPED: ReadonlyArray<{
     reason: "The runtime's own sandbox settings still answer for the postures that write.",
   },
   {
+    file: "codexServerProcess.ts",
+    reason:
+      "Spawns nothing on this host: Codex runs on a server Project's server over SSH, where Octant's sandbox cannot run, so Strict refuses it and Octant claims no sandbox there.",
+  },
+  {
     file: "ohMyPiProcess.ts",
     reason:
       "A probe with no turn, unconfined against the sandbox and readiness-probe rules both. Held, not excused.",
