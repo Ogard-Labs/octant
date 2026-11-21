@@ -343,7 +343,10 @@ Saving a policy does not enable Strict. With Strict off the saved configuration
 is inactive. Project can inherit Settings; an explicit Off overrides an inherited
 On. Existing Full-access-only sandbox choices remain visibly marked as previous
 choices until the person chooses Strict or Off; no silent broadening is described
-as migration. There is no second Keep the sandbox switch.
+as migration. There is no second Keep the sandbox switch, on Windows either: the
+previous Full-access-only choice never returns as a Windows control, and Windows
+gets the same Strict control as it becomes accepted there
+([Windows Strict, phase 1](../architecture.md#windows-strict-phase-1)).
 
 The panel shows effective Strict state and source, full folder paths, supported
 read/write grants and recorded Safe networks settings. Private caches, scratch,
