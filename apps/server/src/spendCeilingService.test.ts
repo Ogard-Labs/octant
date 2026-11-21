@@ -353,6 +353,48 @@ describe("SpendCeilingService", () => {
     expect(admission.status).toBe("admitted");
   });
 
+  it.each([
+    ["as OpenCode now reports it, reasoning inside output", 350, false],
+    ["from before OpenCode's reasoning was added into output", 200, true],
+  ] as const)(
+    "counts an OpenCode turn's reasoning against a token ceiling %s",
+    (_label, output, reasoningOutsideOutput) => {
+      const { connection, service } = openService();
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "code-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { tokenBudget: 1_000 },
+        window: { kind: "lifetime" },
+      });
+      const id = "73000000-0000-4000-8000-000000000103";
+      // 500 input, 200 of answer and 150 of reasoning: 850 spent.
+      insertUsage(connection, {
+        id,
+        subjectType: "code-thread",
+        subjectId: ids.thread,
+        tokens: { input: 500, output, reasoning: 150 },
+        sequence: 1,
+      });
+      if (reasoningOutsideOutput)
+        connection
+          .prepare("INSERT INTO usage_reasoning_outside_output (reconciliation_id) VALUES (?)")
+          .run(id);
+      const admit = (reservationId: typeof ids.reservationA, turnUpperBoundTokens: number) =>
+        service.admit({
+          reservationId,
+          threadId: ids.thread,
+          threadType: "code-thread",
+          turnUpperBoundTokens,
+        });
+      expect(admit(ids.reservationA, 250)).toMatchObject({
+        status: "refused",
+        refusal: { kind: "exhausted" },
+      });
+      expect(admit(ids.reservationB, 150)).toMatchObject({ status: "admitted" });
+    },
+  );
+
   it("counts Octant Shield's reviews against the reviewed Code thread's ceiling", () => {
     const { connection, journal, service } = openService();
     const ledger = { connection, journal, clock: () => now, uuid: () => crypto.randomUUID() };

@@ -694,7 +694,7 @@ describe("OpenCode driver", () => {
     ).toMatchObject([
       {
         inputTokens: 15,
-        outputTokens: 7,
+        outputTokens: 10,
         reasoningTokens: 3,
         cacheReadInputTokens: 2,
         cacheWriteInputTokens: 1,
@@ -702,7 +702,7 @@ describe("OpenCode driver", () => {
       },
       {
         inputTokens: 51,
-        outputTokens: 18,
+        outputTokens: 26,
         reasoningTokens: 8,
         cacheReadInputTokens: 6,
         cacheWriteInputTokens: 3,

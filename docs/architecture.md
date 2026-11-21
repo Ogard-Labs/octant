@@ -10160,7 +10160,11 @@ turn's latest usage report, so a runtime whose reports cover one request each
 reports the whole turn once more before it ends: the Octant Harness does so
 when a turn of several requests completes or is interrupted during its tool
 phase, and Chat and Work let that whole-turn report replace their per-request
-sum, so no request counts twice. A Code row carries the same reasoning and
+sum, so no request counts twice. A token ceiling sums input and output:
+reasoning is part of output for every runtime, OpenCode's included, whose
+mapper adds the reasoning it reports apart into output; the rows OpenCode
+wrote before that are kept by id at the upgrade
+(`usage_reasoning_outside_output`) and their reasoning is added. A Code row carries the same reasoning and
 cache read and write tokens a Chat or Work row does, NULL where the report
 named none; Code rows projected before they were filled stay NULL, since a
 purged thread's operation events are gone and a rebuild would drop its spend.
@@ -10203,8 +10207,10 @@ ledger therefore records no level: an upgrade drops the per-turn Full access
 column and its replay boundary that the earlier rule read, keeping every other
 column of each row, and the turn's level stays in the `executionPolicy` its
 `conversation-turn-started` event journals. The upgrade first keeps the ids of
-the unreported turns the earlier rule read below Full access
-(`usage_unreported_guarded_turn`, which a rebuild keeps): such a turn stays
+the unreported turns the earlier rule read below Full access, and of the Code
+turns still open then whose latest start it would have read so, since restart
+recovery settles those afterwards (`usage_unreported_guarded_turn`, which a
+rebuild keeps): such a turn stays
 left out while its instance's observed release keeps its usage reading
 unverified, because that release read usage at Full access only when the turn
 ran and no report of it exists, so counting it would make a lifetime ceiling

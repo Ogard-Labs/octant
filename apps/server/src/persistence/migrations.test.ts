@@ -296,6 +296,7 @@ describe("applyMigrations", () => {
         "thread_tool_call_record_store",
         "thread_work_item_projection",
         "usage_audit_log",
+        "usage_reasoning_outside_output",
         "usage_record_projection",
         "usage_resume_projection",
         "usage_unreported_guarded_turn",

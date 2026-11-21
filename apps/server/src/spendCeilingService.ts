@@ -1013,6 +1013,10 @@ function ledgerWhere(input: {
 const KEPT_BELOW_FULL_ACCESS_SQL =
   "CASE WHEN reconciliation_id IN (SELECT reconciliation_id FROM usage_unreported_guarded_turn) THEN 1 ELSE 0 END";
 
+/** The reasoning a row reported apart from its output, which the sum adds; 0 for every other row. */
+const REASONING_OUTSIDE_OUTPUT_SQL =
+  "CASE WHEN reconciliation_id IN (SELECT reconciliation_id FROM usage_reasoning_outside_output) THEN COALESCE(reasoning_tokens, 0) ELSE 0 END";
+
 function sumUsageTokens(
   connection: SqliteConnection,
   input: {
@@ -1027,14 +1031,16 @@ function sumUsageTokens(
   // Per provider: an unreported turn refuses as unknown spend unless its
   // provider never reports usage, whose turns the ceiling does not measure.
   // Reasoning is the part of output spent thinking, already in
-  // `output_tokens`, so it is not added a second time.
+  // `output_tokens`, so it is not added a second time, except on the rows
+  // OpenCode wrote before its mapper added reasoning into output
+  // (`usage_reasoning_outside_output`, migration 111).
   const rows = connection
     .prepare(
       `SELECT
         provider_instance_id,
         ${KEPT_BELOW_FULL_ACCESS_SQL} AS kept_below_full_access,
         COALESCE(SUM(CASE WHEN quality = 'unavailable' THEN 1 ELSE 0 END), 0) AS unavailable_count,
-        COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens
+        COALESCE(SUM(input_tokens + output_tokens + ${REASONING_OUTSIDE_OUTPUT_SQL}), 0) AS tokens
       FROM usage_record_projection
       WHERE ${where.sql}
       GROUP BY provider_instance_id, kept_below_full_access`,

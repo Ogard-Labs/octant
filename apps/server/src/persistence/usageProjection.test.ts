@@ -22,6 +22,7 @@ import { USAGE_PROJECTION_SCHEMA_VERSION } from "./usagePersistenceSchema";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import type { UsageProjectScope } from "../usageProjectScope";
 import { recordAgentRunTurnUsage } from "../agentRun/agentRunUsageLedger";
+import { SpendCeilingService } from "../spendCeilingService";
 
 const unfiledScope: UsageProjectScope = { kind: "unfiled" };
 const directories: Array<string> = [];
@@ -701,6 +702,123 @@ describe("UsageProjection", () => {
     if (projection === undefined) throw new Error("Usage projection is missing");
     rebuildProjection({ connection, journal, projection, clock: () => now });
     expect(kept()).toEqual(expected);
+    connection.close();
+  });
+
+  it("keeps a guarded Code turn still open at the upgrade out of a lifetime ceiling once restart recovery settles it", () => {
+    const { connection, journal } = openDatabase(
+      MIGRATIONS.filter((migration) => migration.version <= 110),
+    );
+    const event = (operationId: string, cursor: number, body: Record<string, unknown>) =>
+      pending("code.operation-event-recorded@1", {
+        threadId: ids.aggregate,
+        operationId,
+        cursor,
+        occurredAt: now,
+        event: body,
+      });
+    // Started and sent to the provider, then cut off by the upgrade's restart
+    // with no usage and no terminal state.
+    const openTurn = (operationId: string, executionPolicy: string) =>
+      journal.append({
+        aggregate: { aggregateType: "code-operation", aggregateId: operationId },
+        expectedVersion: 0,
+        events: [
+          event(operationId, 1, {
+            kind: "conversation-turn-started",
+            providerInstanceId: ids.provider,
+            modelId: "acp-agent",
+            sessionId: ids.entry,
+            prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+            executionPolicy,
+          }),
+          event(operationId, 2, {
+            kind: "provider-session-ready",
+            sessionId: ids.entry,
+            providerInstanceId: ids.provider,
+            modelId: "acp-agent",
+            checkoutId: ids.checkout,
+          }),
+        ],
+      });
+    openTurn(ids.usage, "approval-gated");
+    openTurn(ids.usage2, "full-access");
+
+    applyMigrations(connection, MIGRATIONS, () => now);
+    for (const operationId of [ids.usage, ids.usage2])
+      journal.append({
+        aggregate: { aggregateType: "code-operation", aggregateId: operationId },
+        expectedVersion: 2,
+        events: [event(operationId, 3, { kind: "operation-state", state: "interrupted" })],
+      });
+
+    expect(readUsageRecord(connection, ids.usage)?.quality).toBe("unavailable");
+    expect(
+      connection.prepare("SELECT reconciliation_id FROM usage_unreported_guarded_turn").all(),
+    ).toEqual([{ reconciliation_id: ids.usage }]);
+    const service = new SpendCeilingService({
+      connection,
+      journal,
+      clock: () => now,
+      uuid: () => crypto.randomUUID(),
+      threadExists: () => true,
+      // An instance whose release keeps its usage reading unverified.
+      notMeasuredProvider: (providerInstanceId, keptBelowFullAccess) =>
+        keptBelowFullAccess
+          ? { providerInstanceId: providerInstanceId as never, displayName: "Mistral Vibe" }
+          : undefined,
+    });
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "code-thread", threadId: ids.aggregate as never },
+      expectedVersion: 0 as never,
+      policy: { tokenBudget: 1_000 },
+      window: { kind: "lifetime" },
+    });
+    const admit = () =>
+      service.admit({
+        reservationId: crypto.randomUUID() as never,
+        threadId: ids.aggregate,
+        threadType: "code-thread",
+        turnUpperBoundTokens: 100,
+      });
+    // The settled Full access turn was measured, so its missing report refuses.
+    expect(admit()).toMatchObject({ status: "refused", refusal: { kind: "unknown-spend" } });
+    connection
+      .prepare("DELETE FROM usage_record_projection WHERE reconciliation_id = ?")
+      .run(ids.usage2);
+    // The settled guarded turn alone is left out.
+    expect(admit()).toMatchObject({ status: "admitted" });
+    connection.close();
+  });
+
+  it("keeps the rows OpenCode wrote with reasoning apart from output when the upgrade starts counting reasoning inside it", () => {
+    const { connection } = openDatabase(MIGRATIONS.filter((migration) => migration.version <= 110));
+    const openCode = "63000000-0000-4000-8000-0000000000c1";
+    connection
+      .prepare(
+        `INSERT INTO provider_instance_projection (
+          instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+        ) VALUES (?, 1, 'opencode', 1, '{}', 1)`,
+      )
+      .run(openCode);
+    const row = connection.prepare(
+      `INSERT INTO usage_record_projection (
+        reconciliation_id, subject_type, subject_id, provider_instance_id, model_id,
+        request_shape, quality, input_tokens, output_tokens, reasoning_tokens,
+        planned_input_tokens, variance_tokens, schema_version, attribution_json,
+        observed_at, last_sequence, host_id
+      ) VALUES (?, 'chat-thread', ?, ?, 'model', 'chat-turn', 'exact', 10, 5, ?, 10, 0, 2, '[]', ?, 1, 'local')`,
+    );
+    row.run(ids.usage, ids.aggregate, openCode, 3, now);
+    row.run(ids.usage2, ids.aggregate, openCode, null, now);
+    row.run(ids.usage3, ids.aggregate, ids.provider, 3, now);
+
+    applyMigrations(connection, MIGRATIONS, () => now);
+
+    expect(
+      connection.prepare("SELECT reconciliation_id FROM usage_reasoning_outside_output").all(),
+    ).toEqual([{ reconciliation_id: ids.usage }]);
     connection.close();
   });
 

@@ -2846,8 +2846,19 @@ CREATE INDEX validation_evidence_authority_idx
     // out on an ACP release whose usage was then read at Full access only,
     // and that release now reports usage at every level. Reading them as
     // measured would make a lifetime ceiling refuse forever over spend no
-    // report can recover. The table is not a projection, so a rebuild, which
-    // writes the same ids, keeps it.
+    // report can recover. A Code turn still open at the upgrade has no row
+    // yet; restart recovery settles it afterwards, so its id is kept too when
+    // its latest start read below Full access as the projection read it (a
+    // start at or before the boundary recorded no level). An id that never
+    // gets a row, or gets a reported one, changes nothing. The tables are not
+    // projections, so a rebuild, which writes the same ids, keeps them.
+    //
+    // OpenCode reported reasoning apart from output, and the ceiling now sums
+    // input and output only, reasoning being part of output for every runtime
+    // (the OpenCode mapper adds it in from this build on). The rows its
+    // instances wrote before, a removed instance's included, are kept by id
+    // so the ceiling still adds their reasoning; a rebuild writes them from
+    // the same journaled reports.
     sql: `
       CREATE TABLE usage_unreported_guarded_turn (
         reconciliation_id TEXT PRIMARY KEY
@@ -2855,6 +2866,31 @@ CREATE INDEX validation_evidence_authority_idx
       INSERT INTO usage_unreported_guarded_turn (reconciliation_id)
         SELECT reconciliation_id FROM usage_record_projection
         WHERE quality = 'unavailable' AND COALESCE(ran_at_full_access, 0) = 0;
+      INSERT OR IGNORE INTO usage_unreported_guarded_turn (reconciliation_id)
+        SELECT aggregate_id FROM event_journal
+        WHERE aggregate_type = 'code-operation'
+          AND event_name = 'code.operation-event-recorded@1'
+          AND json_extract(payload_json, '$.event.kind') = 'conversation-turn-started'
+          AND aggregate_id NOT IN (SELECT reconciliation_id FROM usage_record_projection)
+        GROUP BY aggregate_id
+        HAVING MAX(global_sequence) = MAX(CASE WHEN COALESCE(
+          global_sequence > (SELECT global_sequence FROM usage_turn_level_boundary)
+            AND json_extract(payload_json, '$.event.executionPolicy') = 'full-access',
+          0) THEN NULL ELSE global_sequence END);
+      CREATE TABLE usage_reasoning_outside_output (
+        reconciliation_id TEXT PRIMARY KEY
+      ) STRICT;
+      INSERT INTO usage_reasoning_outside_output (reconciliation_id)
+        SELECT reconciliation_id FROM usage_record_projection
+        WHERE COALESCE(reasoning_tokens, 0) > 0
+          AND provider_instance_id IN (
+            SELECT instance_id FROM provider_instance_projection WHERE driver_kind = 'opencode'
+            UNION
+            SELECT aggregate_id FROM event_journal
+            WHERE aggregate_type = 'provider-instance'
+              AND event_name = 'provider.instance-created@1'
+              AND json_extract(payload_json, '$.instance.driverKind') = 'opencode'
+          );
       ALTER TABLE usage_record_projection DROP COLUMN ran_at_full_access;
       DROP TABLE usage_turn_level_boundary;
     `,
