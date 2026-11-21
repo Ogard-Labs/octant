@@ -100,7 +100,6 @@ describe("turning phone notifications on for a computer", () => {
           failure: true,
           completion: true,
           threadTitles: false,
-          newDevices: true,
         },
       },
     ]);
@@ -237,7 +236,8 @@ describe("hearing about new devices", () => {
     const preferences = host.bodies.map(
       (body) => (body as { preferences: { newDevices?: boolean } }).preferences.newDevices,
     );
-    expect(preferences).toEqual([true, false]);
+    // On is sent as no field, which a computer from before the setting accepts.
+    expect(preferences).toEqual([undefined, false]);
     expect((await book.list())[0]?.newDevices).toBe(false);
 
     await rotatePhoneNotifications({
@@ -253,7 +253,7 @@ describe("hearing about new devices", () => {
     expect((await book.list())[0]?.newDevices).toBe(false);
 
     await enable(true);
-    expect(host.bodies.at(-1)).toMatchObject({ preferences: { newDevices: true } });
+    expect(host.bodies.at(-1)).not.toHaveProperty("preferences.newDevices");
     expect(await book.list()).toEqual([expect.not.objectContaining({ newDevices: false })]);
   });
 });

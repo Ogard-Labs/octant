@@ -6,6 +6,9 @@ import { mobileRadii, mobileSpacing, mobileTypography } from "../theme/tokens";
 import { readNewDevicesAcross, type NewDevicesReading } from "./newDevices";
 
 export interface NewDevicesPanelProps {
+  readonly hostIds: ReadonlyArray<string>;
+  /** Changes each time a new-device notification opens this screen, so the list is read again. */
+  readonly refreshKey: number;
   readonly transports: ReadonlyArray<MobileRemoteTransport>;
   readonly computerName: (hostId: string) => string;
 }
@@ -17,7 +20,7 @@ export interface NewDevicesPanelProps {
  */
 export function NewDevicesPanel(props: NewDevicesPanelProps) {
   const { colors } = useTheme();
-  const { transports, computerName } = props;
+  const { hostIds, refreshKey, transports, computerName } = props;
   const [reading, setReading] = useState<NewDevicesReading>();
   const [busy, setBusy] = useState(false);
 
@@ -26,6 +29,7 @@ export function NewDevicesPanel(props: NewDevicesPanelProps) {
       setBusy(true);
       try {
         const next = await readNewDevicesAcross({
+          hostIds,
           transports,
           computerName,
           ...(signal === undefined ? {} : { signal }),
@@ -35,14 +39,14 @@ export function NewDevicesPanel(props: NewDevicesPanelProps) {
         if (signal?.aborted !== true) setBusy(false);
       }
     },
-    [transports, computerName],
+    [hostIds, transports, computerName],
   );
 
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [load, refreshKey]);
 
   const styles = useMemo(
     () =>
@@ -67,7 +71,7 @@ export function NewDevicesPanel(props: NewDevicesPanelProps) {
     [colors],
   );
 
-  if (transports.length === 0) return null;
+  if (hostIds.length === 0) return null;
   if (reading !== undefined && reading.rows.length === 0 && reading.unanswered.length === 0) {
     return null;
   }

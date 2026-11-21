@@ -24,14 +24,24 @@ export interface NewDevicesReading {
  * on that computer or an owner device, so each row says where to go.
  */
 export async function readNewDevicesAcross(input: {
+  /** Every paired computer, so one without a usable connection is named, not dropped. */
+  readonly hostIds: ReadonlyArray<string>;
   readonly transports: ReadonlyArray<MobileRemoteTransport>;
   readonly computerName: (hostId: string) => string;
   readonly signal?: AbortSignal;
 }): Promise<NewDevicesReading> {
   const rows: NewDeviceRow[] = [];
   const unanswered: string[] = [];
+  const reachable = input.transports.filter((transport) =>
+    input.hostIds.some((hostId) => hostId === transport.hostId),
+  );
+  for (const hostId of input.hostIds) {
+    if (!reachable.some((transport) => transport.hostId === hostId)) {
+      unanswered.push(input.computerName(hostId));
+    }
+  }
   await Promise.all(
-    input.transports.map(async (transport) => {
+    reachable.map(async (transport) => {
       const computer = input.computerName(transport.hostId);
       const list = await readMobileNewDeviceAlerts({
         transport,
@@ -50,7 +60,9 @@ export async function readNewDevicesAcross(input: {
 }
 
 function newDeviceRow(hostId: string, computer: string, alert: NewDeviceAlertView): NewDeviceRow {
-  const where = alert.kind === "hub-member" ? "joined the hub" : `paired with ${computer}`;
+  // Each computer on a hub reports the same join, so say which one this is.
+  const where =
+    alert.kind === "hub-member" ? `joined the hub, seen by ${computer}` : `paired with ${computer}`;
   return {
     key: `${hostId}:${String(alert.alertId)}`,
     computer,

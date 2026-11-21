@@ -91,7 +91,9 @@ async function registerWithComputer(input: {
       failure: true,
       completion: true,
       threadTitles: false,
-      newDevices: input.newDevices,
+      // Absent means on, and a computer from before the setting refuses the
+      // field outright, so only an off setting is sent.
+      ...(input.newDevices ? {} : { newDevices: false }),
     },
   });
   // Turned off while registering: nothing is recorded, and the forgetting that

@@ -56,7 +56,14 @@ class OctantMessagingService : FirebaseMessagingService() {
       var id = 0
       if (opened != null) {
         tag = opened.hostId
-        id = opened.deepLink.hashCode()
+        // A thread's link is its identity; every new-device notice from a host
+        // shares one link, so it is told apart by what it says instead.
+        id =
+          if (opened.deepLink.endsWith("/new-devices")) {
+            (opened.deepLink + "\n" + opened.title + "\n" + opened.body).hashCode()
+          } else {
+            opened.deepLink.hashCode()
+          }
         val open =
           Intent(Intent.ACTION_VIEW, Uri.parse(opened.deepLink))
             .setPackage(context.packageName)

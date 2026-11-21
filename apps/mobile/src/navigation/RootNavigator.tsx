@@ -56,6 +56,8 @@ function HostsBody(props: {
   readonly onPaired: () => void;
   /** Why a link the person followed was not opened, if it was not. */
   readonly notice?: string | undefined;
+  /** Counts the new-device links followed here, so the list reads again on each. */
+  readonly newDevicesRefreshKey: number;
 }) {
   const { colors } = useTheme();
   const {
@@ -76,6 +78,7 @@ function HostsBody(props: {
     setPlacementHostId,
   } = useMobileSession();
   const offlineDemo = environment.kind === "mock" && environment.offlineDemo;
+  const pairedHostIds = useMemo(() => hosts.map((host) => host.hostId), [hosts]);
   const computerName = useCallback(
     (hostId: string) => hosts.find((host) => host.hostId === hostId)?.label ?? "A paired computer",
     [hosts],
@@ -269,7 +272,12 @@ function HostsBody(props: {
                 />
               )}
               {offlineDemo ? null : (
-                <NewDevicesPanel computerName={computerName} transports={transports} />
+                <NewDevicesPanel
+                  computerName={computerName}
+                  hostIds={pairedHostIds}
+                  refreshKey={props.newDevicesRefreshKey}
+                  transports={transports}
+                />
               )}
               {offlineDemo || unlockKey === undefined ? null : (
                 <OwnerAlertsPanel
@@ -439,6 +447,7 @@ export function RootNavigator(props: RootNavigatorProps) {
   );
   const [agentListView, setAgentListView] = useState<AgentListView>("all");
   const [deepLinkNotice, setDeepLinkNotice] = useState<string | undefined>();
+  const [newDevicesRefreshKey, setNewDevicesRefreshKey] = useState(0);
   const {
     environment,
     setInboxHostFilter,
@@ -509,6 +518,7 @@ export function RootNavigator(props: RootNavigatorProps) {
     );
     setDeepLinkNotice(opening.notice);
     setHostEntryMode(opening.entryMode);
+    setNewDevicesRefreshKey((count) => count + 1);
     props.onSelectRoute(opening.route);
     props.onDeepLinkConsumed?.();
   }, [
@@ -609,6 +619,7 @@ export function RootNavigator(props: RootNavigatorProps) {
           onBack={() => props.onSelectRoute("home")}
           onPaired={() => props.onSelectRoute("home")}
           notice={deepLinkNotice}
+          newDevicesRefreshKey={newDevicesRefreshKey}
         />
       ) : null}
       {activeTab === undefined ? null : (

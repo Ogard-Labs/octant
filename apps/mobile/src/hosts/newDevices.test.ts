@@ -12,6 +12,7 @@ function computer(hostId: string, answer: () => Response): MobileRemoteTransport
 describe("the phone's list of new devices", () => {
   it("lists every computer's new devices, newest first, with each one's address", async () => {
     const reading = await readNewDevicesAcross({
+      hostIds: [studio, laptop],
       transports: [
         computer(studio, () =>
           Response.json({
@@ -49,16 +50,26 @@ describe("the phone's list of new devices", () => {
     });
     expect(reading.rows.map((row) => [row.title, row.detail])).toEqual([
       ["Ada's laptop paired with Studio Mac", "192.168.1.20 · paired device"],
-      ["Tablet joined the hub", "spoke"],
+      ["Tablet joined the hub, seen by Laptop", "spoke"],
     ]);
     expect(reading.unanswered).toEqual([]);
   });
 
   it("names a computer that did not answer instead of reading it as having none", async () => {
     const reading = await readNewDevicesAcross({
+      hostIds: [studio],
       transports: [computer(studio, () => new Response("no", { status: 503 }))],
       computerName: () => "Studio Mac",
     });
     expect(reading).toEqual({ rows: [], unanswered: ["Studio Mac"] });
+  });
+
+  it("names a paired computer with no connection instead of leaving it out", async () => {
+    const reading = await readNewDevicesAcross({
+      hostIds: [studio, laptop],
+      transports: [computer(studio, () => Response.json({ alerts: [], removesHere: false }))],
+      computerName: (hostId) => (hostId === studio ? "Studio Mac" : "Laptop"),
+    });
+    expect(reading).toEqual({ rows: [], unanswered: ["Laptop"] });
   });
 });
