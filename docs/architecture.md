@@ -7761,7 +7761,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   with "Ask again", which drops it. A local window or a paired device sets
   or drops it and answers the card (maintainer decision, 2026-11-12). Not
   built yet: the Project command that drops the choice is refused from a
-  paired device, and the native phone app does not render the offer card.
+  paired device.
   A Chat thread
   outside a Project has no Project to hold a choice and keeps it for that
   thread in host memory, so a restart asks again there. At Full access a
