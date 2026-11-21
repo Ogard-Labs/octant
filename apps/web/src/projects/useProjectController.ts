@@ -319,7 +319,6 @@ export function useProjectController(options: ProjectControllerOptions) {
         : { fullAccessSandbox: project.defaultFullAccessSandbox }),
     };
     if (project.type === "work") {
-      if (permissionMode === "plan") return false;
       return execute(
         {
           kind: "change-work-project-permission-mode",

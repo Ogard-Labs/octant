@@ -677,6 +677,24 @@ describe("WorkThreadService", () => {
     expect(created).toMatchObject({ kind: "thread-created", thread: { access: "auto" } });
   });
 
+  it("starts a new thread in Plan when its Work Project starts threads in Plan", async () => {
+    const fixture = serviceFixture({
+      threads: [],
+      project: { ...workProject(), defaultPermissionMode: "plan" } as Project,
+    });
+    const created = await fixture.service.execute(ids.window, {
+      kind: "create-work-thread",
+      threadId: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: ids.binding,
+    });
+    expect(created).toMatchObject({ kind: "thread-created", thread: { access: "plan" } });
+  });
+
   it("commits a lowering record in the same unit as the level change", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
     let open = false;

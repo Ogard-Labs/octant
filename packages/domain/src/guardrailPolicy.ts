@@ -468,9 +468,9 @@ export function clampWorkAccess(thread: WorkAccess, ceiling: WorkAccess): WorkAc
 
 /**
  * The Work default (Settings › Work, a Work Project's start mode) a Code mode
- * picker choice stands for; Plan has none, since no thread starts in Plan.
+ * picker choice stands for, Plan included.
  */
-export function workAccessOfPermissionMode(mode: PermissionMode): WorkDefaultAccess | undefined {
+export function workAccessOfPermissionMode(mode: PermissionMode): WorkDefaultAccess {
   switch (mode) {
     case "auto":
       return "auto";
@@ -481,13 +481,13 @@ export function workAccessOfPermissionMode(mode: PermissionMode): WorkDefaultAcc
     case "full-access":
       return "full-access";
     case "plan":
-      return undefined;
+      return "plan";
   }
 }
 
 /** The level a Work thread's mode picker choice sets, Plan included. */
 export function workThreadAccessOfMode(mode: PermissionMode): WorkAccess {
-  return workAccessOfPermissionMode(mode) ?? "plan";
+  return workAccessOfPermissionMode(mode);
 }
 
 /** The Code mode picker choice a Work access stands for. */

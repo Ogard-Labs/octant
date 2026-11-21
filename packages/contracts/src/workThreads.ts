@@ -57,13 +57,15 @@ export type WorkThreadCompletionEvidence = typeof WorkThreadCompletionEvidence.T
 
 /**
  * The levels Work's defaults (Settings › Work, and a Work Project's start
- * mode) offer: every Work level except Plan, which a thread enters on its own.
+ * mode) offer: every Work level, Plan included (maintainer decision,
+ * 2026-11-21), so a new thread may start read-only.
  */
 export const WorkDefaultAccess = Schema.Literal(
   "ask-first",
   "auto-accept-edits",
   "auto",
   "full-access",
+  "plan",
 );
 export type WorkDefaultAccess = typeof WorkDefaultAccess.Type;
 
@@ -76,7 +78,7 @@ export type WorkDefaultAccess = typeof WorkDefaultAccess.Type;
  * `auto` lets the provider's own reviewer answer (a provider without one asks
  * first), `full-access` runs with no sandbox and no prompts, and `plan` is
  * Code's read-only Plan: the agent looks and proposes and changes nothing.
- * Plan is a thread's level only, never a default. The first two are what Work
+ * Plan may also be where a new thread starts. The first two are what Work
  * threads recorded before the levels were shared, so older journals replay
  * unchanged.
  */
