@@ -244,10 +244,67 @@ describe("fleet activity route", () => {
         since: "2026-10-06T08:04:00.000Z",
       },
     ]);
-    expect(sources.pending).toHaveBeenCalledExactlyOnceWith(windowId, "local-window");
+    expect(sources.pending).toHaveBeenCalledExactlyOnceWith(
+      windowId,
+      "local-window",
+      expect.objectContaining({ kind: "local-window", windowId: String(windowId) }),
+    );
     expect(sources.childPending).toHaveBeenNthCalledWith(1, boundWindow);
     expect(sources.childPending).toHaveBeenNthCalledWith(2, otherWindow);
     expect(sources.codePending).not.toHaveBeenCalled();
+  });
+
+  it("lists waiting service offers from bound local windows for the menu bar, while a person-paired device sees only its own", async () => {
+    const boundWindow = decodeWindowId("00000000-0000-4000-8000-000000000802");
+    const boundOffer = decodeWaitingAsk({
+      kind: "service-offer",
+      askId: "00000000-0000-4000-8000-000000000921",
+      mode: "code",
+      projectId,
+      threadId: codeThread,
+      threadTitle: "Fix the parser",
+      text: "Generate an image?",
+      requestedAt: "2026-10-06T08:03:00.000Z",
+    });
+    const { route, sources } = fixture({
+      pending: [],
+      offerWindows: [boundWindow],
+      offerPending: async (scope) => (String(scope) === String(boundWindow) ? [boundOffer] : []),
+    });
+    const localBody = await (await route(request()))?.json();
+    expect(localBody.threads).toEqual([
+      {
+        mode: "code",
+        threadId: codeThread,
+        title: "Fix the parser",
+        projectName: "Reports",
+        state: "needs-you",
+        activitySource: "session",
+        since: boundOffer.requestedAt,
+      },
+    ]);
+    expect(sources.offerPending).toHaveBeenCalledExactlyOnceWith(boundWindow);
+
+    sources.offerPending.mockClear();
+    const deviceId = "22222222-2222-4222-8222-222222222222" as DeviceId;
+    const remote = new Request("http://127.0.0.1/api/fleet-activity");
+    bindPrincipalRouteContext(remote, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
+        deviceId,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
+        admittedBy: "host-person",
+      }),
+      scopeId: decodeWindowId(deviceId),
+    });
+    const remoteResponse = await route(remote);
+    expect(remoteResponse?.status).toBe(200);
+    expect(await remoteResponse?.json()).toEqual({ threads: [], truncated: false });
+    expect(sources.offerPending).not.toHaveBeenCalled();
   });
 
   it("asks for a waiting subagent in every saved window bound to a Project, open or not, and in none bound to no Project, once per binding", () => {
@@ -389,25 +446,31 @@ describe("fleet activity route", () => {
     const remote = new Request("http://127.0.0.1/api/fleet-activity");
     const deviceId = "22222222-2222-4222-8222-222222222222" as DeviceId;
     const scopeId = decodeWindowId(deviceId);
+    const principal = createRemoteDevicePrincipal({
+      hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
+      deviceId,
+      credentialGeneration: 1,
+      origin: "https://octant.example",
+      protocolVersion: 1,
+      capabilityDigest: "b".repeat(64),
+      sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
+      admittedBy: "host-person",
+    });
     bindPrincipalRouteContext(remote, {
-      principal: createRemoteDevicePrincipal({
-        hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
-        deviceId,
-        credentialGeneration: 1,
-        origin: "https://octant.example",
-        protocolVersion: 1,
-        capabilityDigest: "b".repeat(64),
-        sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
-        admittedBy: "host-person",
-      }),
+      principal,
       scopeId,
     });
     const response = await route(remote);
     expect(response?.status).toBe(200);
     expect(await response?.json()).toEqual({ threads: [], truncated: false });
-    expect(sources.pending).toHaveBeenCalledExactlyOnceWith(scopeId, "person-paired-device");
+    expect(sources.pending).toHaveBeenCalledExactlyOnceWith(
+      scopeId,
+      "person-paired-device",
+      principal,
+    );
     expect(sources.codePending).not.toHaveBeenCalled();
     expect(sources.childPending).not.toHaveBeenCalled();
+    expect(sources.offerPending).not.toHaveBeenCalled();
   });
 
   it("refuses a read that is not on loopback or that names a parameter", async () => {
@@ -455,6 +518,8 @@ function fixture(
     readonly codePending?: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
     readonly boundProjectWindows?: ReadonlyArray<WindowId>;
     readonly childPending?: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
+    readonly offerWindows?: ReadonlyArray<WindowId>;
+    readonly offerPending?: (windowId: WindowId) => Promise<ReadonlyArray<WaitingAsk>>;
   } = {},
 ) {
   const store = new WindowAuthorityStore();
@@ -474,6 +539,8 @@ function fixture(
     codePending: vi.fn(options.codePending ?? (async () => [])),
     boundProjectWindows: () => options.boundProjectWindows ?? [],
     childPending: vi.fn(options.childPending ?? (async () => [])),
+    offerWindows: () => options.offerWindows ?? [],
+    offerPending: vi.fn(options.offerPending ?? (async () => [])),
     projectName: (id) => (String(id) === String(projectId) ? "Reports" : undefined),
   } satisfies FleetActivitySources;
   const route = createFleetActivityRouteHandler({

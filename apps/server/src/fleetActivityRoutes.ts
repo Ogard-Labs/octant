@@ -6,13 +6,18 @@ import {
 } from "@octant/contracts";
 import { createLocalWindowReadRoute } from "./localWindowReadRoute";
 import type { PrincipalKind } from "@octant/domain/remote-access-policy";
+import type { ClientPrincipal } from "./clientPrincipal";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
 
 export const FLEET_ACTIVITY_PATH = "/api/fleet-activity";
 
 export interface FleetActivityRouteDependencies {
   readonly service: {
-    readonly list: (windowId: WindowId, reader: PrincipalKind) => Promise<FleetActivity>;
+    readonly list: (
+      windowId: WindowId,
+      reader: PrincipalKind,
+      principal?: ClientPrincipal,
+    ) => Promise<FleetActivity>;
   };
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
@@ -27,8 +32,8 @@ export function createFleetActivityRouteHandler(dependencies: FleetActivityRoute
     path: FLEET_ACTIVITY_PATH,
     noun: "Fleet activity",
     plural: "Fleet states",
-    read: async (windowId, reader) =>
-      decodeFleetActivity(await dependencies.service.list(windowId, reader)),
+    read: async (windowId, reader, _request, principal) =>
+      decodeFleetActivity(await dependencies.service.list(windowId, reader, principal)),
     decodeFailure: decodeFleetActivityFailure,
     windowAuthorityStore: dependencies.windowAuthorityStore,
     ...(dependencies.now === undefined ? {} : { now: dependencies.now }),

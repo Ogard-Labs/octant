@@ -11,7 +11,9 @@ import {
   type AgentRun,
   type AgentRunId,
   type PendingRequest,
+  type ServiceOffer,
 } from "@octant/contracts";
+import type { ClientPrincipal } from "../clientPrincipal";
 import { createWorkOverviewRouteHandler } from "../workOverviewRoutes";
 import { createDesignSystemRouteHandler } from "../designSystemRoutes";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
@@ -395,6 +397,25 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
       ? undefined
       : { mode: "code", title: code.title, projectId: String(code.projectId) };
   };
+  const serviceOffersForWindow = async (
+    windowId: WindowId,
+    principal?: ClientPrincipal,
+  ): Promise<ReadonlyArray<ServiceOffer>> => {
+    const waiting = serviceOffers.listForWindow(windowId);
+    if (waiting.length === 0) return [];
+    const checked = await Promise.all(
+      waiting.map(async (offer) =>
+        (await windowCanOpenThread(windowId, offer.threadKind, String(offer.scopeId), principal))
+          ? offer
+          : undefined,
+      ),
+    );
+    return checked.flatMap((offer) => {
+      if (offer === undefined) return [];
+      const live = serviceOffers.find(windowId, offer.offerId);
+      return live === undefined ? [] : [live];
+    });
+  };
   const pendingRequestService = new PendingRequestService({
     reviews: decisionReviews,
     deferrals: pendingQuestionDeferrals(persistence.journal, persistence.connection),
@@ -419,45 +440,31 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     offerHostRun: randomUUID(),
     // Each list is the holding service's own for this reader, so who may
     // answer an ask is decided where it always was.
-    asks: async (reader) => {
-      const windowId = reader.scopeId;
-      const checkedOffers = await Promise.all(
-        serviceOffers
-          .listForWindow(windowId)
-          .map(async (offer) =>
-            (await windowCanOpenThread(windowId, offer.threadKind, String(offer.scopeId)))
-              ? offer
-              : undefined,
-          ),
-      );
-      return waitingAsksFrom(
+    asks: async (reader) =>
+      waitingAsksFrom(
         {
           toolApprovals: extensionToolApprovalService.list(reader),
           browserApprovals: browserToolApprovalService.list(reader.scopeId),
           memoryProposals: projectMemoryAccess.proposals.list(reader.scopeId),
           routineProposals: routineProposalService.list(reader.scopeId),
-          serviceOffers: checkedOffers.flatMap((offer) => {
-            if (offer === undefined) return [];
-            const live = serviceOffers.find(windowId, offer.offerId);
-            return live === undefined ? [] : [live];
-          }),
+          serviceOffers: await serviceOffersForWindow(reader.scopeId, reader.principal),
         },
         readWaitingAskThread,
-      );
-    },
+      ),
   });
   const pendingRequestRoutes = createPendingRequestRouteHandler({
     service: pendingRequestService,
     windowAuthorityStore,
   });
   // The menu bar's roster: needs-you is the pending-request read, plus the
-  // Code requests and subagent waits each persisted local window could
-  // already open. The menu bar's own window binds no Project. Nothing here
-  // reads a terminal's screen.
+  // Code requests, subagent waits, and waiting service offers each persisted
+  // local window could already open. The menu bar's own window binds no
+  // Project. Nothing here reads a terminal's screen.
   const fleetActivityRoutes = createFleetActivityRouteHandler({
     service: new FleetActivityService({
       readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
-      pending: (windowId, reader) => pendingRequestService.list(windowId, reader),
+      pending: (windowId, reader, principal) =>
+        pendingRequestService.list(windowId, reader, principal),
       boundCodeWindows: () => windowsBoundToACodeProject(persistence.readWindowWorkspaces()),
       codePending: async (windowId) => [
         ...((await codeOperationRuntime?.pendingRequests?.(windowId)) ?? []),
@@ -465,6 +472,22 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
       ],
       boundProjectWindows: () => windowsBoundToAProject(persistence.readWindowWorkspaces()),
       childPending: childPendingForWindow,
+      offerWindows: () =>
+        persistence.readWindowWorkspaces().map(({ workspace }) => workspace.windowId),
+      offerPending: async (windowId) => {
+        const offers = await serviceOffersForWindow(windowId);
+        if (offers.length === 0) return [];
+        return waitingAsksFrom(
+          {
+            toolApprovals: [],
+            browserApprovals: [],
+            memoryProposals: [],
+            routineProposals: [],
+            serviceOffers: offers,
+          },
+          readWaitingAskThread,
+        );
+      },
       chat: () =>
         chatService
           .navigation()
