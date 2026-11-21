@@ -418,11 +418,11 @@ export class GhPullRequestSwitchPort {
    * Distinguishes passing required checks from unreported checks independently
    * of review or other merge gates. Because `gh pr checks --required` only
    * lists checks that have reported on the PR head (and omits GitHub App ids),
-   * whenever `mergeStateStatus` is not `CLEAN` we load the base branch's
-   * required status checks (preserving pinned GitHub App ids) and, when any
-   * requirement is app-pinned or missing from head, inspect both the head
-   * commit and `potentialMergeCommit` rollups cohesively without ever mixing
-   * passing checks across commits.
+   * whenever `mergeStateStatus` is not `CLEAN` and required checks exist we
+   * load the base branch's required status checks (preserving pinned GitHub
+   * App ids) and inspect the GraphQL commit rollups cohesively: when
+   * `potentialMergeCommit` has reported statuses it is authoritative, falling
+   * back to the head commit only when the test-merge commit has none.
    */
   async #requiredChecksForCondition(
     request: GhPullRequestSwitchRequest,
@@ -449,7 +449,6 @@ export class GhPullRequestSwitchPort {
     const noChecksReported = !Array.isArray(value)
       ? /no required checks|no checks reported/i.test(`${result.stderr ?? ""}\n${result.stdout}`)
       : value.length === 0;
-    const reportedPassedNames = new Set<string>();
     if (!noChecksReported) {
       if (!Array.isArray(value)) return "unavailable";
       let pending = false;
@@ -458,11 +457,7 @@ export class GhPullRequestSwitchPort {
         if (entry.bucket === "fail" || entry.bucket === "cancel") return "failing";
         if (entry.bucket === "pending") {
           pending = true;
-        } else if (entry.bucket === "pass" || entry.bucket === "skipping") {
-          if (typeof entry.name === "string" && entry.name.length > 0) {
-            reportedPassedNames.add(entry.name);
-          }
-        } else {
+        } else if (entry.bucket !== "pass" && entry.bucket !== "skipping") {
           return "unavailable";
         }
       }
@@ -472,10 +467,6 @@ export class GhPullRequestSwitchPort {
     const required = await this.#baseBranchRequiredChecks(repository, baseBranch, signal);
     if (required.status !== "ready") return "unavailable";
     if (required.checks.length === 0) return "green";
-    const needsRollupVerification = required.checks.some(
-      (check) => check.appId !== undefined || !reportedPassedNames.has(check.context),
-    );
-    if (!needsRollupVerification) return "green";
 
     const rollups = await this.#pullRequestCommitRollups(
       request.owner,
@@ -484,15 +475,10 @@ export class GhPullRequestSwitchPort {
       signal,
     );
     if (rollups.status !== "ready") return "unavailable";
-    const headVerdict = evaluateCommitRequiredChecks(required.checks, rollups.headChecks);
-    const mergeVerdict =
-      rollups.testMergeChecks === undefined
-        ? undefined
-        : evaluateCommitRequiredChecks(required.checks, rollups.testMergeChecks);
-    if (mergeVerdict === "green") return "green";
-    if (headVerdict === "green" && mergeVerdict !== "failing") return "green";
-    if (headVerdict === "failing" || mergeVerdict === "failing") return "failing";
-    return "pending";
+    if (rollups.testMergeChecks !== undefined && rollups.testMergeChecks.length > 0) {
+      return evaluateCommitRequiredChecks(required.checks, rollups.testMergeChecks);
+    }
+    return evaluateCommitRequiredChecks(required.checks, rollups.headChecks);
   }
 
   /**
@@ -1369,10 +1355,10 @@ function classifyStatusContext(state: unknown): "pass" | "pending" | "failing" |
 
 function commitCheckRecencyKey(entry: ObservedCommitCheck): number {
   if (entry.timestampMs !== undefined) return entry.timestampMs;
-  // An undated queued/pending run fail-closed outranks any dated run regardless
-  // of input order; an undated completed run cannot claim to be newer than a
+  // Undated pending or failing runs fail-closed and outrank any dated run
+  // regardless of input order; an undated pass cannot claim to supersede a
   // dated run.
-  return entry.bucket === "pending" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+  return entry.bucket === "pass" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
 }
 
 function commitCheckBucketRank(bucket: ObservedCommitCheck["bucket"]): number {
@@ -1386,31 +1372,30 @@ function compareNumberKey(left: number, right: number): number {
   return left < right ? -1 : 1;
 }
 
-/**
- * Strict weak order over attempts sharing one check identity so choosing the
- * latest attempt is transitive and independent of array order across any
- * number of runs. Uses `databaseId` first when every attempt in the group has
- * one; otherwise orders by deterministic numeric recency key, optional
- * `databaseId`, and fail-closed bucket rank (`pending > failing > pass`).
- */
-function pickNewerCommitCheck(
+function pickNewerCommitCheckById(
   existing: ObservedCommitCheck,
   candidate: ObservedCommitCheck,
-  useDatabaseIdPrimary: boolean,
 ): ObservedCommitCheck {
-  const compare = useDatabaseIdPrimary
-    ? compareNumberKey(existing.databaseId ?? -1, candidate.databaseId ?? -1) ||
-      compareNumberKey(commitCheckRecencyKey(existing), commitCheckRecencyKey(candidate)) ||
-      compareNumberKey(
-        commitCheckBucketRank(existing.bucket),
-        commitCheckBucketRank(candidate.bucket),
-      )
-    : compareNumberKey(commitCheckRecencyKey(existing), commitCheckRecencyKey(candidate)) ||
-      compareNumberKey(existing.databaseId ?? -1, candidate.databaseId ?? -1) ||
-      compareNumberKey(
-        commitCheckBucketRank(existing.bucket),
-        commitCheckBucketRank(candidate.bucket),
-      );
+  const compare =
+    compareNumberKey(existing.databaseId ?? -1, candidate.databaseId ?? -1) ||
+    compareNumberKey(commitCheckRecencyKey(existing), commitCheckRecencyKey(candidate)) ||
+    compareNumberKey(
+      commitCheckBucketRank(existing.bucket),
+      commitCheckBucketRank(candidate.bucket),
+    );
+  return compare < 0 ? candidate : existing;
+}
+
+function pickNewerCommitCheckByRecency(
+  existing: ObservedCommitCheck,
+  candidate: ObservedCommitCheck,
+): ObservedCommitCheck {
+  const compare =
+    compareNumberKey(commitCheckRecencyKey(existing), commitCheckRecencyKey(candidate)) ||
+    compareNumberKey(
+      commitCheckBucketRank(existing.bucket),
+      commitCheckBucketRank(candidate.bucket),
+    );
   return compare < 0 ? candidate : existing;
 }
 
@@ -1442,17 +1427,23 @@ function selectLatestCommitChecks(
   }
   const latest: ObservedCommitCheck[] = [];
   for (const group of groupsByIdentity.values()) {
-    const first = group[0];
-    if (first === undefined) continue;
-    const allHaveDatabaseId = group.every((entry) => entry.databaseId !== undefined);
-    let best = first;
-    for (let index = 1; index < group.length; index += 1) {
-      const candidate = group[index];
-      if (candidate !== undefined) {
-        best = pickNewerCommitCheck(best, candidate, allHaveDatabaseId);
+    let bestWithId: ObservedCommitCheck | undefined;
+    let bestWithoutId: ObservedCommitCheck | undefined;
+    for (const entry of group) {
+      if (entry.databaseId !== undefined) {
+        bestWithId = bestWithId === undefined ? entry : pickNewerCommitCheckById(bestWithId, entry);
+      } else {
+        bestWithoutId =
+          bestWithoutId === undefined ? entry : pickNewerCommitCheckByRecency(bestWithoutId, entry);
       }
     }
-    latest.push(best);
+    if (bestWithId !== undefined && bestWithoutId !== undefined) {
+      latest.push(pickNewerCommitCheckByRecency(bestWithId, bestWithoutId));
+    } else if (bestWithId !== undefined) {
+      latest.push(bestWithId);
+    } else if (bestWithoutId !== undefined) {
+      latest.push(bestWithoutId);
+    }
   }
   return latest;
 }

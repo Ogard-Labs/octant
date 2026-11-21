@@ -607,6 +607,61 @@ describe("forge switch port", () => {
       ).observePullRequestCondition(request, { requiredChecks: true }, signal),
     ).toEqual({ status: "observed", state: "open", requiredChecks: "failing" });
 
+    // When the test-merge commit reports statuses, it is authoritative even if all required
+    // checks passed on the head commit.
+    const testMergeAuthoritativePort = port((args) => {
+      if (args[1] === "checks") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { name: "lint", bucket: "pass" },
+            { name: "integration", bucket: "pass" },
+          ]),
+        };
+      }
+      if (args[0] === "api" && args[1] === "graphql") {
+        return rollupResponse([passRun("lint"), passRun("integration")], [passRun("lint")]);
+      }
+      if (
+        args[0] === "api" &&
+        args.includes("--paginate") &&
+        args.includes("--slurp") &&
+        args.some((arg) => arg.includes("/rules/branches/main"))
+      ) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            [
+              {
+                type: "required_status_checks",
+                parameters: {
+                  required_status_checks: [{ context: "lint" }, { context: "integration" }],
+                },
+              },
+            ],
+          ]),
+        };
+      }
+      if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+        return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          baseRefName: "main",
+          mergeStateStatus: "BLOCKED",
+        }),
+      };
+    }).port;
+    expect(
+      await testMergeAuthoritativePort.observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+
     // Same-name required checks from distinct GitHub Apps must each pass under their pinned app.
     const multiAppPort = (headNodes: ReadonlyArray<unknown>) =>
       port((args) => {
@@ -930,6 +985,89 @@ describe("forge switch port", () => {
           mixedTriplet[k],
         ]).observePullRequestCondition(request, { requiredChecks: true }, signal),
       ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    }
+
+    // Without run IDs, a dated pass never hides an undated failure in either order.
+    const undatedFail = {
+      __typename: "CheckRun",
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      startedAt: null,
+      completedAt: null,
+      checkSuite: {
+        id: "CS_7",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    expect(
+      await rerunPort([undatedPass, undatedFail]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "failing" });
+    expect(
+      await rerunPort([undatedFail, undatedPass]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "failing" });
+
+    // An older ID-less attempt never makes run ID order between identified attempts fall back
+    // to completion timestamps: run 102 (failing at 10:20) beats run 101 (passing at 10:30).
+    const olderIdLess = {
+      __typename: "CheckRun",
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      startedAt: "2026-11-21T09:55:00Z",
+      completedAt: "2026-11-21T10:00:00Z",
+      checkSuite: {
+        id: "CS_8",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    const run101LatePass = {
+      __typename: "CheckRun",
+      databaseId: 101,
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      startedAt: "2026-11-21T10:05:00Z",
+      completedAt: "2026-11-21T10:30:00Z",
+      checkSuite: {
+        id: "CS_9",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    const run102EarlierFail = {
+      __typename: "CheckRun",
+      databaseId: 102,
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      startedAt: "2026-11-21T10:15:00Z",
+      completedAt: "2026-11-21T10:20:00Z",
+      checkSuite: {
+        id: "CS_10",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    const reversedFinishTriplet = [olderIdLess, run101LatePass, run102EarlierFail] as const;
+    for (const [i, j, k] of permutations) {
+      expect(
+        await rerunPort([
+          reversedFinishTriplet[i],
+          reversedFinishTriplet[j],
+          reversedFinishTriplet[k],
+        ]).observePullRequestCondition(request, { requiredChecks: true }, signal),
+      ).toEqual({ status: "observed", state: "open", requiredChecks: "failing" });
     }
 
     // Distinct workflows with different workflow ids never hide each other's failures.
