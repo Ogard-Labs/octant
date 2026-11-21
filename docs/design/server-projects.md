@@ -212,7 +212,9 @@ checks never change registry/configuration or journal state.
   terminal so bytes pass through unchanged. Its script ends by `exec`-ing the
   program, so the program reads standard input directly; stopping the stream
   closes standard input and ends the connection if it is still open two
-  seconds later. As with a command, a mark goes out before the program
+  seconds later; output still unread four seconds after the stop is
+  discarded, so the stream's end never waits on a caller that stopped
+  reading. As with a command, a mark goes out before the program
   starts, so a login shell's greeting never reaches the caller, and the call
   sets `StdinNull=no` so a person's ssh config cannot hand the program EOF.
   Because the program replaces the shell, its exit status is reported as it
