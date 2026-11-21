@@ -49,7 +49,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 8         | 7       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 18        | 10      | 7            | 1                   |
-| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 10         | 6       | 4            | 0                   |
+| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 10        | 6       | 4            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 13        | 6       | 7            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 7         | 4       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
@@ -3629,7 +3629,7 @@ Status: Partly built. Since: 2026-10-28. Detail: [Provider runtimes: artifact la
 
 Claude Code's Code Mode is a workflow Octant does not carry yet, recorded as a gap to close rather than a rule (maintainer decision, 2026-11-14): it runs only in an interactive terminal session and refuses to start while `DISABLE_TELEMETRY` is set.
 
-- Octant adds no terminal mode for it. Outside Strict telemetry is the person's choice: with **Let providers send their own telemetry** on (off by default), a launch carries no `DISABLE_TELEMETRY` of Octant's ([Provider telemetry and self-update are the person's switches](#provider-telemetry-and-self-update-are-the-persons-switches)); Strict keeps it set. A [provider terminal](#provider-terminals) opens Claude Code's own interface in a Code thread with the environment that thread's turns launch with (maintainer decision, 2026-11-21): under Strict Code Mode still does not start there; outside Strict that environment follows the same switch, so with it on Octant's own guard does not keep Code Mode from starting in that terminal, as the person's own session outside the thread's record (not yet seen with a real Claude Code).
+- Octant adds no terminal mode for it. Outside Strict telemetry is the person's choice: with **Let providers send their own telemetry** on (off by default), a launch carries no `DISABLE_TELEMETRY` of Octant's ([Provider telemetry and self-update are the person's switches](#provider-telemetry-and-self-update-are-the-persons-switches)); Strict keeps it set. A [provider terminal](#provider-terminals) opens Claude Code's own interface in a Code thread with the environment that thread's turns launch with (maintainer decision, 2026-11-21): under Strict Code Mode still does not start there; outside Strict the terminal does not read that switch yet and keeps Octant's telemetry guard, so Code Mode does not start there either until it does.
 - Once the Agent SDK supports Code Mode, Octant offers it under the thread's level like Claude's other tools. The `REPL` tool is already offered outside Plan under the shell's rules.
 
 Status: Designed, not built. Since: 2026-11-14. Detail: [Provider runtimes: Code Mode](provider-runtimes.md#code-mode).

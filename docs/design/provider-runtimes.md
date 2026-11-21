@@ -1519,8 +1519,8 @@ telemetry). Octant adds no terminal mode to carry it. A person-operated
 [provider terminal](workspace.md) (maintainer decision, 2026-11-21) opens Claude
 Code's own interface in a Code thread with the environment that thread's turns
 launch with: under Strict Code Mode still does not start there, and outside
-Strict that environment follows the same switch, as the person's session outside
-the thread's record. Once the Agent SDK supports Code Mode, Octant offers it under the
+Strict the terminal does not read that switch yet and keeps Octant's telemetry
+guard, so it does not start there either. Once the Agent SDK supports Code Mode, Octant offers it under the
 same gate and level as Claude's other tools. The `REPL` tool, which runs code
 in Claude's own process, is already offered outside Plan under the shell's
 rules (see [Native plan capture](#native-plan-capture)).
