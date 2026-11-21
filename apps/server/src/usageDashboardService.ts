@@ -127,7 +127,7 @@ export function readUsageDashboard(
   });
 }
 
-/** The dashboard attributes image jobs to their thread's Project; ceilings do not. */
+/** The dashboard and monetary ceilings attribute image jobs to their thread's Project. */
 const dashboardScope = { includeImageJobs: true } as const;
 
 function selectRows(

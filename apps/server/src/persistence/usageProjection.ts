@@ -505,8 +505,9 @@ function projectBearingSubjectTerms(
     ),
     // An image job made in a thread is that thread's spend: its queued event
     // names the thread kind and the thread. A library job names no thread.
-    // Only the dashboard attributes them: a spend ceiling selects its rows
-    // through the same predicate and must keep counting what it always has.
+    // The dashboard and monetary spend ceilings pass `includeImageJobs: true`;
+    // token ceilings leave it false so image providers that report no tokens
+    // do not trip token ceilings as unavailable.
     ...(includeImageJobs ? PROJECT_THREADS : []).map(
       ({ subjectType, threads }) => `(subject_type = 'image-job'
     AND subject_id IN (
@@ -520,7 +521,7 @@ function projectBearingSubjectTerms(
   ];
 }
 
-/** `includeImageJobs` places an image job under its thread's Project; only the dashboard asks. */
+/** `includeImageJobs` places an image job under its thread's Project (used by Usage and monetary ceilings). */
 export interface UsageScopeOptions {
   readonly includeImageJobs?: boolean;
 }

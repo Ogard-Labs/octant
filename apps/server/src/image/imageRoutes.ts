@@ -342,7 +342,14 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
     } catch (error) {
       if (isImageJobServiceError(error)) {
         const status =
-          error.category === "ineligible" ? 403 : error.category === "conflict" ? 409 : 400;
+          error.category === "ineligible" || error.category === "spend-ceiling"
+            ? 403
+            : error.category === "conflict"
+              ? 409
+              : 400;
+        if (error.refusal !== undefined) {
+          return json({ error: error.message, refusal: error.refusal }, status, origin);
+        }
         return failure(error.message, status, origin);
       }
       return failure("Image request failed.", 500, origin);
