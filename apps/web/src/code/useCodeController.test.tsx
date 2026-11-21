@@ -3984,6 +3984,62 @@ describe("useCodeController", () => {
     });
   });
 
+  it("sends pull request line notes to a linked thread that is not open with pullRequestLineNotesSource", async () => {
+    const executeOperation = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "provider-turn-state", state: "running" })
+      .mockResolvedValueOnce({
+        kind: "operation-failed",
+        failure: { category: "waiting", message: "A turn is already running on this thread." },
+      });
+    const putEvidence = vi.fn(async () => ({
+      contentId: "80000000-0000-4000-8000-000000000001",
+      digest: "a".repeat(64),
+      byteLength: 24,
+    }));
+    const client = fakeClient({
+      executeOperation: executeOperation as never,
+      putEvidence: putEvidence as never,
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    let outcome: Awaited<ReturnType<typeof result.current.sendPullRequestLineNotes>> | undefined;
+    await act(async () => {
+      outcome = await result.current.sendPullRequestLineNotes(
+        ids.thread,
+        "Notes on the changed lines:\n\n1. src/refresh.ts, new line 12\n   Why 42?",
+        source,
+      );
+    });
+    expect(outcome).toEqual({ status: "sent" });
+    expect(putEvidence).toHaveBeenCalledWith(
+      ids.thread,
+      "Notes on the changed lines:\n\n1. src/refresh.ts, new line 12\n   Why 42?",
+    );
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "start-provider-turn",
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        pullRequestLineNotesSource: source,
+      }),
+    );
+
+    await act(async () => {
+      outcome = await result.current.sendPullRequestLineNotes(ids.thread, "Second try", source);
+    });
+    expect(outcome).toEqual({
+      status: "refused",
+      message: "A turn is already running on this thread.",
+    });
+  });
+
   it("marks a manual follow-up with a strictly newer trigger sequence", async () => {
     const executeFollowUp = vi.fn(async () => ({ kind: "follow-up-updated" }) as never);
     const client = fakeClient({

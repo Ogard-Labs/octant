@@ -597,6 +597,33 @@ export class CodeProjectPullRequestService {
   }
 
   /**
+   * Returns the last observed GitHub author login for this pull request from
+   * host-local caches, or `undefined` when unobserved, revoked, or unknown.
+   */
+  observedAuthor(target: CodeProjectPullRequestDetailQuery): string | undefined {
+    if (this.#githubRevoked) return undefined;
+    const link = this.#resolveLink(target);
+    const cached =
+      this.#detailCache.get(this.#detailCacheKey(target, link))?.detail ??
+      this.#detailCache.get(detailKey(target))?.detail;
+    const detailAuthor = cached?.author.trim();
+    if (
+      detailAuthor !== undefined &&
+      detailAuthor.length > 0 &&
+      detailAuthor !== "Unknown author"
+    ) {
+      return detailAuthor;
+    }
+    const targetRowKey = this.#targetIdentityKey(target, link);
+    const row = this.#cache?.rows.find((entry) => this.#rowIdentityKey(entry) === targetRowKey);
+    const rowAuthor = row?.author.trim();
+    if (rowAuthor !== undefined && rowAuthor.length > 0 && rowAuthor !== "Unknown author") {
+      return rowAuthor;
+    }
+    return undefined;
+  }
+
+  /**
    * Whether this window may act on one pull request, and which Code threads
    * are linked to it. The pull-request switches ask before every effect, with
    * the same Project-to-repository check the merge makes.

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -77,6 +77,8 @@ export function CodeLineNotes(props: {
   readonly onSend?: (message: string) => Promise<CodeLineNotesSendResult>;
   /** Why sending is not possible right now; the notes stay either way. */
   readonly sendUnavailable?: string;
+  /** Optional compact control rendered directly under the Send notes button. */
+  readonly sendFooter?: ReactNode;
 }) {
   const [notes, setNotes] = useState<ReadonlyArray<CodeLineNote>>([]);
   const [draft, setDraft] = useState<Draft>();
@@ -278,6 +280,7 @@ export function CodeLineNotes(props: {
           >
             {sending ? "Sending…" : pendingLabel}
           </OctantButton>
+          {props.sendFooter === undefined ? null : props.sendFooter}
           {sendHeld === undefined ? null : (
             <p className="code-line-notes__hint" role="status">
               {sendHeld}

@@ -384,6 +384,16 @@ html:not([data-octant-reduced-transparency="true"])
   justify-self: start;
 }
 
+.code-line-notes__thread-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.code-line-notes__thread-select {
+  max-width: 100%;
+}
+
 /* ─── repository file tree ─────────────────────────────────────────────
    The Files dock is 320px wide, so every row spends its width the same
    way: one fixed indent step for files and folders alike, one row height,

@@ -1016,6 +1016,7 @@ export function startOctantServer(
       extensionPackageStore,
       externalContentIngestionStore,
       fileMentionService: (): FileMentionService => fileMentionService,
+      githubCapabilityService,
       githubExtensionSnapshot,
       githubReadToolService,
       isCodeProviderModelAllowed,

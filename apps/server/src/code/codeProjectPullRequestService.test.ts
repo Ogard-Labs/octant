@@ -2224,4 +2224,17 @@ describe("CodeProjectPullRequestService", () => {
     expect(JSON.stringify(view)).not.toContain("Verified implementation.");
     expect(view.freshness).toEqual({ status: "stale", staleReason: "disconnected" });
   });
+
+  it("reports the observed pull request author and returns undefined when unobserved or revoked", async () => {
+    const { service } = serviceFixture({
+      detail: async () => observedDetail,
+    });
+    expect(service.observedAuthor(detailQuery)).toBeUndefined();
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+    expect(service.observedAuthor(detailQuery)).toBe("octocat");
+
+    service.revokeGithub();
+    expect(service.observedAuthor(detailQuery)).toBeUndefined();
+  });
 });

@@ -70,6 +70,7 @@ import {
   type CodeOperationCommand,
   type CodeOperationId,
   type CodeOperationResult,
+  type CodePullRequestLineNotesSource,
   type CodeTerminalId,
   type CodeTerminalLiveFrame,
   type CodeTerminalLiveRequest,
@@ -86,6 +87,7 @@ import {
   type AgentRunId,
   type MentionableThreadId,
   type PendingRequest,
+  type ProjectId,
   type ScaffoldEntry,
   type ScaffoldRun,
   type ProviderAttachmentInput,
@@ -1436,6 +1438,20 @@ export interface CodeOperationServiceOptions {
   readonly recordReviewContent?: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
+  /**
+   * Resolves the observed pull request's author and the signed-in `gh` viewer
+   * login for line notes composed on a pull request's diff. When they differ or
+   * either cannot be read, the host marks the thread as having read outside
+   * content before starting the turn.
+   */
+  readonly resolvePullRequestLineNotesAuthorship?: (input: {
+    readonly projectId: ProjectId;
+    readonly source: CodePullRequestLineNotesSource;
+    readonly signal: AbortSignal;
+  }) => Promise<{
+    readonly pullRequestAuthor: string | undefined;
+    readonly viewerLogin: string | undefined;
+  }>;
   readonly turns: CodeOperationTurnPort;
   readonly evidence: CodeOperationEvidencePort;
   /**
@@ -6921,6 +6937,61 @@ export class CodeOperationService {
           "A selected review finding or its captured comparison is unavailable or changed. Reopen Review to prepare it again, or explicitly clear this draft. Nothing was sent.",
           "refused",
         );
+      }
+    }
+    if (command.pullRequestLineNotesSource !== undefined) {
+      const source = command.pullRequestLineNotesSource;
+      const authorship = await this.#options
+        .resolvePullRequestLineNotesAuthorship?.({
+          projectId: thread.projectId,
+          source,
+          signal: AbortSignal.timeout(5_000),
+        })
+        .catch(() => undefined);
+      if (admissionCurrent?.() === false) {
+        await extensionTools?.close?.().catch(() => undefined);
+        return this.#failed(
+          command.operationId,
+          "unauthorized",
+          "Code turn admission is no longer current.",
+          "refused",
+        );
+      }
+      const author = authorship?.pullRequestAuthor?.trim();
+      const viewer = authorship?.viewerLogin?.trim();
+      const authoredBySignedInUser =
+        author !== undefined &&
+        author.length > 0 &&
+        author !== "Unknown author" &&
+        viewer !== undefined &&
+        viewer.length > 0 &&
+        author.toLowerCase() === viewer.toLowerCase();
+      if (!authoredBySignedInUser) {
+        if (this.#options.recordReviewContent === undefined) {
+          await extensionTools?.close?.().catch(() => undefined);
+          return this.#failed(
+            command.operationId,
+            "unavailable",
+            "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
+            "refused",
+          );
+        }
+        const recorded = this.#options.recordReviewContent({
+          threadId: thread.id,
+          provenance: { origin: "external-content", sourceLabel: "pull-request-line-notes" },
+          contentReference: `pull-request-line-notes:${source.repositoryOwner}/${source.repositoryName}#${source.number}:${command.operationId}`,
+          correlationId: command.operationId,
+          authorized: true,
+        });
+        if (recorded.kind !== "recorded" && recorded.kind !== "already-recorded") {
+          await extensionTools?.close?.().catch(() => undefined);
+          return this.#failed(
+            command.operationId,
+            "unavailable",
+            "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
+            "refused",
+          );
+        }
       }
     }
     // Read last, after every refusal above: carrying a message marks this

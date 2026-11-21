@@ -120,6 +120,7 @@ export interface DockContainerProps {
     | "selectProjectPullRequest"
     | "selectProjectPullRequestIdentity"
     | "selectWorkThread"
+    | "sendPullRequestLineNotes"
     | "setDockSidecarsByThread"
     | "setDockStatesByThread"
     | "setFallbackDockState"
@@ -506,6 +507,7 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
     ...(codeClient.setProjectPullRequestAutoFix === undefined
       ? {}
       : { setAutoFix: codeClient.setProjectPullRequestAutoFix.bind(codeClient) }),
+    onSendLineNotes: actions.sendPullRequestLineNotes,
     pullRequestReviewClient,
   };
 

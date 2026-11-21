@@ -388,6 +388,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     IntegrationsWiring,
     | "agentMessageService"
     | "consumeCreateFromIssueFramed"
+    | "githubCapabilityService"
     | "githubExtensionSnapshot"
     | "githubReadToolService"
     | "peekCreateFromIssueFramed"
@@ -537,6 +538,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     extensionPackageStore,
     externalContentIngestionStore,
     fileMentionService,
+    githubCapabilityService,
     githubExtensionSnapshot,
     githubReadToolService,
     isCodeProviderModelAllowed,
@@ -1872,6 +1874,21 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             port: canvasAgentToolPort,
           }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        resolvePullRequestLineNotesAuthorship: async ({ projectId, source, signal }) => {
+          const pullRequestAuthor = projectPullRequestService.observedAuthor({
+            projectId,
+            repositoryOwner: source.repositoryOwner,
+            repositoryName: source.repositoryName,
+            number: source.number,
+          });
+          if (pullRequestAuthor === undefined) {
+            return { pullRequestAuthor: undefined, viewerLogin: undefined };
+          }
+          const viewerLogin = (
+            await githubCapabilityService.snapshot(signal).catch(() => undefined)
+          )?.account?.login;
+          return { pullRequestAuthor, viewerLogin };
+        },
         outsideContentMarks: runtimeOutsideContentMarks,
         forgeChanges: runtimeForgeChanges,
         readThreadExternalContentTaint: (threadId) =>
