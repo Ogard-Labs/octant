@@ -2553,6 +2553,45 @@ command such as `update-config` may do. The earlier refusal everywhere was
 Octant's default, not a protocol limit: ACP carries the command as prompt
 text.
 
+### Approvals kept for the session, and steering
+
+Decided (maintainer decision, 2026-11-21; built): both apply to every ACP
+agent, shipped profile or added.
+
+- **Allow always.** Where a permission request offers the agent's own
+  `allow_always` option and the person keeps approvals for the session
+  (permission persistence `current-session`), an approval chooses it, so the
+  agent stops asking for that call as Octant itself would. A one-call answer
+  (`scope: "once"`: an automatic reviewer's, or one on a child run's behalf)
+  and persistence `project-default` choose `allow_once`. Offered
+  `allow_always` with no `allow_once`, any other approval is refused and
+  nothing is sent, and a helper run denies such a request on arrival, as
+  described for [Google Antigravity](#google-antigravity). Before this, only
+  Google Antigravity chose it.
+- **Steering.** A profile whose agent folds a second `session/prompt` into
+  the turn already running (`steersMidTurn`; Google Antigravity, per
+  Google's ACP guide) offers the provider SDK's `steer`: the note goes as
+  another `session/prompt` on the same session, as text only, while the
+  first is still open, and its events continue on the same Octant turn.
+  The turn ends when the last open prompt answers: an earlier prompt's
+  answer, whatever its stop reason (the agent may end it `cancelled` once
+  the note takes over), is part of the turn, and the last answer decides
+  completed, interrupted or failed and settles the turn's usage (its token
+  counts stand for the turn; an earlier answer's are not added, while a
+  cost read from the session's running total still covers both). A prompt
+  that fails ends the turn at once. `steer` answers `unsupported` with no
+  turn running, while compacting, for an empty note, and for a note that
+  opens with `/`, which would run an agent command no review admitted.
+  The host steers through it where it steers any runtime: a person's note
+  to a running child run, and a finished child's result into a running
+  parent turn. Every other ACP agent offers no `steer`, so those wait for a
+  turn of their own, and a prompt `send` delivers while a turn runs is
+  refused for every ACP agent; a person's message to a running thread goes
+  into the host's queue for the next turn either way. Rationale: other ACP
+  clients either steer this way or cancel the turn and resend; cancelling
+  would discard the work under way, and an agent that does not take a
+  second prompt would fail the turn, so the flag is per profile.
+
 ### Own sandboxes checked and not switched
 
 Under [Providers run in their own sandbox](../architecture.md#security-and-authority)
@@ -2942,10 +2981,8 @@ with the person's token. The CLI talks to Google itself.
   `yolo` and, for some accounts, `auto`, and refuses `auto_edit` and `yolo`
   from an ACP client. The profile selects no mode (`selectsNoMode`): the
   session keeps `default` and Octant answers its approvals for the thread's
-  level, Full access included. Where the CLI offers its own `allow_always`
-  and the person keeps approvals for the session, an approval chooses it, so
-  the CLI remembers the answer (`forwardsAllowAlways`); a one-call answer (an
-  automatic reviewer's, or one on a child run's behalf) never does. Its
+  level, Full access included. Its own `allow_always` is chosen as for
+  [every ACP agent](#approvals-kept-for-the-session-and-steering). Its
   questions arrive as permission requests whose tool call id starts with
   `interaction_`: one with no allow option is asked as a question whose
   answers are its other options, and a reject option among them is not an
@@ -3015,18 +3052,20 @@ Kept, where other ACP clients of the CLI differ: the self-update guard (other
 clients both set and leave it), `--disable-telemetry` where the launch keeps
 telemetry closed, Strict and Network
 limits as the person sets them, and Chat and Plan, which those clients do not
-have. A prompt sent while a turn runs is refused as for every ACP agent;
-the CLI steers a running turn with it, which Octant does not offer yet.
+have. Google's guide says a prompt sent while a turn runs steers that turn
+instead of starting a new one, so the profile steers (`steersMidTurn`, see
+[Approvals kept for the session, and steering](#approvals-kept-for-the-session-and-steering)).
 
 Not built yet, each pending the signed-in probe on a Mac with a personal
 subscription: whether the sandboxed keychain read signs in as measured for
 Claude Code, the model and thinking option ids, the exact shape of a question
-and of `session/list`, the `/usage` answer on a real account, mid-turn
-steering, and a pinned compaction release. Google's guide says the server
-speaks protocol version 1, offers elicitation forms for questions, supports
-`session/close`, and treats a prompt sent during a turn as steering; Octant
-asks questions through the permission channel, sends no `session/close`, and
-refuses a mid-turn prompt until each is built against a live run.
+and of `session/list`, the `/usage` answer on a real account, and a pinned
+compaction release. Steering is built from Google's guide; how the CLI
+answers the first prompt once a second one takes over its turn (the driver
+accepts any stop reason) remains part of that probe. Google's guide says the
+server speaks protocol version 1, offers elicitation forms for questions, and
+supports `session/close`; Octant asks questions through the permission
+channel and sends no `session/close` until each is built against a live run.
 
 ### Any ACP agent
 

@@ -3071,6 +3071,9 @@ Agents tab on that child, and no way to answer.
 Live child steering is optional on a provider connection. Codex uses its
 current-turn steering command; Octant's harness inserts a note after a complete
 tool-results step or response and persists it before acknowledging delivery.
+An ACP agent whose profile steers (Google Antigravity) takes the note as a
+second `session/prompt` on the running turn
+([Provider runtimes](design/provider-runtimes.md#approvals-kept-for-the-session-and-steering)).
 Only notes retained in the fitted provider request are recorded and acknowledged;
 notes omitted to fit the context limit are refused.
 Unsupported steering is reported as such; a saved note alone is not evidence
@@ -3105,7 +3108,7 @@ The reviewer at Auto does not answer in the person's place.
 
 A finished child's result reaches its parent as a queued delivery turn, or,
 while the parent's turn is running on a runtime that steers (Codex, the Octant
-Harness) and the result fits the runtime's note limit, as a note steered into
+Harness, an ACP agent whose profile steers) and the result fits the runtime's note limit, as a note steered into
 that turn (`steer` with `source: "agent-result"`). The parent is marked as
 having read outside content before either, and its approval gates read the
 mark live, so later tools in the same turn act marked; a Code turn reviewed by

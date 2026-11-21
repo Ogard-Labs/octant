@@ -259,6 +259,8 @@ interface SessionState {
   readonly appManagedTools: ProviderCapabilitySupport;
   managedTools: AcpManagedToolsLease | undefined;
   promptActive: boolean;
+  /** The turn's prompts the agent has not answered: more than one once steered. */
+  openPrompts: number;
   compacting: boolean;
   closed: boolean;
 }
@@ -1622,6 +1624,7 @@ function makeConnection(
         appManagedTools,
         managedTools,
         promptActive: false,
+        openPrompts: 0,
         compacting: false,
         closed: false,
       };
@@ -2292,6 +2295,123 @@ function makeConnection(
         return pending;
       });
 
+    /**
+     * Settles one prompt of a turn. A turn the agent steers holds more than
+     * one open prompt (`steer` sends each note as another `session/prompt`);
+     * an earlier prompt answering while a later one is open is part of the
+     * same turn, whatever stop reason it gives (the agent may end it as
+     * `cancelled` once the note takes over), so only the last prompt to
+     * answer ends the turn and settles its usage. A prompt that fails ends
+     * the turn at once, and the prompts still open answer into a turn that
+     * is already over.
+     */
+    const settlePrompt = (
+      state: SessionState,
+      outcome:
+        | { readonly status: "answered"; readonly result: AcpPromptResult }
+        | { readonly status: "failed"; readonly error: unknown },
+    ): void => {
+      state.openPrompts = Math.max(0, state.openPrompts - 1);
+      if (outcome.status === "answered" && state.openPrompts > 0) return;
+      state.promptActive = state.openPrompts > 0;
+      if (outcome.status === "answered") {
+        const { result } = outcome;
+        void cancelForms(state);
+        if (result.stopReason === "cancelled") cancelPendingTools(state);
+        // The reply settles the session's cumulative cost even
+        // when the turn already failed, so the next turn is
+        // charged only its own share.
+        const reported =
+          state.runtime.reported === undefined
+            ? undefined
+            : finishAcpReportedTurn(
+                state.runtime.reported,
+                result.usage,
+                profile.turnUsageWithoutTotal,
+              );
+        if (state.closed || state.context.terminal) return;
+        if (state.runtime.usage !== undefined) {
+          const usage = finishAcpUsageTurn(state.runtime.usage, result.usage);
+          if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
+        } else if (reported !== undefined) {
+          offer(eventFor(state, factories.clock, reported));
+        }
+        state.context.terminal = true;
+        if (result.stopReason === "cancelled") {
+          offer(
+            eventFor(state, factories.clock, {
+              kind: "interrupted",
+              message: `${name} turn was interrupted.`,
+            }),
+          );
+        } else if (
+          result.stopReason === "end_turn" ||
+          outputStopReason(result.stopReason) !== undefined
+        ) {
+          const stop = outputStopReason(result.stopReason);
+          state.completed = true;
+          // A call the agent never finished (a subagent's read)
+          // is done once its turn is.
+          if (profile.toleratesStrayUpdates === true)
+            for (const tool of state.context.tools.values()) {
+              if (tool.terminal) continue;
+              tool.terminal = true;
+              offer(
+                eventFor(state, factories.clock, {
+                  kind: "tool-success",
+                  toolCallId: tool.toolCallId,
+                  summary: "Tool completed.",
+                }),
+              );
+            }
+          offer(
+            eventFor(state, factories.clock, {
+              kind: "completed",
+              resumeCursor: {
+                driverKind: profile.kind,
+                value: state.sourceSessionId,
+                binding: {
+                  instanceId: options.instanceId,
+                  sessionId: state.sessionId,
+                  projectRoot,
+                  mode,
+                  modelId: decodeProviderModelId(state.modelId),
+                },
+              },
+              ...(stop === undefined ? {} : { stopReason: stop }),
+            }),
+          );
+        } else {
+          offer(
+            eventFor(state, factories.clock, {
+              kind: "failed",
+              failure: failure(
+                "provider-failed",
+                result.stopReason === "refusal" && profile.refusalMessage !== undefined
+                  ? profile.refusalMessage
+                  : `${name} turn did not complete.`,
+              ),
+            }),
+          );
+        }
+        return;
+      }
+      const { error } = outcome;
+      void cancelForms(state);
+      // A steered turn's later reply still settles its cost.
+      if (state.runtime.reported !== undefined && state.openPrompts === 0)
+        finishAcpReportedTurn(state.runtime.reported, undefined);
+      if (state.closed || state.context.terminal) return;
+      state.context.terminal = true;
+      offerObservedUsage(state);
+      offer(
+        eventFor(state, factories.clock, {
+          kind: "failed",
+          failure: providerFailure(profile, error),
+        }),
+      );
+    };
+
     return {
       ...(hasVerifiedCompaction(profile)
         ? {
@@ -2540,109 +2660,47 @@ function makeConnection(
                 if (state.runtime.reported !== undefined)
                   beginAcpReportedTurn(state.runtime.reported);
                 state.promptActive = true;
-                void state.client
-                  .prompt(state.sourceSessionId, promptBlocks, attachments)
-                  .then((result) => {
-                    state.promptActive = false;
-                    void cancelForms(state);
-                    if (result.stopReason === "cancelled") cancelPendingTools(state);
-                    // The reply settles the session's cumulative cost even
-                    // when the turn already failed, so the next turn is
-                    // charged only its own share.
-                    const reported =
-                      state.runtime.reported === undefined
-                        ? undefined
-                        : finishAcpReportedTurn(
-                            state.runtime.reported,
-                            result.usage,
-                            profile.turnUsageWithoutTotal,
-                          );
-                    if (state.closed || state.context.terminal) return;
-                    if (state.runtime.usage !== undefined) {
-                      const usage = finishAcpUsageTurn(state.runtime.usage, result.usage);
-                      if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
-                    } else if (reported !== undefined) {
-                      offer(eventFor(state, factories.clock, reported));
-                    }
-                    state.context.terminal = true;
-                    if (result.stopReason === "cancelled") {
-                      offer(
-                        eventFor(state, factories.clock, {
-                          kind: "interrupted",
-                          message: `${name} turn was interrupted.`,
-                        }),
-                      );
-                    } else if (
-                      result.stopReason === "end_turn" ||
-                      outputStopReason(result.stopReason) !== undefined
-                    ) {
-                      const stop = outputStopReason(result.stopReason);
-                      state.completed = true;
-                      // A call the agent never finished (a subagent's read)
-                      // is done once its turn is.
-                      if (profile.toleratesStrayUpdates === true)
-                        for (const tool of state.context.tools.values()) {
-                          if (tool.terminal) continue;
-                          tool.terminal = true;
-                          offer(
-                            eventFor(state, factories.clock, {
-                              kind: "tool-success",
-                              toolCallId: tool.toolCallId,
-                              summary: "Tool completed.",
-                            }),
-                          );
-                        }
-                      offer(
-                        eventFor(state, factories.clock, {
-                          kind: "completed",
-                          resumeCursor: {
-                            driverKind: profile.kind,
-                            value: state.sourceSessionId,
-                            binding: {
-                              instanceId: options.instanceId,
-                              sessionId: state.sessionId,
-                              projectRoot,
-                              mode,
-                              modelId: decodeProviderModelId(state.modelId),
-                            },
-                          },
-                          ...(stop === undefined ? {} : { stopReason: stop }),
-                        }),
-                      );
-                    } else {
-                      offer(
-                        eventFor(state, factories.clock, {
-                          kind: "failed",
-                          failure: failure(
-                            "provider-failed",
-                            result.stopReason === "refusal" && profile.refusalMessage !== undefined
-                              ? profile.refusalMessage
-                              : `${name} turn did not complete.`,
-                          ),
-                        }),
-                      );
-                    }
-                  })
-                  .catch((error: unknown) => {
-                    state.promptActive = false;
-                    void cancelForms(state);
-                    if (state.runtime.reported !== undefined)
-                      finishAcpReportedTurn(state.runtime.reported, undefined);
-                    if (state.closed || state.context.terminal) return;
-                    state.context.terminal = true;
-                    offerObservedUsage(state);
-                    offer(
-                      eventFor(state, factories.clock, {
-                        kind: "failed",
-                        failure: providerFailure(profile, error),
-                      }),
-                    );
-                  });
+                state.openPrompts = 1;
+                void state.client.prompt(state.sourceSessionId, promptBlocks, attachments).then(
+                  (result) => settlePrompt(state, { status: "answered", result }),
+                  (error: unknown) => settlePrompt(state, { status: "failed", error }),
+                );
                 return Effect.void;
               }),
             );
           }),
         ),
+      ...(profile.steersMidTurn === true
+        ? {
+            // A note goes as another `session/prompt` on the running turn's
+            // session, which the agent folds into that turn; its events
+            // continue on the same turn, which ends when the last open
+            // prompt answers (`settlePrompt`). A note that opens with `/`
+            // would run an agent command no review admitted, so it is
+            // refused, as is one with no turn running to take it.
+            steer: (input: Parameters<NonNullable<ProviderConnection["steer"]>>[0]) =>
+              Effect.sync(() => {
+                const state = sessions.get(input.sessionId);
+                if (
+                  state === undefined ||
+                  state.closed ||
+                  state.context.terminal ||
+                  state.compacting ||
+                  !state.promptActive ||
+                  state.openPrompts === 0 ||
+                  input.message.trim().length === 0 ||
+                  input.message.trimStart().startsWith("/")
+                )
+                  return "unsupported" as const;
+                state.openPrompts += 1;
+                void state.client.prompt(state.sourceSessionId, [input.message]).then(
+                  (result) => settlePrompt(state, { status: "answered", result }),
+                  (error: unknown) => settlePrompt(state, { status: "failed", error }),
+                );
+                return "steered" as const;
+              }),
+          }
+        : {}),
       interrupt: (sessionId) =>
         stateFor(sessionId).pipe(
           Effect.flatMap((state) =>
@@ -2725,11 +2783,12 @@ function makeConnection(
                 ),
               );
             }
-            // An agent that remembers its own allow-always gets it when the
-            // person keeps answers for the session, never for a one-call
-            // answer (an automatic reviewer's, or one on a child's behalf).
+            // An agent that offers its own allow-always gets it when the
+            // person keeps answers for the session, so it stops asking for
+            // that call, as Octant would; never for a one-call answer (an
+            // automatic reviewer's, or one on a child's behalf), and never
+            // when answers are kept only as the Project's default.
             const remembers =
-              profile.forwardsAllowAlways === true &&
               input.scope !== "once" &&
               pending.allowAlwaysOptionId !== undefined &&
               permissionPersistence(options) === "current-session";
