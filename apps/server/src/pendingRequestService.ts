@@ -12,16 +12,18 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { enabledModes } from "@octant/domain";
+import type { ClientPrincipal } from "./clientPrincipal";
 
 /**
  * Who reads the list: a window of this computer or a paired device, by the
  * service scope its authenticated principal resolved to. The services that
- * hold asks decide differently for the two, so the kind travels with the
- * scope instead of being guessed from it.
+ * hold asks decide differently for the two, so the kind and authenticated
+ * principal travel with the scope instead of being guessed from it.
  */
 export interface PendingRequestReader {
   readonly kind: PrincipalKind;
   readonly scopeId: WindowId;
+  readonly principal?: ClientPrincipal;
 }
 
 export interface PendingRequestSources {
@@ -113,9 +115,14 @@ export class PendingRequestService {
   async list(
     windowId: WindowId,
     readerKind: PendingRequestReader["kind"] = "local-window",
+    principal?: ClientPrincipal,
   ): Promise<PendingRequestList> {
     const modes = enabledModes(this.#sources.readSettings());
-    const reader = { kind: readerKind, scopeId: windowId };
+    const reader: PendingRequestReader = {
+      kind: readerKind,
+      scopeId: windowId,
+      ...(principal === undefined ? {} : { principal }),
+    };
     const [work, code, children, waiting] = await Promise.all([
       modes.includes("work") ? this.#sources.work(windowId) : [],
       this.#sources.code(windowId),

@@ -207,7 +207,11 @@ describe("pending request route", () => {
     ]);
     expect(body.requests[0]).not.toHaveProperty("answer");
     expect(body.requests[0]).not.toHaveProperty("options");
-    expect(sources.children).toHaveBeenCalledWith({ kind: "local-window", scopeId: windowId });
+    expect(sources.children).toHaveBeenCalledWith({
+      kind: "local-window",
+      scopeId: windowId,
+      principal: expect.objectContaining({ kind: "local-window", windowId: String(windowId) }),
+    });
   });
 
   it("lists the agent's own approval beside the requests it works under, without a way to answer it, and not for a mode that is switched off", async () => {
@@ -252,17 +256,18 @@ describe("pending request route", () => {
     const { route, sources } = fixture({ code: [codeDecision], asks: [toolAsk] });
     const deviceScope = decodeWindowId("22222222-2222-4222-8222-222222222222");
     const remote = new Request("http://127.0.0.1/api/pending-requests");
+    const principal = createRemoteDevicePrincipal({
+      hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
+      deviceId: "22222222-2222-4222-8222-222222222222" as DeviceId,
+      credentialGeneration: 1,
+      origin: "https://octant.example",
+      protocolVersion: 1,
+      capabilityDigest: "b".repeat(64),
+      sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
+      admittedBy: "host-person",
+    });
     bindPrincipalRouteContext(remote, {
-      principal: createRemoteDevicePrincipal({
-        hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
-        deviceId: "22222222-2222-4222-8222-222222222222" as DeviceId,
-        credentialGeneration: 1,
-        origin: "https://octant.example",
-        protocolVersion: 1,
-        capabilityDigest: "b".repeat(64),
-        sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
-        admittedBy: "host-person",
-      }),
+      principal,
       scopeId: deviceScope,
     });
     const response = await route(remote);
@@ -276,10 +281,12 @@ describe("pending request route", () => {
     expect(sources.asks).toHaveBeenCalledWith({
       kind: "person-paired-device",
       scopeId: deviceScope,
+      principal,
     });
     expect(sources.children).toHaveBeenCalledWith({
       kind: "person-paired-device",
       scopeId: deviceScope,
+      principal,
     });
   });
 
@@ -287,7 +294,11 @@ describe("pending request route", () => {
     const { route, sources } = fixture({ asks: [toolAsk, chatSignIn] });
     const body = await (await route(request()))?.json();
     expect(body.asks).toEqual([chatSignIn, toolAsk]);
-    expect(sources.asks).toHaveBeenCalledWith({ kind: "local-window", scopeId: windowId });
+    expect(sources.asks).toHaveBeenCalledWith({
+      kind: "local-window",
+      scopeId: windowId,
+      principal: expect.objectContaining({ kind: "local-window", windowId: String(windowId) }),
+    });
     const workOff = fixture({
       asks: [toolAsk, chatSignIn],
       settings: { ...defaultShellSettings(), workEnabled: false },
