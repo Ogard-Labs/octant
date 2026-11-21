@@ -237,7 +237,15 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
         const decision = dependencies.hubActScope?.()?.decideStart(startProjectId);
         if (decision?.status === "refused") {
           return failureResponse(
-            { category: "unauthorized", message: hubActRefusalMessage(decision) },
+            {
+              category: "unauthorized",
+              // A fork is refused whatever Act names, so it says so rather
+              // than pointing at a grant change that would not help.
+              message:
+                command.kind === "fork-work-thread" && decision.kind === "project-not-named"
+                  ? "A device the hub introduced cannot fork a thread on this computer while it is in a hub."
+                  : hubActRefusalMessage(decision),
+            },
             403,
             origin,
           );

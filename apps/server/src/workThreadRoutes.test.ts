@@ -167,6 +167,10 @@ describe("Work thread routes", () => {
       }),
     );
     expect(forked?.status).toBe(403);
+    expect(await forked?.json()).toMatchObject({
+      message:
+        "A device the hub introduced cannot fork a thread on this computer while it is in a hub.",
+    });
     grant.current = { items: ["act"], actProjects: [] };
     const refused = await route(fromIntroduced());
     expect(refused?.status).toBe(403);
