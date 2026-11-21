@@ -1,4 +1,26 @@
 import { decodeChatThreadId, decodeEventActor } from "@octant/contracts";
+import {
+  decodeImageGenerationScopeId,
+  decodeProviderInstance,
+  decodeServiceOffersResponse,
+  type DeviceId,
+  type StableHostId,
+  type RemoteSessionId,
+  type ServiceOffer,
+} from "@octant/contracts";
+import { listEligibleImageProfiles } from "@octant/domain";
+import { createThreadImageAgentTools, IMAGE_TOOL_NAME } from "../image/imageAgentTools";
+import {
+  ImageGenerationOfferService,
+  type ImageOfferAnswer,
+} from "../image/imageGenerationOfferService";
+import { imageOfferDecisionRules } from "../image/imageOfferDecisionRules";
+import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
+import { ServiceOfferService } from "../offers/serviceOfferService";
+import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { createRemoteDevicePrincipal } from "../clientPrincipal";
+import { createChatRouteHandler } from "../chatRoutes";
 import { createNativeHarnessComposition } from "../harness/nativeHarnessComposition";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ToolActionAuthority } from "@octant/contracts";
@@ -257,6 +279,7 @@ function searxngResearchProbe(): ProviderProbeResult {
 }
 
 function openFixture(options?: {
+  readonly toolRequest?: { readonly name: string; readonly inputJson: string };
   readonly responseFragments?: ReadonlyArray<string>;
   readonly verifyModelToolsOnFirstUse?: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
@@ -616,6 +639,15 @@ function openFixture(options?: {
     }) =>
       Effect.gen(function* () {
         sentTurns.push(input);
+        if (options?.toolRequest !== undefined) {
+          yield* Queue.offer(queue, {
+            kind: "tool-request",
+            sessionId: input.sessionId,
+            requestId: "fixture-tool",
+            toolName: options.toolRequest.name,
+            inputJson: options.toolRequest.inputJson,
+          } as never);
+        }
         const planned = options?.turnOutcome ?? "completed";
         const outcome = typeof planned === "function" ? planned(sentTurns.length - 1) : planned;
         if (outcome === "waiting") {
@@ -1396,6 +1428,138 @@ describe("ChatService", () => {
     );
     expect(JSON.stringify(fakeDriver.sentTurns[0]?.context)).not.toContain("octant_browser");
   });
+  it("lets the paired browser that started a Chat turn see and cancel the image its model asks for", async () => {
+    const profile = decodeProviderInstance({
+      id: ids.provider,
+      displayName: "Image fixture",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      driverKind: "openai-image",
+      configuration: {
+        kind: "openai-image-http",
+        modelAllowlist: ["fixture"],
+        defaultModel: "fixture",
+      },
+    });
+    const imageProfiles = {
+      listInstances: () => [profile],
+      readImageGenerationSettings: () => ({ customSources: [] }),
+    };
+    const waiting = new ServiceOfferService<ServiceOffer, ImageOfferAnswer>(5, {
+      uuid: () => crypto.randomUUID(),
+      now: Date.now,
+    });
+    const offers = new ImageGenerationOfferService(waiting);
+    const unexpected = vi.fn(async (): Promise<never> => {
+      throw new Error("A cancelled offer cannot run an image job.");
+    });
+    const { service } = openFixture({
+      toolRequest: { name: IMAGE_TOOL_NAME, inputJson: JSON.stringify({ prompt: "A lighthouse" }) },
+      resolveAppManagedTools: ({ thread, windowId }) =>
+        createThreadImageAgentTools({
+          windowId,
+          threadKind: "chat-thread",
+          scopeId: decodeImageGenerationScopeId(thread.id),
+          offers,
+          kept: {
+            remembered: () => undefined,
+            forget: async () => undefined,
+            asksAgain: () => false,
+          },
+          jobs: {
+            enqueue: unexpected,
+            listByScope: () => [],
+            whenTerminal: unexpected,
+            readArtifact: unexpected,
+          },
+          listInstances: imageProfiles.listInstances,
+          readImageGenerationCustomSources: () => [],
+          readsImages: () => false,
+        }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Paired turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread");
+    const windowAuthorityStore = new WindowAuthorityStore();
+    const chat = createChatRouteHandler({ service, windowAuthorityStore });
+    const offerRoute = createServiceOfferRouteHandler({
+      offers: waiting,
+      rules: imageOfferDecisionRules(imageProfiles),
+      authorizeScope: async (_scope, kind, id) =>
+        kind === "chat-thread" &&
+        service.read(decodeChatThreadId(id)).thread.lifecycle === "active",
+      listImageProfiles: () => listEligibleImageProfiles([profile]),
+      windowAuthorityStore,
+      now: Date.now,
+    });
+    const dispatch = createAuthenticatedProductDispatch({
+      dispatch: async (request) => (await chat(request)) ?? offerRoute(request),
+    });
+    const origin = "https://octant.example";
+    const first = crypto.randomUUID() as DeviceId;
+    const other = crypto.randomUUID() as DeviceId;
+    const send = (deviceId: DeviceId, path: string, body?: object) =>
+      dispatch({
+        principal: createRemoteDevicePrincipal({
+          deviceId,
+          hostId: ids.project as StableHostId,
+          sessionId: ids.memory as RemoteSessionId,
+          capabilityDigest: "b".repeat(64),
+          credentialGeneration: 1,
+          origin,
+          protocolVersion: 1,
+          admittedBy: "host-person",
+        }),
+        abortSignal: new AbortController().signal,
+        request: new Request(
+          origin + path,
+          body === undefined
+            ? {}
+            : {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(body),
+              },
+        ),
+      });
+    try {
+      const turn = send(first, "/api/chat/commands", {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Draw a lighthouse",
+      });
+      const list = async (device: DeviceId) =>
+        decodeServiceOffersResponse(
+          await (
+            await send(device, `/api/offers?threadKind=chat-thread&scopeId=${created.thread.id}`)
+          )?.json(),
+        ).offers;
+      await vi.waitFor(async () => expect(await list(first)).toHaveLength(1));
+      const [card] = await list(first);
+      expect(card).toMatchObject({ kind: "generate", prompt: "A lighthouse" });
+      expect(await list(other)).toEqual([]);
+      const decision = { offerId: card?.offerId, decision: "cancel" };
+      expect(await (await send(other, "/api/offers/decide", decision))?.json()).toEqual({
+        kind: "offer-gone",
+      });
+      expect(await (await send(first, "/api/offers/decide", decision))?.json()).toEqual({
+        kind: "offer-answered",
+      });
+      expect(await list(first)).toEqual([]);
+      expect((await turn)?.status).toBe(200);
+      expect(unexpected).not.toHaveBeenCalled();
+    } finally {
+      waiting.close();
+    }
+  });
+
   it("tells the model to deliver kept work as a Canvas only when Chat offers the Canvas tool", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000013");
     const { service, fakeDriver } = openFixture({
