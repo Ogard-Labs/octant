@@ -937,6 +937,8 @@ function withoutHostTools(props: WorkThreadWorkspaceProps): WorkThreadWorkspaceP
     extensionClient: _extensions,
     fileMentionClient: _files,
     imageGenerationClient: _images,
+    imageResults: _imageResults,
+    imageGenerationProfiles: _imageProfiles,
     serviceOfferClient: _offers,
     mutationClient: _mutations,
     ...rest
