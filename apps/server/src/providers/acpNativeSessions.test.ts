@@ -222,7 +222,7 @@ describe("an ACP agent's session history", () => {
       driverKind: "antigravity",
       displayName: "Antigravity",
       heldSessions: () => new Set(),
-      listSessions: async () => [],
+      listSessions: async () => ({ sessions: [], truncated: false }),
       readHistory: async () => "unsupported",
     });
     const history = sessions.history;
