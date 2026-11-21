@@ -150,6 +150,13 @@ describe("usage an agent reports in its prompt reply", () => {
       outputTokens: 20,
       cacheReadInputTokens: 300,
     });
+    // Output already counts thinking under this rule, so thought is its reasoning part.
+    expect(acpTurnUsage({ inputTokens: 5, outputTokens: 40, thoughtTokens: 30 }, rule)).toEqual({
+      kind: "usage",
+      inputTokens: 5,
+      outputTokens: 40,
+      reasoningTokens: 30,
+    });
     expect(acpTurnUsage({ inputTokens: 5, outputTokens: 1 }, rule)).toEqual({
       kind: "usage",
       inputTokens: 5,
@@ -172,7 +179,7 @@ describe("usage an agent reports in its prompt reply", () => {
     ).toBeUndefined();
   });
 
-  it("adds disjoint cache and thought figures into input and output when the total sums them all", () => {
+  it("adds disjoint cache and thought figures into input and output, keeping thought as reasoning, when the total sums them all", () => {
     expect(
       acpTurnUsage({
         inputTokens: 100,
@@ -186,6 +193,7 @@ describe("usage an agent reports in its prompt reply", () => {
       kind: "usage",
       inputTokens: 450,
       outputTokens: 50,
+      reasoningTokens: 30,
       cacheReadInputTokens: 300,
       cacheWriteInputTokens: 50,
     });
@@ -200,7 +208,13 @@ describe("usage an agent reports in its prompt reply", () => {
         cachedReadTokens: 300,
         totalTokens: 450,
       }),
-    ).toEqual({ kind: "usage", inputTokens: 400, outputTokens: 50, cacheReadInputTokens: 300 });
+    ).toEqual({
+      kind: "usage",
+      inputTokens: 400,
+      outputTokens: 50,
+      reasoningTokens: 30,
+      cacheReadInputTokens: 300,
+    });
   });
 
   it("reads each part inside or outside its parent as the total sums it", () => {
@@ -212,7 +226,13 @@ describe("usage an agent reports in its prompt reply", () => {
         cachedReadTokens: 300,
         totalTokens: 450,
       }),
-    ).toEqual({ kind: "usage", inputTokens: 400, outputTokens: 50, cacheReadInputTokens: 300 });
+    ).toEqual({
+      kind: "usage",
+      inputTokens: 400,
+      outputTokens: 50,
+      reasoningTokens: 30,
+      cacheReadInputTokens: 300,
+    });
     expect(
       acpTurnUsage({
         inputTokens: 400,
@@ -221,7 +241,13 @@ describe("usage an agent reports in its prompt reply", () => {
         cachedReadTokens: 300,
         totalTokens: 450,
       }),
-    ).toEqual({ kind: "usage", inputTokens: 400, outputTokens: 50, cacheReadInputTokens: 300 });
+    ).toEqual({
+      kind: "usage",
+      inputTokens: 400,
+      outputTokens: 50,
+      reasoningTokens: 30,
+      cacheReadInputTokens: 300,
+    });
   });
 
   it("reports nothing when no reading of the parts adds up to the total", () => {

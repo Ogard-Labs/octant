@@ -189,7 +189,8 @@ function optionalCount(value: unknown): number | undefined | false {
  * already counts `thoughtTokens`, so the total decides: the first reading
  * whose parts add up to it is taken, starting with every type disjoint (as
  * the schema's sum describes) and then each part counted inside its parent.
- * Octant's input is all input, cached or not, and its output counts thinking.
+ * Octant's input is all input, cached or not, and its output counts thinking,
+ * with `thoughtTokens` kept as the reasoning part of it.
  * A reply whose parts fit no reading, or with no total and no reviewed rule
  * for that, reports nothing rather than a guess.
  */
@@ -223,6 +224,7 @@ export function acpTurnUsage(
       kind: "usage",
       inputTokens: input + (cacheRead ?? 0),
       outputTokens: output,
+      ...(thought === undefined || thought > output ? {} : { reasoningTokens: thought }),
       ...(cacheRead === undefined ? {} : { cacheReadInputTokens: cacheRead }),
     };
   }
@@ -242,7 +244,14 @@ export function acpTurnUsage(
     (candidate) => candidate.inputTokens + candidate.outputTokens === total,
   );
   if (reading === undefined) return;
-  return { kind: "usage", ...reading, ...cache };
+  // Every reading's output counts thinking, so the thought figure is the
+  // part of it spent reasoning.
+  return {
+    kind: "usage",
+    ...reading,
+    ...(thought === undefined ? {} : { reasoningTokens: thought }),
+    ...cache,
+  };
 }
 
 interface AcpSessionCost {
