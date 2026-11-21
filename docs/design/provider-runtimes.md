@@ -298,20 +298,22 @@ entry point but documented nowhere. `vibe-acp` is a projection over the same
 in-process host, so it loses no capability by comparison: the 3.0.3 source
 sends ACP usage updates with context size and cost, a `/compact` command,
 `review/*` extension methods, and questions as elicitation. Usage and context
-updates are consumed for the verified 3.0.3 release, as specified below.
+updates are consumed from the verified 3.0.3 release on (a later release
+unverified), as specified below.
 Native review remains unimplemented. Supplementary file-review
 reads have a candidate integration behind an empty verified-version allowlist:
 no production profile declares the read capability until signed-in 3.0.3
 read and genuine same-task cold-resume evidence pass. Revisit `vibe-app-server` when it negotiates a
 version or is documented. Vibe's questions reach the shared questionnaire as
 a session-form elicitation on 3.0.3, the one release in its verified-version
-list (maintainer decision, 2026-11-14: Octant adds to a provider and does not
-take its core features away). Another release reports questions
+list, and on every later release, unverified (maintainer decisions,
+2026-11-14: Octant adds to a provider and does not take its core features
+away; 2026-11-21: release ranges). An older release reports questions
 `unavailable`. The signed-in 3.0.3 question, answer and cancellation check
 stays a maintainer live check.
 
 The adapter advertises only ACP `elicitation.form`, never URL elicitation,
-for an explicitly verified exact 3.0.3 release. Only an active originating
+on 3.0.3 and later releases. Only an active originating
 native session may ask; one form callback is pending at a time. It maps the
 runtime's bounded string/array choice schema to the shared questionnaire,
 refusing unsupported constraints, oversized asks, duplicate choices and
@@ -1913,8 +1915,15 @@ maintainer decision, 2026-11-16). A Linux launch reaches the bridge as Pi's
 does: on the shared host network a provider launch has by default, or, when
 Network limits proxy the launch, through the egress forwarder's loopback
 relay, which opens only the bridge's port; Windows is not offered the tools.
-Decided under the same entry (designed, not built): at Full access a newer
-2.x release is offered the tools as "unverified" instead of losing them. Project resolution
+Those two exact releases are a launch-confinement attestation (the
+hostile-configuration check proves no other tool enters the launch), not a
+feature claim, so the release-range rule under
+[Probe before a profile ships](#probe-before-a-profile-ships) does not widen
+them: on any other 2.x release a Full access thread is offered the tools as
+mixed, as on 1.x. OpenCode's other 2.x floors (question forms and command
+routes from 2.0.22, native file-change and compaction routes from 2.2.0) are
+the earliest releases whose server was read for those routes, and every later
+release keeps them. Project resolution
 starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
 launches get the failing `git` stand-in described under
 [Security and authority](../architecture.md#security-and-authority), so 2.x offers turns in
@@ -2264,15 +2273,16 @@ driver reports `nativeAttachments` supported when any listed model does. In
 Work and Code any other file is named by its path in the thread's attachments
 folder, which Pi's launch confinement reads and never writes, at every level;
 in Chat it follows Chat's rule. An image to a text-only model is refused unless
-Sees images describes it. App-managed tools are reported only for the releases whose
-tool attestation, approval bridge, and confinement Octant verified: 0.85.1 and
-every release from 1.1.0 whose probe attests the tool bridge. A newer Pi
-therefore needs no Octant release; a release below 1.1.0 (other than 0.85.1), or
-one whose probe does not attest, lists its models and reports app tools
-unsupported, and a session that offers tools on it is refused with a message
-that names the floor. Only 0.85.1 is
-verified for warm reuse of a settled process; other releases close it and
-cold-resume the native history. Pi 1.1.0 adds `aborted` to `agent_settled`:
+Sees images describes it. Octant reviewed Pi's tool attestation, approval
+bridge, and confinement on 0.85.1 and from 1.1.0; app-managed tools are
+reported for every release from 0.85.1 whose probe attests the tool bridge,
+and one between 0.85.1 and 1.1.0 keeps them unverified, as its runtime card
+says (maintainer decision, 2026-11-21). A newer Pi therefore needs no Octant
+release; a release older than 0.85.1, or one whose probe does not attest,
+lists its models and reports app tools unsupported, and a session that
+offers tools on it is refused with a message that names 0.85.1. Warm reuse
+of a settled process was reviewed on 0.85.1 and holds from that release on;
+an older release closes the process and cold-resumes the native history. Pi 1.1.0 adds `aborted` to `agent_settled`:
 an aborted run is reported as interrupted, never as completed. A Pi session
 runs on the model it was opened with, so a resume that names another is refused
 as `stale-resume` rather than run on the old model unseen. Pi 1.0.3
@@ -2481,12 +2491,13 @@ later request naming the same call adds only its card. The run stays shown
 as running, because nothing reports its end.
 
 Kimi Code's own slash commands run in every mode, Chat and Plan included, as
-in its own app (maintainer decisions, 2026-11-14 and 2026-11-16; built); the
-probe still pins the reviewed command inventory, so a release with a new
-command fails closed (decided: at Full access such a release is offered as
-"unverified" instead, under
-[Provider reach Octant no longer narrows](../architecture.md#security-and-authority); designed, not built), and a
-prompt opening with `/` runs only a reviewed command the session listed. In
+in its own app (maintainer decisions, 2026-11-14 and 2026-11-16; built). No
+reviewed command inventory gates a release (maintainer decision, 2026-11-21;
+built): whatever commands a release lists, the readiness check keeps the
+listing and passes, and a prompt opening with `/` runs a command the session
+listed, or the readiness check listed until the session lists any, at every
+level (`listedCommandsOnly`); an unlisted one is refused before it reaches the
+agent. In
 Plan and Chat the session's own mode, set for the level, decides what a
 command such as `update-config` may do. The earlier refusal everywhere was
 Octant's default, not a protocol limit: ACP carries the command as prompt
@@ -2542,10 +2553,11 @@ Full access are as they were.
 ### Usage an ACP agent reports
 
 Every ACP agent records its usage in Octant (maintainer decision,
-2026-11-20). A profile that pins a reviewed reading (`usageVersions`:
+2026-11-20). A profile that names a reviewed reading (`usageVersions`:
 Mistral Vibe 3.0.3, whose figures are cumulative, under
-[Mistral Vibe surface](#mistral-vibe-surface)) is read only by that rule
-and only on those releases. Every other agent, built-in or added, is read
+[Mistral Vibe surface](#mistral-vibe-surface)) is read only by that rule,
+on those releases and, unverified, on every later one
+([Probe before a profile ships](#probe-before-a-profile-ships)). Every other agent, built-in or added, is read
 by ACP's standard usage, and its probe declares `usage: "supported"`
 (`acpTurnUsage` and `finishAcpReportedTurn` in
 `apps/server/src/providers/acpUsage.ts`). The schema is ACP's unstable
@@ -2641,7 +2653,8 @@ infers them from the driver kind.
 
 Octant's tools reach an ACP session only through the session MCP bridge, and
 only when the agent's `initialize` result advertises `mcpCapabilities.http`
-(or the profile names an exact release that accepts it unadvertised) and the
+(or the profile names a reviewed release that accepts it unadvertised, and
+the running release is that one or later) and the
 host is macOS, Linux or Windows (Linux built under
 [Provider reach Octant no longer narrows](../architecture.md#security-and-authority),
 maintainer decision, 2026-11-16; Windows under
@@ -2695,7 +2708,8 @@ read from its source repository `agentclientprotocol/registry` at commit
 `814a241`, 2026-10-25). **Shipped** has a profile; **probe next** needs the
 live probe below before a profile ships; **blocked** will not ship as an ACP
 profile for the stated reason. The registry command is its macOS
-distribution.
+distribution. Since the 2026-11-21 maintainer decision a probe next agent may
+also ship as an unverified profile without the live probe (below).
 
 | Registry id               | Agent              | Registry command                                       | Octant status                                                                                       |
 | ------------------------- | ------------------ | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
@@ -3081,9 +3095,9 @@ advertises. The model is set in the spelling the session reported
 session already opened on that model. No mode is selected (`selectsNoMode`), since no mapping of
 Chat, Work, Code and Plan onto the agent's own modes was read; Plan's
 read-only wall and the level's approvals are Octant's sandbox and approval
-bridge. It pins no exact-release feature (compaction, file review, forms, warm
-reuse, unadvertised HTTP tools), so none is offered at any level, and the
-Full access "unverified" rule has nothing to offer it. Its usage is read as
+bridge. It names no reviewed-release feature (compaction, file review,
+forms, warm reuse, unadvertised HTTP tools), so none is offered at any level,
+and the release-range rule has nothing to offer it. Its usage is read as
 [any ACP agent's](#usage-an-acp-agent-reports). An
 agent whose session lists no model has nothing to select and cannot start a
 thread.
@@ -3122,48 +3136,57 @@ outside driver packages. Rejected: a driver kind per added agent, which
 would turn the vocabulary into `string`.
 
 Not built: the probe next agents' first-class profiles and the recheck of
-Cursor's block (below). Each needs a live probe against a signed-in install,
-which this change could not run; until then each is added as any ACP agent.
+Cursor's block (below). Each may ship as an unverified profile without a live
+probe (maintainer decision, 2026-11-21); until one does, each is added as any
+ACP agent.
 
 ### Probe before a profile ships
 
-At Full access an installed release newer than the one a profile's probe
-pinned is offered as "unverified" instead of refused, under
-[Provider reach Octant no longer narrows](../architecture.md#security-and-authority); below
-Full access the pin holds. Built for Kimi Code's reviewed command inventory:
-a release that lists another inventory passes the probe, the runtime card
-says it is unverified and names the commands it added, a session below Full
-access is refused, and at Full access its listed commands run with it.
+A profile states compatibility as a range, not as exact releases
+(maintainer decision, 2026-11-21; built). A feature a profile reviewed on
+named releases (`usageVersions`, `elicitationVersions`,
+`compactionVersions`, `fileReviewVersions`, `retainedSessionVersions`,
+`unadvertisedHttpMcpVersions`; `acpReleaseClaim` in
+`apps/server/src/providers/acpProfiles.ts`) is kept, at every level alike,
+on each of those releases and on every later one; a later release that is
+not one of them keeps it unverified, and the probe's runtime card names
+what it keeps that way ("Mistral Vibe 3.0.4 keeps usage, forms, Octant's
+tools, its process open between turns, unverified: Octant reviewed them on
+another release."). A release older than the earliest of them, or one whose
+version cannot be read, never inherits newer evidence. Compaction and file
+review stay limited to Mistral Vibe, the one agent whose dialect for them
+was read. The probe no longer reports a separate Full access value
+(`capabilities.atFullAccess`), since every level now reads the same one, so
+a spend ceiling counts such a release's turns as measured at every level.
 
-Built for the exact-release claims a profile pins (`acpExactReleaseClaim` in
-`apps/server/src/providers/acpProfiles.ts`): a release newer than every
-release a claim was reviewed on keeps that claim at Full access, offered as
-unverified, and below Full access the pin holds; an older or unparseable
-release never inherits newer evidence. The probe gives Full access its own
-value, `capabilities.atFullAccess` (`release: "unverified"` with usage,
-forms as `userQuestions`, and Octant's tools as `appManagedTools`), present
-only where it differs from the other levels, and the runtime card says which
-features the release keeps at Full access. A Full access session then
-counts usage, asks the agent's session forms, takes Octant's tools over the
-unadvertised HTTP transport (the tool gate reads `atFullAccess` through
-`threadAppToolSupport`), and is retained warm on the newer release.
-Compaction and file review keep the pin at Full access too: the host runs
-both on a session it resumes for them tool-free or under Plan, not on the
-thread's Full access session, so the release is judged below Full access
-there. A spend ceiling reads each Code turn at the level it ran at: a Full access
-turn on such a release counts like any measuring provider's, its reported
-usage counted and a turn that ended with no report refusing as unknown spend,
-while a guarded turn's unreported row stays not measured
-([Architecture: stop reasons](../architecture.md#stop-reasons);
-maintainer decision, 2026-11-19). Rationale: the probe used to
-report one value for every level, so an unreviewed release lost these
-features at Full access as well, where the person already runs the agent
-open; Mistral Vibe 3.0.3, newer than the 2.25.0 its HTTP tool evidence
-pinned, is now offered Octant's tools at Full access as unverified.
+A release found to break with Octant is refused by name: a profile's
+`process.brokenVersions` (empty for every profile today) lists it, and
+Connection Check and every launch on it fail as `runtime-incompatible` with
+"`<agent> <version>` is known to break with Octant. Install another
+release." Nothing else refuses a release at or above the profile's
+`minimumVersion`. That floor is the earliest release the profile was probed
+on, kept because nothing shows an older one speaks the wire the profile
+reads; Mistral Vibe's 2.24.1 is also a protocol requirement, since its mode
+ids moved in 2.23.3 and 2.24.1. Pi keeps the same shape: Octant's tools run
+from 0.85.1 on where the probe attests them, unverified between 0.85.1 and
+1.1.0, and warm reuse of a settled process holds from 0.85.1 on, while
+the `+name` tool list stays from 1.1.0, the release that added that syntax.
 
-A profile ships only after a live probe against a signed-in install on Apple
+Rationale: an exact pin turned every agent update into an Octant release and
+kept features off on releases nobody had found broken; at Full access the
+person already ran the agent open, and below it the sandbox and the
+approval bridge, not the release number, bound what the agent reaches.
+Rejected: keeping the pin below Full access (the 2026-11-16 rule), which
+left a guarded thread without usage, forms or Octant's tools on every
+update.
+
+A profile is reviewed once a live probe against a signed-in install on Apple
 Silicon shows each of the following, recorded as a smoke test beside
 `devinSmoke.integration.test.ts` and a case in `acpConformance.test.ts`.
+A profile may ship before that probe as an unverified profile (maintainer
+decision, 2026-11-21; designed, not built: no profile ships this way yet):
+it claims only what its `initialize` reply and its sessions show, names no
+reviewed release, and says on its runtime card that it is unverified.
 Nothing is inferred from the registry entry alone.
 
 1. **Locate and version.** The binary is found where the registry
