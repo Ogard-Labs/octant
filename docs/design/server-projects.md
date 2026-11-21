@@ -213,8 +213,8 @@ checks never change registry/configuration or journal state.
   program, so the program reads standard input directly; stopping the stream
   closes standard input and ends the connection if it is still open two
   seconds later. Nothing is forwarded, and no secret goes in the command line,
-  which the server's process list shows. Built; Codex's app-server runs over
-  it ([Providers running on the server](#providers-running-on-the-server)).
+  which the server's process list shows. Built; Codex's app-server and Claude
+  Code run over it ([Providers running on the server](#providers-running-on-the-server)).
 - **Fail closed.** When a call cannot reach the server (the connection drops,
   times out, is refused, or the host key does not match), that call is refused
   with `server-unreachable` and nothing runs anywhere else. There is no local
@@ -242,22 +242,55 @@ checks never change registry/configuration or journal state.
 - **Providers running on the server.** A provider runtime that reports
   `serverPlacement: "supported"` runs a Code turn on the server with no Octant
   installed there (maintainer decisions, 2026-11-19 and 2026-11-20). Built for
-  Codex; Claude Code follows. OpenCode, Pi and the ACP agents report it
-  unsupported, because their Octant tools reach this host's loopback.
+  Codex and Claude Code. OpenCode, Pi and the ACP agents report it
+  unsupported, because their Octant tools reach this host's loopback, and
+  they are not run on a server.
   - The runtime's program starts in the Project's folder on the server through
     the Project's connection as a stream to a long-running program (`codex
-app-server --listen stdio://` after `codex --version` there), and speaks its
-    protocol over that stream. Octant's own tools travel inside that protocol,
-    so nothing on the server reaches this host. The provider SDK hands the
-    runtime a placement (`ProviderServerPlacement`) that names only the program
-    and its arguments; the host owns the connection, its pinned host key and
-    its quoting, and no secret goes on the command line.
+app-server --listen stdio://` after `codex --version` there; for Claude Code,
+    the Agent SDK's own launch of `claude` after `claude --version` there), and
+    speaks its protocol over that stream. Octant's own tools travel inside that
+    protocol (Claude Code's in-process MCP server, `canUseTool` and the SDK's
+    hooks ride its stream-json control channel), so nothing on the server
+    reaches this host. The provider SDK hands the runtime a placement
+    (`ProviderServerPlacement`) that names only the program and its arguments;
+    the host owns the connection, its pinned host key and its quoting, and no
+    secret goes on the command line. Claude Code's launch passes on only the
+    SDK's fixed switches (`env CLAUDE_CODE_ENTRYPOINT=… claude …`), none of
+    this host's environment.
   - It uses the server login's own sign-in; no credential of this host goes
-    there. It keeps the thread's level, which maps to its own sandbox and
-    approval policy as on this host; at Full access Codex runs on that server
-    with no sandbox, as it would there on its own.
+    there, including a Claude API-key or gateway account's key: on a server
+    Claude Code signs in as that login. It keeps the thread's level, which maps
+    to its own sandbox and approval policy as on this host; at Full access it
+    runs on that server with no sandbox, as it would there on its own. Plan runs
+    in the provider's own read-only plan mode; Claude Code's Plan there has no
+    shell, since the sandbox that keeps Plan's commands read-only on this host
+    cannot run there.
   - Strict refuses it, naming why: Octant's own sandbox cannot run on a
-    server, and Octant claims no sandbox there.
+    server, and Octant claims no sandbox there. A Claude Code thread that keeps
+    Octant's sandbox at Full access is refused the same way.
+  - Claude Code there reads nothing of this host's Claude account: not its
+    environment or account folder, not its instruction files (Claude Code
+    reads the server's own), not its stored task list (the panel starts empty
+    and follows the task tools), not its Git identity, sign-in check or egress
+    proxy, and it gets no Artifact tool, since a publish snapshots a file on
+    this host.
+  - Claude Code resumes its own session on the server: before each turn the
+    host asks the server whether the session's transcript is in the login's
+    `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/<folder>/`, where `<folder>` comes
+    from the folder's canonical path there. A missing transcript ends the
+    resume as a stale one, so the thread carries on with the text handoff a
+    missing session gets on this host; a server that does not answer leaves
+    the session as it was. A rewind sends the text handoff, as for any server
+    thread: no session is copied on this host.
+  - Its gate judges the server's paths by name: inside the Project means
+    beneath its folder as written, since this host cannot resolve a link
+    there; the secret guard's list (outside Strict, the provider sign-ins) is
+    matched by name, and below Full access a search rooted outside the
+    Project's folders is refused whole, since the server's folders cannot be
+    walked from here for a protected file. A worktree Claude Code makes is held
+    only when its call names its path, or when it lands inside the Project's
+    folder.
   - The thread gets none of this host's checkout tools, extensions,
     attachments folder, Browser, Computer or forks; only the routine tools,
     which act on this host's records, join its own. Checkpoints and change
@@ -272,8 +305,9 @@ app-server --listen stdio://` after `codex --version` there), and speaks its
     host's catalog for it.
   - Not built yet: reading sign-in with the provider's own status command
     before the first turn, recording the remote process to stop an orphan
-    after a dropped connection, and Work Projects, which stay on the Octant
-    Harness.
+    after a dropped connection, a Claude Code account this host has not
+    signed in (its model list is this host's probe, so the turn is refused
+    until it is), and Work Projects, which stay on the Octant Harness.
 - **Attached files.** A file the turn names by path rather than sends (any
   file but an image or a file the model takes natively) is copied before the
   turn is accepted, over the Project's own SSH connection, into the thread's

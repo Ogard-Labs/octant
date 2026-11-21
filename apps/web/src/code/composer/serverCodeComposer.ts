@@ -18,7 +18,7 @@ function runsInServerProject(group: PickerGroup, mode: "code" | "work"): boolean
 
 /**
  * The provider menu for a thread in a server Project. The host runs the Octant
- * Harness there, or a runtime that runs on the server itself (Codex), and
+ * Harness there, or a runtime that runs on the server itself (Codex, Claude Code), and
  * refuses every other runtime before it launches. Each one stays listed, unavailable with the
  * reason, rather than disappearing from a menu that otherwise shows what
  * cannot be chosen.
