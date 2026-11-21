@@ -52,6 +52,14 @@ export interface CodeTerminalPaneProps {
   readonly offerBrowserGrant?: boolean;
   /** Opens a second terminal for this thread. Absent when tabs cannot open. */
   readonly onOpenAnotherTerminal?: () => void;
+  /**
+   * Opens a terminal tab running the thread's provider's own program. Absent
+   * when the provider has none or tabs cannot open; the host still decides,
+   * and refuses anyone but the person.
+   */
+  readonly onOpenProviderTerminal?: { readonly name: string; readonly open: () => void };
+  /** Set when this pane runs the thread's provider's own program rather than a shell. */
+  readonly providerProgramName?: string;
   /** Opens the thread composer's mode menu when shown in Plan mode. */
   readonly onOpenModeMenu?: () => void;
   /**
@@ -69,6 +77,8 @@ export interface CodeTerminalPaneProps {
      * Project still lists.
      */
     readonly folders?: ReadonlyArray<string>;
+    /** Restart the provider's program rather than a shell. */
+    readonly program?: "provider";
     readonly rows: number;
   };
   readonly result: TerminalResult;
@@ -419,12 +429,12 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   };
 
   const control = async (action: "restart" | "stop") => {
-    if (props.executionPolicy === "plan" || (action === "restart" && props.restart === undefined))
-      return;
+    const restart = props.restart;
+    if (props.executionPolicy === "plan" || (action === "restart" && restart === undefined)) return;
     try {
       const operationId = props.createOperationId();
       const command =
-        action === "stop"
+        action === "stop" || restart === undefined
           ? ({
               kind: "stop-terminal",
               operationId,
@@ -434,10 +444,11 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           : ({
               kind: "start-terminal",
               operationId,
-              terminalId: props.restart!.createTerminalId(),
-              columns: props.restart!.columns,
-              rows: props.restart!.rows,
-              credentialRefs: props.restart!.credentialRefs,
+              terminalId: restart.createTerminalId(),
+              columns: restart.columns,
+              rows: restart.rows,
+              credentialRefs: restart.credentialRefs,
+              ...(restart.program === undefined ? {} : { program: restart.program }),
               ...props.scope,
             } as const);
       // The person at the window restarting their own terminal is the
@@ -586,6 +597,9 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
       : [{ value: "add-selection", label: "Add selection to chat" }]),
     ...(props.onPinTerminal === undefined ? [] : [{ value: "pin", label: "Pin to focus zone" }]),
     ...(props.onOpenAnotherTerminal === undefined ? [] : [{ value: "new", label: "New terminal" }]),
+    ...(props.onOpenProviderTerminal === undefined || props.executionPolicy === "plan"
+      ? []
+      : [{ value: "provider", label: `Open ${props.onOpenProviderTerminal.name} terminal` }]),
     ...(canOfferBrowser
       ? [{ value: "browser-on", label: "Let this terminal use the Browser…" }]
       : []),
@@ -608,6 +622,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     if (value === "add-selection") addSelectionToChat();
     else if (value === "pin") props.onPinTerminal?.();
     else if (value === "new") props.onOpenAnotherTerminal?.();
+    else if (value === "provider") props.onOpenProviderTerminal?.open();
     else if (value === "browser-on") setConfirmingBrowser(true);
     else if (value === "browser-off") void switchBrowserOff();
     else if (value === "stop" || value === "restart") void control(value);
@@ -671,6 +686,12 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
             </OctantButton>
           ) : null}
         </div>
+      )}
+      {props.providerProgramName === undefined ? null : (
+        <OctantAlert layout="row" className="code-terminal-pane__provider" tone="neutral">
+          {props.providerProgramName} runs here on its own, with its own approvals. What you do in
+          it stays outside this thread's record and usage.
+        </OctantAlert>
       )}
       {result.transcript?.truncated === true ? (
         <OctantAlert layout="row" className="code-delivery-pane__warning" tone="warning">

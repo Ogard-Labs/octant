@@ -27,6 +27,8 @@ export function resolveProviderToolingAccount(
   instance: ProviderInstance,
   hostEnvironment: NodeJS.ProcessEnv,
   homeDirectory: string,
+  /** Whether the launch it mirrors is Strict; tooling commands always are. */
+  strict = true,
 ): ProviderToolingAccount | undefined {
   if (instance.driverKind === "claude") {
     const directory =
@@ -36,6 +38,7 @@ export function resolveProviderToolingAccount(
       hostEnvironment,
       configDirectory: directory ?? "/",
       authentication: instance.configuration.authentication,
+      strict,
     });
     if (directory === undefined) {
       // The account uses Claude's own default folder; leave both variables unset
@@ -62,6 +65,7 @@ export function resolveProviderToolingAccount(
         binaryPath: instance.configuration.binaryPath,
         hostEnvironment,
         codexHome: directory,
+        ...(strict ? {} : { strict: false as const }),
       }),
       shownEnvironment: [{ name: "CODEX_HOME", value: directory }],
       directory,

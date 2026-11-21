@@ -37,6 +37,7 @@ import { createAuthenticatedProductDispatch } from "../authenticatedProductRoute
 import { CodeProjectAccess } from "../codeProjectAccess";
 import { createCodeRouteHandler } from "../codeRoutes";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import type { ProviderTerminalLaunch } from "../providers/providerTerminal";
 
 const ids = {
   window: "11111111-1111-4111-8111-111111111111" as WindowId,
@@ -5724,5 +5725,167 @@ describe("pull request line notes outside-content marking", () => {
       }),
     ).toMatchObject({ kind: "provider-turn-state", state: "failed" });
     expect(busyRecord).not.toHaveBeenCalled();
+  });
+});
+
+describe("CodeOperationService provider terminal", () => {
+  function providerFixture() {
+    const terminals = {
+      launch: vi.fn(async () => ({
+        terminalId: ids.terminal,
+        status: "running" as const,
+        canRerun: false,
+        transcript: { chunks: [], byteLength: 0, truncated: false, characters: 0 },
+      })),
+      attach: vi.fn(),
+      observe: vi.fn(() => vi.fn()),
+      write: vi.fn(),
+      resize: vi.fn(),
+      terminate: vi.fn(),
+    };
+    const providerTerminal = vi.fn(
+      (_input: {
+        readonly thread: CodeThread;
+        readonly shell: string;
+        readonly strict: boolean;
+      }): ProviderTerminalLaunch => ({
+        status: "resolved",
+        name: "Claude Code",
+        command: "exec '/opt/tools/claude'",
+        environment: { CLAUDE_CONFIG_DIR: "/Users/person/.octant/claude-work" },
+      }),
+    );
+    const service = new CodeOperationService({
+      authority: {
+        readThread: vi.fn(() =>
+          decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+        ),
+        readCheckout: vi.fn(() =>
+          decodeCodeCheckoutIdentity({
+            id: ids.checkout,
+            repositoryId: `repo_${"8".repeat(64)}`,
+            kind: "existing-worktree",
+            availability: "available",
+            head: { kind: "branch", name: "feature/exact", oid: "b".repeat(40) },
+            observedAt: "2026-07-21T10:00:00.000Z",
+          }),
+        ),
+        canAccessProject: vi.fn(async () => true),
+        approvalContextDigest: vi.fn(async () => "a".repeat(64)),
+        resolveCheckoutRoot: vi.fn(async () => ({
+          checkoutRoot: "/private/exact-checkout",
+          workingDirectory: "/private/exact-checkout/packages/app",
+          shell: "/bin/zsh",
+          credentialReferences: [],
+          environment: {},
+        })),
+      } as never,
+      // Every approval would pass, so a refusal below is the person-only rule.
+      approvals: { validate: vi.fn(async () => true) } as never,
+      terminals: terminals as never,
+      providerTerminal,
+      repositoryTests: {} as never,
+      git: {} as never,
+      pullRequests: {} as never,
+      reviewFindings: {} as never,
+      turns: {} as never,
+      evidence: {
+        put: vi.fn(() =>
+          decodeCodeEvidenceReference({
+            contentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            digest: "a".repeat(64),
+            byteLength: 0,
+          }),
+        ),
+        read: vi.fn(async () => ""),
+      } as never,
+      events: {
+        replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
+        append: vi.fn(),
+        historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+        summaryForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      } as never,
+    } as CodeOperationServiceOptions);
+    return { providerTerminal, service, terminals };
+  }
+
+  const start = {
+    kind: "start-terminal",
+    operationId: ids.operation,
+    threadId: ids.thread,
+    checkoutId: ids.checkout,
+    terminalId: ids.terminal,
+    columns: 100,
+    rows: 30,
+    credentialRefs: [],
+    program: "provider",
+  } as const;
+
+  it("opens the thread's provider program with its account environment in the thread's folder, confined like its shell", async () => {
+    const { providerTerminal, service, terminals } = providerFixture();
+    await expect(service.execute(ids.window, start, { initiator: "user" })).resolves.toMatchObject({
+      kind: "terminal-state",
+      state: "running",
+    });
+    // No Strict value reads as Strict, so the program gets the guarded environment.
+    expect(providerTerminal).toHaveBeenCalledWith({
+      thread: expect.objectContaining({ id: ids.thread }),
+      shell: "/bin/zsh",
+      strict: true,
+    });
+    expect(terminals.launch).toHaveBeenCalledWith({
+      terminalId: ids.terminal,
+      shell: "/bin/zsh",
+      command: "exec '/opt/tools/claude'",
+      environment: { CLAUDE_CONFIG_DIR: "/Users/person/.octant/claude-work" },
+      cwd: "/private/exact-checkout/packages/app",
+      stateScope: `repo_${"8".repeat(64)}`,
+      columns: 100,
+      rows: 30,
+      credentialReferences: [],
+      executionPolicy: "approval-gated",
+    });
+  });
+
+  it("refuses to open a provider terminal for an agent even when an approval would pass", async () => {
+    const { providerTerminal, service, terminals } = providerFixture();
+    await expect(service.execute(ids.window, start, { initiator: "agent" })).resolves.toMatchObject(
+      { kind: "operation-failed", failure: { category: "unauthorized" } },
+    );
+    expect(providerTerminal).not.toHaveBeenCalled();
+    expect(terminals.launch).not.toHaveBeenCalled();
+  });
+
+  it("refuses an agent's keystrokes to a provider terminal the person opened", async () => {
+    const { service, terminals } = providerFixture();
+    await service.execute(ids.window, start, { initiator: "user" });
+    await expect(
+      service.execute(
+        ids.window,
+        {
+          kind: "write-terminal",
+          operationId: decodeCodeOperationId("abababab-abab-4bab-8bab-abababababab"),
+          threadId: ids.thread,
+          checkoutId: ids.checkout,
+          terminalId: ids.terminal,
+          data: "/help\r",
+        },
+        { initiator: "agent" },
+      ),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+    expect(terminals.write).not.toHaveBeenCalled();
+  });
+
+  it("starts no terminal when the thread's provider has no program to open", async () => {
+    const { providerTerminal, service, terminals } = providerFixture();
+    providerTerminal.mockReturnValueOnce({
+      status: "refused",
+      message: "This thread's provider has no command-line program Octant can open.",
+    });
+    await expect(service.execute(ids.window, start, { initiator: "user" })).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable" },
+    });
+    expect(terminals.launch).not.toHaveBeenCalled();
   });
 });

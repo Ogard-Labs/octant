@@ -1637,6 +1637,26 @@ shows no button.
 Explicitly opening or selecting the tab in the current window session also
 requests a shell. The host still checks the thread's checkout and authority;
 Plan cannot start or stop terminals. Restored transcripts never replay commands.
+**Provider terminal.** A Code thread whose provider has its own command-line
+program (Claude Code, Codex) adds **Open <provider> terminal** to a terminal's
+actions, beside New terminal. It opens a terminal tab named for the program,
+which starts that program interactively, in its own interface, in the thread's
+folder: the binary, account folder (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) and
+environment the thread's own turns launch with, resolved by the host from the
+thread's provider, and confined exactly as an Octant terminal at the thread's
+level (maintainer decision, 2026-11-21). Only the person opens one or types
+into it, from their own window or a device they paired; the host refuses
+every agent and every other remote principal, approval or not. The tab says
+the program runs on its own, with its own approvals: what happens in it is
+outside the thread's record, transcript and usage, and Octant does not read it
+back. Plan, a Project on a server, and a provider without such a program offer
+none; restarting the tab restarts the program, and it lends no Browser.
+Confinement is the shell's and is not widened for the program: where the
+terminal is confined, an account folder outside the thread's folders stays
+outside its writable roots, so a program that must write there can fail to
+sign in or save its session; binding the account folder for this tab is an open
+decision. Not built yet: the same tab for a Work thread with developer tools on, and for
+ACP agents and the other providers with a command-line program.
 A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+Z` is Redo, which a page's text field keeps as the renderer's do. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
 live cards on a shelf at the foot of the dock, so a page or a shell can be
 watched, and seen to answer, while another tool or only the dock's overview is

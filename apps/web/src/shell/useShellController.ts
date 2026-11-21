@@ -1718,8 +1718,9 @@ function createWorkspaceMutation(
       }
       // A second terminal for the same thread would otherwise arrive with the
       // same title as the first, leaving two panes nobody can tell apart.
+      // A provider terminal keeps its program's name.
       const title =
-        intent.tab.kind === "code-terminal"
+        intent.tab.kind === "code-terminal" && intent.tab.program === undefined
           ? unusedCodeTerminalTitle(layout, intent.tab.threadId)
           : intent.tab.title;
       const surface = { ...intent.tab, title, id: newTabId(), mode: "code" } as Extract<
