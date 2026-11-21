@@ -171,9 +171,9 @@ describe("the Needs you card", () => {
       })
       .mockResolvedValue({ requests: [], truncated: false, offerHostRun: "after" });
     const options = source({ pendingRequestClient: { list }, onOpenAsk });
-    const dashboard = (feedRevision: number) => (
+    const dashboard = (feedRevision: number, modes: NeedsYouCardSource["modes"] = ["chat"]) => (
       <HomeDashboard
-        cards={[createNeedsYouCard({ ...options, feedRevision })]}
+        cards={[createNeedsYouCard({ ...options, feedRevision, modes })]}
         customization={{ order: [], visibility: [] }}
         onCustomizationChange={vi.fn()}
       />
@@ -186,6 +186,8 @@ describe("the Needs you card", () => {
     screenRender.rerender(dashboard(1));
     expect(await screen.findByText("A waiting offer ended when the host restarted.")).toBeVisible();
     expect(screen.queryByText("Generate an image?")).toBeNull();
+    screenRender.rerender(dashboard(1, ["code"]));
+    expect(screen.queryByText("A waiting offer ended when the host restarted.")).toBeNull();
   });
 
   it("lists each waiting approval and question with its thread, Project, wait, and text", async () => {
