@@ -14907,11 +14907,13 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     default for every new thread, Work and
     Code; Settings › Work and Settings › Code change it, a Project, Work or Code, may override
     it, and any thread can switch mode at any time from the composer in one
-    click (maintainer decision, 2026-10-31). No Work thread starts in Plan,
-    so a Plan answer leaves new Work threads at Ask first. A new Work thread
-    takes its Project's mode, else Work's default; a Project override can be
-    Auto, Ask first, Accept edits, or Full access, and a device the host's
-    own person did not pair cannot pick Full access for it. A Work thread
+    click (maintainer decision, 2026-10-31). A Plan answer starts new Work
+    threads in Plan too (maintainer decision, 2026-11-21; before, it left
+    them at Ask first). A new Work thread takes its Project's mode, else
+    Work's default, decided on the host; a Project override can be Auto, Ask
+    first, Accept edits, Plan, or Full access, and a device the host's own
+    person did not pair cannot pick Full access for it. A routine or
+    benchmark run in a Project whose start mode is Plan asks first. A Work thread
     moves to Plan from its own mode picker, as a Code thread does.
   - **Computer asks below Full access (and under Strict at Full access):**
     outside Strict, Full access requires no first-action approval (maintainer
@@ -15284,8 +15286,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     default access, behind the one-time warning).
   - **Plan in Work.** Work threads get the Plan level, so the provider's
     own plan mode, `EnterPlanMode` and `ExitPlanMode` work there as in Code.
-    Built: Plan is a Work thread's level (`access: "plan"`, never a Settings
-    or Project default), journaled through `change-work-thread-access` like
+    Built: Plan is a Work thread's level (`access: "plan"`, and since
+    2026-11-21 also a Settings › Work default and a Work Project's start
+    mode, `WorkDefaultAccess` and `WorkProjectPermissionMode`), journaled through `change-work-thread-access` like
     any level change and offered by the web and phone mode pickers, the
     owner posture card and `octant agent --access plan`. In Plan, Work is
     read-only on the host as Code's Plan is: the provider launches with
@@ -15846,8 +15849,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `octant settings access <mode> [--work]` sets the global default new
   threads start at, Code unless `--work`, through `update-code-settings` /
   `update-work-settings`. A Work thread
-  takes the same levels, Plan included, though Plan is never a default:
-  Settings › Work sets the one a new thread starts at and its composer
+  takes the same levels, Plan included, as a default too
+  (`octant settings access plan --work`): Settings › Work sets the one a new
+  thread starts at and its composer
   changes it
   ([Modes](#modes-chat-work-and-code)).
   One provider-owned exception is accepted: on OpenCode 2.x, approval-gated

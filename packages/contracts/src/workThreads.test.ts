@@ -36,6 +36,16 @@ describe("work thread contracts", () => {
     expect(() => decodeWorkThreadId("not-a-uuid")).toThrow();
   });
 
+  it("accepts Plan as the level Settings › Work starts new threads at", () => {
+    expect(
+      decodeWorkThreadCommand({
+        kind: "update-work-settings",
+        expectedVersion: 1,
+        defaultAccess: "plan",
+      }),
+    ).toMatchObject({ defaultAccess: "plan" });
+  });
+
   it("decodes WorkThread with required projectId and rejects excess fields", () => {
     // A thread journaled before access existed reads as ask-first.
     expect(decodeWorkThread(threadFixture)).toEqual({ ...threadFixture, access: "ask-first" });

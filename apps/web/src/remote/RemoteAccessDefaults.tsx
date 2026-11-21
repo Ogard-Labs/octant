@@ -22,8 +22,6 @@ const CODE_MODE_OPTIONS = PERMISSION_MODE_OPTIONS.map((option) => ({
   id: option.id,
   label: option.label,
 }));
-// Work shares Code's levels; Plan is a thread's own level, never a default.
-const WORK_MODE_OPTIONS = CODE_MODE_OPTIONS.filter((option) => option.id !== "plan");
 
 export interface RemoteAccessDefaultsProps {
   readonly codeClient: Pick<CodeClient, "bootstrap" | "execute">;
@@ -113,10 +111,9 @@ function WorkDefaultMode(props: {
       disabled={!props.connected || work.busy}
       message={work.message}
       onChange={(mode) => {
-        const defaultAccess = workAccessOfPermissionMode(mode);
-        if (defaultAccess !== undefined) void work.update({ defaultAccess });
+        void work.update({ defaultAccess: workAccessOfPermissionMode(mode) });
       }}
-      options={WORK_MODE_OPTIONS}
+      options={CODE_MODE_OPTIONS}
       value={
         work.settings === undefined
           ? undefined
