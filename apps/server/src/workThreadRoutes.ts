@@ -23,9 +23,10 @@ import {
 } from "./threadDocumentDeliveryAuthority";
 import { Schema } from "effect";
 import { isAgentGrantSession, principalActsAsHostPerson } from "./clientPrincipal";
-import { hubActRefusalMessage, type HubActScopePort } from "./hub/hubActScope";
+import { hubActRefusal, type HubActScopePort } from "./hub/hubActScope";
 import {
   authenticateRouteWindowId,
+  boundPrincipalIsHubIntroduced,
   boundPrincipalIsRestricted,
   boundPrincipalIsAgent,
   readPrincipalRouteContext,
@@ -225,13 +226,13 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
       // member's Act item names, read at this start; the server always binds
       // the scope, so a route built without one belongs to no hub.
       if (command.kind === "create-work-thread" && boundPrincipalIsHubIntroduced(request)) {
-        const decision = dependencies.hubActScope?.()?.decideStart(String(command.projectId));
-        if (decision?.status === "refused") {
-          return failureResponse(
-            { category: "unauthorized", message: hubActRefusalMessage(decision) },
-            403,
-            origin,
-          );
+        const refusal = hubActRefusal(
+          dependencies.hubActScope?.(),
+          String(command.projectId),
+          "start",
+        );
+        if (refusal !== undefined) {
+          return failureResponse({ category: "unauthorized", message: refusal }, 403, origin);
         }
       }
       if (
@@ -566,16 +567,6 @@ function setsRestartContinuation(command: WorkThreadCommand): boolean {
  * its own guard admitted before this route: a thread, when the person chose
  * Full access for that grant.
  */
-function boundPrincipalIsHubIntroduced(request: Request): boolean {
-  const principal = readPrincipalRouteContext(request)?.principal;
-  return (
-    principal !== undefined &&
-    principal.kind === "remote-device" &&
-    !principalActsAsHostPerson(principal) &&
-    !isAgentGrantSession(principal)
-  );
-}
-
 function refusesFullAccessRaise(request: Request): boolean {
   const principal = readPrincipalRouteContext(request)?.principal;
   return (

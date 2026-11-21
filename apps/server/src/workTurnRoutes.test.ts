@@ -1,5 +1,8 @@
-import { decodeWindowId } from "@octant/contracts";
+import { decodeWindowId, type HubGrant } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { hubActScopeFromSpokeLink } from "./hub/hubActScope";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { createWorkTurnRouteHandler } from "./workTurnRoutes";
 import { WorkTurnServiceError } from "./work/workTurnService";
@@ -249,6 +252,81 @@ describe("Work transcript window route", () => {
   });
 });
 
+describe("Work turn Stop from a hub-introduced device", () => {
+  it("a hub-introduced device stops a Work turn only in a Project the member's Act item names", async () => {
+    const namedProject = "00000000-0000-4000-8000-0000000009d5";
+    const otherThreadId = "00000000-0000-4000-8000-0000000009d2";
+    const cancelFirstTurn = vi.fn(async (_windowId: unknown, command: { threadId: string }) => ({
+      kind: "turn-cancelled",
+      requestId: "00000000-0000-4000-8000-0000000009d3",
+      threadId: command.threadId,
+      turnId: "00000000-0000-4000-8000-0000000009d4",
+      status: "cancelled",
+    }));
+    const grant: { current: HubGrant } = {
+      current: { items: ["roster", "introduce", "act"], actProjects: [namedProject as never] },
+    };
+    const route = routeFixture(
+      { cancelFirstTurn },
+      {
+        hubActScope: () =>
+          hubActScopeFromSpokeLink({
+            status: () => ({ membership: "member", grant: grant.current }) as never,
+          }),
+        threadProjectId: (id: string) =>
+          id === threadId ? namedProject : "30000000-0000-4000-8000-0000000000dd",
+      },
+    );
+    const remoteDeviceId = "00000000-0000-4000-8000-0000000009d0";
+    const stop = (target: string, admittedBy: "host-person" | "hub-roster" = "hub-roster") => {
+      const remote = request("/api/work/turns/cancel", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "cancel-work-turn",
+          requestId: "00000000-0000-4000-8000-0000000009d3",
+          threadId: target,
+          turnId: "00000000-0000-4000-8000-0000000009d4",
+        }),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-0000000009d1" as never,
+          admittedBy,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+
+    expect((await route(stop(threadId)))?.status).toBe(200);
+    const unnamed = await route(stop(otherThreadId));
+    expect(unnamed?.status).toBe(403);
+    expect(await unnamed?.json()).toMatchObject({
+      message: "This computer's Act item for its hub does not name this Project.",
+    });
+    expect(cancelFirstTurn).toHaveBeenCalledOnce();
+
+    // Unticking Act refuses the next Stop; a device the member's own person
+    // paired stops anywhere, as before.
+    grant.current = { items: ["roster", "introduce"], actProjects: [] };
+    const unticked = await route(stop(threadId));
+    expect(unticked?.status).toBe(403);
+    expect(await unticked?.json()).toMatchObject({
+      message:
+        "This computer has not ticked Act for its hub, so a device the hub introduced cannot stop turns here.",
+    });
+    expect((await route(stop(otherThreadId, "host-person")))?.status).toBe(200);
+    expect(cancelFirstTurn).toHaveBeenCalledTimes(2);
+  });
+});
+
 function request(path: string, init: RequestInit = {}): Request {
   const headers = new Headers(init.headers);
   if (!headers.has("x-octant-window-capability")) {
@@ -257,7 +335,10 @@ function request(path: string, init: RequestInit = {}): Request {
   return new Request(`http://127.0.0.1${path}`, { ...init, headers });
 }
 
-function routeFixture(overrides: Record<string, unknown> = {}) {
+function routeFixture(
+  overrides: Record<string, unknown> = {},
+  dependencies: Record<string, unknown> = {},
+) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   return createWorkTurnRouteHandler({
@@ -270,5 +351,6 @@ function routeFixture(overrides: Record<string, unknown> = {}) {
     } as never,
     windowAuthorityStore: store,
     now: () => 1,
+    ...dependencies,
   });
 }

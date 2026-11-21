@@ -670,7 +670,7 @@ export function memberThreadPage(
   return url.toString();
 }
 
-export type HubIntroducedStartDecision =
+export type HubIntroducedActDecision =
   | { readonly status: "allowed" }
   /** This host is in no hub, so no hub grant speaks for the device. */
   | { readonly status: "not-in-a-hub" }
@@ -680,17 +680,19 @@ export type HubIntroducedStartDecision =
     };
 
 /**
- * Whether a device only the hub introduced may start a thread in a Project on
- * this member: only while the member's grant to its hub ticks Act and names
- * that Project. The grant is read at each start, so unticking Act or dropping
- * a Project refuses the next one (hub and spokes, "What a hub-introduced device
- * may do"). A device the member's own person paired never reaches this rule.
+ * Whether a device only the hub introduced may act in a Project on this
+ * member: start a thread there, answer its threads' approvals and questions,
+ * or Stop their turns. Only while the member's grant to its hub ticks Act and
+ * names that Project. The grant is read at each request, so unticking Act or
+ * dropping a Project refuses the next one (hub and spokes, "What a
+ * hub-introduced device may do"). A device the member's own person paired
+ * never reaches this rule.
  */
-export function decideHubIntroducedThreadStart(input: {
+export function decideHubIntroducedAct(input: {
   readonly membership: "none" | "member" | "removed";
   readonly grant: HubGrant | undefined;
   readonly projectId: string;
-}): HubIntroducedStartDecision {
+}): HubIntroducedActDecision {
   if (input.membership === "none") return { status: "not-in-a-hub" };
   if (input.membership === "removed" || input.grant === undefined) {
     return { status: "refused", kind: "removed-from-hub" };

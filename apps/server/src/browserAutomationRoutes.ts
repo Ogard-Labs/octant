@@ -1,5 +1,6 @@
 import type { EventActor } from "@octant/contracts";
-import { principalActsAsHostPerson } from "./clientPrincipal";
+import { principalActsAsHostPerson, principalIsHubIntroduced } from "./clientPrincipal";
+import { hubActRefusal, type HubActScopePort } from "./hub/hubActScope";
 import { eventActorForPrincipal } from "./principalEventActor";
 import { boundPrincipalIsRestricted } from "./principalRouteContext";
 import {
@@ -178,6 +179,10 @@ export interface BrowserAutomationRouteDependencies {
   readonly flowRuns?: BrowserFlowRuns;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize: number;
+  /** The member's Act item for its hub, which bounds where a device only the hub introduced may answer. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
+  /** The Project of a Code or Work thread; undefined for a thread this host does not hold. */
+  readonly codeOrWorkThreadProjectId?: (threadId: string) => string | undefined;
 }
 
 export function createBrowserAutomationRouteHandler(
@@ -245,6 +250,7 @@ export function createBrowserAutomationRouteHandler(
     // A device the host's own person paired, judged as the person where a
     // route says so; it stays the principal and the actor.
     let actsAsHostPerson: boolean;
+    let hubIntroduced: boolean;
     // Who the journal names for what this request changes: the device, when a
     // device asked.
     let actor: EventActor;
@@ -257,6 +263,7 @@ export function createBrowserAutomationRouteHandler(
       windowId = principal.scopeId;
       callerKind = principal.principal.kind;
       actsAsHostPerson = principalActsAsHostPerson(principal.principal);
+      hubIntroduced = principalIsHubIntroduced(principal.principal);
       actor = eventActorForPrincipal(principal.principal);
     } catch {
       return failure(
@@ -698,6 +705,26 @@ export function createBrowserAutomationRouteHandler(
         }
         const { kind: _kind, ...rawDecision } = decoded.value as Record<string, unknown>;
         const decision = decodeBrowserToolApprovalDecision(rawDecision);
+        // A device only the hub introduced answers a Code or Work thread's
+        // prompt only in a Project the member's Act item names, read at this
+        // answer. A prompt it may not answer is refused by the service anyway,
+        // and Chat is not held to the Act item.
+        if (hubIntroduced) {
+          const prompt = dependencies.approvals
+            .list(windowId)
+            .find((listed) => String(listed.approvalId) === String(decision.approvalId));
+          const refusal =
+            prompt === undefined || prompt.mode === "chat"
+              ? undefined
+              : hubActRefusal(
+                  dependencies.hubActScope?.(),
+                  dependencies.codeOrWorkThreadProjectId?.(String(prompt.threadId)),
+                  "answer",
+                );
+          if (refusal !== undefined) {
+            return failure({ category: "unauthorized", message: refusal }, 403, origin);
+          }
+        }
         const accepted = dependencies.approvals.decide(windowId, decision);
         return success({ accepted }, origin, accepted ? 200 : 409);
       }

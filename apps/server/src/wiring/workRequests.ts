@@ -220,6 +220,11 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     service: workRequestApplication,
     windowAuthorityStore,
     maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+    hubActScope: hubActScopeSlot.current,
+    requestProjectId: (requestId) => {
+      const projectId = workRequestService.lookup(requestId)?.projectId;
+      return projectId === undefined ? undefined : String(projectId);
+    },
   });
   // Whether a window may open a Work or Code parent: the project binding, not
   // the harness session route, which also requires the thread to be the open

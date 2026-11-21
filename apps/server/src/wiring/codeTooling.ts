@@ -42,7 +42,7 @@ import {
 } from "@octant/plugin-host/language-servers";
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
 import { createPairedMergeUnlockSlot } from "../hub/pairedMergeUnlock";
-import { createHubActScopeSlot } from "../hub/hubActScope";
+import type { HubActScopeSlot } from "../hub/hubActScope";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
 import {
   createCodeDebugAgentSessionApprovals,
@@ -146,10 +146,14 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     | "worktreePreparation"
     | "childWorktreeSources"
     | "resolveChildWorktree"
-  >;
+  > & {
+    /** The member's Act item for its hub, bound by the hub side after this is built. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  };
 
 export function wireCodeTooling(deps: CodeToolingDependencies) {
   const {
+    hubActScopeSlot,
     browserAuthority,
     workThreadProjection,
     agentRunPersistence,
@@ -842,9 +846,6 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // The hub side is wired after this; it binds the owner unlock a paired
     // client's merge may need into this slot.
     const pairedMergeUnlockSlot = createPairedMergeUnlockSlot();
-    // Likewise the member's Act item, which bounds where a hub-introduced
-    // device may start a thread.
-    const hubActScopeSlot = createHubActScopeSlot();
     const codeRoutes = createCodeRouteHandler({
       service: routeCodeService,
       pairedMergeUnlock: pairedMergeUnlockSlot.current,
@@ -1115,7 +1116,6 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       languageServerApprovals,
       localServerRoutes,
       pairedMergeUnlockSlot,
-      hubActScopeSlot,
       projectTerminals,
       remoteServerGrantLocalRoutes,
       remoteServerGrants,

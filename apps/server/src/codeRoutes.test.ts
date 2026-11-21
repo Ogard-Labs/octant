@@ -725,6 +725,163 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
+  describe("answering and Stop from a hub-introduced device", () => {
+    const otherProjectId = "30000000-0000-4000-8000-0000000000bb";
+    const otherThreadId = "00000000-0000-4000-8000-0000000009b2";
+    const remoteDeviceId = "00000000-0000-4000-8000-0000000009b0";
+    // Each thread lives in its own Project: this file's thread in the named one.
+    const read = vi.fn((_windowId: unknown, id: unknown) => ({
+      thread: String(id) === otherThreadId ? { ...thread, projectId: otherProjectId } : thread,
+      checkout,
+      lastSequence: 0,
+    }));
+    const fixture = (grant: { current: HubGrant }) => {
+      const executeOperation = vi.fn(async (_windowId, command) => ({
+        kind: "operation-accepted",
+        operationId: command.operationId,
+      }));
+      const route = routeFixture({
+        read,
+        executeOperation,
+        hubActScope: hubActScopeFromSpokeLink({
+          status: () => ({ membership: "member", grant: grant.current }) as never,
+        }),
+      });
+      return { route, executeOperation };
+    };
+    const approve = (target: string) =>
+      JSON.stringify({
+        kind: "answer-provider-approval",
+        operationId: crypto.randomUUID(),
+        threadId: target,
+        checkoutId,
+        approvalId: "00000000-0000-4000-8000-0000000009b3",
+        decision: "approved",
+      });
+    const stop = (target: string) =>
+      JSON.stringify({
+        kind: "cancel-provider-turn",
+        operationId: crypto.randomUUID(),
+        threadId: target,
+        checkoutId,
+      });
+    const from = (body: string, admittedBy: "host-person" | "hub-roster" = "hub-roster") => {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-0000000009b1" as never,
+          admittedBy,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const actOnThisProject = (): { current: HubGrant } => ({
+      current: { items: ["roster", "introduce", "act"], actProjects: [thread.projectId] },
+    });
+
+    it("a hub-introduced device answers an approval only in a Project the member's Act item names", async () => {
+      const { route, executeOperation } = fixture(actOnThisProject());
+
+      expect((await route(from(approve(threadId))))?.status).toBe(200);
+      const unnamed = await route(from(approve(otherThreadId)));
+
+      expect(unnamed?.status).toBe(403);
+      expect(await unnamed?.json()).toMatchObject({
+        message: "This computer's Act item for its hub does not name this Project.",
+      });
+      expect(executeOperation).toHaveBeenCalledOnce();
+      expect(executeOperation).toHaveBeenCalledWith(
+        remoteDeviceId,
+        expect.objectContaining({ kind: "answer-provider-approval", threadId }),
+        expect.anything(),
+      );
+    });
+
+    it("a hub-introduced device stops a turn only in a Project the member's Act item names", async () => {
+      const { route, executeOperation } = fixture(actOnThisProject());
+
+      expect((await route(from(stop(threadId))))?.status).toBe(200);
+      const unnamed = await route(from(stop(otherThreadId)));
+
+      expect(unnamed?.status).toBe(403);
+      expect(await unnamed?.json()).toMatchObject({
+        message: "This computer's Act item for its hub does not name this Project.",
+      });
+      expect(executeOperation).toHaveBeenCalledOnce();
+      expect(executeOperation).toHaveBeenCalledWith(
+        remoteDeviceId,
+        expect.objectContaining({ kind: "cancel-provider-turn", threadId }),
+        expect.anything(),
+      );
+    });
+
+    it("unticking Act refuses the next approval answer and Stop", async () => {
+      const grant = actOnThisProject();
+      const { route, executeOperation } = fixture(grant);
+      expect((await route(from(approve(threadId))))?.status).toBe(200);
+
+      grant.current = { items: ["roster", "introduce"], actProjects: [] };
+      const answered = await route(from(approve(threadId)));
+      const stopped = await route(from(stop(threadId)));
+
+      expect(answered?.status).toBe(403);
+      expect(await answered?.json()).toMatchObject({
+        message:
+          "This computer has not ticked Act for its hub, so a device the hub introduced cannot answer approvals or questions here.",
+      });
+      expect(stopped?.status).toBe(403);
+      expect(await stopped?.json()).toMatchObject({
+        message:
+          "This computer has not ticked Act for its hub, so a device the hub introduced cannot stop turns here.",
+      });
+      expect(executeOperation).toHaveBeenCalledOnce();
+    });
+
+    it("a device the member's own person paired answers and stops anywhere, as before", async () => {
+      const grant = actOnThisProject();
+      grant.current = { items: ["roster", "introduce"], actProjects: [] };
+      const { route, executeOperation } = fixture(grant);
+
+      expect((await route(from(approve(otherThreadId), "host-person")))?.status).toBe(200);
+      expect((await route(from(stop(otherThreadId), "host-person")))?.status).toBe(200);
+      // A local window never reads the Act item either.
+      const local = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: stop(otherThreadId),
+      });
+      expect((await route(local))?.status).toBe(200);
+      expect(executeOperation).toHaveBeenCalledTimes(3);
+    });
+
+    it("leaves a hub-introduced device to its own rules on a host in no hub", async () => {
+      const executeOperation = vi.fn(async (_windowId, command) => ({
+        kind: "operation-accepted",
+        operationId: command.operationId,
+      }));
+      const route = routeFixture({
+        read,
+        executeOperation,
+        hubActScope: hubActScopeFromSpokeLink({ status: () => ({ membership: "none" }) as never }),
+      });
+
+      expect((await route(from(approve(otherThreadId))))?.status).toBe(200);
+      expect((await route(from(stop(otherThreadId))))?.status).toBe(200);
+      expect(executeOperation).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("refuses the per-run Full access flag from any caller but a window on this host", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-created" }));
     const route = routeFixture({ execute });

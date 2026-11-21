@@ -195,7 +195,7 @@ import type { FileIdentity } from "./code/fileOperationPort";
 import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
 import type { PairedMergeUnlockPort } from "./hub/pairedMergeUnlock";
-import { hubActRefusalMessage, type HubActScopePort } from "./hub/hubActScope";
+import { hubActRefusal, type HubActScopePort } from "./hub/hubActScope";
 import {
   isAgentGrantSession,
   principalActsAsHostPerson,
@@ -667,7 +667,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // judged as a local window is; it stays the principal and the actor.
     let callerAuthority: "local-window" | "remote-device";
     let agentGrantSession: boolean;
-    // A device only the hub introduced: it starts threads within the member's Act item.
+    // A device only the hub introduced: it starts threads, answers approvals
+    // and questions, and stops turns within the member's Act item.
     let hubIntroduced = false;
     // Who the journal names for what this request changes: the device, when a
     // device asked.
@@ -765,11 +766,34 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               ? ""
               : undefined;
       if (projectId === undefined) return undefined;
-      // The server always binds the scope with its hub side; a route built
-      // without one belongs to no hub.
-      const decision = dependencies.hubActScope?.()?.decideStart(projectId);
-      if (decision === undefined || decision.status !== "refused") return undefined;
-      return hubActRefusalMessage(decision);
+      return hubActRefusal(dependencies.hubActScope?.(), projectId, "start");
+    };
+
+    // Answering a thread's approval or question, and Stop, likewise: only in a
+    // Project the member's Act item names, read at this request. The Project
+    // is the thread's own, read under this caller's scope; a thread it cannot
+    // read names no Project, so the request is refused while this host is in a
+    // hub and keeps its own rules otherwise.
+    const hubActOperationRefusal = async (
+      operation: CodeOperationCommand,
+    ): Promise<string | undefined> => {
+      const action =
+        operation.kind === "answer-provider-approval" || operation.kind === "answer-provider-input"
+          ? "answer"
+          : operation.kind === "cancel-provider-turn" ||
+              operation.kind === "force-stop-provider-turn"
+            ? "stop"
+            : undefined;
+      const scope = dependencies.hubActScope?.();
+      if (action === undefined || scope === undefined) return undefined;
+      let projectId: string | undefined;
+      try {
+        const view = await dependencies.service.read(authenticatedWindowId, operation.threadId);
+        projectId = String(view.thread.projectId);
+      } catch {
+        projectId = undefined;
+      }
+      return hubActRefusal(scope, projectId, action);
     };
 
     try {
@@ -1020,6 +1044,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             return failureResponse(
               { category: "unavailable", message: "Code operations are unavailable." },
               503,
+              origin,
+            );
+          }
+          const operationActRefusal = hubIntroduced
+            ? await hubActOperationRefusal(operation)
+            : undefined;
+          if (operationActRefusal !== undefined) {
+            return failureResponse(
+              { category: "unauthorized", message: operationActRefusal },
+              403,
               origin,
             );
           }

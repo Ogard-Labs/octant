@@ -160,7 +160,7 @@ import type { ThreadMoveStatePort } from "../hub/threadMoveStateStore";
 import type { ChatService } from "../chat/chatService";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
 import { PairedMergeUnlockService } from "../hub/pairedMergeUnlock";
-import { hubActScopeFromSpokeLink } from "../hub/hubActScope";
+import { hubActScopeFromSpokeLink, type HubActScopeSlot } from "../hub/hubActScope";
 import { OwnerApprovalAnswerUnlock } from "../hub/ownerApprovalAnswerUnlock";
 import { createHubMembershipJournal } from "../hub/hubMembershipJournal";
 import { FailoverService } from "../hub/failoverService";
@@ -295,10 +295,11 @@ export type RemoteDependencies = {
     | "debugService"
     | "languageServerApprovals"
     | "pairedMergeUnlockSlot"
-    | "hubActScopeSlot"
     | "remoteServerGrants"
-  > &
-  Pick<
+  > & {
+    /** Where the member's Act item is bound for the routes built before the hub side. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  } & Pick<
     WorkWiring,
     | "threadExportService"
     | "threadHandOffProvider"
