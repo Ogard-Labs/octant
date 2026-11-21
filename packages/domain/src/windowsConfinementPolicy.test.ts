@@ -150,6 +150,35 @@ describe("Windows confined launch plan", () => {
     expect(refusal({ additionalWriteRoots: [`${DATA}\\providers`], ownAccountPaths: [own] })).toBe(
       "covers-protected",
     );
+
+    // Default `%USERPROFILE%\.codex` encloses `.codex\auth.json` (an
+    // own-account-exempt sign-in entry): admit it only for its own runtime,
+    // never for another runtime, an ancestor above it, or a non-exempt secret.
+    const defaultCodexHome = `${HOME}\\.codex`;
+    expect(
+      planned({ readRoots: [defaultCodexHome], ownAccountPaths: [defaultCodexHome] }).grants,
+    ).toContainEqual({
+      path: defaultCodexHome,
+      access: "read",
+    });
+    expect(refusal({ readRoots: [defaultCodexHome] })).toBe("covers-protected");
+    expect(refusal({ readRoots: [defaultCodexHome], ownAccountPaths: [`${HOME}\\.claude`] })).toBe(
+      "covers-protected",
+    );
+    expect(refusal({ readRoots: [HOME], ownAccountPaths: [defaultCodexHome] })).toBe(
+      "covers-protected",
+    );
+    const withCustomSecret = resolveProtectedFiles(
+      { platform: "win32", home: HOME, dataDirectory: DATA },
+      { added: ["~/.codex/private.key"], removed: [] },
+    );
+    expect(
+      refusal({
+        readRoots: [defaultCodexHome],
+        ownAccountPaths: [defaultCodexHome],
+        protectedEntries: withCustomSecret,
+      }),
+    ).toBe("covers-protected");
   });
 
   it("asks for a pattern scan beneath a grant inside a browser-store folder", () => {

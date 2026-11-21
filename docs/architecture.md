@@ -20481,15 +20481,19 @@ Windows gets the same provider behaviour the provider's own CLI gives there;
 claiming a sandbox Octant cannot enforce would be the dishonest part, so the
 picker names what is missing instead of refusing the level.
 
-Built (2026-11-16): a Work or Code provider turn on Windows below Full access
-starts outside Strict with the provider's own approvals, every ask still
-answered and journaled on the server (`hostProviderTurnRefusal` in the
-domain's `guardrailPolicy.ts`); Strict at every level is refused by name
-("Strict needs a sandbox Windows doesn't have yet") and so is Full access with
-the sandbox kept, before anything is journaled or started. The shared Strict
-control retains confinement at Full access too; it cannot be enabled on Windows.
-[Windows Strict, phase 1](#windows-strict-phase-1) proposes accepting it at Full
-access on a verified Codex runtime; it does not change current availability.
+Built (2026-11-16, updated 2026-11-21 for [Windows Strict, phase 1](#windows-strict-phase-1)):
+a Work or Code provider turn on Windows below Full access starts outside Strict
+with the provider's own approvals, every ask still answered and journaled on the
+server (`hostProviderTurnRefusal` in the domain's `guardrailPolicy.ts`). Under
+[Windows Strict, phase 1](#windows-strict-phase-1) (**Partly built** —
+implemented and verified in hosted Windows CI, pending Gate 5 real standard-user
+Windows 11 desktop smoke), the shared Strict control is accepted on Windows for
+Work and Code at Full access on a verified native Codex runtime through the
+packaged AppContainer and Job Object launcher (`octant-windows-confine.exe`).
+Every other Windows Strict case — Chat, Plan, levels below Full access, every
+other provider family, provider shims, and Octant-operated tools — keeps
+refusing by name before anything is journaled or started, and so does the legacy
+Full-access-only sandbox choice without Strict.
 The mode picker offers those levels with the line "On Windows the provider's
 own approvals decide; Octant's sandbox does not run here", and shows them
 unavailable on a Strict thread. Each provider launch decides again from its

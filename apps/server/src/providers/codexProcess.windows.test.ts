@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -176,6 +177,18 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
             leaseStore,
           },
         });
+        // Seed shared startup config, archived history, and the rollout-persistence
+        // marker inside CODEX_HOME so the confined turn proves config and archived
+        // sessions stay unwritable while active rollout state persists across fresh
+        // Windows Strict AppContainer processes.
+        writeFileSync(join(codexHome, ".persist-rollout"), "1\n");
+        writeFileSync(join(codexHome, "config.toml"), 'model = "gpt-5.4"\n');
+        mkdirSync(join(codexHome, "archived_sessions"), { recursive: true });
+        writeFileSync(
+          join(codexHome, "archived_sessions", "archived.jsonl"),
+          '{"archived":true}\n',
+        );
+        const canonicalRoot = realpathSync.native(root);
         const started = await Effect.runPromise(
           Effect.either(
             Effect.scoped(
@@ -195,18 +208,94 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
                   },
                 })
                 .pipe(
-                  Effect.map((connection) => ({
-                    version: connection.version,
-                    pid: connection.pid,
-                  })),
+                  Effect.flatMap((connection) =>
+                    Effect.promise(async () => {
+                      const created = await connection.rpc.request(
+                        "thread/start",
+                        { cwd: canonicalRoot, model: "gpt-5.4" },
+                        (value) =>
+                          value as {
+                            readonly thread: { readonly id: string };
+                            readonly cwd: string;
+                          },
+                      );
+                      return {
+                        version: connection.version,
+                        pid: connection.pid,
+                        threadId: created.thread.id,
+                        cwd: created.cwd,
+                      };
+                    }),
+                  ),
                 ),
             ),
           ),
         );
         if (Either.isLeft(started)) throw new Error(started.left.message);
         expect(started.right.version).toBe("0.144.4");
+        expect(started.right.threadId).toBe("thread-1");
+        expect(started.right.cwd).toBe(canonicalRoot);
         expect(running(started.right.pid)).toBe(false);
         expect(readdirSync(leaseDir)).toEqual([]);
+        expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe('model = "gpt-5.4"\n');
+        expect(readFileSync(join(codexHome, "archived_sessions", "archived.jsonl"), "utf8")).toBe(
+          '{"archived":true}\n',
+        );
+
+        // Fresh follow-up process in a brand-new AppContainer SID resumes the
+        // saved rollout written by Turn 1 and appends its own follow-up record.
+        const resumed = await Effect.runPromise(
+          Effect.either(
+            Effect.scoped(
+              confinedPort
+                .start({
+                  binaryPath: realpathSync.native(fakeCodex ?? ""),
+                  authority: {
+                    kind: "thread",
+                    root,
+                    mode: "code",
+                    executionPolicy: "full-access",
+                    strict: true,
+                  },
+                  environment: {
+                    ...process.env,
+                    CODEX_HOME: codexHome,
+                  },
+                })
+                .pipe(
+                  Effect.flatMap((connection) =>
+                    Effect.promise(async () => {
+                      const loaded = await connection.rpc.request(
+                        "thread/resume",
+                        { threadId: started.right.threadId },
+                        (value) =>
+                          value as {
+                            readonly thread: { readonly id: string };
+                            readonly cwd: string;
+                          },
+                      );
+                      return {
+                        pid: connection.pid,
+                        threadId: loaded.thread.id,
+                        cwd: loaded.cwd,
+                      };
+                    }),
+                  ),
+                ),
+            ),
+          ),
+        );
+        if (Either.isLeft(resumed)) throw new Error(resumed.left.message);
+        expect(resumed.right.threadId).toBe("thread-1");
+        expect(resumed.right.cwd).toBe(canonicalRoot);
+        expect(running(resumed.right.pid)).toBe(false);
+        expect(readdirSync(leaseDir)).toEqual([]);
+        const savedRollout = readFileSync(
+          join(codexHome, "sessions", "rollout-thread-1.jsonl"),
+          "utf8",
+        );
+        expect(savedRollout).toContain('"turns":1');
+        expect(savedRollout).toContain('"resumed":true');
 
         const shimPath = join(root, "codex.cmd");
         writeFileSync(shimPath, "@ECHO off\r\necho should-not-run\r\n");

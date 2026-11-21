@@ -242,11 +242,16 @@ export function planWindowsConfinedLaunch(
     for (const entry of input.protectedEntries) {
       const exempt = entry.ownAccountExempt && own.some((owned) => isSameOrInside(form, owned));
       if (entry.kind === "path") {
-        // Above the entry: the inheritable ACE would reach it. At or inside:
-        // the grant names it. Only a runtime's own account home is exempt,
-        // and only from inside it.
+        // Above the entry: the inheritable ACE would reach it. Only a runtime's
+        // own account home is exempt, and only when the own-account path itself
+        // encloses the exempt entry (such as `%USERPROFILE%\.codex` enclosing
+        // `.codex\auth.json`), never an ancestor above the own-account path.
         if (isSameOrInside(entry.path, form) && entry.path !== form) {
-          return coversProtected(grant.path, entry);
+          const ownCoversEntry =
+            entry.ownAccountExempt &&
+            own.some((owned) => isSameOrInside(form, owned) && isSameOrInside(entry.path, owned));
+          if (!ownCoversEntry) return coversProtected(grant.path, entry);
+          continue;
         }
         if (isSameOrInside(form, entry.path) && !exempt) return coversProtected(grant.path, entry);
         continue;

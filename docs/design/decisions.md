@@ -2341,7 +2341,7 @@ The one shared Strict control is accepted on native Windows for Work and Code at
 - Two postures: outside Strict the provider holds the level with no Octant sandbox; Strict is Octant's confinement at every level. Phase 1 adds no Windows-only label, switch or preference, and Strict keeps its thread, Project and Settings resolution and explicit Off.
 - The legacy Full-access-only sandbox preference never returns as a Windows control: a saved or inherited choice without Strict keeps refusing by name and is never read as Strict or migrated into it.
 - Every other Windows Strict case keeps refusing by name until its runtime is verified, one runtime at a time: Chat, Plan and every level below Full access, every other provider, proxy-only or blocked-network policies (`network: "deny"` until model traffic has a separate verified path), and Octant's own file, terminal and command operations.
-- Shared `CODEX_HOME` startup configuration stays read-only while isolated durable rollout and SQLite subdirectories stay writable across fresh follow-up sessions; nothing retries unconfined, and Windows behavior with Strict off is unchanged.
+- Shared `CODEX_HOME` startup configuration, `archived_sessions`, and shared SQLite state stay read-only/isolated (`CODEX_SQLITE_HOME` uses launch-private scratch) while Codex's active `sessions` and `log` subdirectories stay writable so fresh follow-up sessions can resume saved threads; nothing retries unconfined, and Windows behavior with Strict off is unchanged.
 - Live check still owed: Gate 5 real standard-user Windows 11 desktop verification before promoting to Built.
 
 Status: Partly built. Since: 2026-11-21. Detail: [Architecture: Windows Strict, phase 1](../architecture.md#windows-strict-phase-1).
