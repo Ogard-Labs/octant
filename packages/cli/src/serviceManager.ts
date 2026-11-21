@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { chmod, lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, win32 } from "node:path";
@@ -319,7 +319,10 @@ function resolveServiceInvocation(options: UserServiceManagerOptions): ServiceIn
     (options.executable === undefined ? resolveCurrentCliEntryPoint() : undefined);
   const launcher =
     options.executable === undefined && options.hostArguments === undefined
-      ? installedBuildLauncher(entryPoint)
+      ? installedBuildLauncher(
+          entryPoint,
+          (options.runtimeEnvironment ?? process.env)["OCTANT_CLI_LAUNCHER"],
+        )
       : undefined;
   const command = launcher ?? options.executable ?? process.execPath;
   const runtimeEntryPoint = launcher === undefined ? entryPoint : undefined;
@@ -355,16 +358,41 @@ function resolveServiceInvocation(options: UserServiceManagerOptions): ServiceIn
  * build's `bin/octant.mjs`. The service runs the launcher rather than this
  * process's runtime: the kernel reports a runtime reached through the install's
  * `current` link by its version's own path, so recording it would keep the
- * service on that version's Bun after an upgrade. The entry point keeps the
- * path it was started from, and so does the launcher beside it.
+ * service on that version's Bun after an upgrade. Bun resolves the entry
+ * point's links too, so the entry point names the version as well; the
+ * launcher reports the path it was started from in `OCTANT_CLI_LAUNCHER`,
+ * which is used when it is the launcher beside this entry point.
  */
-function installedBuildLauncher(entryPoint: string | undefined): string | undefined {
+function installedBuildLauncher(
+  entryPoint: string | undefined,
+  reportedLauncher: string | undefined,
+): string | undefined {
   if (entryPoint === undefined || basename(entryPoint) !== "octant.mjs") return undefined;
   const bin = dirname(entryPoint);
   const launcher = join(bin, "octant");
-  return existsSync(launcher) && existsSync(join(dirname(bin), HEADLESS_ARTIFACT_MANIFEST_FILENAME))
-    ? launcher
-    : undefined;
+  if (
+    !existsSync(launcher) ||
+    !existsSync(join(dirname(bin), HEADLESS_ARTIFACT_MANIFEST_FILENAME))
+  ) {
+    return undefined;
+  }
+  if (
+    reportedLauncher !== undefined &&
+    isAbsolute(reportedLauncher) &&
+    basename(reportedLauncher) === "octant" &&
+    sameDirectory(dirname(reportedLauncher), bin)
+  ) {
+    return reportedLauncher;
+  }
+  return launcher;
+}
+
+function sameDirectory(left: string, right: string): boolean {
+  try {
+    return realpathSync(left) === realpathSync(right);
+  } catch {
+    return false;
+  }
 }
 
 export function resolveCurrentCliEntryPoint(): string {

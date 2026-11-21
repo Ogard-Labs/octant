@@ -185,18 +185,24 @@ describe("buildHeadlessArtifact", () => {
     mkdirSync(join(install, "lib", "runtime"), { recursive: true });
     writeFileSync(join(install, "bin", "octant"), HEADLESS_CLI_LAUNCHER, { mode: 0o755 });
     // A stand-in runtime that prints what it was asked to run.
-    writeFileSync(join(install, "lib", "runtime", "bun"), '#!/bin/sh\necho "$@"\n', {
-      mode: 0o755,
-    });
+    writeFileSync(
+      join(install, "lib", "runtime", "bun"),
+      '#!/bin/sh\necho "$OCTANT_CLI_LAUNCHER" >&2\necho "$@"\n',
+      {
+        mode: 0o755,
+      },
+    );
     const environment = { PATH: "/usr/bin:/bin" };
     const direct = await execFileAsync(join(install, "bin", "octant"), ["server", "status"], {
       env: environment,
     });
     expect(direct.stdout.trim()).toBe(`${join(install, "bin")}/octant.mjs server status`);
+    expect(direct.stderr.trim()).toBe(join(install, "bin", "octant"));
     mkdirSync(join(root, "path"));
     symlinkSync(join(install, "bin", "octant"), join(root, "path", "octant"));
     const linked = await execFileAsync(join(root, "path", "octant"), ["web"], { env: environment });
     expect(linked.stdout.trim()).toBe(`${join(install, "bin")}/octant.mjs web`);
+    expect(linked.stderr.trim()).toBe(join(install, "bin", "octant"));
   });
 
   it("carries the Bun the repository pins and nothing else", () => {

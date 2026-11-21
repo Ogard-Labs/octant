@@ -240,8 +240,12 @@ describe("per-user service managers", () => {
       paths: runtimePaths,
       uid: process.getuid?.() ?? 0,
       home: join(root, "home"),
-      cliEntryPoint: join(root, "install", "current", "bin", "octant.mjs"),
-      runtimeEnvironment: {},
+      // Bun resolves its entry point's links before the CLI sees it, so the
+      // entry point names the version; only the launcher kept `current`.
+      cliEntryPoint: join(version, "bin", "octant.mjs"),
+      runtimeEnvironment: {
+        OCTANT_CLI_LAUNCHER: join(root, "install", "current", "bin", "octant"),
+      },
       runner: { run: vi.fn(async () => ({ stdout: "", stderr: "" })) },
     });
 

@@ -56,7 +56,9 @@ const EXECUTABLE_ROLES = new Set<HeadlessArtifactComponentRole>([
  * computer needs no Bun of its own. A link to it (one on `PATH`) is followed to
  * the launcher itself, but the directory it names is not resolved further, so
  * a launcher reached through an install's `current` link keeps that path and
- * the service it writes follows the next upgrade.
+ * the service it writes follows the next upgrade. Bun resolves its entry
+ * point's links before the CLI reads it, so the launcher hands its own path
+ * over in `OCTANT_CLI_LAUNCHER` rather than leaving the CLI to work it out.
  */
 export const HEADLESS_CLI_LAUNCHER = `#!/bin/sh
 self=$0
@@ -68,6 +70,8 @@ while [ -L "$self" ]; do
   esac
 done
 dir=$(dirname -- "$self")
+OCTANT_CLI_LAUNCHER="$dir/octant"
+export OCTANT_CLI_LAUNCHER
 exec "$dir/../lib/runtime/bun" "$dir/octant.mjs" "$@"
 `;
 
