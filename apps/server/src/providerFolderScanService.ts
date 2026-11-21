@@ -63,7 +63,7 @@ const STRICT_IMPORT_REFUSAL_MESSAGE =
   "Importing discovered provider folders is unavailable while Strict is on.";
 
 export interface ProviderFolderScanApi {
-  readonly scan: (windowId: WindowId) => Promise<ProviderFolderScanResult>;
+  readonly scan: (windowId: WindowId, signal?: AbortSignal) => Promise<ProviderFolderScanResult>;
   readonly importFolders: (
     windowId: WindowId,
     input: unknown,
@@ -74,7 +74,9 @@ export interface ProviderFolderScanApi {
 export interface ProviderFolderScanServiceOptions {
   readonly homeDirectory: string;
   readonly env?: NodeJS.ProcessEnv;
-  readonly readProviderInstances: () => ReadonlyArray<ProviderInstance>;
+  readonly readProviderInstances: () =>
+    | ReadonlyArray<ProviderInstance>
+    | Promise<ReadonlyArray<ProviderInstance>>;
   readonly readActiveCodeProjects: () => ReadonlyArray<Project>;
   readonly isHostStrict: () => boolean;
   /** Whether Code currently requires a Git repository; defaults to true. */
@@ -129,7 +131,9 @@ interface ScanBudget {
 export class ProviderFolderScanService implements ProviderFolderScanApi {
   readonly #homeDirectory: string;
   readonly #env: NodeJS.ProcessEnv;
-  readonly #readProviderInstances: () => ReadonlyArray<ProviderInstance>;
+  readonly #readProviderInstances: () =>
+    | ReadonlyArray<ProviderInstance>
+    | Promise<ReadonlyArray<ProviderInstance>>;
   readonly #readActiveCodeProjects: () => ReadonlyArray<Project>;
   readonly #isHostStrict: () => boolean;
   readonly #requireGitRepository: () => boolean;
@@ -141,6 +145,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
   readonly #now: () => number;
   readonly #limits: ProviderFolderScanLimits;
   readonly #candidates = new Map<string, StoredCandidate>();
+  readonly #scanGenerationByWindow = new Map<string, number>();
 
   constructor(options: ProviderFolderScanServiceOptions) {
     this.#homeDirectory = options.homeDirectory;
@@ -162,15 +167,39 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     };
   }
 
-  async scan(windowId: WindowId): Promise<ProviderFolderScanResult> {
+  async scan(windowId: WindowId, signal?: AbortSignal): Promise<ProviderFolderScanResult> {
+    const windowKey = String(windowId);
     const hiddenIfStrict = (): ProviderFolderScanResult | undefined => {
       if (!this.#isHostStrict()) return undefined;
+      this.#scanGenerationByWindow.set(
+        windowKey,
+        (this.#scanGenerationByWindow.get(windowKey) ?? 0) + 1,
+      );
       this.#clearWindowCandidates(windowId);
       return decodeProviderFolderScanResult({ status: "hidden", reason: "strict" });
     };
 
     const initialStrict = hiddenIfStrict();
     if (initialStrict !== undefined) return initialStrict;
+
+    const emptyResult = (): ProviderFolderScanResult =>
+      decodeProviderFolderScanResult({
+        status: "ready",
+        groups: [],
+        requireGitRepository: this.#requireGitRepository(),
+        stoppedEarly: false,
+        scannedAt: this.#clock(),
+      });
+
+    // An already-aborted request must not supersede an active scan or wipe its listing.
+    if (signal?.aborted === true) return emptyResult();
+
+    const generation = (this.#scanGenerationByWindow.get(windowKey) ?? 0) + 1;
+    this.#scanGenerationByWindow.set(windowKey, generation);
+    const isSuperseded = (): boolean =>
+      this.#scanGenerationByWindow.get(windowKey) !== generation || signal?.aborted === true;
+    const emptyIfSuperseded = (): ProviderFolderScanResult | undefined =>
+      isSuperseded() ? emptyResult() : undefined;
 
     this.#purgeExpired();
     const canonicalHome = await realpath(this.#homeDirectory).catch(() =>
@@ -192,7 +221,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
       sessionKey: string,
       activityMs: number,
     ): boolean => {
-      if (this.#isHostStrict()) return false;
+      if (this.#isHostStrict() || isSuperseded()) return false;
       if (!isAbsolute(cwd)) return true;
       const existing = rawByCwd.get(cwd);
       if (existing !== undefined) {
@@ -223,16 +252,20 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     ]) {
       const strictNow = hiddenIfStrict();
       if (strictNow !== undefined) return strictNow;
+      const supersededNow = emptyIfSuperseded();
+      if (supersededNow !== undefined) return supersededNow;
       if (isDiscoveryStopped(budget)) break;
       await runPhase();
     }
 
     const strictBeforeInspect = hiddenIfStrict();
     if (strictBeforeInspect !== undefined) return strictBeforeInspect;
+    const supersededBeforeInspect = emptyIfSuperseded();
+    if (supersededBeforeInspect !== undefined) return supersededBeforeInspect;
 
     // Canonicalize every working directory already collected even when
     // discovery stopped at a file or entry cap, stopping here only if the
-    // wall-clock deadline expires or Strict turns on.
+    // wall-clock deadline expires, the scan is superseded/aborted, or Strict turns on.
     const mergedByRoot = new Map<
       string,
       {
@@ -249,6 +282,8 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     for (const [cwd, activity] of rawByCwd) {
       const strictNow = hiddenIfStrict();
       if (strictNow !== undefined) return strictNow;
+      const supersededNow = emptyIfSuperseded();
+      if (supersededNow !== undefined) return supersededNow;
       if (isTimeExpired(budget)) {
         markStopped(budget, "time-limit");
         break;
@@ -279,9 +314,12 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
       });
     }
 
-    // Recheck Strict right before committing candidates or returning labels.
+    // Recheck Strict and scan generation right before committing candidates so
+    // an older or aborted scan can never clear a newer scan's visible IDs.
     const strictBeforeReturn = hiddenIfStrict();
     if (strictBeforeReturn !== undefined) return strictBeforeReturn;
+    const supersededBeforeCommit = emptyIfSuperseded();
+    if (supersededBeforeCommit !== undefined) return supersededBeforeCommit;
 
     const activeRoots = new Set(
       this.#activeCodeProjects().map((project) => project.binding.canonicalRoot),
@@ -550,7 +588,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     readonly opencode: ReadonlyArray<string>;
     readonly pi: ReadonlyArray<string>;
   }> {
-    const instances = this.#readProviderInstances();
+    const instances = await this.#readProviderInstances();
 
     const claudeRaw: string[] = [join(canonicalHome, ".claude")];
     if (isAbsoluteNonEmpty(this.#env.CLAUDE_CONFIG_DIR)) {

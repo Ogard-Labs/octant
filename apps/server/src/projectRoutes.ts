@@ -340,7 +340,11 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           );
         }
         if (isProviderFolderScan) {
-          return response(await dependencies.providerFolderScan.scan(windowId), 200, origin);
+          return response(
+            await dependencies.providerFolderScan.scan(windowId, request.signal),
+            200,
+            origin,
+          );
         }
         let importRequest;
         try {

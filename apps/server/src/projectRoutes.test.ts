@@ -1169,7 +1169,7 @@ describe("Project icon change route", () => {
       }),
     );
     expect(scanResponse?.status).toBe(200);
-    expect(scan).toHaveBeenCalledWith(windowId);
+    expect(scan).toHaveBeenCalledWith(windowId, expect.any(AbortSignal));
 
     const invalidImport = await route(
       new Request("http://127.0.0.1:43120/api/projects/provider-folders/import", {
