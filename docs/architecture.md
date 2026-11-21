@@ -15898,8 +15898,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   **Waiting asks.** The same answer carries `asks`: every other ask a host
   service holds for the person, oldest first (maintainer decision,
   2026-11-13). These are MCP and connector tool approvals, Project memory
-  proposals, routine proposals and change requests, image generation and
-  save offers, Browser site, upload, download and script approvals
+  proposals, routine proposals and change requests, service offers (image
+  generation and save), Browser site, upload, download and script approvals
   (`/api/browser/approvals`), and the Browser sign-in card. Each list is the
   holding service's own list for the reader, so the rule on who may answer
   is the one that service already applies and listing adds none: the window
@@ -15931,11 +15931,19 @@ approval-gated` command that undoes it. The terminal shows no one-time
   are never cut to fit an answer: a row either holds the whole ask or sends
   the person to the card. `asks` is its own optional field rather than more
   members of `requests`, so a client built before it still decodes the list
-  and shows no such rows; it is absent when nothing waits. A memory or
-  routine proposal and an image offer are still not raised by a turn the
-  host runs with no person behind it (their owning sections refuse them
-  before asking), so none waits here for such a turn. The desktop menu
-  bar's fleet read lists `requests` only.
+  and shows no such rows; it is absent when nothing waits. Current clients
+  opt in to the `service-offer` row and a host-run marker in the pending list;
+  older clients still get `image-offer` rows. A service-offer row shows a
+  short action line, not the prompt, and is visible only to the scope that
+  raised it while that scope can still open the thread. The desktop Needs you
+  card and Inbox show a notice when a previously observed offer in one of
+  their listed modes disappears across a host restart. No offer or answer
+  can be recovered from the notice.
+  The phone Inbox shows the action line on its thread; the phone's in-thread
+  card requires device confirmation before sending image generation or save.
+  A memory or routine proposal and an image offer are still not raised by a
+  turn the host runs with no person behind it (their owning sections refuse
+  them before asking), so none waits here for such a turn.
   A native-harness question raised on a Code turn is a Code question
   and is listed. The lead's own native-harness session approval (a request with
   no `source`) is listed as a `lead-approval` row in any mode: the thread, its
@@ -16007,8 +16015,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   read, the Code requests and decisions each local window with a persisted Code
   binding could answer, the subagent waits each persisted local window bound to
   the parent's project could open, and each mode's own navigation run state,
-  and adds no authority or state.
-  It follows the same rule as pending requests: a local window or a device the host's own person paired, with no remote action, so every other device session is refused. The [desktop menu bar](#desktop-menu-bar) is its reader.
+  and adds no authority or state. A service offer marks its own thread as
+  needs you; fleet activity contains neither the offer nor its answer.
+  The read takes a local window or a device the host's own person paired.
+  Only local reads include the extra waits from persisted local windows.
+  The [desktop menu bar](#desktop-menu-bar) is its reader.
 - **Turn decisions.** A Work or Code turn that cannot continue without the
   person's choice ends its reply with one closing `octant-decision` block: an
   ask (one line, at most 110 characters) and one to four options (at most 60

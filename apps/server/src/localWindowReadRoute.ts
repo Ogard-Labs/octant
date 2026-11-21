@@ -1,6 +1,10 @@
 import type { WindowId } from "@octant/contracts";
 import type { PrincipalKind } from "@octant/domain/remote-access-policy";
-import { principalActsAsHostPerson, principalAuthorityKind } from "./clientPrincipal";
+import {
+  principalActsAsHostPerson,
+  principalAuthorityKind,
+  type ClientPrincipal,
+} from "./clientPrincipal";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -19,7 +23,12 @@ export interface LocalWindowReadRouteOptions<T> {
   readonly noun: string;
   /** The plural that opens an unavailable sentence, such as "Pending requests". */
   readonly plural: string;
-  readonly read: (windowId: WindowId, reader: PrincipalKind) => Promise<T>;
+  readonly read: (
+    windowId: WindowId,
+    reader: PrincipalKind,
+    request: Request,
+    principal: ClientPrincipal,
+  ) => Promise<T>;
   readonly decodeFailure: (failure: LocalWindowReadFailure) => unknown;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
@@ -70,14 +79,16 @@ export function createLocalWindowReadRoute<T>(options: LocalWindowReadRouteOptio
 
     let windowId: WindowId;
     let reader: PrincipalKind;
+    let principal: ClientPrincipal;
     try {
       const context = authenticateRoutePrincipal({
         request,
         store: options.windowAuthorityStore,
         now: now(),
       });
-      reader = principalAuthorityKind(context.principal);
-      if (!principalActsAsHostPerson(context.principal)) {
+      principal = context.principal;
+      reader = principalAuthorityKind(principal);
+      if (!principalActsAsHostPerson(principal)) {
         return fail(
           { code: "unauthorized", message: `${options.plural} are read at a local window.` },
           403,
@@ -98,7 +109,7 @@ export function createLocalWindowReadRoute<T>(options: LocalWindowReadRouteOptio
 
     let body: T;
     try {
-      body = await options.read(windowId, reader);
+      body = await options.read(windowId, reader, request, principal);
     } catch {
       return fail(
         { code: "unavailable", message: `${options.plural} are unavailable.` },

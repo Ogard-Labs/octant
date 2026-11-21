@@ -88,6 +88,56 @@ function transportFor(input: {
 }
 
 describe("listAllHostsMobileInbox", () => {
+  it("marks only the waiting offer's own host and thread as needing input", async () => {
+    const threadId = "00000000-0000-4000-8000-000000000001";
+    const owner = transportFor({
+      hostId: "studio",
+      threadId,
+      title: "Studio chat",
+      updatedAt: now,
+    });
+    const other = transportFor({
+      hostId: "laptop",
+      threadId,
+      title: "Laptop chat",
+      updatedAt: now,
+    });
+    const result = await listAllHostsMobileInbox([
+      {
+        ...owner,
+        authenticatedFetch: (request) =>
+          request.path === "/api/pending-requests"
+            ? Promise.resolve(
+                Response.json({
+                  requests: [],
+                  truncated: false,
+                  asks: [
+                    {
+                      kind: "service-offer",
+                      mode: "chat",
+                      askId: "00000000-0000-4000-8000-000000000009",
+                      threadId,
+                      threadTitle: "Studio chat",
+                      text: "Generate an image?",
+                      requestedAt: now,
+                    },
+                  ],
+                }),
+              )
+            : owner.authenticatedFetch(request),
+      },
+      other,
+    ]);
+    expect(result.failures).toEqual([]);
+    expect(result.rows.find((row) => row.hostId === "studio")).toMatchObject({
+      live: "needs-input",
+      waitingOfferText: "Generate an image?",
+    });
+    expect(result.rows.find((row) => row.hostId === "laptop")).not.toHaveProperty(
+      "waitingOfferText",
+    );
+  });
+
   it("merges rows from healthy hosts and sorts by freshness", async () => {
     const studio = transportFor({
       hostId: "11111111-1111-4111-8111-111111111111",
