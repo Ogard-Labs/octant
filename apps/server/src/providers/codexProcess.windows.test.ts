@@ -230,7 +230,8 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
           Either.left({ category: "incompatible", message: WINDOWS_STRICT_SHIM_REFUSAL }),
         );
 
-        // Confined catalog probe succeeds even when host defaults disallow unconfined catalog reads.
+        // Confined catalog probe succeeds even when host defaults disallow unconfined catalog reads,
+        // and answers `model/list` over stdio with model metadata and options.
         const catalogProbed = await Effect.runPromise(
           Effect.either(
             Effect.scoped(
@@ -241,16 +242,37 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
                   environment: { ...process.env, CODEX_HOME: codexHome },
                 })
                 .pipe(
-                  Effect.map((connection) => ({
-                    version: connection.version,
-                    pid: connection.pid,
-                  })),
+                  Effect.flatMap((connection) =>
+                    Effect.promise(async () => {
+                      const models = await connection.rpc.request(
+                        "model/list",
+                        {},
+                        (value) =>
+                          value as {
+                            readonly data?: ReadonlyArray<{
+                              readonly id?: string;
+                              readonly defaultReasoningEffort?: string;
+                            }>;
+                          },
+                      );
+                      return {
+                        version: connection.version,
+                        pid: connection.pid,
+                        models: models.data ?? [],
+                      };
+                    }),
+                  ),
                 ),
             ),
           ),
         );
         if (Either.isLeft(catalogProbed)) throw new Error(catalogProbed.left.message);
         expect(catalogProbed.right.version).toBe("0.144.4");
+        expect(catalogProbed.right.models).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: "gpt-5.4", defaultReasoningEffort: "medium" }),
+          ]),
+        );
         expect(running(catalogProbed.right.pid)).toBe(false);
         expect(readdirSync(leaseDir)).toEqual([]);
       },

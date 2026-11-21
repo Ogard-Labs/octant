@@ -26,7 +26,10 @@ import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { ProjectionRegistry } from "./persistence/projection";
 import { openSqlite, type SqliteConnection } from "./persistence/sqlitePort";
-import { configureSandboxToolNetwork } from "./process/sandboxRuntimePolicy";
+import {
+  configureSandboxRestrictionsAuthority,
+  configureSandboxToolNetwork,
+} from "./process/sandboxRuntimePolicy";
 import { makeProcessConfinementLive, ProcessConfinementError } from "./process/seatbeltProfile";
 import {
   registerSandboxRestrictionsEvents,
@@ -38,6 +41,7 @@ const tempDirs: string[] = [];
 const connections: SqliteConnection[] = [];
 
 afterEach(() => {
+  configureSandboxRestrictionsAuthority(undefined);
   configureSandboxToolNetwork(undefined, () => true);
   for (const db of connections.splice(0)) db.close();
   for (const dir of tempDirs.splice(0)) {
@@ -392,6 +396,7 @@ describe("Windows Strict, phase 1 admission, isolation, and tool refusals", () =
       executionPolicy: "full-access",
       strict: true,
     });
+    configureSandboxRestrictionsAuthority(service);
     const threadId = "50000000-0000-4000-8000-000000000021";
     const admitted = service.beginTurn({
       threadId,
@@ -430,9 +435,49 @@ describe("Windows Strict, phase 1 admission, isolation, and tool refusals", () =
       expect(prepared.args).toContain("Octant.Confined.0123456789abcdef0123456789abcdef");
       expect(prepared.policyReceipt?.backend).toBe("windows-appcontainer-v1");
 
-      // Unsupported custom restrictions (custom protectedPaths or isolated credentials)
-      // fail closed cleanly as incompatible rather than hitting the POSIX-only compiler.
+      // Passing the original selection reference records the Windows backend
+      // and grants on SandboxRestrictionsService via WeakMap identity.
+      const recordedSnapshot = service.snapshot({ kind: "session", threadId });
+      expect(recordedSnapshot.runtimeDetails).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            provider: "codex",
+            backend: expect.stringMatching(/^Windows AppContainer \+ Job Object/u),
+            writes: expect.arrayContaining(["C:\\Work\\repo", "C:\\Temp\\octant-scratch"]),
+          }),
+        ]),
+      );
+
+      // Unsupported custom restrictions (network: "deny", custom protectedPaths,
+      // or isolated credentials) fail closed cleanly as incompatible rather than
+      // hitting the POSIX-only compiler or granting broad network.
+      configureSandboxRestrictionsAuthority(undefined);
       if (admitted.turn.selection !== undefined) {
+        const denyNetwork = {
+          ...admitted.turn.selection,
+          policy: decodeSandboxPolicy({
+            ...admitted.turn.selection.policy,
+            network: "deny",
+          }),
+        };
+        let denyNetworkError: unknown;
+        try {
+          port.prepare({
+            executable: "C:\\Tools\\Codex\\codex.exe",
+            args: ["app-server"],
+            boundRoot: "C:\\Work\\repo",
+            temporaryDirectory: "C:\\Temp\\octant-scratch",
+            networkEgress: "allow",
+            sandboxPolicy: denyNetwork,
+          });
+        } catch (error) {
+          denyNetworkError = error;
+        }
+        expect(denyNetworkError).toBeInstanceOf(ProcessConfinementError);
+        expect((denyNetworkError as ProcessConfinementError).message).toBe(
+          WINDOWS_STRICT_NETWORK_REFUSAL,
+        );
+
         const unsupportedProtected = {
           ...admitted.turn.selection,
           policy: decodeSandboxPolicy({
@@ -487,5 +532,36 @@ describe("Windows Strict, phase 1 admission, isolation, and tool refusals", () =
     } finally {
       await admitted.turn.end();
     }
+
+    // Saving Block network access (`network: "deny"`) refuses Windows Strict Codex
+    // turns at beginTurn before dispatch rather than breaking model inference or
+    // silently granting broad network.
+    const denyPolicy = decodeSandboxPolicy({
+      schemaVersion: 1,
+      revision: 1,
+      filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+      network: "deny",
+      credentials: "existing-policy",
+      hostServices: "existing-policy",
+    });
+    const savedDeny = service.change({
+      kind: "set-policy",
+      scope: { kind: "project", projectId },
+      expectedVersion: 0,
+      policy: denyPolicy,
+    });
+    expect(savedDeny.kind).toBe("sandbox-restrictions");
+    expect(
+      service.beginTurn({
+        threadId: "50000000-0000-4000-8000-000000000022",
+        projectId: String(projectId),
+        mode: "code",
+        root,
+        provider: "codex",
+      }),
+    ).toEqual({
+      status: "refused",
+      message: WINDOWS_STRICT_NETWORK_REFUSAL,
+    });
   });
 });

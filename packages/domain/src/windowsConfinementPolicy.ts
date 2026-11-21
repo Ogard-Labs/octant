@@ -220,6 +220,17 @@ export function planWindowsConfinedLaunch(
         `Windows confinement cannot keep ${readOnly.path} read-only beneath ${covering.path}, which the launch may write.`,
       );
     }
+    // Reject the inverse overlap too (an explicit read-only folder containing a
+    // writable bound root or extra folder), matching POSIX policy compilation.
+    const nested = writableGrants.find((writable) =>
+      isSameOrInside(guardForm(writable.path), readOnlyForm),
+    );
+    if (nested !== undefined) {
+      return refused(
+        "writable-above-read-only",
+        `Windows confinement cannot keep ${readOnly.path} read-only while ${nested.path} inside it is writable.`,
+      );
+    }
   }
 
   const own = input.ownAccountPaths

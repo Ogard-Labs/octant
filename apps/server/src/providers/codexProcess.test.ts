@@ -1110,6 +1110,7 @@ describe("Codex launch confinement", () => {
       readonly executable: string;
       readonly networkEgress: unknown;
       readonly writeBoundRoot: boolean | undefined;
+      readonly readRoots: ReadonlyArray<string> | undefined;
       readonly additionalWriteRoots: ReadonlyArray<string> | undefined;
       readonly explicitReadOnlyRoots: ReadonlyArray<string> | undefined;
     }> = [];
@@ -1120,6 +1121,7 @@ describe("Codex launch confinement", () => {
           readonly args: ReadonlyArray<string>;
           readonly networkEgress: unknown;
           readonly writeBoundRoot?: boolean;
+          readonly readRoots?: ReadonlyArray<string>;
           readonly additionalWriteRoots?: ReadonlyArray<string>;
           readonly explicitReadOnlyRoots?: ReadonlyArray<string>;
         }) => {
@@ -1127,6 +1129,7 @@ describe("Codex launch confinement", () => {
             executable: input.executable,
             networkEgress: input.networkEgress,
             writeBoundRoot: input.writeBoundRoot,
+            readRoots: input.readRoots,
             additionalWriteRoots: input.additionalWriteRoots,
             explicitReadOnlyRoots: input.explicitReadOnlyRoots,
           });
@@ -1164,10 +1167,10 @@ describe("Codex launch confinement", () => {
         "C:\\Program Files\\Octant\\resources\\native\\octant-windows-confine.exe",
       );
       expect(admitted.launch.confined).toBe(true);
-      // Shared CODEX_HOME must never be writable by a confined turn, and
-      // Codex SQLite state must be directed into the ephemeral scratch folder.
-      expect(admitted.launch.environment.CODEX_SQLITE_HOME).toContain("codex-sqlite");
-      expect(admitted.launch.environment.CODEX_SQLITE_HOME).not.toContain("C:\\Users\\Ada\\.codex");
+      // Shared CODEX_HOME root must stay strictly read-only (never writable so
+      // startup config/integrations cannot be poisoned), while durable rollout
+      // and SQLite subdirectories stay writable across fresh follow-up sessions.
+      expect(admitted.launch.environment.CODEX_SQLITE_HOME).toBe("C:\\Users\\Ada\\.codex\\sqlite");
       admitted.launch.release();
     }
     expect(seen).toEqual([
@@ -1175,14 +1178,20 @@ describe("Codex launch confinement", () => {
         executable: "C:\\Tools\\Codex\\codex.exe",
         networkEgress: "allow",
         writeBoundRoot: true,
-        additionalWriteRoots: undefined,
-        explicitReadOnlyRoots: ["C:\\Users\\Ada\\.codex"],
+        readRoots: ["C:\\Users\\Ada\\.codex"],
+        additionalWriteRoots: [
+          "C:\\Users\\Ada\\.codex\\sessions",
+          "C:\\Users\\Ada\\.codex\\archived_sessions",
+          "C:\\Users\\Ada\\.codex\\log",
+          "C:\\Users\\Ada\\.codex\\sqlite",
+        ],
+        explicitReadOnlyRoots: undefined,
       },
     ]);
+    expect(seen[0]?.additionalWriteRoots).not.toContain("C:\\Users\\Ada\\.codex");
 
-    // Confined Windows Strict catalog probe runs with read-only bound root and
-    // read-only CODEX_HOME (never unconfined) so Full-access threads can verify
-    // model options even when host defaults are Strict + Ask first.
+    // Confined Windows Strict catalog probe runs with read-only bound root,
+    // read-only CODEX_HOME, zero durable write roots, and scratch SQLite home.
     const confinedCatalog = prepareCodexLaunch({
       binaryPath: "C:\\Tools\\Codex\\codex.exe",
       args: ["app-server"],
@@ -1194,14 +1203,16 @@ describe("Codex launch confinement", () => {
     expect(confinedCatalog.status).toBe("prepared");
     if (confinedCatalog.status === "prepared") {
       expect(confinedCatalog.launch.confined).toBe(true);
+      expect(confinedCatalog.launch.environment.CODEX_SQLITE_HOME).toContain("codex-sqlite");
       confinedCatalog.launch.release();
     }
     expect(seen[1]).toEqual({
       executable: "C:\\Tools\\Codex\\codex.exe",
       networkEgress: "allow",
       writeBoundRoot: false,
+      readRoots: ["C:\\Users\\Ada\\.codex"],
       additionalWriteRoots: undefined,
-      explicitReadOnlyRoots: ["C:\\Users\\Ada\\.codex"],
+      explicitReadOnlyRoots: undefined,
     });
 
     // Command shims refuse before confinement or spawn.

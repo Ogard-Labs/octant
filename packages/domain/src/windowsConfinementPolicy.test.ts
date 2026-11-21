@@ -229,13 +229,23 @@ describe("Windows confined launch plan", () => {
     expect(windowsNativePath("C:\\a\\.\\b")).toBeUndefined();
   });
 
-  it("refuses an explicit read-only root beneath a writable grant and names the Windows network limit refusal", () => {
-    const overlap = planWindowsConfinedLaunch(
+  it("refuses an explicit read-only root overlapping a writable grant in either direction and names the Windows network limit refusal", () => {
+    const belowWritable = planWindowsConfinedLaunch(
       input({
         explicitReadOnlyRoots: [`${HOME}\\src\\octant\\readonly-dir`],
       }),
     );
-    expect(overlap).toMatchObject({ status: "refused", refusal: "writable-above-read-only" });
+    expect(belowWritable).toMatchObject({ status: "refused", refusal: "writable-above-read-only" });
+
+    const aboveWritable = planWindowsConfinedLaunch(
+      input({
+        explicitReadOnlyRoots: [`${HOME}\\src`],
+      }),
+    );
+    expect(aboveWritable).toMatchObject({ status: "refused", refusal: "writable-above-read-only" });
+    if (aboveWritable.status === "refused") {
+      expect(aboveWritable.message).toMatch(/read-only while .* inside it is writable/u);
+    }
 
     const proxied = planWindowsConfinedLaunch(input({ network: "proxied" }));
     expect(proxied).toEqual({

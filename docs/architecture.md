@@ -21506,15 +21506,15 @@ user-added packages through the published seams and the credential broker.
 
 ### Windows Strict, phase 1
 
-**Designed, not built.** Phase 1 makes the one shared Strict control accepted
-on native Windows for Work and Code at Full access on a verified Codex runtime,
-confined by the AppContainer and Job Object launcher this section designs.
-Today the server refuses Strict on Windows at every level ("Strict needs a
-sandbox Windows doesn't have yet"). Neither the dormant launcher nor the
-unconfined Windows provider tests prove this combination, and admission does
-not ship until the gates below pass. This reframes the earlier proposal to keep
-the sandbox at Full access on Windows as a separate choice (maintainer
-decision, 2026-11-21).
+**Partly built.** Phase 1 makes the one shared Strict control accepted on native
+Windows for Work and Code at Full access on a verified native Codex runtime,
+confined by the packaged AppContainer and kill-on-close Job Object launcher
+(`octant-windows-confine.exe`) with durable pre-ACL lease recovery. Hosted
+Windows CI covers the launcher, ACL/profile recovery, and native Codex smoke;
+Gate 5 real standard-user Windows 11 desktop verification remains pending before
+promoting the status to Built. This reframes the earlier proposal to keep the
+sandbox at Full access on Windows as a separate choice (maintainer decision,
+2026-11-21).
 
 **Two postures, one control.** Outside Strict the provider holds the level with
 no Octant sandbox, on Windows as on macOS and Linux

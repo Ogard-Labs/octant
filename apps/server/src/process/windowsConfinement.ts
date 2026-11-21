@@ -114,8 +114,9 @@ export function buildWindowsConfinedLaunch(
       "Windows confinement requires octant-windows-confine.exe.",
     );
   }
-  const selectedPolicy = parseWindowsSandboxPolicy(input.sandboxPolicy);
-  refuseWhatWindowsCannotExpress(input, selectedPolicy);
+  const originalPolicy = input.sandboxPolicy;
+  const selectedPolicy = parseWindowsSandboxPolicy(originalPolicy);
+  refuseWhatWindowsCannotExpress(input, selectedPolicy, originalPolicy);
 
   const homeDirectory = options.homeDirectory ?? homedir();
   const launchId = options.launchId ?? randomBytes(16).toString("hex");
@@ -140,11 +141,7 @@ export function buildWindowsConfinedLaunch(
     ]),
   ];
   const network =
-    selectedPolicy?.policy.network === "deny"
-      ? ("none" as const)
-      : typeof input.networkEgress === "object"
-        ? ("proxied" as const)
-        : input.networkEgress;
+    typeof input.networkEgress === "object" ? ("proxied" as const) : input.networkEgress;
   const decision = planWindowsConfinedLaunch({
     launchId,
     executable: input.executable,
@@ -274,14 +271,16 @@ export function buildWindowsConfinedLaunch(
     }
   }
   const args = windowsConfinedLauncherArguments(decision, input.args);
-  if (selectedPolicy !== undefined) {
+  if (selectedPolicy !== undefined && originalPolicy !== undefined) {
     const readGrantPaths = decision.grants
       .filter((grant) => grant.access === "read")
       .map((grant) => grant.path);
     const writeGrantPaths = decision.grants
       .filter((grant) => grant.access === "modify")
       .map((grant) => grant.path);
-    recordSandboxLaunch(selectedPolicy, {
+    // Pass the original selection reference registered by SandboxRestrictionsService
+    // so WeakMap-backed launch recording matches it by object identity.
+    recordSandboxLaunch(originalPolicy, {
       provider: selectedPolicy.context.provider,
       backend: `Windows AppContainer + Job Object · ${release()}`,
       reads: readGrantPaths.slice(0, 64),
@@ -347,6 +346,7 @@ function parseWindowsSandboxPolicy(raw: unknown): SandboxPolicySelection | undef
 function refuseWhatWindowsCannotExpress(
   input: ProcessConfinementPrepareInput,
   selectedPolicy: SandboxPolicySelection | undefined,
+  originalPolicy: SandboxPolicySelection | undefined,
 ): void {
   const refuse = (what: string) => {
     throw new ProcessConfinementError("incompatible", `Windows confinement has no ${what}.`);
@@ -369,6 +369,12 @@ function refuseWhatWindowsCannotExpress(
     throw new ProcessConfinementError("incompatible", WINDOWS_STRICT_NETWORK_REFUSAL);
   }
   if (selectedPolicy !== undefined) {
+    // Blocking all AppContainer network without a verified host model-inference
+    // proxy would sever Codex's own API calls; refuse rather than breaking or
+    // silently weakening network: "deny".
+    if (selectedPolicy.policy.network === "deny") {
+      throw new ProcessConfinementError("incompatible", WINDOWS_STRICT_NETWORK_REFUSAL);
+    }
     if (selectedPolicy.policy.filesystem.protectedPaths.length > 0) {
       throw new ProcessConfinementError(
         "incompatible",
@@ -383,7 +389,9 @@ function refuseWhatWindowsCannotExpress(
     }
     if (
       selectedPolicy.policy.network === "existing-policy" &&
-      (sandboxNetworkSnapshot(selectedPolicy)?.limitsOn ?? sandboxNetworkLimitsOn())
+      ((originalPolicy === undefined ? undefined : sandboxNetworkSnapshot(originalPolicy))
+        ?.limitsOn ??
+        sandboxNetworkLimitsOn())
     ) {
       throw new ProcessConfinementError("incompatible", WINDOWS_STRICT_NETWORK_REFUSAL);
     }

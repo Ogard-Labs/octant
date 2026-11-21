@@ -725,6 +725,7 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
             throw new Error(windowsStrictRuntimeRefusal(kind));
           }
           if (
+            selectedPolicy.network === "deny" ||
             selectedPolicy.hostServices === "blocked" ||
             (selectedPolicy.approvedDestinations?.length ?? 0) > 0 ||
             (selectedPolicy.localServices?.length ?? 0) > 0 ||
@@ -747,7 +748,7 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         const admission = admitSandboxPolicy(selectedPolicy, {
           allowedFolders: true,
           protectedPaths: accessTimeReady,
-          networkDeny: true,
+          networkDeny: platform !== "win32",
           unrestrictedNetwork: true,
           isolatedCredentials: accessTimeReady,
           blockedHostServices: platform !== "win32",

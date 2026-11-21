@@ -8,6 +8,7 @@ import {
   chmodSync,
   constants,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -28,6 +29,7 @@ import {
   windowsProviderLaunch,
   type WindowsProviderLaunch,
 } from "@octant/domain/guardrail-policy";
+import { isSameOrInside, windowsGuardPath } from "@octant/domain/secret-guard-policy";
 import { windowsNativePath } from "@octant/domain/windows-confinement-policy";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import { sandboxNetworkLimitsOn } from "../process/sandboxRuntimePolicy";
@@ -1159,6 +1161,7 @@ function prepareWindowsCodexLaunch(input: {
     const policy = authority.kind === "thread" ? authority.sandboxPolicy?.policy : undefined;
     if (
       input.network !== undefined ||
+      policy?.network === "deny" ||
       policy?.hostServices === "blocked" ||
       (policy?.approvedDestinations?.length ?? 0) > 0 ||
       (policy?.localServices?.length ?? 0) > 0 ||
@@ -1193,12 +1196,54 @@ function prepareWindowsCodexLaunch(input: {
       }
       return [...resolved];
     };
+    const ensureDurableCodexStateDirs = (
+      resolvedCodexHome: string,
+    ): {
+      readonly writeRoots: ReadonlyArray<string>;
+      readonly sqliteHome: string;
+    } => {
+      const subdirs = ["sessions", "archived_sessions", "log", "sqlite"] as const;
+      const writeRoots: string[] = [];
+      let sqliteHome = `${resolvedCodexHome}\\sqlite`;
+      for (const sub of subdirs) {
+        const candidate = `${resolvedCodexHome}\\${sub}`;
+        if (process.platform === "win32") {
+          if (existsSync(candidate)) {
+            const meta = lstatSync(candidate);
+            if (!meta.isDirectory() || meta.isSymbolicLink()) {
+              throw new ProcessConfinementError(
+                "incompatible",
+                `Codex cannot run under Windows Strict: ${candidate} must be a regular directory.`,
+              );
+            }
+          } else {
+            mkdirSync(candidate, { recursive: true, mode: 0o700 });
+          }
+          const canonical = windowsNativePath(realpathSync.native(candidate));
+          if (canonical === undefined) {
+            throw new ProcessConfinementError(
+              "incompatible",
+              `Codex cannot run under Windows Strict: ${candidate} could not be resolved.`,
+            );
+          }
+          writeRoots.push(canonical);
+          if (sub === "sqlite") sqliteHome = canonical;
+        } else {
+          const normalized = windowsNativePath(candidate);
+          if (normalized !== undefined) {
+            writeRoots.push(normalized);
+            if (sub === "sqlite") sqliteHome = normalized;
+          }
+        }
+      }
+      return { writeRoots, sqliteHome };
+    };
     try {
       const createdScratch = mkdtempSync(join(tmpdir(), "octant-codex-"));
       temporaryDirectory =
         process.platform === "win32" ? realpathSync.native(createdScratch) : createdScratch;
-      const confinedSqliteHome = join(temporaryDirectory, "codex-sqlite");
-      mkdirSync(confinedSqliteHome, { recursive: true });
+      const scratchSqliteHome = join(temporaryDirectory, "codex-sqlite");
+      mkdirSync(scratchSqliteHome, { recursive: true });
       const root =
         authority.kind === "thread" ? nativeRealpath(authority.root) : temporaryDirectory;
       if (process.platform === "win32" && !statSync(root).isDirectory()) {
@@ -1217,16 +1262,36 @@ function prepareWindowsCodexLaunch(input: {
       // (`config.toml`, `hooks.json`, `.env`, `plugins`, `rules`, `skills`,
       // `AGENTS.md`) out of a writable parent grant. Keep the shared Codex
       // home strictly read-only so a confined turn cannot poison startup
-      // config or integrations for later Strict-off launches, and direct
-      // Codex's writable SQLite state into the per-launch scratch folder.
+      // config or integrations for later Strict-off launches, while granting
+      // write access only to the durable non-authority rollout/state subdirs
+      // (`sessions`, `archived_sessions`, `log`, `sqlite`) so fresh Windows
+      // Strict follow-up processes can resume saved conversations.
       const accountReadRoots = existingNativePaths([codexHome]);
+      const resolvedCodexHome = accountReadRoots[0];
+      if (authority.kind === "thread" && resolvedCodexHome !== undefined) {
+        const codexHomeForm = windowsGuardPath(`${resolvedCodexHome}\\`);
+        const writableProjectForms = [root, ...extraFolders]
+          .map((path) => windowsGuardPath(`${path}\\`))
+          .filter((form): form is string => form !== undefined);
+        if (
+          codexHomeForm !== undefined &&
+          writableProjectForms.some((writable) => isSameOrInside(codexHomeForm, writable))
+        ) {
+          throw new ProcessConfinementError(
+            "incompatible",
+            "Windows Strict cannot grant a writable Project folder that covers CODEX_HOME.",
+          );
+        }
+      }
+      const durableState =
+        authority.kind === "thread" && resolvedCodexHome !== undefined
+          ? ensureDurableCodexStateDirs(resolvedCodexHome)
+          : { writeRoots: [], sqliteHome: scratchSqliteHome };
       const explicitReadOnly = existingNativePaths([
         ...(authority.readOnlyFolders ?? []),
         ...(policy?.filesystem.readOnlyRoots ?? []),
-        ...accountReadRoots,
       ]);
       const executable = nativeRealpath(input.binaryPath);
-      const networkEgress = policy?.network === "deny" ? ("none" as const) : ("allow" as const);
       const launch = input.confinement.prepare({
         executable,
         args: input.args,
@@ -1234,10 +1299,13 @@ function prepareWindowsCodexLaunch(input: {
         extraBoundRoots: extraFolders,
         writeBoundRoot: authority.kind === "thread",
         temporaryDirectory,
+        ...(durableState.writeRoots.length === 0
+          ? {}
+          : { additionalWriteRoots: durableState.writeRoots }),
         readRoots: [...accountReadRoots],
         ...(explicitReadOnly.length === 0 ? {} : { explicitReadOnlyRoots: explicitReadOnly }),
-        ownAccountPaths: accountReadRoots,
-        networkEgress,
+        ownAccountPaths: [...accountReadRoots, ...durableState.writeRoots],
+        networkEgress: "allow",
         ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
           ? { sandboxPolicy: authority.sandboxPolicy }
           : {}),
@@ -1251,7 +1319,7 @@ function prepareWindowsCodexLaunch(input: {
           environment: {
             ...input.environment,
             ...launch.environment,
-            CODEX_SQLITE_HOME: confinedSqliteHome,
+            CODEX_SQLITE_HOME: durableState.sqliteHome,
             TMP: temporaryDirectory,
             TEMP: temporaryDirectory,
             TMPDIR: temporaryDirectory,

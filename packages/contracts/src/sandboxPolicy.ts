@@ -5,22 +5,45 @@ import { ProjectId } from "./projects";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
-/** POSIX host paths only. Other platforms must refuse before interpreting them. */
+function isPosixSandboxPath(path: string): boolean {
+  return (
+    path.startsWith("/") &&
+    path !== "/" &&
+    Array.from(path).every(
+      (character) =>
+        character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127 && character !== "\\",
+    ) &&
+    path
+      .split("/")
+      .slice(1)
+      .every((part) => part !== "" && part !== "." && part !== "..")
+  );
+}
+
+function isWindowsSandboxPath(path: string): boolean {
+  if (!/^[A-Za-z]:\\/u.test(path)) return false;
+  const rest = path.slice(3);
+  if (rest.length === 0 || rest.includes("/")) return false;
+  return rest
+    .split("\\")
+    .every(
+      (part) =>
+        part.length > 0 &&
+        part !== "." &&
+        part !== ".." &&
+        !part.includes(":") &&
+        !/[. ]$/u.test(part) &&
+        !/[<>"|?*]/u.test(part) &&
+        Array.from(part).every(
+          (character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127,
+        ),
+    );
+}
+
+/** Canonical absolute POSIX or Windows drive-absolute host paths. */
 export const SandboxPolicyPath = Schema.String.pipe(
   Schema.maxLength(4096),
-  Schema.filter(
-    (path) =>
-      path.startsWith("/") &&
-      path !== "/" &&
-      Array.from(path).every(
-        (character) =>
-          character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127 && character !== "\\",
-      ) &&
-      path
-        .split("/")
-        .slice(1)
-        .every((part) => part !== "" && part !== "." && part !== ".."),
-  ),
+  Schema.filter((path) => isPosixSandboxPath(path) || isWindowsSandboxPath(path)),
 );
 
 const roots = Schema.Array(SandboxPolicyPath).pipe(Schema.maxItems(64));
