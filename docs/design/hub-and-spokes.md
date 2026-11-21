@@ -1134,8 +1134,8 @@ a request naming a provider profile is refused. Its branch is
 `octant/delegated/<slug>-<request id>`, made from the marked remote and base
 branch. The delegating member reads the thread's state, and on completion
 is told the changes are on the thread's own branch on this computer; the
-thread's text stays here. Today
-only a Work Project takes delegated work, because a Code thread needs a
+thread's text stays here. A Code Project takes delegated work only once
+marked, because a Code thread needs a
 managed worktree and a delivery target a person confirmed. B offers Code for a
 Code Project only after its person marks that Project as accepting delegated
 Code work, which records the delivery target they confirmed (the remote, base
@@ -1145,7 +1145,12 @@ at most (Full access only under the owner rule above), and marked as having
 read outside content from its first turn, because its task is a peer's text.
 A's agent lists the members that take delegated work and the Projects each
 accepts through a read-only route B filters by its peer grant, with titles
-and no paths. Cancelling the parent cancels the remote Code child as it does a
+and no paths. B bounds the listing it sends (names cut to 200 characters,
+at most 500 Projects, within the route's reply budget) so one long name
+cannot make the asker drop the member. The names are another member's
+text: A marks the asking thread as having read outside content before its
+agent sees them, frames them as data, and withholds the listing when that
+mark cannot be recorded. Cancelling the parent cancels the remote Code child as it does a
 Work child, and a delegated Code thread cannot move, as a delegated Work
 thread cannot.
 

@@ -545,12 +545,12 @@ describe("a spoke delegating work to another spoke", () => {
   });
 
   it("lists, by name, only the Projects B opened for delegated work within the grant it gave A", async () => {
-    const other = "77777777-7777-4777-8777-777777777777";
+    const other = decodeProjectId("77777777-7777-4777-8777-777777777777");
     const { a, b } = await threeHosts({
       child: fakeChildHost({ modes: ["code"] }),
       bProjects: () => [
         { projectId: PROJECT, name: "Service" },
-        { projectId: other as never, name: "Notes" },
+        { projectId: other, name: "Notes" },
       ],
     });
     const listed = await b.hubLink(
@@ -586,6 +586,15 @@ describe("a spoke delegating work to another spoke", () => {
     );
     expect(refused?.status).toBe(403);
     expect(await refused?.json()).toMatchObject({ kind: "delegation-not-granted" });
+  });
+
+  it("still lists a member's Projects when one has a name longer than the listing allows", async () => {
+    const { a } = await threeHosts({
+      bProjects: () => [{ projectId: PROJECT, name: "N".repeat(300) }],
+    });
+    const [member] = await a.delegating.listTargets();
+    expect(member?.projects).toHaveLength(1);
+    expect(Array.from(member?.projects[0]?.name ?? "")).toHaveLength(200);
   });
 
   it("interrupts a child once its start finishes when the sender cancels mid-start, and refuses another sender", async () => {

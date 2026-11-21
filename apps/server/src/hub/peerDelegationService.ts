@@ -343,9 +343,9 @@ export class PeerDelegationService {
       const modes = (authority?.modes ?? []).filter((mode) => delegation.modes.includes(mode));
       return modes.length === 0
         ? []
-        : [{ projectId: project.projectId, name: project.name, modes }];
+        : [{ projectId: project.projectId, name: listedName(project.name), modes }];
     });
-    return { status: "listed", projects };
+    return { status: "listed", projects: withinListingBudget(projects) };
   }
 
   async status(signed: SignedRequest): Promise<DelegationStatusReceipt> {
@@ -528,4 +528,30 @@ export class PeerDelegationService {
 
 function refusal(kind: DelegationRefusalKind): DelegationRefusal {
   return { status: "refused", kind };
+}
+
+// The asker decodes a listing whole and drops the member when any part breaks
+// the contract (a name over 200 characters, more than 500 entries) or the
+// reply is cut at the route's 131,072-byte budget, so one long local name
+// would hide every Project here. The listing is bounded where it is made.
+const LISTED_NAME_MAX = 200;
+const LISTED_PROJECTS_MAX = 500;
+const LISTING_BYTES_MAX = 120_000;
+
+function listedName(name: string): string {
+  const characters = Array.from(name);
+  return characters.length <= LISTED_NAME_MAX
+    ? name
+    : `${characters.slice(0, LISTED_NAME_MAX - 1).join("")}…`;
+}
+
+function withinListingBudget<T>(projects: ReadonlyArray<T>): ReadonlyArray<T> {
+  const kept: T[] = [];
+  let bytes = 64;
+  for (const project of projects.slice(0, LISTED_PROJECTS_MAX)) {
+    bytes += Buffer.byteLength(JSON.stringify(project)) + 1;
+    if (bytes > LISTING_BYTES_MAX) break;
+    kept.push(project);
+  }
+  return kept;
 }
