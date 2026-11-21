@@ -153,6 +153,16 @@ describe("a delegated Code thread", () => {
     expect(createThread).not.toHaveBeenCalled();
   });
 
+  it("keeps the Project's own identity as the base for an outcome that opens no pull request", async () => {
+    const { host, createThread } = fixture(
+      codeProject({ delegatedCode: { ...MARK, outcomeKind: "local-implementation" } }),
+    );
+    await start(host);
+    expect(createThread.mock.calls[0]?.[0]).toMatchObject({
+      deliveryTarget: { proposedBaseRepository: String(PROJECT) },
+    });
+  });
+
   it("refuses as not granted when the grant ends before the provider turn starts", async () => {
     const { host, startTurn } = fixture();
     let granted = true;

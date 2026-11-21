@@ -1134,7 +1134,7 @@ request naming a provider profile is refused. Its branch is
 `octant/delegated/<slug>-<request id>`, made from the marked remote and base
 branch. A pull-request outcome names its base as the `owner/repository` the
 marked remote points at; when that remote names no GitHub repository the
-request is refused before any thread is made. The sender's grant and the
+request is refused before any thread is made; any other outcome keeps the Project's own identity as its base. The sender's grant and the
 Project's mark are checked again immediately before the provider turn
 starts. The delegating member reads the thread's state, and on completion
 is told the changes are on the thread's own branch on this computer; the

@@ -21,9 +21,9 @@ import {
   isProviderAllowedByProjectPolicy,
   orderProviderInstances,
   orderProviderModels,
+  parseGithubRemote,
 } from "@octant/domain";
 import type { CodeRouteService } from "../codeRoutes";
-import { repositoryFromRemote } from "../work/workPromotionProjectPort";
 import type { ChildReading } from "./peerDelegationService";
 import type { CodeDelegationServices } from "./codeDelegationHost";
 
@@ -73,7 +73,11 @@ export function createCodeDelegationServices(input: {
       const project = input.readProject(projectId);
       if (project?.type !== "code") return undefined;
       const url = await input.remoteUrl(project.binding.canonicalRoot, remoteName);
-      return url === undefined ? undefined : repositoryFromRemote(url);
+      if (url === undefined) return undefined;
+      const parsed = parseGithubRemote(url);
+      return parsed.status === "resolved"
+        ? `${parsed.identity.owner}/${parsed.identity.name}`
+        : undefined;
     },
     createThread: async (command, mark) => {
       const result = await code.execute(scope, decodeCodeCommand(command), undefined, {

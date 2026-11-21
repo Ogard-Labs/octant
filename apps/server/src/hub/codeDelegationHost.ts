@@ -126,8 +126,12 @@ export function createCodeDelegationHost(services: CodeDelegationServices): Peer
       // outcome needs the repository the confirmed remote points at; without
       // one the outcome could never be reached. Other outcomes keep the
       // Project's own identity, as other managed threads here do.
-      const repository = await services.deliveryRepository(input.projectId, mark.remoteName);
       const wantsPullRequest = mark.outcomeKind === "opened-pr" || mark.outcomeKind === "merged-pr";
+      // Pull-request operations use this repository whatever the outcome, so
+      // only a pull-request outcome is given one.
+      const repository = wantsPullRequest
+        ? await services.deliveryRepository(input.projectId, mark.remoteName)
+        : undefined;
       if (wantsPullRequest && repository === undefined) {
         return { status: "refused", kind: "start-failed" };
       }

@@ -28,6 +28,7 @@ function services(input: {
   readonly instances: ReadonlyArray<ProviderInstance>;
   readonly catalogs: ReadonlyArray<ProviderCatalogSnapshot>;
   readonly code?: Parameters<typeof createCodeDelegationServices>[0]["code"];
+  readonly remoteUrl?: string;
 }) {
   const project = {
     id: PROJECT_ID,
@@ -42,7 +43,7 @@ function services(input: {
     readProviderInstances: () => input.instances,
     readProviderDefaults: () => ({}) as never,
     readProviderCatalogs: () => input.catalogs,
-    remoteUrl: async () => undefined,
+    remoteUrl: async () => input.remoteUrl,
     code: input.code ?? ({} as never),
   });
 }
@@ -58,6 +59,20 @@ describe("the provider a delegated Code thread starts on", () => {
       ],
     }).defaultProvider(PROJECT_ID as never);
     expect(chosen).toEqual({ providerInstanceId: "on", modelId: "tagged" });
+  });
+});
+
+describe("the repository a delegated pull request is based on", () => {
+  it("reads owner/repository from scp, ssh:// and https GitHub remotes and nothing from another host", async () => {
+    const repositoryOf = (remoteUrl: string) =>
+      services({ instances: [], catalogs: [], remoteUrl }).deliveryRepository(
+        PROJECT_ID as never,
+        "origin",
+      );
+    expect(await repositoryOf("git@github.com:acme/widget.git")).toBe("acme/widget");
+    expect(await repositoryOf("ssh://git@github.com/acme/widget.git")).toBe("acme/widget");
+    expect(await repositoryOf("https://github.com/acme/widget")).toBe("acme/widget");
+    expect(await repositoryOf("https://gitlab.example/acme/widget.git")).toBeUndefined();
   });
 });
 
