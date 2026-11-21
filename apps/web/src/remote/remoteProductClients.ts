@@ -181,6 +181,14 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
     windowCapability: NO_WINDOW_CAPABILITY,
   };
   const canvas = createCanvasClient(port);
+  // A server Project's port forward listens on the loopback of the computer
+  // that runs the host, not this browser's, so only a window there is offered
+  // one; the host refuses every device too.
+  const {
+    forwardRead: _forwardRead,
+    forwardCommand: _forwardCommand,
+    ...serverProjects
+  } = createServerProjectsClient(port);
   return {
     conversationInputs: createConversationInputClient(port),
     chat: createChatClient(port),
@@ -220,6 +228,6 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
       canvas.importHtml?.(request) ?? Promise.reject(new Error("Import is unavailable.")),
     projectTerminal: createProjectTerminalClient(port),
     projectBrowser: createProjectBrowserClient(port),
-    serverProjects: createServerProjectsClient(port),
+    serverProjects,
   };
 }

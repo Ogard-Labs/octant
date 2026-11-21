@@ -341,9 +341,13 @@ import {
   SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES,
   SERVER_PROJECTS_EVENT_NAMES,
   SERVER_PROJECTS_EVENT_NAMES_V2,
+  SERVER_PROJECTS_PORT_FORWARD_CLOSED,
+  SERVER_PROJECTS_PORT_FORWARD_OPENED,
   SERVER_PROJECTS_PREVIEW_OUTCOME_V1,
   ServerAttachmentCleanupPendingPayload,
   ServerAttachmentCleanupSettledPayload,
+  ServerPortForwardClosedPayload,
+  ServerPortForwardOpenedPayload,
   ServerPreviewOutcomePayloadV1,
   ServerPreviewOutcomePayloadV2,
   ServerProjectActionsReplacedPayload,
@@ -784,6 +788,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     )
     .register(SERVER_PROJECTS_PREVIEW_OUTCOME_V1, 1, ServerPreviewOutcomePayloadV1)
     .register(SERVER_PROJECTS_EVENT_NAMES_V2.previewOutcome, 1, ServerPreviewOutcomePayloadV2)
+    .register(SERVER_PROJECTS_PORT_FORWARD_OPENED, 1, ServerPortForwardOpenedPayload)
+    .register(SERVER_PROJECTS_PORT_FORWARD_CLOSED, 1, ServerPortForwardClosedPayload)
     .register(
       SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending,
       1,

@@ -317,6 +317,7 @@ export function wireHarness(deps: HarnessDependencies) {
     pinnedKnownHosts: (server) => serverConnection.pinnedKnownHostsFile(server),
     refuses: (server) => serverConnection.refusal(server),
     record: (record, principal) => serverProjectStore.recordPreview(record, principal),
+    recordForward: (record) => serverProjectStore.recordForward(record),
   });
   const previewRoutes = createServerPreviewTunnelRoutes({
     windows: windowAuthorityStore,
