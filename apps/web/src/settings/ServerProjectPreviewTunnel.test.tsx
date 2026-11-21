@@ -80,3 +80,48 @@ it("lists what the login serves from the Project's folder and previews one in a 
   // Who can reach the forwarded port is said plainly.
   expect(screen.getByText(/guarded commands can't reach it/)).toBeInTheDocument();
 });
+
+it("opens a host-relayed preview through the signed forwarder callback and never renders an unsigned raw link", async () => {
+  const grantId = `rsg_${"a".repeat(64)}`;
+  const relayedView: Extract<ServerPreviewResult, { kind: "tunnel" }>["view"] = {
+    projectId: String(project.id),
+    localPort: 0,
+    remotePort: 5173,
+    endpoint: `/api/server-proxy/${grantId}/`,
+    grantId: grantId as NonNullable<
+      Extract<ServerPreviewResult, { kind: "tunnel" }>["view"]["grantId"]
+    >,
+    status: "listening",
+  };
+  const previewCommand = vi.fn(
+    async (): Promise<ServerPreviewResult> => ({
+      kind: "tunnel",
+      view: relayedView,
+    }),
+  );
+  const onOpenRelayedPreview = vi.fn(async () => ({ kind: "opened" as const }));
+  const { rerender } = render(
+    <ServerProjectPreviewTunnel
+      project={project}
+      client={{ previewRead: async () => null, previewCommand }}
+      onOpenRelayedPreview={onOpenRelayedPreview}
+    />,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByText("Dev server preview"));
+  await user.click(screen.getByRole("button", { name: "Start preview" }));
+  expect(screen.queryByRole("link", { name: "Open preview" })).not.toBeInTheDocument();
+  await user.click(await screen.findByRole("button", { name: "Open preview" }));
+  expect(onOpenRelayedPreview).toHaveBeenCalledWith(relayedView);
+
+  // Without a desktop forwarder opener (plain browser tab), no broken unsigned link is rendered.
+  rerender(
+    <ServerProjectPreviewTunnel
+      project={project}
+      client={{ previewRead: async () => relayedView, previewCommand }}
+    />,
+  );
+  expect(screen.queryByRole("link", { name: "Open preview" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Open preview" })).not.toBeInTheDocument();
+  expect(screen.getByText(/Octant's desktop app/i)).toBeInTheDocument();
+});

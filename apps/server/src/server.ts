@@ -275,6 +275,7 @@ export function startOctantServer(
       extensionToolApprovalService,
       isPairedDeviceScope,
       isRestrictedDeviceScope,
+      isPersonPairedDeviceCurrent,
       liveTurns,
       machineChangeFeed,
       onAgentRunExecutionAccepted,
@@ -664,6 +665,7 @@ export function startOctantServer(
       resolveThreadStrict,
       providerAvailabilityMarks,
       isProjectPolicyTargetAllowed,
+      isPersonPairedDeviceCurrent,
       toolEffectLedger,
       hostResourceBudget,
       serverAttachmentCleanup,
@@ -875,6 +877,9 @@ export function startOctantServer(
       browserProfileService,
       browserToolApprovalService,
       liveProjectBrowsers,
+      pairedBrowserControlService,
+      resolvePairedDeviceName,
+      isPairedDeviceSessionCurrent,
       productFeedbackRoutes,
       nativeBrowserPresentationRoutes,
       productFeedbackService,
@@ -893,6 +898,7 @@ export function startOctantServer(
       onThreadArchived,
       onWaitingAsk,
       onWindowRevoked,
+      isRestrictedDeviceScope,
       browserCaptures,
       codeEvidence,
       externalContentIngestionStore,
@@ -1092,6 +1098,8 @@ export function startOctantServer(
       onWindowRevoked,
       isPairedDeviceScope,
       isRestrictedDeviceScope,
+      isPersonPairedDeviceCurrent,
+      serverPreviewTunnels,
       desktopLeases,
       installDesktopPreviewRequest,
       workThreadProjection,
@@ -1404,6 +1412,9 @@ export function startOctantServer(
       contextHarness,
       hostShield,
       liveProjectBrowsers,
+      pairedBrowserControlService,
+      resolvePairedDeviceName,
+      isPairedDeviceSessionCurrent,
       nativeHarnessHooks,
       observeTurnEnded,
       persistence,
@@ -1881,6 +1892,7 @@ export function startOctantServer(
       windowAuthorityStore,
       spendCeilingService,
       configuredDriverOptions,
+      isPersonPairedDeviceCurrent,
       ...(options.allowedRendererHttpOrigin === undefined
         ? {}
         : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
@@ -2007,7 +2019,6 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
-      ownerBrowserControlService,
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
@@ -2150,8 +2161,6 @@ export function startOctantServer(
           nextDueAt: definition.nextDueAt,
         })),
     });
-
-    yield* Effect.addFinalizer(() => Effect.promise(() => ownerBrowserControlService.close()));
     let remoteListenerError: PrivateListenerFailureCode | undefined;
     // Retained so shutdown can settle warming before the runtime registry
     // closes: an acquisition that lands after `closeAll()` would leave a warm

@@ -1853,8 +1853,9 @@ every mode there. On Linux 2.x runs turns in every mode too (maintainer
 decision, 2026-11-16, replacing the 2026-11-14 refusal of Chat and Plan): its
 Chat and Plan launches start processes inside a read-only capsule with the
 same stand-in first on `PATH`, and the probe attests that capsule
-([Plan and Chat tool parity](../architecture.md#security-and-authority)). A
-host that is neither macOS nor Linux refuses a 2.x Chat or Plan launch before
+([Plan and Chat tool parity](../architecture.md#security-and-authority)). On Windows
+2.x runs turns in every mode outside Strict without an Octant jail (below). A
+host that is neither macOS, Linux, nor Windows refuses a 2.x Chat or Plan launch before
 it starts with a sentence naming why and reports `turnModes` with Chat and
 Plan unsupported (`host-confinement`), which the provider's Settings page
 shows as where it runs turns. Rationale: there the jail Chat and Plan need can
@@ -1880,8 +1881,16 @@ OpenCode's own settings for the repository, where clearing it is the way to
 revoke it. OpenCode then makes later matching edits without asking and
 settles other pending requests the grant covers, so the files an `always`
 answer names, and those of a request OpenCode settled by itself, stay
-admitted by the file-change check for that Project root while the host runs;
-after a host restart such an edit fails the turn until it is approved again. Approval-gated on
+admitted by the file-change check while the native process that earned them
+runs; the admission is a ledger of that process's generation, retired with
+it, so a later connection of the same Project admits nothing the earlier
+process remembered, and after a host restart or process exit such an edit
+fails the turn until it is approved again. The ledger holds at most 1,024
+file names per process and fails closed: a request whose new names would not
+fit whole is answered `once` instead of being remembered by half, and a
+request OpenCode settles by itself cannot be re-answered, so the same full
+ledger leaves it the one-use admission a `once` answer gives rather than
+nothing. Approval-gated on
 2.x honours permission grants the person saved in OpenCode itself for the
 same repository: OpenCode keys them by the repository's root commit, keeps
 them in its own data store (shared with the person's own use because
@@ -2013,7 +2022,17 @@ reports through the same events as a prompt. A command route that fails
 after the context was admitted leaves that context queued in the session,
 where the next run would read it stale beside the next turn's own; the turn
 fails as `stale-resume` and the driver never resumes that session again (in
-this host process), so the thread starts on a new session. Such a turn runs
+this host process), so the thread starts on a new session. The denial is a
+tombstone the driver keeps for the host's whole life rather than a list it
+can evict, and a `session.deleted` the provider reports clears the session's
+own tombstone — a deletion is an ending, not a doubt. The tombstones are
+bounded to 4,096; a 4,097th distinct denial cannot be represented, so
+refusal latches for every resume — an id the cap dropped or one never seen
+— until the host restarts, while a new session may still start. The tool catalogue a
+session's resume may reuse is bounded to 128 catalogues held for 30 minutes
+each, dropped oldest-first past that; a resume that misses simply installs
+no app tools rather than another session's, and a deleted or stale session's
+catalogue is dropped with it. Such a turn runs
 in every mode, Chat and Plan included (maintainer decision, 2026-11-16;
 built). A command may run a shell before the model sees it: a configured
 command's template expands `` !`…` `` through OpenCode's shell, which asks no
@@ -2978,23 +2997,25 @@ its status are in
   launch carries no sandbox settings at all (the SDK port refuses one that
   does): one asking for that sandbox with `failIfUnavailable` would leave
   every command unable to run.
-- **Chat** outside Strict starts unconfined on a family told natively that
-  it has no folder or shell (`chatWithoutFolderOrShell`): Codex with no
-  execution environment and its shell, image, plugin and app features off;
-  Pi with `--no-tools`, no extension and none of the person's resources; and
-  Claude with no file or shell tool in its session's tool list
-  (`claudeExecutionOptions` leaves out `Read`, `Grep`, `Glob`, `LS`, `Edit`,
-  `Write`, `NotebookEdit`, `Bash` and the task tools on Windows). OpenCode
-  and the ACP agents stay refused by name in Chat: OpenCode's permission
-  rules can deny its file and shell tools, but its command templates run
-  shell substitutions and its plugins run code in its own process outside
-  those rules, and an ACP agent's client capabilities decide only whether it
-  uses Octant's file and terminal methods, never its own built-in tools,
-  which no reviewed profile can be told to drop.
-- **Refused by name:** Strict at every level ("Strict needs a sandbox
-  Windows doesn't have yet"), Full access with the sandbox kept, and a Chat
-  launch on OpenCode or an ACP agent. A launch that does not carry its Strict
-  value is Strict.
+- **Chat** outside Strict starts unconfined on every provider family (maintainer
+  decision, 2026-11-19: outside Strict, the provider's own rules apply and
+  Octant adds none of its own): Codex with no execution environment and its
+  shell, image, plugin and app features off; Pi with `--no-tools`, no extension
+  and none of the person's resources; Claude with no file or shell tool in its
+  session's tool list (`claudeExecutionOptions` leaves out `Read`, `Grep`,
+  `Glob`, `LS`, `Edit`, `Write`, `NotebookEdit`, `Bash` and the task tools on
+  Windows); OpenCode with a deny-everything Chat permission ruleset of its own
+  (`*` denied, keeping only Octant's session tool bridge and 2.x `question`
+  open, with no Octant isolation); and ACP agents on their own permission
+  handling with no Octant isolation. Both the provider card and Settings
+  capability wording state honestly that outside Strict on Windows OpenCode's
+  own permission rules, not Octant, keep its file and shell tools off in Chat
+  (and its command templates and plugins run as they do in OpenCode itself),
+  and that an ACP agent's own permission handling, not Octant confinement,
+  applies in Chat.
+- **Refused by name:** Strict at every level, Chat included ("Strict needs a
+  sandbox Windows doesn't have yet"), and Full access with the sandbox kept. A
+  launch that does not carry its Strict value is Strict.
 - **Version and catalog reads.** An admitted launch reads its version
   unconfined. A read that serves no one thread (Codex's catalog lease,
   OpenCode's or an ACP agent's readiness check) runs unconfined only while the host's new

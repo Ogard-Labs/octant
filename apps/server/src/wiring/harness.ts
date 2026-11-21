@@ -141,6 +141,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "processAuthorityTime"
     | "toolEffectLedger"
     | "windowAuthorityStore"
+    | "isPersonPairedDeviceCurrent"
   > &
   Pick<
     AgentRunsWiring,
@@ -237,6 +238,7 @@ export function wireHarness(deps: HarnessDependencies) {
     toolEgressRules,
     turnMetrics,
     windowAuthorityStore,
+    isPersonPairedDeviceCurrent,
     workThreadProjection,
     workTurnProjection,
     personMemory,
@@ -315,7 +317,7 @@ export function wireHarness(deps: HarnessDependencies) {
     agentSocket: sshAgentSocket,
     pinnedKnownHosts: (server) => serverConnection.pinnedKnownHostsFile(server),
     refuses: (server) => serverConnection.refusal(server),
-    record: (record) => serverProjectStore.recordPreview(record),
+    record: (record, principal) => serverProjectStore.recordPreview(record, principal),
   });
   const previewRoutes = createServerPreviewTunnelRoutes({
     windows: windowAuthorityStore,
@@ -335,6 +337,7 @@ export function wireHarness(deps: HarnessDependencies) {
         folder: project.folder,
       });
     },
+    isPersonPairedDeviceCurrent,
   });
   // Machines in the person's own cloud account, each bound as a server
   // Project. Targets arrive only from cloud machine target plugins the person
@@ -390,6 +393,7 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   const setupCheckRoutes = createRemoteSetupCheckRoutes({
     windows: windowAuthorityStore,
+    isPersonPairedDeviceCurrent,
     checks: new RemoteSetupChecks({
       servers: () => shieldServerStore.servers(),
       agentAvailable: () => sshAgentSocket() !== undefined,

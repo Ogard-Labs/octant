@@ -65,7 +65,8 @@ export class MonotonicRemoteClock {
   #posture: ClockPostureKind = "ok";
   #reason: ClockRecoveryReason | undefined;
   #effectiveNowMs: number;
-  #lastMonotonicMs: number | undefined;
+  #anchorEpochMs: number | undefined;
+  #anchorMonotonicMs: number | undefined;
   #lastPersistedHighWaterMarkMs = -1;
 
   constructor(options: MonotonicRemoteClockOptions) {
@@ -92,17 +93,27 @@ export class MonotonicRemoteClock {
   nowMs(): number {
     const monotonicNowMs = this.#monotonicSource();
     const monotonicElapsedMs =
-      this.#lastMonotonicMs === undefined
+      this.#anchorMonotonicMs === undefined
         ? undefined
-        : Math.max(0, monotonicNowMs - this.#lastMonotonicMs);
+        : Math.max(0, monotonicNowMs - this.#anchorMonotonicMs);
     const evaluation = evaluateMonotonicNow({
       wallClockMs: this.#wallClock(),
       highWaterMarkMs: this.#highWaterMarkMs,
       toleranceMs: this.#toleranceMs,
       forwardToleranceMs: this.#forwardJumpToleranceMs,
       ...(monotonicElapsedMs === undefined ? {} : { monotonicElapsedMs }),
+      ...(this.#anchorEpochMs === undefined ? {} : { forwardBaselineMs: this.#anchorEpochMs }),
     });
-    this.#lastMonotonicMs = monotonicNowMs;
+    // Anchor only on the initial baseline or a trusted wall-clock observation
+    // so repeated observations during a forward discontinuity share one
+    // tolerance allowance instead of ratcheting forward on every call.
+    if (
+      this.#anchorMonotonicMs === undefined ||
+      (evaluation.posture === "ok" && evaluation.rollbackMs === 0)
+    ) {
+      this.#anchorEpochMs = evaluation.highWaterMarkMs;
+      this.#anchorMonotonicMs = monotonicNowMs;
+    }
     this.#highWaterMarkMs = evaluation.highWaterMarkMs;
     this.#effectiveNowMs = evaluation.effectiveNowMs;
     this.#posture = evaluation.posture;

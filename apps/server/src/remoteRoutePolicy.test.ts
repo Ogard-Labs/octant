@@ -282,7 +282,6 @@ describe("remote route policy", () => {
       "/api/host-control/export",
       "/api/secret-stores/settings",
       "/api/secret-stores/commands",
-      "/api/provider-cloud",
       "/api/missing",
     ]) {
       expect((await fixture.route(request(path, { method: "POST" }))).status).toBe(404);
@@ -967,6 +966,7 @@ describe("remote route policy", () => {
       "/api/extensions/skills",
       "/api/extensions/user-servers",
       "/api/extensions/sign-in",
+      "/api/extensions/mcp-sign-in/relay",
     ]) {
       expect(inspect(path, "POST")).toMatchObject({
         kind: "allow",

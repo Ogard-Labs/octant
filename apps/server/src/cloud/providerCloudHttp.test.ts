@@ -161,4 +161,37 @@ describe("cloud request dispatch", () => {
     ).rejects.toThrow();
     expect(calls).toBe(0);
   });
+
+  it("signals credential unlock at this computer for a person-paired device before spending the create permit", async () => {
+    let calls = 0;
+    let usage = 0;
+    let unlockNotified = 0;
+    const lockedError = { category: "unavailable", cause: "locked" };
+    const ports = makeProviderCloudPorts({
+      intent,
+      instanceId: decodeProviderInstanceId("a7550000-0000-4000-8000-000000000001"),
+      principalKind: "person-paired-device",
+      credentialResolver: {
+        has: async () => true,
+        resolve: async () => {
+          throw lockedError;
+        },
+      },
+      admission: () => true,
+      onCredentialUnlockRequired: () => {
+        unlockNotified += 1;
+      },
+      onCreateDispatch: () => {
+        usage += 1;
+      },
+      fetch: async () => {
+        calls += 1;
+        return Response.json({});
+      },
+    });
+    await expect(ports.request(planned)).rejects.toThrow("refused before dispatch");
+    expect(unlockNotified).toBe(1);
+    expect(calls).toBe(0);
+    expect(usage).toBe(0);
+  });
 });

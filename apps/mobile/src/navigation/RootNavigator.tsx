@@ -20,6 +20,7 @@ import { OwnerAlertsPanel } from "../hosts/OwnerAlertsPanel";
 import { OwnerMovesPanel } from "../hosts/OwnerMovesPanel";
 import type { GuestSpokeRefusal } from "../hosts/hubGuestFlow";
 import { PairingPanel } from "../hosts/PairingPanel";
+import { ConnectorSignInPanel } from "../hosts/ConnectorSignInPanel";
 import { RemoveHostPanel } from "../hosts/RemoveHostPanel";
 import { forgetPhoneNotificationsForHost } from "../notifications/enablePhoneNotifications";
 import { mobileNotificationPort } from "../notifications/mobileNotificationPort";
@@ -323,6 +324,7 @@ function HostsBody(props: {
                           <Text style={styles.hostPanelsTitle}>{host.label}</Text>
                           {environment.kind === "live" && status?.kind === "ready" ? (
                             <>
+                              <ConnectorSignInPanel transport={transportForHost(host.hostId)} />
                               <PushNotificationsPanel
                                 hostKeyFingerprint={host.hostKeyFingerprint}
                                 permission={notificationPermission}

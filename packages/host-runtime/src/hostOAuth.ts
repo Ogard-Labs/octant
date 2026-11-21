@@ -172,6 +172,10 @@ const ATTEMPT_RETENTION_MS = 5 * 60_000;
 const CANCELLATION_WAIT_MS = 10_000;
 const MAX_TOKEN_CHARS = 4_096;
 const MAX_RESPONSE_CHARS = 16 * 1_024;
+const MAX_RELAY_CALLBACK_CHARS = 4_352;
+const MAX_RELAY_FAILURES = 3;
+const RELAY_WINDOW_MS = 10 * 60 * 1_000;
+const VERIFICATION_HOST_PATTERN = /^[A-Za-z0-9.-]{1,253}(?::\d{1,5})?$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const CODE_PATTERN = /^[A-Za-z0-9._~-]{1,512}$/;
 // The directory's authorization codes are opaque and run past a thousand
@@ -218,6 +222,8 @@ export interface HostOAuthDescriptor {
    */
   readonly tokenEndpoint?: string;
   readonly deviceAuthorizationEndpoint?: string;
+  /** MCP device-code flow only: hosts from the issuer's metadata allowed in verification URIs. */
+  readonly verificationHosts?: readonly string[];
   readonly scopes: readonly string[];
   readonly termsId: string;
   /**
@@ -328,6 +334,7 @@ export type HostOAuthPublicState =
       readonly descriptorId: string;
       readonly flow: "device-code";
       readonly verificationUri: string;
+      readonly verificationUriComplete?: string;
       readonly userCode: string;
       readonly expiresAt: string;
     }
@@ -385,6 +392,16 @@ export type HostOAuthAccessResult =
   | { readonly kind: "binding-mismatch" }
   | { readonly kind: "unavailable" };
 
+export type HostOAuthRelayResult =
+  | Extract<HostOAuthPublicState, { readonly kind: "signed-in" | "refused" }>
+  | {
+      readonly kind: "retry";
+      readonly remainingAttempts: 1 | 2;
+      readonly reason: "invalid-callback" | "state-mismatch" | "issuer-mismatch";
+    }
+  | { readonly kind: "sign-in-settled" }
+  | { readonly kind: "not-found" };
+
 export interface HostOAuthRuntime {
   readonly githubActionsSource: (
     input: GithubActionsSourceRead,
@@ -400,6 +417,8 @@ export interface HostOAuthRuntime {
      * production stores cannot list their entries.
      */
     readonly credentialRef?: string;
+    /** MCP PKCE only: permits a one-time callback relay from the paired device that began it. */
+    readonly relayable?: boolean;
   }) => Promise<HostOAuthBeginResult>;
   readonly cancel: (input: {
     readonly attemptId: string;
@@ -408,6 +427,12 @@ export interface HostOAuthRuntime {
   }) => Promise<
     { readonly kind: "cancelled" } | { readonly kind: "unavailable" } | { readonly kind: "refused" }
   >;
+  readonly relay: (input: {
+    readonly attemptId: string;
+    readonly descriptorId: string;
+    readonly actorId: string;
+    readonly callbackUrl: string;
+  }) => Promise<HostOAuthRelayResult>;
   readonly status: (attemptId: string) => HostOAuthPublicState;
   readonly refresh: (credentialRef: string) => Promise<HostOAuthRefreshResult>;
   /**
@@ -535,6 +560,19 @@ interface TenantAuthority extends SignInAuthority {
   readonly deviceAuthorizationEndpoint: string;
 }
 
+interface CallbackSession {
+  readonly attempt: Attempt;
+  readonly attemptId: string;
+  readonly descriptor: HostOAuthDescriptor;
+  readonly tokenEndpoint: string;
+  readonly directory?: DirectoryContext;
+  readonly state: string;
+  readonly verifier: string;
+  readonly challenge: string;
+  readonly nonce: string;
+  readonly redirectUri: string;
+}
+
 interface Attempt {
   status: HostOAuthPublicState;
   readonly descriptorId: string;
@@ -543,8 +581,12 @@ interface Attempt {
   readonly listeners: Server[];
   timer: ReturnType<typeof setTimeout> | undefined;
   closed: boolean;
-  /** Present only for host-owned MCP PKCE attempts. */
+  /** Present only for host-owned MCP attempts. */
   readonly cancelActorId?: string;
+  readonly relayable?: boolean;
+  readonly begunAt?: number;
+  failedRelays?: number;
+  relaySession?: CallbackSession;
   cancelRequested?: boolean;
   issuedCredentialRef?: string;
   grantWrite?: Promise<void>;
@@ -2156,6 +2198,7 @@ export function createHostOAuthRuntime(options: {
     readonly actorId: string;
     readonly termsAcknowledgedAt: string;
     readonly credentialRef?: string;
+    readonly relayable?: boolean;
   }): Promise<HostOAuthBeginResult> => {
     if (closed) return { kind: "refused", reason: "unavailable" };
     if (!UUID_PATTERN.test(input.actorId) || input.termsAcknowledgedAt.trim().length === 0) {
@@ -2163,14 +2206,15 @@ export function createHostOAuthRuntime(options: {
     }
     const descriptor = validateDescriptor(input.descriptor);
     if (descriptor === undefined) return { kind: "refused", reason: "invalid" };
-    if (descriptor.flow === "device-code") return beginDevice(descriptor);
-    return beginPkce(descriptor, input.credentialRef, input.actorId);
+    if (descriptor.flow === "device-code") return beginDevice(descriptor, input.actorId);
+    return beginPkce(descriptor, input.credentialRef, input.actorId, input.relayable === true);
   };
 
   const beginPkce = async (
     descriptor: HostOAuthDescriptor,
     credentialRef: string | undefined,
     actorId: string,
+    relayableRequested: boolean,
   ): Promise<HostOAuthBeginResult> => {
     // The directory dialect's descriptor names no URL: the broker builds the
     // tenant's authority from the closed issuer host. The issuer dialect's
@@ -2211,10 +2255,13 @@ export function createHostOAuthRuntime(options: {
     // The ChatGPT plan and directory dialects bind the identity token to this
     // attempt with an OIDC nonce; the standard and OpenRouter paths send none.
     const nonce = randomBytes(24).toString("base64url");
-    const expiresAt = now() + timeoutMs;
+    const begunAt = now();
+    const expiresAt = begunAt + timeoutMs;
+    const relayable = relayableRequested && isMcpDialect(descriptor.dialect);
     const attempt: Attempt = {
       descriptorId: descriptor.descriptorId,
       ...(isMcpDialect(descriptor.dialect) ? { cancelActorId: actorId } : {}),
+      ...(relayable ? { relayable: true, begunAt, failedRelays: 0 } : {}),
       closed: false,
       listeners: [],
       timer: undefined,
@@ -2232,24 +2279,25 @@ export function createHostOAuthRuntime(options: {
     track(attemptId, attempt);
     let redirectUri = "";
     try {
+      const makeSession = (): CallbackSession => ({
+        attempt,
+        attemptId,
+        descriptor,
+        tokenEndpoint,
+        ...(directory === undefined ? {} : { directory }),
+        state,
+        verifier,
+        challenge,
+        nonce,
+        redirectUri,
+      });
       const onRequest = (request: IncomingMessage, response: ServerResponse) => {
         if (redirectUri === "") {
           response.writeHead(503, { "cache-control": "no-store" });
           response.end();
           return;
         }
-        void handleCallback(request, response, {
-          attempt,
-          attemptId,
-          descriptor,
-          tokenEndpoint,
-          ...(directory === undefined ? {} : { directory }),
-          state,
-          verifier,
-          challenge,
-          nonce,
-          redirectUri,
-        });
+        void handleCallback(request, response, makeSession());
       };
       const bindListener = async (listener: Server, port?: number, host?: string) => {
         attempt.listeners.push(listener);
@@ -2275,6 +2323,7 @@ export function createHostOAuthRuntime(options: {
         await bindListener(ipv6, address.port, "::1");
       }
       redirectUri = `http://${descriptor.redirectHostname ?? "127.0.0.1"}:${address.port}${CALLBACK_PATH}`;
+      if (relayable) attempt.relaySession = makeSession();
       let authorizationUrl: string;
       if (descriptor.dialect === OPENROUTER_DIALECT) {
         authorizationUrl = openRouterAuthorizationRequest(authorizationEndpoint, {
@@ -2372,21 +2421,196 @@ export function createHostOAuthRuntime(options: {
     }
   };
 
+  const hasInvalidIssuerParam = (
+    descriptor: HostOAuthDescriptor,
+    params: URLSearchParams,
+  ): boolean => {
+    if (
+      googleWorkspaceMcpScopes(descriptor.resource) !== undefined &&
+      (params.getAll("iss").length > 1 ||
+        (params.has("iss") && params.get("iss") !== GOOGLE_WORKSPACE_MCP_OAUTH.issuer))
+    ) {
+      return true;
+    }
+    if (
+      (descriptor.dialect === SLACK_MCP_DIALECT || descriptor.dialect === GITHUB_MCP_DIALECT) &&
+      (params.getAll("iss").length > 1 ||
+        (descriptor.dialect === GITHUB_MCP_DIALECT && !params.has("iss")) ||
+        (params.has("iss") && params.get("iss") !== descriptor.mcpIssuer))
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  /**
+   * Shared callback acceptor used by both the loopback HTTP listener and the
+   * paired-device one-time relay. Callers must already have atomically claimed
+   * `session.attempt.closed = true` and verified `state` and `iss`.
+   */
+  const acceptValidatedCallback = async (
+    session: CallbackSession,
+    params: URLSearchParams,
+  ): Promise<{
+    readonly state: Extract<HostOAuthPublicState, { readonly kind: "signed-in" | "refused" }>;
+    readonly httpStatus: number;
+  }> => {
+    const error = params.get("error");
+    if (error !== null) {
+      const reason =
+        error === "access_denied" ||
+        (googleWorkspaceMcpScopes(session.descriptor.resource) !== undefined &&
+          error === "admin_policy_enforced")
+          ? "denied"
+          : "exchange-refused";
+      const terminal = refused(session.attemptId, session.descriptor.descriptorId, reason);
+      publish(session.attemptId, terminal);
+      return { state: terminal, httpStatus: 400 };
+    }
+    const code = params.get("code") ?? "";
+    const codePattern = session.directory === undefined ? CODE_PATTERN : DIRECTORY_CODE_PATTERN;
+    if (!codePattern.test(code)) {
+      const terminal = refused(
+        session.attemptId,
+        session.descriptor.descriptorId,
+        "exchange-refused",
+      );
+      publish(session.attemptId, terminal);
+      return { state: terminal, httpStatus: 400 };
+    }
+    // The ChatGPT plan callback returns the issued client id alongside the
+    // code. A first sign-in must present an oaiapp_ id — never the
+    // dynamic_agent_client placeholder. A reauthorization may omit client_id;
+    // the issued id used in the authorize request is retained. A callback
+    // client id that differs from that expected id is refused before exchange.
+    let issuedClientId: string | undefined;
+    if (session.descriptor.dialect === CHATGPT_PLAN_DIALECT) {
+      const returned = params.get("client_id");
+      const expected = session.attempt.expectedIssuedClientId;
+      const omitted = returned === null || returned.length === 0;
+      if (omitted) {
+        if (expected === undefined) {
+          const terminal = refused(
+            session.attemptId,
+            session.descriptor.descriptorId,
+            "exchange-refused",
+          );
+          publish(session.attemptId, terminal);
+          return { state: terminal, httpStatus: 400 };
+        }
+        issuedClientId = expected;
+      } else if (expected !== undefined && returned !== expected) {
+        const terminal = refused(
+          session.attemptId,
+          session.descriptor.descriptorId,
+          "exchange-refused",
+        );
+        publish(session.attemptId, terminal);
+        return { state: terminal, httpStatus: 400 };
+      } else if (!ISSUED_CLIENT_ID_PATTERN.test(returned)) {
+        const terminal = refused(
+          session.attemptId,
+          session.descriptor.descriptorId,
+          "exchange-refused",
+        );
+        publish(session.attemptId, terminal);
+        return { state: terminal, httpStatus: 400 };
+      } else {
+        issuedClientId = returned;
+      }
+    }
+    const exchanged = await exchangeAuthorizationCode({
+      ...(session.descriptor.clientAuthentication === undefined
+        ? {}
+        : { clientAuthentication: session.descriptor.clientAuthentication }),
+      ...(options.resolveClientSecret === undefined
+        ? {}
+        : { resolveClientSecret: options.resolveClientSecret }),
+      tokenEndpoint: session.tokenEndpoint,
+      clientId: issuedClientId ?? session.descriptor.clientId ?? "",
+      code,
+      redirectUri: session.redirectUri,
+      verifier: session.verifier,
+      challenge: session.challenge,
+      fetch: fetchImpl,
+      now,
+      ...(session.descriptor.dialect === undefined ? {} : { dialect: session.descriptor.dialect }),
+      ...(session.descriptor.resource === undefined
+        ? {}
+        : { resource: session.descriptor.resource }),
+      ...(session.descriptor.mcpTransportUrl === undefined
+        ? {}
+        : { mcpTransportUrl: session.descriptor.mcpTransportUrl }),
+      ...(session.descriptor.mcpIssuer === undefined
+        ? {}
+        : { mcpIssuer: session.descriptor.mcpIssuer }),
+      ...(session.descriptor.mcpPermissionProfile === undefined
+        ? {}
+        : { mcpPermissionProfile: session.descriptor.mcpPermissionProfile }),
+      ...(session.nonce === "" ? {} : { nonce: session.nonce }),
+      ...(issuedClientId === undefined ? {} : { issuedClientId }),
+      ...(session.descriptor.extAgentHostId === undefined
+        ? {}
+        : { extAgentHostId: session.descriptor.extAgentHostId }),
+      jwks: siwcJwks,
+      issuer: siwcIssuer,
+      ...(session.directory === undefined ? {} : { directory: session.directory }),
+    });
+    if (session.attempt.cancelRequested) {
+      return {
+        state: refused(session.attemptId, session.descriptor.descriptorId, "denied"),
+        httpStatus: 400,
+      };
+    }
+    if (exchanged.kind === "tokens") {
+      const credentialRef = randomUUID();
+      session.attempt.issuedCredentialRef = credentialRef;
+      try {
+        session.attempt.grantWrite = options.store.set(
+          credentialRef,
+          JSON.stringify(exchanged.grant),
+        );
+        await session.attempt.grantWrite;
+        if (session.attempt.cancelRequested) {
+          await cleanupCancelledGrant(session.attempt);
+          return {
+            state: refused(session.attemptId, session.descriptor.descriptorId, "denied"),
+            httpStatus: 400,
+          };
+        }
+        const signedIn: Extract<HostOAuthPublicState, { readonly kind: "signed-in" }> = {
+          kind: "signed-in",
+          attemptId: session.attemptId,
+          descriptorId: session.descriptor.descriptorId,
+          credentialRef,
+          // Settings shows who signed in; only a directory or issuer grant
+          // keeps a label, taken from the identity token it validated.
+          ...(isBoundGrant(exchanged.grant) && exchanged.grant.accountLabel !== undefined
+            ? { accountLabel: exchanged.grant.accountLabel }
+            : {}),
+        };
+        publish(session.attemptId, signedIn);
+        return { state: signedIn, httpStatus: 200 };
+      } catch {
+        const terminal = refused(session.attemptId, session.descriptor.descriptorId, "unavailable");
+        publish(session.attemptId, terminal);
+        return { state: terminal, httpStatus: 503 };
+      }
+    }
+    if (exchanged.kind === "transient") {
+      const terminal = refused(session.attemptId, session.descriptor.descriptorId, "unavailable");
+      publish(session.attemptId, terminal);
+      return { state: terminal, httpStatus: 503 };
+    }
+    const terminal = refused(session.attemptId, session.descriptor.descriptorId, exchanged.reason);
+    publish(session.attemptId, terminal);
+    return { state: terminal, httpStatus: 400 };
+  };
+
   const handleCallback = async (
     request: IncomingMessage,
     response: ServerResponse,
-    session: {
-      readonly attempt: Attempt;
-      readonly attemptId: string;
-      readonly descriptor: HostOAuthDescriptor;
-      readonly tokenEndpoint: string;
-      readonly directory?: DirectoryContext;
-      readonly state: string;
-      readonly verifier: string;
-      readonly challenge: string;
-      readonly nonce: string;
-      readonly redirectUri: string;
-    },
+    session: CallbackSession,
   ) => {
     const remote = request.socket.remoteAddress ?? "";
     if (!isLoopback(remote)) {
@@ -2440,11 +2664,7 @@ export function createHostOAuthRuntime(options: {
       return;
     }
     // Closed profiles cannot switch issuer; GitHub advertises and must return it.
-    if (
-      googleWorkspaceMcpScopes(session.descriptor.resource) !== undefined &&
-      (params.getAll("iss").length > 1 ||
-        (params.has("iss") && params.get("iss") !== GOOGLE_WORKSPACE_MCP_OAUTH.issuer))
-    ) {
+    if (hasInvalidIssuerParam(session.descriptor, params)) {
       publish(
         session.attemptId,
         refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
@@ -2453,182 +2673,126 @@ export function createHostOAuthRuntime(options: {
       finishListener(session.attempt);
       return;
     }
-    if (
-      (session.descriptor.dialect === SLACK_MCP_DIALECT ||
-        session.descriptor.dialect === GITHUB_MCP_DIALECT) &&
-      (params.getAll("iss").length > 1 ||
-        (session.descriptor.dialect === GITHUB_MCP_DIALECT && !params.has("iss")) ||
-        (params.has("iss") && params.get("iss") !== session.descriptor.mcpIssuer))
-    ) {
-      publish(
-        session.attemptId,
-        refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
-      );
-      replyCallback(response, 400);
-      finishListener(session.attempt);
-      return;
-    }
-    const error = params.get("error");
-    if (error !== null) {
-      const reason =
-        error === "access_denied" ||
-        (googleWorkspaceMcpScopes(session.descriptor.resource) !== undefined &&
-          error === "admin_policy_enforced")
-          ? "denied"
-          : "exchange-refused";
-      publish(
-        session.attemptId,
-        refused(session.attemptId, session.descriptor.descriptorId, reason),
-      );
-      replyCallback(response, 400);
-      finishListener(session.attempt);
-      return;
-    }
-    const code = params.get("code") ?? "";
-    const codePattern = session.directory === undefined ? CODE_PATTERN : DIRECTORY_CODE_PATTERN;
-    if (!codePattern.test(code)) {
-      publish(
-        session.attemptId,
-        refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
-      );
-      replyCallback(response, 400);
-      finishListener(session.attempt);
-      return;
-    }
-    // The ChatGPT plan callback returns the issued client id alongside the
-    // code. A first sign-in must present an oaiapp_ id — never the
-    // dynamic_agent_client placeholder. A reauthorization may omit client_id;
-    // the issued id used in the authorize request is retained. A callback
-    // client id that differs from that expected id is refused before exchange.
-    let issuedClientId: string | undefined;
-    if (session.descriptor.dialect === CHATGPT_PLAN_DIALECT) {
-      const returned = params.get("client_id");
-      const expected = session.attempt.expectedIssuedClientId;
-      const omitted = returned === null || returned.length === 0;
-      if (omitted) {
-        if (expected === undefined) {
-          publish(
-            session.attemptId,
-            refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
-          );
-          replyCallback(response, 400);
-          finishListener(session.attempt);
-          return;
-        }
-        issuedClientId = expected;
-      } else if (expected !== undefined && returned !== expected) {
-        publish(
-          session.attemptId,
-          refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
-        );
-        replyCallback(response, 400);
-        finishListener(session.attempt);
-        return;
-      } else if (!ISSUED_CLIENT_ID_PATTERN.test(returned)) {
-        publish(
-          session.attemptId,
-          refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
-        );
-        replyCallback(response, 400);
-        finishListener(session.attempt);
-        return;
-      } else {
-        issuedClientId = returned;
-      }
-    }
-    const exchanged = await exchangeAuthorizationCode({
-      ...(session.descriptor.clientAuthentication === undefined
-        ? {}
-        : { clientAuthentication: session.descriptor.clientAuthentication }),
-      ...(options.resolveClientSecret === undefined
-        ? {}
-        : { resolveClientSecret: options.resolveClientSecret }),
-      tokenEndpoint: session.tokenEndpoint,
-      clientId: issuedClientId ?? session.descriptor.clientId ?? "",
-      code,
-      redirectUri: session.redirectUri,
-      verifier: session.verifier,
-      challenge: session.challenge,
-      fetch: fetchImpl,
-      now,
-      ...(session.descriptor.dialect === undefined ? {} : { dialect: session.descriptor.dialect }),
-      ...(session.descriptor.resource === undefined
-        ? {}
-        : { resource: session.descriptor.resource }),
-      ...(session.descriptor.mcpTransportUrl === undefined
-        ? {}
-        : { mcpTransportUrl: session.descriptor.mcpTransportUrl }),
-      ...(session.descriptor.mcpIssuer === undefined
-        ? {}
-        : { mcpIssuer: session.descriptor.mcpIssuer }),
-      ...(session.descriptor.mcpPermissionProfile === undefined
-        ? {}
-        : { mcpPermissionProfile: session.descriptor.mcpPermissionProfile }),
-      ...(session.nonce === "" ? {} : { nonce: session.nonce }),
-      ...(issuedClientId === undefined ? {} : { issuedClientId }),
-      ...(session.descriptor.extAgentHostId === undefined
-        ? {}
-        : { extAgentHostId: session.descriptor.extAgentHostId }),
-      jwks: siwcJwks,
-      issuer: siwcIssuer,
-      ...(session.directory === undefined ? {} : { directory: session.directory }),
-    });
-    if (session.attempt.cancelRequested) {
-      replyCallback(response, 400);
-      finishListener(session.attempt);
-      return;
-    }
-    if (exchanged.kind === "tokens") {
-      const credentialRef = randomUUID();
-      session.attempt.issuedCredentialRef = credentialRef;
-      try {
-        session.attempt.grantWrite = options.store.set(
-          credentialRef,
-          JSON.stringify(exchanged.grant),
-        );
-        await session.attempt.grantWrite;
-        if (session.attempt.cancelRequested) {
-          await cleanupCancelledGrant(session.attempt);
-          replyCallback(response, 400);
-          finishListener(session.attempt);
-          return;
-        }
-        publish(session.attemptId, {
-          kind: "signed-in",
-          attemptId: session.attemptId,
-          descriptorId: session.descriptor.descriptorId,
-          credentialRef,
-          // Settings shows who signed in; only a directory or issuer grant
-          // keeps a label, taken from the identity token it validated.
-          ...(isBoundGrant(exchanged.grant) && exchanged.grant.accountLabel !== undefined
-            ? { accountLabel: exchanged.grant.accountLabel }
-            : {}),
-        });
-        replyCallback(response, 200);
-      } catch {
-        publish(
-          session.attemptId,
-          refused(session.attemptId, session.descriptor.descriptorId, "unavailable"),
-        );
-        replyCallback(response, 503);
-      }
-    } else if (exchanged.kind === "transient") {
-      publish(
-        session.attemptId,
-        refused(session.attemptId, session.descriptor.descriptorId, "unavailable"),
-      );
-      replyCallback(response, 503);
-    } else {
-      publish(
-        session.attemptId,
-        refused(session.attemptId, session.descriptor.descriptorId, exchanged.reason),
-      );
-      replyCallback(response, 400);
-    }
+    const accepted = await acceptValidatedCallback(session, params);
+    replyCallback(response, accepted.httpStatus);
     finishListener(session.attempt);
   };
 
-  const beginDevice = async (descriptor: HostOAuthDescriptor): Promise<HostOAuthBeginResult> => {
+  /**
+   * One-time callback relay for a paired device's pending PKCE attempt.
+   * Failing checks refuse without settling up to three times; the third ends
+   * the attempt. A passing check atomically settles through the same acceptor
+   * as the loopback listener.
+   */
+  const relay = async (input: {
+    readonly attemptId: string;
+    readonly descriptorId: string;
+    readonly actorId: string;
+    readonly callbackUrl: string;
+  }): Promise<HostOAuthRelayResult> => {
+    if (
+      closed ||
+      !UUID_PATTERN.test(input.attemptId) ||
+      !UUID_PATTERN.test(input.actorId) ||
+      !safeId(input.descriptorId)
+    ) {
+      return { kind: "not-found" };
+    }
+    const attempt = attempts.get(input.attemptId);
+    const session = attempt?.relaySession;
+    if (
+      attempt === undefined ||
+      attempt.relayable !== true ||
+      attempt.cancelActorId !== input.actorId ||
+      attempt.descriptorId !== input.descriptorId ||
+      session === undefined
+    ) {
+      return { kind: "not-found" };
+    }
+    if (attempt.closed) return { kind: "sign-in-settled" };
+    const deadline = Math.min((attempt.begunAt ?? 0) + RELAY_WINDOW_MS, attempt.expiresAt);
+    if (now() >= deadline) {
+      attempt.closed = true;
+      finishListener(attempt);
+      const terminal = refused(input.attemptId, attempt.descriptorId, "timeout");
+      publish(input.attemptId, terminal);
+      return terminal;
+    }
+    const failCheck = (
+      reason: "invalid-callback" | "state-mismatch" | "issuer-mismatch",
+    ): HostOAuthRelayResult => {
+      const failures = (attempt.failedRelays ?? 0) + 1;
+      attempt.failedRelays = failures;
+      if (failures < MAX_RELAY_FAILURES) {
+        return {
+          kind: "retry",
+          remainingAttempts: (MAX_RELAY_FAILURES - failures) as 1 | 2,
+          reason,
+        };
+      }
+      attempt.closed = true;
+      finishListener(attempt);
+      const terminal = refused(
+        input.attemptId,
+        attempt.descriptorId,
+        reason === "state-mismatch" ? "state-mismatch" : "exchange-refused",
+      );
+      publish(input.attemptId, terminal);
+      return terminal;
+    };
+    const rawUrl = input.callbackUrl;
+    if (
+      rawUrl.length === 0 ||
+      rawUrl.length > MAX_RELAY_CALLBACK_CHARS ||
+      hasForbiddenCallbackChar(rawUrl)
+    ) {
+      return failCheck("invalid-callback");
+    }
+    let parsed: URL;
+    let expected: URL;
+    try {
+      parsed = new URL(rawUrl);
+      expected = new URL(session.redirectUri);
+    } catch {
+      return failCheck("invalid-callback");
+    }
+    if (
+      parsed.protocol !== expected.protocol ||
+      parsed.username !== "" ||
+      parsed.password !== "" ||
+      parsed.hash !== "" ||
+      parsed.hostname !== expected.hostname ||
+      parsed.port !== expected.port ||
+      parsed.pathname !== expected.pathname ||
+      parsed.search.length === 0 ||
+      parsed.search.length > 4_096
+    ) {
+      return failCheck("invalid-callback");
+    }
+    const params = new URLSearchParams(parsed.search);
+    const states = params.getAll("state");
+    if (states.length !== 1 || !statesEqual(session.state, states[0] ?? "")) {
+      return failCheck("state-mismatch");
+    }
+    if (hasInvalidIssuerParam(session.descriptor, params)) {
+      return failCheck("issuer-mismatch");
+    }
+    const hasError = params.get("error") !== null;
+    const code = params.get("code") ?? "";
+    if (!hasError && !CODE_PATTERN.test(code)) {
+      return failCheck("invalid-callback");
+    }
+    if (attempt.closed) return { kind: "sign-in-settled" };
+    attempt.closed = true;
+    const accepted = await acceptValidatedCallback(session, params);
+    finishListener(attempt);
+    return accepted.state;
+  };
+
+  const beginDevice = async (
+    descriptor: HostOAuthDescriptor,
+    actorId: string,
+  ): Promise<HostOAuthBeginResult> => {
     const directoryBinding = descriptorDirectoryBinding(descriptor);
     if (directoryBinding !== undefined) {
       // Only a tenant of the closed directory signs in with a device code; an
@@ -2644,38 +2808,100 @@ export function createHostOAuthRuntime(options: {
     if (deviceEndpoint === undefined || tokenEndpoint === undefined) {
       return { kind: "refused", reason: "invalid" };
     }
-    const issued = await postForm(fetchImpl, deviceEndpoint, {
+    const form: Record<string, string> = {
       client_id: descriptor.clientId ?? "",
-      scope: descriptor.scopes.join(" "),
-    });
+      ...(descriptor.scopes.length === 0 ? {} : { scope: descriptor.scopes.join(" ") }),
+      ...(descriptor.resource === undefined ? {} : { resource: descriptor.resource }),
+    };
+    const extraHeaders: Record<string, string> = {};
+    if (descriptor.clientAuthentication !== undefined) {
+      if (
+        descriptor.clientAuthentication.tokenEndpoint !== tokenEndpoint ||
+        !sameOrigin(deviceEndpoint, tokenEndpoint)
+      ) {
+        return { kind: "refused", reason: "exchange-refused" };
+      }
+      const secret = await options.resolveClientSecret?.(descriptor.clientAuthentication.secretRef);
+      if (secret === undefined || secret.length === 0 || secret.length > MAX_TOKEN_CHARS) {
+        return { kind: "refused", reason: "unavailable" };
+      }
+      if (descriptor.clientAuthentication.method === "client_secret_post") {
+        form.client_secret = secret;
+      } else {
+        const encode = (value: string) => new URLSearchParams({ v: value }).toString().slice(2);
+        extraHeaders.authorization = `Basic ${Buffer.from(`${encode(descriptor.clientId ?? "")}:${encode(secret)}`).toString("base64")}`;
+        delete form.client_id;
+      }
+    }
+    const issued = await postForm(fetchImpl, deviceEndpoint, form, extraHeaders);
     if (issued.kind !== "json") return { kind: "refused", reason: "unavailable" };
     const deviceCode = stringField(issued.value, "device_code");
     const userCode = stringField(issued.value, "user_code");
     const verificationUri = stringField(issued.value, "verification_uri");
+    const verificationUriCompleteRaw = issued.value.verification_uri_complete;
+    const verificationUriComplete =
+      verificationUriCompleteRaw === undefined
+        ? undefined
+        : typeof verificationUriCompleteRaw === "string"
+          ? verificationUriCompleteRaw
+          : null;
     const expiresIn = numberField(issued.value, "expires_in") ?? 300;
     const interval = numberField(issued.value, "interval") ?? DEFAULT_DEVICE_INTERVAL_MS / 1_000;
+    const mcpDevice = descriptor.dialect === MCP_DIALECT;
+    const allowedVerificationHosts = mcpDevice
+      ? new Set(
+          descriptor.verificationHosts ?? [
+            new URL(deviceEndpoint).host,
+            new URL(tokenEndpoint).host,
+          ],
+        )
+      : undefined;
+    const verificationAllowed = (uri: string): boolean => {
+      if (uri.length === 0 || uri.length > 2_048) return false;
+      if (!mcpDevice) return allowedEndpoint(uri);
+      try {
+        const parsed = new URL(uri);
+        return (
+          parsed.protocol === "https:" &&
+          parsed.username === "" &&
+          parsed.password === "" &&
+          allowedVerificationHosts !== undefined &&
+          allowedVerificationHosts.has(parsed.host)
+        );
+      } catch {
+        return false;
+      }
+    };
     if (
       deviceCode === undefined ||
       userCode === undefined ||
       !USER_CODE_PATTERN.test(userCode) ||
       verificationUri === undefined ||
-      !allowedEndpoint(verificationUri)
+      !verificationAllowed(verificationUri) ||
+      verificationUriComplete === null ||
+      (verificationUriComplete !== undefined && !verificationAllowed(verificationUriComplete))
     ) {
       return { kind: "refused", reason: "exchange-refused" };
     }
     const attemptId = randomUUID();
-    const expiresAt = now() + expiresIn * 1_000;
+    const boundedExpiresIn = Math.min(
+      Math.max(1, Math.floor(expiresIn)),
+      DIRECTORY_DEVICE_MAX_SECONDS,
+    );
+    const expiresAt = now() + boundedExpiresIn * 1_000;
     const awaiting: Extract<HostOAuthPublicState, { readonly kind: "awaiting-consent" }> = {
       kind: "awaiting-consent",
       attemptId,
       descriptorId: descriptor.descriptorId,
       flow: "device-code",
       verificationUri,
+      ...(verificationUriComplete === undefined ? {} : { verificationUriComplete }),
       userCode,
       expiresAt: new Date(expiresAt).toISOString(),
     };
     const attempt: Attempt = {
       descriptorId: descriptor.descriptorId,
+      ...(isMcpDialect(descriptor.dialect) ? { cancelActorId: actorId } : {}),
       closed: false,
       listeners: [],
       timer: undefined,
@@ -2748,6 +2974,12 @@ export function createHostOAuthRuntime(options: {
     readonly deviceCode: string;
   }): Promise<DevicePoll> => {
     const polled = await requestTokens({
+      ...(session.descriptor.clientAuthentication === undefined
+        ? {}
+        : { clientAuthentication: session.descriptor.clientAuthentication }),
+      ...(options.resolveClientSecret === undefined
+        ? {}
+        : { resolveClientSecret: options.resolveClientSecret }),
       fetch: fetchImpl,
       now,
       endpoint: session.tokenEndpoint,
@@ -2755,12 +2987,19 @@ export function createHostOAuthRuntime(options: {
         grant_type: DEVICE_GRANT,
         device_code: session.deviceCode,
         client_id: session.descriptor.clientId ?? "",
+        ...(session.descriptor.resource === undefined
+          ? {}
+          : { resource: session.descriptor.resource }),
       },
       clientId: session.descriptor.clientId ?? "",
       tokenEndpoint: session.tokenEndpoint,
       previousRefresh: undefined,
       generation: 0,
       codeExchange: true,
+      ...(session.descriptor.resource === undefined
+        ? {}
+        : { resource: session.descriptor.resource }),
+      ...(session.descriptor.dialect === MCP_DIALECT ? { refreshTokenOptional: true } : {}),
     });
     if (polled.kind === "pending" || polled.kind === "tokens") return polled;
     // No answer, a 429, or a 5xx: the code may still be entered.
@@ -2825,11 +3064,21 @@ export function createHostOAuthRuntime(options: {
         if (polled.slowDown) session.intervalMs += SLOW_DOWN_MS;
         continue;
       }
+      if (session.attempt.cancelRequested) return;
       session.attempt.closed = true;
       if (polled.kind === "tokens") {
         const credentialRef = randomUUID();
+        session.attempt.issuedCredentialRef = credentialRef;
         try {
-          await options.store.set(credentialRef, JSON.stringify(polled.grant));
+          session.attempt.grantWrite = options.store.set(
+            credentialRef,
+            JSON.stringify(polled.grant),
+          );
+          await session.attempt.grantWrite;
+          if (session.attempt.cancelRequested) {
+            await cleanupCancelledGrant(session.attempt);
+            return;
+          }
           publish(session.attemptId, {
             kind: "signed-in",
             attemptId: session.attemptId,
@@ -3147,6 +3396,7 @@ export function createHostOAuthRuntime(options: {
   return Object.freeze({
     begin,
     cancel,
+    relay,
     status: (attemptId: string): HostOAuthPublicState => {
       const attempt = attempts.get(attemptId);
       return attempt === undefined ? { kind: "unknown" } : attempt.status;
@@ -3253,6 +3503,7 @@ export async function handleHostOAuthBrokerRoute(
   }
   if (pathname === "/v1/oauth/begin") return beginRoute(decoded.value, runtime);
   if (pathname === "/v1/oauth/cancel") return cancelRoute(decoded.value, runtime);
+  if (pathname === "/v1/oauth/relay") return relayRoute(decoded.value, runtime);
   if (pathname === "/v1/oauth/status") return statusRoute(decoded.value, runtime);
   if (pathname === "/v1/oauth/refresh") return refreshRoute(decoded.value, runtime);
   if (pathname === "/v1/oauth/access") return accessRoute(decoded.value, runtime);
@@ -3268,12 +3519,14 @@ async function beginRoute(
   const actorId = value.actorId;
   const termsAcknowledgedAt = value.termsAcknowledgedAt;
   const credentialRef = value.credentialRef;
+  const relayable = value.relayable;
   if (
     !isRecord(descriptor) ||
     typeof actorId !== "string" ||
     typeof termsAcknowledgedAt !== "string" ||
     (credentialRef !== undefined &&
-      (typeof credentialRef !== "string" || !UUID_PATTERN.test(credentialRef)))
+      (typeof credentialRef !== "string" || !UUID_PATTERN.test(credentialRef))) ||
+    (relayable !== undefined && typeof relayable !== "boolean")
   ) {
     return Response.json({ error: "invalid-request" }, { status: 400 });
   }
@@ -3284,8 +3537,37 @@ async function beginRoute(
     actorId,
     termsAcknowledgedAt,
     ...(typeof credentialRef === "string" ? { credentialRef } : {}),
+    ...(relayable === true ? { relayable: true } : {}),
   });
   return Response.json(publicBegin(started), { headers: { "cache-control": "no-store" } });
+}
+
+async function relayRoute(
+  value: Record<string, unknown>,
+  runtime: HostOAuthRuntime,
+): Promise<Response> {
+  if (
+    Object.keys(value).length !== 4 ||
+    typeof value.attemptId !== "string" ||
+    !UUID_PATTERN.test(value.attemptId) ||
+    typeof value.actorId !== "string" ||
+    !UUID_PATTERN.test(value.actorId) ||
+    typeof value.descriptorId !== "string" ||
+    typeof value.callbackUrl !== "string" ||
+    value.callbackUrl.length === 0 ||
+    value.callbackUrl.length > MAX_RELAY_CALLBACK_CHARS
+  ) {
+    return Response.json({ error: "invalid-request" }, { status: 400 });
+  }
+  const relayed = await runtime.relay({
+    attemptId: value.attemptId,
+    actorId: value.actorId,
+    descriptorId: value.descriptorId,
+    callbackUrl: value.callbackUrl,
+  });
+  const body =
+    relayed.kind === "signed-in" || relayed.kind === "refused" ? publicStatus(relayed) : relayed;
+  return Response.json(body, { headers: { "cache-control": "no-store" } });
 }
 
 async function cancelRoute(
@@ -3452,6 +3734,9 @@ function publicStatus(status: HostOAuthPublicState): HostOAuthPublicState {
       descriptorId: status.descriptorId,
       flow: "device-code",
       verificationUri: status.verificationUri,
+      ...(status.verificationUriComplete === undefined
+        ? {}
+        : { verificationUriComplete: status.verificationUriComplete }),
       userCode: status.userCode,
       expiresAt: status.expiresAt,
     };
@@ -4089,9 +4374,31 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
   }
   if (descriptor.flow !== "authorization-code-pkce" && descriptor.flow !== "device-code")
     return undefined;
-  // A dialect exists precisely because its wire shape is not OAuth; a
-  // device-code grant cannot pair with one.
-  if (dialect !== undefined && descriptor.flow !== "authorization-code-pkce") return undefined;
+  if (
+    descriptor.verificationHosts !== undefined &&
+    (dialect !== MCP_DIALECT ||
+      descriptor.flow !== "device-code" ||
+      descriptor.verificationHosts.length === 0 ||
+      descriptor.verificationHosts.length > 16 ||
+      !descriptor.verificationHosts.every((host) => VERIFICATION_HOST_PATTERN.test(host)))
+  ) {
+    return undefined;
+  }
+  // Closed dialects (OpenRouter, ChatGPT plan, Slack, GitHub, Google Workspace,
+  // issuer-oidc) keep their PKCE profiles; generic MCP authorization may also
+  // use standard RFC 8628 device authorization.
+  if (
+    dialect !== undefined &&
+    !(
+      dialect === MCP_DIALECT &&
+      googleWorkspaceMcpScopes(descriptor.resource) === undefined &&
+      descriptor.redirectPort === undefined &&
+      descriptor.redirectHostname === undefined
+    ) &&
+    descriptor.flow !== "authorization-code-pkce"
+  ) {
+    return undefined;
+  }
   if (descriptor.tokenEndpoint === undefined || !allowedEndpoint(descriptor.tokenEndpoint)) {
     return undefined;
   }
@@ -4226,6 +4533,14 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
   }
   const authorizationEndpoint = value.authorizationEndpoint;
   const deviceAuthorizationEndpoint = value.deviceAuthorizationEndpoint;
+  const verificationHosts = value.verificationHosts;
+  if (
+    verificationHosts !== undefined &&
+    (!Array.isArray(verificationHosts) ||
+      !verificationHosts.every((host): host is string => typeof host === "string"))
+  ) {
+    return undefined;
+  }
   const dialect = value.dialect;
   if (
     dialect !== undefined &&
@@ -4282,6 +4597,7 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     scopes,
     ...(typeof authorizationEndpoint === "string" ? { authorizationEndpoint } : {}),
     ...(typeof deviceAuthorizationEndpoint === "string" ? { deviceAuthorizationEndpoint } : {}),
+    ...(Array.isArray(verificationHosts) ? { verificationHosts } : {}),
     ...(typeof extAgentHostId === "string" ? { extAgentHostId } : {}),
     ...(typeof agentNameHint === "string" ? { agentNameHint } : {}),
     ...(typeof resource === "string" ? { resource } : {}),
@@ -4410,6 +4726,14 @@ function replyCallback(response: ServerResponse, status: number): void {
   response.end("<!doctype html><p>You can close this window.</p>");
 }
 
+function hasForbiddenCallbackChar(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x20 || code === 0x7f || code === 0x5c || code === 0x23) return true;
+  }
+  return false;
+}
+
 function isLoopback(address: string): boolean {
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
 }
@@ -4440,6 +4764,7 @@ async function postForm(
   fetchImpl: typeof fetch,
   endpoint: string,
   fields: Readonly<Record<string, string>>,
+  extraHeaders?: Readonly<Record<string, string>>,
 ): Promise<
   { readonly kind: "json"; readonly value: Record<string, unknown> } | { readonly kind: "failed" }
 > {
@@ -4447,7 +4772,7 @@ async function postForm(
     const response = await fetchImpl(endpoint, {
       method: "POST",
       redirect: "error",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: { "content-type": "application/x-www-form-urlencoded", ...extraHeaders },
       body: new URLSearchParams(fields).toString(),
       signal: issuerRequestDeadline(),
     });

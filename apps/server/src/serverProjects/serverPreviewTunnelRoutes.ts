@@ -1,5 +1,7 @@
 import { ServerPreviewCommand } from "@octant/contracts/server-projects";
 import { Schema } from "effect";
+import { principalActsAsHostPerson } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -13,6 +15,11 @@ export function createServerPreviewTunnelRoutes(dependencies: {
   readonly windows: WindowAuthorityStore;
   readonly tunnels: ServerPreviewTunnels;
   readonly listeners?: (projectId: string) => Promise<ServerProjectListenerRead>;
+  readonly isPersonPairedDeviceCurrent?: (
+    deviceId: string,
+    credentialGeneration: number,
+    sessionId?: string,
+  ) => boolean;
   readonly now?: () => number;
 }) {
   return async (request: Request): Promise<Response | undefined> => {
@@ -38,6 +45,14 @@ export function createServerPreviewTunnelRoutes(dependencies: {
       return json({ error: "Invalid JSON." }, 400);
     }
     let owner: string;
+    let pairedDevice:
+      | {
+          readonly deviceId: string;
+          readonly credentialGeneration: number;
+          readonly sessionId: string;
+          readonly actor: ReturnType<typeof eventActorForPrincipal>;
+        }
+      | undefined;
     try {
       const context = authenticateRoutePrincipal({
         request,
@@ -45,9 +60,17 @@ export function createServerPreviewTunnelRoutes(dependencies: {
         now: (dependencies.now ?? Date.now)(),
         ...(body === undefined ? {} : { body }),
       });
-      if (context.principal.kind !== "local-window")
-        return json({ error: "Use a local window to control this preview." }, 403);
+      if (!principalActsAsHostPerson(context.principal))
+        return json({ error: "Only this host's own person can control this preview." }, 403);
       owner = String(context.scopeId);
+      if (context.principal.kind === "remote-device") {
+        pairedDevice = {
+          deviceId: String(context.principal.deviceId),
+          credentialGeneration: context.principal.credentialGeneration,
+          sessionId: String(context.principal.sessionId),
+          actor: eventActorForPrincipal(context.principal),
+        };
+      }
     } catch {
       return json({ error: "Preview request is unauthorized." }, 401);
     }
@@ -72,26 +95,41 @@ export function createServerPreviewTunnelRoutes(dependencies: {
     }
     const result =
       command.kind === "start"
-        ? await dependencies.tunnels.start(
-            String(command.projectId),
-            owner,
-            command.remotePort,
-            command.localPort,
-            () => {
-              try {
-                return (
-                  String(
-                    dependencies.windows.authenticate(
-                      request.headers.get("x-octant-window-capability") ?? "",
-                      (dependencies.now ?? Date.now)(),
-                    ),
-                  ) === owner
-                );
-              } catch {
-                return false;
-              }
-            },
-          )
+        ? pairedDevice !== undefined
+          ? await dependencies.tunnels.startRelayed({
+              projectId: String(command.projectId),
+              owner,
+              remotePort: command.remotePort,
+              credentialGeneration: pairedDevice.credentialGeneration,
+              sessionId: pairedDevice.sessionId,
+              actor: pairedDevice.actor,
+              ownerCurrent: () =>
+                dependencies.isPersonPairedDeviceCurrent?.(
+                  pairedDevice.deviceId,
+                  pairedDevice.credentialGeneration,
+                  pairedDevice.sessionId,
+                ) ?? true,
+            })
+          : await dependencies.tunnels.start(
+              String(command.projectId),
+              owner,
+              command.remotePort,
+              command.localPort,
+              () => {
+                try {
+                  return (
+                    String(
+                      dependencies.windows.authenticate(
+                        request.headers.get("x-octant-window-capability") ?? "",
+                        (dependencies.now ?? Date.now)(),
+                      ),
+                    ) === owner
+                  );
+                } catch {
+                  return false;
+                }
+              },
+            )
         : command.kind === "stop"
           ? await dependencies.tunnels.stop(String(command.projectId), owner)
           : await dependencies.tunnels.reconnect(String(command.projectId), owner);

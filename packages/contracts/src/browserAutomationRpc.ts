@@ -22,6 +22,7 @@ import {
   ToolEvidence,
 } from "./toolActions";
 import { BrowserProfileChoice } from "./projectBrowser";
+import { PairedBrowserLeaseId, PairedBrowserTarget } from "./pairedBrowserControl";
 import { AggregateVersion } from "./events";
 import { UtcTimestamp } from "./events";
 
@@ -183,6 +184,7 @@ export type BrowserContextInspectCommand = typeof BrowserContextInspectCommand.T
 
 export const BrowserThreadContextCommand = Schema.Struct({
   threadId: BrowserThreadId,
+  leaseId: Schema.optional(PairedBrowserLeaseId),
 }).annotations(strict);
 export type BrowserThreadContextCommand = typeof BrowserThreadContextCommand.Type;
 
@@ -236,10 +238,21 @@ export const BrowserAutomationSnapshot = Schema.Struct({
    * thread brings its Browser forward), `take-over` when the person took it.
    */
   waitingForPerson: Schema.optional(Schema.Literal("sign-in", "take-over")),
-  ownerController: Schema.optional(
+  /** Set when a person-paired device holds a live remote control lease on this page. */
+  remoteHolder: Schema.optional(
     Schema.Struct({
-      name: Schema.String.pipe(Schema.maxLength(128)),
+      deviceId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+      deviceName: Schema.String.pipe(Schema.maxLength(128)),
+      leaseId: PairedBrowserLeaseId,
       expiresAt: UtcTimestamp,
+    }).annotations(strict),
+  ),
+  /** Returned to the person-paired device that opened a live lease through Take over. */
+  pairedLease: Schema.optional(
+    Schema.Struct({
+      leaseId: PairedBrowserLeaseId,
+      expiresAt: UtcTimestamp,
+      target: PairedBrowserTarget,
     }).annotations(strict),
   ),
   /**

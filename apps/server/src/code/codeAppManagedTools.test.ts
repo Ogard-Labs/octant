@@ -17,6 +17,7 @@ import type {
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserFlowRecorder } from "../browser/browserFlows";
+import { BrowserToolApprovalService } from "../browser/browserToolApprovalService";
 import { BROWSER_OPERATION_EFFECT } from "../browser/browserToolOperations";
 import { BROWSER_CALL_OF_EACH_OPERATION } from "../browser/browserToolPlanCalls.test-support";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
@@ -1004,6 +1005,84 @@ describe("Code app-managed tools", () => {
         expect(f.create).not.toHaveBeenCalled();
       },
     );
+
+    it("evaluates default personal profiles through a real BrowserToolApprovalService instance for Code threads", async () => {
+      const personPhone = "10000000-0000-4000-8000-0000000000cc" as WindowId;
+      const restrictedPhone = "10000000-0000-4000-8000-0000000000dd" as WindowId;
+      const approvals = new BrowserToolApprovalService({
+        uuid: () => crypto.randomUUID(),
+        now: Date.now,
+        authorityIsCurrent: () => true,
+        isLocalWindow: () => false,
+        isRestrictedDevice: (scope) => String(scope) === String(restrictedPhone),
+      });
+      const authority = browserAuthority();
+      const current: CodeThread = thread({
+        browserTaskProfile: "personal",
+      });
+      const bindings = new Map<string, BrowserModelBinding>();
+      const create = vi.fn(async () => ({
+        status: "running" as const,
+        threadId: decodeBrowserThreadId(threadId),
+        evidence: [],
+      }));
+      const makeCodeTools = (scope: WindowId) =>
+        createCodeAppManagedTools({
+          windowId: scope,
+          thread: current,
+          readThread: () => current,
+          uuid: uuidFactory(),
+          executeOperation: vi.fn(),
+          terminal: { read: vi.fn() },
+          browserProfiles: {
+            approvals,
+            readBinding: (id) => bindings.get(id),
+            rememberBinding: (id, binding) => {
+              bindings.set(id, binding);
+            },
+            forgetBinding: (id) => {
+              bindings.delete(id);
+            },
+          },
+          browserApproval: { forget: vi.fn() },
+          browser: {
+            resolveAuthority: () => authority,
+            inspectThread: () => ({
+              status: "ready",
+              threadId: decodeBrowserThreadId(threadId),
+              evidence: [],
+            }),
+            create,
+            act: vi.fn(),
+            releaseThread: vi.fn(),
+          },
+        });
+
+      const restrictedResult = await makeCodeTools(restrictedPhone).execute({
+        name: CODE_BROWSER_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+      });
+      expect(restrictedResult).toMatchObject({
+        isError: true,
+        result: { error: "profile-not-local" },
+      });
+
+      const personNav = makeCodeTools(personPhone).execute({
+        name: CODE_BROWSER_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+      });
+      await vi.waitFor(() => expect(approvals.list(personPhone)).toHaveLength(1));
+      const pending = approvals.list(personPhone)[0];
+      if (pending === undefined) throw new Error("Expected pending site approval");
+      approvals.decide(personPhone, {
+        approvalId: pending.approvalId,
+        decision: "denied",
+      });
+      expect(await personNav).toMatchObject({
+        isError: true,
+        result: { error: "browser-approval-denied" },
+      });
+    });
     it.each(["same", "model", "authority"] as const)(
       "rechecks a staged page binding before allowing content: %s",
       async (pending) => {

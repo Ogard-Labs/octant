@@ -89,6 +89,9 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     | "browserProfileService"
     | "browserToolApprovalService"
     | "liveProjectBrowsers"
+    | "pairedBrowserControlService"
+    | "resolvePairedDeviceName"
+    | "isPairedDeviceSessionCurrent"
   > &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
   Pick<ChatWiring, "chatService"> &
@@ -124,6 +127,9 @@ export function wireContext(deps: ContextDependencies) {
     configuredDriverOptions,
     contextHarness,
     liveProjectBrowsers,
+    pairedBrowserControlService,
+    resolvePairedDeviceName,
+    isPairedDeviceSessionCurrent,
     browserExtensionService,
     browserFlowService,
     browserProfileService,
@@ -999,6 +1005,9 @@ export function wireContext(deps: ContextDependencies) {
     profiles: browserProfileService,
     flows: browserFlowService,
     flowRuns,
+    pairedBrowserControl: pairedBrowserControlService,
+    resolvePairedDeviceName,
+    isPairedDeviceSessionCurrent,
     extensions: browserExtensionService,
     authority: browserAuthority,
     approvals: browserToolApprovalService,

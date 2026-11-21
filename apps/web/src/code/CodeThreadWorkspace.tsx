@@ -244,9 +244,12 @@ export interface CodeThreadWorkspaceProps {
   readonly onTurnRevealed?: () => void;
   /**
    * Set where a paired device shows the thread: it has no window on the host
-   * to take dropped files with, and is not offered provider cloud sessions.
+   * to take dropped files with. Provider cloud sessions are offered when the
+   * paired device acts as the host's own person (`actsAsHostPerson`).
    */
   readonly pairedDevice?: boolean;
+  /** Whether the paired device acts as the host's own person. */
+  readonly actsAsHostPerson?: boolean;
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   /**
@@ -2735,7 +2738,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 windowCapability={props.windowCapability}
               />
               {!displayReady ||
-              props.pairedDevice === true ||
+              (props.pairedDevice === true && props.actsAsHostPerson !== true) ||
               codeClient?.providerCloudSessions === undefined ? null : (
                 <ProviderCloudSessions
                   client={codeClient.providerCloudSessions}

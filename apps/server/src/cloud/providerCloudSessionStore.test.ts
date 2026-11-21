@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { decodeProviderInstanceId } from "@octant/contracts";
+import { decodeEventActor, decodeProviderInstanceId } from "@octant/contracts";
 import { decodeProviderCloudJob } from "@octant/contracts/provider-cloud-sessions";
 import { openSqlite } from "../persistence/sqlitePort";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -104,6 +104,86 @@ describe("provider cloud journal", () => {
       expect(usageRows()).toEqual([
         { subject_type: "code-thread", subject_id: null, quality: "unavailable" },
       ]);
+    } finally {
+      connection.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("writes v2 events with remote-device actor and credentialGeneration for person-paired acts and replays mixed v1/v2 journals", () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "octant-cloud-journal-v2-")));
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    const now = "2026-11-04T12:00:00.000Z";
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registry = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registry.events,
+        projections: registry.projections,
+        clock: () => now,
+      });
+      const store = new ProviderCloudSessionStore({ connection, journal, now: () => now });
+      const instanceId = decodeProviderInstanceId(randomUUID());
+      const deviceId = "77000000-0000-4000-8000-000000000001";
+      const deviceActor = decodeEventActor({
+        kind: "remote-device",
+        actorId: deviceId,
+        deviceId,
+      });
+      const pairedPrincipal = {
+        kind: "person-paired-device" as const,
+        credentialGeneration: 5,
+      };
+      const recordPrincipal = {
+        ...pairedPrincipal,
+        actor: deviceActor,
+      };
+
+      // Person-paired device enables opt-in (writes v2)
+      store.setEnabled(instanceId, true, recordPrincipal);
+      const job = decodeProviderCloudJob({
+        id: randomUUID(),
+        version: 1,
+        threadId: randomUUID(),
+        projectId: randomUUID(),
+        instanceId,
+        modelId: "fixture-model",
+        inputDigest: "b".repeat(64),
+        input: "reviewed snapshot from paired device",
+        state: "submitting",
+        output: "",
+        truncated: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+      // Person-paired submit writes v2; subsequent system observation writes v1.
+      const submitted = store.put(job, recordPrincipal);
+      const observed = store.put({
+        ...submitted,
+        state: "running",
+        remoteId: "sess_paired" as never,
+      });
+
+      const events = journal.replay({ afterSequence: 0 as never, limit: 50 });
+      expect(events.map((event) => event.eventName)).toEqual([
+        "provider-cloud.opt-in-changed@2",
+        "provider-cloud.job-changed@2",
+        "provider-cloud.job-changed@1",
+      ]);
+      expect(events[0]?.actor).toEqual(deviceActor);
+      expect((events[0]?.payload as { principal?: unknown } | undefined)?.principal).toEqual(
+        pairedPrincipal,
+      );
+      expect(events[1]?.actor).toEqual(deviceActor);
+      expect((events[1]?.payload as { principal?: unknown } | undefined)?.principal).toEqual(
+        pairedPrincipal,
+      );
+
+      const recovered = new ProviderCloudSessionStore({ connection, journal, now: () => now });
+      expect(recovered.enabled(instanceId)).toBe(true);
+      expect(recovered.get(job.id)).toEqual(observed);
+      expect(recovered.active()).toEqual([observed]);
     } finally {
       connection.close();
       rmSync(directory, { recursive: true, force: true });

@@ -37,7 +37,7 @@ export interface ServerProjectsClient {
   previewCommand?(command: ServerPreviewCommand): Promise<ServerPreviewResult>;
   /** The TCP ports the login serves from the Project's folder on its server; a window on this computer only. */
   listeners?(projectId: string): Promise<ServerProjectListenerList>;
-  /** Machines in the person's cloud account; refused off this computer. */
+  /** Machines in the person's cloud account; admitted for local windows and person-paired devices. */
   cloudMachinesRead?(signal?: AbortSignal): Promise<CloudMachinesView>;
   cloudMachinesCommand?(command: CloudMachinesCommand): Promise<CloudMachinesCommandResult>;
   command(

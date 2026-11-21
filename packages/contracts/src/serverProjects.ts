@@ -17,6 +17,7 @@ import {
   ProjectActions,
   WorkProjectDeveloperTools,
 } from "./projects";
+import { RemoteServerGrantId } from "./remoteServerGrants";
 import { ShieldServerAlias, ShieldServerUser } from "./shieldServers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -30,6 +31,15 @@ export const SERVER_PROJECTS_EVENT_NAMES = {
   removed: "server-projects.removed@1",
   actionsReplaced: "server-projects.actions-replaced@1",
   developerToolsChanged: "server-projects.work-developer-tools-changed@1",
+} as const;
+export const SERVER_PROJECTS_PREVIEW_OUTCOME_V1 = "server-projects.preview-outcome@1" as const;
+export const SERVER_PROJECTS_EVENT_NAMES_V2 = {
+  bound: "server-projects.bound@2",
+  renamed: "server-projects.renamed@2",
+  removed: "server-projects.removed@2",
+  actionsReplaced: "server-projects.actions-replaced@2",
+  developerToolsChanged: "server-projects.work-developer-tools-changed@2",
+  previewOutcome: "server-projects.preview-outcome@2",
 } as const;
 
 /**
@@ -119,14 +129,32 @@ export const ServerProject = Schema.Struct({
 }).annotations(strict);
 export type ServerProject = typeof ServerProject.Type;
 
-/** Only a person at a local window changes the catalog. */
+/**
+ * Version 1 records name only a local window; version 2 widens `principal` to
+ * also name a device the host's own person paired, with its credential
+ * generation so the pairing survives re-pairing under a new key.
+ */
 const localWindow = Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict);
+export const ServerProjectEventPrincipalV2 = Schema.Union(
+  localWindow,
+  Schema.Struct({
+    kind: Schema.Literal("person-paired-device"),
+    credentialGeneration: Schema.Int.pipe(Schema.positive()),
+  }).annotations(strict),
+);
+export type ServerProjectEventPrincipalV2 = typeof ServerProjectEventPrincipalV2.Type;
 
 export const ServerProjectBoundPayload = Schema.Struct({
   project: ServerProject,
   principal: localWindow,
 }).annotations(strict);
 export type ServerProjectBoundPayload = typeof ServerProjectBoundPayload.Type;
+
+export const ServerProjectBoundPayloadV2 = Schema.Struct({
+  project: ServerProject,
+  principal: ServerProjectEventPrincipalV2,
+}).annotations(strict);
+export type ServerProjectBoundPayloadV2 = typeof ServerProjectBoundPayloadV2.Type;
 
 export const ServerProjectRenamedPayload = Schema.Struct({
   projectId: ProjectId,
@@ -135,11 +163,24 @@ export const ServerProjectRenamedPayload = Schema.Struct({
 }).annotations(strict);
 export type ServerProjectRenamedPayload = typeof ServerProjectRenamedPayload.Type;
 
+export const ServerProjectRenamedPayloadV2 = Schema.Struct({
+  projectId: ProjectId,
+  name: ServerProjectName,
+  principal: ServerProjectEventPrincipalV2,
+}).annotations(strict);
+export type ServerProjectRenamedPayloadV2 = typeof ServerProjectRenamedPayloadV2.Type;
+
 export const ServerProjectRemovedPayload = Schema.Struct({
   projectId: ProjectId,
   principal: localWindow,
 }).annotations(strict);
 export type ServerProjectRemovedPayload = typeof ServerProjectRemovedPayload.Type;
+
+export const ServerProjectRemovedPayloadV2 = Schema.Struct({
+  projectId: ProjectId,
+  principal: ServerProjectEventPrincipalV2,
+}).annotations(strict);
+export type ServerProjectRemovedPayloadV2 = typeof ServerProjectRemovedPayloadV2.Type;
 
 export const ServerProjectActionsReplacedPayload = Schema.Struct({
   projectId: ProjectId,
@@ -151,6 +192,17 @@ export type ServerProjectActionsReplacedPayload = typeof ServerProjectActionsRep
 export const decodeServerProjectActionsReplacedPayload = Schema.decodeUnknownSync(
   ServerProjectActionsReplacedPayload,
 );
+export const ServerProjectActionsReplacedPayloadV2 = Schema.Struct({
+  projectId: ProjectId,
+  actions: ProjectActions,
+  actionsVersion: AggregateVersion,
+  principal: ServerProjectEventPrincipalV2,
+}).annotations(strict);
+export type ServerProjectActionsReplacedPayloadV2 =
+  typeof ServerProjectActionsReplacedPayloadV2.Type;
+export const decodeServerProjectActionsReplacedPayloadV2 = Schema.decodeUnknownSync(
+  ServerProjectActionsReplacedPayloadV2,
+);
 export const ServerWorkDeveloperToolsChangedPayload = Schema.Struct({
   projectId: ProjectId,
   developerTools: WorkProjectDeveloperTools,
@@ -158,6 +210,16 @@ export const ServerWorkDeveloperToolsChangedPayload = Schema.Struct({
 }).annotations(strict);
 export const decodeServerWorkDeveloperToolsChangedPayload = Schema.decodeUnknownSync(
   ServerWorkDeveloperToolsChangedPayload,
+);
+export const ServerWorkDeveloperToolsChangedPayloadV2 = Schema.Struct({
+  projectId: ProjectId,
+  developerTools: WorkProjectDeveloperTools,
+  principal: ServerProjectEventPrincipalV2,
+}).annotations(strict);
+export type ServerWorkDeveloperToolsChangedPayloadV2 =
+  typeof ServerWorkDeveloperToolsChangedPayloadV2.Type;
+export const decodeServerWorkDeveloperToolsChangedPayloadV2 = Schema.decodeUnknownSync(
+  ServerWorkDeveloperToolsChangedPayloadV2,
 );
 
 /**
@@ -249,6 +311,7 @@ export const ServerProjectsCommand = Schema.Union(
 export type ServerProjectsCommand = typeof ServerProjectsCommand.Type;
 
 export const ServerProjectsRefusalReason = Schema.Literal(
+  "needs-person",
   "needs-local-window",
   "server-not-registered",
   "server-unreachable",
@@ -281,11 +344,20 @@ export const decodeServerProjectsCommandResult = Schema.decodeUnknownSync(
   ServerProjectsCommandResult,
 );
 export const decodeServerProjectBoundPayload = Schema.decodeUnknownSync(ServerProjectBoundPayload);
+export const decodeServerProjectBoundPayloadV2 = Schema.decodeUnknownSync(
+  ServerProjectBoundPayloadV2,
+);
 export const decodeServerProjectRenamedPayload = Schema.decodeUnknownSync(
   ServerProjectRenamedPayload,
 );
+export const decodeServerProjectRenamedPayloadV2 = Schema.decodeUnknownSync(
+  ServerProjectRenamedPayloadV2,
+);
 export const decodeServerProjectRemovedPayload = Schema.decodeUnknownSync(
   ServerProjectRemovedPayload,
+);
+export const decodeServerProjectRemovedPayloadV2 = Schema.decodeUnknownSync(
+  ServerProjectRemovedPayloadV2,
 );
 
 /** Person-operated preview of one selected port on the registered server's loopback. */
@@ -304,11 +376,42 @@ export type ServerPreviewCommand = typeof ServerPreviewCommand.Type;
 export const ServerPreviewView = Schema.Struct({
   projectId: Schema.String,
   remotePort: Schema.Int.pipe(Schema.between(1, 65535)),
+  /** Loopback port for a local window's preview; 0 when served to a paired device via the relay. */
+  localPort: Schema.Int.pipe(Schema.between(0, 65535)),
+  endpoint: Schema.String,
+  status: Schema.Literal("listening", "lost", "stopped", "revoked"),
+  /** Present when the host serves this preview through `/api/server-proxy/<grantId>/`. */
+  grantId: Schema.optional(RemoteServerGrantId),
+})
+  .pipe(
+    Schema.filter((view) =>
+      view.localPort === 0
+        ? view.grantId !== undefined && view.endpoint === `/api/server-proxy/${view.grantId}/`
+        : view.grantId === undefined && view.endpoint === `http://127.0.0.1:${view.localPort}`,
+    ),
+  )
+  .annotations(strict);
+export type ServerPreviewView = typeof ServerPreviewView.Type;
+export const ServerPreviewOutcomePayloadV1 = Schema.Struct({
+  projectId: Schema.String,
+  remotePort: Schema.Int.pipe(Schema.between(1, 65535)),
   localPort: Schema.Int.pipe(Schema.between(1, 65535)),
   endpoint: Schema.String,
   status: Schema.Literal("listening", "lost", "stopped", "revoked"),
+  owner: Schema.String,
 }).annotations(strict);
-export type ServerPreviewView = typeof ServerPreviewView.Type;
+export type ServerPreviewOutcomePayloadV1 = typeof ServerPreviewOutcomePayloadV1.Type;
+export const ServerPreviewOutcomePayloadV2 = Schema.Struct({
+  projectId: Schema.String,
+  remotePort: Schema.Int.pipe(Schema.between(1, 65535)),
+  localPort: Schema.Int.pipe(Schema.between(0, 65535)),
+  endpoint: Schema.String,
+  status: Schema.Literal("listening", "lost", "stopped", "revoked"),
+  grantId: Schema.optional(RemoteServerGrantId),
+  owner: Schema.String,
+  principal: ServerProjectEventPrincipalV2,
+}).annotations(strict);
+export type ServerPreviewOutcomePayloadV2 = typeof ServerPreviewOutcomePayloadV2.Type;
 export const ServerPreviewResult = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("tunnel"), view: ServerPreviewView }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("refused"), reason: Schema.String }).annotations(strict),
