@@ -204,7 +204,7 @@ export function GeneratedImageJobs(
                 job={job}
                 key={String(artifact.attachmentId)}
                 profiles={props.profiles}
-                {...(generator === undefined || props.canSaveToProject === undefined
+                {...(!("save" in props.client) || props.canSaveToProject === undefined
                   ? {}
                   : { canSaveToProject: props.canSaveToProject })}
                 {...(props.onAttach === undefined ? {} : { onAttach: props.onAttach })}
