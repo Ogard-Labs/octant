@@ -758,8 +758,12 @@ describe("ProviderFolderScanService", () => {
     const duplicateSessionUuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     const archiveDir = join(codexHome, "archived_sessions");
     mkdirSync(archiveDir, { recursive: true });
+    const archiveOnlyFile = join(
+      archiveDir,
+      `rollout-2026-11-20T09-00-00-${archiveOnlySessionUuid}.jsonl`,
+    );
     writeFileSync(
-      join(archiveDir, `rollout-2026-11-20T09-00-00-${archiveOnlySessionUuid}.jsonl`),
+      archiveOnlyFile,
       `${JSON.stringify({
         type: "session_meta",
         payload: {
@@ -769,8 +773,14 @@ describe("ProviderFolderScanService", () => {
         },
       })}\n`,
     );
+    const archiveOnlyTime = new Date("2026-11-20T09:00:00.000Z");
+    utimesSync(archiveOnlyFile, archiveOnlyTime, archiveOnlyTime);
+    const duplicateArchiveFile = join(
+      archiveDir,
+      `rollout-2026-11-20T08-00-00-${duplicateSessionUuid}.jsonl`,
+    );
     writeFileSync(
-      join(archiveDir, `rollout-2026-11-20T08-00-00-${duplicateSessionUuid}.jsonl`),
+      duplicateArchiveFile,
       `${JSON.stringify({
         type: "session_meta",
         payload: {
@@ -780,6 +790,8 @@ describe("ProviderFolderScanService", () => {
         },
       })}\n`,
     );
+    const duplicateTime = new Date("2026-11-20T08:00:00.000Z");
+    utimesSync(duplicateArchiveFile, duplicateTime, duplicateTime);
     // Same session ID also in active sessions must deduplicate to 1 session.
     writeCodexSession(
       codexHome,
@@ -928,5 +940,92 @@ describe("ProviderFolderScanService", () => {
       expect(imported.results[0]).toMatchObject({ status: "refused", reason: "unavailable" });
     }
     expect(fakeProjects.created).toHaveLength(0);
+  });
+
+  it("keeps the newer scan's folder IDs importable when an older overlapping or aborted scan finishes later", async () => {
+    const home = makeTempDir("octant-scan-overlap-");
+    const repo = join(home, "code", "overlap-repo");
+    createGitRepo(repo, "https://github.com/acme/overlap.git");
+    writeClaudeSession(
+      join(home, ".claude"),
+      repo,
+      "11111111-1111-4111-8111-111111111111",
+      "2026-11-21T10:00:00.000Z",
+    );
+
+    let callCount = 0;
+    let markScan1Paused: (() => void) | undefined;
+    const scan1Paused = new Promise<void>((resolve) => {
+      markScan1Paused = resolve;
+    });
+    let releaseScan1: ((instances: ReadonlyArray<ProviderInstance>) => void) | undefined;
+    const scan1Gate = new Promise<ReadonlyArray<ProviderInstance>>((resolve) => {
+      releaseScan1 = resolve;
+    });
+    let markScan3Paused: (() => void) | undefined;
+    const scan3Paused = new Promise<void>((resolve) => {
+      markScan3Paused = resolve;
+    });
+    let releaseScan3: ((instances: ReadonlyArray<ProviderInstance>) => void) | undefined;
+    const scan3Gate = new Promise<ReadonlyArray<ProviderInstance>>((resolve) => {
+      releaseScan3 = resolve;
+    });
+
+    const receipts = new BindingReceiptStore();
+    const fakeProjects = createFakeProjectService(receipts);
+    const scanner = new ProviderFolderScanService({
+      homeDirectory: home,
+      env: {},
+      readProviderInstances: () => {
+        callCount += 1;
+        if (callCount === 1) {
+          markScan1Paused?.();
+          return scan1Gate;
+        }
+        if (callCount === 3) {
+          markScan3Paused?.();
+          return scan3Gate;
+        }
+        return [];
+      },
+      readActiveCodeProjects: () => [],
+      isHostStrict: () => false,
+      bindingReceiptStore: receipts,
+      projectRootPort: new ProjectRootPort(),
+      projectService: fakeProjects.service,
+    });
+
+    const windowId = decodeWindowId(randomUUID());
+
+    // Start scan #1 and pause it in-flight.
+    const scan1Promise = scanner.scan(windowId);
+    await scan1Paused;
+
+    // Start scan #2 for the same window and let it complete first.
+    const scan2 = await scanner.scan(windowId);
+    expect(scan2.status).toBe("ready");
+    if (scan2.status !== "ready") return;
+    const scan2FolderId = scan2.groups[0]?.folders[0]?.id;
+    expect(scan2FolderId).toBeDefined();
+    if (scan2FolderId === undefined) return;
+
+    // Let older scan #1 finish after scan #2 already committed its candidates.
+    releaseScan1?.([]);
+    await scan1Promise;
+
+    // Also start scan #3 and abort its signal mid-flight; it must not wipe scan #2's IDs either.
+    const abortController = new AbortController();
+    const scan3Promise = scanner.scan(windowId, abortController.signal);
+    await scan3Paused;
+    abortController.abort();
+    releaseScan3?.([]);
+    await scan3Promise;
+
+    const imported = await scanner.importFolders(windowId, { folderIds: [scan2FolderId] });
+    expect(imported.status).toBe("completed");
+    if (imported.status === "completed") {
+      expect(imported.results[0]).toMatchObject({ status: "created" });
+    }
+    expect(fakeProjects.created.map((entry) => entry.canonicalRoot)).toEqual([repo]);
   });
 });
