@@ -6962,7 +6962,11 @@ ls-remote` against the thread's remote and the GitHub reads they already
   Work turn projection and the Code conversation read attach to that turn as
   `steeredMessages`, once per message, so replay and a rebuild show it
   where it was. The transcript shows it as the person's message labelled
-  "Sent while the turn ran". A message the runtime refuses, or a steer that
+  "Sent while the turn ran", on the desktop and the phone alike. Its journal
+  append invalidates the turn's mode on the change feed (`work-navigation` or
+  `code-navigation`), as any turn change does, so it shows in the turn as soon
+  as it leaves the queue rather than at the next unrelated refresh. A message
+  the runtime refuses, or a steer that
   fails, leaves it queued for the next turn, and the queue does not offer that
   message again; a connection with no `steer`, or one not yet acquired, offers
   nothing and changes nothing. The message is not marked as dispatching

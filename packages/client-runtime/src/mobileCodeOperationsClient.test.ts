@@ -395,6 +395,21 @@ describe("mobile Code follow-through", () => {
     expect(conversation.turns[0]?.usageLimit).toEqual(usageLimit);
   });
 
+  it("carries the person's messages steered into a turn, so the phone shows them inside it", async () => {
+    const steeredMessages = [
+      {
+        messageId: "8a000000-0000-4000-8000-000000000001",
+        body: "Also update the changelog",
+        steeredAt: now,
+      },
+    ];
+    const conversation = await loadMobileCodeConversation(
+      transport([], { status: "waiting", steeredMessages }),
+      threadId,
+    );
+    expect(conversation.turns[0]?.steeredMessages).toEqual(steeredMessages);
+  });
+
   it("reads the page ending at a search hit and says newer turns follow it", async () => {
     const queries: Array<string | undefined> = [];
     const base = transport([]);
