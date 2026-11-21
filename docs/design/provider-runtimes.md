@@ -2321,6 +2321,53 @@ never written. A kept turn with no anchor, a thread now on another model, or
 a copy that fails goes back with the text handoff. Files come back only
 through Octant's checkpoints, as for every provider.
 
+### OpenCode and Pi without Octant's sandbox
+
+On macOS and Linux a Work or Code launch of OpenCode or Pi below Full access
+outside Strict starts with no Octant sandbox, as every Windows launch does,
+and the provider's own approvals hold the thread's level (maintainer
+decision, 2026-11-21; built). The rule is the domain's
+`providerHoldsLevelWithoutSandbox` (`guardrailPolicy.ts`), shared with the
+ACP agents; `openCodeStartsUnconfined` (`openCodeProcess.ts`) and
+`piStartsUnconfined` (`piProcess.ts`) apply it.
+
+- **OpenCode** keeps its session permission rules unchanged: below Full
+  access `edit` asks at Ask first, `bash` and every other tool ask at Ask
+  first and Accept edits, and `external_directory` asks for any folder
+  outside the Project, each ask answered and journaled on Octant's server.
+  Its read refusals for other providers' sign-ins still hold for its own
+  tools. A verified release on Octant's private configuration (no Project
+  config loaded) is attested `privateConfiguration`, which admits Octant's
+  app-managed tools without claiming OS confinement, as on Windows; a
+  release the probe did not verify, or a launch that loads a trusted
+  Project's own configuration, gets them only as before.
+- **Pi** has an approval channel of its own: Octant's bridge extension asks
+  Octant, by the thread's level, before every tool call but `read`, `grep`,
+  `find`, `ls` and Octant's app tools, so `bash`, `edit` and `write` and an
+  extension's own tools all ask. The launch is otherwise the one the
+  sandbox wrapped: the same arguments, the same environment, approvals on.
+- **Still wrapped:** Chat, Plan, Strict, a Full access thread that keeps its
+  sandbox, a chosen sandbox policy, and the readiness check and version
+  read. Open Full access stays unwrapped as before.
+- **No wall:** an unwrapped launch takes no egress proxy and no
+  registered-server folder, as Full access does, so Network limits and the
+  Project's server folder do not bind it.
+
+Cost, accepted with the decision: below Full access the process may read and
+write anything the person can, and only the approvals it asks for bind it.
+Pi's `read`, `grep`, `find` and `ls` ask nothing inside the launch's folders
+(the Project root, its extra folders and the thread's attachments); unwrapped,
+Octant's approval bridge asks before one reaches any other path, links
+resolved (`OCTANT_PI_READ_ROOTS`), so another provider's sign-in is never read
+without the person's yes. OpenCode asks for an outside folder and refuses
+those sign-ins by rule. The person's own Pi extensions and OpenCode plugins
+in a trusted Project run unwrapped too. A person who wants the wall turns
+Strict on. Rationale: both providers already carry every side effect to
+Octant as an approval, the same rule that holds the level for them on
+Windows, so outside Strict the wall below Full access only added a limit of
+Octant's own ([Architecture: Octant adds no restrictions of its own unless
+Strict is on](../architecture.md#security-and-authority)).
+
 ## ACP agents
 
 Every ACP agent runs on one shared stack: `acpDriver.ts`, `acpProcess.ts`,
@@ -2774,8 +2821,9 @@ with the person's token. The CLI talks to Google itself.
 - **No sandbox in Work and Code outside Strict.** There the CLI starts as the
   person's own terminal would start it, at every level: no Octant sandbox, no
   network allowlist, the person's whole environment, and its own sign-in read
-  as it reads it (`confinement: provider-approvals-outside-strict`). This is
-  the rule Windows already applies to ACP agents below Full access: the CLI's
+  as it reads it. Every ACP agent now runs this way
+  (`providerHoldsLevelWithoutSandbox`, maintainer decision, 2026-11-21), the
+  rule Windows already applied to ACP agents below Full access: the CLI's
   `default` mode asks Octant before every edit and command, so the thread's
   level holds through Octant's approvals rather than the OS. Rationale: other
   ACP clients of the CLI run it this way, and the person asked for the same
