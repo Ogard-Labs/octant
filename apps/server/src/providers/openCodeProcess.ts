@@ -37,6 +37,7 @@ import {
   windowsUnconfinedLaunch,
 } from "../process/windowsProviderProgram";
 import {
+  providerHoldsLevelWithoutSandbox,
   WINDOWS_SANDBOX_MISSING_REASON,
   windowsProviderLaunch,
   type WindowsProviderLaunch,
@@ -78,11 +79,13 @@ export interface OpenCodeServerConnection {
   /** Attested only when user/project MCP, plugins, and skills cannot enter an OS-confined process. */
   readonly isolatedConfiguration?: true;
   /**
-   * Attested when a Windows outside-Strict launch runs a verified release with
-   * Octant's private configuration (no Project config loaded), admitting
-   * app-managed tools without claiming OS confinement.
+   * Attested when an outside-Strict launch with no Octant sandbox (any Windows
+   * launch, or Work and Code elsewhere per `providerHoldsLevelWithoutSandbox`)
+   * runs a verified release with Octant's private configuration (no Project
+   * config loaded), admitting app-managed tools without claiming OS
+   * confinement.
    */
-  readonly windowsPrivateConfiguration?: true;
+  readonly privateConfiguration?: true;
   readonly authorization: string;
   readonly pid: number;
   /** Runtime protocol attested by the binary version probe before startup. */
@@ -120,9 +123,10 @@ export interface OpenCodeProcessStartInput {
   /**
    * Whether the launch is Strict; absent is Strict. Outside Strict the wall
    * refuses only other providers' sign-ins among the protected files, so
-   * OpenCode's own tools use the rest as they do on their own. On Windows a
-   * launch below Full access runs only outside Strict, with OpenCode's own
-   * permission rules and no Octant sandbox.
+   * OpenCode's own tools use the rest as they do on their own. Below Full
+   * access, Work and Code outside Strict run with no Octant sandbox, held by
+   * OpenCode's own permission rules (`openCodeStartsUnconfined`); on Windows
+   * a launch below Full access runs only outside Strict, the same way.
    */
   readonly strict?: boolean;
   /**
@@ -1310,6 +1314,28 @@ function openCodeWallPolicy(input: OpenCodeProcessStartInput): ProviderExecution
 }
 
 /**
+ * Whether a macOS or Linux launch runs with no Octant sandbox: open Full
+ * access, or Work and Code outside Strict at a level below it, where
+ * OpenCode's permission rules ask Octant before each edit, shell command, and
+ * folder outside the Project and so hold the level
+ * (`providerHoldsLevelWithoutSandbox`, maintainer decision 2026-11-21). Chat,
+ * Plan, Strict, a kept sandbox, a chosen sandbox policy, and the readiness
+ * check stay confined.
+ */
+function openCodeStartsUnconfined(input: OpenCodeProcessStartInput): boolean {
+  if (input.sandboxPolicy !== undefined || input.fullAccessSandbox === true) return false;
+  return (
+    input.executionPolicy === "full-access" ||
+    providerHoldsLevelWithoutSandbox({
+      mode: input.mode ?? "code",
+      executionPolicy: input.executionPolicy ?? "approval-gated",
+      strict: input.strict,
+      purpose: input.purpose,
+    })
+  );
+}
+
+/**
  * How one OpenCode launch runs on Windows, from that launch's own authority. A
  * readiness check serves no one thread, so it runs only for a host whose new
  * threads run with no Octant sandbox.
@@ -1453,11 +1479,7 @@ function prepareOpenCodeLaunch(
         stateHome,
         providerDataDirectory,
       ]);
-      if (
-        executionPolicy === "full-access" &&
-        input.sandboxPolicy === undefined &&
-        input.fullAccessSandbox !== true
-      ) {
+      if (openCodeStartsUnconfined(input)) {
         return {
           command: input.binaryPath,
           args,
@@ -1992,10 +2014,11 @@ function acquireOpenCodeServer(
                   launch.command !== input.binaryPath
                     ? { isolatedConfiguration: true as const }
                     : {}),
-                  ...(options.platform === "win32" &&
-                  isolationAttested &&
-                  (input.purpose === "probe" || input.strict === false)
-                    ? { windowsPrivateConfiguration: true as const }
+                  ...(isolationAttested &&
+                  (options.platform === "win32"
+                    ? input.purpose === "probe" || input.strict === false
+                    : input.strict === false && openCodeStartsUnconfined(input))
+                    ? { privateConfiguration: true as const }
                     : {}),
                   runtime,
                   version,
@@ -2174,10 +2197,12 @@ export function makeOpenCodeProcessLive(
             failure("invalid-configuration", "OpenCode runtime routing could not be prepared."),
         });
         const executionPolicy = openCodeWallPolicy(input);
-        // A Windows launch has no Octant wall to hold a proxy or a server
-        // folder to, so it takes neither.
+        // A launch with no Octant wall (Windows, or an unconfined one
+        // elsewhere) has nothing to hold a proxy or a server folder to, so it
+        // takes neither, as Full access does.
+        const unwalled = windows !== undefined || openCodeStartsUnconfined(input);
         const network =
-          executionPolicy === "full-access" || windows !== undefined
+          executionPolicy === "full-access" || unwalled
             ? undefined
             : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                 ...(input.sandboxPolicy === undefined
@@ -2189,18 +2214,17 @@ export function makeOpenCodeProcessLive(
                 loopbackPorts: input.loopbackPorts ?? [],
                 environment: options.inheritedEnvironment ?? process.env,
               });
-        const servers =
-          windows === undefined
-            ? yield* acquireProviderServerAccess(
-                input.sandboxPolicy?.policy.hostServices === "blocked"
-                  ? undefined
-                  : options.serverAccess,
-                {
-                  root: input.cwd,
-                  executionPolicy,
-                },
-              )
-            : undefined;
+        const servers = !unwalled
+          ? yield* acquireProviderServerAccess(
+              input.sandboxPolicy?.policy.hostServices === "blocked"
+                ? undefined
+                : options.serverAccess,
+              {
+                root: input.cwd,
+                executionPolicy,
+              },
+            )
+          : undefined;
         const { network: _ignored, servers: _ignoredServers, ...requested } = input;
         let terminate: (() => Promise<void>) | undefined;
         return yield* Effect.acquireReleaseInterruptible(
