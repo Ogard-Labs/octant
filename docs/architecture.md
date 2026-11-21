@@ -4142,7 +4142,11 @@ thread's agent proposes one, because a Chat thread has no Environment to
 propose from. Each run creates a Chat thread in the Project through
 `create-chat-thread`, puts it on the routine's provider and model, and sends
 the task as one `send-chat-turn` under a submission identity derived from the
-occurrence, so a retry after a crash finds the turn it already sent. Each occurrence creates
+occurrence, so a retry after a crash finds the turn it already sent. The
+scheduler finds that same turn by that identity and finishes the run when the
+turn's newest attempt settles: completed, failed, or interrupted when it was
+stopped or interrupted, as a Work run does; a turn the person sends into the
+thread afterwards never finishes it. Each occurrence creates
 at most one new thread (target policy `new-thread`) and runs its first turn
 through the ordinary thread and turn services; a routine cannot do anything the
 thread it creates could not do. The one exception is a follow-up (target
