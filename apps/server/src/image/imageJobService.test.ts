@@ -1930,6 +1930,138 @@ describe("image job spend ceilings", () => {
       journal,
       projection: runtime.imageJobProjection,
       attachments: new GeneratedImageStore(directory),
+      readProviderInstance: (id) => (String(id) === String(profileId) ? imageProfile() : undefined),
+      readImageGenerationCustomSources: () => [],
+      credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+      actor,
+      createAdapter: () => adapter,
+      concurrency: 1,
+      spendCeiling,
+      resolveThreadProjectId: ({ threadId }) =>
+        threadId === String(scopeId) ? currentProjectId : projectId,
+    });
+
+    // Project B has an 8-cent ceiling: fits one 5.3-cent gpt-image-2 high square image,
+    // not a 2-variant 10.6-cent request.
+    spendCeiling.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(projectB) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 8 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+
+    const blocker = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId: otherThread,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "occupies the single slot",
+      quality: "high",
+      size: "1024x1024",
+    });
+    const affordable = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "affordable 5.3-cent job",
+      quality: "high",
+      size: "1024x1024",
+      variantCount: 1,
+    });
+    const oversized = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "oversized 10.6-cent job",
+      quality: "high",
+      size: "1024x1024",
+      variantCount: 2,
+    });
+
+    // Move scopeId from Project A (uncapped) to Project B (8-cent ceiling) while both jobs are queued.
+    currentProjectId = projectB;
+    connection
+      .prepare("UPDATE chat_thread_projection SET project_id = ? WHERE thread_id = ?")
+      .run(projectB, String(scopeId));
+
+    releaseFirst?.();
+    expect((await service.whenTerminal(blocker.id)).status).toBe("completed");
+    expect((await service.whenTerminal(affordable.id)).status).toBe("completed");
+    const oversizedResult = await service.whenTerminal(oversized.id);
+    expect(oversizedResult.status).toBe("failed");
+    expect(oversizedResult.failure?.message).toMatch(/Project's money ceiling/i);
+    expect(dispatchedPrompts).toEqual(["occupies the single slot", "affordable 5.3-cent job"]);
+    expect(
+      spendCeiling.snapshot({ principalKind: "local-window", projectId: projectB }),
+    ).toMatchObject({
+      projectRemaining: { ceilingUsdCents: 8, usedUsdCents: 5, remainingUsdCents: 2 },
+    });
+  });
+
+  it("rechecks a moved queued job against a Project ceiling installed after an earlier moved job started", async () => {
+    const projectB = "a3000000-0000-4000-8000-000000000092";
+    let releaseBlocker: (() => void) | undefined;
+    const blockerPaused = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    let notifyFirstMovedStarted: (() => void) | undefined;
+    const firstMovedStarted = new Promise<void>((resolve) => {
+      notifyFirstMovedStarted = resolve;
+    });
+    let releaseFirstMoved: (() => void) | undefined;
+    const firstMovedPaused = new Promise<void>((resolve) => {
+      releaseFirstMoved = resolve;
+    });
+    const dispatchedPrompts: Array<string> = [];
+    const adapter: ImageGenerationAdapter = {
+      generate: async (request) => {
+        dispatchedPrompts.push(request.prompt);
+        if (request.prompt === "occupies the single slot") {
+          await blockerPaused;
+        } else if (request.prompt === "first moved 4-cent job") {
+          notifyFirstMovedStarted?.();
+          await firstMovedPaused;
+        }
+        return {
+          status: "completed",
+          images: [{ bytes: png, mediaType: "image/png" as const }],
+          usage: { inputTokens: 0, outputTokens: 0 },
+        };
+      },
+    };
+    const directory = mkdtempSync(join(tmpdir(), "octant-image-job-new-ceiling-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "octant.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => now,
+    });
+    const spendCeiling = new SpendCeilingService({
+      connection,
+      journal,
+      clock: () => now,
+      uuid: () => crypto.randomUUID(),
+      threadExists: () => true,
+      projectExists: () => true,
+    });
+    let currentProjectId = projectId;
+    seedChatThreadProject(connection, String(scopeId), projectId);
+    const otherThread = decodeImageGenerationScopeId("a3000000-0000-4000-8000-000000000091");
+    seedChatThreadProject(connection, String(otherThread), projectId);
+
+    const service = new ImageJobService({
+      journal,
+      projection: runtime.imageJobProjection,
+      attachments: new GeneratedImageStore(directory),
       readProviderInstance: (id) => (String(id) === String(bflId) ? bflInstance() : undefined),
       readImageGenerationCustomSources: () => [],
       credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
@@ -1943,15 +2075,6 @@ describe("image job spend ceilings", () => {
         threadId === String(scopeId) ? currentProjectId : projectId,
     });
 
-    // Project B has a 5-cent ceiling: fits one 4-cent FLUX image, not a 2-variant 8-cent job.
-    spendCeiling.execute("local-window", {
-      kind: "set-spend-ceiling",
-      scope: { kind: "project", projectId: decodeProjectId(projectB) },
-      expectedVersion: decodeAggregateVersion(0),
-      policy: { costBudgetUsdCents: 5 },
-      window: { kind: "calendar", period: "day", timeZone: "UTC" },
-    });
-
     const blocker = await service.enqueue({
       threadKind: "chat-thread",
       scopeId: otherThread,
@@ -1959,40 +2082,51 @@ describe("image job spend ceilings", () => {
       modelId: bflModelId,
       prompt: "occupies the single slot",
     });
-    const affordable = await service.enqueue({
+    const firstMoved = await service.enqueue({
       threadKind: "chat-thread",
       scopeId,
       profileInstanceId: bflId,
       modelId: bflModelId,
-      prompt: "affordable 4-cent job",
-      variantCount: 1,
+      prompt: "first moved 4-cent job",
     });
-    const oversized = await service.enqueue({
+    const secondMoved = await service.enqueue({
       threadKind: "chat-thread",
       scopeId,
       profileInstanceId: bflId,
       modelId: bflModelId,
-      prompt: "oversized 8-cent job",
-      variantCount: 2,
+      prompt: "second moved 4-cent job",
     });
 
-    // Move scopeId from Project A (uncapped) to Project B (5-cent ceiling) while both jobs are queued.
+    // Move scopeId into Project B while Project B has no ceiling yet.
     currentProjectId = projectB;
     connection
       .prepare("UPDATE chat_thread_projection SET project_id = ? WHERE thread_id = ?")
       .run(projectB, String(scopeId));
 
-    releaseFirst?.();
+    // Release blocker so firstMoved begins running on Project B (and secondMoved stays queued).
+    releaseBlocker?.();
+    await firstMovedStarted;
+
+    // Install a 4-cent ceiling on Project B while firstMoved is running and secondMoved waits.
+    spendCeiling.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(projectB) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 4 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+
+    releaseFirstMoved?.();
     expect((await service.whenTerminal(blocker.id)).status).toBe("completed");
-    expect((await service.whenTerminal(affordable.id)).status).toBe("completed");
-    const oversizedResult = await service.whenTerminal(oversized.id);
-    expect(oversizedResult.status).toBe("failed");
-    expect(oversizedResult.failure?.message).toMatch(/Project's money ceiling/i);
-    expect(dispatchedPrompts).toEqual(["occupies the single slot", "affordable 4-cent job"]);
+    expect((await service.whenTerminal(firstMoved.id)).status).toBe("completed");
+    const secondResult = await service.whenTerminal(secondMoved.id);
+    expect(secondResult.status).toBe("failed");
+    expect(secondResult.failure?.message).toMatch(/Project's money ceiling/i);
+    expect(dispatchedPrompts).toEqual(["occupies the single slot", "first moved 4-cent job"]);
     expect(
       spendCeiling.snapshot({ principalKind: "local-window", projectId: projectB }),
     ).toMatchObject({
-      projectRemaining: { ceilingUsdCents: 5, usedUsdCents: 4, remainingUsdCents: 1 },
+      projectRemaining: { ceilingUsdCents: 4, usedUsdCents: 4, remainingUsdCents: 0 },
     });
   });
 });
