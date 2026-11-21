@@ -300,7 +300,10 @@ export async function runProviderConformance(
                 ...fixture.acquireInput,
                 serverPlacement: placed.placement,
               });
-              yield* onServer.start(fixture.sessionStart).pipe(Effect.either);
+              // The host hands a placement out only with Strict off, since
+              // Octant's sandbox cannot run on a server; a runtime may refuse
+              // a Strict start there before it starts anything.
+              yield* onServer.start({ ...fixture.sessionStart, strict: false }).pipe(Effect.either);
               yield* onServer.stop(fixture.sessionStart.sessionId).pipe(Effect.either);
             }),
           );

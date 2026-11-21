@@ -67,8 +67,14 @@ import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
+import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import { canonicalClaudeAccountDirectory } from "./claudeAccountIsolation";
 import { REQUIRED_GUARDS, sanitizeClaudeEnvironment } from "./claudeEnvironment";
+import {
+  CLAUDE_SERVER_STRICT_REFUSAL,
+  readClaudeVersionOnServer,
+  spawnClaudeOnServer,
+} from "./claudeServerProcess";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
@@ -109,6 +115,12 @@ export interface ClaudeRuntimeConfinement {
    * reach that listener and nothing else. Absent keeps open network.
    */
   readonly network?: ProviderRuntimeProxiedNetwork;
+  /**
+   * The server a server Project's thread runs on. The runtime then starts
+   * there through the host's connection, and nothing of this host's launch
+   * (binary, sandbox, egress, account directory, environment) applies.
+   */
+  readonly server?: ProviderServerPlacement;
 }
 
 /**
@@ -125,7 +137,14 @@ export const CONFINED_CLAUDE_EXECUTION_POLICIES: ReadonlySet<ProviderExecutionPo
 ]);
 
 export interface ClaudeProcessPort {
-  readonly probeVersion: (binaryPath: string) => Effect.Effect<string, ProviderFailure>;
+  /**
+   * The runtime's version. With a server, `claude --version` runs there
+   * instead, since that is the runtime a placed session starts.
+   */
+  readonly probeVersion: (
+    binaryPath: string,
+    server?: ProviderServerPlacement,
+  ) => Effect.Effect<string, ProviderFailure>;
   /**
    * Whether the account is signed in. With a confinement, the check runs inside
    * the sandbox that launch will use: a sign-in the sandbox cannot read is no
@@ -1628,14 +1647,25 @@ export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): Claud
   };
 
   return {
-    probeVersion: (binaryPath) =>
-      runProbe(
-        binaryPath,
-        ["--version"],
-        sanitizeClaudeEnvironment("subscription", resolved.inheritedEnvironment),
-        "version",
-        resolved,
-      ),
+    probeVersion: (binaryPath, server) =>
+      server === undefined
+        ? runProbe(
+            binaryPath,
+            ["--version"],
+            sanitizeClaudeEnvironment("subscription", resolved.inheritedEnvironment),
+            "version",
+            resolved,
+          )
+        : Effect.tryPromise({
+            try: () => readClaudeVersionOnServer(server),
+            catch: () => failure("unavailable", `Octant could not reach ${server.serverName}.`),
+          }).pipe(
+            Effect.flatMap((found) =>
+              found.status === "found"
+                ? Effect.succeed(found.version)
+                : Effect.fail(failure("unavailable", found.message)),
+            ),
+          ),
     probeSubscription: (binaryPath, environment, confinement) =>
       runProbe(
         binaryPath,
@@ -1646,6 +1676,16 @@ export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): Claud
         confinement,
       ),
     spawn: (confinement) => (spawnOptions) => {
+      const server = confinement.server;
+      if (server !== undefined) {
+        // Octant's own sandbox cannot run on a server, so a Strict launch
+        // there is refused rather than run without the sandbox it promises.
+        if (confinement.strict !== false) throw new Error(CLAUDE_SERVER_STRICT_REFUSAL);
+        return spawnClaudeOnServer(spawnOptions, server, {
+          stderrBytes: resolved.runtimeStderrBytes,
+          onDiagnostic: resolved.onDiagnostic,
+        });
+      }
       const confined = confineClaudeLaunch(spawnOptions, confinement, resolved);
       try {
         return spawnOwnedClaudeProcess(
