@@ -123,7 +123,12 @@ it("opens a host-relayed preview through the signed forwarder callback and never
   await user.click(screen.getByText("Dev server preview"));
   // A client without the listing is a paired device, whose preview is no local TCP port.
   expect(screen.queryByText(/local address is 127.0.0.1/)).not.toBeInTheDocument();
+  // Its preview is relayed, so the Local port field neither gates nor travels.
+  const localPort = screen.getByLabelText("Local port, 0 chooses an available port");
+  await user.clear(localPort);
+  await user.type(localPort, "65536");
   await user.click(screen.getByRole("button", { name: "Start preview" }));
+  expect(previewCommand).toHaveBeenCalledWith(expect.objectContaining({ localPort: 0 }));
   expect(screen.queryByRole("link", { name: "Open preview" })).not.toBeInTheDocument();
   await user.click(await screen.findByRole("button", { name: "Open preview" }));
   expect(onOpenRelayedPreview).toHaveBeenCalledWith(relayedView);

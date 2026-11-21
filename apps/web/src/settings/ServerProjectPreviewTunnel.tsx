@@ -86,7 +86,8 @@ export function ServerProjectPreviewTunnel(props: {
               kind,
               projectId: project.id,
               remotePort: Number(port),
-              localPort: Number(localPort),
+              // A paired device's preview is relayed and uses no local port.
+              localPort: client.listeners === undefined ? 0 : Number(localPort),
             }
           : { kind, projectId: project.id },
       );
