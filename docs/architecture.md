@@ -7182,9 +7182,11 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   request naming no call Octant saw, and Kimi Code's own reviewed slash
   commands run in every mode; each reports only those features
   ([detail](design/provider-runtimes.md#acp-agents-run-as-themselves)).
-  Every other provider keeps the deny rules for Project code and skills under
-  [Extensions and skills](#extensions-and-skills) until it is promoted the
-  same way. Pi, not a key provider, loads the person's own home Pi skills,
+  Outside Strict an ACP agent's launch holds back none of those entries, in
+  any mode, wherever the session carries the person's setup, as the agent
+  loads them on its own (maintainer decision, 2026-11-21, as Google
+  Antigravity's profile already did); under Strict the entries stay held
+  until the person allows the Project's code. Pi, not a key provider, loads the person's own home Pi skills,
   prompt templates and context files in Work and Code, and their extensions
   outside Plan, by default with no switch yet, with the tools those
   extensions register asking by the thread's level on Pi 1.1.0 and later;
@@ -12478,11 +12480,13 @@ that is not yet effective for the thread is refused and never reaches the model.
   Octant reports that it loaded. Every other runtime keeps the rule above.
 
   Gemini CLI and Qwen Code are the exception to a deny: their settings loaders
-  fail on a file they cannot read, so Octant refuses to start either one in a
-  Project not trusted for it that holds the entries in their rows, before the
-  process launches
-  (`refusesProject` on the profile, checked beside the mode refusal). Every
-  other Project starts as before. The refusal is a start failure, not a
+  fail on a file they cannot read, so under Strict Octant refuses to start
+  either one in a Project whose code the person has not allowed for it that
+  holds the entries in their rows, before the process launches
+  (`refusesProject` on the profile, checked beside the mode refusal). Outside
+  Strict either one starts there in every mode and loads those files, as on
+  its own, unless the person turned its setup off for the account or thread
+  (maintainer decision, 2026-11-21). Every other Project starts as before. The refusal is a start failure, not a
   capability change: the runtime still reports what it can do, and the failure
   says why. Their rows name what would end the refusal.
 
@@ -15405,8 +15409,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   Kept as product rules, since no provider feature depends on them: Plan is
   read-only, Chat has no folder or shell (it is an extra mode, not a limit
   on Work or Code), folders outside the Project ask below Full access as in
-  the providers, a question asking for a secret is refused and secrets are
-  never recorded, an account with Run as itself off keeps its own web tools
+  the providers, secrets are never recorded (a Codex question asking for one
+  is to be shown outside Strict with its answer kept out of the record,
+  maintainer decision, 2026-11-21, not built yet; until then it is refused),
+  an account with Run as itself off keeps its own web tools
   off, and one provider never receives another's credentials.
 
   Rationale: people choose Octant for what it adds beside the provider, not
@@ -15575,10 +15581,12 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     and Plan Octant's gate refuses every file write into the account's
     `CLAUDE.md` or a memory folder, links resolved, before any level's allow,
     with a sentence saying memory is read-only there. A shell command in Chat
-    stays held by Claude's own command sandbox. Codex keeps its memory off in
-    Plan and Chat at every setting, because Codex writes memories by itself
-    after a turn into `~/.codex/memories`, outside any tool call Octant's gate
-    could refuse. OpenCode, Mistral Vibe and the other providers keep no
+    stays held by Claude's own command sandbox. Outside Strict Codex keeps its
+    memory in Plan and Chat on the account's memory setting, as in Codex itself
+    (maintainer decision, 2026-11-21); under Strict it keeps it off there at
+    every setting, because Codex writes memories by itself after a turn into
+    `~/.codex/memories`, outside any tool call Octant's gate could refuse.
+    OpenCode, Mistral Vibe and the other providers keep no
     memory behind a switch Octant sets, so nothing changes for them.
   - **Linux Plan and Chat confinement admits processes** (built for OpenCode
     2; Claude Code's Plan shell on Linux designed, not built). A Linux Chat or
@@ -15647,10 +15655,12 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     and Plan Octant's gate refuses every file write into the account's
     `CLAUDE.md` or a memory folder, links resolved, before any level's allow,
     with a sentence saying memory is read-only there. A shell command in Chat
-    stays held by Claude's own command sandbox. Codex keeps its memory off in
-    Plan and Chat at every setting, because Codex writes memories by itself
-    after a turn into `~/.codex/memories`, outside any tool call Octant's gate
-    could refuse. OpenCode, Mistral Vibe and the other providers keep no
+    stays held by Claude's own command sandbox. Outside Strict Codex keeps its
+    memory in Plan and Chat on the account's memory setting, as in Codex itself
+    (maintainer decision, 2026-11-21); under Strict it keeps it off there at
+    every setting, because Codex writes memories by itself after a turn into
+    `~/.codex/memories`, outside any tool call Octant's gate could refuse.
+    OpenCode, Mistral Vibe and the other providers keep no
     memory behind a switch Octant sets, so nothing changes for them.
   - **Linux Plan and Chat confinement admits processes** (built). A Linux Chat or
     Plan launch that needs to start processes runs in the same Bubblewrap

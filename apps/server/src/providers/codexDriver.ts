@@ -2153,15 +2153,17 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // it is part of the posture the key names. So is the account's own
       // memory, which rides there too: it is read from the person's switch
       // here, so a lease started after they change it is a new process.
-      const keepsOwnMemory = (executionPolicy: ProviderExecutionPolicy) =>
+      const keepsOwnMemory = (executionPolicy: ProviderExecutionPolicy, strict: boolean) =>
         providerOwnMemoryLaunches({
           accountAllows: options.ownMemory?.() === true,
           mode,
           executionPolicy,
           // Codex writes memories by itself after a turn, into
           // `~/.codex/memories`, outside any tool call Octant's gate sees, so
-          // its memory stays off in Plan and Chat.
+          // under Strict its memory stays off in Plan and Chat; outside
+          // Strict the person's setting decides there too.
           memoryWrites: "background",
+          strict,
         });
       // Strict is part of the key too: a lease outside Strict gets the host's
       // environment, and below Full access Codex's own sandbox in place of
@@ -2181,7 +2183,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           [...extraFolders, ...readOnlyFolders.map((folder) => `read-only:${folder}`)],
           threadMode,
           `${executionPolicy}${ownSubagents ? "+own-subagents" : ""}${
-            keepsOwnMemory(executionPolicy) ? "+own-memory" : ""
+            keepsOwnMemory(executionPolicy, strict) ? "+own-memory" : ""
           }${strict ? "" : "+not-strict"}`,
           ...(fullAccessSandbox ? ["+sandbox"] : []),
           { strict: strict ?? "legacy" },
@@ -2202,7 +2204,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               mode: threadMode,
               executionPolicy,
               ...(ownSubagents ? { ownSubagents: true as const } : {}),
-              ...(keepsOwnMemory(executionPolicy) ? { ownMemory: true as const } : {}),
+              ...(keepsOwnMemory(executionPolicy, strict) ? { ownMemory: true as const } : {}),
               ...(fullAccessSandbox ? { fullAccessSandbox: true as const } : {}),
               ...(strict ? {} : { strict: false as const }),
             },
