@@ -144,8 +144,9 @@ describe("ServiceOfferPrompt", () => {
     expect(card).toHaveTextContent("Browser screenshot of example.com (signed-in page)");
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     await user.click(screen.getByRole("combobox", { name: "Image model" }));
+    const geminiOption = await screen.findByRole("option", { name: "Gemini · gemini-3-pro-image" });
     expect(screen.queryByRole("option", { name: "BFL · flux-pro" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("option", { name: "Gemini · gemini-3-pro-image" }));
+    await user.click(geminiOption);
     await user.click(screen.getByRole("button", { name: "Generate" }));
     expect(fake.decide).toHaveBeenCalledWith(
       expect.objectContaining({
