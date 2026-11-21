@@ -369,4 +369,18 @@ describe("usage of a turn that fails before its reply", () => {
     });
     expect(observedAcpUsageTurn(state)).toBeUndefined();
   });
+
+  it("reports nothing for a turn that failed before the agent sent any snapshot of its own", () => {
+    expect(observedAcpUsageTurn(started())).toBeUndefined();
+  });
+
+  it("reports zero for a turn whose fresh snapshot repeats the counters it began with", () => {
+    const state = started();
+    observeAcpUsage(state, snapshot(1_000, 400, 200));
+    expect(observedAcpUsageTurn(state)).toMatchObject({
+      kind: "usage",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+  });
 });

@@ -2517,7 +2517,9 @@ by ACP's standard usage, and its probe declares `usage: "supported"`
   failure the driver raises mid-turn (a protocol fault, a refused question,
   an undeliverable form answer) or a rejected prompt first offers the usage
   observed so far. Only a pinned reading has any before the reply (its
-  cumulative snapshots since the turn began); a standard agent's failed
+  cumulative snapshots since the turn began, and none until the agent sends
+  a snapshot after the turn began, so a turn that failed first records
+  unreported rather than zero); a standard agent's failed
   turn records unreported, and its reply, if one still comes, settles the
   session cost so the next turn is charged only its own share.
 

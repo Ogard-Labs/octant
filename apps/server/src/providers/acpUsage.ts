@@ -14,6 +14,12 @@ interface AcpUsageSnapshot extends AcpUsageTotals {
 export interface AcpUsageState {
   latest?: AcpUsageSnapshot | undefined;
   baseline?: AcpUsageSnapshot | undefined;
+  /**
+   * Whether the agent sent a snapshot since the turn began. Before one,
+   * `latest` is the baseline itself, and a failed turn would subtract it from
+   * itself and record a zero it never measured.
+   */
+  observedInTurn?: boolean;
 }
 
 type Usage = Omit<
@@ -67,6 +73,7 @@ function regresses(current: AcpUsageTotals, previous: AcpUsageTotals): boolean {
 
 export function beginAcpUsageTurn(state: AcpUsageState): void {
   state.baseline = state.latest;
+  state.observedInTurn = false;
 }
 
 /** Vibe 3.0.3 reports session totals, including after loading an earlier session. */
@@ -82,6 +89,7 @@ export function observeAcpUsage(
     return;
   }
   state.latest = current;
+  state.observedInTurn = true;
 }
 
 export function finishAcpUsageTurn(state: AcpUsageState, receipt: unknown): Usage | undefined {
@@ -146,15 +154,19 @@ export function finishAcpUsageTurn(state: AcpUsageState, receipt: unknown): Usag
 
 /**
  * Usage observed so far in a turn that fails before its reply settles: the
- * counters added since the turn's baseline, from the latest valid snapshot.
+ * counters added since the turn's baseline, from the latest valid snapshot
+ * the agent sent after the turn began; with none, nothing was measured.
  * A failed turn has no final receipt, and the turn's consumer stops reading
  * at its failure, so this is the whole usage it can still record.
  */
 export function observedAcpUsageTurn(state: AcpUsageState): Usage | undefined {
   const baseline = state.baseline;
   const latest = state.latest;
+  const observed = state.observedInTurn === true;
   state.baseline = undefined;
-  if (baseline === undefined || latest === undefined || regresses(latest, baseline)) return;
+  state.observedInTurn = false;
+  if (!observed || baseline === undefined || latest === undefined || regresses(latest, baseline))
+    return;
   return {
     kind: "usage",
     inputTokens: latest.inputTokens - baseline.inputTokens,
