@@ -3,22 +3,26 @@ import { decodeAppUpdateFeed, decodeAppVersion } from "@octant/contracts/app-upd
 import {
   canonicalReleaseBytes,
   canonicalReleaseBytesWithoutProduct,
+  resolveHeadlessBuildOffer,
   resolveNightlyInstallRelease,
   resolveUpdateOffer,
 } from "@octant/domain";
 import { describe, expect, it } from "vitest";
 import {
+  buildHeadlessRelease,
   buildRelease,
   dryRunFeedDocument,
   feedRelativePath,
   generateFeedKeyPair,
   legacyFeedRelativePath,
   parseFeedCommand,
+  parseHeadlessFeedCommand,
   printedFeedPath,
   refuseUntrustedSigningKey,
   resolveFeedSigningMaterial,
   sha256Hex,
   signFeed,
+  signHeadlessFeed,
   signLegacyFeed,
 } from "./sign-update-feed";
 
@@ -382,5 +386,116 @@ describe("reading the publish command", () => {
 
   it("refuses a missing field rather than signing a release built from guesses", () => {
     expect(() => parseFeedCommand(argv.filter((value) => value !== "--url"))).toThrow(/--url/);
+  });
+});
+
+describe("listing a headless build in the ring's feed", () => {
+  const BUILD = new TextEncoder().encode("octant headless build bytes");
+  const headless = (ring: "stable" | "preview" | "candidate" = "candidate") =>
+    buildHeadlessRelease({
+      version: "0.3.0-candidate.4",
+      ring,
+      target: "linux-arm64",
+      url: "https://github.com/Ogard-Labs/octant/releases/download/v0.3.0-candidate.4/octant-0.3.0-candidate.4-linux-arm64.tar.gz",
+      sha256: sha256Hex(BUILD),
+      releasedAt: "2026-11-20T12:00:00.000Z",
+    });
+  const verifierFor = (publicKeyBase64: string) => {
+    const publicKey = createPublicKey({
+      key: Buffer.from(publicKeyBase64, "base64"),
+      format: "der",
+      type: "spki",
+    });
+    return (message: Uint8Array, signature: string) =>
+      verify(null, message, publicKey, Buffer.from(signature, "base64"));
+  };
+
+  it("signs a listing a host accepts for that target and ring, with the build's digest", () => {
+    const keys = generateFeedKeyPair();
+    const feed = signHeadlessFeed(headless(), keys.privateKey);
+    const offer = resolveHeadlessBuildOffer({
+      document: JSON.parse(JSON.stringify(feed)),
+      target: "linux-arm64",
+      ring: "candidate",
+      verifySignature: verifierFor(keys.publicKey),
+    });
+    expect(offer).toMatchObject({
+      kind: "offer",
+      release: { version: "0.3.0-candidate.4", sha256: sha256Hex(BUILD) },
+    });
+    expect(
+      resolveHeadlessBuildOffer({
+        document: feed,
+        target: "linux-x64",
+        ring: "candidate",
+        verifySignature: verifierFor(keys.publicKey),
+      }),
+    ).toEqual({ kind: "refuse", refusal: "wrong-platform" });
+    expect(
+      resolveHeadlessBuildOffer({
+        document: feed,
+        target: "linux-arm64",
+        ring: "stable",
+        verifySignature: verifierFor(keys.publicKey),
+      }),
+    ).toEqual({ kind: "refuse", refusal: "wrong-ring" });
+  });
+
+  it("a desktop feed's signature does not verify as a headless listing, nor a changed digest", () => {
+    const keys = generateFeedKeyPair();
+    const desktop = signFeed(release({ ring: "candidate" }), keys.privateKey);
+    const listing = signHeadlessFeed(headless(), keys.privateKey);
+    expect(
+      resolveHeadlessBuildOffer({
+        document: { ...listing, signature: desktop.signature },
+        target: "linux-arm64",
+        ring: "candidate",
+        verifySignature: verifierFor(keys.publicKey),
+      }),
+    ).toEqual({ kind: "refuse", refusal: "untrusted-signature" });
+    expect(
+      resolveHeadlessBuildOffer({
+        document: { ...listing, release: { ...listing.release, sha256: "0".repeat(64) } },
+        target: "linux-arm64",
+        ring: "candidate",
+        verifySignature: verifierFor(keys.publicKey),
+      }),
+    ).toEqual({ kind: "refuse", refusal: "untrusted-signature" });
+  });
+
+  it("lists headless builds only on Octant's rings", () => {
+    expect(() => headless("preview")).toThrow(/preview ring carries no headless build/);
+  });
+
+  it("names the listing a host reads, beside the desktop feeds", () => {
+    expect(
+      printedFeedPath([
+        "--print-feed-path",
+        "--headless",
+        "--ring",
+        "stable",
+        "--target",
+        "darwin-arm64",
+      ]),
+    ).toBe("stable/darwin-arm64.octant-headless.json");
+    expect(
+      parseHeadlessFeedCommand([
+        "--headless",
+        "--version",
+        "0.3.0",
+        "--ring",
+        "stable",
+        "--target",
+        "linux-x64",
+        "--url",
+        "https://example.test/b.tar.gz",
+        "--artifact",
+        "/tmp/b.tar.gz",
+        "--released-at",
+        "2026-11-20T12:00:00.000Z",
+        "--out",
+        "/tmp/out.json",
+      ]),
+    ).toMatchObject({ ring: "stable", target: "linux-x64" });
   });
 });

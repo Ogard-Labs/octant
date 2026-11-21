@@ -156,6 +156,73 @@ describe("Make this an Octant computer", () => {
     ]);
   });
 
+  it("downloads the build when none is on this computer, shows downloading, verifying and ready, then states the plan", async () => {
+    const download = {
+      downloadId: "3d2c1b0a-0000-4000-8000-000000000001",
+      target: "linux-x64",
+      ring: "candidate",
+    } as Extract<MemberInstallResult, { kind: "member-build-download" }>["download"];
+    const reads = [
+      { ...download, state: "verifying", version: "1.2.3" },
+      { ...download, state: "ready", version: "1.2.3" },
+    ] as const;
+    let prepares = 0;
+    let read = 0;
+    const { memberInstall } = setup((command) => {
+      if (command.kind === "prepare-member-install") {
+        prepares += 1;
+        return prepares === 1
+          ? { kind: "member-build-download", download: { ...download, state: "downloading" } }
+          : { kind: "member-install-plan", plan: PLAN };
+      }
+      const next = reads[Math.min(read, reads.length - 1)];
+      read += 1;
+      return { kind: "member-build-download", download: { ...download, ...next } };
+    });
+
+    const stages = await screen.findByRole("list", { name: "Download" });
+    expect(
+      within(stages)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual([
+      "Download Octant for linux-x64 from the candidate releaseRunning…",
+      "Verify the release's signed listing, the digest and the build's signatureWaiting",
+      "ReadyWaiting",
+    ]);
+    expect(
+      await screen.findByText("Download Octant 1.2.3 for linux-x64 from the candidate release"),
+    ).toBeTruthy();
+    // Once the build is ready the sheet reads its plan again, and only then
+    // offers the install.
+    expect(
+      await screen.findByLabelText("What Octant will do", {}, { timeout: 4_000 }),
+    ).toBeTruthy();
+    expect(memberInstall.mock.calls.map(([command]) => command.kind)).toEqual([
+      "prepare-member-install",
+      "read-member-build-download",
+      "read-member-build-download",
+      "prepare-member-install",
+    ]);
+  });
+
+  it("says where to place a build when the download is refused", async () => {
+    setup(() => ({
+      kind: "member-build-download",
+      download: {
+        downloadId: "3d2c1b0a-0000-4000-8000-000000000002",
+        target: "linux-x64",
+        ring: "candidate",
+        state: "refused",
+        refusal: "unreachable",
+        message:
+          "No signed Octant build for linux-x64 is on this computer, and the candidate release could not be reached or lists none. Put octant-<version>-linux-x64.tar.gz from Octant's release in /data/headless-builds, then try again.",
+      } as Extract<MemberInstallResult, { kind: "member-build-download" }>["download"],
+    }));
+    expect(await screen.findByText(/in \/data\/headless-builds, then try again/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Install and join" })).toBeNull();
+  });
+
   it("refuses a server with no private address and links the private network guide", async () => {
     const { onOpenPrivateNetworkGuide, user } = setup(() => ({
       kind: "member-install-refused",

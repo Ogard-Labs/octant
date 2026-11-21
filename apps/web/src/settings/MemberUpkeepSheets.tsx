@@ -2,6 +2,7 @@ import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-
 import {
   MEMBER_REMOVAL_STEPS,
   MEMBER_UPDATE_STEPS,
+  type MemberBuildDownload,
   type MemberInstallRefusalReason,
   type MemberInstallResult,
   type MemberRemovalPlan,
@@ -18,6 +19,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { MemberBuildDownloadStatus } from "./MemberBuildDownloadStatus";
 
 export const MEMBER_UPDATE_ACTION = "Update";
 export const MEMBER_REMOVAL_ACTION = "Remove Octant";
@@ -58,7 +60,8 @@ type Sheet<Plan, Progress> =
       readonly reason: MemberInstallRefusalReason;
       readonly message: string;
     }
-  | { readonly kind: "progress"; readonly progress: Progress };
+  | { readonly kind: "progress"; readonly progress: Progress }
+  | { readonly kind: "download"; readonly download: MemberBuildDownload };
 
 interface MemberSheetProps {
   readonly server: ShieldServer;
@@ -69,7 +72,8 @@ interface MemberSheetProps {
 /**
  * Reads the plan once, then a running progress every second until it stops.
  * `pick` turns an answer into the sheet's next state, or nothing for an
- * answer this sheet does not show.
+ * answer this sheet does not show. `readAgain` reads the plan again, once a
+ * build downloaded for the server is ready.
  */
 function useMemberSheet<Plan, Progress extends { readonly state: string }>(input: {
   readonly client: Pick<ShieldServersClient, "memberInstall">;
@@ -80,6 +84,7 @@ function useMemberSheet<Plan, Progress extends { readonly state: string }>(input
 }) {
   const { client, prepare, read, pick, failure } = input;
   const [state, setState] = useState<Sheet<Plan, Progress>>({ kind: "reading" });
+  const [attempt, setAttempt] = useState(0);
   const prepareKey = JSON.stringify(prepare);
 
   useEffect(() => {
@@ -97,7 +102,7 @@ function useMemberSheet<Plan, Progress extends { readonly state: string }>(input
       current = false;
     };
     // The prepare command is read by its contents; a new object each render is the same read.
-  }, [client, prepareKey]);
+  }, [attempt, client, prepareKey]);
 
   const running = state.kind === "progress" && state.progress.state === "running";
   useEffect(() => {
@@ -119,7 +124,8 @@ function useMemberSheet<Plan, Progress extends { readonly state: string }>(input
     // `read` and `pick` are rebuilt each render and say the same thing; the state drives the poll.
   }, [client, running, state]);
 
-  return [state, setState] as const;
+  const readAgain = () => setAttempt((count) => count + 1);
+  return [state, setState, readAgain] as const;
 }
 
 function StepList<Step extends string>(props: {
@@ -181,7 +187,7 @@ export function MemberUpdateSheet(props: MemberSheetProps) {
   const { server, client } = props;
   const titleId = useId();
   const [confirming, setConfirming] = useState(false);
-  const [state, setState] = useMemberSheet<MemberUpdatePlan, MemberUpdateProgress>({
+  const [state, setState, readAgain] = useMemberSheet<MemberUpdatePlan, MemberUpdateProgress>({
     client,
     prepare: { kind: "prepare-member-update", serverId: server.serverId },
     read: (progress) => ({ kind: "read-member-update", updateId: progress.updateId }),
@@ -190,9 +196,11 @@ export function MemberUpdateSheet(props: MemberSheetProps) {
         ? { kind: "plan", plan: result.plan }
         : result.kind === "member-update-progress"
           ? { kind: "progress", progress: result.progress }
-          : result.kind === "member-install-refused"
-            ? { kind: "refused", reason: result.reason, message: result.message }
-            : undefined,
+          : result.kind === "member-build-download"
+            ? { kind: "download", download: result.download }
+            : result.kind === "member-install-refused"
+              ? { kind: "refused", reason: result.reason, message: result.message }
+              : undefined,
     failure: "Octant could not read the server. Try again.",
   });
   // The confirmed plan's versions stay known while the steps run, for their labels.
@@ -242,6 +250,21 @@ export function MemberUpdateSheet(props: MemberSheetProps) {
         <p className="member-install__note" role="status">
           Reading {server.alias} over SSH…
         </p>
+      ) : null}
+      {state.kind === "download" ? (
+        <>
+          <MemberBuildDownloadStatus
+            client={client}
+            download={state.download}
+            key={state.download.downloadId}
+            onReady={readAgain}
+          />
+          <div className="member-install__actions">
+            <OctantButton onClick={props.onClose} type="button" variant="ghost">
+              Close
+            </OctantButton>
+          </div>
+        </>
       ) : null}
       {state.kind === "refused" ? (
         <Refusal message={state.message} onClose={props.onClose} />

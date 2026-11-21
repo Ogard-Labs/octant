@@ -601,13 +601,46 @@ keys when it has them) and changes nothing anywhere. The sheet states:
 - that it joins this computer's hub, and that confirming also approves that
   one join.
 
-**Where the build comes from.** Octant downloads no build itself yet: the
-newest `octant-<version>-<target>.tar.gz` in the `headless-builds` folder of
-this computer's Octant data folder is used, as the release publishes it. A
-build that is unsigned, signed by a key not trusted for its ring, or whose
-files differ from its manifest is refused before a byte is sent; it is
-checked again when the person confirms, and a build changed since the sheet
-was read is refused.
+**Where the build comes from.** The newest `octant-<version>-<target>.tar.gz`
+in the `headless-builds` folder of this computer's Octant data folder is
+used, as the release publishes it. A build the person placed there by hand is
+kept: while one for the server's target is there (for an update, one newer
+than the installed version), Octant asks no release for anything. Otherwise
+preparing downloads the build for the server's target from the ring this
+computer follows (Settings › Updates; the ring its own version names until
+the person picks one), as its own updater does (maintainer decision,
+2026-11-19), and the sheet shows **downloading**, **verifying** and
+**ready**, then reads the plan again. This computer downloads it; the server
+needs no internet access to the release host.
+
+1. **Listing.** The ring's signed listing of the build,
+   `<ring>/<target>.octant-headless.json` under the updater's feed base (see
+   [Architecture: the feed is published to GitHub
+   releases](../architecture.md#security-and-authority)), names the version,
+   target, ring, the build's URL on its release and its SHA-256. It is read
+   through the updater's own transport, and nothing in it is believed until
+   its signature verifies against the release keys of the ring it names; that
+   ring must be the one this computer follows and the target the server's.
+   For an update, a listed version not newer than the installed one is
+   refused.
+2. **Digest.** The build is downloaded over HTTPS (the updater's redirect,
+   size and time limits) and must hash to the listed digest.
+3. **Signature.** The build then passes the same check as a placed build:
+   every file against its manifest, and the manifest's own release signature
+   against the keys of its ring; its version and ring must be the listed
+   ones.
+4. **Kept.** It is written to a hidden temporary file in `headless-builds`,
+   checked there, and only then renamed to its release name. A build that
+   fails any step is deleted, so nothing unverified is ever kept or found.
+
+A computer following Octant Nightly's preview ring asks nothing, because
+Nightly releases carry no headless build. When the ring cannot be reached,
+lists no build for the target, or refuses one, the sheet keeps the sentence
+it shows when no build is on this computer and says where to place a build
+by hand. A build that is unsigned, signed by a key not trusted for its ring,
+or whose files differ from its manifest is refused before a byte is sent; it
+is checked again when the person confirms, and a build changed since the
+sheet was read is refused.
 
 **The steps.** The person's one confirmation journals the request, then runs
 copy, verify, install, start, listen and join over the same connection. Each
@@ -652,9 +685,11 @@ an install whose join succeeded, and no removal since) offers **Update** and
 principals on the same route, decided before anything is read. Preparing
 reads the install over SSH (the version its `current` link names, that
 version's manifest, and the login's state and data folders) and this
-computer's build, and changes nothing. It refuses a server this hub does not
-list as a member, a build that is not newer than the installed one, and an
-unsigned or untrusted build, exactly as the install does. The sheet states
+computer's build, and changes nothing on the server. When no build newer
+than the installed one is on this computer it downloads one from the ring,
+as the install does. It refuses a server this hub does not list as a member,
+a build that is not newer than the installed one, and an unsigned or
+untrusted build, exactly as the install does. The sheet states
 the two versions and the ring, that the signature and every file were checked
 here, how running turns stop, that the store is migrated when the new build's
 store version is higher, and what makes Octant roll back. The one
@@ -718,8 +753,6 @@ servers are Octant computers now and at which version.
 
 **Not built yet.**
 
-- Downloading the build from its ring: today the person places the signed
-  release build in the folder named above.
 - Joining a hub from a computer that is only a member: the ticket is approved
   on the hub, and the owner routes offer no pairing approval, so a member's
   window refuses with a sentence and the person uses the hub's window.
@@ -3627,12 +3660,15 @@ verify, stop now, `octant server upgrade`, the signed hello confirmed, and a
 roll-back when the hello does not come, is not the member's, names another
 version or does not cover this computer) and Remove Octant (leave, stop and
 remove the service, delete the install, the data folder only when ticked),
-with their journal events. Not built: the download from the ring, a join made
-from a member's window, pairing with no hub, draining by waiting for running
-turns, and rolling back a swap that migrated the store. Verification: server
-tests against a stand-in `ssh` that runs the remote command in `sh` with a
-stand-in signed build and a stand-in hello, and component tests of the
-sheets; a real machine is a maintainer gate.
+with their journal events; and, when no suitable build is on this computer,
+the build downloaded from its ring through the signed feed listing, its
+digest and its own signature checked before it is kept. Not built: a join
+made from a member's window, pairing with no hub, draining by waiting for
+running turns, and rolling back a swap that migrated the store.
+Verification: server tests against a stand-in `ssh` that runs the remote
+command in `sh` with a stand-in signed build, a stand-in hello and a
+stand-in release host serving a signed listing, and component tests of the
+sheets; a real machine and a published listing are maintainer gates.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

@@ -478,6 +478,50 @@ const MemberStepRunState = Schema.Literal("waiting", "running", "succeeded", "fa
 const MemberStepMessage = Schema.String.pipe(Schema.maxLength(1_024));
 const MemberInstallPath = Schema.String.pipe(Schema.minLength(2), Schema.maxLength(1_024));
 
+/**
+ * Downloading the signed headless build for a server's target from this
+ * computer's ring, when none suitable is on this computer: the ring's signed
+ * listing, then the build's digest, then its own release signature, before it
+ * is kept in the data folder's `headless-builds` folder. The sheet reads it
+ * until it is ready, then reads its plan again.
+ */
+export const MemberBuildDownloadState = Schema.Literal(
+  "downloading",
+  "verifying",
+  "ready",
+  "refused",
+);
+export type MemberBuildDownloadState = typeof MemberBuildDownloadState.Type;
+
+/** Why a download kept nothing, as a closed list. */
+export const MemberBuildDownloadRefusal = Schema.Literal(
+  /** The ring could not be reached, or lists no build for the target. */
+  "unreachable",
+  /** This computer follows a ring that carries no headless build. */
+  "no-release",
+  /** The ring's build is not newer than the one the server runs. */
+  "no-newer-release",
+  /** The listing did not verify against the ring's release keys, or names another target or ring. */
+  "untrusted-listing",
+  /** The bytes downloaded do not hash to the digest the signed listing names. */
+  "digest-mismatch",
+  /** The build failed its own check: its files, its signature, or its version. */
+  "build-unverified",
+);
+export type MemberBuildDownloadRefusal = typeof MemberBuildDownloadRefusal.Type;
+
+export const MemberBuildDownload = Schema.Struct({
+  downloadId: AggregateId,
+  target: MemberInstallTarget,
+  ring: MemberInstallReleaseRing,
+  state: MemberBuildDownloadState,
+  /** The version the signed listing names, once it is read. */
+  version: Schema.optional(MemberInstallVersion),
+  refusal: Schema.optional(MemberBuildDownloadRefusal),
+  message: Schema.optional(MemberStepMessage),
+}).annotations(strict);
+export type MemberBuildDownload = typeof MemberBuildDownload.Type;
+
 /** What the Update sheet states before anything runs, every fact read now. */
 export const MemberUpdatePlan = Schema.Struct({
   planId: AggregateId,
@@ -590,6 +634,11 @@ export const MemberInstallCommand = Schema.Union(
     kind: Schema.Literal("read-member-removal"),
     removalId: AggregateId,
   }).annotations(strict),
+  /** A build download a prepare started, read until it is ready or refused. */
+  Schema.Struct({
+    kind: Schema.Literal("read-member-build-download"),
+    downloadId: AggregateId,
+  }).annotations(strict),
 );
 export type MemberInstallCommand = typeof MemberInstallCommand.Type;
 
@@ -614,6 +663,7 @@ export const MemberInstallRefusalReason = Schema.Literal(
   "no-newer-build",
   "update-not-found",
   "removal-not-found",
+  "download-not-found",
 );
 export type MemberInstallRefusalReason = typeof MemberInstallRefusalReason.Type;
 
@@ -645,6 +695,11 @@ export const MemberInstallResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("member-removal-progress"),
     progress: MemberRemovalProgress,
+  }).annotations(strict),
+  /** No suitable build is on this computer, so preparing started, or joined, its download. */
+  Schema.Struct({
+    kind: Schema.Literal("member-build-download"),
+    download: MemberBuildDownload,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("member-install-refused"),

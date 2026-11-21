@@ -1,5 +1,6 @@
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type {
+  MemberBuildDownload,
   MemberInstallPlan,
   MemberInstallProgress,
   MemberInstallRefusalReason,
@@ -12,6 +13,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { MemberBuildDownloadStatus } from "./MemberBuildDownloadStatus";
 
 export const MEMBER_INSTALL_ACTION = "Make this an Octant computer";
 
@@ -45,7 +47,8 @@ type SheetState =
       readonly reason: MemberInstallRefusalReason;
       readonly message: string;
     }
-  | { readonly kind: "progress"; readonly progress: MemberInstallProgress };
+  | { readonly kind: "progress"; readonly progress: MemberInstallProgress }
+  | { readonly kind: "download"; readonly download: MemberBuildDownload };
 
 export interface MemberInstallSheetProps {
   readonly server: ShieldServer;
@@ -69,6 +72,8 @@ export function MemberInstallSheet(props: MemberInstallSheetProps) {
   const [state, setState] = useState<SheetState>({ kind: "reading" });
   const [address, setAddress] = useState<string | undefined>(undefined);
   const [confirming, setConfirming] = useState(false);
+  // Read again once a build downloaded for the server is ready.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let current = true;
@@ -78,6 +83,8 @@ export function MemberInstallSheet(props: MemberInstallSheetProps) {
         if (result.kind === "member-install-plan") {
           setState({ kind: "plan", plan: result.plan });
           setAddress(result.plan.addresses[0]?.address);
+        } else if (result.kind === "member-build-download") {
+          setState({ kind: "download", download: result.download });
         } else if (result.kind === "member-install-refused") {
           setState({ kind: "refused", reason: result.reason, message: result.message });
         }
@@ -95,7 +102,7 @@ export function MemberInstallSheet(props: MemberInstallSheetProps) {
     return () => {
       current = false;
     };
-  }, [client, server.serverId]);
+  }, [attempt, client, server.serverId]);
 
   const runningId =
     state.kind === "progress" && state.progress.state === "running"
@@ -159,6 +166,21 @@ export function MemberInstallSheet(props: MemberInstallSheetProps) {
         <p className="member-install__note" role="status">
           Reading {server.alias} over SSH…
         </p>
+      ) : null}
+      {state.kind === "download" ? (
+        <>
+          <MemberBuildDownloadStatus
+            client={client}
+            download={state.download}
+            key={state.download.downloadId}
+            onReady={() => setAttempt((count) => count + 1)}
+          />
+          <div className="member-install__actions">
+            <OctantButton onClick={props.onClose} type="button" variant="ghost">
+              Close
+            </OctantButton>
+          </div>
+        </>
       ) : null}
       {state.kind === "refused" ? (
         <>

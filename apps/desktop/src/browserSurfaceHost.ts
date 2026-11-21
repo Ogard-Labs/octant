@@ -93,7 +93,7 @@ import {
   type BrowserTransferLimits,
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
-import { isPrivateAddress } from "./privateAddress";
+import { isPrivateAddress } from "@octant/host-runtime";
 import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
 import {
   FAVICON_MIN_INTERVAL_MS,
