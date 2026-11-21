@@ -301,3 +301,53 @@ it("preserves rename and copy paths containing spaces from rename/copy headers",
     binary: true,
   });
 });
+
+it("preserves leading spaces in unquoted extended headers and leading UTF-8 BOMs in quoted paths", () => {
+  const patch = [
+    'diff --git "a/old\\tname.txt" "b/ file.txt"',
+    "similarity index 100%",
+    'rename from "old\\tname.txt"',
+    "rename to  file.txt",
+    'diff --git "a/\\357\\273\\277bom.txt" "b/\\357\\273\\277bom.txt"',
+    "similarity index 100%",
+    'rename from "old-bom.txt"',
+    'rename to "\\357\\273\\277bom.txt"',
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]).toMatchObject({
+    path: " file.txt",
+    previousPath: "old\tname.txt",
+    change: "renamed",
+  });
+  expect(files[1]?.path).toBe("\uFEFFbom.txt");
+  expect(files[1]?.nonUtf8Path).toBeUndefined();
+});
+
+it("sets nonUtf8Path from the destination path on renames", () => {
+  const patch = [
+    'diff --git "a/file-\\303.txt" b/report.txt',
+    "similarity index 100%",
+    'rename from "file-\\303.txt"',
+    "rename to report.txt",
+    'diff --git a/report.txt "b/file-\\303.txt"',
+    "similarity index 100%",
+    "rename from report.txt",
+    'rename to "file-\\303.txt"',
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]).toMatchObject({
+    path: "report.txt",
+    previousPath: "file-\\303.txt",
+    change: "renamed",
+  });
+  expect(files[0]?.nonUtf8Path).toBeUndefined();
+
+  expect(files[1]).toMatchObject({
+    path: "file-\\303.txt",
+    previousPath: "report.txt",
+    change: "renamed",
+    nonUtf8Path: true,
+  });
+});

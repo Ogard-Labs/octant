@@ -163,7 +163,7 @@ interface DecodedPath {
 }
 
 const UTF8_ENCODER = new TextEncoder();
-const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 const C_ESCAPES: Readonly<Record<string, number>> = {
   a: 0x07,
@@ -177,12 +177,12 @@ const C_ESCAPES: Readonly<Record<string, number>> = {
   "\\": 0x5c,
 };
 
-function unquotePath(path: string): DecodedPath {
-  const trimmed = path.trim();
-  if (!trimmed.startsWith('"') || !trimmed.endsWith('"') || trimmed.length < 2) {
-    return { value: trimmed, nonUtf8: false };
+function unquotePath(path: string, options: { readonly trim?: boolean } = {}): DecodedPath {
+  const candidate = options.trim === false ? path : path.trim();
+  if (!candidate.startsWith('"') || !candidate.endsWith('"') || candidate.length < 2) {
+    return { value: candidate, nonUtf8: false };
   }
-  const inner = trimmed.slice(1, -1);
+  const inner = candidate.slice(1, -1);
   const bytes: number[] = [];
   let cursor = 0;
   while (cursor < inner.length) {
@@ -328,11 +328,10 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     !accumulator.sawHunk &&
     !accumulator.sawBinaryContent &&
     (change === "created" || change === "deleted");
-  const primaryNonUtf8 =
+  const nonUtf8Path =
     newPath !== undefined && newPath !== "/dev/null"
       ? accumulator.newPathNonUtf8
       : accumulator.oldPathNonUtf8;
-  const nonUtf8Path = primaryNonUtf8 || (renamed && accumulator.oldPathNonUtf8);
   return {
     id: `${String(index)}:${path}`,
     path,
@@ -394,28 +393,28 @@ export function parseUnifiedDiff(
     }
     if (accumulator === undefined) continue;
     if (!accumulator.sawHunk && line.startsWith("rename from ")) {
-      const decoded = unquotePath(line.slice("rename from ".length));
+      const decoded = unquotePath(line.slice("rename from ".length), { trim: false });
       accumulator.oldPath = decoded.value;
       accumulator.oldPathNonUtf8 = decoded.nonUtf8;
       accumulator.change = "renamed";
       continue;
     }
     if (!accumulator.sawHunk && line.startsWith("rename to ")) {
-      const decoded = unquotePath(line.slice("rename to ".length));
+      const decoded = unquotePath(line.slice("rename to ".length), { trim: false });
       accumulator.newPath = decoded.value;
       accumulator.newPathNonUtf8 = decoded.nonUtf8;
       accumulator.change = "renamed";
       continue;
     }
     if (!accumulator.sawHunk && line.startsWith("copy from ")) {
-      const decoded = unquotePath(line.slice("copy from ".length));
+      const decoded = unquotePath(line.slice("copy from ".length), { trim: false });
       accumulator.oldPath = decoded.value;
       accumulator.oldPathNonUtf8 = decoded.nonUtf8;
       accumulator.change = "renamed";
       continue;
     }
     if (!accumulator.sawHunk && line.startsWith("copy to ")) {
-      const decoded = unquotePath(line.slice("copy to ".length));
+      const decoded = unquotePath(line.slice("copy to ".length), { trim: false });
       accumulator.newPath = decoded.value;
       accumulator.newPathNonUtf8 = decoded.nonUtf8;
       accumulator.change = "renamed";
