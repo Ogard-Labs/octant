@@ -1,5 +1,9 @@
 import { useContext, useEffect, useState } from "react";
-import type { BenchmarkAdviceRequest, BenchmarkAdviceResponse } from "@octant/contracts";
+import type {
+  BenchmarkAdviceRequest,
+  BenchmarkAdviceResponse,
+  ProviderModelOptionValues,
+} from "@octant/contracts";
 import {
   findPickerModel,
   isDraftSelectionSelectable,
@@ -8,6 +12,10 @@ import {
 } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { BenchmarkAdviceContext } from "../usage/benchmarks/BenchmarkAdviceContext";
+import {
+  findSupportedReasoningOption,
+  preservedNonReasoningModelOptions,
+} from "./composerReasoningOption";
 
 type Scope = Extract<BenchmarkAdviceRequest, { readonly projectId: unknown }>;
 
@@ -61,18 +69,28 @@ export function ComposerBenchmarkHint(props: {
     const best = ranked[0];
     const selectedRank = ranked.findIndex(
       ({ model }) =>
-        model.providerInstanceId === props.selected.providerInstanceId &&
-        model.modelId === props.selected.modelId,
+        String(model.providerInstanceId) === String(props.selected.providerInstanceId) &&
+        String(model.modelId) === String(props.selected.modelId),
     );
     if (best === undefined || selectedRank < 1) continue;
     const { model, picker } = best;
+    const supportedReasoning = findSupportedReasoningOption(picker.model.options, model.effort);
+    // Pass an explicit option map so switching to a default-effort or
+    // unsupported-effort suggestion clears prior reasoning effort instead of
+    // inheriting it, while keeping still-supported non-reasoning choices (e.g. Fast).
+    const modelOptionValues: ProviderModelOptionValues = {
+      ...preservedNonReasoningModelOptions(picker.model.options, props.selected.modelOptionValues),
+      ...(supportedReasoning === undefined
+        ? {}
+        : { [supportedReasoning.id]: supportedReasoning.value }),
+    };
     return (
       <div className="composer-model-picker__benchmark-hint">
         <span className="oct-meta">
           {model.costPerPass === undefined
             ? `Passed your ${suite.name} suite: ${picker.model.displayName} (cost not reported).`
             : `Passed your ${suite.name} suite at the lowest cost: ${picker.model.displayName}.`}{" "}
-          {model.effort === undefined ? "" : `Effort: ${model.effort}. `}
+          {supportedReasoning === undefined ? "" : `Effort: ${supportedReasoning.value}. `}
           {model.runAt.slice(0, 10)}
           {model.stale ? " · Stale" : ""}
         </span>
@@ -81,9 +99,7 @@ export function ComposerBenchmarkHint(props: {
             props.onSelect({
               providerInstanceId: model.providerInstanceId,
               modelId: model.modelId,
-              ...(model.effort === undefined
-                ? {}
-                : { modelOptionValues: { effort: model.effort } }),
+              modelOptionValues,
             })
           }
           size="sm"

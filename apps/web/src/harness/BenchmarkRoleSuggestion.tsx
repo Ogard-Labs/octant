@@ -12,6 +12,7 @@ import {
   MODEL_ROLE_NEEDS,
   type PickerGroup,
 } from "@octant/domain";
+import { findSupportedReasoningOption } from "../providers/ComposerModelPicker";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 
@@ -65,15 +66,26 @@ export function BenchmarkRoleSuggestion(props: {
   }, [client, suiteId]);
 
   const need = MODEL_ROLE_NEEDS.find((entry) => entry.roleId === props.role.id);
-  const models = (ranked?.suiteId === suiteId ? (ranked?.models ?? []) : [])
+  const models = (
+    ranked !== undefined && suiteId !== undefined && String(ranked.suiteId) === String(suiteId)
+      ? ranked.models
+      : []
+  )
     .flatMap((model) => {
       const picker = findPickerModel(props.groups, model);
-      return picker === undefined ||
+      if (
+        picker === undefined ||
         !isDraftSelectionSelectable(props.groups, model) ||
         (need?.needsTools === true && !picker.toolCapable) ||
         (need?.needsImages === true && !picker.model.inputModalities.includes("image"))
-        ? []
-        : [{ model, displayName: picker.model.displayName }];
+      ) {
+        return [];
+      }
+      const supported = findSupportedReasoningOption(picker.model.options, model.effort);
+      const { effort: _dropped, ...withoutEffort } = model;
+      const validated: BenchmarkModelAdvice =
+        supported === undefined ? withoutEffort : { ...withoutEffort, effort: supported.value };
+      return [{ model: validated, displayName: picker.model.displayName }];
     })
     .slice(0, MAX_NATIVE_HARNESS_SLOT_CANDIDATES);
   return (
@@ -93,7 +105,7 @@ export function BenchmarkRoleSuggestion(props: {
               onValueChange={(id) => {
                 setMessage(undefined);
                 setRanked(undefined);
-                setSuiteId(suites.find((suite) => suite.id === id)?.id);
+                setSuiteId(suites.find((suite) => String(suite.id) === id)?.id);
               }}
             />
           )}
