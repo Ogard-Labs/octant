@@ -58,8 +58,18 @@ const WINDOW_LEAD_READ = /\bcontextByMode\b/g;
 const SERVER_SOURCE = /^apps\/server\//;
 /** Only the shared process error net may register process-level crash listeners. */
 export const PROCESS_ERROR_NET_OWNER = "packages/host-runtime/src/processErrorNet.ts";
-const PROCESS_ERROR_LISTENER =
-  /(?:\.\s*(?:on|once|addListener|prependListener|prependOnceListener)\s*\(\s*(["'`])(?:uncaughtException(?:Monitor)?|unhandledRejection)\1|\bsetUncaughtExceptionCaptureCallback\s*\()/g;
+const LISTENER_METHODS = "on|once|addListener|prependListener|prependOnceListener";
+// Disjoint whitespace/comment separator: allows inline block or line comments
+// between receiver, method name, parenthesis, and event name without scanning
+// quotes across unrelated regex literals earlier in the file.
+const CALL_GAP = "(?:\\s|//[^\\n]*\\n|/\\*[\\s\\S]*?\\*/)*";
+const PROCESS_ERROR_LISTENER = new RegExp(
+  `(?:(?:\\??\\.${CALL_GAP}(?:${LISTENER_METHODS})|(?:\\?\\.)?${CALL_GAP}\\[${CALL_GAP}(["'\`])(?:${LISTENER_METHODS})\\1${CALL_GAP}\\])` +
+    `${CALL_GAP}\\(${CALL_GAP}(["'\`])(?:uncaughtException(?:Monitor)?|unhandledRejection)\\2|` +
+    `(?:\\bsetUncaughtExceptionCaptureCallback|(?:\\?\\.)?${CALL_GAP}\\[${CALL_GAP}(["'\`])setUncaughtExceptionCaptureCallback\\3${CALL_GAP}\\])` +
+    `${CALL_GAP}\\()`,
+  "g",
+);
 
 const SOURCE_EXTENSION = /\.(?:ts|tsx|mts|cts)$/;
 

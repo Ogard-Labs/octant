@@ -62,6 +62,11 @@ describe("code-style check", () => {
       "process.once('unhandledRejection', () => undefined);",
       "process.addListener(`uncaughtExceptionMonitor`, () => undefined);",
       "process.setUncaughtExceptionCaptureCallback(() => undefined);",
+      'process["on"]("uncaughtException", () => undefined);',
+      "process?.['prependOnceListener'](/* inline */ 'unhandledRejection', () => undefined);",
+      'process.on(/* event */ "uncaughtException", () => undefined);',
+      'process["setUncaughtExceptionCaptureCallback"](() => undefined);',
+      "process.once(\n  // line comment before event\n  'unhandledRejection', () => undefined);",
       'const isRejectionRecord = record.exitReason === "unhandledRejection";',
       'const label = "uncaughtException";',
     ].join("\n");
@@ -75,6 +80,11 @@ describe("code-style check", () => {
       { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 2 },
       { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 3 },
       { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 4 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 5 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 6 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 7 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 8 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 9 },
     ]);
     const findings = [
       { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 1 },
