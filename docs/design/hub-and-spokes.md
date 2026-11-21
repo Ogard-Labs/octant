@@ -656,16 +656,28 @@ computer's build, and changes nothing. It refuses a server this hub does not
 list as a member, a build that is not newer than the installed one, and an
 unsigned or untrusted build, exactly as the install does. The sheet states
 the two versions and the ring, that the signature and every file were checked
-here, how running turns stop, that the store is migrated when the new build's
-store version is higher, and what makes Octant roll back. The one
-confirmation journals the request, then runs over the same connection:
+here, how running turns stop (the person picks **Wait up to N minutes for
+running work**, ten unless they pick another bound from 1 to 60, or **Stop
+now**), that the store is migrated when the new build's store version is
+higher, and what makes Octant roll back. The one confirmation journals the
+request, then runs over the same connection:
 
 1. **Copy** and **Verify**, exactly as the install does.
-2. **Drain.** `octant server stop` from the installed copy: the member's owner
-   stops gracefully, and the turns that stop cuts off continue by themselves
-   once it starts again (restart continuation). Only **stop now** is built;
-   waiting up to a chosen number of minutes for running turns is not, because
-   no host stops admitting new turns while letting running ones finish.
+2. **Drain.** As the person chose (maintainer decision, 2026-11-19). **Wait**
+   runs `octant server drain --wait <minutes>` from the installed copy: the
+   member refuses every new turn and routine run at once, lets running turns
+   finish, and answers `drained` once none runs or `timed-out` with how many
+   still run when the wait passes
+   ([Architecture: draining before an update](../architecture.md#draining-before-an-update)).
+   Then `octant server stop`; a turn still running is stopped then, and the
+   step says how many were. **Stop now** runs only `octant server stop`.
+   Either way the member's owner stops gracefully and the turns the stop cuts
+   off continue by themselves once it starts again (restart continuation).
+   When the drain or the stop fails nothing is swapped: Roll back lifts the
+   drain and starts the member on the version it runs. Octant never stops a
+   member asked to wait without that wait first; a member whose installed CLI
+   cannot drain fails the step and is rolled back, and the person can update it
+   with Stop now.
 3. **Swap.** The installed copy's `octant server upgrade --artifact …
 --install-root …`, so the user service it rewrites keeps naming the
    install's `current` link. It checks the signature again, stages the new
@@ -678,12 +690,14 @@ confirmation journals the request, then runs over the same connection:
    signed it. The update is confirmed when the hello names the installed
    version and its protocol range covers this computer.
 
-**Roll back.** After a failed swap that left the previous version current, or
-a confirmation that fails because the hello does not come within two minutes
-(the health check), is not signed by the member's key, names another version,
-or has a protocol range that does not cover this computer, the **Roll back**
-step points `current` at the previous version again, starts it, and deletes
-the refused version so the update can be tried again; the sheet says why. A
+**Roll back.** After a failed drain or stop, a failed swap that left the
+previous version current, or a confirmation that fails because the hello does
+not come within two minutes (the health check), is not signed by the member's
+key, names another version, or has a protocol range that does not cover this
+computer, the **Roll back** step points `current` at the previous version
+again, lifts the drain with `octant server drain --lift` when the member was
+asked to wait and nothing was swapped, starts it, and deletes the refused
+version so the update can be tried again; the sheet says why. A
 swap that `octant server upgrade` left stopped for a store restore
 (`recovery-required`) is not rolled back, and neither is a confirmed swap
 whose store was migrated: Octant never starts the previous build against a
@@ -706,8 +720,10 @@ confirmation journals the request and runs:
 <data folder>`, where the CLI deletes the data folder only when it is that
    exact canonical folder the sheet named.
 
-**Journal.** An update journals `shield-servers.member-update-requested@1`
-(both versions, ring, target, and the drain chosen) and
+**Journal.** An update journals `shield-servers.member-update-requested@2`
+(both versions, ring, target, and the drain chosen: `{ kind: "stop-now" }` or
+`{ kind: "wait", minutes }`; `@1`, written before waiting was offered, is read
+back as stop now) and
 `shield-servers.member-update-step@1` for each step including Roll back (step,
 outcome, a closed failure reason); a removal journals
 `shield-servers.member-removal-requested@1` (whether the data folder is
@@ -727,8 +743,8 @@ servers are Octant computers now and at which version.
   computer's claim lives in the desktop app, not in the server, so a computer
   with no hub role refuses with a sentence.
 - Starting a Mac at boot with no login; the sheet says so.
-- Draining by waiting for running turns: an update stops the member now, and
-  restart continuation resumes the turns the stop cut off.
+- Offering Wait only to a member whose CLI can drain: an older member fails
+  the Drain step and is rolled back.
 - Rolling back after a confirmed swap that migrated the store, which needs a
   store restore on the member; the sheet names the backup instead.
 - Reading the hello again after a roll-back: the roll-back step succeeds when

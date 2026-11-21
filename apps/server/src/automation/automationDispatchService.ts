@@ -50,6 +50,12 @@ export interface AutomationDispatchServiceOptions {
   /** Absent, a Chat routine is refused as `unsupported-mode`. */
   readonly chat?: AutomationChatDispatchPort;
   readonly capacity: AutomationCapacityAdmissionPort;
+  /**
+   * True while the host drains before an update. A run then waits without a
+   * thread, and the scheduler's lease recovery offers it again once the drain
+   * lifts or the updated host starts.
+   */
+  readonly refusesNewRuns?: () => boolean;
   readonly resolveFacts: (input: {
     readonly definition: AutomationDefinition;
     readonly run: AutomationRun;
@@ -97,6 +103,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   readonly #work: AutomationWorkDispatchPort;
   readonly #chat: AutomationChatDispatchPort | undefined;
   readonly #capacity: AutomationCapacityAdmissionPort;
+  readonly #refusesNewRuns: (() => boolean) | undefined;
   readonly #resolveFacts: AutomationDispatchServiceOptions["resolveFacts"];
   readonly #readFollowUpThread: AutomationDispatchServiceOptions["readFollowUpThread"];
   readonly #now: () => UtcTimestamp;
@@ -112,6 +119,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     this.#work = options.work;
     this.#chat = options.chat;
     this.#capacity = options.capacity;
+    this.#refusesNewRuns = options.refusesNewRuns;
     this.#resolveFacts = options.resolveFacts;
     this.#readFollowUpThread = options.readFollowUpThread;
     this.#now = options.now;
@@ -157,6 +165,9 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     }
 
     if (run.dispatchIntent === undefined) {
+      // Moved to dispatching first, so the lease recovery offers it again:
+      // left queued, the scheduler would not offer it until a restart.
+      if (this.#refusesNewRuns?.() === true) return;
       const revalidation = revalidateAutomationAuthority({
         definition,
         run,

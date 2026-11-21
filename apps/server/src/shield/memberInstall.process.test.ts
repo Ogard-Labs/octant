@@ -24,6 +24,7 @@ import {
   SHIELD_SERVERS_AGGREGATE,
   SHIELD_SERVERS_EVENT_NAMES,
   MemberInstallResult,
+  type MemberUpdateDrain,
 } from "@octant/contracts/shield-servers";
 import { Schema } from "effect";
 import {
@@ -81,7 +82,9 @@ const decodeMemberInstallResult = Schema.decodeUnknownSync(MemberInstallResult);
  * computer's approval, which the stand-in hub writes as `$HOME/approved`.
  * Its `server upgrade` swaps the `current` link, and when `$HOME/unhealthy`
  * exists it fails its health check and puts the previous version back, as
- * the real one does.
+ * the real one does. Its `server drain --wait` says `drained`, or
+ * `timed-out` with the count `$HOME/turns-running` holds; its `server stop`
+ * fails while `$HOME/stop-fails` exists.
  */
 const STAND_IN_CLI = `#!/bin/sh
 printf '%s\\n' "$*" >> "$HOME/octant-calls.log"
@@ -107,7 +110,17 @@ case "$1 $2" in
     mkdir -p "$HOME/.config/systemd/user" && echo "[Unit]" > "$HOME/.config/systemd/user/octant.service"
     echo "enabled" ;;
   "server start") echo "ready" ;;
-  "server stop") echo "stopped" ;;
+  "server stop")
+    [ -f "$HOME/stop-fails" ] && { echo "Octant did not stop." >&2; exit 1; }
+    echo "stopped" ;;
+  "server drain")
+    if [ "$3" = "--lift" ]; then echo "lifted: this computer admits new turns again."; exit 0; fi
+    if [ -f "$HOME/turns-running" ]; then
+      echo "draining: $(cat "$HOME/turns-running") turns running. New turns are refused."
+      echo "timed-out: $(cat "$HOME/turns-running") turns still running after $4 minutes. New turns are refused."
+    else
+      echo "drained: no turn is running. New turns are refused."
+    fi ;;
   "server disable")
     if [ "$3" = "--remove-service" ]; then rm -f "$HOME/.config/systemd/user/octant.service"; fi
     echo "disabled" ;;
@@ -761,10 +774,13 @@ async function settledRemoval(setup: ReturnType<typeof setUp>, removalId: string
   }
 }
 
-async function updateOver(setup: ReturnType<typeof setUp>) {
+async function updateOver(
+  setup: ReturnType<typeof setUp>,
+  drain: MemberUpdateDrain = { kind: "stop-now" },
+) {
   const plan = updatePlanOf(await setup.upkeep.prepareUpdate(setup.serverId, person));
   const confirmed = await setup.upkeep.confirmUpdate(
-    { planId: String(plan.planId), drain: "stop-now" },
+    { planId: String(plan.planId), drain },
     person,
   );
   if (confirmed.kind !== "member-update-progress") throw new Error(JSON.stringify(confirmed));
@@ -799,10 +815,10 @@ describe("updating a member and removing Octant from it over SSH", () => {
       signature: "verified",
       installRoot: `${setup.server.state}/install`,
       storeMigration: false,
-      drains: ["stop-now"],
+      drains: ["wait", "stop-now"],
     });
     const confirmed = await setup.upkeep.confirmUpdate(
-      { planId: String(plan.planId), drain: "stop-now" },
+      { planId: String(plan.planId), drain: { kind: "stop-now" } },
       person,
     );
     if (confirmed.kind !== "member-update-progress") throw new Error(JSON.stringify(confirmed));
@@ -829,7 +845,10 @@ describe("updating a member and removing Octant from it over SSH", () => {
     ).toBe(false);
     // The confirmation was spent, and there is nothing newer to update to.
     expect(
-      await setup.upkeep.confirmUpdate({ planId: String(plan.planId), drain: "stop-now" }, person),
+      await setup.upkeep.confirmUpdate(
+        { planId: String(plan.planId), drain: { kind: "stop-now" } },
+        person,
+      ),
     ).toMatchObject({ reason: "plan-expired" });
     expect(await setup.upkeep.prepareUpdate(setup.serverId, person)).toMatchObject({
       kind: "member-install-refused",
@@ -914,6 +933,143 @@ describe("updating a member and removing Octant from it over SSH", () => {
     expect(silent.store.memberComputer(silent.serverId)?.artifactVersion).toBe("1.2.3");
   });
 
+  it("an update that waits drains the member before swapping", async () => {
+    const setup = setUp();
+    const before = await memberAt123(setup);
+    signedBuild(setup.builds, setup.releaseKey.privateKeyBase64, "1.2.4");
+    const { progress } = await updateOver(setup, { kind: "wait", minutes: 10 });
+    expect(progress.state).toBe("updated");
+    const root = `${setup.server.state}/install`;
+    // The member refuses new turns and waits for running ones before it
+    // stops, and only then is the build swapped.
+    expect(callsSince(setup, before)).toEqual([
+      "server drain --wait 10",
+      "server stop",
+      expect.stringMatching(new RegExp(`^server upgrade --artifact /.+ --install-root ${root}$`)),
+    ]);
+    expect(progress.steps.find((step) => step.step === "drain")).toEqual({
+      step: "drain",
+      state: "succeeded",
+    });
+    const requested = upkeepRecords(setup)[0];
+    expect(requested?.eventName).toBe("shield-servers.member-update-requested@2");
+    expect(decodeMemberUpdateRequestedPayload(requested?.payload).drain).toEqual({
+      kind: "wait",
+      minutes: 10,
+    });
+
+    // Turns still running when the wait ends are stopped, as the person
+    // chose, and the sheet says so; restart continuation resumes them.
+    const slow = setUp();
+    const slowBefore = await memberAt123(slow);
+    signedBuild(slow.builds, slow.releaseKey.privateKeyBase64, "1.2.4");
+    writeFileSync(join(slow.server.home, "turns-running"), "2");
+    const timedOut = await updateOver(slow, { kind: "wait", minutes: 10 });
+    expect(timedOut.progress.state).toBe("updated");
+    expect(callsSince(slow, slowBefore).slice(0, 2)).toEqual([
+      "server drain --wait 10",
+      "server stop",
+    ]);
+    expect(timedOut.progress.steps.find((step) => step.step === "drain")).toMatchObject({
+      state: "succeeded",
+      message: expect.stringContaining("2 turns were still running after 10 minutes"),
+    });
+  });
+
+  it("a failed update lifts the drain", async () => {
+    const setup = setUp();
+    const before = await memberAt123(setup);
+    signedBuild(setup.builds, setup.releaseKey.privateKeyBase64, "1.2.4");
+    writeFileSync(join(setup.server.home, "stop-fails"), "");
+    const { progress } = await updateOver(setup, { kind: "wait", minutes: 5 });
+    expect(progress.state).toBe("rolled-back");
+    expect(progress.steps.map((step) => [step.step, step.state])).toEqual([
+      ["copy", "succeeded"],
+      ["verify", "succeeded"],
+      ["drain", "failed"],
+      ["swap", "not-run"],
+      ["confirm", "not-run"],
+      ["roll-back", "succeeded"],
+    ]);
+    // Nothing was swapped; the member that was refusing turns admits them
+    // again and runs the version it ran before.
+    expect(callsSince(setup, before)).toEqual([
+      "server drain --wait 5",
+      "server stop",
+      "server drain --lift",
+      "server start",
+    ]);
+    expect(currentVersion(setup)).toBe("1.2.3");
+    expect(setup.store.memberComputer(setup.serverId)?.artifactVersion).toBe("1.2.3");
+
+    // Stopping now never drained, so a failed stop has nothing to lift.
+    const stopNow = setUp();
+    const stopNowBefore = await memberAt123(stopNow);
+    signedBuild(stopNow.builds, stopNow.releaseKey.privateKeyBase64, "1.2.4");
+    writeFileSync(join(stopNow.server.home, "stop-fails"), "");
+    expect((await updateOver(stopNow)).progress.state).toBe("rolled-back");
+    expect(callsSince(stopNow, stopNowBefore)).toEqual(["server stop", "server start"]);
+  });
+
+  it("an update journaled before waiting was offered still moves the member's version on", async () => {
+    const setup = setUp();
+    await memberAt123(setup);
+    const updateId = randomUUID();
+    const version =
+      setup.journal
+        .aggregateVersions(SHIELD_SERVERS_AGGREGATE)
+        .find((entry) => entry.aggregateId === setup.serverId)?.aggregateVersion ?? 0;
+    setup.journal.append({
+      aggregate: {
+        aggregateType: SHIELD_SERVERS_AGGREGATE,
+        aggregateId: setup.serverId as never,
+      },
+      expectedVersion: version as never,
+      events: [
+        {
+          eventId: randomUUID() as never,
+          eventName: SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequestedV1 as never,
+          eventVersion: 1,
+          correlationId: randomUUID() as never,
+          actor: person.actor,
+          occurredAt: "2026-11-20T12:00:00.000Z" as never,
+          payload: {
+            updateId,
+            serverId: setup.serverId,
+            target: "linux-x64",
+            fromVersion: "1.2.3",
+            toVersion: "1.2.4",
+            ring: "preview",
+            drain: "stop-now",
+          },
+        },
+      ],
+    });
+    const reopened = new ShieldServerStore({
+      journal: setup.journal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => "2026-11-20T12:00:00.000Z",
+    });
+    reopened.load();
+    expect(
+      reopened.recordMemberUpdate(
+        {
+          event: "step",
+          payload: {
+            updateId: updateId as never,
+            serverId: setup.serverId as never,
+            step: "confirm",
+            outcome: "succeeded",
+          },
+        },
+        person.actor,
+      ),
+    ).toBe(true);
+    expect(reopened.memberComputer(setup.serverId)?.artifactVersion).toBe("1.2.4");
+  });
+
   it("refuses an update build whose signature does not verify, and changes nothing", async () => {
     const untrusted = setUp();
     const before = await memberAt123(untrusted);
@@ -936,7 +1092,7 @@ describe("updating a member and removing Octant from it over SSH", () => {
     signedBuild(swapped.builds, swapped.otherKey.privateKeyBase64, "1.2.4");
     expect(
       await swapped.upkeep.confirmUpdate(
-        { planId: String(plan.planId), drain: "stop-now" },
+        { planId: String(plan.planId), drain: { kind: "stop-now" } },
         person,
       ),
     ).toMatchObject({ kind: "member-install-refused", reason: "build-unverified" });
@@ -1020,7 +1176,7 @@ describe("updating a member and removing Octant from it over SSH", () => {
     const updating = await askResult({
       kind: "confirm-member-update",
       planId: plan.planId,
-      drain: "stop-now",
+      drain: { kind: "stop-now" },
     });
     if (updating.kind !== "member-update-progress") throw new Error(JSON.stringify(updating));
     expect((await settledUpdate(setup, String(updating.progress.updateId))).state).toBe("updated");
@@ -1062,7 +1218,7 @@ describe("updating a member and removing Octant from it over SSH", () => {
       fromVersion: "1.2.3",
       toVersion: "1.2.4",
       ring: "preview",
-      drain: "stop-now",
+      drain: { kind: "stop-now" },
     });
     expect(
       updateSteps.map((envelope) => {
@@ -1119,7 +1275,7 @@ describe("updating a member and removing Octant from it over SSH", () => {
       expect(await setup.upkeep.prepareUpdate(setup.serverId, requester)).toMatchObject(refusal);
       expect(
         await setup.upkeep.confirmUpdate(
-          { planId: String(update.planId), drain: "stop-now" },
+          { planId: String(update.planId), drain: { kind: "stop-now" } },
           requester,
         ),
       ).toMatchObject(refusal);
@@ -1134,7 +1290,7 @@ describe("updating a member and removing Octant from it over SSH", () => {
     // The route reads who is asking from the authenticated principal.
     for (const body of [
       { kind: "prepare-member-update", serverId: setup.serverId },
-      { kind: "confirm-member-update", planId: update.planId, drain: "stop-now" },
+      { kind: "confirm-member-update", planId: update.planId, drain: { kind: "stop-now" } },
       { kind: "prepare-member-removal", serverId: setup.serverId },
       { kind: "confirm-member-removal", planId: removal.planId, deleteData: true },
     ]) {

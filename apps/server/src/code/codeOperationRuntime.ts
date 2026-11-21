@@ -2196,6 +2196,11 @@ export function createCodeOperationRuntime(
                   modelId: thread.modelId,
                   projectId: thread.projectId,
                 });
+          if (admission?.kind === "draining") {
+            throw new CodeServiceError(
+              decodeCodeFailure({ category: "unavailable", message: admission.detail }),
+            );
+          }
           if (admission?.kind === "paused") {
             throw new CodeServiceError(
               decodeCodeFailure({

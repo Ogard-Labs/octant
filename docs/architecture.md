@@ -1287,6 +1287,41 @@ rather than as its own file or a long reply; its text is owned by
 tools or authority, and the Canvas one is absent wherever the tool is not
 offered.
 
+### Draining before an update
+
+An update Octant runs on a member over SSH can ask the member to drain first
+([Hub and spokes: adding a computer over SSH](design/hub-and-spokes.md#adding-a-computer-over-ssh)).
+`octant server drain --wait <minutes>` (1 to 60) asks the member's own host,
+through the CLI's local control session and `POST /api/host-control/drain`,
+to refuse new turns and let running ones go on. The host decides admission,
+never the client:
+
+- **New turns.** The turn admission every Chat send, Work turn and Code turn
+  asks before it starts, the one a paused harness session answers, refuses
+  with "This computer is about to update. Try again in a few minutes." A
+  subagent's result delivered to its parent is refused the same way.
+- **Routine runs.** The dispatcher starts none: a due run waits as dispatching
+  with no thread, and the scheduler's lease recovery offers it again once the
+  drain lifts or the updated host starts.
+- **Running turns** go on, with what they started. Nothing in the drain
+  cancels a turn; only the update's stop does, after the wait or at once when
+  the person chose Stop now.
+
+The host counts running turns from the start and end every mode reports for a
+turn, one per thread. The CLI reads the drain once a second and prints
+`drained` once no turn runs, or `timed-out` with the count still running once
+the wait passes. The drain keeps refusing until the host stops, `octant server
+drain --lift` lifts it (an update that fails before its swap does), or five
+minutes after its wait ended, which lifts a drain whose update never came
+back. It lives in the host process and journals nothing: a restart admits
+turns again, and restart continuation resumes the turns a stop cut off. Only
+the host's own person drains (`host.service.drain`, beside
+`host.service.stop`: a local window, or a device that person paired), and the
+private listener does not forward the route, so in practice the member's own
+CLI is the caller. Not refused while draining: a Chat Retry or resumed attempt,
+a context compaction, and a helper agent a running turn starts, which do not
+pass the turn admission.
+
 ### Desktop menu bar
 
 The menu bar is the closed-window fleet roster; the Inbox is the in-window list.
@@ -19621,8 +19656,10 @@ listen address and port) and `shield-servers.member-install-step@1` (step,
 outcome, and a closed failure reason), with the person or their paired device
 as the actor and never a join code, ticket, comparison code or key. Such a
 server's row then offers **Update** and **Remove Octant** on the same route,
-journaled the same way as `shield-servers.member-update-requested@1` (both
-versions, ring, target, drain), `shield-servers.member-update-step@1` (copy,
+journaled the same way as `shield-servers.member-update-requested@2` (both
+versions, ring, target, and the drain: stop now, or wait with its minutes;
+`@1`, whose only drain was stop now, is still read),
+`shield-servers.member-update-step@1` (copy,
 verify, drain, swap, confirm or roll-back, with outcome and a closed failure
 reason, among them why the swapped build was rolled back),
 `shield-servers.member-removal-requested@1` (whether the data folder is

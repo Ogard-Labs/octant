@@ -42,9 +42,10 @@ import type { ShieldServerStore } from "./shieldServerStore";
  * Canonical: docs/design/hub-and-spokes.md § Adding a computer over SSH.
  *
  * Preparing reads the server's install and changes nothing. An update copies
- * and checks the newest signed build exactly as the install does, stops the
- * member gracefully (waiting for running turns is not built; the turns the
- * stop cuts off continue after it starts again), runs the installed
+ * and checks the newest signed build exactly as the install does, drains the
+ * member as the person chose (refusing new turns and waiting up to their
+ * bound for running ones, or not waiting) and stops it gracefully, so the
+ * turns the stop cuts off continue after it starts again, runs the installed
  * `octant server upgrade`, which stages, backs up a migrating store, swaps
  * and rolls back after failed health polls, and then reads the member's
  * signed hello. A hello that does not come, is not signed by the member's
@@ -137,6 +138,13 @@ exit 0`;
 const DRAIN_SCRIPT = `"$1" server stop`;
 
 /**
+ * `$1` the installed CLI, `$2` minutes. The member refuses new turns and
+ * waits up to that long for running ones, then says `drained` or
+ * `timed-out` with how many still run; it keeps refusing until it stops.
+ */
+const DRAIN_WAIT_SCRIPT = `"$1" server drain --wait "$2"`;
+
+/**
  * `$1` install root, `$2` the unpacked build, `$3` work folder. The installed
  * CLI runs the upgrade so the user service it rewrites keeps naming the
  * install's `current` link rather than this work folder. Prints the end of
@@ -151,14 +159,18 @@ exit 0`;
 
 /**
  * `$1` install root, `$2` the previous version's folder, `$3` the failed
- * version's folder. Points \`current\` back at the previous version, starts it,
- * and deletes the failed version so the update can be tried again.
+ * version's folder, `$4` \`lift\` when the member may still be draining.
+ * Points \`current\` back at the previous version, lifts the drain, starts
+ * it, and deletes the failed version so the update can be tried again. The
+ * lift may find nothing to lift (the stop went through), which is not a
+ * failure: the member starts again admitting turns either way.
  */
 const ROLL_BACK_SCRIPT = `cur=$(readlink -- "$1/current")
 if [ "$cur" != "$2" ]; then
   "$1/current/bin/octant" server stop >/dev/null 2>&1
   ln -sfn -- "$2" "$1/current" || exit 3
 fi
+if [ "$4" = lift ]; then "$1/current/bin/octant" server drain --lift >/dev/null 2>&1; fi
 "$1/current/bin/octant" server start >/dev/null || exit $?
 [ "$3" = "$2" ] || rm -rf -- "$3"
 readlink -- "$1/current"`;
@@ -225,7 +237,8 @@ interface RunningRemoval {
 }
 
 type UpdateOutcome =
-  | { readonly ok: true }
+  /** `note` is what the sheet says beside a step that succeeded, when there is more to say. */
+  | { readonly ok: true; readonly note?: string }
   | {
       readonly ok: false;
       readonly failure: MemberUpdateFailure;
@@ -309,7 +322,7 @@ export class MemberUpkeepService {
       signature: "verified",
       installRoot: facts.installRoot,
       storeMigration: build.storeVersion > facts.storeVersion,
-      drains: ["stop-now"],
+      drains: ["wait", "stop-now"],
     };
     this.#forgetExpiredPlans();
     this.#updatePlans.set(String(plan.planId), {
@@ -385,7 +398,7 @@ export class MemberUpkeepService {
       steps: MEMBER_UPDATE_STEPS.map((step): MemberUpdateStepState => ({ step, state: "waiting" })),
     };
     this.#updates.set(String(updateId), update);
-    const done = this.#runUpdate(update, prepared, build, actor).finally(() => {
+    const done = this.#runUpdate(update, prepared, build, input.drain, actor).finally(() => {
       this.#options.work.release(String(plan.serverId), String(updateId));
     });
     void done.catch(() => undefined);
@@ -489,6 +502,7 @@ export class MemberUpkeepService {
     update: RunningUpdate,
     prepared: PreparedUpdate,
     build: Verified,
+    drain: MemberUpdateDrain,
     actor: EventActor,
   ): Promise<void> {
     const { plan, server, facts } = prepared;
@@ -537,6 +551,28 @@ export class MemberUpkeepService {
         return { ok: true };
       },
       drain: async () => {
+        let note: string | undefined;
+        if (drain.kind === "wait") {
+          const waited = await this.#call(server, {
+            script: DRAIN_WAIT_SCRIPT,
+            args: [cli, String(drain.minutes)],
+            timeoutMs: drain.minutes * 60_000 + SHORT_STEP_TIMEOUT_MS,
+          });
+          // The member may be refusing turns by now, so the roll-back lifts
+          // the drain and starts it. The member is not stopped here: only the
+          // person's choice of Stop now cuts running turns off without a wait.
+          if (!waited.ok) return { ...waited, rollBack: true };
+          const drained = readDrain(waited.output);
+          if (drained === undefined) {
+            return rollBackFor(
+              "command-failed",
+              `${plan.alias} did not say whether its running turns ended, so it was not stopped.`,
+            );
+          }
+          if (drained.outcome === "timed-out") {
+            note = `${turnsStill(drained.running)} after ${minutesOf(drain.minutes)}; Octant stopped ${drained.running === 1 ? "it" : "them"}, and ${drained.running === 1 ? "it continues" : "they continue"} once ${plan.alias} starts again.`;
+          }
+        }
         const call = await this.#call(server, {
           script: DRAIN_SCRIPT,
           args: [cli],
@@ -544,7 +580,8 @@ export class MemberUpkeepService {
         });
         // A stop that failed may have stopped the member anyway, so it is
         // started again on the version it runs.
-        return call.ok ? { ok: true } : { ...call, rollBack: true };
+        if (!call.ok) return { ...call, rollBack: true };
+        return note === undefined ? { ok: true } : { ok: true, note };
       },
       swap: async () => {
         const call = await this.#call(server, {
@@ -606,7 +643,12 @@ export class MemberUpkeepService {
       );
       const recorded = record(step, outcome);
       if (outcome.ok && recorded) {
-        mark(step, { state: "succeeded" });
+        mark(
+          step,
+          outcome.note === undefined
+            ? { state: "succeeded" }
+            : { state: "succeeded", message: outcome.note.slice(0, 1_024) },
+        );
         continue;
       }
       // A step whose outcome the journal does not hold stops the run as a
@@ -625,7 +667,12 @@ export class MemberUpkeepService {
         return;
       }
       update.steps = [...update.steps, { step: "roll-back", state: "running" }];
-      const rolledBack = await this.#rollBack(prepared, swapped).catch(
+      const rolledBack = await this.#rollBack(
+        prepared,
+        swapped,
+        // Until the swap, a member asked to wait may still be refusing turns.
+        drain.kind === "wait" && !swapped,
+      ).catch(
         (): UpdateOutcome => updateFailed("command-failed", "The roll-back stopped unexpectedly."),
       );
       const rollBackRecorded = record("roll-back", rolledBack);
@@ -694,7 +741,11 @@ export class MemberUpkeepService {
    * the new build migrated is never handed back to the previous build: that
    * is the person's to restore.
    */
-  async #rollBack(prepared: PreparedUpdate, swapped: boolean): Promise<UpdateOutcome> {
+  async #rollBack(
+    prepared: PreparedUpdate,
+    swapped: boolean,
+    liftDrain: boolean,
+  ): Promise<UpdateOutcome> {
     const { plan, server, facts } = prepared;
     if (swapped && plan.storeMigration) {
       return updateFailed(
@@ -708,6 +759,7 @@ export class MemberUpkeepService {
         facts.installRoot,
         facts.currentRoot,
         `${facts.installRoot}/versions/${plan.toVersion}`,
+        liftDrain ? "lift" : "keep",
       ],
       timeoutMs: STEP_TIMEOUT_MS,
     });
@@ -971,6 +1023,26 @@ function readSwap(output: string): {
     healthRolledBack: /failed its health check and was rolled back/.test(said),
     lastLine: lines.at(-1)?.slice(0, 1_024),
   };
+}
+
+/** What `octant server drain --wait` said last: `drained`, or `timed-out` with the turns still running. */
+function readDrain(
+  output: string,
+):
+  | { readonly outcome: "drained" }
+  | { readonly outcome: "timed-out"; readonly running: number }
+  | undefined {
+  const timedOut = /(?:^|\n)timed-out: (\d{1,6}) turns? still running/.exec(output);
+  if (timedOut?.[1] !== undefined) return { outcome: "timed-out", running: Number(timedOut[1]) };
+  return /(?:^|\n)drained:/.test(output) ? { outcome: "drained" } : undefined;
+}
+
+function turnsStill(running: number): string {
+  return running === 1 ? "1 turn was still running" : `${running} turns were still running`;
+}
+
+function minutesOf(minutes: number): string {
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
 }
 
 function updateFailed(failure: MemberUpdateFailure, message: string): UpdateOutcome {

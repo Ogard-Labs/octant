@@ -633,6 +633,7 @@ export function startOctantServer(
       nativeHarnessComposition,
       nativeHarnessEgressRoutes,
       nativeHarnessHooks,
+      hostDrain,
       nativeHarnessRoutingRoutes,
       imageDescriber,
       shieldServerRoutes,
@@ -1434,6 +1435,7 @@ export function startOctantServer(
       agentRunOrchestration,
       externalContentIngestionStore,
       readHarnessProcessReceipts,
+      hostDrain,
       capacityScheduler,
       chatService,
       codeCompletedThreadSource,
@@ -1983,6 +1985,7 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      hostDrain,
       shieldServerStore,
       serverConnection,
       resolveThreadStrict,

@@ -777,6 +777,40 @@ describe("AutomationDispatchService", () => {
     session.connection.close();
   });
 
+  it("starts no routine run while the host drains, and starts it once the drain lifts", async () => {
+    const session = openSession();
+    const definition = codeDefinition();
+    const run = claimQueuedRun(session, definition);
+    const code = createCodePort();
+    let draining = true;
+    const dispatcher = new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: code.port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: alwaysAdmit(),
+      refusesNewRuns: () => draining,
+      resolveFacts: () => matchingFacts(definition),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+      schedule: (work) => {
+        void work();
+      },
+    });
+
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(code.create).not.toHaveBeenCalled();
+    // It waits as dispatching with no thread, which the scheduler's lease
+    // recovery offers again; nothing failed it.
+    expect(session.projection.getRun(run.id)).toMatchObject({ lifecycle: "dispatching" });
+    expect(session.projection.getRun(run.id)?.dispatchIntent).toBeUndefined();
+
+    draining = false;
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(code.create).toHaveBeenCalledTimes(1);
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+    session.connection.close();
+  });
+
   it("observes the exact recorded Code turn and releases its run only on matching terminal evidence", async () => {
     const session = openSession();
     const definition = codeDefinition();
