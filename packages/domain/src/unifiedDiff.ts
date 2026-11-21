@@ -58,11 +58,18 @@ export interface ParsedDiffFile {
   readonly previousPath?: string;
   /** Present when git recorded an `old mode` → `new mode` permission change. */
   readonly modeChange?: DiffFileModeChange;
+  /** Present when git recorded a `new file mode` or `deleted file mode`. */
+  readonly fileMode?: string;
   /**
    * True only when the file changed permissions (`old mode` → `new mode`) with
    * no textual hunks and no binary or blob content change.
    */
   readonly modeOnly?: true;
+  /**
+   * True only when a created or deleted file carried no textual hunks and no
+   * binary or non-empty blob content change.
+   */
+  readonly emptyFile?: true;
   readonly change: DiffFileChange;
   readonly additions: number;
   readonly deletions: number;
@@ -94,6 +101,7 @@ interface FileAccumulator {
   newPath?: string;
   oldMode?: string;
   newMode?: string;
+  fileMode?: string;
   change: DiffFileChange;
   additions: number;
   deletions: number;
@@ -107,6 +115,25 @@ interface FileAccumulator {
 
 const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$/;
 const CONTENT_INDEX = /^index ([0-9a-f]+)\.\.([0-9a-f]+)(?:\s|$)/i;
+const EMPTY_SHA1_BLOB = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+const EMPTY_SHA256_BLOB = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
+
+function isNullOid(oid: string): boolean {
+  return /^0+$/.test(oid);
+}
+
+function isEmptyBlobOid(oid: string): boolean {
+  const lower = oid.toLowerCase();
+  return (
+    lower.length >= 7 && (EMPTY_SHA1_BLOB.startsWith(lower) || EMPTY_SHA256_BLOB.startsWith(lower))
+  );
+}
+
+function isEmptyFileIndexPair(oldOid: string, newOid: string): boolean {
+  return (
+    (isNullOid(oldOid) && isEmptyBlobOid(newOid)) || (isEmptyBlobOid(oldOid) && isNullOid(newOid))
+  );
+}
 
 function newAccumulator(): FileAccumulator {
   return {
@@ -160,12 +187,18 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
       : undefined;
   const modeOnly =
     !accumulator.sawHunk && modeChange !== undefined && !accumulator.sawBinaryContent;
+  const emptyFile =
+    !accumulator.sawHunk &&
+    !accumulator.sawBinaryContent &&
+    (change === "created" || change === "deleted");
   return {
     id: `${String(index)}:${path}`,
     path,
     ...(renamed && oldPath !== undefined ? { previousPath: oldPath } : {}),
     ...(modeChange === undefined ? {} : { modeChange }),
+    ...(accumulator.fileMode === undefined ? {} : { fileMode: accumulator.fileMode }),
     ...(modeOnly ? { modeOnly: true as const } : {}),
+    ...(emptyFile ? { emptyFile: true as const } : {}),
     change,
     additions: accumulator.additions,
     deletions: accumulator.deletions,
@@ -225,6 +258,18 @@ export function parseUnifiedDiff(
       if (mode.length > 0) accumulator.newMode = mode;
       continue;
     }
+    if (!accumulator.sawHunk && line.startsWith("new file mode ")) {
+      const mode = line.slice("new file mode ".length).trim();
+      if (mode.length > 0) accumulator.fileMode = mode;
+      accumulator.change = "created";
+      continue;
+    }
+    if (!accumulator.sawHunk && line.startsWith("deleted file mode ")) {
+      const mode = line.slice("deleted file mode ".length).trim();
+      if (mode.length > 0) accumulator.fileMode = mode;
+      accumulator.change = "deleted";
+      continue;
+    }
     if (!accumulator.sawHunk) {
       if (line.startsWith("Binary files ") || line === "GIT binary patch") {
         accumulator.sawBinaryContent = true;
@@ -234,7 +279,8 @@ export function parseUnifiedDiff(
       if (
         indexMatch?.[1] !== undefined &&
         indexMatch[2] !== undefined &&
-        indexMatch[1] !== indexMatch[2]
+        indexMatch[1] !== indexMatch[2] &&
+        !isEmptyFileIndexPair(indexMatch[1], indexMatch[2])
       ) {
         accumulator.sawBinaryContent = true;
         continue;

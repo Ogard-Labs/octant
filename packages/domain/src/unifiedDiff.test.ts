@@ -137,3 +137,55 @@ it("preserves end-of-file no-newline markers on the lines they follow", () => {
     { kind: "context", text: "tail", oldNumber: 2, newNumber: 2, noNewlineAtEndOfFile: true },
   ]);
 });
+
+it("preserves creation and deletion modes for empty, executable, and binary files", () => {
+  const patch = [
+    "diff --git a/scripts/empty.sh b/scripts/empty.sh",
+    "new file mode 100755",
+    "index 0000000..e69de29",
+    "diff --git a/obsolete.txt b/obsolete.txt",
+    "deleted file mode 100644",
+    "index e69de29..0000000",
+    "diff --git a/scripts/start.sh b/scripts/start.sh",
+    "new file mode 100755",
+    "index 0000000..abcdef1",
+    "--- /dev/null",
+    "+++ b/scripts/start.sh",
+    "@@ -0,0 +1 @@",
+    "+#!/bin/sh",
+    "diff --git a/assets/new.png b/assets/new.png",
+    "new file mode 100644",
+    "index 0000000..1234567",
+    "Binary files /dev/null and b/assets/new.png differ",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]).toMatchObject({
+    path: "scripts/empty.sh",
+    change: "created",
+    fileMode: "100755",
+    binary: true,
+    emptyFile: true,
+  });
+  expect(files[1]).toMatchObject({
+    path: "obsolete.txt",
+    change: "deleted",
+    fileMode: "100644",
+    binary: true,
+    emptyFile: true,
+  });
+  expect(files[2]).toMatchObject({
+    path: "scripts/start.sh",
+    change: "created",
+    fileMode: "100755",
+    binary: false,
+  });
+  expect(files[2]?.emptyFile).toBeUndefined();
+  expect(files[3]).toMatchObject({
+    path: "assets/new.png",
+    change: "created",
+    fileMode: "100644",
+    binary: true,
+  });
+  expect(files[3]?.emptyFile).toBeUndefined();
+});

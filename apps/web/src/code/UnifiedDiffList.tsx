@@ -490,11 +490,17 @@ function renderFileSection(input: {
         {file.previousPath === undefined ? null : (
           <span className="unified-diff__renamed">from {file.previousPath}</span>
         )}
-        {file.modeChange === undefined ? null : (
+        {file.modeChange !== undefined ? (
           <span className="unified-diff__mode">
             mode {file.modeChange.oldMode} → {file.modeChange.newMode}
           </span>
-        )}
+        ) : file.fileMode !== undefined ? (
+          <span className="unified-diff__mode">
+            {file.change === "deleted"
+              ? `deleted mode ${file.fileMode}`
+              : `new mode ${file.fileMode}`}
+          </span>
+        ) : null}
         <span className="unified-diff__change">{CHANGE_LABELS[file.change]}</span>
         {input.onReadProviderFile === undefined ? null : (
           <OctantButton
@@ -531,7 +537,11 @@ function renderFileSection(input: {
         >
           {file.modeOnly === true && file.modeChange !== undefined
             ? `File mode changed from ${file.modeChange.oldMode} to ${file.modeChange.newMode} with no content changes.`
-            : "This file changed without a textual diff, so there is nothing to compare."}
+            : file.emptyFile === true && file.change === "created"
+              ? "Empty file added."
+              : file.emptyFile === true && file.change === "deleted"
+                ? "Empty file deleted."
+                : "This file changed without a textual diff, so there is nothing to compare."}
         </p>
       ) : (
         <table aria-label={`Diff for ${file.path}`} className="unified-diff__table">

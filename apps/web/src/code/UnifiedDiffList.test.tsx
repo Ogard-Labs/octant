@@ -102,6 +102,57 @@ describe("UnifiedDiffList", () => {
     expect(onSelectLine).not.toHaveBeenCalled();
   });
 
+  it("renders creation and deletion mode badges and honest empty-file copy without hiding binary additions", () => {
+    const files = parseUnifiedDiff(
+      [
+        "diff --git a/scripts/empty.sh b/scripts/empty.sh",
+        "new file mode 100755",
+        "index 0000000..e69de29",
+        "diff --git a/obsolete.txt b/obsolete.txt",
+        "deleted file mode 100644",
+        "index e69de29..0000000",
+        "diff --git a/scripts/start.sh b/scripts/start.sh",
+        "new file mode 100755",
+        "index 0000000..abcdef1",
+        "--- /dev/null",
+        "+++ b/scripts/start.sh",
+        "@@ -0,0 +1 @@",
+        "+#!/bin/sh",
+        "diff --git a/assets/new.png b/assets/new.png",
+        "new file mode 100644",
+        "index 0000000..1234567",
+        "Binary files /dev/null and b/assets/new.png differ",
+      ].join("\n"),
+    );
+
+    render(<UnifiedDiffList files={files} onOpenFile={vi.fn()} />);
+
+    const emptyAdded = screen.getByRole("region", { name: "scripts/empty.sh" });
+    expect(within(emptyAdded).getByText("new mode 100755")).toBeVisible();
+    expect(within(emptyAdded).getByText("added")).toBeVisible();
+    expect(within(emptyAdded).getByText("Empty file added.")).toBeVisible();
+
+    const emptyDeleted = screen.getByRole("region", { name: "obsolete.txt" });
+    expect(within(emptyDeleted).getByText("deleted mode 100644")).toBeVisible();
+    expect(within(emptyDeleted).getByText("deleted")).toBeVisible();
+    expect(within(emptyDeleted).getByText("Empty file deleted.")).toBeVisible();
+    expect(within(emptyDeleted).queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+
+    const executableAdded = screen.getByRole("region", { name: "scripts/start.sh" });
+    expect(within(executableAdded).getByText("new mode 100755")).toBeVisible();
+    expect(within(executableAdded).getByText("added")).toBeVisible();
+    expect(within(executableAdded).getByText("#!/bin/sh")).toBeVisible();
+
+    const binaryAdded = screen.getByRole("region", { name: "assets/new.png" });
+    expect(within(binaryAdded).getByText("new mode 100644")).toBeVisible();
+    expect(within(binaryAdded).getByText("added")).toBeVisible();
+    expect(
+      within(binaryAdded).getByText(
+        "This file changed without a textual diff, so there is nothing to compare.",
+      ),
+    ).toBeVisible();
+  });
+
   it("virtualizes large single-file diffs to bounded DOM rows while scrolling", () => {
     const lines = Array.from(
       { length: 600 },
