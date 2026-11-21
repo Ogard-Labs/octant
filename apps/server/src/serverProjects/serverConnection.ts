@@ -57,7 +57,9 @@ export interface ServerCallInput {
   /**
    * An agent socket offering only the key Octant keeps for this server, used
    * in place of the person's agent. Such a call opens its own login and never
-   * shares a connection made with the person's keys.
+   * shares a connection made with the person's keys. It is named on the
+   * command line for the destination alone (see `keptKeyOptions`), so a
+   * `ProxyJump` hop still signs in to its jump host with the person's agent.
    */
   readonly identityAgent?: string;
 }
@@ -210,6 +212,8 @@ export function serverSshArguments(
     readonly controlSocket?: string | undefined;
     /** A known hosts file holding only the server's pinned keys. */
     readonly pinnedKnownHosts?: string | undefined;
+    /** An agent socket offering only the key Octant keeps for this server. */
+    readonly identityAgent?: string | undefined;
   },
 ): ReadonlyArray<string> {
   const control =
@@ -225,6 +229,7 @@ export function serverSshArguments(
     ...[
       ...SERVER_CONNECTION_OPTIONS,
       ...pinnedHostKeyOptions(options.pinnedKnownHosts),
+      ...keptKeyOptions(options.identityAgent),
       ...control,
     ].flatMap((option) => ["-o", option]),
     options.terminal ? "-tt" : "-T",
@@ -234,6 +239,22 @@ export function serverSshArguments(
     server.alias,
     ...(remoteCommand === undefined ? [] : [remoteCommand]),
   ];
+}
+
+/**
+ * Signs in to the destination with the kept key's agent. A command-line
+ * option wins over the person's config, so an `IdentityAgent` of theirs cannot
+ * replace the kept agent, and `IdentitiesOnly=no` keeps a configured
+ * `IdentitiesOnly yes` from filtering the kept key out. `IdentityFile` is the
+ * one setting OpenSSH accumulates across sources (`ssh -G` lists a config's
+ * files after `none`), so a configured file is still tried, but only after the
+ * agent's key, which the server is registered to accept. These options reach
+ * the destination only: a `ProxyJump` hop runs its own `ssh` without them and
+ * keeps the person's agent from the inherited `SSH_AUTH_SOCK`.
+ */
+export function keptKeyOptions(identityAgent: string | undefined): ReadonlyArray<string> {
+  if (identityAgent === undefined) return [];
+  return [`IdentityAgent=${identityAgent}`, "IdentitiesOnly=no", "IdentityFile=none"];
 }
 
 /**
@@ -395,6 +416,7 @@ export class ServerConnection {
       configFile: this.#options.configFile,
       controlSocket,
       pinnedKnownHosts: this.pinnedKnownHostsFile(server, pinned),
+      identityAgent: input.identityAgent,
     });
     return new Promise((resolve) => {
       if (input.signal?.aborted === true) {
@@ -404,7 +426,6 @@ export class ServerConnection {
       const child = spawn(this.#options.sshPath ?? "ssh", [...args], {
         env: {
           ...this.#environment(),
-          ...(input.identityAgent === undefined ? {} : { SSH_AUTH_SOCK: input.identityAgent }),
           ...(input.freshConnection === true ? { LC_ALL: "C" } : {}),
         },
         detached: input.freshConnection === true,

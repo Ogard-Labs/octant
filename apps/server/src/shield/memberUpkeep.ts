@@ -318,7 +318,7 @@ export class MemberUpkeepService {
     if (!this.#options.hub.hellosFrom(listener)) {
       return refused(
         "not-a-member",
-        `This hub does not list ${server.alias} as a member, so an update could not be confirmed by its signed hello. Make it an Octant computer again from this window.`,
+        `This hub does not list ${server.alias} as a member, so an update could not be confirmed by its signed hello. Turn on the hub in Settings › Remote access, then open the sheet again.`,
       );
     }
     const read = await this.#readInstall(server, member);

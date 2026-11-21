@@ -980,10 +980,15 @@ describe("updating a member and removing Octant from it over SSH", () => {
     const before = await memberAt123(setup);
     signedBuild(setup.builds, setup.releaseKey.privateKeyBase64, "1.2.4");
     setup.upkeepHub.roster.roleOn = false;
-    expect(await setup.upkeep.prepareUpdate(setup.serverId, person)).toMatchObject({
+    const offRefusal = await setup.upkeep.prepareUpdate(setup.serverId, person);
+    expect(offRefusal).toMatchObject({
       kind: "member-install-refused",
       reason: "not-a-member",
     });
+    // Make this an Octant computer is hidden for a member, so the refusal
+    // names the action the person can take.
+    expect(JSON.stringify(offRefusal)).toContain("Turn on the hub in Settings › Remote access");
+    expect(JSON.stringify(offRefusal)).not.toContain("Octant computer again");
 
     // A sheet read while the role was on is refused at confirmation once it is off.
     setup.upkeepHub.roster.roleOn = true;

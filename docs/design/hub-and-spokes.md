@@ -571,7 +571,12 @@ not built is listed at the end.
 A server registered with **A key Octant keeps** is reached for install,
 update and removal with that key alone, through an agent socket that offers
 only it and shares no connection made with the person's keys; with no key
-held for it, nothing runs.
+held for it, nothing runs. That agent is named for the destination on the
+`ssh` command line (`IdentityAgent`, with `IdentitiesOnly=no`), which wins over
+the person's config, while `SSH_AUTH_SOCK` stays the person's, so a `ProxyJump`
+hop still signs in to its jump host with their own agent. A configured
+`IdentityFile` cannot be cleared from the command line (OpenSSH adds it to the
+list), so it may still be tried, only after the kept key.
 
 **Who may.** In Settings › Permissions › Servers a registered server's row
 offers **Make this an Octant computer**. The host decides on its own route
