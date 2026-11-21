@@ -2149,7 +2149,11 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           options.runtimeRegistry.closeIdleLeasesWhere(options.instanceId, (lease) => {
             if (lease === leaseKey(posture)) return false;
             const parsed = codexThreadLease(lease);
-            return parsed?.root === projectRoot && parsed.mode === threadMode;
+            return (
+              parsed?.server === serverPlacement?.serverName &&
+              parsed?.root === projectRoot &&
+              parsed.mode === threadMode
+            );
           }),
         );
       return Effect.gen(function* () {
@@ -2219,25 +2223,32 @@ interface CodexLeasedRuntime {
   readonly networkOpen: boolean;
 }
 
-/** The root and mode a thread lease key names, or undefined for any other lease. */
+/**
+ * The server, root and mode a thread lease key names, or undefined for any
+ * other lease. A server lease leads with `server:<name>`; a local root is an
+ * absolute path, so the two never read as each other.
+ */
 function codexThreadLease(
   lease: string,
-): { readonly root: string; readonly mode: string } | undefined {
+):
+  | { readonly server: string | undefined; readonly root: string; readonly mode: string }
+  | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(lease);
   } catch {
     return undefined;
   }
-  if (
-    !Array.isArray(parsed) ||
-    parsed.length < 4 ||
-    parsed.length > 7 ||
-    typeof parsed[3] !== "string"
-  )
-    return undefined;
-  const [root, , mode] = parsed;
-  return typeof root === "string" && typeof mode === "string" ? { root, mode } : undefined;
+  if (!Array.isArray(parsed)) return undefined;
+  const head: unknown = parsed[0];
+  const server =
+    typeof head === "string" && head.startsWith("server:")
+      ? head.slice("server:".length)
+      : undefined;
+  const fields: ReadonlyArray<unknown> = server === undefined ? parsed : parsed.slice(1);
+  if (fields.length < 4 || fields.length > 7 || typeof fields[3] !== "string") return undefined;
+  const [root, , mode] = fields;
+  return typeof root === "string" && typeof mode === "string" ? { server, root, mode } : undefined;
 }
 
 function acquireRuntime(
@@ -2696,11 +2707,13 @@ function makeConnection(
     // Windows has no Octant profile to hold Plan read-only, so a Plan session
     // there outside Strict keeps Codex's own read-only sandbox; Strict is
     // refused there before the process starts.
+    // A server has no Octant profile either: Octant's sandbox cannot run
+    // there, so a server Plan session takes Codex's own read-only sandbox.
     const codexPlanRunsNativeSandbox = (input: {
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly strict?: boolean;
     }) =>
-      (options.platform ?? process.platform) === "win32" &&
+      ((options.platform ?? process.platform) === "win32" || serverPlacement !== undefined) &&
       mode !== "chat" &&
       input.executionPolicy === "plan" &&
       input.strict === false;

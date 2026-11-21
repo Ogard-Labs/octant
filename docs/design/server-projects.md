@@ -212,7 +212,14 @@ checks never change registry/configuration or journal state.
   terminal so bytes pass through unchanged. Its script ends by `exec`-ing the
   program, so the program reads standard input directly; stopping the stream
   closes standard input and ends the connection if it is still open two
-  seconds later. Nothing is forwarded, and no secret goes in the command line,
+  seconds later; output still unread when the stream has not closed by four
+  seconds after the stop is discarded, so the stream's end never waits on a caller that stopped
+  reading. As with a command, a mark goes out before the program
+  starts, so a login shell's greeting never reaches the caller, and the call
+  sets `StdinNull=no` so a person's ssh config cannot hand the program EOF.
+  Because the program replaces the shell, its exit status is reported as it
+  is: a stream's 255 may be the program's own or ssh's, and a caller tells
+  them apart by whether the program answered at all. Nothing is forwarded, and no secret goes in the command line,
   which the server's process list shows. Built; Codex's app-server and Claude
   Code run over it ([Providers running on the server](#providers-running-on-the-server)).
 - **Fail closed.** When a call cannot reach the server (the connection drops,

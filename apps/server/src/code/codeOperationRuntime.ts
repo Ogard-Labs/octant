@@ -1730,6 +1730,10 @@ export function createCodeOperationRuntime(
   const compactableSession = (threadId: CodeThreadId) => {
     const thread = options.persistence.readCodeThread(threadId);
     if (thread === undefined || thread.lifecycle !== "active") return undefined;
+    // Compaction opens its own runtime here, which a server thread's session
+    // cannot run on, so the action is not offered for one.
+    if (options.persistence.readCodeCheckout(thread.checkoutId)?.kind === "remote-root")
+      return undefined;
     const recovered = events.providerSessionForThread(thread.id, NO_OPERATION);
     if (recovered.status !== "ok") return undefined;
     const session = recovered.session;

@@ -5,6 +5,10 @@ import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/prov
 export const SERVER_CODE_THREAD_PROVIDER_UNAVAILABLE =
   "Runs on this computer's files; a Project on a server runs on the Octant Harness, or on a runtime that runs on the server itself.";
 
+/** Why a runtime is not offered for a Work thread in a server Project. */
+export const SERVER_WORK_THREAD_PROVIDER_UNAVAILABLE =
+  "A Work thread in a Project on a server runs on the Octant Harness.";
+
 /**
  * Whether a runtime runs in a server Project: the Octant Harness, whose hands
  * are on the server, or a runtime that reports it runs on the server itself.
@@ -27,17 +31,21 @@ export function serverCodeThreadProviderGroups(
   groups: ReadonlyArray<PickerGroup>,
   mode: "code" | "work" = "code",
 ): ReadonlyArray<PickerGroup> {
+  const reason =
+    mode === "work"
+      ? SERVER_WORK_THREAD_PROVIDER_UNAVAILABLE
+      : SERVER_CODE_THREAD_PROVIDER_UNAVAILABLE;
   return groups.map((group) =>
     runsInServerProject(group, mode)
       ? group
       : {
           ...group,
-          unavailableNote: SERVER_CODE_THREAD_PROVIDER_UNAVAILABLE,
+          unavailableNote: reason,
           sections: group.sections.map((section) => ({
             ...section,
             models: section.models.map((picker) => ({
               ...picker,
-              unavailableReason: SERVER_CODE_THREAD_PROVIDER_UNAVAILABLE,
+              unavailableReason: reason,
             })),
           })),
         },

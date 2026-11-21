@@ -9,7 +9,7 @@ import { transferServerAttachments, type ServerAttachmentTransfer } from "./serv
 import { ServerFileSystem } from "./serverFiles";
 import type { ServerProjectStore } from "./serverProjectStore";
 import { createServerShell, type ServerShellOptions } from "./serverShell";
-import { SERVER_RUNTIME_NOT_HARNESS } from "./serverProjectThreads";
+import { SERVER_WORK_RUNTIME_NOT_HARNESS } from "./serverProjectThreads";
 
 /**
  * Work threads in a server Project. Canonical: docs/design/server-projects.md
@@ -128,7 +128,7 @@ export function bindServerWorkTurn(
     server: () => options.store.serverOf(projectId),
   });
   return tools === undefined
-    ? { status: "refused", message: SERVER_RUNTIME_NOT_HARNESS }
+    ? { status: "refused", message: SERVER_WORK_RUNTIME_NOT_HARNESS }
     : {
         status: "bound",
         folder: project.folder,
