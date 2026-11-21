@@ -309,7 +309,7 @@ function AvailableDiff(
   const tracked = new Map(
     props.snapshot.status
       .filter((entry) => entry.index !== "?" && entry.worktree !== "?")
-      .map((entry) => [String(entry.path), entry.path] as const),
+      .map((entry) => [String(entry.path), entry] as const),
   );
   const mayDiscard =
     policy !== undefined &&
@@ -418,10 +418,17 @@ function AvailableDiff(
     !files.some((file) => file.path === selectedPath);
   const selected =
     files.find((file) => file.path === selectedPath) ?? (selectionMissing ? undefined : files[0]);
-  const trackedPath =
-    selected === undefined || selected.nonUtf8Path === true || selected.nonUtf8PreviousPath === true
+  const trackedEntry =
+    selected === undefined ||
+    selected.nonUtf8Path === true ||
+    (selected.nonUtf8PreviousPath === true && selected.copied !== true)
       ? undefined
       : tracked.get(selected.path);
+  const trackedPath =
+    trackedEntry === undefined ||
+    (selected?.nonUtf8PreviousPath === true && trackedEntry.index === "R")
+      ? undefined
+      : trackedEntry.path;
   const changedCount = files.length > 0 ? files.length : props.snapshot.changedPaths.length;
   const totals =
     content.kind === "ready"

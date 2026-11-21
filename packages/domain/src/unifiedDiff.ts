@@ -80,6 +80,8 @@ export interface ParsedDiffFile {
    * so destructive checkout restoration cannot safely restore the source path.
    */
   readonly nonUtf8PreviousPath?: true;
+  /** True when git recorded a `copy from` / `copy to` header rather than a rename. */
+  readonly copied?: true;
   readonly change: DiffFileChange;
   readonly additions: number;
   readonly deletions: number;
@@ -114,6 +116,7 @@ interface FileAccumulator {
   oldMode?: string;
   newMode?: string;
   fileMode?: string;
+  copied: boolean;
   change: DiffFileChange;
   additions: number;
   deletions: number;
@@ -151,6 +154,7 @@ function newAccumulator(): FileAccumulator {
   return {
     oldPathNonUtf8: false,
     newPathNonUtf8: false,
+    copied: false,
     change: "modified",
     additions: 0,
     deletions: 0,
@@ -348,6 +352,7 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     ...(emptyFile ? { emptyFile: true as const } : {}),
     ...(nonUtf8Path ? { nonUtf8Path: true as const } : {}),
     ...(nonUtf8PreviousPath ? { nonUtf8PreviousPath: true as const } : {}),
+    ...(renamed && accumulator.copied ? { copied: true as const } : {}),
     change,
     additions: accumulator.additions,
     deletions: accumulator.deletions,
@@ -403,6 +408,7 @@ export function parseUnifiedDiff(
       const decoded = unquotePath(line.slice("rename from ".length), { trim: false });
       accumulator.oldPath = decoded.value;
       accumulator.oldPathNonUtf8 = decoded.nonUtf8;
+      accumulator.copied = false;
       accumulator.change = "renamed";
       continue;
     }
@@ -410,6 +416,7 @@ export function parseUnifiedDiff(
       const decoded = unquotePath(line.slice("rename to ".length), { trim: false });
       accumulator.newPath = decoded.value;
       accumulator.newPathNonUtf8 = decoded.nonUtf8;
+      accumulator.copied = false;
       accumulator.change = "renamed";
       continue;
     }
@@ -417,6 +424,7 @@ export function parseUnifiedDiff(
       const decoded = unquotePath(line.slice("copy from ".length), { trim: false });
       accumulator.oldPath = decoded.value;
       accumulator.oldPathNonUtf8 = decoded.nonUtf8;
+      accumulator.copied = true;
       accumulator.change = "renamed";
       continue;
     }
@@ -424,6 +432,7 @@ export function parseUnifiedDiff(
       const decoded = unquotePath(line.slice("copy to ".length), { trim: false });
       accumulator.newPath = decoded.value;
       accumulator.newPathNonUtf8 = decoded.nonUtf8;
+      accumulator.copied = true;
       accumulator.change = "renamed";
       continue;
     }

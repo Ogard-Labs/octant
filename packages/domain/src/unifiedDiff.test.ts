@@ -294,10 +294,12 @@ it("preserves rename and copy paths containing spaces from rename/copy headers",
     change: "renamed",
     binary: true,
   });
+  expect(files[0]?.copied).toBeUndefined();
   expect(files[1]).toMatchObject({
     path: "copied doc.md",
     previousPath: "source doc.md",
     change: "renamed",
+    copied: true,
     binary: true,
   });
 });
@@ -334,6 +336,10 @@ it("sets nonUtf8Path from the destination path on renames", () => {
     "similarity index 100%",
     "rename from report.txt",
     'rename to "file-\\303.txt"',
+    'diff --git "a/file-\\303.txt" b/copy.txt',
+    "similarity index 100%",
+    'copy from "file-\\303.txt"',
+    "copy to copy.txt",
   ].join("\n");
 
   const files = parseUnifiedDiff(patch);
@@ -344,6 +350,7 @@ it("sets nonUtf8Path from the destination path on renames", () => {
     nonUtf8PreviousPath: true,
   });
   expect(files[0]?.nonUtf8Path).toBeUndefined();
+  expect(files[0]?.copied).toBeUndefined();
 
   expect(files[1]).toMatchObject({
     path: "file-\\303.txt",
@@ -352,4 +359,13 @@ it("sets nonUtf8Path from the destination path on renames", () => {
     nonUtf8Path: true,
   });
   expect(files[1]?.nonUtf8PreviousPath).toBeUndefined();
+
+  expect(files[2]).toMatchObject({
+    path: "copy.txt",
+    previousPath: "file-\\303.txt",
+    change: "renamed",
+    copied: true,
+    nonUtf8PreviousPath: true,
+  });
+  expect(files[2]?.nonUtf8Path).toBeUndefined();
 });
