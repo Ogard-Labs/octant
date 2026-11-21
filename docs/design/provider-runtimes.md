@@ -2944,6 +2944,61 @@ identity or sign-in: no spoofed `clientInfo`, no faked environment that moves
 where the CLI keeps its sign-in, and no call to Google's internal endpoints
 with the person's token. The CLI talks to Google itself.
 
+**Interactive use on a personal sign-in only** (maintainer decision,
+2026-11-21, reversing the same day's decision that Antigravity runs in
+Automations as in a thread). Answers on Google's Antigravity developer forum
+(`discuss.ai.google.dev`, read 2026-11-21) draw the consumer-plan line at one
+person, on their own computer, signed in through the CLI's own flow, driving
+an unmodified `agy acp` themselves. Unattended or background automation, task
+queues and multi-agent "teammates", `agy` as a sub-agent inside another agent
+loop or a multi-provider orchestration, serving several users, and sharing or
+rotating credentials are not supported there; automated or multi-agent runs
+belong on a Gemini API key (AI Studio) or Vertex AI. The profile declares the
+runs its sign-in does not cover (`personalSignIn` in the contracts profile
+table), each with the sentence a refused run shows, and the server refuses by
+that declaration, never by the profile id:
+
+- **Routines** (`refusesUnattendedRuns`). Every Automation dispatch on an
+  `antigravity` instance (scheduled, triggered, Run now, a follow-up, and a
+  Chat follow-up proposal, which runs through the same dispatch) is refused
+  at the dispatcher's authority revalidation as `provider-capability-mismatch`,
+  before a thread is created or the CLI starts. The provider is read live at
+  dispatch, so a routine saved earlier is refused at its next run: "Google
+  doesn't support unattended runs of Google Antigravity on a personal Google
+  sign-in, so this routine did not run. Choose a provider that uses a Gemini
+  API key, such as Gemini CLI with an API key."
+- **Helper runs** (`refusesHelperRuns`). Antigravity is never a helper
+  target: the target list names it unavailable as `helper-runs-refused`, so an
+  explicit target, a role slot and a follow-up on it are refused, and a child
+  that would start or resume on it is refused at launch. A thread running on
+  Antigravity starts no helper on any provider, here or on another hub member,
+  and the person's retry or resume of an earlier child is refused too (its
+  capabilities report delegation blocked as `helper-runs-refused`). A hub
+  member whose Work default is Antigravity refuses a peer's delegated task as
+  `provider-unavailable`. The message: "Google doesn't support Google
+  Antigravity as a helper agent, or starting helpers from it, on a personal
+  Google sign-in. Use a provider that uses a Gemini API key, such as Gemini
+  CLI with an API key, for helper work." The CLI's own built-in subagents
+  inside `agy` are unaffected, and the driver keeps its helper-run handling
+  (`answersOncePerCall`, below) as a fallback that still fails closed.
+- **Outside agents** (`refusesOutsideAgents`). An agent grant's session (an
+  outside agent, which is never the person) may not send a prompt or an answer
+  to a thread on Antigravity: "Google doesn't support another agent driving
+  Google Antigravity on a personal Google sign-in. Continue this thread
+  yourself in Octant, or use a provider that uses a Gemini API key."
+- **Who else can drive it.** No other principal than the host's own person
+  can. Hub members are the person's own devices by scope
+  ([Hub and spokes](hub-and-spokes.md#outcome): teams, shared machines and
+  other people's computers are out of scope), so a paired phone, browser or
+  owner device driving a thread is the same person at their own host, and a
+  hub-introduced device acts only as an owner device after a fresh unlock.
+  Agent grants are the one non-person caller that sends turns, and they are
+  refused above.
+- **Not built yet.** Other turns no person starts (a message that wakes an
+  idle thread, a pull request's Auto-fix, goal-loop rounds) are not yet held
+  to this line, and an Antigravity server added from the ACP registry as an
+  ordinary added agent carries no profile and so no declaration.
+
 - **No sandbox in Work and Code outside Strict.** There the CLI starts as the
   person's own terminal would start it, at every level: no Octant sandbox, no
   network allowlist, the person's whole environment, and its own sign-in read
@@ -2964,10 +3019,9 @@ with the person's token. The CLI talks to Google itself.
   `daily-cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`,
   `www.googleapis.com`, `accounts.google.com`, `antigravity.google`).
 - **Sign-in.** The person runs `agy` in a terminal and signs in with their
-  own Google account; Octant reuses that sign-in as the CLI reads it, in
-  threads and in Automations alike: Octant runs only `agy acp`, so a routine
-  drives the same ACP session a thread does (maintainer decision, 2026-11-21).
-  On macOS the CLI keeps it in the login
+  own Google account; Octant reuses that sign-in as the CLI reads it, in the
+  person's own threads only (routines, helper runs and outside agents are
+  refused, above). On macOS the CLI keeps it in the login
   keychain and reads it by running `/usr/bin/security`. Unconfined, that read
   needs nothing from Octant. A sandboxed launch sets `readsLoginKeychain`: the
   grant Claude Code's runtime measured as the least that reads a keychain

@@ -40,6 +40,8 @@ const routeChild = decodeNativeHarnessSlotCandidate({
   modelId: "provider-model",
 });
 const dependencyId = "00000000-0000-4000-8000-000000000061";
+const ANTIGRAVITY_HELPER_REFUSAL =
+  "Google doesn't support Google Antigravity as a helper agent, or starting helpers from it, on a personal Google sign-in. Use a provider that uses a Gemini API key, such as Gemini CLI with an API key, for helper work.";
 const allowedAuthority: AgentRunAuthority = {
   filesystem: false,
   shell: false,
@@ -73,6 +75,10 @@ function delegationPair(
     resumeResult?: AgentRunCommandResult;
     settlementFailure?: "failed" | "new-generation";
     resultText?: string;
+    /** The parent thread's provider refuses helper runs, as its profile declares. */
+    parentHelperRunRefusal?: string;
+    /** The child's provider is an Antigravity instance, which refuses helper runs. */
+    antigravityChild?: boolean;
   } = {},
 ) {
   const commands: AgentRunCommand[] = [];
@@ -132,6 +138,9 @@ function delegationPair(
                 : { reasoning: currentParent.reasoning }),
               projectId,
             },
+            ...(options.parentHelperRunRefusal === undefined
+              ? {}
+              : { helperRunRefusal: options.parentHelperRunRefusal }),
           };
     },
     nativeEvidence: () => ({
@@ -257,7 +266,7 @@ function delegationPair(
   const listTargets = () =>
     [
       ...(options.excludedParent ? [] : [routeLead]),
-      ...(options.excludedChild ? [] : [routeChild]),
+      ...(options.excludedChild || options.antigravityChild ? [] : [routeChild]),
     ].map((candidate) => ({
       providerInstanceId: String(candidate.providerInstanceId),
       modelIds: [String(candidate.modelId)],
@@ -265,6 +274,18 @@ function delegationPair(
       driverKind: candidate === routeLead ? "openai" : "claude",
       reasoningByModel: { [String(candidate.modelId)]: ["high", "low"] },
     }));
+  // What `agentRunTargetAvailability` lists for a provider that refuses helper runs.
+  const listUnavailableTargets = () =>
+    options.antigravityChild
+      ? [
+          {
+            providerInstanceId: String(routeChild.providerInstanceId),
+            displayName: "Google Antigravity",
+            driverKind: "antigravity",
+            reason: "helper-runs-refused" as const,
+          },
+        ]
+      : [];
   const common = {
     admission,
     orchestration: {
@@ -297,6 +318,7 @@ function delegationPair(
     persistence,
     uuid: () => "00000000-0000-4000-8000-000000000098",
     listTargets,
+    listUnavailableTargets,
     isTainted: () => options.tainted === true,
     ...(options.askMarkedDelegation === undefined
       ? {}
@@ -554,6 +576,56 @@ describe("octant_agents delegation routing", () => {
       expect(result).toMatchObject({ status: "error", error: "delegate-target-unavailable" });
       expect(pair.commands).toEqual([]);
     }
+  });
+  it("refuses a helper on Google Antigravity and says why, starting nothing", async () => {
+    const pair = delegationPair({ antigravityChild: true });
+    expect(
+      await pair.start({
+        role: "research",
+        task: "Look",
+        providerInstanceId: String(routeChild.providerInstanceId),
+        modelId: String(routeChild.modelId),
+      }),
+    ).toEqual({
+      status: "error",
+      error: "delegate-target-unavailable",
+      message: ANTIGRAVITY_HELPER_REFUSAL,
+    });
+    expect(pair.commands).toEqual([]);
+  });
+  it("starts no helper, on any provider, from a thread running on Google Antigravity", async () => {
+    const pair = delegationPair({ parentHelperRunRefusal: ANTIGRAVITY_HELPER_REFUSAL });
+    for (const input of [
+      { role: "research", task: "Look" },
+      {
+        role: "research",
+        task: "Look",
+        providerInstanceId: String(routeChild.providerInstanceId),
+        modelId: String(routeChild.modelId),
+      },
+    ])
+      expect(await pair.start(input)).toEqual({
+        status: "refused",
+        reason: "helper-runs-refused",
+        message: ANTIGRAVITY_HELPER_REFUSAL,
+      });
+    expect(pair.commands).toEqual([]);
+    expect(await pair.capabilities()).toMatchObject({
+      delegationBlocked: true,
+      reason: "helper-runs-refused",
+    });
+    const completed = delegationPair({
+      parentHelperRunRefusal: ANTIGRAVITY_HELPER_REFUSAL,
+      run: { lifecycleStatus: "completed" },
+    });
+    expect(
+      await completed.followUp({ runId: dependencyId, expectedVersion: 1, message: "Continue" }),
+    ).toEqual({
+      status: "refused",
+      reason: "helper-runs-refused",
+      message: ANTIGRAVITY_HELPER_REFUSAL,
+    });
+    expect(completed.resumes).toEqual([]);
   });
   it("reports bounded context, role routing, and a paused parent in capabilities", async () => {
     const pair = delegationPair({ paused: true });

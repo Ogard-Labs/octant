@@ -1,6 +1,7 @@
 import {
   DEFAULT_HOST_RESOURCE_POLICY,
   decodeAgentRunParentThreadId,
+  personalSignInRefusals,
   type NativeHarnessSlotCandidate,
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
@@ -1005,6 +1006,10 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         if (project?.type !== run.workspaceReceipt.mode) return false;
         return isProjectPolicyTargetAllowed(project, providerInstanceId, modelId);
       },
+      helperRunRefusal: (providerInstanceId) =>
+        personalSignInRefusals(
+          persistence.readProviderInstance(providerInstanceId)?.driverKind ?? "",
+        )?.refusesHelperRuns,
       // `configuredDriverOptions` is declared later in this scope; the closure
       // only runs when a child starts, long after boot, so the reference is safe.
       resolveDriver: (providerInstanceId, run) => {

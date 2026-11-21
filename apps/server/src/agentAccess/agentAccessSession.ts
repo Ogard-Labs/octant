@@ -63,7 +63,7 @@ export interface AgentSessionDependencies {
 }
 
 /** What a thread is and runs on now: its mode (`kind`), model, and access. */
-export type AgentThreadAccess =
+export type AgentThreadAccess = (
   | {
       readonly kind: "code";
       readonly modelId: string;
@@ -77,7 +77,14 @@ export type AgentThreadAccess =
       readonly access: string;
       readonly fullAccessSandbox: boolean;
     }
-  | { readonly kind: "chat"; readonly modelId: string };
+  | { readonly kind: "chat"; readonly modelId: string }
+) & {
+  /**
+   * Why the thread's provider takes no turn an outside agent sends, as its
+   * profile declares for its personal sign-in; absent when it declares none.
+   */
+  readonly outsideAgentRefusal?: string;
+};
 
 /**
  * The in-process session an outside agent's tool calls run in. Every request
@@ -309,6 +316,7 @@ export function guardAgentRequest(input: {
     if (access === undefined || !modelAllowed(grant, access.modelId)) {
       return refused("That thread runs on a model this agent's grant does not include.");
     }
+    if (access.outsideAgentRefusal !== undefined) return refused(access.outsideAgentRefusal);
     return {
       kind: "allowed",
       marksThread: threadId,

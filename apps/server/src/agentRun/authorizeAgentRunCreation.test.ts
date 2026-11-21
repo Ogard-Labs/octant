@@ -174,9 +174,13 @@ function authorize(input: {
   readonly parentThreadId: string;
   readonly authority?: CodeSessionAuthorityStore;
   readonly activeTurn?: (thread: ReturnType<typeof codeThread>) => ReturnType<typeof codeThread>;
+  /** The driver kind of the parent thread's provider instance. */
+  readonly parentDriverKind?: string;
 }) {
   return authorizeAgentRunCreation({
     persistence: {
+      readProviderInstance: () =>
+        input.parentDriverKind === undefined ? undefined : { driverKind: input.parentDriverKind },
       readWindowWorkspace: () =>
         input.workspace === undefined
           ? undefined
@@ -368,6 +372,27 @@ describe("authorizeAgentRunCreation", () => {
     expect(facts?.parentMode).toBe("chat");
     expect(facts?.workspaceParent).toEqual({ threadId: String(thread.id), mode: "chat" });
     expect(facts?.liveAuthority.executionPolicy).toBe("plan");
+  });
+
+  it("marks a parent running on Google Antigravity as starting no helpers, and no other parent", () => {
+    const thread = chatThread();
+    const workspace = withSurface(
+      defaultWindowWorkspace(ids.window),
+      "chat",
+      decodeWorkspaceTab({
+        kind: "chat-thread",
+        id: ids.tab,
+        threadId: thread.id,
+        mode: "chat",
+        title: thread.title,
+      }),
+    );
+    const on = (parentDriverKind: string) =>
+      authorize({ workspace, chat: thread, parentThreadId: String(thread.id), parentDriverKind });
+    expect(on("antigravity")?.helperRunRefusal).toMatch(
+      /^Google doesn't support Google Antigravity as a helper agent, or starting helpers from it/,
+    );
+    expect(on("gemini")).not.toHaveProperty("helperRunRefusal");
   });
 
   it("refuses a Chat parent that is not in the window layout", () => {

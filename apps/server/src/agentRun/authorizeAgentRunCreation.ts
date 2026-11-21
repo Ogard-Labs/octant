@@ -3,6 +3,7 @@ import {
   decodeCodeThreadId,
   decodeWorkThreadId,
   DEFAULT_WORK_ACCESS,
+  personalSignInRefusals,
   type AgentRun,
   type AgentRunAuthority,
   type AgentRunParentThreadId,
@@ -127,14 +128,29 @@ export function parentRunsAtFullAccess(
   }
 }
 
-export function authorizeAgentRunCreation(input: {
+type AgentRunCreationInput = {
   readonly persistence: PersistenceService;
   readonly workThreadProjection: WorkThreadProjection;
   readonly parentThreadId: AgentRunParentThreadId;
   readonly windowId: string;
   readonly codeSessionAuthority: CodeSessionAuthorityStore;
   readonly activeTurn?: CodeParentActiveTurn;
-}): AgentRunControlParentFacts | undefined {
+};
+
+export function authorizeAgentRunCreation(
+  input: AgentRunCreationInput,
+): AgentRunControlParentFacts | undefined {
+  const parent = authorizeParentThread(input);
+  if (parent === undefined) return undefined;
+  const refusal = personalSignInRefusals(
+    input.persistence.readProviderInstance(parent.parentRoute.providerInstanceId)?.driverKind ?? "",
+  )?.refusesHelperRuns;
+  return refusal === undefined ? parent : { ...parent, helperRunRefusal: refusal };
+}
+
+function authorizeParentThread(
+  input: AgentRunCreationInput,
+): AgentRunControlParentFacts | undefined {
   const workspace = input.persistence.readWindowWorkspace(input.windowId as WindowId)?.workspace;
   if (workspace === undefined) return undefined;
 

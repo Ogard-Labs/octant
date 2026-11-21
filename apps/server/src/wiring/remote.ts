@@ -34,6 +34,7 @@ import {
   HubMemberId,
   ThreadRetentionThreadId,
   decodeCodeCommand,
+  personalSignInRefusals,
   type HostRestartRecovery,
   type MovedThreadReference,
 } from "@octant/contracts";
@@ -449,6 +450,15 @@ export function wireRemote(deps: RemoteDependencies) {
     workThreadService,
     workTurnService,
   } = deps;
+
+  // Peers and outside agents name a provider by its id as text, so the
+  // instance is found by that text rather than by a branded lookup.
+  const providerDriverKind = (providerInstanceId: string): string =>
+    String(
+      persistence
+        .readProviderInstances()
+        .find((instance) => String(instance.id) === providerInstanceId)?.driverKind ?? "",
+    );
 
   // The proxy route's grant requests run under the paired device's own scope,
   // the same remote read rule product requests are judged by.
@@ -1274,6 +1284,8 @@ export function wireRemote(deps: RemoteDependencies) {
               workTurnService.cancelFirstTurn(scope, command),
           },
           scope: ROUTINE_HOST_SCOPE_ID,
+          helperRunRefusal: (providerInstanceId) =>
+            personalSignInRefusals(providerDriverKind(providerInstanceId))?.refusesHelperRuns,
           onDelegatedThreadCreated: withholdThreadFromPersonMemory,
         }),
         code: createCodeDelegationHost(
@@ -2363,9 +2375,20 @@ export function wireRemote(deps: RemoteDependencies) {
       return work === undefined ? undefined : { projectId: String(work.projectId) };
     },
     threadAccess: (threadId) => {
+      const refusalOf = (providerInstanceId: string) => {
+        const refusal = personalSignInRefusals(
+          providerDriverKind(providerInstanceId),
+        )?.refusesOutsideAgents;
+        return refusal === undefined ? {} : { outsideAgentRefusal: refusal };
+      };
       try {
         const chat = persistence.readChatThread(decodeChatThreadId(threadId));
-        if (chat !== undefined) return { kind: "chat", modelId: String(chat.modelId) };
+        if (chat !== undefined)
+          return {
+            kind: "chat",
+            modelId: String(chat.modelId),
+            ...refusalOf(String(chat.providerInstanceId)),
+          };
       } catch {
         // Not a Chat thread id; try the other modes.
       }
@@ -2378,6 +2401,7 @@ export function wireRemote(deps: RemoteDependencies) {
             executionPolicy: code.executionPolicy,
             autoApprove: code.autoApprove === true,
             fullAccessSandbox: code.fullAccessSandbox === true,
+            ...refusalOf(String(code.providerInstanceId)),
           };
         }
       } catch {
@@ -2391,6 +2415,7 @@ export function wireRemote(deps: RemoteDependencies) {
             modelId: String(work.modelId),
             access: work.access,
             fullAccessSandbox: work.fullAccessSandbox === true,
+            ...refusalOf(String(work.providerInstanceId)),
           };
     },
     markOutsideContent: (threadId, grant) => {

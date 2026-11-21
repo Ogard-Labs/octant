@@ -50,6 +50,9 @@ const chatThread = "30000000-0000-4000-8000-000000000005";
 const turnKey = "60000000-0000-4000-8000-000000000001";
 const otherModelThread = "30000000-0000-4000-8000-000000000006";
 const workThread = "30000000-0000-4000-8000-000000000007";
+const antigravityThread = "30000000-0000-4000-8000-000000000008";
+const ANTIGRAVITY_OUTSIDE_AGENT_REFUSAL =
+  "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.";
 
 function deps() {
   const recorded: Array<{ threadId: string; mode: string }> = [];
@@ -85,7 +88,8 @@ function deps() {
     threadId === autoThread ||
     threadId === chatThread ||
     threadId === workThread ||
-    threadId === otherModelThread
+    threadId === otherModelThread ||
+    threadId === antigravityThread
       ? { projectId: granted }
       : threadId === strangerThread
         ? { projectId: other }
@@ -115,7 +119,9 @@ function deps() {
                   access: "ask-first",
                   fullAccessSandbox: false,
                 }
-              : undefined;
+              : threadId === antigravityThread
+                ? { ...askFirst, outsideAgentRefusal: ANTIGRAVITY_OUTSIDE_AGENT_REFUSAL }
+                : undefined;
   return { service, threadProject, threadAccess, recorded, turned, sentTurns };
 }
 
@@ -483,6 +489,25 @@ describe("threads the person made in a granted Project", () => {
       );
     expect(send(projectThread)).toBe("allowed");
     expect(send(otherModelThread)).toBe("refused");
+  });
+
+  it("take no prompt or answer when the thread runs on Google Antigravity, and say why", () => {
+    const check = (body: Readonly<Record<string, unknown>>, path = "/api/code/commands") =>
+      guardAgentRequest({
+        grant: grant({ threads: "project", tools: ["start_work", "answer_question"] }),
+        request: { path, method: "POST", body },
+        deps: deps(),
+      });
+    const refusal = { kind: "refused", message: ANTIGRAVITY_OUTSIDE_AGENT_REFUSAL };
+    expect(
+      check({ kind: "start-provider-turn", operationId: turnKey, threadId: antigravityThread }),
+    ).toEqual(refusal);
+    expect(check({}, `/api/native-harness/sessions/${antigravityThread}/questions`)).toEqual(
+      refusal,
+    );
+    expect(
+      check({ kind: "start-provider-turn", operationId: turnKey, threadId: projectThread }).kind,
+    ).toBe("allowed");
   });
 
   it("count toward the running-turn limit once the agent runs a turn there", async () => {

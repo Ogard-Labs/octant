@@ -1142,6 +1142,19 @@ async function mutateLiveRun(
     });
     return json(result, result.kind === "run-command-failed" ? 409 : 200, origin);
   }
+  // A retry or resume runs the helper again, which this parent's provider
+  // does not allow, whoever asks.
+  if (parent.helperRunRefusal !== undefined) {
+    return json(
+      {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message: parent.helperRunRefusal,
+      },
+      409,
+      origin,
+    );
+  }
   if (action === "resume" && !isAgentRunTargetEligible(run, dependencies.listTargets(parent))) {
     return json(
       {
