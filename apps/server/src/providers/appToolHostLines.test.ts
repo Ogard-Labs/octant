@@ -148,6 +148,8 @@ describe("appToolHostLines", () => {
       .join("\n");
     // Below Full access the browser asks per site; a Private page never does.
     expect(text).not.toMatch(/each new site asks/);
+    // Outside Strict at Full access, or under a remembered Project grant, Computer use does not ask.
+    expect(text).not.toMatch(/first action on each app asks/);
     // A Project's "Don't ask again" choice skips the image tool's question.
     expect(text).not.toMatch(/confirm first|confirms first/);
     const [image] = appToolHostLines(offered("octant_create_image"));
