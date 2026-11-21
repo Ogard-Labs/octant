@@ -60,16 +60,30 @@ export interface SpendCeilingTurnRequest {
   readonly childSubjectIds?: ReadonlyArray<string>;
   /**
    * False for spend that is not a turn of its own, such as a requested context
-   * compaction or a billed image generation job: its spend counts against the
-   * ceilings, but it uses up no turn and no run time.
+   * compaction, a Shield review, or a billed image generation job: it uses up
+   * no turn and no run time in the turn ledger. Does not skip turn or run-time
+   * ceiling checks unless `skipTurnAndRunTimeCeiling` is also true.
    */
   readonly countsAsTurn?: boolean;
   /**
+   * Exact estimated monetary spend in integer micro-dollars (1 cent = 10,000
+   * micros) for callers that reserve money before dispatch (billed image
+   * generation), or `"unknown"` when no rate is known so an active monetary
+   * ceiling fails closed with `unknown-spend`.
+   */
+  readonly estimatedCostUsdMicros?: number | "unknown";
+  /**
    * Estimated monetary spend in whole US cents for callers that reserve money
-   * before dispatch (billed image generation), or `"unknown"` when no rate is
-   * known so an active monetary ceiling fails closed with `unknown-spend`.
+   * before dispatch (converted to micro-dollars when `estimatedCostUsdMicros`
+   * is omitted), or `"unknown"` when no rate is known.
    */
   readonly estimatedCostUsdCents?: number | "unknown";
+  /**
+   * True when the operation is governed by monetary spend rather than turn or
+   * run-time budgets (for example billed image generation invoked inside an
+   * already-admitted turn or from the composer).
+   */
+  readonly skipTurnAndRunTimeCeiling?: boolean;
   /**
    * True for unmeasured non-token operations (such as image providers that do
    * not report token counts): token ceilings are skipped.
@@ -96,10 +110,12 @@ interface LiveReservationScope {
 
 interface LiveReservation {
   readonly reservationId: string;
+  readonly threadType: SpendCeilingThreadType;
+  readonly threadId: string;
+  readonly projectId?: string;
   readonly reservedTokens: number;
-  readonly reservedCostUsdCents: number;
+  readonly reservedCostUsdMicros: number;
   readonly tokenScopes: ReadonlyArray<LiveReservationScope>;
-  readonly costScopes: ReadonlyArray<LiveReservationScope>;
 }
 
 export interface SpendCeilingServiceOptions {
@@ -381,7 +397,22 @@ export class SpendCeilingService {
     const thread = readSpendCeiling(this.#connection, threadScope);
     const project =
       projectScope === undefined ? undefined : readSpendCeiling(this.#connection, projectScope);
+    const requestedCostUsdMicros = positiveRequestCostMicros(request);
     if (thread === undefined && project === undefined) {
+      if (requestedCostUsdMicros > 0) {
+        // Track live monetary spend even before any ceiling exists on the
+        // thread or Project so moving the thread into a ceilinged Project (or
+        // setting a ceiling while the job is running) sees the reservation.
+        this.#reservations.set(String(request.reservationId), {
+          reservationId: String(request.reservationId),
+          threadType: request.threadType,
+          threadId: request.threadId,
+          ...(request.projectId === undefined ? {} : { projectId: request.projectId }),
+          reservedTokens: 0,
+          reservedCostUsdMicros: requestedCostUsdMicros,
+          tokenScopes: [],
+        });
+      }
       return { status: "admitted", reservedTokens: 0, reservations: [] };
     }
     const childIds = [
@@ -396,34 +427,38 @@ export class SpendCeilingService {
       ...(request.turnUpperBoundTokens === undefined
         ? {}
         : { turnUpperBoundTokens: request.turnUpperBoundTokens }),
+      ...(request.estimatedCostUsdMicros === undefined
+        ? {}
+        : { estimatedCostUsdMicros: request.estimatedCostUsdMicros }),
       ...(request.estimatedCostUsdCents === undefined
         ? {}
         : { estimatedCostUsdCents: request.estimatedCostUsdCents }),
-      ...(request.countsAsTurn === undefined ? {} : { countsAsTurn: request.countsAsTurn }),
+      ...(request.skipTurnAndRunTimeCeiling === undefined
+        ? {}
+        : { skipTurnAndRunTimeCeiling: request.skipTurnAndRunTimeCeiling }),
       ...(request.skipTokenCeiling === undefined
         ? {}
         : { skipTokenCeiling: request.skipTokenCeiling }),
     });
-    const reservedCostUsdCents =
-      admission.status === "admitted" ? (admission.reservedCostUsdCents ?? 0) : 0;
+    const reservedCostUsdMicros =
+      admission.status === "admitted"
+        ? (admission.reservedCostUsdMicros ?? requestedCostUsdMicros)
+        : 0;
     if (
       admission.status !== "admitted" ||
-      (admission.reservedTokens === 0 && reservedCostUsdCents === 0)
+      (admission.reservedTokens === 0 && reservedCostUsdMicros === 0)
     ) {
       return admission;
     }
     this.#reservations.set(String(request.reservationId), {
       reservationId: String(request.reservationId),
+      threadType: request.threadType,
+      threadId: request.threadId,
+      ...(request.projectId === undefined ? {} : { projectId: request.projectId }),
       reservedTokens: admission.reservedTokens,
-      reservedCostUsdCents,
+      reservedCostUsdMicros,
       tokenScopes: admission.reservations
         .filter((reservation) => reservation.reservedTokens > 0)
-        .map((reservation) => ({
-          scopeKind: reservation.scopeKind,
-          scopeId: reservation.scopeId,
-        })),
-      costScopes: admission.reservations
-        .filter((reservation) => (reservation.reservedCostUsdCents ?? 0) > 0)
         .map((reservation) => ({
           scopeKind: reservation.scopeKind,
           scopeId: reservation.scopeId,
@@ -511,14 +546,14 @@ export class SpendCeilingService {
     const needsTurns =
       ceiling.policy.turnBudget !== undefined || ceiling.policy.runTimeBudgetSeconds !== undefined;
     const used = needsTurns ? this.#turnUse(ceiling.scope, from, now) : undefined;
-    const cost =
+    const costMicros =
       ceiling.policy.costBudgetUsdCents === undefined
         ? undefined
-        : this.#costUse(ceiling.scope, childIds, from);
-    const reservedCostUsdCents =
+        : this.#costUseMicros(ceiling.scope, childIds, from);
+    const reservedCostUsdMicros =
       ceiling.policy.costBudgetUsdCents === undefined
         ? undefined
-        : this.#reservedCostFor(ceiling.scope);
+        : this.#reservedCostMicrosFor(ceiling.scope);
     return {
       scopeKind: ceiling.scope.kind,
       scopeId:
@@ -530,17 +565,30 @@ export class SpendCeilingService {
       reservedTokens: this.#reservedFor(ceiling.scope),
       ...(ceiling.overrun === undefined ? {} : { overrun: ceiling.overrun }),
       ...(used === undefined ? {} : { usedTurns: used.turns, usedRunTimeMs: used.runTimeMs }),
-      ...(cost === undefined ? {} : { usedCostUsdCents: cost }),
-      ...(reservedCostUsdCents === undefined ? {} : { reservedCostUsdCents }),
+      ...(costMicros === undefined
+        ? {}
+        : {
+            // Whole cents for display: a partial cent of estimated spend still
+            // counts against the ceiling in micro-dollar comparisons.
+            usedCostUsdCents: Math.floor(costMicros / 10_000),
+            usedCostUsdMicros: costMicros,
+          }),
+      ...(reservedCostUsdMicros === undefined
+        ? {}
+        : {
+            reservedCostUsdCents: Math.ceil(reservedCostUsdMicros / 10_000),
+            reservedCostUsdMicros,
+          }),
     };
   }
 
   /**
-   * Settled US-dollar spend in the window, in whole cents. Undefined when any
-   * in-window record is unpriced or the sum cannot be measured: a monetary
-   * ceiling then refuses rather than counting unpriced usage as free.
+   * Settled US-dollar spend in the window, in integer micro-dollars (1 cent =
+   * 10,000 micros). Undefined when any in-window record is unpriced or the sum
+   * cannot be measured: a monetary ceiling then refuses rather than counting
+   * unpriced usage as free.
    */
-  #costUse(
+  #costUseMicros(
     scope: SpendCeilingScope,
     childIds: ReadonlyArray<string>,
     from: string | undefined,
@@ -595,9 +643,7 @@ export class SpendCeilingService {
       micros += row.micros;
     }
     if (!Number.isSafeInteger(micros) || micros < 0) return undefined;
-    // Whole cents: a partial cent of estimated spend still counts against the
-    // ceiling once it reaches one cent.
-    return Math.floor(micros / 10_000);
+    return micros;
   }
 
   /**
@@ -745,12 +791,24 @@ export class SpendCeilingService {
     return total;
   }
 
-  #reservedCostFor(scope: SpendCeilingScope): number {
+  #reservedCostMicrosFor(scope: SpendCeilingScope): number {
     const id = scope.kind === "project" ? String(scope.projectId) : String(scope.threadId);
     let total = 0;
     for (const live of this.#reservations.values()) {
-      if (live.costScopes.some((item) => item.scopeKind === scope.kind && item.scopeId === id)) {
-        total += live.reservedCostUsdCents;
+      if (live.reservedCostUsdMicros <= 0) continue;
+      if (scope.kind === "thread") {
+        if (live.threadType === scope.threadType && live.threadId === id) {
+          total += live.reservedCostUsdMicros;
+        }
+        continue;
+      }
+      // Resolve live Project ownership against the thread's current durable
+      // record so moving a Chat thread to another Project transfers its
+      // in-flight monetary reservation alongside its settled usage rows.
+      const current = currentThreadProjectId(this.#connection, live.threadType, live.threadId);
+      const effectiveProjectId = current.found ? current.projectId : live.projectId;
+      if (effectiveProjectId === id) {
+        total += live.reservedCostUsdMicros;
       }
     }
     return total;
@@ -989,6 +1047,57 @@ export function formatSpendCeilingRefusal(refusal: SpendCeilingRefusal): string 
 }
 
 export { decodeSpendCeilingReservationId };
+
+function positiveRequestCostMicros(request: SpendCeilingTurnRequest): number {
+  if (
+    typeof request.estimatedCostUsdMicros === "number" &&
+    Number.isSafeInteger(request.estimatedCostUsdMicros) &&
+    request.estimatedCostUsdMicros > 0
+  ) {
+    return request.estimatedCostUsdMicros;
+  }
+  if (
+    typeof request.estimatedCostUsdCents === "number" &&
+    Number.isSafeInteger(request.estimatedCostUsdCents) &&
+    request.estimatedCostUsdCents > 0
+  ) {
+    const micros = request.estimatedCostUsdCents * 10_000;
+    return Number.isSafeInteger(micros) && micros > 0 ? micros : 0;
+  }
+  return 0;
+}
+
+/**
+ * The thread's current owning Project from durable projections, matching
+ * `usageProjection.ts`'s Project predicates. `found: false` means no durable
+ * thread row exists (for example in an isolated unit test), allowing the caller
+ * to fall back to the Project supplied at admission.
+ */
+function currentThreadProjectId(
+  connection: SqliteConnection,
+  threadType: SpendCeilingThreadType,
+  threadId: string,
+): { readonly found: true; readonly projectId: string | undefined } | { readonly found: false } {
+  const sql =
+    threadType === "chat-thread"
+      ? "SELECT project_id FROM chat_thread_projection WHERE thread_id = ?"
+      : threadType === "code-thread"
+        ? "SELECT project_id FROM code_thread_projection WHERE thread_id = ?"
+        : `SELECT json_extract(payload_json, '$.thread.projectId') AS project_id
+           FROM event_journal
+           WHERE aggregate_type = 'work-thread'
+             AND aggregate_id = ?
+             AND event_name = 'work.thread-created@1'`;
+  try {
+    const row = connection.prepare(sql).get(threadId) as
+      | { readonly project_id: string | null }
+      | undefined;
+    if (row === undefined) return { found: false };
+    return { found: true, projectId: row.project_id ?? undefined };
+  } catch {
+    return { found: false };
+  }
+}
 
 function spendCeilingAggregateId(scope: SpendCeilingScope): string {
   return scope.kind === "project" ? String(scope.projectId) : String(scope.threadId);

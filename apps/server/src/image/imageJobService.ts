@@ -24,7 +24,6 @@ import {
   decodeUsageReconciliationId,
   decodeUtcTimestamp,
   type GeminiImageAspectRatio,
-  type GeminiImageProviderInstance,
   type GeminiImageResolution,
   type ImageArtifactId,
   type ImageArtifactMediaType,
@@ -36,7 +35,6 @@ import {
   type ImageJobStatus,
   type ImageJobThreadKind,
   type OpenAiCompatibleProviderInstance,
-  type OpenAiImageProviderInstance,
   type OpenAiImageQuality,
   type OpenAiImageSize,
   type ProviderInstance,
@@ -362,20 +360,26 @@ export class ImageJobService {
     }
 
     const scopeId = decodeImageGenerationScopeId(input.scopeId);
-    const effectiveOptions = resolveEffectivePricingOptions(instance, input);
+    // Freeze the effective profile options at enqueue time so changing profile
+    // defaults while a job waits in the queue cannot dispatch a costlier
+    // request than the reservation covered.
+    const effectiveOptions = resolveEffectiveRequestOptions(instance, input);
+    const estimate = estimateImageGenerationCost({
+      driverKind: instance.driverKind,
+      modelId: String(input.modelId),
+      variantCount,
+      ...(effectiveOptions.quality === undefined ? {} : { quality: effectiveOptions.quality }),
+      ...(effectiveOptions.size === undefined ? {} : { size: effectiveOptions.size }),
+      ...(effectiveOptions.resolution === undefined
+        ? {}
+        : { resolution: effectiveOptions.resolution }),
+    });
+    const estimatedCostUsdMicros: number | "unknown" =
+      estimate.kind === "api-estimate" ? estimate.usdMicros : "unknown";
+    let admittedProjectId: string | undefined;
     let reservationId: SpendCeilingReservationId | undefined;
     if (this.#spendCeiling !== undefined && input.threadKind !== "image-library") {
-      const estimate = estimateImageGenerationCost({
-        driverKind: instance.driverKind,
-        modelId: String(input.modelId),
-        variantCount,
-        ...(effectiveOptions.quality === undefined ? {} : { quality: effectiveOptions.quality }),
-        ...(effectiveOptions.size === undefined ? {} : { size: effectiveOptions.size }),
-        ...(effectiveOptions.resolution === undefined
-          ? {}
-          : { resolution: effectiveOptions.resolution }),
-      });
-      const projectId = this.#resolveThreadProjectId?.({
+      admittedProjectId = this.#resolveThreadProjectId?.({
         threadType: input.threadKind,
         threadId: String(scopeId),
       });
@@ -384,10 +388,11 @@ export class ImageJobService {
         reservationId: candidateReservationId,
         threadId: String(scopeId),
         threadType: input.threadKind,
-        ...(projectId === undefined ? {} : { projectId }),
+        ...(admittedProjectId === undefined ? {} : { projectId: admittedProjectId }),
         countsAsTurn: false,
+        skipTurnAndRunTimeCeiling: true,
         skipTokenCeiling: true,
-        estimatedCostUsdCents: estimate.kind === "api-estimate" ? estimate.usdCents : "unknown",
+        estimatedCostUsdMicros,
       });
       if (admission.status === "refused") {
         throw new ImageJobServiceError(
@@ -430,10 +435,16 @@ export class ImageJobService {
       prompt: input.prompt,
       references,
       variantCount,
-      ...(input.quality === undefined ? {} : { quality: input.quality }),
-      ...(input.size === undefined ? {} : { size: input.size }),
-      ...(input.aspectRatio === undefined ? {} : { aspectRatio: input.aspectRatio }),
-      ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
+      estimatedCostUsdMicros,
+      ...(admittedProjectId === undefined ? {} : { admittedProjectId }),
+      ...(effectiveOptions.quality === undefined ? {} : { quality: effectiveOptions.quality }),
+      ...(effectiveOptions.size === undefined ? {} : { size: effectiveOptions.size }),
+      ...(effectiveOptions.aspectRatio === undefined
+        ? {}
+        : { aspectRatio: effectiveOptions.aspectRatio }),
+      ...(effectiveOptions.resolution === undefined
+        ? {}
+        : { resolution: effectiveOptions.resolution }),
     });
     this.#pump();
     return job;
@@ -572,6 +583,8 @@ export class ImageJobService {
       readonly prompt: string;
       readonly references: NonNullable<ImageAdapterRequest["references"]>;
       readonly variantCount: number;
+      readonly estimatedCostUsdMicros: number | "unknown";
+      readonly admittedProjectId?: string;
       readonly quality?: OpenAiImageQuality;
       readonly size?: OpenAiImageSize;
       readonly aspectRatio?: GeminiImageAspectRatio;
@@ -657,6 +670,7 @@ export class ImageJobService {
     const running = this.#transition(queued, "running");
     const controller = new AbortController();
     this.#abort.set(String(running.id), controller);
+    let billedUsage: BilledImageUsage | undefined;
     try {
       const instance = this.#readProviderInstance(running.profileInstanceId);
       if (instance === undefined) {
@@ -669,11 +683,57 @@ export class ImageJobService {
         this.#resolve(failed);
         return;
       }
+      // If the thread moved to a different Project while this job waited in the
+      // queue, re-admit against the current Project ceiling before dispatching.
+      if (this.#spendCeiling !== undefined && running.threadKind !== "image-library") {
+        const currentProjectId = this.#resolveThreadProjectId?.({
+          threadType: running.threadKind,
+          threadId: String(running.scopeId),
+        });
+        if (currentProjectId !== work.admittedProjectId) {
+          this.#finishSpendReservation(running.id, "abandon");
+          const movedReservationId = decodeSpendCeilingReservationId(this.#uuid());
+          const readmission = this.#spendCeiling.admit({
+            reservationId: movedReservationId,
+            threadId: String(running.scopeId),
+            threadType: running.threadKind,
+            ...(currentProjectId === undefined ? {} : { projectId: currentProjectId }),
+            countsAsTurn: false,
+            skipTurnAndRunTimeCeiling: true,
+            skipTokenCeiling: true,
+            estimatedCostUsdMicros: work.estimatedCostUsdMicros,
+          });
+          if (readmission.status === "refused") {
+            const failed = this.#transition(running, "failed", {
+              failure: {
+                category: "unauthorized",
+                message: readmission.refusal.message,
+              },
+            });
+            this.#resolve(failed);
+            return;
+          }
+          this.#spendReservations.set(String(running.id), movedReservationId);
+        }
+      }
       const adapter = this.#createAdapter(instance);
       const request = this.#adapterRequest(instance, running, work, controller.signal);
       const result = await adapter.generate(request);
+      if (result.status === "completed" && result.images.length > 0) {
+        billedUsage = {
+          imageCount: Math.min(result.images.length, MAX_IMAGE_VARIANTS),
+          adapterResult: result,
+          pricingContext: {
+            driverKind: instance.driverKind,
+            ...(work.quality === undefined ? {} : { quality: work.quality }),
+            ...(work.size === undefined ? {} : { size: work.size }),
+            ...(work.resolution === undefined ? {} : { resolution: work.resolution }),
+          },
+        };
+      }
       if (controller.signal.aborted) {
-        const cancelled = this.#transition(running, "cancelled");
+        const cancelled = this.#transition(running, "cancelled", {}, billedUsage);
+        if (billedUsage !== undefined) this.#finishSpendReservation(running.id, "settle");
         this.#resolve(cancelled);
         return;
       }
@@ -693,30 +753,33 @@ export class ImageJobService {
         return;
       }
       if (result.images.length > work.variantCount) {
-        const failed = this.#transition(running, "failed", {
-          failure: {
-            category: "protocol",
-            message: "The provider returned more images than requested.",
+        const failed = this.#transition(
+          running,
+          "failed",
+          {
+            failure: {
+              category: "protocol",
+              message: "The provider returned more images than requested.",
+            },
           },
-        });
+          billedUsage,
+        );
+        if (billedUsage !== undefined) this.#finishSpendReservation(running.id, "settle");
         this.#resolve(failed);
         return;
       }
       const artifacts = await this.#finalizeArtifacts(running, result.images);
       if (controller.signal.aborted) {
         await this.#removeArtifacts(running, artifacts);
-        const cancelled = this.#transition(running, "cancelled");
+        const cancelled = this.#transition(running, "cancelled", {}, billedUsage);
+        if (billedUsage !== undefined) this.#finishSpendReservation(running.id, "settle");
         this.#resolve(cancelled);
         return;
       }
-      const effectiveOptions = resolveEffectivePricingOptions(instance, work);
       try {
         // Record committed usage in the journal before releasing the spend
         // reservation so concurrent checks neither miss the charge nor count it twice.
-        const completed = this.#transition(running, "completed", { artifacts }, result, {
-          driverKind: instance.driverKind,
-          ...effectiveOptions,
-        });
+        const completed = this.#transition(running, "completed", { artifacts }, billedUsage);
         this.#finishSpendReservation(running.id, "settle");
         this.#resolve(completed);
       } catch (error) {
@@ -725,13 +788,20 @@ export class ImageJobService {
       }
     } catch (error) {
       if (controller.signal.aborted) {
-        const cancelled = this.#transition(running, "cancelled");
+        const cancelled = this.#transition(running, "cancelled", {}, billedUsage);
+        if (billedUsage !== undefined) this.#finishSpendReservation(running.id, "settle");
         this.#resolve(cancelled);
         return;
       }
-      const failed = this.#transition(running, "failed", {
-        failure: storageOrGenericFailure(error),
-      });
+      const failed = this.#transition(
+        running,
+        "failed",
+        {
+          failure: storageOrGenericFailure(error),
+        },
+        billedUsage,
+      );
+      if (billedUsage !== undefined) this.#finishSpendReservation(running.id, "settle");
       this.#resolve(failed);
     } finally {
       this.#finishSpendReservation(running.id, "abandon");
@@ -763,23 +833,17 @@ export class ImageJobService {
       ...(work.references.length === 0 ? {} : { references: work.references }),
     };
     if (instance.configuration.kind === "openai-image-http") {
-      const configuration = (instance as OpenAiImageProviderInstance).configuration;
-      const quality = work.quality ?? configuration.quality;
-      const size = work.size ?? configuration.size;
       return {
         ...request,
-        ...(quality === undefined ? {} : { quality }),
-        ...(size === undefined ? {} : { size }),
+        ...(work.quality === undefined ? {} : { quality: work.quality }),
+        ...(work.size === undefined ? {} : { size: work.size }),
       };
     }
     if (instance.configuration.kind === "gemini-native-image-http") {
-      const configuration = (instance as GeminiImageProviderInstance).configuration;
-      const aspectRatio = work.aspectRatio ?? configuration.aspectRatio;
-      const resolution = work.resolution ?? configuration.resolution;
       return {
         ...request,
-        ...(aspectRatio === undefined ? {} : { aspectRatio }),
-        ...(resolution === undefined ? {} : { resolution }),
+        ...(work.aspectRatio === undefined ? {} : { aspectRatio: work.aspectRatio }),
+        ...(work.resolution === undefined ? {} : { resolution: work.resolution }),
       };
     }
     return request;
@@ -863,25 +927,13 @@ export class ImageJobService {
       readonly failure?: ImageJob["failure"];
       readonly artifacts?: ImageJob["artifacts"];
     } = {},
-    adapterResult?: {
-      readonly usage?: {
-        readonly inputTokens?: number;
-        readonly outputTokens?: number;
-        readonly size?: string;
-        readonly outputQuality?: string;
-      };
-    },
-    pricingContext?: {
-      readonly driverKind: ProviderDriverKind;
-      readonly quality?: OpenAiImageQuality;
-      readonly size?: OpenAiImageSize;
-      readonly resolution?: GeminiImageResolution;
-    },
+    billedUsage?: BilledImageUsage,
   ): ImageJob {
     assertImageJobTransitionAllowed(job.status, toStatus);
     assertImageJobExpectedVersion(job, job.version);
     const updatedAt = decodeUtcTimestamp(this.#clock());
-    const includeUsage = toStatus === "completed" && extras.artifacts !== undefined;
+    const includeUsage =
+      billedUsage !== undefined || (toStatus === "completed" && extras.artifacts !== undefined);
     const version = includeUsage
       ? ((job.version + 2) as ImageJob["version"])
       : nextImageJobVersion(job.version);
@@ -907,16 +959,17 @@ export class ImageJobService {
         occurredAt: updatedAt,
       },
     ];
-    if (includeUsage && extras.artifacts !== undefined) {
+    if (includeUsage) {
+      const imageCount = extras.artifacts?.length ?? billedUsage?.imageCount ?? 1;
       events.push({
         eventName: "context.usage-reconciled@1",
         payload: {
           reconciliation: this.#usageReconciliation(
             job,
-            extras.artifacts,
+            imageCount,
             updatedAt,
-            adapterResult,
-            pricingContext,
+            billedUsage?.adapterResult,
+            billedUsage?.pricingContext,
           ),
         },
         occurredAt: updatedAt,
@@ -929,7 +982,7 @@ export class ImageJobService {
 
   #usageReconciliation(
     job: ImageJob,
-    artifacts: ImageJob["artifacts"],
+    imageCount: number,
     observedAt: UtcTimestamp,
     adapterResult:
       | {
@@ -962,7 +1015,7 @@ export class ImageJobService {
         : estimateImageGenerationCost({
             driverKind: pricingContext.driverKind,
             modelId: String(job.modelId),
-            variantCount: artifacts.length,
+            variantCount: imageCount,
             ...(settledQuality === undefined ? {} : { quality: settledQuality }),
             ...(settledSize === undefined ? {} : { size: settledSize }),
             ...(pricingContext.resolution === undefined
@@ -995,7 +1048,7 @@ export class ImageJobService {
           }
         : {}),
       imageUnits: {
-        count: artifacts.length,
+        count: imageCount,
         quality: "exact" as const,
         ...(typeof size === "string" && size.length > 0 ? { size } : {}),
         ...(outputQuality === undefined ? {} : { outputQuality }),
@@ -1129,6 +1182,24 @@ export class ImageJobService {
   }
 }
 
+interface BilledImageUsage {
+  readonly imageCount: number;
+  readonly adapterResult: {
+    readonly usage?: {
+      readonly inputTokens?: number;
+      readonly outputTokens?: number;
+      readonly size?: string;
+      readonly outputQuality?: string;
+    };
+  };
+  readonly pricingContext: {
+    readonly driverKind: ProviderDriverKind;
+    readonly quality?: OpenAiImageQuality;
+    readonly size?: OpenAiImageSize;
+    readonly resolution?: GeminiImageResolution;
+  };
+}
+
 interface Deferred<T> {
   readonly promise: Promise<T>;
   readonly resolve: (value: T) => void;
@@ -1139,16 +1210,18 @@ function hashPrompt(prompt: string): string {
   return createHash("sha256").update(prompt).digest("hex");
 }
 
-function resolveEffectivePricingOptions(
+function resolveEffectiveRequestOptions(
   instance: ProviderInstance,
   input: {
     readonly quality?: OpenAiImageQuality;
     readonly size?: OpenAiImageSize;
+    readonly aspectRatio?: GeminiImageAspectRatio;
     readonly resolution?: GeminiImageResolution;
   },
 ): {
   readonly quality?: OpenAiImageQuality;
   readonly size?: OpenAiImageSize;
+  readonly aspectRatio?: GeminiImageAspectRatio;
   readonly resolution?: GeminiImageResolution;
 } {
   if (instance.configuration.kind === "openai-image-http") {
@@ -1160,8 +1233,10 @@ function resolveEffectivePricingOptions(
     };
   }
   if (instance.configuration.kind === "gemini-native-image-http") {
+    const aspectRatio = input.aspectRatio ?? instance.configuration.aspectRatio;
     const resolution = input.resolution ?? instance.configuration.resolution;
     return {
+      ...(aspectRatio === undefined ? {} : { aspectRatio }),
       ...(resolution === undefined ? {} : { resolution }),
     };
   }

@@ -1628,6 +1628,256 @@ describe("image job spend ceilings", () => {
     });
     expect((await service.whenTerminal(libraryJob.id)).status).toBe("completed");
   });
+
+  it("freezes the profile defaults priced at enqueue time even when profile settings change while the job is queued", async () => {
+    let releaseFirst: (() => void) | undefined;
+    const dispatchedQualities: Array<string | undefined> = [];
+    const adapter: ImageGenerationAdapter = {
+      generate: async (request) => {
+        dispatchedQualities.push(request.quality);
+        if (dispatchedQualities.length === 1) {
+          await new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+          });
+        }
+        return {
+          status: "completed",
+          images: [{ bytes: png, mediaType: "image/png" }],
+        };
+      },
+    };
+    let currentQuality: "low" | "high" = "low";
+    const dynamicProfile = (): ProviderInstance => ({
+      id: profileId,
+      displayName: "OpenAI Image",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1 as ProviderInstance["version"],
+      createdAt: now as ProviderInstance["createdAt"],
+      updatedAt: now as ProviderInstance["updatedAt"],
+      driverKind: "openai-image",
+      configuration: {
+        kind: "openai-image-http",
+        modelAllowlist: [modelId],
+        defaultModel: modelId,
+        quality: currentQuality,
+        size: "1024x1024",
+      },
+    });
+    const directory = mkdtempSync(join(tmpdir(), "octant-image-job-frozen-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "octant.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => now,
+    });
+    const spendCeiling = new SpendCeilingService({
+      connection,
+      journal,
+      clock: () => now,
+      uuid: () => crypto.randomUUID(),
+      threadExists: () => true,
+      projectExists: () => true,
+    });
+    const service = new ImageJobService({
+      journal,
+      projection: runtime.imageJobProjection,
+      attachments: new GeneratedImageStore(directory),
+      readProviderInstance: (id) =>
+        String(id) === String(profileId) ? dynamicProfile() : undefined,
+      readImageGenerationCustomSources: () => [],
+      credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+      actor,
+      createAdapter: () => adapter,
+      concurrency: 1,
+      spendCeiling,
+    });
+    // Low square gpt-image-2 is 6,000 micros (0.6 cents); budget of 2 cents admits 2 low jobs, never a high job (53,000 micros).
+    spendCeiling.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "chat-thread", threadId: String(scopeId) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 2 },
+      window: { kind: "lifetime" },
+    });
+
+    const first = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "first queued",
+    });
+    const second = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "second queued inheriting low",
+    });
+    // Raise profile default to high while the second job is still queued.
+    currentQuality = "high";
+    releaseFirst?.();
+    expect((await service.whenTerminal(first.id)).status).toBe("completed");
+    expect((await service.whenTerminal(second.id)).status).toBe("completed");
+    expect(dispatchedQualities).toEqual(["low", "low"]);
+  });
+
+  it("records billed image cost against the spend ceiling when the provider succeeded but local storage fails", async () => {
+    const adapter: ImageGenerationAdapter = {
+      generate: async () => ({
+        status: "completed",
+        images: [{ bytes: png, mediaType: "image/png" }],
+      }),
+    };
+    const { service, spendCeiling, attachments } = openHarness(adapter, {
+      withSpendCeiling: true,
+      bflInstance: bflInstance(),
+    });
+    // flux-pro-1.1 costs 40,000 micros (4 cents); a 4-cent ceiling allows only one billed generation.
+    spendCeiling?.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "chat-thread", threadId: String(scopeId) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 4 },
+      window: { kind: "lifetime" },
+    });
+    const diskFull = Object.assign(new Error("no space"), { code: "ENOSPC" });
+    vi.spyOn(attachments, "stage").mockRejectedValueOnce(diskFull);
+
+    const first = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: bflId,
+      modelId: bflModelId,
+      prompt: "billed then disk full",
+    });
+    const failed = await service.whenTerminal(first.id);
+    expect(failed.status).toBe("failed");
+
+    // The provider already billed 4 cents, so a retry must be refused by the 4-cent ceiling.
+    await expect(
+      service.enqueue({
+        threadKind: "chat-thread",
+        scopeId,
+        profileInstanceId: bflId,
+        modelId: bflModelId,
+        prompt: "retry after disk full",
+      }),
+    ).rejects.toMatchObject({
+      category: "spend-ceiling",
+      refusal: {
+        kind: "exhausted",
+        dimension: "monetary",
+        remainingUsdCents: 0,
+        ceilingUsdCents: 4,
+      },
+    });
+  });
+
+  it("rechecks the destination Project ceiling before dispatching a queued job whose thread moved Projects", async () => {
+    const projectB = "a3000000-0000-4000-8000-000000000095";
+    let releaseFirst: (() => void) | undefined;
+    let calls = 0;
+    const adapter: ImageGenerationAdapter = {
+      generate: async () => {
+        calls += 1;
+        if (calls === 1) {
+          await new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+          });
+        }
+        return {
+          status: "completed",
+          images: [{ bytes: png, mediaType: "image/png" }],
+        };
+      },
+    };
+    const directory = mkdtempSync(join(tmpdir(), "octant-image-job-move-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "octant.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => now,
+    });
+    const spendCeiling = new SpendCeilingService({
+      connection,
+      journal,
+      clock: () => now,
+      uuid: () => crypto.randomUUID(),
+      threadExists: () => true,
+      projectExists: () => true,
+    });
+    let currentProjectId = projectId;
+    seedChatThreadProject(connection, String(scopeId), projectId);
+    const otherThread = decodeImageGenerationScopeId("a3000000-0000-4000-8000-000000000096");
+    seedChatThreadProject(connection, String(otherThread), projectId);
+
+    const service = new ImageJobService({
+      journal,
+      projection: runtime.imageJobProjection,
+      attachments: new GeneratedImageStore(directory),
+      readProviderInstance: (id) => (String(id) === String(bflId) ? bflInstance() : undefined),
+      readImageGenerationCustomSources: () => [],
+      credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+      actor,
+      createAdapter: () => adapter,
+      concurrency: 1,
+      spendCeiling,
+      resolveThreadProjectId: ({ threadId }) =>
+        threadId === String(scopeId) ? currentProjectId : projectId,
+    });
+
+    // Project B has a 2-cent ceiling (cannot afford a 4-cent FLUX job).
+    spendCeiling.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(projectB) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 2 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+
+    const first = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId: otherThread,
+      profileInstanceId: bflId,
+      modelId: bflModelId,
+      prompt: "occupies the single slot",
+    });
+    const queuedInA = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: bflId,
+      modelId: bflModelId,
+      prompt: "queued in Project A then moved to B",
+    });
+
+    // Move scopeId's thread to Project B while its job is still queued.
+    currentProjectId = projectB;
+    connection
+      .prepare("UPDATE chat_thread_projection SET project_id = ? WHERE thread_id = ?")
+      .run(projectB, String(scopeId));
+
+    releaseFirst?.();
+    expect((await service.whenTerminal(first.id)).status).toBe("completed");
+    const movedResult = await service.whenTerminal(queuedInA.id);
+    expect(movedResult.status).toBe("failed");
+    expect(movedResult.failure?.message).toMatch(/Project's money ceiling/i);
+    // Provider was called ONLY for the first job, never for the moved job.
+    expect(calls).toBe(1);
+  });
 });
 
 function appendToStatus(input: unknown): string | undefined {
