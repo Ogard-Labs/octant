@@ -83,7 +83,7 @@ import type {
   AcpProcessPort,
   AcpSessionMode,
 } from "./acpProcess";
-import { acpExactReleaseClaim, acpSubagentsRun, type AcpProviderProfile } from "./acpProfiles";
+import { acpReleaseClaim, acpSubagentsRun, type AcpProviderProfile } from "./acpProfiles";
 import { createAcpManagedToolsBridge, type AcpManagedToolsBridge } from "./acpManagedTools";
 import {
   AcpFailure,
@@ -272,47 +272,31 @@ interface Factories {
   readonly makeCorrelation: () => string;
   readonly makeRequestId: () => string;
   /**
-   * What the last probe found of the profile's reviewed command inventory.
-   * `unverified`: the release listed another inventory, so it runs at Full
-   * access only; `unreviewed` names the commands it listed beyond the
-   * reviewed ones.
+   * The commands the last readiness check listed, for a profile that runs
+   * only listed commands, until a session lists its own.
    */
-  readonly commandInventory: { unverified: boolean; unreviewed: ReadonlyArray<string> };
+  readonly listedCommands: { names: ReadonlyArray<string> };
 }
-
-/**
- * The level a release pin is judged at for compaction and file review. The
- * host runs both on a session it resumes for them, tool-free or under Plan,
- * not on the thread's own Full access session, so an unverified release
- * never earns them: below Full access the pin holds.
- */
-const ACP_HOST_SESSION_RELEASE_POLICY: ProviderExecutionPolicy = "approval-gated";
 
 function hasVerifiedCompaction(profile: AcpProviderProfile): boolean {
   return profile.kind === "mistral-vibe" && profile.compactionVersions?.includes("3.0.3") === true;
 }
 
 /**
- * Capabilities at one level. The exact-release features answer for the
- * level they are asked at: below Full access only a reviewed release has
- * them, and at Full access a newer release keeps them as unverified
- * (`acpExactReleaseClaim`).
+ * Capabilities of one release, the same at every level. A feature reviewed
+ * on named releases is kept from the earliest of them on, unverified on a
+ * release that is not one of them (`acpReleaseClaim`).
  */
 function baseCapabilities(
   profile: AcpProviderProfile,
   appManagedTools: ProviderCapabilitySupport = "unsupported",
   version?: string,
-  executionPolicy?: ProviderExecutionPolicy,
 ) {
   const claims = (reviewed: ReadonlyArray<string> | undefined) =>
-    acpExactReleaseClaim(reviewed, version, executionPolicy) !== "absent";
-  // Compaction and file review run on a session the host resumes for them
-  // read-only, whatever the thread's level, so their pin holds at Full
-  // access too (`ACP_HOST_SESSION_RELEASE_POLICY`).
+    acpReleaseClaim(reviewed, version) !== "absent";
   const compaction: ProviderCapabilitySupport = !hasVerifiedCompaction(profile)
     ? "unsupported"
-    : acpExactReleaseClaim(profile.compactionVersions, version, ACP_HOST_SESSION_RELEASE_POLICY) !==
-        "absent"
+    : claims(profile.compactionVersions)
       ? "supported"
       : "unavailable";
   return {
@@ -387,13 +371,11 @@ function negotiatedAppManagedTools(
   initialized: AcpConnection["initialized"],
   profile: AcpProviderProfile,
   version: string,
-  executionPolicy?: ProviderExecutionPolicy,
 ): ProviderCapabilitySupport {
   return appToolBridgeReachesLaunchOn(process.platform) &&
     (initialized.agentCapabilities.mcpCapabilities?.http === true ||
       (initialized.agentCapabilities.mcpCapabilities?.http === undefined &&
-        acpExactReleaseClaim(profile.unadvertisedHttpMcpVersions, version, executionPolicy) !==
-          "absent"))
+        acpReleaseClaim(profile.unadvertisedHttpMcpVersions, version) !== "absent"))
     ? "supported"
     : "unsupported";
 }
@@ -694,20 +676,9 @@ function normalizeProbe(
     initialized.agentCapabilities.sessionCapabilities?.resume !== undefined
       ? ("supported" as const)
       : ("unsupported" as const);
-  const pinned = baseCapabilities(
-    profile,
-    negotiatedAppManagedTools(initialized, profile, version),
-    version,
-  );
-  const atFullAccess = unverifiedAtFullAccess(
-    pinned,
-    baseCapabilities(
-      profile,
-      negotiatedAppManagedTools(initialized, profile, version, "full-access"),
-      version,
-      "full-access",
-    ),
-  );
+  const appManagedTools = negotiatedAppManagedTools(initialized, profile, version);
+  const capabilities = baseCapabilities(profile, appManagedTools, version);
+  const unverified = unverifiedFeatures(profile, version, initialized, capabilities);
   return decodeProviderProbeResult({
     instanceId,
     readiness: models.length === 0 ? "degraded" : "ready",
@@ -716,8 +687,7 @@ function normalizeProbe(
     ...(credentialStatus === undefined ? {} : { credentialStatus }),
     models,
     capabilities: {
-      ...pinned,
-      ...(atFullAccess === undefined ? {} : { atFullAccess }),
+      ...capabilities,
       nativeAttachments:
         promptInputs.image || promptInputs.embeddedContext || promptInputs.audio
           ? "supported"
@@ -727,52 +697,50 @@ function normalizeProbe(
     },
     ...(models.length === 0
       ? { message: `${profile.displayName} did not report a selectable model.` }
-      : atFullAccess === undefined
+      : unverified.length === 0
         ? {}
-        : { message: unverifiedReleaseMessage(profile, version, pinned, atFullAccess) }),
+        : {
+            message: `${profile.displayName} ${version} keeps ${unverified.join(", ")}, unverified: Octant reviewed them on another release.`,
+          }),
     lastSuccessfulProbeAt: observedAt,
     observedAt,
   });
 }
 
-type AcpLevelCapabilities = ReturnType<typeof baseCapabilities>;
-type AcpFullAccessCapabilities = NonNullable<ProviderCapabilities["atFullAccess"]>;
-
 /**
- * Full access's own value, present only where it differs from every other
- * level's: the probe used to report one value for all of them, so a release
- * newer than the reviewed one lost its pinned features at Full access too.
+ * The features this release keeps without being one they were reviewed on,
+ * as the runtime card names them. A release keeps them at every level, so
+ * the card is where a person learns they run unverified.
  */
-function unverifiedAtFullAccess(
-  pinned: AcpLevelCapabilities,
-  open: AcpLevelCapabilities,
-): AcpFullAccessCapabilities | undefined {
-  const differs =
-    pinned.usage !== open.usage ||
-    pinned.userQuestions !== open.userQuestions ||
-    pinned.appManagedTools !== open.appManagedTools;
-  if (!differs) return undefined;
-  return {
-    release: "unverified",
-    usage: open.usage,
-    userQuestions: open.userQuestions,
-    appManagedTools: open.appManagedTools,
-  };
-}
-
-/** What the runtime card says of a release newer than the one Octant reviewed. */
-function unverifiedReleaseMessage(
+function unverifiedFeatures(
   profile: AcpProviderProfile,
   version: string,
-  pinned: AcpLevelCapabilities,
-  open: AcpFullAccessCapabilities,
-): string {
-  const kept = [
-    ...(pinned.usage !== open.usage ? ["usage"] : []),
-    ...(pinned.userQuestions !== open.userQuestions ? ["forms"] : []),
-    ...(pinned.appManagedTools !== open.appManagedTools ? ["Octant's tools"] : []),
+  initialized: AcpConnection["initialized"],
+  capabilities: ReturnType<typeof baseCapabilities>,
+): ReadonlyArray<string> {
+  const unverified = (reviewed: ReadonlyArray<string> | undefined) =>
+    acpReleaseClaim(reviewed, version) === "unverified";
+  return [
+    ...(capabilities.usage === "supported" && unverified(profile.usageVersions) ? ["usage"] : []),
+    ...(capabilities.userQuestions === "supported" && unverified(profile.elicitationVersions)
+      ? ["forms"]
+      : []),
+    ...(capabilities.appManagedTools === "supported" &&
+    initialized.agentCapabilities.mcpCapabilities?.http !== true &&
+    unverified(profile.unadvertisedHttpMcpVersions)
+      ? ["Octant's tools"]
+      : []),
+    ...(capabilities.sessionCompaction.code === "supported" &&
+    unverified(profile.compactionVersions)
+      ? ["compaction"]
+      : []),
+    ...(hasVerifiedFileReview(profile) && unverified(profile.fileReviewVersions)
+      ? ["file review"]
+      : []),
+    ...(profile.retainsSessions !== true && unverified(profile.retainedSessionVersions)
+      ? ["its process open between turns"]
+      : []),
   ];
-  return `${profile.displayName} ${version} is newer than the release Octant reviewed. At Full access it keeps ${kept.join(", ")}, unverified; below Full access those stay off until Octant reviews this release.`;
 }
 
 function makeClient(connection: AcpAgentConnection): AcpClientPort {
@@ -807,28 +775,6 @@ function advertisedCommandsOf(
   const update = notification.params.update;
   if (update.sessionUpdate !== "available_commands_update") return undefined;
   return advertisedSlashCommands(update.availableCommands);
-}
-
-/** What the runtime card says of a release whose command inventory Octant has not reviewed. */
-function unverifiedInventoryMessage(
-  name: string,
-  version: string,
-  unreviewed: ReadonlyArray<string>,
-): string {
-  const listed = unreviewed.length === 0 ? "" : ` (${unreviewed.join(", ")})`;
-  return `${name} ${version} is unverified: its commands${listed} differ from the ones Octant reviewed. It runs at Full access only, its listed commands with it; below Full access it is refused until Octant reviews this release.`;
-}
-
-function isReviewedCommandInventory(
-  reviewed: ReadonlyArray<string>,
-  commands: ReadonlyArray<string>,
-): boolean {
-  const reviewedSet = new Set(reviewed);
-  return (
-    commands.length === reviewed.length &&
-    new Set(commands).size === commands.length &&
-    commands.every((command) => reviewedSet.has(command))
-  );
 }
 
 function resolveApiKey(
@@ -872,7 +818,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
     clock: options.clock ?? (() => new Date().toISOString()),
     makeCorrelation: options.correlationId ?? (() => crypto.randomUUID()),
     makeRequestId: options.requestId ?? (() => crypto.randomUUID()),
-    commandInventory: { unverified: false, unreviewed: [] },
+    listedCommands: { names: [] },
   };
   const resumeIdentities = new Map<string, ResumeIdentity>();
   const request = <A>(
@@ -921,12 +867,9 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
     return undefined;
   };
 
-  const probeCommandInventory = (
-    client: AcpClientPort,
-    reviewed: ReadonlyArray<string>,
-    root: string,
-    detectedVersion: string,
-  ) =>
+  // An agent may list its commands just after it opens the session, so the
+  // readiness check waits a moment for the list it runs commands from.
+  const probeCommandListing = (client: AcpClientPort, root: string, detectedVersion: string) =>
     Effect.gen(function* () {
       let observedCommands: ReadonlyArray<string> | undefined;
       let resolveCommands: ((commands: ReadonlyArray<string>) => void) | undefined;
@@ -958,13 +901,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       } finally {
         removeNotification();
       }
-      // A release whose inventory differs from the reviewed one is offered
-      // as unverified rather than refused: it runs at Full access, each of
-      // its listed commands with it, and below Full access the pin holds.
-      factories.commandInventory.unverified = !isReviewedCommandInventory(reviewed, commands);
-      factories.commandInventory.unreviewed = [
-        ...new Set(commands.filter((command) => !reviewed.includes(command))),
-      ].slice(0, 32);
+      factories.listedCommands.names = [...new Set(commands)];
       return scratch;
     });
 
@@ -1105,17 +1042,12 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           });
         }
         const scratch =
-          profile.reviewedCommands === undefined
+          profile.listedCommandsOnly !== true
             ? yield* request(() => client.newSession(connection.root), {
                 stage: "model-discovery",
                 detectedVersion: connection.version,
               })
-            : yield* probeCommandInventory(
-                client,
-                profile.reviewedCommands,
-                connection.root,
-                connection.version,
-              );
+            : yield* probeCommandListing(client, connection.root, connection.version);
         const optionsByModel = new Map<string, ReadonlyArray<AcpSessionConfigOption>>();
         if (profile.discoverModelOptions === true) {
           // Devin's first session reports only its default model's settings.
@@ -1160,19 +1092,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           options.authentication === "api-key" ? "stored" : undefined,
           profile.discoverModelOptions === true ? optionsByModel : undefined,
         );
-        const commandsListed =
-          advertised.length === 0 ? observed : { ...observed, commands: advertised };
-        const listed =
-          !factories.commandInventory.unverified || profile.reviewedCommands === undefined
-            ? commandsListed
-            : {
-                ...commandsListed,
-                message: unverifiedInventoryMessage(
-                  name,
-                  connection.version,
-                  factories.commandInventory.unreviewed,
-                ),
-              };
+        const listed = advertised.length === 0 ? observed : { ...observed, commands: advertised };
         options.runtimeRegistry.setObservedState(listed);
         return listed;
       });
@@ -1509,11 +1429,7 @@ function makeConnection(
       if (requestMessage.method === "elicitation/create") {
         const enabled =
           profile.kind === "mistral-vibe" &&
-          acpExactReleaseClaim(
-            profile.elicitationVersions,
-            state.runtime.version,
-            state.executionPolicy,
-          ) !== "absent";
+          acpReleaseClaim(profile.elicitationVersions, state.runtime.version) !== "absent";
         const form = normalizeAcpElicitation(
           requestMessage.params.message,
           requestMessage.params.requestedSchema,
@@ -1972,16 +1888,6 @@ function makeConnection(
             if (refusal !== undefined) throw failure("incompatible", refusal);
             const shellRefusal = shellWithoutRequestRefusal(mode, input.executionPolicy);
             if (shellRefusal !== undefined) throw failure("unsupported", shellRefusal);
-            if (
-              profile.reviewedCommands !== undefined &&
-              factories.commandInventory.unverified &&
-              input.executionPolicy !== "full-access"
-            )
-              throw failure(
-                "incompatible",
-                `${name} lists commands Octant has not reviewed, so this release runs at Full access only, unverified.`,
-                { reason: "runtime-incompatible" },
-              );
             // A Project trusted for the agent, outside Plan, loads the files
             // the refusal is about, as the agent does on its own.
             const projectRefusal =
@@ -2028,7 +1934,6 @@ function makeConnection(
               connection.initialized,
               profile,
               connection.version,
-              input.executionPolicy,
             );
             if (bridgeTools.length > 0 && appManagedTools !== "supported") {
               throw failure(
@@ -2054,11 +1959,7 @@ function makeConnection(
             // new/load can send their baseline before replying. Listen before
             // opening the session, then keep only its exact native identity.
             const initialUsage: AcpUsageState | undefined =
-              acpExactReleaseClaim(
-                profile.usageVersions,
-                connection.version,
-                input.executionPolicy,
-              ) === "absent"
+              acpReleaseClaim(profile.usageVersions, connection.version) === "absent"
                 ? undefined
                 : {};
             // Every other agent's cumulative cost reported while loading or
@@ -2387,11 +2288,8 @@ function makeConnection(
                   if (state.promptActive || state.compacting)
                     return { kind: "refused", reason: "turn-running" } as const;
                   if (
-                    acpExactReleaseClaim(
-                      profile.compactionVersions,
-                      state.runtime.version,
-                      ACP_HOST_SESSION_RELEASE_POLICY,
-                    ) === "absent" ||
+                    acpReleaseClaim(profile.compactionVersions, state.runtime.version) ===
+                      "absent" ||
                     !state.runtime.commands.has("compact")
                   )
                     return { kind: "refused", reason: "runtime-version-unsupported" } as const;
@@ -2436,13 +2334,7 @@ function makeConnection(
                   return { status: "refused", reason: "no-session" } as const;
                 if (state.promptActive || state.compacting)
                   return { status: "refused", reason: "turn-running" } as const;
-                if (
-                  acpExactReleaseClaim(
-                    profile.fileReviewVersions,
-                    state.runtime.version,
-                    ACP_HOST_SESSION_RELEASE_POLICY,
-                  ) === "absent"
-                )
+                if (acpReleaseClaim(profile.fileReviewVersions, state.runtime.version) === "absent")
                   return { status: "refused", reason: "unsupported" } as const;
                 return readAcpFileReview({
                   sourceSessionId: state.sourceSessionId,
@@ -2585,31 +2477,27 @@ function makeConnection(
                   input.context.length > 0
                     ? [input.prompt, renderProviderContextSections(input.context)]
                     : prompt;
-                // An agent with a reviewed inventory runs only a command on
-                // that inventory, and one its session listed once it has
-                // listed any, so an unreviewed command cannot run. It does so
+                // An agent that runs only listed commands runs one its
+                // session listed, or the readiness check listed until the
+                // session lists any, whatever its release lists. It does so
                 // in every mode; the level's tool rules decide what it does.
-                // At Full access an unverified release runs its listed
-                // commands too, as the agent does on its own.
-                const reviewed =
-                  profile.reviewedCommands === undefined
-                    ? undefined
-                    : state.executionPolicy === "full-access"
-                      ? [...profile.reviewedCommands, ...factories.commandInventory.unreviewed]
-                      : profile.reviewedCommands;
+                const sessionListed = [...state.runtime.commands];
+                const listed =
+                  sessionListed.length === 0 ? factories.listedCommands.names : sessionListed;
                 const opensWithSlash = prompt.trimStart().startsWith("/");
-                const listed = [...state.runtime.commands];
                 const command = providerCommandOf(
                   input.prompt,
-                  (reviewed ?? [])
-                    .filter((commandName) => listed.length === 0 || listed.includes(commandName))
-                    .map((commandName) => ({ name: commandName })),
+                  listed.map((commandName) => ({ name: commandName })),
                 );
-                if (reviewed !== undefined && opensWithSlash && command === undefined) {
+                if (
+                  profile.listedCommandsOnly === true &&
+                  opensWithSlash &&
+                  command === undefined
+                ) {
                   return Effect.fail(
                     failure(
                       "unauthorized",
-                      `${name} runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.`,
+                      `${name} runs only the slash commands it listed. Rephrase the request without a leading slash.`,
                     ),
                   );
                 }
@@ -2760,11 +2648,8 @@ function makeConnection(
                 options.sandboxPolicy === undefined &&
                 state.completed &&
                 (profile.retainsSessions === true ||
-                  acpExactReleaseClaim(
-                    profile.retainedSessionVersions,
-                    state.runtime.version,
-                    state.executionPolicy,
-                  ) !== "absent") &&
+                  acpReleaseClaim(profile.retainedSessionVersions, state.runtime.version) !==
+                    "absent") &&
                 state.approvals.size === 0 &&
                 state.questions.size === 0 &&
                 state.pendingToolAnswers.size === 0 &&
@@ -2891,7 +2776,8 @@ function makeConnection(
               });
             }
             // The refusal names what the probe reported for this release, so a
-            // form-asking agent on an unverified release says `unavailable`.
+            // form-asking agent on a release older than its reviewed one says
+            // `unavailable`.
             const questions = baseCapabilities(
               profile,
               undefined,

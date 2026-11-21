@@ -330,6 +330,22 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
     });
   }, 15_000);
 
+  it("refuses a release listed as known to break with Octant, naming it", async () => {
+    const version = readyVersions[profile.kind];
+    const broken = { ...profile, process: { ...profile.process, brokenVersions: [version] } };
+    const ready = fixture(broken);
+    await expect(failureOf(probeAcp(broken, ready.binaryPath))).resolves.toEqual({
+      category: "incompatible",
+      reason: "runtime-incompatible",
+      message: `${profile.displayName} ${version} is known to break with Octant. Install another release.`,
+      diagnostic: {
+        stage: "version-check",
+        kind: "version-mismatch",
+        detectedVersion: version,
+      },
+    });
+  }, 15_000);
+
   it.skipIf(profile.process.npmPackageName !== undefined)(
     "reads the version from stdout when the program warns on stderr before answering",
     async () => {

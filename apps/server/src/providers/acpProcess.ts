@@ -26,7 +26,7 @@ import { Effect, type Scope } from "effect";
 import {
   HOST_PASSTHROUGH_VARIABLES,
   PROTOCOL_STREAM_GUARDS,
-  acpExactReleaseClaim,
+  acpReleaseClaim,
   acpSubagentsRun,
   type AcpProviderProfile,
   type AcpSessionMode,
@@ -946,6 +946,26 @@ function parseVersion(
   };
 }
 
+/**
+ * A launch on a release the profile lists as known to break with Octant is
+ * refused by name; every other release at or above the minimum runs
+ * (maintainer decision, 2026-11-21).
+ */
+function knownBrokenRelease(
+  profile: AcpProviderProfile,
+  version: string,
+): ProviderFailure | undefined {
+  if (profile.process.brokenVersions?.includes(version) !== true) return undefined;
+  return failure(
+    "incompatible",
+    `${profile.displayName} ${version} is known to break with Octant. Install another release.`,
+    {
+      reason: "runtime-incompatible",
+      diagnostic: { stage: "version-check", kind: "version-mismatch", detectedVersion: version },
+    },
+  );
+}
+
 /** Whether a major, minor, patch version is at least the minimum. */
 export function versionAtLeast(
   current: readonly [number, number, number],
@@ -1038,6 +1058,8 @@ function probeNpmPackageVersion(
       }),
     );
   }
+  const broken = knownBrokenRelease(profile, parsed.version);
+  if (broken !== undefined) return Effect.fail(broken);
   return Effect.succeed({ binaryPath, version: parsed.version });
 }
 
@@ -1207,7 +1229,12 @@ export function probeAcpBinary(
           );
           return;
         }
-        finish(Effect.succeed({ binaryPath, version: parsed.version }));
+        const broken = knownBrokenRelease(profile, parsed.version);
+        finish(
+          broken === undefined
+            ? Effect.succeed({ binaryPath, version: parsed.version })
+            : Effect.fail(broken),
+        );
       };
       const timeout = setTimeout(
         () =>
@@ -1408,7 +1435,7 @@ function acquireConnection(
         {
           ...(clientCapabilities ?? { readTextFile: false, writeTextFile: false, terminal: false }),
           ...(profile.kind === "mistral-vibe" &&
-          acpExactReleaseClaim(profile.elicitationVersions, version, executionPolicy) !== "absent"
+          acpReleaseClaim(profile.elicitationVersions, version) !== "absent"
             ? { elicitationForm: true }
             : {}),
         },

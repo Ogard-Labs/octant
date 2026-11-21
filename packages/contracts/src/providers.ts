@@ -1740,11 +1740,11 @@ export const ProviderCapabilities = Schema.Struct({
    */
   appManagedToolsAtFullAccess: Schema.optional(Schema.Literal("mixed")),
   /**
-   * What a Full access thread is offered on an install whose release is newer
-   * than the one Octant reviewed a version-pinned feature against: the
-   * features that pin gates, offered as unverified instead of lost. Every
-   * other level keeps the values above, since below Full access the pin
-   * holds. Absent means Full access reads the values above.
+   * Full access's own value for features a release keeps unverified, where
+   * it differs from every other level's. No runtime reports it since a
+   * release at or above the earliest one a feature was reviewed on keeps it
+   * at every level (maintainer decision, 2026-11-21); the host still reads it
+   * where present. Absent means Full access reads the values above.
    */
   atFullAccess: Schema.optional(
     Schema.Struct({
