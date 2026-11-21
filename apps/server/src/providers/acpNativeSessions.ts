@@ -70,7 +70,7 @@ export interface AcpReplayedHistory {
   readonly omittedMessages: number;
 }
 
-/** The most replayed updates a history read keeps; earlier ones are counted as omitted. */
+/** The most imported replay updates a history read keeps; earlier ones are counted as omitted. */
 export const MAX_ACP_REPLAYED_UPDATES = 20_000;
 
 /** Which imported message an update adds to, as `acpReplayedMessages` joins them. */
@@ -86,7 +86,9 @@ function replayedRole(update: Readonly<Record<string, unknown>>): "person" | "ag
 }
 
 /**
- * Collects a replay, keeping only its newest `limit` updates: the replay runs
+ * Collects a replay, keeping only its newest `limit` updates that
+ * `acpReplayedMessages` imports (text message chunks and named tool calls;
+ * every other update is dropped before it counts): the replay runs
  * oldest first, and keeping its first updates dropped the newest
  * conversation, which is the part a thread taken up from the session needs.
  * Each evicted update is counted into the messages it belonged to, and a
@@ -103,6 +105,9 @@ export function acpReplayCollector(limit: number = MAX_ACP_REPLAYED_UPDATES): {
   let evictedRole: "person" | "agent" | undefined;
   return {
     add: (update) => {
+      // Thoughts, plans and tool progress are never imported; counting them
+      // let a tool-heavy session's replay push out its recent conversation.
+      if (replayedRole(update) === undefined) return;
       if (ring.length < limit) {
         ring.push(update);
         return;

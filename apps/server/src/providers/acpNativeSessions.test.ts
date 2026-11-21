@@ -218,7 +218,7 @@ describe("an ACP agent's session history", () => {
   });
 
   it("keeps the newest messages of a replay longer than its bound and counts the earlier ones as omitted", async () => {
-    const replay = acpReplayCollector(5);
+    const replay = acpReplayCollector(4);
     const chunk = (role: "user" | "agent", text: string) => ({
       sessionUpdate: `${role}_message_chunk`,
       content: { type: "text", text },
@@ -229,7 +229,6 @@ describe("an ACP agent's session history", () => {
       chunk("agent", "answer"),
       chunk("user", "second "),
       chunk("user", "question"),
-      { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "hm" } },
       chunk("agent", "second answer"),
       chunk("user", "newest question"),
       chunk("agent", "newest answer"),
@@ -257,6 +256,41 @@ describe("an ACP agent's session history", () => {
         { role: "agent", text: "newest answer" },
       ],
       omitted: 3,
+    });
+  });
+
+  it("keeps a tool-heavy session's conversation whole when its thoughts, plans and tool progress alone exceed the bound", async () => {
+    const replay = acpReplayCollector(4);
+    const chunk = (role: "user" | "agent", text: string) => ({
+      sessionUpdate: `${role}_message_chunk`,
+      content: { type: "text", text },
+    });
+    replay.add(chunk("user", "Fix the build"));
+    for (let step = 0; step < 50; step += 1) {
+      replay.add({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "hm" } });
+      replay.add({ sessionUpdate: "plan", entries: [] });
+      replay.add({ sessionUpdate: "tool_call_update", toolCallId: `t${step}`, status: "done" });
+    }
+    replay.add({ sessionUpdate: "tool_call", toolCallId: "t50", title: "Run build" });
+    replay.add(chunk("agent", "Fixed."));
+    const sessions = makeAcpNativeSessions({
+      instanceId,
+      driverKind: "antigravity",
+      displayName: "Antigravity",
+      heldSessions: () => new Set(),
+      listSessions: async () => ({ sessions: [], truncated: false }),
+      readHistory: async () => replay.collected(),
+    });
+    const history = sessions.history;
+    if (history === undefined) throw new Error("A reader was given");
+    expect(
+      await Effect.runPromise(history({ instanceId, projectRoot: "/work", nativeSessionId: "s1" })),
+    ).toEqual({
+      status: "read",
+      messages: [
+        { role: "person", text: "Fix the build" },
+        { role: "agent", text: "Fixed.", tools: ["Run build"] },
+      ],
     });
   });
 
