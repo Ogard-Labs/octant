@@ -742,6 +742,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               windowId,
               threadKind: "code-thread",
               scopeId: decodeImageGenerationScopeId(String(thread.id)),
+              toolConstraints: () => readThread()?.toolConstraints ?? thread.toolConstraints ?? [],
               inPlan: () => thread.executionPolicy === "plan" || level() === "plan",
               root: currentRoot,
               allowed: () =>

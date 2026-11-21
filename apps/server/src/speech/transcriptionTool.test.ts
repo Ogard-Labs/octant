@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
   decodeImageGenerationScopeId,
   decodeProviderInstance,
   decodeProviderModelId,
@@ -31,7 +32,10 @@ beforeEach(async () => {
 });
 afterEach(() => rm(dir, { force: true, recursive: true }));
 
-function fixture(kind: "work-thread" | "code-thread" = "work-thread") {
+function fixture(
+  kind: "work-thread" | "code-thread" = "work-thread",
+  transcript = "abcdefghij".repeat(10_000),
+) {
   const windowId = decodeWindowId(randomUUID());
   const scopeId = decodeImageGenerationScopeId(randomUUID());
   const offers = new ServiceOfferService<ServiceOffer, ServiceOfferAnswer>(8, {
@@ -46,7 +50,7 @@ function fixture(kind: "work-thread" | "code-thread" = "work-thread") {
     address: "http://127.0.0.1:7401/v1",
     model: "meeting-model",
   };
-  const transcript = "abcdefghij".repeat(10_000);
+  const toolConstraints: string[] = [];
   const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
     Response.json({ text: transcript }),
   );
@@ -61,6 +65,7 @@ function fixture(kind: "work-thread" | "code-thread" = "work-thread") {
       windowId,
       threadKind: kind,
       scopeId: thread,
+      ...(kind === "code-thread" ? { toolConstraints: () => toolConstraints } : {}),
       inPlan: () => settings.inPlan,
       offers,
       gates,
@@ -119,6 +124,7 @@ function fixture(kind: "work-thread" | "code-thread" = "work-thread") {
     windowId,
     scopeId,
     settings,
+    toolConstraints,
     offers,
     gates,
     service,
@@ -169,6 +175,47 @@ it.each(["work-thread", "code-thread"] as const)(
     expect(form.get("language")).toBe("nb");
   },
 );
+
+it("withholds transcription under a restricted Code profile and rechecks it after approval", async () => {
+  const f = fixture("code-thread");
+  f.toolConstraints.push("octant_canvas");
+  expect(f.tool()).toBeUndefined();
+  f.toolConstraints.push("octant_transcribe");
+  const pending = f.call();
+  await f.waiting();
+  f.toolConstraints.pop();
+  await f.answer(true);
+  expect((await pending).isError).toBe(true);
+  expect(f.fetch).not.toHaveBeenCalled();
+});
+
+it("delivers every page of multilingual and escaped text within the Code answer limit", async () => {
+  const text = ("字".repeat(3) + "\u0001𐍈").repeat(16_000);
+  const f = fixture("code-thread", text);
+  let pending = f.call();
+  await f.answer();
+  let received = "";
+  for (;;) {
+    const { result } = await pending;
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(
+      MAX_PROVIDER_TOOL_RESULT_BYTES,
+    );
+    if (
+      !result ||
+      typeof result !== "object" ||
+      !("text" in result) ||
+      typeof result.text !== "string"
+    )
+      throw new Error("Expected a transcript page");
+    expect(result.text).not.toMatch(/[\uD800-\uDBFF]$/u);
+    received += result.text;
+    if (!("nextOffset" in result)) break;
+    expect(result.nextOffset).toBe(received.length);
+    pending = f.call({ offset: result.nextOffset });
+  }
+  expect(received).toBe(text);
+  expect(f.fetch).toHaveBeenCalledTimes(1);
+});
 
 it.each(["address", "model", "thread"] as const)(
   "remembers consent only within the approved destination and thread: %s",

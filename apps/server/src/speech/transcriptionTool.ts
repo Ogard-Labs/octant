@@ -3,13 +3,14 @@ import {
   decodeCodeRelativePath,
   decodeSpeechTranscriptionLanguage,
   decodeTranscriptionOffer,
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
   SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES,
   type CodeRelativePath,
   type ServiceOffer,
   type ServiceOfferDecision,
   type WindowId,
 } from "@octant/contracts";
-import type { SpeechEndpointResolution } from "@octant/domain";
+import { isToolAllowedByAllowlist, type SpeechEndpointResolution } from "@octant/domain";
 import { readConfinedCodeFile } from "../code/codeConfinedFileRead";
 import { liveCodeTestSourcePort } from "../code/codeDirectoryPort";
 import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
@@ -28,6 +29,7 @@ type Ready = Extract<SpeechEndpointResolution, { status: "ready" }>;
 type Offer = Extract<ServiceOffer, { kind: "transcribe" }>;
 type Turn = Pick<Offer, "scopeId" | "threadKind"> & {
   readonly windowId: WindowId;
+  readonly toolConstraints?: () => ReadonlyArray<string>;
   readonly inPlan: () => boolean;
   readonly allowed: () => boolean;
   readonly root: () => Promise<string | undefined>;
@@ -78,7 +80,8 @@ export class ThreadTranscription {
         readonly adapter: (ready: Ready) => Pick<SpeechAdapter, "transcribe">;
       },
   ): AppManagedToolSet | undefined {
-    if (input.inPlan() || input.endpoint().status !== "ready") return undefined;
+    const profileAllows = () => isToolAllowedByAllowlist(input.toolConstraints?.() ?? [], name);
+    if (!profileAllows() || input.inPlan() || input.endpoint().status !== "ready") return undefined;
     const stopped = new AbortController();
     const thread = String(input.scopeId);
     const tools: AppManagedToolSet = {
@@ -105,7 +108,8 @@ export class ThreadTranscription {
           call.signal === undefined
             ? stopped.signal
             : AbortSignal.any([stopped.signal, call.signal]);
-        const allowed = () => !signal.aborted && !input.inPlan() && input.allowed();
+        const allowed = () =>
+          !signal.aborted && profileAllows() && !input.inPlan() && input.allowed();
         if (call.name !== name || !allowed())
           return refused("Transcription is unavailable for this turn.");
         const args = parseInput(call.inputJson);
@@ -215,16 +219,26 @@ function refused(reason: string) {
 
 function page(text: string, offset: number) {
   if (offset > text.length) return refused("The offset is past the end of this transcript.");
-  const next = Math.min(text.length, offset + pageSize);
-  return {
-    result: {
-      status: "transcribed",
-      text: text.slice(offset, next),
-      characters: text.length,
-      truncated: next < text.length,
-      ...(next < text.length ? { nextOffset: next } : {}),
-    },
-  };
+  const resultAt = (next: number) => ({
+    status: "transcribed",
+    text: text.slice(offset, next),
+    characters: text.length,
+    truncated: next < text.length,
+    ...(next < text.length ? { nextOffset: next } : {}),
+  });
+  let end = Math.min(text.length, offset + pageSize);
+  if (Buffer.byteLength(JSON.stringify(resultAt(end))) > MAX_PROVIDER_TOOL_RESULT_BYTES) {
+    let lo = offset;
+    while (lo < end) {
+      const mid = Math.ceil((lo + end) / 2);
+      if (Buffer.byteLength(JSON.stringify(resultAt(mid))) <= MAX_PROVIDER_TOOL_RESULT_BYTES)
+        lo = mid;
+      else end = mid - 1;
+    }
+  }
+  // Offsets follow JavaScript string indices; do not split a character across two tool answers.
+  if (end < text.length && (text.codePointAt(end - 1) ?? 0) > 0xffff) end--;
+  return { result: resultAt(end) };
 }
 
 function parseInput(json: string) {
