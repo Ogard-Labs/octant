@@ -16,13 +16,17 @@ const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000b0
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000b02");
 const modelId = decodeProviderModelId("gemini-3.8-flash");
 
-function sessions(listed: ReadonlyArray<AcpListedSession> | "unsupported", held: string[] = []) {
+function sessions(
+  listed: ReadonlyArray<AcpListedSession> | "unsupported",
+  held: string[] = [],
+  truncated = false,
+) {
   return makeAcpNativeSessions({
     instanceId,
     driverKind: "antigravity",
     displayName: "Google Antigravity",
     heldSessions: () => new Set(held),
-    listSessions: async () => listed,
+    listSessions: async () => (listed === "unsupported" ? listed : { sessions: listed, truncated }),
   });
 }
 
@@ -71,6 +75,30 @@ describe("an ACP agent's own sessions", () => {
     });
   });
 
+  it("says a session it could not reach is past what it reads, rather than gone, when the list stopped at a bound", async () => {
+    const native = sessions([{ sessionId: "s1", cwd: "/work/app" }], [], true);
+    const result = await Effect.runPromise(
+      Effect.either(
+        native.adopt({
+          instanceId,
+          projectRoot: "/work/app",
+          mode: "code",
+          sessionId,
+          nativeSessionId: "beyond",
+          modelId,
+        }),
+      ),
+    );
+    expect(result).toMatchObject({
+      _tag: "Left",
+      left: {
+        category: "unavailable",
+        message:
+          "That session is past the sessions Octant can read; open it in Google Antigravity instead.",
+      },
+    });
+  });
+
   it("says plainly when the agent does not list its sessions", async () => {
     const result = await Effect.runPromise(
       Effect.either(sessions("unsupported").list({ instanceId, projectRoot: "/work/app" })),
@@ -109,6 +137,7 @@ describe("an ACP agent's own sessions", () => {
           return pages[cursor ?? "first"];
         });
         if (listed === undefined) throw new Error("Expected readable pages");
+        expect(listed.truncated).toBe(false);
         return listed;
       },
     });
@@ -135,7 +164,8 @@ describe("an ACP agent's own sessions", () => {
       return { sessions: [{ sessionId: `s-${repeating.length}` }], nextCursor: "again" };
     });
     expect(repeating).toEqual([undefined, "again"]);
-    expect(listed?.map((session) => session.sessionId)).toEqual(["s-1", "s-2"]);
+    expect(listed?.sessions.map((session) => session.sessionId)).toEqual(["s-1", "s-2"]);
+    expect(listed?.truncated).toBe(true);
 
     let calls = 0;
     const endless = await readAcpSessionPages(async () => {
@@ -143,7 +173,20 @@ describe("an ACP agent's own sessions", () => {
       return { sessions: [{ sessionId: `e-${calls}` }], nextCursor: `next-${calls}` };
     });
     expect(calls).toBeLessThanOrEqual(20);
-    expect(endless?.length).toBe(calls);
+    expect(endless?.sessions.length).toBe(calls);
+    expect(endless?.truncated).toBe(true);
+
+    const crowded = await readAcpSessionPages(async () => ({
+      sessions: Array.from({ length: 2001 }, (_, index) => ({ sessionId: `c-${index}` })),
+    }));
+    expect(crowded?.sessions.length).toBe(2000);
+    expect(crowded?.truncated).toBe(true);
+
+    const overlong = await readAcpSessionPages(async () => ({
+      sessions: [{ sessionId: "o" }],
+      nextCursor: "x".repeat(4097),
+    }));
+    expect(overlong?.truncated).toBe(true);
   });
 
   it("refuses a later page it cannot read rather than offering a partial list", async () => {

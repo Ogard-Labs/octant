@@ -37,12 +37,19 @@ export interface AcpListedSession {
 }
 
 /**
+ * What a `session/list` read collected. `truncated` when it stopped at a bound
+ * with sessions still unread, so a session it did not reach may still exist.
+ */
+export interface AcpSessionPages {
+  readonly sessions: ReadonlyArray<AcpListedSession>;
+  readonly truncated: boolean;
+}
+
+/**
  * The agent's sessions for one folder, or `unsupported` when its `initialize`
  * advertised no `session/list`.
  */
-export type AcpSessionLister = (
-  projectRoot: string,
-) => Promise<ReadonlyArray<AcpListedSession> | "unsupported">;
+export type AcpSessionLister = (projectRoot: string) => Promise<AcpSessionPages | "unsupported">;
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
@@ -82,11 +89,12 @@ export function acpListedSessions(reply: unknown): ReadonlyArray<AcpListedSessio
  * Every session the agent's `session/list` names across its pages, asking
  * for each following page with the `cursor` the previous one returned. It
  * stops at a cursor it has already followed and at the page and session
- * bounds; `undefined` when any page cannot be read.
+ * bounds, and says it was truncated when it stopped with a page or a session
+ * left unread; `undefined` when any page cannot be read.
  */
 export async function readAcpSessionPages(
   listPage: (cursor: string | undefined) => Promise<unknown>,
-): Promise<ReadonlyArray<AcpListedSession> | undefined> {
+): Promise<AcpSessionPages | undefined> {
   const listed: AcpListedSession[] = [];
   const followed = new Set<string>();
   let cursor: string | undefined;
@@ -94,20 +102,23 @@ export async function readAcpSessionPages(
     const reply = await listPage(cursor);
     const sessions = acpListedSessions(reply);
     if (sessions === undefined) return undefined;
-    listed.push(...sessions.slice(0, MAX_LISTED_SESSIONS - listed.length));
+    const room = MAX_LISTED_SESSIONS - listed.length;
+    listed.push(...sessions.slice(0, room));
     const next = record(reply)?.nextCursor;
+    const more = typeof next === "string" && next.length > 0;
+    if (sessions.length > room) return { sessions: listed, truncated: true };
+    if (!more) return { sessions: listed, truncated: false };
     if (
       listed.length >= MAX_LISTED_SESSIONS ||
-      typeof next !== "string" ||
-      next.length === 0 ||
       next.length > MAX_CURSOR_CHARACTERS ||
       followed.has(next)
     )
-      break;
+      return { sessions: listed, truncated: true };
     followed.add(next);
     cursor = next;
   }
-  return listed;
+  // The last page allowed still named a following one.
+  return { sessions: listed, truncated: true };
 }
 
 export function makeAcpNativeSessions(options: {
@@ -132,7 +143,10 @@ export function makeAcpNativeSessions(options: {
     const listed = await options.listSessions(projectRoot);
     if (listed === "unsupported")
       throw failure("unsupported", `${name} does not list its sessions.`);
-    return listed.filter((session) => inFolder(session, projectRoot));
+    return {
+      sessions: listed.sessions.filter((session) => inFolder(session, projectRoot)),
+      truncated: listed.truncated,
+    };
   };
   const asFailure = (error: unknown, fallback: string): ProviderFailure => {
     const candidate = record(error);
@@ -147,7 +161,7 @@ export function makeAcpNativeSessions(options: {
         : Effect.tryPromise({
             try: async () => {
               const sessions: ProviderNativeSession[] = [];
-              for (const session of await listFor(projectRoot)) {
+              for (const session of (await listFor(projectRoot)).sessions) {
                 if (held(session.sessionId)) continue;
                 const updated =
                   session.updatedAt === undefined ? NaN : Date.parse(session.updatedAt);
@@ -177,8 +191,16 @@ export function makeAcpNativeSessions(options: {
               `That ${name} session already belongs to an Octant thread.`,
             );
           const listed = await listFor(input.projectRoot);
-          if (!listed.some((session) => session.sessionId === input.nativeSessionId))
+          if (!listed.sessions.some((session) => session.sessionId === input.nativeSessionId)) {
+            // A read that stopped at a bound cannot tell a session that is gone
+            // from one it never reached.
+            if (listed.truncated)
+              throw failure(
+                "unavailable",
+                `That session is past the sessions Octant can read; open it in ${name} instead.`,
+              );
             throw failure("stale-resume", `That ${name} session is not one of this folder's.`);
+          }
           // Read again: the journal may have recorded it while the agent answered.
           if (held(input.nativeSessionId))
             throw failure(

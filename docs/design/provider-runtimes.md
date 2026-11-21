@@ -2739,7 +2739,11 @@ with the person's token. The CLI talks to Google itself.
   (`importsSessions`). Octant follows the list's `nextCursor` through its
   pages, up to 20 pages and 2,000 sessions and stopping at a cursor it has
   already followed, before it filters by folder and held sessions and offers
-  the newest 50.
+  the newest 50. A read that stops at one of those bounds with sessions left
+  unread cannot tell a missing session from one it never reached, so
+  adopting a session it did not find then says the session is past what
+  Octant can read and to open it in the CLI, rather than that it is not the
+  folder's.
 - **Usage and limits.** The `session/prompt` reply's `usage` is that turn's
   own; its `inputTokens` leaves out cached reads, so Octant's input is input
   plus `cachedReadTokens`, kept also as cache reads (`reportsTurnUsage`). The
