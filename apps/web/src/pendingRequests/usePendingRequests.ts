@@ -55,32 +55,37 @@ export function usePendingRequests(
   const [read, setRead] = useState<PendingRequestRead>({ status: "loading" });
   const [nudge, setNudge] = useState(0);
   const queue = useRef<ReadQueue | undefined>(undefined);
+  const observed = useRef<{ run: string; modes: Set<WaitingAsk["mode"]> } | undefined>(undefined);
   const { feedRevision, settings, workspace } = freshness;
   useEffect(() => {
     if (client === undefined) {
+      observed.current = undefined;
       queue.current = undefined;
       setRead({ status: "loading" });
       return;
     }
     const controller = new AbortController();
-    let previous: PendingRequestList | undefined;
-    let lostOfferModes = new Set<WaitingAsk["mode"]>();
     queue.current = createReadQueue(client, controller.signal, (list) => {
-      if (
-        previous?.offerHostRun !== undefined &&
-        list.offerHostRun !== undefined &&
-        previous.offerHostRun !== list.offerHostRun
-      ) {
-        lostOfferModes = new Set(
-          previous.asks?.filter((ask) => ask.kind === "service-offer").map((ask) => ask.mode),
-        );
-      }
-      previous = list;
+      const previous = observed.current;
+      const run = list.offerHostRun;
+      const lost =
+        run !== undefined && previous !== undefined && run !== previous.run
+          ? previous.modes
+          : undefined;
+      observed.current =
+        run === undefined
+          ? undefined
+          : {
+              run,
+              modes: new Set(
+                list.asks?.filter((ask) => ask.kind === "service-offer").map((ask) => ask.mode),
+              ),
+            };
       setRead((current) => ({
         status: "ready",
         requests: list.requests,
         asks: list.asks ?? [],
-        lostOfferModes,
+        lostOfferModes: lost ?? (current.status === "ready" ? current.lostOfferModes : new Set()),
         read: current.status === "ready" ? current.read + 1 : 1,
       }));
     });
