@@ -103,22 +103,37 @@ export function MemberInstallSheet(props: MemberInstallSheetProps) {
       : undefined;
   useEffect(() => {
     if (runningId === undefined) return;
+    // Polls until the install leaves "running". A failed read (a paired
+    // device briefly offline) schedules the next one instead of leaving the
+    // sheet on "Running…"; a refusal is terminal and is shown.
     let current = true;
-    const timer = setTimeout(() => {
-      void client
-        .memberInstall({ kind: "read-member-install", installId: runningId })
-        .then((result) => {
-          if (current && result.kind === "member-install-progress") {
-            setState({ kind: "progress", progress: result.progress });
-          }
-        })
-        .catch(() => undefined);
-    }, PROGRESS_POLL_MS);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = () => {
+      timer = setTimeout(() => {
+        client.memberInstall({ kind: "read-member-install", installId: runningId }).then(
+          (result) => {
+            if (!current) return;
+            if (result.kind === "member-install-progress") {
+              setState({ kind: "progress", progress: result.progress });
+              if (result.progress.state === "running") poll();
+            } else if (result.kind === "member-install-refused") {
+              setState({ kind: "refused", reason: result.reason, message: result.message });
+            } else {
+              poll();
+            }
+          },
+          () => {
+            if (current) poll();
+          },
+        );
+      }, PROGRESS_POLL_MS);
+    };
+    poll();
     return () => {
       current = false;
       clearTimeout(timer);
     };
-  }, [client, runningId, state]);
+  }, [client, runningId]);
 
   async function confirm(plan: MemberInstallPlan, listenAddress: string) {
     setConfirming(true);

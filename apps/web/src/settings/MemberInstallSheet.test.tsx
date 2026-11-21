@@ -156,6 +156,49 @@ describe("Make this an Octant computer", () => {
     ]);
   });
 
+  it("keeps showing progress after a progress read fails once", async () => {
+    const steps: MemberInstallProgress["steps"] = [
+      { step: "copy", state: "succeeded" },
+      { step: "verify", state: "succeeded" },
+      { step: "install", state: "succeeded" },
+      { step: "start", state: "succeeded" },
+      { step: "listen", state: "failed", message: "Port taken." },
+      { step: "join", state: "not-run" },
+    ];
+    let reads = 0;
+    const memberInstall = vi.fn(async (command: MemberInstallCommand) => {
+      if (command.kind === "prepare-member-install") {
+        return { kind: "member-install-plan", plan: PLAN } as MemberInstallResult;
+      }
+      if (command.kind === "confirm-member-install") {
+        return {
+          kind: "member-install-progress",
+          progress: progress("running", [{ step: "copy", state: "running" }]),
+        } as MemberInstallResult;
+      }
+      reads += 1;
+      if (reads === 1) throw new Error("connection lost");
+      return {
+        kind: "member-install-progress",
+        progress: progress("failed", steps),
+      } as MemberInstallResult;
+    });
+    const user = userEvent.setup();
+    render(
+      <MemberInstallSheet
+        client={{ memberInstall }}
+        onClose={() => {}}
+        onOpenPrivateNetworkGuide={() => {}}
+        server={SERVER}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Install and join" }));
+    expect(
+      await screen.findByText("Nothing ran after the step that failed.", {}, { timeout: 4_000 }),
+    ).toBeTruthy();
+    expect(reads).toBe(2);
+  });
+
   it("refuses a server with no private address and links the private network guide", async () => {
     const { onOpenPrivateNetworkGuide, user } = setup(() => ({
       kind: "member-install-refused",
