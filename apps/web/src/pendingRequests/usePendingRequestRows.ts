@@ -185,6 +185,7 @@ export function usePendingRequestRows(source: PendingRequestRowsSource | undefin
     defer,
     asks,
     answerAsk,
-    offerLostInRestart: read.status === "ready" && read.offerLostInRestart,
+    offerLostInRestart:
+      read.status === "ready" && (modes?.some((mode) => read.lostOfferModes.has(mode)) ?? false),
   };
 }
