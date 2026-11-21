@@ -1,7 +1,11 @@
 import { EventEmitter } from "node:events";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { readHostCrashRecords } from "./crashRecords";
 import {
   installProcessErrorNet,
   REVIEWED_BENIGN_TEARDOWN_ERRORS,
@@ -14,6 +18,7 @@ class FakeProcessTarget extends EventEmitter implements ProcessErrorNetTarget {}
 class FakeStdioStream extends EventEmitter {}
 
 const MODULE_PATH = fileURLToPath(new URL("./processErrorNet.ts", import.meta.url));
+const CRASH_RECORDS_MODULE_PATH = fileURLToPath(new URL("./crashRecords.ts", import.meta.url));
 
 describe("process error net", () => {
   it("an unhandled error event ends the process with a logged cause", () => {
@@ -87,59 +92,107 @@ describe("process error net", () => {
     net.uninstall();
   });
 
-  it("preserves redacted stack frames even when the error message exceeds the redactor length cap", () => {
+  it("preserves redacted native stack frames even when the error message exceeds the redactor length cap", () => {
     const target = new FakeProcessTarget();
     const lines: string[] = [];
     const fatalEvents: ProcessErrorNetEvent[] = [];
     const exit = vi.fn();
+    const homeDirectory = dirname(MODULE_PATH);
 
     const net = installProcessErrorNet({
       processName: "host",
       target,
       stdioStreams: [],
-      homeDirectory: "/Users/ada",
+      homeDirectory,
       writeLine: (line) => lines.push(line),
       onFatal: (event) => fatalEvents.push(event),
       exit,
     });
 
-    const longMessage = `token=sk-longsecret12345 ${"x".repeat(10_000)}`;
-    const failure = new Error(longMessage);
-    failure.stack = `Error: ${longMessage}\n    at run (/Users/ada/repo/server.ts:42:7)\n    at main (/Users/ada/repo/index.ts:10:3)`;
-    target.emit("uncaughtException", failure);
+    const longMessage = `token=sk-longsecret12345 at ${homeDirectory}/secret-dir ${"x".repeat(10_000)}`;
+    function buildLongMessageFailure(): Error {
+      return new Error(longMessage);
+    }
+    target.emit("uncaughtException", buildLongMessageFailure());
 
     expect(exit).toHaveBeenCalledWith(1);
     expect(lines).toHaveLength(1);
     const logged = lines[0] ?? "";
     expect(logged).not.toContain("sk-longsecret12345");
-    expect(logged).not.toContain("/Users/ada");
-    expect(logged).toContain("at run (~/repo/server.ts:42:7)");
-    expect(logged).toContain("at main (~/repo/index.ts:10:3)");
-    expect(fatalEvents[0]?.stack).toContain("at run (~/repo/server.ts:42:7)");
+    expect(logged).not.toContain(homeDirectory);
+    expect(logged).toContain("~/secret-dir");
+    expect(logged).toContain("buildLongMessageFailure");
+    expect(logged).toContain("~/processErrorNet.test.ts");
+    expect(fatalEvents[0]?.stack).toContain("buildLongMessageFailure");
+    expect(fatalEvents[0]?.stack).toContain("~/processErrorNet.test.ts");
+    expect(fatalEvents[0]?.stack ?? "").not.toContain(homeDirectory);
 
     net.uninstall();
   });
 
-  it("ends a real child process non-zero with a redacted cause on an unhandled error event", () => {
-    const script = [
-      `import { installProcessErrorNet } from ${JSON.stringify(MODULE_PATH)};`,
-      `installProcessErrorNet({ processName: "host", homeDirectory: "/Users/ada" });`,
-      `setTimeout(() => {`,
-      `  throw new Error("fatal crash at /Users/ada/repo Authorization: Bearer topsecretvalue12345");`,
-      `}, 5);`,
-    ].join("\n");
+  it("ends a real child process non-zero with redacted cause and native stack frames in stderr and crash record", async () => {
+    const dataDirectory = mkdtempSync(join(tmpdir(), "octant-process-error-net-"));
+    const childCwd = process.cwd();
+    try {
+      const script = [
+        `import { installProcessErrorNet } from ${JSON.stringify(MODULE_PATH)};`,
+        `import { recordHostCrashSync } from ${JSON.stringify(CRASH_RECORDS_MODULE_PATH)};`,
+        `const dataDirectory = ${JSON.stringify(dataDirectory)};`,
+        `const homeDirectory = ${JSON.stringify(childCwd)};`,
+        `installProcessErrorNet({`,
+        `  processName: "host",`,
+        `  homeDirectory,`,
+        `  onFatal: (event) => {`,
+        `    recordHostCrashSync(dataDirectory, {`,
+        `      recordedAt: event.timestamp,`,
+        `      process: "host",`,
+        `      exitReason: event.kind,`,
+        `      lastLines: event.line.split("\\n"),`,
+        `      homeDirectory,`,
+        `    });`,
+        `  },`,
+        `});`,
+        `function explodeInChildProcess() {`,
+        `  throw new Error(\`fatal crash at \${homeDirectory}/repo Authorization: Bearer topsecretvalue12345 \${"x".repeat(10_000)}\`);`,
+        `}`,
+        `setTimeout(() => {`,
+        `  explodeInChildProcess();`,
+        `}, 5);`,
+      ].join("\n");
 
-    const result = spawnSync("bun", ["-e", script], {
-      encoding: "utf8",
-      timeout: 10_000,
-    });
+      const result = spawnSync("bun", ["-e", script], {
+        cwd: childCwd,
+        encoding: "utf8",
+        timeout: 10_000,
+      });
 
-    expect(result.error).toBeUndefined();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("[octant:host] fatal uncaughtException");
-    expect(result.stderr).toContain("fatal crash at ~/repo");
-    expect(result.stderr).not.toContain("/Users/ada");
-    expect(result.stderr).not.toContain("topsecretvalue12345");
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("[octant:host] fatal uncaughtException");
+      expect(result.stderr).toContain("fatal crash at ~/repo");
+      expect(result.stderr).toContain("explodeInChildProcess");
+      expect(result.stderr).toMatch(/\nat\s+/);
+      expect(result.stderr).not.toContain(childCwd);
+      expect(result.stderr).not.toContain("topsecretvalue12345");
+
+      const records = await readHostCrashRecords(dataDirectory);
+      expect(records).toHaveLength(1);
+      const record = records[0];
+      expect(record?.process).toBe("host");
+      expect(record?.exitReason).toBe("uncaughtException");
+      expect(record?.lastLines[0]).toContain("[octant:host] fatal uncaughtException");
+      expect(record?.lastLines[0]).toContain("fatal crash at ~/repo");
+      expect(
+        record?.lastLines.some(
+          (line) => line.startsWith("at ") && line.includes("explodeInChildProcess"),
+        ),
+      ).toBe(true);
+      const joined = record?.lastLines.join("\n") ?? "";
+      expect(joined).not.toContain(childCwd);
+      expect(joined).not.toContain("topsecretvalue12345");
+    } finally {
+      rmSync(dataDirectory, { recursive: true, force: true });
+    }
   });
 
   it("logs an unhandled rejection and guards against re-entrant crashes", () => {
