@@ -2502,7 +2502,9 @@ by ACP's standard usage, and its probe declares `usage: "supported"`
   than charged zero; an update restating the same total charges zero. A
   session Octant opened
   with `session/new` starts from zero; one it loaded or resumed is priced
-  from the second cost it sees. Only `currency: "USD"` becomes `costUsd`;
+  from the second cost it sees, and a cost the agent reports while
+  `session/load` or `session/resume` runs counts as the first (Octant reads
+  usage updates from before it opens the session). Only `currency: "USD"` becomes `costUsd`;
   another currency or unit ("credits"), a cost that fell or a changed unit
   leaves the turn without a provider cost, so the ledger estimates it or
   refuses a money ceiling as unknown spend.

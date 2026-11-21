@@ -1006,6 +1006,49 @@ describe("standard ACP usage", () => {
     });
   });
 
+  it("charges a resumed session's first turn the growth from the cost the agent reported while loading it", async () => {
+    const f = fixture(kilo);
+    const loaded = async (sourceSessionId: string) => {
+      usageUpdate(f.client, 5);
+      return { sessionId: sourceSessionId, configOptions: f.client.configOptions };
+    };
+    f.client.loadSession.mockImplementationOnce(loaded);
+    f.client.resumeSession.mockImplementationOnce(loaded);
+    f.client.prompt.mockImplementationOnce(async () => {
+      usageUpdate(f.client, 5.5);
+      return {
+        stopReason: "end_turn",
+        usage: { inputTokens: 1_000, outputTokens: 200, totalTokens: 1_200 },
+      };
+    });
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const started = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          yield* connection.stop(sessionId);
+          if (started.resumeCursor === undefined) throw new Error("Missing resume cursor.");
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: started.resumeCursor,
+            executionPolicy: "approval-gated",
+          });
+          const stream = yield* connection.subscribe;
+          const collected = yield* Effect.fork(Effect.promise(() => collectTerminal(stream)));
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          const events = yield* Fiber.join(collected);
+          yield* connection.stop(sessionId);
+          return events;
+        }),
+      ),
+    );
+    expect(events.find((event) => event.kind === "usage")).toMatchObject({ costUsd: 0.5 });
+  });
+
   it("records no usage for an unpinned agent whose reply carries none", async () => {
     const f = fixture(kilo);
     f.client.prompt.mockImplementationOnce(async () => {

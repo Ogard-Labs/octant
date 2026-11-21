@@ -2064,9 +2064,16 @@ function makeConnection(
               ) === "absent"
                 ? undefined
                 : {};
+            // Every other agent's cumulative cost reported while loading or
+            // resuming is the baseline its first turn grows from, so the state
+            // exists before the session opens and is kept for the session.
+            const reportedUsage: AcpReportedUsageState | undefined =
+              profile.usageVersions === undefined
+                ? acpReportedUsageState(sourceSessionId === undefined ? "new" : "existing")
+                : undefined;
             let usageSessionId = sourceSessionId;
             let usageMismatch = false;
-            if (initialUsage !== undefined) {
+            if (initialUsage !== undefined || reportedUsage !== undefined) {
               removeUsage = client.onNotification((message) => {
                 if (message.params.update.sessionUpdate !== "usage_update") return;
                 usageSessionId ??= message.params.sessionId;
@@ -2074,7 +2081,10 @@ function makeConnection(
                   usageMismatch = true;
                   return;
                 }
-                observeAcpUsage(initialUsage, message.params.update);
+                if (initialUsage !== undefined)
+                  observeAcpUsage(initialUsage, message.params.update);
+                if (reportedUsage !== undefined)
+                  observeAcpUsageUpdate(reportedUsage, message.params.update);
               });
             }
             // Native resume keeps agent context without replaying its growing
@@ -2276,13 +2286,14 @@ function makeConnection(
                 : {
                     usage: usageMismatch || usageSessionId !== source.sessionId ? {} : initialUsage,
                   }),
-              ...(profile.usageVersions === undefined
-                ? {
-                    reported: acpReportedUsageState(
-                      sourceSessionId === undefined ? "new" : "existing",
-                    ),
-                  }
-                : {}),
+              ...(reportedUsage === undefined
+                ? {}
+                : {
+                    reported:
+                      usageMismatch || usageSessionId !== source.sessionId
+                        ? acpReportedUsageState(sourceSessionId === undefined ? "new" : "existing")
+                        : reportedUsage,
+                  }),
               source,
               scope: runtimeScope,
               client,
