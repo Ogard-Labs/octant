@@ -2314,6 +2314,10 @@ function renderNonCodeTab(
         {...(props.onOpenUsageDashboard === undefined
           ? {}
           : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
+        {...(props.automationClient === undefined
+          ? {}
+          : { automationClient: props.automationClient })}
+        {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
         key={tab.threadId}
         onClearCanvasSelections={canvasContext.clearCanvasSelections}
         onRemoveCanvasSelection={canvasContext.onRemoveCanvasSelection}
@@ -3387,6 +3391,8 @@ function ChatThreadWorkspace(props: {
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
   readonly spendCeilingShown?: boolean;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
+  readonly automationClient?: AutomationClient;
+  readonly onOpenRoutine?: (automationId: string) => void;
 }) {
   const controller = useChatController({
     // The App-level controller already refreshes navigation from the Machine
@@ -3432,6 +3438,10 @@ function ChatThreadWorkspace(props: {
       {...(props.onOpenUsageDashboard === undefined
         ? {}
         : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
+      {...(props.automationClient === undefined
+        ? {}
+        : { automationClient: props.automationClient })}
+      {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
       projects={props.projects}
       tab={props.tab}
     >
