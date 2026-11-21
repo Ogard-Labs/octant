@@ -30,6 +30,7 @@ const REGISTERED_PROVIDER_DRIVER_KINDS = {
   cline: true,
   qwen: true,
   fx: true,
+  antigravity: true,
   devin: true,
   pi: true,
   "oh-my-pi": true,
@@ -67,6 +68,7 @@ const CHAT_OUTCOMES = {
   cline: "complete",
   qwen: "complete",
   fx: "complete",
+  antigravity: "complete",
   devin: "complete",
   pi: "complete",
   "oh-my-pi": "unavailable",
@@ -88,7 +90,7 @@ const CHAT_OUTCOMES = {
 
 describe("Chat provider matrix", () => {
   it("consumes Chat conformance evidence for every registered provider kind", () => {
-    expect(new Set(registeredProviderDriverKinds).size).toBe(28);
+    expect(new Set(registeredProviderDriverKinds).size).toBe(29);
 
     for (const driverKind of registeredProviderDriverKinds) {
       if (CHAT_OUTCOMES[driverKind] === "unavailable") continue;

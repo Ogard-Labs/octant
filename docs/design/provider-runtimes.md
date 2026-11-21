@@ -2482,8 +2482,10 @@ takes documents (text, PDF and office files), and each goes as an embedded
 text and it is not a PDF or office file, otherwise its bytes as
 `BlobResourceContents` (a PDF stays bytes even when they decode), under an
 `attachment:<id>/<name>` URI that names the attachment, not a path. ACP states
-these for the agent, not per model. The probe reports `nativeAttachments`
-supported when either is advertised. In Work and Code any other file (an
+these for the agent, not per model. With `promptCapabilities.audio` every
+listed model takes audio, and each recording goes as an ACP `audio` block
+with its bytes in base64 (built, 2026-11-20). The probe reports
+`nativeAttachments` supported when any of the three is advertised. In Work and Code any other file (an
 archive, a binary, or a document to an agent without embedded context) is
 named by its path in the thread's attachments folder, which the agent's launch
 confinement reads and never writes, at every level; an ACP `resource_link`
@@ -2491,7 +2493,18 @@ block is not sent, since the path in the message already reaches every agent.
 In Chat a file the agent does not take natively follows Chat's rule
 ([Plan and Chat tool parity](../architecture.md#security-and-authority)). An
 attachment of a kind the agent advertised no block for is refused rather than
-dropped. Audio is not sent.
+dropped; audio to an agent without the `audio` block goes as an embedded
+resource where it advertises embedded context.
+
+A turn's `session/prompt` has a budget of silence, not of total time (built,
+2026-11-20): ten minutes, restarted by every message the agent sends, and
+standing still while the agent waits on an answer from Octant (an approval,
+a question, a client request). A turn that keeps streaming is never cut;
+before, a fixed ten minutes failed long agentic turns that were still
+working. A session config option that is not a `select` (ACP also defines a
+boolean toggle) is left out of what Octant reads, since Octant sets none,
+instead of failing the whole `session/new`, load or update reply that
+carried it.
 
 ### Registry coverage
 
@@ -2517,7 +2530,7 @@ distribution.
 | `mistral-vibe`            | Mistral Vibe       | `vibe-acp` (binary)                                    | Shipped (`mistral-vibe`)                                                                            |
 | `qwen-code`               | Qwen Code          | `npx @qwen-code/qwen-code --acp --experimental-skills` | Shipped (`qwen`; Octant does not pass `--experimental-skills`)                                      |
 | `opencode`, `opencode-v2` | OpenCode           | `opencode acp` (binary)                                | Shipped as the native OpenCode driver, not an ACP profile                                           |
-| `antigravity-acp`         | Google Antigravity | `agy_acp_server.par` (binary)                          | Listed for adding as any ACP agent; profile needs the probe                                         |
+| `antigravity-acp`         | Google Antigravity | `agy_acp_server.par` (binary)                          | Shipped as `antigravity` on the official `agy` CLI; the registry server stays listed for adding     |
 | `junie`                   | Junie              | `junie --acp=true` (binary inside `junie.app`)         | Listed for adding as any ACP agent; profile needs the probe                                         |
 | `amp-acp`                 | Amp                | `amp-acp` (binary)                                     | Listed for adding as any ACP agent; profile needs the probe                                         |
 | `auggie`                  | Auggie CLI         | `npx @augmentcode/auggie --acp`                        | Listed for adding as any ACP agent; profile needs the probe                                         |
@@ -2549,7 +2562,8 @@ distribution.
 | `qoder`                   | Qoder CLI          | `npx @qoder-ai/qodercli --acp`                         | Blocked: registry quarantine (initialize fails)                                                     |
 | `vtcode`                  | VT Code            | `vtcode acp` (binary)                                  | Blocked: registry quarantine (missing Windows builds) until it is lifted                            |
 
-Decided (maintainer decision, 2026-11-16; designed, not built): the probe
+Decided (maintainer decision, 2026-11-16; Google Antigravity built, the
+rest designed, not built): the probe
 next agents Google Antigravity, Factory Droid, Junie, Amp and Auggie, and
 Kiro, Trae and Muse (not in the snapshot above), are to become first-class
 profiles, each through the probe below; Cursor's block is to be rechecked
@@ -2557,7 +2571,7 @@ against the current release and lifted if its reason no longer holds. Every
 other agent can be added as [any ACP agent](#any-acp-agent).
 
 Rechecked against the registry's source at commit `131167e` (2026-11-16):
-none of these has a profile yet, because none has the signed-in probe below
+apart from Google Antigravity (below), none of these has a profile yet, because none has the signed-in probe below
 on record and the registry entry gives only a command, not the
 `agentInfo.name`, modes, sign-in folder or Project entries a profile pins.
 They are listed for adding as any ACP agent instead (`ACP_REGISTRY_AGENTS`),
@@ -2595,6 +2609,147 @@ secret. `WITHHELD_BUNDLED_PROVIDER_DRIVERS` in
 `packages/plugin-host/src/bundledProviderDrivers.ts` holds no driver; an entry
 there keeps a driver out of the activation ladder while stored instances and
 threads stay.
+
+### Google Antigravity
+
+Built (maintainer decision, 2026-11-20): Google Antigravity is a shipped ACP
+profile, `antigravity`, on Google's official CLI, `agy`, run unmodified as
+`agy acp --process-per-session --disable-telemetry` with
+`AGY_CLI_DISABLE_AUTO_UPDATE=1`, in the project directory.
+
+It stays inside Google's terms (read 2026-11-20). The Antigravity Additional
+Terms of Service (`antigravity.google/terms`) make "using third party
+software, tools, or services to access the Service (e.g. using OpenClaw with
+Antigravity OAuth)" a breach that may suspend the account. Google's own
+guide (`antigravity.google/docs/ide/extensions/acp`) is the sanctioned path:
+"Any ACP client can launch Antigravity CLI. Configure it to run this command
+with the project directory as the working directory: `agy acp`", with the
+agent, its tools, sign-in and settings coming from the CLI itself. Octant is
+that ACP client and does nothing outside the guide: it never reads, copies or
+replays the CLI's OAuth credentials, sends no other client's identity (the
+guide offers third-party models only to some named editors, so Octant gets
+Gemini models alone), passes only flags the guide lists, and never uses
+`--dangerously-skip-permissions`. The FAQ (`antigravity.google/docs/faq`)
+says headless mode (`agy -p`) "is intended for direct scripting and CI
+workflows. Wrapping agy inside third-party coding agents or applications, or
+automating account rotation, is not supported under consumer plans", so
+Octant never runs `agy -p` (not even for `/usage`) and never rotates or
+switches Antigravity accounts by itself; one person's own sign-in serves
+their own threads. `--process-per-session` is the guide's flag "required for
+HTTP MCP servers that your editor configures", which is how Octant offers its
+tools. Discovery finds `agy` on the
+PATH. It speaks standard ACP over stdio, and Octant does nothing to the CLI's
+identity or sign-in: no spoofed `clientInfo`, no faked environment that moves
+where the CLI keeps its sign-in, and no call to Google's internal endpoints
+with the person's token. The CLI talks to Google itself.
+
+- **No sandbox in Work and Code outside Strict.** There the CLI starts as the
+  person's own terminal would start it, at every level: no Octant sandbox, no
+  network allowlist, the person's whole environment, and its own sign-in read
+  as it reads it (`confinement: provider-approvals-outside-strict`). This is
+  the rule Windows already applies to ACP agents below Full access: the CLI's
+  `default` mode asks Octant before every edit and command, so the thread's
+  level holds through Octant's approvals rather than the OS. Rationale: other
+  ACP clients of the CLI run it this way, and the person asked for the same
+  reach. Cost: below Full access the process itself may read and write
+  anything the person can, and Octant's protected files and network limits do
+  not bind it; only the approvals it asks for do.
+- **Where the sandbox stays.** A readiness check, Chat (which has no folder),
+  Plan (which writes nothing), Strict, an explicit sandbox policy, and a Full
+  access thread that keeps the sandbox start inside Octant's deny-default
+  sandbox. Under Strict, Network limits still reach only Google's sign-in and
+  model hosts (`cloudcode-pa.googleapis.com`,
+  `daily-cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`,
+  `www.googleapis.com`, `accounts.google.com`, `antigravity.google`).
+- **Sign-in.** The person runs `agy` in a terminal and signs in with their
+  own Google account; Octant reuses that sign-in as the CLI reads it, in
+  threads and in Automations alike: Octant runs only `agy acp`, so a routine
+  drives the same ACP session a thread does (maintainer decision, 2026-11-21).
+  On macOS the CLI keeps it in the login
+  keychain and reads it by running `/usr/bin/security`. Unconfined, that read
+  needs nothing from Octant. A sandboxed launch sets `readsLoginKeychain`: the
+  grant Claude Code's runtime measured as the least that reads a keychain
+  sign-in (exec of `/usr/bin/security`, the `com.apple.SecurityServer` and
+  `com.apple.securityd.xpc` lookups, a literal read of
+  `~/Library/Keychains/login.keychain-db`, and process-fork, which Chat and
+  Plan otherwise deny). The rules follow the built-in secret-file denials, so
+  a path the person protects in Settings still wins; nothing grants a Keychain
+  write, no other file in that folder is readable, and no other profile gets
+  the grant. Unlike Claude Code's, it is not held to the runtime alone:
+  commands the agent runs in-process share its sandbox. Octant never reads the
+  keychain item itself.
+- **Own setup.** Nothing of the CLI's own setup is held back, at any level or
+  under Strict: it reads and writes `~/.gemini` (`GEMINI_HOME` names it), and
+  loads the person's `AGENTS.md`, `GEMINI.md` and skills there and a Project's
+  `.agents/skills` and `.gemini/skills` as it does on its own. Its own-setup
+  switches report nothing, and Strict has no Project code to ask about for it.
+- **Release and identity.** The version is the first `x.y.z` anywhere in
+  `agy --version`; releases before 1.5.0 are refused, as other ACP clients of
+  the CLI refuse them. Any `agentInfo.name` is accepted (1.1.x reported
+  `antigravity-acp`, 1.5.x `Antigravity ACP Server`), and `initialize` may
+  report protocol version 1 or 2 (1.1.1 reported 2 with version 1 shapes);
+  every other profile accepts exactly 1.
+- **Modes, approvals and questions.** The CLI offers `default`, `auto_edit`,
+  `yolo` and, for some accounts, `auto`, and refuses `auto_edit` and `yolo`
+  from an ACP client. The profile selects no mode (`selectsNoMode`): the
+  session keeps `default` and Octant answers its approvals for the thread's
+  level, Full access included. Where the CLI offers its own `allow_always`
+  and the person keeps approvals for the session, an approval chooses it, so
+  the CLI remembers the answer (`forwardsAllowAlways`); a one-call answer (an
+  automatic reviewer's, or one on a child run's behalf) never does. Its
+  questions arrive as permission requests whose tool call id starts with
+  `interaction_`: one whose options are no allow-and-reject pair is asked as
+  a question with its options as the answers, and a pair as an approval.
+- **Turns that do not fail on stray updates** (`toleratesStrayUpdates`).
+  Updates after the prompt answered (usage, background-command replies,
+  scheduled wakes), a subagent's updates under its own session id, a repeated
+  tool start, a repeated finish and an update for a call never started are
+  ignored or read as the start they imply, as other ACP clients of the CLI
+  accept them; a call still running when the turn ends (a subagent's read
+  the CLI never finishes) is marked done with it. Every other profile keeps
+  the strict mapper. A turn the CLI ends with `refusal` says the account's
+  usage limit may be reached (`refusalMessage`).
+- **Prompts.** A prompt that opens with `/` is one of the CLI's own commands
+  (`/plan`, `/goal`, `/compact`), which it runs only from the start of the
+  prompt: the command goes as the first text block and Octant's context as
+  the next (`commandLeadsPrompt`). Octant does not offer it `fs/write_text_file`
+  (`withholdsClientWrites`): offered it, the CLI rewrites whole files through
+  it instead of making its own edits, which its edit approvals already ask
+  for. Octant's instructions reach it in the prompt as they reach every
+  agent, not through the `_meta.antigravity.systemPrompt.append` it
+  advertises, because Octant's context arrives with each turn, after
+  `session/new`.
+- **Sessions.** A follow-up reattaches with `session/resume`, because
+  `session/load` replays the whole history; no `session/close` is sent, since
+  `initialize` does not advertise it. The process stays open between turns on
+  every release (`retainsSessions`), as other clients keep it, since each
+  launch unpacks the CLI again before it answers. A thread may start from
+  one of the CLI's own sessions for its folder, listed through `session/list`
+  when `initialize` advertises it, leaving out any an Octant thread holds
+  (`importsSessions`).
+- **Usage and limits.** The `session/prompt` reply's `usage` is that turn's
+  own; its `inputTokens` leaves out cached reads, so Octant's input is input
+  plus `cachedReadTokens`, kept also as cache reads (`reportsTurnUsage`). The
+  account's 5-hour and weekly windows are not read: the CLI answers `/usage`
+  only through headless mode, which Google does not support wrapping inside
+  another application on consumer plans, so its limits report as
+  `runtime-does-not-report`.
+
+Kept, where other ACP clients of the CLI differ: the self-update guard (other
+clients both set and leave it), `--disable-telemetry`, Strict and Network
+limits as the person sets them, and Chat and Plan, which those clients do not
+have. A prompt sent while a turn runs is refused as for every ACP agent;
+the CLI steers a running turn with it, which Octant does not offer yet.
+
+Not built yet, each pending the signed-in probe on a Mac with a personal
+subscription: whether the sandboxed keychain read signs in as measured for
+Claude Code, the model and thinking option ids, the exact shape of a question
+and of `session/list`, the `/usage` answer on a real account, mid-turn
+steering, and a pinned compaction release. Google's guide says the server
+speaks protocol version 1, offers elicitation forms for questions, supports
+`session/close`, and treats a prompt sent during a turn as steering; Octant
+asks questions through the permission channel, sends no `session/close`, and
+refuses a mid-turn prompt until each is built against a live run.
 
 ### Any ACP agent
 
@@ -2832,9 +2987,8 @@ Nothing is inferred from the registry entry alone.
    integration reports tools unavailable. Where resume is advertised, a
    follow-up reopens the agent's session.
 
-For the shortlist the probe must also settle: for Google Antigravity, how
-`agy_acp_server` authenticates outside its IDE extension and whether it runs
-without the IDE (the registry's Linux entry passes `--uid=`); for Junie,
+For the shortlist the probe must also settle: for Google Antigravity, the
+signed-in items listed under [Google Antigravity](#google-antigravity); for Junie,
 whether the executable inside `junie.app` launches under Seatbelt from its
 bundle path, and which JetBrains account state it reads.
 

@@ -993,7 +993,8 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         userQuestions:
           profile.elicitationVersions === undefined ? profile.userQuestions : "unavailable",
         reasoning: "supported",
-        usage: "unsupported",
+        // An agent that reports each turn's usage in its reply has it on any release.
+        usage: profile.reportsTurnUsage === true ? "supported" : "unsupported",
         fileChanges: "unavailable",
         nativeChildAgents: "unavailable",
         // Mistral Vibe's auto-approve mode is its own reviewer; no other agent has one.
@@ -1252,6 +1253,36 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(textOnly.probed.models[0]?.inputModalities).toEqual(["text"]);
     expect(textOnly.sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
     expect(textOnly.prompt).not.toHaveBeenCalled();
+  });
+
+  it("sends attached audio as an audio block to an agent that advertises audio", async () => {
+    const memo = {
+      attachmentId: "file-3",
+      displayName: "memo.wav",
+      mediaType: "audio/wav",
+      bytes: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+    };
+    const f = fixture(profile);
+    Object.assign(f.connection.initialized.agentCapabilities, {
+      promptCapabilities: { image: false, audio: true, embeddedContext: false },
+    });
+    const probed = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    expect(probed.models[0]?.inputModalities).toEqual(["text", "audio"]);
+    const sent = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          return yield* Effect.either(
+            connection.send({ sessionId, prompt: "listen", attachments: [memo], tools: [] }),
+          );
+        }),
+      ),
+    );
+    expect(sent._tag).toBe("Right");
+    expect(f.client.prompt).toHaveBeenCalledWith(expect.any(String), expect.any(String), [
+      { type: "audio", mimeType: "audio/wav", data: Buffer.from(memo.bytes).toString("base64") },
+    ]);
   });
 
   it("sends an attached document as an embedded resource only to an agent that advertises embedded context", async () => {
@@ -1966,7 +1997,14 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       }
       const modeValue = profile.sessionMode(productMode, executionPolicy);
       const expectedModeRequest = profile.setModeCall?.("agent-session-1", modeValue);
-      if (expectedModeRequest === undefined) {
+      if (profile.selectsNoMode === true) {
+        // The session keeps the mode it opened with.
+        expect(client.setConfigOption).not.toHaveBeenCalledWith(
+          "agent-session-1",
+          "mode",
+          expect.anything(),
+        );
+      } else if (expectedModeRequest === undefined) {
         expect(client.setConfigOption).toHaveBeenCalledWith("agent-session-1", "mode", modeValue);
       } else {
         expect(client.call).toHaveBeenCalledWith(
@@ -3481,6 +3519,31 @@ it("keeps a retained native session identity reserved while it is idle", async (
   );
 });
 
+it.each([
+  ["Google Antigravity keeps", acpProviderProfiles.antigravity, "refused"],
+  ["an agent with no reviewed warm release closes", acpProviderProfiles.gemini, "claimed"],
+] as const)("%s its process between turns on any release", async (_label, profile, expected) => {
+  const { driver, registry } = fixture(profile, { runtimeVersion: "9.9.9" });
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, mode: "code", projectRoot });
+        yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+        const events = yield* connection.subscribe;
+        const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+        yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+        yield* Fiber.join(terminal);
+        yield* connection.stop(sessionId);
+        const claim = registry.claimNativeSession(
+          instanceId,
+          JSON.stringify(["acp-native", profile.kind, "agent-session-1"]),
+        );
+        expect(claim.status).toBe(expected);
+      }),
+    ),
+  );
+});
+
 it("never takes up a retained session opened under another reviewer or another of the person's setups", async () => {
   const own = {
     subagents: false,
@@ -4455,6 +4518,60 @@ describe("an added ACP agent's model selection", () => {
     expect(client.call).not.toHaveBeenCalledWith("session/set_model", expect.anything());
     expect(client.setConfigOption).not.toHaveBeenCalled();
   });
+});
+
+it("offers Google Antigravity no client file writes, while still offering reads and the terminal", async () => {
+  const nativeTools = Object.values(ACP_CLIENT_TOOL_NAMES).map((name) => ({
+    name,
+    inputSchema: { type: "object" },
+  }));
+  const { driver, starts } = fixture(acpProviderProfiles.antigravity, {
+    runtimeVersion: "1.5.12",
+  });
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+        yield* connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          tools: nativeTools,
+        });
+        expect(starts[0]).toMatchObject({
+          clientCapabilities: { readTextFile: true, writeTextFile: false, terminal: true },
+        });
+      }),
+    ),
+  );
+});
+
+it("sends Google Antigravity its own command first and Octant's context after it", async () => {
+  const { driver, client } = fixture(acpProviderProfiles.antigravity, {
+    runtimeVersion: "1.5.12",
+  });
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+        yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+        const events = yield* connection.subscribe;
+        const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+        yield* connection.send({
+          sessionId,
+          prompt: "/compact",
+          context: [{ kind: "instructions", text: "Octant's standing instructions." }],
+          attachments: [],
+          tools: [],
+        });
+        yield* Fiber.join(terminal);
+      }),
+    ),
+  );
+  const blocks: unknown = client.prompt.mock.calls[0]?.at(1);
+  if (!Array.isArray(blocks)) throw new Error("Expected separate text blocks");
+  expect(blocks[0]).toBe("/compact");
+  expect(String(blocks[1])).toContain("Octant's standing instructions.");
 });
 
 describe("ACP Chat on Windows", () => {

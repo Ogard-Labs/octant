@@ -59,6 +59,8 @@ export interface AcpEventContext {
   readonly unnamedPermissionDescription?: string;
   /** The profile's `unseenChildCalls`. */
   readonly unseenChildCalls?: { readonly readOnlyAgents: ReadonlyArray<string> };
+  /** The profile's `toleratesStrayUpdates`. */
+  readonly toleratesStrayUpdates?: true;
   /**
    * The calls Octant never saw that an agent without child sessions asked
    * permission for, each already journaled as a subagent run.
@@ -81,6 +83,8 @@ export type AcpMappedPermission =
       /** The ACP tool kind the agent declared, or `tool` when it named none. */
       readonly toolKind: string;
       readonly allowOptionId: string;
+      /** The agent's own remember-this option, where it offers one. */
+      readonly allowAlwaysOptionId?: string;
       readonly rejectOptionId: string;
       readonly event: ProviderRuntimeEvent;
       /** Events journaled before the approval, in order. */
@@ -215,8 +219,12 @@ function mapTool(
     return [protocolFailure(`${context.displayName} tool update was missing an ID.`)];
   const state = context.tools.get(providerId);
   if (update.sessionUpdate === "tool_call") {
-    if (state !== undefined)
+    if (state !== undefined) {
+      // A repeated start restates the call: it is read as an update.
+      if (context.toleratesStrayUpdates === true)
+        return mapTool(context, { ...update, sessionUpdate: "tool_call_update" });
       return [protocolFailure(`${context.displayName} repeated a tool start.`)];
+    }
     // A tool_call may carry its kind but no title; the kind is still the
     // provider's own bounded word for the call and reads better than a bare
     // fallback. The provider's call ID never doubles as the display name.
@@ -235,10 +243,19 @@ function mapTool(
       ...childRun(context, created, update),
     ];
   }
-  if (state === undefined)
+  if (state === undefined) {
+    // An update for a call never started (a subagent's call) starts it first.
+    if (context.toleratesStrayUpdates === true)
+      return [
+        ...mapTool(context, { ...update, sessionUpdate: "tool_call" }),
+        ...mapTool(context, update),
+      ];
     return [protocolFailure(`${context.displayName} updated a tool that was not started.`)];
-  if (state.terminal)
+  }
+  if (state.terminal) {
+    if (context.toleratesStrayUpdates === true) return [{ kind: "ignored" }];
     return [protocolFailure(`${context.displayName} repeated a terminal tool update.`)];
+  }
   const title = normalized(update.title, SUMMARY_MAX_CHARACTERS);
   const toolKind = normalized(update.kind, LABEL_MAX_CHARACTERS);
   if (title !== undefined) state.title = title;
@@ -472,10 +489,17 @@ export function mapAcpNotification(
   notification: AcpServerNotification,
 ): ReadonlyArray<AcpMappedNotification> {
   if (notification.params.sessionId !== context.sourceSessionId) {
+    // A subagent's own session reports under its id; such an agent's turn
+    // does not fail on it.
+    if (context.toleratesStrayUpdates === true) return [{ kind: "ignored" }];
     return [protocolFailure(`${context.displayName} update did not match the active session.`)];
   }
-  if (context.terminal)
+  if (context.terminal) {
+    // Usage, background-command replies and scheduled wakes arrive after the
+    // prompt answered; they change nothing about the finished turn.
+    if (context.toleratesStrayUpdates === true) return [{ kind: "ignored" }];
     return [protocolFailure(`${context.displayName} sent an update after terminal state.`)];
+  }
   const update = notification.params.update;
   switch (update.sessionUpdate) {
     case "agent_message_chunk":
@@ -646,6 +670,29 @@ export function mapAcpPermissionRequest(
   }
   const allow = request.params.options.find((option) => option.kind === "allow_once");
   const reject = request.params.options.find((option) => option.kind.startsWith("reject"));
+  // A request whose options are not an allow-and-reject pair is a question
+  // the agent asks through its permission channel: each option is an answer.
+  if (
+    (allow === undefined || reject === undefined) &&
+    context.toleratesStrayUpdates === true &&
+    request.params.options.length > 0
+  ) {
+    const answers = request.params.options.filter((option) => !option.kind.startsWith("reject"));
+    const skip = request.params.options.find((option) => option.kind.startsWith("reject"));
+    return {
+      kind: "question",
+      requestId,
+      providerRequestId: request.id,
+      optionIds: new Map(answers.map((option) => [option.name, option.optionId])),
+      ...(skip === undefined ? {} : { skipOptionId: skip.optionId }),
+      event: mappedEvent(context, {
+        kind: "user-input-request",
+        requestId,
+        prompt: title,
+        options: answers.map((option) => ({ label: option.name })),
+      }),
+    };
+  }
   if (allow === undefined || reject === undefined) {
     return {
       kind: "protocol-failure",
@@ -655,6 +702,7 @@ export function mapAcpPermissionRequest(
       },
     };
   }
+  const allowAlways = request.params.options.find((option) => option.kind === "allow_always");
   const preceding =
     tool === undefined &&
     normalized(request.params.toolCall.title, SUMMARY_MAX_CHARACTERS) === undefined
@@ -666,6 +714,7 @@ export function mapAcpPermissionRequest(
     providerRequestId: request.id,
     toolKind,
     allowOptionId: allow.optionId,
+    ...(allowAlways === undefined ? {} : { allowAlwaysOptionId: allowAlways.optionId }),
     rejectOptionId: reject.optionId,
     ...(preceding.length === 0 ? {} : { preceding }),
     event: mappedEvent(context, {
