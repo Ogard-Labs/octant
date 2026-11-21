@@ -1,5 +1,9 @@
 import { useContext, useEffect, useState } from "react";
-import type { BenchmarkAdviceRequest, BenchmarkAdviceResponse } from "@octant/contracts";
+import type {
+  BenchmarkAdviceRequest,
+  BenchmarkAdviceResponse,
+  ProviderModelOptionValues,
+} from "@octant/contracts";
 import {
   findPickerModel,
   isDraftSelectionSelectable,
@@ -8,6 +12,7 @@ import {
 } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { BenchmarkAdviceContext } from "../usage/benchmarks/BenchmarkAdviceContext";
+import { findSupportedReasoningOption } from "./composerReasoningOption";
 
 type Scope = Extract<BenchmarkAdviceRequest, { readonly projectId: unknown }>;
 
@@ -61,11 +66,17 @@ export function ComposerBenchmarkHint(props: {
     const best = ranked[0];
     const selectedRank = ranked.findIndex(
       ({ model }) =>
-        model.providerInstanceId === props.selected.providerInstanceId &&
-        model.modelId === props.selected.modelId,
+        String(model.providerInstanceId) === String(props.selected.providerInstanceId) &&
+        String(model.modelId) === String(props.selected.modelId),
     );
     if (best === undefined || selectedRank < 1) continue;
     const { model, picker } = best;
+    const supportedReasoning = findSupportedReasoningOption(picker.model.options, model.effort);
+    // Always pass an explicit option map so switching to a default-effort or
+    // unsupported-effort suggestion clears any reasoning effort carried over
+    // from the previous model instead of inheriting it.
+    const modelOptionValues: ProviderModelOptionValues =
+      supportedReasoning === undefined ? {} : { [supportedReasoning.id]: supportedReasoning.value };
     return (
       <div className="composer-model-picker__benchmark-hint">
         <span className="oct-meta">
@@ -81,9 +92,7 @@ export function ComposerBenchmarkHint(props: {
             props.onSelect({
               providerInstanceId: model.providerInstanceId,
               modelId: model.modelId,
-              ...(model.effort === undefined
-                ? {}
-                : { modelOptionValues: { effort: model.effort } }),
+              modelOptionValues,
             })
           }
           size="sm"

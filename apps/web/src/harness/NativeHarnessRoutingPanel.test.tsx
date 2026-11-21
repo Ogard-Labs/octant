@@ -5,11 +5,13 @@ import { describe, expect, it, vi } from "vitest";
 import {
   decodeBenchmarkAdviceResponse,
   decodeBenchmarkSuite,
+  decodeNativeHarnessSlot,
   DEFAULT_NATIVE_HARNESS_ROUTING_SETTINGS,
   type NativeHarnessRoutingConfiguration,
   type NativeHarnessRoutingSettings,
   type ProviderInstance,
   type ProviderObservedState,
+  type UpdateNativeHarnessRoutingSettings,
 } from "@octant/contracts";
 import { buildModelPickerGroups } from "@octant/domain";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
@@ -53,7 +55,7 @@ interface EndpointFixture {
     readonly id: string;
     readonly name: string;
     readonly images?: boolean;
-    readonly effort?: boolean;
+    readonly effort?: boolean | ReadonlyArray<string>;
   }>;
   readonly readiness?: "ready" | "degraded" | "unauthenticated";
   readonly carriesTools?: boolean;
@@ -94,7 +96,9 @@ function observed(fixture: EndpointFixture): ProviderObservedState {
       options:
         model.effort === true
           ? [{ id: "effort", displayName: "Effort", kind: "selection", values: ["low", "high"] }]
-          : [],
+          : Array.isArray(model.effort)
+            ? [{ id: "effort", displayName: "Effort", kind: "selection", values: model.effort }]
+            : [],
       source: "discovered",
       verification: "verified",
     })),
@@ -469,10 +473,16 @@ describe("NativeHarnessRoutingPanel roles", () => {
       reason: "stale-version",
       message: "The routing table changed.",
     }));
+    const claudeWithMedium: EndpointFixture = {
+      ...claude,
+      models: claude.models.map((model) =>
+        model.id === "sonnet-5-5" ? { ...model, effort: ["low", "medium", "high"] } : model,
+      ),
+    };
     const { routing } = renderPanel({
       routing: async () =>
         reads++ === 0 ? settings(initial.configuration, 3) : settings(elsewhere.configuration, 4),
-      fixtures: [local, router, claude],
+      fixtures: [local, router, claudeWithMedium],
       updateRouting,
       wrap: (panel) => (
         <BenchmarkAdviceContext.Provider
@@ -522,6 +532,117 @@ describe("NativeHarnessRoutingPanel roles", () => {
     ).toBeVisible();
     expect(routing).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: "Builder, main" })).toHaveTextContent("Router Text");
+  });
+
+  it("drops a colliding overflow promotion and unsupported effort when accepting benchmark role suggestions", async () => {
+    const user = userEvent.setup();
+    const suite = decodeBenchmarkSuite({
+      suiteId: "10000000-0000-4000-8000-0000000000f2",
+      revision: 1,
+      name: "Builder quality",
+      cases: [
+        {
+          caseId: "10000000-0000-4000-8000-0000000000f3",
+          kind: "prompt",
+          title: "Case one",
+          prompt: "Verify",
+          checks: [],
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    });
+    const advice = vi.fn(async () =>
+      decodeBenchmarkAdviceResponse({
+        suites: [
+          {
+            suiteId: suite.suiteId,
+            name: suite.name,
+            models: [
+              {
+                modelId: "sonnet-5-5",
+                providerInstanceId: claudeId,
+                effort: "max",
+                passRate: 1,
+                runAt: now,
+                stale: false,
+              },
+              {
+                modelId: "opus-5-5",
+                providerInstanceId: claudeId,
+                effort: "high",
+                passRate: 0.9,
+                runAt: now,
+                stale: false,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const saved = settings(
+      {
+        slots: [
+          {
+            id: "default" as never,
+            candidates: [candidate(endpointA, "scribe-2")],
+            overflowPromotion: candidate(claudeId, "sonnet-5-5"),
+            askBeforeUsing: true,
+          },
+        ],
+        jobSlots: [],
+      },
+      2,
+    );
+    let sent: UpdateNativeHarnessRoutingSettings | undefined;
+    const updateRouting = vi.fn(async (input: UpdateNativeHarnessRoutingSettings) => {
+      sent = input;
+      return { kind: "routing-settings" as const, settings: saved };
+    });
+    const claudeWithLimitedEffort: EndpointFixture = {
+      ...claude,
+      models: claude.models.map((model) =>
+        model.id === "sonnet-5-5" ? { ...model, effort: ["low", "high"] } : model,
+      ),
+    };
+    renderPanel({
+      routing: async () => saved,
+      fixtures: [local, claudeWithLimitedEffort],
+      updateRouting,
+      wrap: (panel) => (
+        <BenchmarkAdviceContext.Provider
+          value={{
+            projects: [],
+            client: { listSuites: async () => ({ suites: [suite] }), advice },
+          }}
+        >
+          {panel}
+        </BenchmarkAdviceContext.Provider>
+      ),
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Suggest from my benchmarks for Builder" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Benchmark suggestions for Builder",
+    });
+    await chooseSelectFieldOption(
+      user,
+      await within(dialog).findByRole("combobox", { name: "Benchmark suite" }),
+      suite.name,
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Use these models" }));
+
+    await waitFor(() => expect(updateRouting).toHaveBeenCalledOnce());
+    expect(sent?.expectedVersion).toBe(2);
+    const updatedSlot = sent?.configuration.slots.find((slot) => String(slot.id) === "default");
+    expect(updatedSlot).toEqual({
+      id: "default",
+      candidates: [candidate(claudeId, "sonnet-5-5"), candidate(claudeId, "opus-5-5")],
+      askBeforeUsing: true,
+    });
+    expect(decodeNativeHarnessSlot(updatedSlot)).toEqual(updatedSlot);
   });
 
   it("turns a role back to the Builder by removing its only model, and the advisor off", async () => {
