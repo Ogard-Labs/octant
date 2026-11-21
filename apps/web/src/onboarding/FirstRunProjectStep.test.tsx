@@ -386,4 +386,114 @@ describe("FirstRunProjectStep provider folder scan", () => {
     });
     expect(screen.queryByText(/folders from your providers/i)).not.toBeInTheDocument();
   });
+
+  it("aborts and ignores a superseded manual rescan after switching modes", async () => {
+    const user = userEvent.setup();
+    const signals: Array<AbortSignal | undefined> = [];
+    let resolveManualScan: ((result: ProviderFolderScanResult) => void) | undefined;
+
+    const initialResult: ProviderFolderScanResult = {
+      status: "ready",
+      requireGitRepository: true,
+      groups: [
+        {
+          repository: "acme/initial",
+          label: "acme/initial",
+          providers: ["claude"],
+          sessionCount: 1,
+          lastActivityAt: "2026-11-21T10:00:00.000Z" as UtcTimestamp,
+          folders: [
+            {
+              id: FOLDER_A,
+              folderName: "initial",
+              providers: ["claude"],
+              sessionCount: 1,
+              lastActivityAt: "2026-11-21T10:00:00.000Z" as UtcTimestamp,
+              isGitRepository: true,
+              alreadyImported: false,
+            },
+          ],
+        },
+      ],
+      stoppedEarly: false,
+      scannedAt: "2026-11-21T10:00:00.000Z" as UtcTimestamp,
+    };
+
+    const latestResult: ProviderFolderScanResult = {
+      status: "ready",
+      requireGitRepository: true,
+      groups: [
+        {
+          repository: "acme/latest",
+          label: "acme/latest",
+          providers: ["codex"],
+          sessionCount: 2,
+          lastActivityAt: "2026-11-21T10:05:00.000Z" as UtcTimestamp,
+          folders: [
+            {
+              id: FOLDER_B,
+              folderName: "latest",
+              providers: ["codex"],
+              sessionCount: 2,
+              lastActivityAt: "2026-11-21T10:05:00.000Z" as UtcTimestamp,
+              isGitRepository: true,
+              alreadyImported: false,
+            },
+          ],
+        },
+      ],
+      stoppedEarly: false,
+      scannedAt: "2026-11-21T10:05:00.000Z" as UtcTimestamp,
+    };
+
+    const scan = vi.fn(async (signal?: AbortSignal): Promise<ProviderFolderScanResult> => {
+      signals.push(signal);
+      if (signals.length === 1) return initialResult;
+      if (signals.length === 2) {
+        return await new Promise<ProviderFolderScanResult>((resolve) => {
+          resolveManualScan = resolve;
+        });
+      }
+      return latestResult;
+    });
+
+    render(
+      <Step
+        initial="code"
+        providerFolderScan={{
+          strict: false,
+          scan,
+          importFolders: async () => ({ status: "completed", results: [] }),
+        }}
+      />,
+    );
+
+    expect(await screen.findByText("acme/initial")).toBeInTheDocument();
+
+    // Start a manual rescan, then leave Code for Work and come back before it resolves.
+    await user.click(screen.getByRole("button", { name: "Scan again" }));
+    await waitFor(() => {
+      expect(scan).toHaveBeenCalledTimes(2);
+    });
+
+    await user.click(screen.getByRole("radio", { name: "Work" }));
+    expect(signals[1]?.aborted).toBe(true);
+
+    await user.click(screen.getByRole("radio", { name: "Code" }));
+    expect(await screen.findByText("acme/latest")).toBeInTheDocument();
+
+    // Even if the superseded manual request still resolves with an empty listing, ignore it.
+    resolveManualScan?.({
+      status: "ready",
+      requireGitRepository: true,
+      groups: [],
+      stoppedEarly: false,
+      scannedAt: "2026-11-21T10:06:00.000Z" as UtcTimestamp,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("acme/latest")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Scan again" })).toBeEnabled();
+    });
+  });
 });

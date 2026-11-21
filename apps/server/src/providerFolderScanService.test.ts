@@ -1028,4 +1028,94 @@ describe("ProviderFolderScanService", () => {
     }
     expect(fakeProjects.created.map((entry) => entry.canonicalRoot)).toEqual([repo]);
   });
+
+  it("stops reading remaining session files immediately when a scan is canceled", async () => {
+    const home = makeTempDir("octant-scan-cancel-");
+    const claudeProjectDir = join(home, ".claude", "projects", "-tmp-empty");
+    mkdirSync(claudeProjectDir, { recursive: true });
+    for (let index = 0; index < 12; index += 1) {
+      writeFileSync(
+        join(claudeProjectDir, `session-${String(index).padStart(2, "0")}.jsonl`),
+        `${JSON.stringify({ type: "system", message: "no working directory here" })}\n`,
+      );
+    }
+
+    const abortController = new AbortController();
+    let nowCalls = 0;
+    const receipts = new BindingReceiptStore();
+    const fakeProjects = createFakeProjectService(receipts);
+    const scanner = new ProviderFolderScanService({
+      homeDirectory: home,
+      env: {},
+      readProviderInstances: () => [],
+      readActiveCodeProjects: () => [],
+      isHostStrict: () => false,
+      bindingReceiptStore: receipts,
+      projectRootPort: new ProjectRootPort(),
+      projectService: fakeProjects.service,
+      now: () => {
+        nowCalls += 1;
+        // Abort after the first file budget check inside Claude discovery.
+        if (nowCalls === 7) abortController.abort();
+        return 1_000;
+      },
+    });
+
+    const scanned = await scanner.scan(decodeWindowId(randomUUID()), abortController.signal);
+    expect(scanned.status).toBe("ready");
+    if (scanned.status === "ready") {
+      expect(scanned.groups).toEqual([]);
+    }
+    // Stopping immediately after file #1 avoids inspecting the remaining 11 files.
+    expect(nowCalls).toBeLessThanOrEqual(8);
+  });
+
+  it("expires closed-window candidates after the TTL without interfering with subsequent scans", async () => {
+    const home = makeTempDir("octant-scan-expiry-");
+    const repo = join(home, "code", "ephemeral");
+    createGitRepo(repo, "https://github.com/acme/ephemeral.git");
+    writeClaudeSession(
+      join(home, ".claude"),
+      repo,
+      "11111111-1111-4111-8111-111111111111",
+      "2026-11-21T10:00:00.000Z",
+    );
+
+    let currentTimeMs = 10_000;
+    const receipts = new BindingReceiptStore();
+    const fakeProjects = createFakeProjectService(receipts);
+    const scanner = new ProviderFolderScanService({
+      homeDirectory: home,
+      env: {},
+      readProviderInstances: () => [],
+      readActiveCodeProjects: () => [],
+      isHostStrict: () => false,
+      bindingReceiptStore: receipts,
+      projectRootPort: new ProjectRootPort(),
+      projectService: fakeProjects.service,
+      now: () => currentTimeMs,
+    });
+
+    const closedWindowId = decodeWindowId(randomUUID());
+    const first = await scanner.scan(closedWindowId);
+    expect(first.status).toBe("ready");
+    if (first.status !== "ready") return;
+    const expiredFolderId = first.groups[0]?.folders[0]?.id;
+    expect(expiredFolderId).toBeDefined();
+    if (expiredFolderId === undefined) return;
+
+    // Advance past the 10-minute candidate TTL and scan from a different window.
+    currentTimeMs += 11 * 60_000;
+    const activeWindowId = decodeWindowId(randomUUID());
+    const second = await scanner.scan(activeWindowId);
+    expect(second.status).toBe("ready");
+
+    const staleImport = await scanner.importFolders(closedWindowId, {
+      folderIds: [expiredFolderId],
+    });
+    expect(staleImport.status).toBe("completed");
+    if (staleImport.status === "completed") {
+      expect(staleImport.results[0]).toMatchObject({ status: "refused", reason: "not-found" });
+    }
+  });
 });
