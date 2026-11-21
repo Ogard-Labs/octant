@@ -462,10 +462,17 @@ const PROJECT_THREADS = [
     mode: "work",
     subjectType: "work-thread",
     threads: (match: (projectColumn: string) => string) => `
-      SELECT aggregate_id FROM event_journal
-      WHERE aggregate_type = 'work-thread'
-        AND event_name = 'work.thread-created@1'
-        AND ${match("json_extract(payload_json, '$.thread.projectId')")}`,
+      SELECT w.aggregate_id FROM event_journal w
+      WHERE w.aggregate_type = 'work-thread'
+        AND w.event_name IN ('work.thread-created@1', 'work.thread-updated@1')
+        AND w.aggregate_version = (
+          SELECT MAX(w2.aggregate_version)
+          FROM event_journal w2
+          WHERE w2.aggregate_type = 'work-thread'
+            AND w2.aggregate_id = w.aggregate_id
+            AND w2.event_name IN ('work.thread-created@1', 'work.thread-updated@1')
+        )
+        AND ${match("json_extract(w.payload_json, '$.thread.projectId')")}`,
   },
 ] as const;
 
