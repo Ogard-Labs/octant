@@ -101,6 +101,46 @@ describe("isolatedClaudeAccountEnvironment", () => {
     );
   });
 
+  const openLaunch = (ownChannels: { telemetry: boolean; selfUpdate: boolean }) =>
+    isolatedClaudeAccountEnvironment({
+      hostEnvironment: { PATH: "/usr/bin" },
+      configDirectory: "/Users/provider-user/.claude-accounts/work",
+      authentication: "subscription",
+      strict: false,
+      ownChannels,
+    });
+
+  it("outside Strict keeps every telemetry guard when the person turned provider telemetry off", () => {
+    expect(openLaunch({ telemetry: false, selfUpdate: false })).toMatchObject({
+      DISABLE_TELEMETRY: "1",
+      DISABLE_ERROR_REPORTING: "1",
+      DISABLE_BUG_COMMAND: "1",
+      DISABLE_FEEDBACK_COMMAND: "1",
+      CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1",
+      DISABLE_AUTOUPDATER: "1",
+    });
+  });
+
+  it("outside Strict lets the runtime update itself when the person lets providers update themselves", () => {
+    const environment = openLaunch({ telemetry: true, selfUpdate: true });
+    expect(environment).not.toHaveProperty("DISABLE_AUTOUPDATER");
+    expect(environment).not.toHaveProperty("DISABLE_TELEMETRY");
+    expect(environment).toMatchObject({
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+      CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: "1",
+    });
+  });
+
+  it("under Strict keeps every telemetry and self-update guard whatever the person's switches say", () => {
+    const environment = isolatedClaudeAccountEnvironment({
+      hostEnvironment: { PATH: "/usr/bin" },
+      configDirectory: "/Users/provider-user/.claude-accounts/work",
+      authentication: "subscription",
+      ownChannels: { telemetry: true, selfUpdate: true },
+    });
+    expect(environment).toMatchObject(ISOLATED_CLAUDE_LAUNCH_GUARDS);
+  });
+
   it("preserves the person's AWS Bedrock variables outside Strict without resolving or replacing them, and exposes existing AWS profile paths for open launches", async () => {
     const fakeHome = await realpath(await mkdtemp(join(tmpdir(), "octant-claude-aws-")));
     await mkdir(join(fakeHome, ".aws"), { recursive: true });
@@ -395,6 +435,26 @@ describe("claudeArtifactLaunchEnvironment", () => {
     expect(open({ PATH: "/usr/bin" })).toMatchObject({ CLAUDE_CODE_ARTIFACT: "1" });
     const optedOut = open({ PATH: "/usr/bin", DISABLE_TELEMETRY: "1" });
     expect(optedOut).toMatchObject({ DISABLE_TELEMETRY: "1" });
+    expect(optedOut).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
+  });
+
+  it("outside Strict with provider telemetry off lifts only the telemetry guard, and the person's own opt-out still keeps the tool off", () => {
+    const guarded = (hostEnvironment: NodeJS.ProcessEnv) =>
+      claudeArtifactLaunchEnvironment(
+        isolatedClaudeAccountEnvironment({
+          hostEnvironment,
+          configDirectory: "/Users/provider-user/.claude-accounts/personal",
+          authentication: "subscription",
+          strict: false,
+          ownChannels: { telemetry: false, selfUpdate: false },
+        }),
+        true,
+      );
+    const offered = guarded({ PATH: "/usr/bin" });
+    expect(offered).not.toHaveProperty("DISABLE_TELEMETRY");
+    expect(offered).toMatchObject({ DISABLE_ERROR_REPORTING: "1", CLAUDE_CODE_ARTIFACT: "1" });
+    const optedOut = guarded({ PATH: "/usr/bin", DISABLE_TELEMETRY: "1" });
+    expect(optedOut).toMatchObject({ DISABLE_TELEMETRY: "1", DO_NOT_TRACK: "1" });
     expect(optedOut).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
   });
 

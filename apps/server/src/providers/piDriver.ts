@@ -22,8 +22,10 @@ import { decidesCodeEffectsByApproval } from "@octant/domain";
 import type {
   ProviderConnection,
   ProviderDriver,
+  ProviderOwnChannels,
   ProviderSessionForkRequest,
 } from "@octant/provider-sdk/driver";
+import { launchOwnChannels } from "./providerOwnChannels";
 import {
   rejectUnsupportedChatTurn,
   renderProviderTurnPrompt,
@@ -959,6 +961,7 @@ function makeConnection(
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
+      readonly ownChannels?: ProviderOwnChannels;
       readonly tools: ReadonlyArray<ProviderToolDefinition>;
       readonly blockedTools?: ReadonlyArray<string>;
     }) =>
@@ -998,6 +1001,8 @@ function makeConnection(
             // Strict changes the launch's environment, channels and protected
             // files, so a warm runtime never crosses a change of it.
             input.strict,
+            // Its telemetry and release-check guards are fixed at start too.
+            launchOwnChannels(input.strict !== false, input.ownChannels),
             tools,
             // The blocked tools are written into the bridge and the tool list
             // when the process starts, so a warm runtime never crosses a change.
@@ -1079,6 +1084,9 @@ function makeConnection(
                     executionPolicy: input.executionPolicy,
                     ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
                     ...(input.strict === false ? { strict: false } : {}),
+                    ...(input.strict === false && input.ownChannels !== undefined
+                      ? { ownChannels: input.ownChannels }
+                      : {}),
                     modelProvider: selection.provider,
                     ...(tools.length === 0 ? {} : { tools }),
                     ...(managedTools === undefined ? {} : { toolBridge: managedTools.config }),
@@ -1302,6 +1310,7 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
           ...(input.strict === false ? { strict: false } : {}),
+          ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
           ...(input.blockedTools === undefined ? {} : { blockedTools: input.blockedTools }),
           // A Plan resume with no caller-supplied set fails closed to no tools,
           // not the full catalogue the session was first opened with.

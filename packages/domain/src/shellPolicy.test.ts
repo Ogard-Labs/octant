@@ -226,6 +226,8 @@ describe("shell settings policy", () => {
       fullAccessStalledTurnLimitMinutes: null,
       providerToolCallPauseLimitMinutes: 120,
       backgroundSessionIdleLimitMinutes: 120,
+      providerTelemetry: true,
+      providerSelfUpdate: false,
       threadWakeupsWaitingLimit: 8,
       threadWakeupsRunMissedOnReturn: false,
       messageWakesPerHour: 30,
