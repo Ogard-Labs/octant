@@ -239,6 +239,10 @@ describe("shell settings policy", () => {
       siblingThreadWaitsPerTurn: 4,
       browserWaitLimitMinutes: 10,
       childRunWaitLimitSeconds: 120,
+      shieldDenialsInARow: 3,
+      shieldDenialsPerThread: 20,
+      followUpLatenessLimitHours: 24,
+      toolingCommandConfirmMinutes: 10,
       agentRoutinesStartActiveAtFullAccess: false,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
       navigatorAssistant: {},

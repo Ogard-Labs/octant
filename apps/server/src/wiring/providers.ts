@@ -1408,6 +1408,9 @@ export function wireProviders(deps: ProvidersDependencies) {
         hostEnvironment: () => process.env,
         homeDirectory: homedir(),
         workingDirectory: join(providerDataDirectory, "provider-tooling"),
+        confirmMinutes: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .toolingCommandConfirmMinutes,
         ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
           ? {}
           : {

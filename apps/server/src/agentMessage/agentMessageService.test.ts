@@ -122,16 +122,43 @@ function fixture(options: FixtureOptions = {}) {
 const handoff = "Handoff: CI on the branch head is green.";
 
 describe("the agent message delivery service", () => {
-  it("expires a queued message after its recorded 24-hour deadline before carrying it", async () => {
+  it("keeps a new queued message waiting a week later and carries it into the next turn", async () => {
     let now = "2026-11-06T12:00:00.000Z";
-    const { service, projection, events, bodyStore, journalPort, root } = fixture({
-      clock: () => now,
-    });
+    const { service, projection } = fixture({ clock: () => now });
     await service.send({
       senderThreadId,
       recipients: [{ threadId: recipientThreadId }],
       body: handoff,
     });
+    const record = projection.inFlight()[0];
+    expect(record?.expiresAt).toBeUndefined();
+    now = "2026-11-13T12:00:00.000Z";
+    await service.expireQueued();
+    expect(projection.lookup(String(record?.messageId))?.state).toBe("in-flight");
+    expect(await service.carryIntoTurn(String(recipientThreadId))).toHaveLength(1);
+  });
+
+  it("expires a queued message after the deadline an older host recorded, before carrying it", async () => {
+    let now = "2026-11-06T12:00:00.000Z";
+    const { service, projection, events, bodyStore, journalPort, root } = fixture({
+      clock: () => now,
+    });
+    // An earlier host journaled a 24-hour deadline on each message it admitted.
+    const recordAppend = journalPort.append;
+    journalPort.append = (input) => {
+      for (const event of input.events) {
+        if (event.eventName === "agent.message-sent@1" && typeof event.payload === "object") {
+          Object.assign(event.payload as object, { expiresAt: "2026-11-07T12:00:00.000Z" });
+        }
+      }
+      recordAppend(input);
+    };
+    await service.send({
+      senderThreadId,
+      recipients: [{ threadId: recipientThreadId }],
+      body: handoff,
+    });
+    journalPort.append = recordAppend;
     const record = projection.inFlight()[0];
     expect(record).toMatchObject({ expiresAt: "2026-11-07T12:00:00.000Z" });
     now = "2026-11-07T12:00:00.000Z";

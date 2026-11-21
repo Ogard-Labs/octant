@@ -97,7 +97,7 @@ Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
 draw the same hairline.
 
 **Octant's own limits** sit on Settings › Permissions after Tool steps, as
-host settings in four sections of number steppers (1 to the stated top) and
+host settings in five sections of number steppers (1 to the stated top) and
 switches, each row naming its default in its description
 ([Octant's own limits become settings](../architecture.md#security-and-authority)):
 **Wake-ups and messages** (Wake-ups waiting per thread, 8, up to 64; Message
@@ -105,9 +105,14 @@ wakes per hour, 30; Rounds of replies that wake, 10; Thread messages per turn,
 3, up to 20, under Strict only; Sibling thread reads per turn, 8, up to 64,
 under Strict only; Sibling thread waits per turn, 4, up to 32, under Strict
 only; and the switch **Run missed wake-ups on return**, off),
+**Octant Shield** (Denials in a row before you decide, 3, up to 50; Denials
+per thread before you decide, 20, up to 500),
 **Coordinators** (Coordinators per Project, 4, up to 32), **Pull requests**
 (Wakes per pull-request watch, 10, up to 100; Days a pull-request watch lasts,
-3, up to 30; Auto-fix tries per failure, 3, up to 20), **Waiting** (Longest
+3, up to 30; Auto-fix tries per failure, 3, up to 20), **Waiting** (Latest a
+follow-up still runs, in hours, 24, up to 720; Time to run a shown provider
+command, in minutes, 10, up to 1,440, whose description says a secret held
+for the command is deleted when the time runs out; Longest
 Browser wait, in minutes, 10, up to 60, under Strict only, whose description
 says outside Strict there is no wait limit and a Claude Code
 thread still ends one tool call at eleven minutes; Longest wait for a helper,
