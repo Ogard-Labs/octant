@@ -555,9 +555,10 @@ otherwise.
   attachments are not built yet.
 - **What a hub-introduced device may do.** A device the member's own person
   paired acts as that person there. A device that only the hub introduced acts
-  within the member's **Act** hub-grant item: the Projects it names, the
-  threads it may start there (Code included), and never more than the
-  member's own level allows. Approvals stay on the member, answerable as
+  within the member's **Act** hub-grant item: the Projects it names, and
+  there three things: starting threads (Code included), answering their
+  approvals and questions, and Stop (maintainer decision, 2026-11-20); never
+  more than the member's own level allows. Approvals stay on the member, as
   [What the hub may do on a spoke](#what-the-hub-may-do-on-a-spoke) says.
   Built for starting threads (slice 16): while a host is a hub member, a
   device only the hub introduced starts a Code or Work thread there only in
@@ -568,7 +569,19 @@ otherwise.
   host in no hub keeps its own rules for such a device. Unticking Act also
   ends every open session of the devices the hub introduced on that member
   (maintainer decision, 2026-11-20); they stay paired, so a new session opens
-  under the rules then in force and its next start is refused. Built (slice
+  under the rules then in force and its next start is refused. Built for
+  answering and Stop: while a host is a hub member, such a device answers a
+  Code or Work thread's approval or question, and stops its turn, only when
+  the thread's Project is one the member's Act item names, read at each
+  request; unticking Act or the Project refuses the next answer or Stop with
+  a sentence that names what was refused. This holds on every route that
+  answers or stops: a Code thread's approval and question answers and its
+  Stop and Stop now, a Work request's answer or dismissal and a Work turn's
+  Stop, a harness thread's approval and question cards, and the MCP tool and
+  Browser prompts of a Code or Work thread. A thread the route cannot find
+  names no Project and is refused. A local window, a device the member's own
+  person paired, an agent grant's session, and a host in no hub keep their
+  own rules and never read the Act item. Built (slice
   16): a desktop window on a member, or on the hub, lists the hub's other
   spokes and standbys as its computers. The window makes a device key of its
   own; its host asks the hub to list that key as a guest (the hub's own
@@ -585,9 +598,9 @@ otherwise.
   revoked with the roster; a member's window leaves the roster with that
   member, and a newer window of the same member replaces the older one. The
   hub itself is not listed for a spoke's window: it has no Act item of its
-  own to bound a device it introduced to itself. Not built yet: answering
-  approvals and Stop held to the Act item, and the hub as one of a spoke
-  window's computers.
+  own to bound a device it introduced to itself. Not built yet: a turn sent
+  into an existing thread, and Chat threads, held to the Act item; and the
+  hub as one of a spoke window's computers.
 
   Rationale: a spoke asks the hub to list its own window without the hub's
   person approving it again, because the hub's person already approved that

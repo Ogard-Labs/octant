@@ -52,6 +52,7 @@ const capability = "A".repeat(43);
 const secret = "desktop-secret";
 const ACT_PROJECT = "00000000-0000-4000-8000-000000000906";
 const OTHER_PROJECT = "30000000-0000-4000-8000-0000000000aa";
+const OTHER_THREAD = "00000000-0000-4000-8000-0000000009a2";
 const now = "2026-07-20T22:00:00.000Z";
 const thread = decodeCodeThread({
   id: "00000000-0000-4000-8000-000000000902",
@@ -210,6 +211,7 @@ function desktopWindow(host: HubTestHost, network: HubTestNetwork) {
 /** B's Code route as production builds it, over a Code service that keeps the threads it starts. */
 function memberCodeRoutes(member: { current?: HubTestHost }) {
   const started: Array<{ readonly projectId: string }> = [];
+  const operated: Array<{ readonly kind: string; readonly threadId: string }> = [];
   const routes = createCodeRouteHandler({
     service: {
       navigation: async () => ({ threads: started, activity: [], runtime: [] }),
@@ -219,6 +221,23 @@ function memberCodeRoutes(member: { current?: HubTestHost }) {
         }
         return { kind: "thread-created" };
       },
+      // B's two threads: this file's in the named Project, the other outside it.
+      read: async (_window: unknown, threadId: string) => ({
+        thread: threadId === OTHER_THREAD ? { ...thread, projectId: OTHER_PROJECT } : thread,
+        checkout: { checkoutId: thread.checkoutId },
+        lastSequence: 0,
+      }),
+      executeOperation: async (
+        _window: unknown,
+        operation: {
+          readonly kind: string;
+          readonly threadId: string;
+          readonly operationId: string;
+        },
+      ) => {
+        operated.push({ kind: operation.kind, threadId: operation.threadId });
+        return { kind: "operation-accepted", operationId: operation.operationId };
+      },
     } as never,
     windowAuthorityStore: new WindowAuthorityStore(),
     hubActScope: () =>
@@ -227,7 +246,7 @@ function memberCodeRoutes(member: { current?: HubTestHost }) {
   const productDispatch = createAuthenticatedProductDispatch({
     dispatch: (request) => routes(request),
   });
-  return { started, productDispatch };
+  return { started, operated, productDispatch };
 }
 
 async function startWorld() {
@@ -403,6 +422,45 @@ describe("a desktop window on a hub member", () => {
         (entry) => entry.projectId,
       ),
     ).toEqual([ACT_PROJECT]);
+  }, 60_000);
+
+  it("answers an approval and stops a turn on another member only in a Project that member's Act item names", async () => {
+    const { network, a, b, bCode } = await startWorld();
+    expect(b.spoke.setGrant(grantWithAct(b, [ACT_PROJECT]), window).status).toBe("changed");
+    const desktop = desktopWindow(a, network);
+    await desktop.sync();
+    const onStudio = await readySession(desktop, b);
+    const operate = (body: Record<string, unknown>) =>
+      onStudio.authenticatedFetch({
+        method: "POST",
+        path: "/api/code/commands",
+        body: JSON.stringify({
+          operationId: crypto.randomUUID(),
+          checkoutId: thread.checkoutId,
+          ...body,
+        }),
+      });
+    const approve = (threadId: string) =>
+      operate({
+        kind: "answer-provider-approval",
+        threadId,
+        approvalId: "00000000-0000-4000-8000-0000000009a3",
+        decision: "approved",
+      });
+    const stop = (threadId: string) => operate({ kind: "cancel-provider-turn", threadId });
+
+    const named = [await approve(thread.id), await stop(thread.id)];
+    const unnamed = [await approve(OTHER_THREAD), await stop(OTHER_THREAD)];
+
+    expect(named.map((response) => response.status)).toEqual([200, 200]);
+    expect(unnamed.map((response) => response.status)).toEqual([403, 403]);
+    expect(await unnamed[0]?.json()).toMatchObject({
+      message: "This computer's Act item for its hub does not name this Project.",
+    });
+    expect(bCode.operated).toEqual([
+      { kind: "answer-provider-approval", threadId: thread.id },
+      { kind: "cancel-provider-turn", threadId: thread.id },
+    ]);
   }, 60_000);
 
   it("removing the Act item refuses the next create and ends the device's open sessions on that member", async () => {

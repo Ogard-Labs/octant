@@ -3,6 +3,7 @@ import {
   assertNoPrincipalIdentityInPayload,
   ClientPrincipalError,
   principalActsAsHostPerson,
+  principalIsHubIntroduced,
   isAgentGrantSession,
   WINDOW_CAPABILITY_HEADER,
   resolveAuthenticatedPrincipal,
@@ -57,6 +58,12 @@ export function boundPrincipalIsAgent(request: Request): boolean {
 export function boundPrincipalIsRestricted(request: Request): boolean {
   const principal = boundContexts.get(request)?.principal;
   return principal !== undefined && !principalActsAsHostPerson(principal);
+}
+
+/** Whether the request's bound principal is a device only the hub introduced. */
+export function boundPrincipalIsHubIntroduced(request: Request): boolean {
+  const principal = boundContexts.get(request)?.principal;
+  return principal !== undefined && principalIsHubIntroduced(principal);
 }
 
 /**

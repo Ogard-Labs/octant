@@ -10,13 +10,19 @@ import {
   type WorkRequestCommandResult,
   type WorkRequestFailure,
   type WorkRequestList,
+  type WorkRequestId,
   type WorkThreadId,
   type ProjectId,
   type WindowId,
 } from "@octant/contracts";
 import { isLoopbackHostname } from "./shellRoutes";
 import { eventActorForPrincipal } from "./principalEventActor";
-import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
+import {
+  authenticateRouteWindowId,
+  boundPrincipalIsHubIntroduced,
+  readPrincipalRouteContext,
+} from "./principalRouteContext";
+import { hubActRefusal, type HubActScopePort } from "./hub/hubActScope";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import type { WorkRequestApplicationService } from "./work/workRequestApplicationService";
 
@@ -42,6 +48,10 @@ export interface WorkRequestRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly now?: () => number;
+  /** The member's Act item for its hub, which bounds where a device only the hub introduced may answer. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
+  /** The Project a request belongs to, from the request journal; undefined for one it does not hold. */
+  readonly requestProjectId?: (requestId: WorkRequestId) => string | undefined;
 }
 
 export function createWorkRequestRouteHandler(dependencies: WorkRequestRouteDependencies) {
@@ -132,6 +142,20 @@ export function createWorkRequestRouteHandler(dependencies: WorkRequestRouteDepe
         );
       }
       const command = decodeWorkRequestCommand(value);
+      // A device only the hub introduced answers a request only in a Project
+      // the member's Act item names, read at this answer. The Project is the
+      // request's own; one the route cannot find is refused while this host
+      // is in a hub, and the service then answers as before otherwise.
+      if (boundPrincipalIsHubIntroduced(request)) {
+        const refusal = hubActRefusal(
+          dependencies.hubActScope?.(),
+          dependencies.requestProjectId?.(command.requestId),
+          "answer",
+        );
+        if (refusal !== undefined) {
+          return failureResponse({ code: "unauthorized", message: refusal }, 403, origin);
+        }
+      }
       return jsonResponse(
         decodeWorkRequestCommandResult(
           await dependencies.service.execute(

@@ -19,7 +19,7 @@ import {
   authorizePeer,
   clampDelegation,
   decideHubFollow,
-  decideHubIntroducedThreadStart,
+  decideHubIntroducedAct,
   decideRosterReplacement,
   decideStandIn,
   decideStandInHandback,
@@ -1095,14 +1095,14 @@ describe("a hub-introduced device starting a thread", () => {
 
   it("starts a thread only in a Project the member's Act item names", () => {
     expect(
-      decideHubIntroducedThreadStart({
+      decideHubIntroducedAct({
         membership: "member",
         grant: actOn([studio]),
         projectId: studio,
       }),
     ).toEqual({ status: "allowed" });
     expect(
-      decideHubIntroducedThreadStart({
+      decideHubIntroducedAct({
         membership: "member",
         grant: actOn([studio]),
         projectId: other,
@@ -1112,7 +1112,7 @@ describe("a hub-introduced device starting a thread", () => {
 
   it("refuses the next start once the member unticks Act", () => {
     expect(
-      decideHubIntroducedThreadStart({
+      decideHubIntroducedAct({
         membership: "member",
         grant: defaultHubGrant(),
         projectId: studio,
@@ -1122,7 +1122,7 @@ describe("a hub-introduced device starting a thread", () => {
 
   it("refuses every start on a member the hub removed", () => {
     expect(
-      decideHubIntroducedThreadStart({
+      decideHubIntroducedAct({
         membership: "removed",
         grant: actOn([studio]),
         projectId: studio,
@@ -1132,7 +1132,7 @@ describe("a hub-introduced device starting a thread", () => {
 
   it("leaves a host that is in no hub to its own rules", () => {
     expect(
-      decideHubIntroducedThreadStart({ membership: "none", grant: undefined, projectId: studio }),
+      decideHubIntroducedAct({ membership: "none", grant: undefined, projectId: studio }),
     ).toEqual({ status: "not-in-a-hub" });
   });
 });
