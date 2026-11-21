@@ -31,12 +31,14 @@ import {
 } from "../providers/accountSessionCarry";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
+  decodeChatThreadId,
   decodeCodeCheckoutId,
   decodeCodeRepositoryId,
   decodeCodeThreadId,
   decodeCodeWorktreeRef,
   decodeCodeWorktreeSourcePreview,
   decodeWindowId,
+  decodeWorkThreadId,
   type DiscoveryCandidate,
   type EventActor,
   LOCAL_HOST_ID,
@@ -283,6 +285,7 @@ import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkRequestStateWiring } from "./workRequestState";
+import type { WorkspaceWiring } from "./workspace";
 import { protectedAtLevel, secretGuardEntries } from "../process/secretGuard";
 import type { OpenCodeProtectedPaths } from "../providers/openCodeDriver";
 
@@ -742,6 +745,7 @@ export type ProvidersDependencies = Pick<
   Pick<IntegrationsWiring, "githubExtensionSnapshot" | "providerRuntimeNetwork"> &
   Pick<ComputerUseWiring, "computerUseProcess"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
+  Pick<WorkspaceWiring, "spendCeilingService"> &
   Pick<
     FoundationsWiring,
     "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict" | "resolveHostStrict"
@@ -768,6 +772,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     providerRuntimeRegistry,
     serverProjectStore,
     serverRegistry,
+    spendCeilingService,
     version,
     windowAuthorityStore,
     workThreadProjection,
@@ -2615,6 +2620,19 @@ export function wireProviders(deps: ProvidersDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      spendCeiling: spendCeilingService,
+      resolveThreadProjectId: ({ threadType, threadId }) => {
+        if (threadType === "chat-thread") {
+          const projectId = persistence.readChatThread(decodeChatThreadId(threadId))?.projectId;
+          return projectId === undefined ? undefined : String(projectId);
+        }
+        if (threadType === "code-thread") {
+          const projectId = persistence.readCodeThread(decodeCodeThreadId(threadId))?.projectId;
+          return projectId === undefined ? undefined : String(projectId);
+        }
+        const projectId = workThreadProjection.read(decodeWorkThreadId(threadId))?.projectId;
+        return projectId === undefined ? undefined : String(projectId);
+      },
     });
     yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
     return {

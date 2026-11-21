@@ -1,10 +1,26 @@
-import { describe, expect, it, vi } from "vitest";
-import type { ImageGenerationCustomSource, ImageJob, ProviderInstance } from "@octant/contracts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  decodeAggregateVersion,
+  decodeProjectId,
+  type ImageGenerationCustomSource,
+  type ImageJob,
+  type ProviderInstance,
+} from "@octant/contracts";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite } from "../persistence/sqlitePort";
+import { SpendCeilingService } from "../spendCeilingService";
+import { GeneratedImageStore } from "./generatedImageStore";
 import { createImageAgentTools, IMAGE_TOOL_NAME, type ImageAgentToolPort } from "./imageAgentTools";
 import type {
   ImageGenerationChoice,
   ImageGenerationOfferOutcome,
 } from "./imageGenerationOfferService";
+import { ImageJobService } from "./imageJobService";
 
 const now = "2026-08-28T12:00:00.000Z";
 const scopeId = "a3000000-0000-4000-8000-000000000002" as never;
@@ -550,6 +566,118 @@ describe("createImageAgentTools", () => {
       expect((await call(elsewhere.set, save)).isError).toBe(true);
       expect(plan.write).not.toHaveBeenCalled();
       expect(other.write).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("spend ceiling enforcement on agent image generation", () => {
+    const directories: Array<string> = [];
+    const projectId = "a3000000-0000-4000-8000-000000000092";
+
+    afterEach(() => {
+      for (const directory of directories.splice(0)) {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("still asks for consent and refuses without calling the provider when a thread or Project monetary ceiling cannot cover the chosen model", async () => {
+      const directory = mkdtempSync(join(tmpdir(), "octant-image-tool-ceiling-"));
+      directories.push(directory);
+      const connection = openSqlite(join(directory, "octant.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const runtime = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: runtime.events,
+        projections: runtime.projections,
+        clock: () => now,
+      });
+      const spendCeiling = new SpendCeilingService({
+        connection,
+        journal,
+        clock: () => now,
+        uuid: () => crypto.randomUUID(),
+        threadExists: () => true,
+        projectExists: () => true,
+      });
+      const generate = vi.fn(async () => ({
+        status: "completed" as const,
+        images: [
+          {
+            bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47]),
+            mediaType: "image/png" as const,
+          },
+        ],
+      }));
+      const profile = imageProfile();
+      const jobs = new ImageJobService({
+        journal,
+        projection: runtime.imageJobProjection,
+        attachments: new GeneratedImageStore(directory),
+        readProviderInstance: (id) => (String(id) === String(profile.id) ? profile : undefined),
+        readImageGenerationCustomSources: () => [],
+        credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
+        uuid: () => crypto.randomUUID(),
+        clock: () => now,
+        actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000002" as never },
+        createAdapter: () => ({ generate }),
+        spendCeiling,
+        resolveThreadProjectId: () => projectId,
+      });
+      const ask = vi.fn(async ({ offer }: Parameters<ImageAgentToolPort["ask"]>[0]) =>
+        offer.kind === "generate"
+          ? ({ status: "generate", ...offer.suggested } as const)
+          : ({ status: "cancelled" } as const),
+      );
+      const set = createImageAgentTools({
+        threadKind: "chat-thread",
+        scopeId,
+        port: {
+          listInstances: () => [profile],
+          readImageGenerationCustomSources: () => [],
+          enqueue: (input) => jobs.enqueue(input),
+          listJobs: (id) => jobs.listByScope(id),
+          whenTerminal: (id) => jobs.whenTerminal(id),
+          ask,
+          remembered: () => undefined,
+          forget: () => undefined,
+        },
+      });
+
+      // Thread ceiling blocks after consent without calling the provider.
+      spendCeiling.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: String(scopeId) },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { costBudgetUsdCents: 2 },
+        window: { kind: "lifetime" },
+      });
+      const threadOutcome = await call(set, { prompt: "a red cube" });
+      expect(ask).toHaveBeenCalledTimes(1);
+      expect(threadOutcome.isError).toBe(true);
+      expect(threadOutcome.result).toMatchObject({
+        error: expect.stringMatching(/money ceiling/i),
+      });
+
+      // Clear thread ceiling; Project ceiling still blocks without calling the provider.
+      spendCeiling.execute("local-window", {
+        kind: "clear-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: String(scopeId) },
+        expectedVersion: decodeAggregateVersion(1),
+      });
+      spendCeiling.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "project", projectId: decodeProjectId(projectId) },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { costBudgetUsdCents: 2 },
+        window: { kind: "calendar", period: "day", timeZone: "UTC" },
+      });
+      const projectOutcome = await call(set, { prompt: "a red cube" });
+      expect(ask).toHaveBeenCalledTimes(2);
+      expect(projectOutcome.isError).toBe(true);
+      expect(projectOutcome.result).toMatchObject({
+        error: expect.stringMatching(/Project's money ceiling/i),
+      });
+      expect(generate).not.toHaveBeenCalled();
     });
   });
 });
