@@ -927,7 +927,7 @@ describe("OpenCodeProcessPort", () => {
     );
     expect(unverifiedStarted.runtime).toBe("beta");
     expect(unverifiedStarted.isolatedConfiguration).toBeUndefined();
-    expect(unverifiedStarted.windowsPrivateConfiguration).toBeUndefined();
+    expect(unverifiedStarted.privateConfiguration).toBeUndefined();
 
     const verifiedStarted = await Effect.runPromise(
       Effect.scoped(
@@ -947,7 +947,7 @@ describe("OpenCodeProcessPort", () => {
     );
     expect(verifiedStarted.runtime).toBe("legacy");
     expect(verifiedStarted.isolatedConfiguration).toBeUndefined();
-    expect(verifiedStarted.windowsPrivateConfiguration).toBe(true);
+    expect(verifiedStarted.privateConfiguration).toBe(true);
     expect(prepare).not.toHaveBeenCalled();
   });
 
@@ -1186,6 +1186,82 @@ describe("OpenCodeProcessPort", () => {
       ),
     );
     expect(prepared.some((args) => args.includes("serve"))).toBe(false);
+  });
+
+  it("starts Work and Code below Full access outside Strict with no wrapper, on OpenCode's own permission rules", async () => {
+    for (const platform of ["darwin", "linux"] as const) {
+      for (const mode of ["work", "code"] as const) {
+        for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+          const fixture = profileRecordingWrapper("isolation-supported");
+          const prepared: Array<ReadonlyArray<string>> = [];
+          let proxied = 0;
+          const started = await Effect.runPromise(
+            Effect.scoped(
+              makeOpenCodeProcessLive({
+                confinement: {
+                  prepare: (input) => {
+                    prepared.push(input.args);
+                    return { command: input.executable, args: input.args };
+                  },
+                },
+                platform,
+                runtimeConfigResolver: async () => undefined,
+                startupTimeoutMs: 2_000,
+                runtimeNetwork: {
+                  start: async () => {
+                    proxied += 1;
+                    return { status: "open" };
+                  },
+                },
+              }).start({
+                binaryPath: fixture.binaryPath,
+                cwd: fixture.root,
+                mode,
+                executionPolicy,
+                strict: false,
+              }),
+            ),
+          );
+          expect(prepared.some((args) => args.includes("serve"))).toBe(false);
+          expect(proxied).toBe(0);
+          // A verified release on Octant's private configuration still
+          // carries app-managed tools, without claiming OS confinement.
+          expect(started.isolatedConfiguration).toBeUndefined();
+          expect(started.privateConfiguration).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("keeps the wrapper below Full access under Strict, in Plan and Chat, for a kept sandbox, and for the readiness check", async () => {
+    for (const launch of [
+      { mode: "code", executionPolicy: "approval-gated" },
+      { mode: "work", executionPolicy: "auto-accept-edits", strict: true },
+      { mode: "code", executionPolicy: "plan", strict: false },
+      { mode: "chat", executionPolicy: "approval-gated", strict: false },
+      { mode: "code", executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
+      { mode: "code", executionPolicy: "approval-gated", purpose: "probe" },
+    ] as const) {
+      const fixture = profileRecordingWrapper("isolation-supported");
+      const prepared: Array<ReadonlyArray<string>> = [];
+      const started = await Effect.runPromise(
+        Effect.scoped(
+          makeOpenCodeProcessLive({
+            confinement: {
+              prepare: (input) => {
+                prepared.push(input.args);
+                return { command: input.executable, args: input.args };
+              },
+            },
+            platform: "darwin",
+            runtimeConfigResolver: async () => undefined,
+            startupTimeoutMs: 2_000,
+          }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, ...launch }),
+        ),
+      );
+      expect(prepared.some((args) => args.includes("serve"))).toBe(true);
+      expect(started.privateConfiguration).toBeUndefined();
+    }
   });
 
   it("wraps a Full access server that keeps the sandbox as Accept edits would, on its own egress proxy", async () => {
@@ -1814,11 +1890,20 @@ describe("OpenCodeProcessPort", () => {
       }
     });
 
-    it("is what an OpenCode 2.x launch running as itself finds outside Strict, opened as for 1.x", async () => {
+    it("is what an OpenCode 2.x launch running as itself finds outside Strict, opened as for 1.x where it is confined", async () => {
       const { home, file, folder } = agentsHome();
+      // Work below Full access outside Strict runs with no Octant sandbox;
+      // Plan keeps it, so the file is opened by the wall's rules there.
+      const unconfined = await launch(home, {
+        platform: "linux",
+        mode: "v2-0-1-ready",
+        strict: false,
+      });
+      expect(unconfined.seen).toBe("Answer in British English.\n");
       const onLinux = await launch(home, {
         platform: "linux",
         mode: "v2-0-1-ready",
+        executionPolicy: "plan",
         strict: false,
       });
       expect(onLinux.seen).toBe("Answer in British English.\n");
@@ -1827,7 +1912,12 @@ describe("OpenCodeProcessPort", () => {
         ...(onLinux.input?.readRoots ?? []),
       ];
       expect(granted.filter((path) => path.startsWith(folder))).toEqual([file]);
-      const onMac = await launch(home, { platform: "darwin", mode: "v2-0-1-ready", strict: false });
+      const onMac = await launch(home, {
+        platform: "darwin",
+        mode: "v2-0-1-ready",
+        executionPolicy: "plan",
+        strict: false,
+      });
       expect(onMac.seen).toBe("Answer in British English.\n");
       expect(
         new Set((onMac.input?.extraRules ?? []).filter((rule) => rule.includes(folder))),

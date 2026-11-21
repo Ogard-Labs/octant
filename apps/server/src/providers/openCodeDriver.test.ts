@@ -334,6 +334,35 @@ describe("OpenCode driver", () => {
     );
   });
 
+  it("offers app tools below Full access outside Strict to a runtime with no Octant sandbox on Octant's private configuration", async () => {
+    for (const strict of [false, true]) {
+      const fixture = driverFixture({
+        platform: "darwin",
+        isolatedConfiguration: false,
+        privateConfiguration: true,
+      });
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+            Effect.flatMap((connection) =>
+              Effect.exit(
+                connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict,
+                  tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      // Under Strict the launch is confined, so only an OS receipt admits them.
+      expect(Exit.isSuccess(result)).toBe(!strict);
+    }
+  });
+
   it("offers a Full access thread app tools on a runtime that can inherit external configuration", async () => {
     const fixture = driverFixture({ isolatedConfiguration: false });
     const result = await Effect.runPromise(
@@ -4452,6 +4481,8 @@ function launchScratchDirectory(): string {
 function driverFixture(
   options: {
     readonly isolatedConfiguration?: boolean;
+    /** The launch ran with no Octant sandbox on Octant's private configuration. */
+    readonly privateConfiguration?: true;
     readonly process?: OpenCodeProcessPort;
     readonly events?: ReadonlyArray<OpenCodeEvent>;
     readonly permissionPersistence?:
@@ -4505,6 +4536,9 @@ function driverFixture(
                 ...(options.isolatedConfiguration === false
                   ? {}
                   : { isolatedConfiguration: true as const }),
+                ...(options.privateConfiguration === true
+                  ? { privateConfiguration: true as const }
+                  : {}),
                 authorization: "Basic redacted",
                 pid: process.pid,
                 url: new URL("http://127.0.0.1:1/"),
