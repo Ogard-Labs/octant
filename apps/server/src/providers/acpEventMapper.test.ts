@@ -915,7 +915,7 @@ describe("an agent that sends stray updates", () => {
     expect(repeated.every((item) => item.kind !== "protocol-failure")).toBe(true);
   });
 
-  it("asks a permission request with no allow-and-reject pair as a question, and offers allow-always where the agent does", () => {
+  it("asks a permission request with neither allow nor reject options as a question, and offers allow-always where the agent does", () => {
     const state = context({
       toleratesStrayUpdates: true,
       unnamedPermissionDescription: "Asking before it continues.",
@@ -949,10 +949,31 @@ describe("an agent that sends stray updates", () => {
         ],
       },
     });
-    // …and one with no reject is a question whose options are the answers.
-    expect(asked).toMatchObject({
+    // …and allow options with no reject are never answers to choose among,
+    // since choosing one would grant what no approval checked.
+    expect(asked.kind).toBe("protocol-failure");
+    const free = mapAcpPermissionRequest(state, {
+      kind: "request",
+      id: "interaction-3",
+      method: "session/request_permission",
+      params: {
+        sessionId: "acp-session-1",
+        toolCall: { toolCallId: "interaction_3", title: "Which branch?" },
+        options: [
+          { optionId: "a", name: "main", kind: "choice" },
+          { optionId: "b", name: "dev", kind: "choice" },
+          { optionId: "skip", name: "Skip", kind: "reject_once" },
+        ],
+      },
+    });
+    expect(free).toMatchObject({
       kind: "question",
-      event: { kind: "user-input-request", prompt: "Which branch?" },
+      skipOptionId: "skip",
+      event: {
+        kind: "user-input-request",
+        prompt: "Which branch?",
+        options: [{ label: "main" }, { label: "dev" }],
+      },
     });
     const approval = mapAcpPermissionRequest(state, {
       kind: "request",
@@ -969,5 +990,29 @@ describe("an agent that sends stray updates", () => {
       },
     });
     expect(approval).toMatchObject({ kind: "approval", allowAlwaysOptionId: "always" });
+  });
+
+  it("asks an allow-always and reject offer as an approval, never as a question", () => {
+    const state = context({ toleratesStrayUpdates: true });
+    const mapped = mapAcpPermissionRequest(state, {
+      kind: "request",
+      id: "edit-2",
+      method: "session/request_permission",
+      params: {
+        sessionId: "acp-session-1",
+        toolCall: { toolCallId: "edit-2", title: "Edit file" },
+        options: [
+          { optionId: "always", name: "Always allow", kind: "allow_always" },
+          { optionId: "no", name: "Reject", kind: "reject_once" },
+        ],
+      },
+    });
+    expect(mapped).toMatchObject({
+      kind: "approval",
+      allowAlwaysOptionId: "always",
+      rejectOptionId: "no",
+      event: { kind: "approval-request" },
+    });
+    expect(mapped.kind === "approval" ? mapped.allowOptionId : "none").toBeUndefined();
   });
 });

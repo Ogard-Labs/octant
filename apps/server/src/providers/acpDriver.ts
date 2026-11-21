@@ -185,7 +185,7 @@ interface ResumeIdentity {
 interface PendingApproval {
   readonly kind: "approval";
   readonly providerRequestId: string | number;
-  readonly allowOptionId: string;
+  readonly allowOptionId?: string;
   readonly allowAlwaysOptionId?: string;
   readonly rejectOptionId: string;
   /** The pending call, for an automatic reviewer; never published. */
@@ -2706,11 +2706,13 @@ function makeConnection(
               input.scope !== "once" &&
               pending.allowAlwaysOptionId !== undefined &&
               permissionPersistence(options) === "current-session";
+            // Offered only allow-always, an approval that does not hold for
+            // the session cannot choose it, so it rejects.
             const selected = !input.approved
               ? pending.rejectOptionId
               : remembers && pending.allowAlwaysOptionId !== undefined
                 ? pending.allowAlwaysOptionId
-                : pending.allowOptionId;
+                : (pending.allowOptionId ?? pending.rejectOptionId);
             return request(() =>
               state.client.respondPermission(pending.providerRequestId, selected),
             );
@@ -2802,7 +2804,7 @@ function rememberPermission(state: SessionState, mapped: AcpMappedPermission): v
     state.approvals.set(mapped.requestId, {
       kind: "approval",
       providerRequestId: mapped.providerRequestId,
-      allowOptionId: mapped.allowOptionId,
+      ...(mapped.allowOptionId === undefined ? {} : { allowOptionId: mapped.allowOptionId }),
       ...(mapped.allowAlwaysOptionId === undefined
         ? {}
         : { allowAlwaysOptionId: mapped.allowAlwaysOptionId }),

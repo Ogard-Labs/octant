@@ -197,7 +197,10 @@ function permissionRequest(id: string, toolCallId: string) {
 function fixture(
   profile: AcpProviderProfile,
   overrides: Partial<
-    Pick<AcpDriverOptions, "authentication" | "managedToolsBridgeFactory" | "process">
+    Pick<
+      AcpDriverOptions,
+      "authentication" | "managedToolsBridgeFactory" | "permissionPersistence" | "process"
+    >
   > & {
     readonly mcpHttp?: boolean;
     readonly nativeResume?: boolean;
@@ -4613,6 +4616,92 @@ it("asks Google Antigravity for each following session/list page with the cursor
   expect(f.client.call).toHaveBeenCalledWith("session/list", {
     cwd: projectRoot,
     cursor: "page-2",
+  });
+});
+
+describe("Google Antigravity's allow-always offer without allow-once", () => {
+  const allowAlwaysRequest = {
+    kind: "request" as const,
+    id: "always-provider",
+    method: "session/request_permission" as const,
+    params: {
+      sessionId: "agent-session-1",
+      toolCall: { toolCallId: "edit-always", title: "Edit file", kind: "edit" as const },
+      options: [
+        { optionId: "always", name: "Always allow", kind: "allow_always" },
+        { optionId: "no", name: "Reject", kind: "reject_once" },
+      ],
+    },
+  };
+  const run = (
+    executionPolicy: "approval-gated" | "plan",
+    persistence: "current-session" | "project-default",
+    answer: (
+      connection: Effect.Effect.Success<
+        ReturnType<ReturnType<typeof fixture>["driver"]["acquire"]>
+      >,
+    ) => Effect.Effect<unknown, unknown>,
+  ) => {
+    const f = fixture(acpProviderProfiles.antigravity, {
+      runtimeVersion: "1.5.12",
+      permissionPersistence: () => persistence,
+    });
+    const offered: ProviderRuntimeEvent[] = [];
+    return Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy });
+          const events = yield* connection.subscribe;
+          yield* Effect.fork(
+            Stream.runForEach(events, (event) => Effect.sync(() => offered.push(event))),
+          );
+          yield* Effect.sleep("1 millis");
+          f.client.request(allowAlwaysRequest);
+          yield* Effect.sleep("1 millis");
+          yield* answer(connection);
+        }),
+      ),
+    ).then(() => ({ client: f.client, offered }));
+  };
+
+  it("refuses it in Plan and never offers it as a question", async () => {
+    const { client, offered } = await run("plan", "current-session", (connection) =>
+      Effect.flip(
+        connection.answerUserInput({ sessionId, requestId: "request-1", answer: "Always allow" }),
+      ).pipe(Effect.asVoid),
+    );
+    expect(client.respondPermission).toHaveBeenCalledTimes(1);
+    expect(client.respondPermission).toHaveBeenCalledWith("always-provider", "no");
+    expect(offered.some((event) => event.kind === "user-input-request")).toBe(false);
+  });
+
+  it("chooses allow-always when the person keeps approvals for the session", async () => {
+    const { client, offered } = await run("approval-gated", "current-session", (connection) =>
+      connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+    );
+    expect(offered.some((event) => event.kind === "approval-request")).toBe(true);
+    expect(client.respondPermission).toHaveBeenCalledWith("always-provider", "always");
+  });
+
+  it("rejects it when an approval holds for one call only", async () => {
+    const perProject = await run("approval-gated", "project-default", (connection) =>
+      connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+    );
+    expect(perProject.client.respondPermission).toHaveBeenCalledWith("always-provider", "no");
+    expect(perProject.client.respondPermission).not.toHaveBeenCalledWith(
+      "always-provider",
+      "always",
+    );
+    const once = await run("approval-gated", "current-session", (connection) =>
+      connection.answerApproval({
+        sessionId,
+        requestId: "request-1",
+        approved: true,
+        scope: "once",
+      }),
+    );
+    expect(once.client.respondPermission).toHaveBeenCalledWith("always-provider", "no");
   });
 });
 

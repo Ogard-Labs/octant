@@ -2698,8 +2698,13 @@ with the person's token. The CLI talks to Google itself.
   the CLI remembers the answer (`forwardsAllowAlways`); a one-call answer (an
   automatic reviewer's, or one on a child run's behalf) never does. Its
   questions arrive as permission requests whose tool call id starts with
-  `interaction_`: one whose options are no allow-and-reject pair is asked as
-  a question with its options as the answers, and a pair as an approval.
+  `interaction_`: one whose options have neither an allow nor a reject kind
+  is asked as a question with its options as the answers, and an allow
+  option beside a reject as an approval, so Plan and the approval policy
+  apply to it. An allow option is never a question's answer, and allow
+  options with no reject fail the turn. Offered `allow_always` with no
+  `allow_once`, an approval chooses it only where approvals hold for the
+  session and otherwise rejects.
 - **Turns that do not fail on stray updates** (`toleratesStrayUpdates`).
   Updates after the prompt answered (usage, background-command replies,
   scheduled wakes), a subagent's updates under its own session id, a repeated

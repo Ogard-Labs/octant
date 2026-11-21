@@ -82,7 +82,8 @@ export type AcpMappedPermission =
       readonly providerRequestId: string | number;
       /** The ACP tool kind the agent declared, or `tool` when it named none. */
       readonly toolKind: string;
-      readonly allowOptionId: string;
+      /** Absent where the agent offers only its remember-this option. */
+      readonly allowOptionId?: string;
       /** The agent's own remember-this option, where it offers one. */
       readonly allowAlwaysOptionId?: string;
       readonly rejectOptionId: string;
@@ -669,22 +670,25 @@ export function mapAcpPermissionRequest(
     };
   }
   const allow = request.params.options.find((option) => option.kind === "allow_once");
+  const allowAlways = request.params.options.find((option) => option.kind === "allow_always");
   const reject = request.params.options.find((option) => option.kind.startsWith("reject"));
-  // A request whose options are not an allow-and-reject pair is a question
-  // the agent asks through its permission channel: each option is an answer.
+  // A request with neither allow nor reject options is a question the agent
+  // asks through its permission channel: each option is an answer. An allow
+  // option is never an answer: offered `allow_always` and a reject, the
+  // chosen allow went back through the question path, so Plan and one-call
+  // approvals never saw it.
   if (
-    (allow === undefined || reject === undefined) &&
     context.toleratesStrayUpdates === true &&
-    request.params.options.length > 0
+    request.params.options.length > 0 &&
+    !request.params.options.some((option) => option.kind.startsWith("allow"))
   ) {
     const answers = request.params.options.filter((option) => !option.kind.startsWith("reject"));
-    const skip = request.params.options.find((option) => option.kind.startsWith("reject"));
     return {
       kind: "question",
       requestId,
       providerRequestId: request.id,
       optionIds: new Map(answers.map((option) => [option.name, option.optionId])),
-      ...(skip === undefined ? {} : { skipOptionId: skip.optionId }),
+      ...(reject === undefined ? {} : { skipOptionId: reject.optionId }),
       event: mappedEvent(context, {
         kind: "user-input-request",
         requestId,
@@ -693,7 +697,12 @@ export function mapAcpPermissionRequest(
       }),
     };
   }
-  if (allow === undefined || reject === undefined) {
+  // Such an agent may offer only `allow_always` beside its reject; that is
+  // still an approval, which the driver answers with allow-always only where
+  // approvals hold for the session.
+  const approvable =
+    allow !== undefined || (context.toleratesStrayUpdates === true && allowAlways !== undefined);
+  if (!approvable || reject === undefined) {
     return {
       kind: "protocol-failure",
       failure: {
@@ -702,7 +711,6 @@ export function mapAcpPermissionRequest(
       },
     };
   }
-  const allowAlways = request.params.options.find((option) => option.kind === "allow_always");
   const preceding =
     tool === undefined &&
     normalized(request.params.toolCall.title, SUMMARY_MAX_CHARACTERS) === undefined
@@ -713,7 +721,7 @@ export function mapAcpPermissionRequest(
     requestId,
     providerRequestId: request.id,
     toolKind,
-    allowOptionId: allow.optionId,
+    ...(allow === undefined ? {} : { allowOptionId: allow.optionId }),
     ...(allowAlways === undefined ? {} : { allowAlwaysOptionId: allowAlways.optionId }),
     rejectOptionId: reject.optionId,
     ...(preceding.length === 0 ? {} : { preceding }),

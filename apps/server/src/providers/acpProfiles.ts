@@ -260,8 +260,11 @@ export interface AcpProviderProfile {
    * tool update for a call never started or already finished. They are
    * ignored or read as the start they imply, a call left running is done
    * when its turn is, an update reaching a process parked between turns
-   * leaves it warm, and a permission request whose options are not an
-   * allow-and-reject pair is asked as a question.
+   * leaves it warm, and a permission request with neither allow nor reject
+   * options is asked as a question. An allow option is never a question's
+   * answer: `allow_always` beside a reject, with no `allow_once`, is an
+   * approval that chooses allow-always only where approvals hold for the
+   * session and otherwise rejects.
    */
   readonly toleratesStrayUpdates?: true;
   /** The agent's own allow-always option is chosen when approvals hold for the session. */
@@ -1794,8 +1797,9 @@ const antigravityProfile: AcpProviderProfile = {
   selectsNoMode: true,
   chatSessionRoot: "managed-home",
   // Its questions arrive as permission requests whose tool call id starts
-  // with `interaction_`; options that are no allow-and-reject pair are asked
-  // as a question (`toleratesStrayUpdates`), and a pair as an approval.
+  // with `interaction_`; options with neither an allow nor a reject kind are
+  // asked as a question (`toleratesStrayUpdates`), and an allow beside a
+  // reject as an approval.
   userQuestions: "supported",
   unnamedPermissionDescription: "Google Antigravity is asking before it continues.",
   toleratesStrayUpdates: true,
