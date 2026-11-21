@@ -767,6 +767,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     },
     readWorkTurn: (requestId) => workTurnProjection.lookup(requestId),
     readCodeTurn: readCodeRoutineTurn,
+    readChatThread: (threadId) => persistence.readChatThreadView(threadId),
     onRunStatusChanged: observeRunStatusChanged,
     store: automationEventStore,
     projection: persistence.automationProjection,
