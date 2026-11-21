@@ -149,13 +149,18 @@ The design rests on a small set of invariants that every package obeys:
 - **The event journal is authoritative; projections are rebuildable.** Commands
   append versioned events to a SQLite journal. Read models are idempotent
   projections that can be dropped and rebuilt from the journal at any time.
-  _Rationale for no interactive raw provider terminal mode_ (maintainer
-  decision, 2026-11-14): Octant offers no mode in which the person types into
-  a provider's own terminal program inside a thread. Keystrokes typed there
-  reach the provider directly, so its tool calls bypass Octant's approvals and
-  never reach the journal; the thread would claim a record it does not hold.
-  The person can still run a provider's CLI in an ordinary terminal, outside
-  any thread's authority.
+  _Rationale for a person-operated provider terminal_ (maintainer decision,
+  2026-11-21, replacing the 2026-11-14 exclusion): keystrokes typed into a
+  provider's own terminal program reach the provider directly, so its tool
+  calls bypass Octant's approvals and never reach the journal. Excluding it
+  also blocked workflows only a provider's own interface offers. A Code
+  thread's terminal tab, or a Work task's terminal, may therefore run its
+  provider's program, but only as a person-operated terminal: only the person opens or types into it, it runs
+  the way the thread's turns do (outside Strict without Octant's sandbox, on
+  the provider's own approvals; under Strict confined as that thread's
+  terminals are), and the thread claims nothing that happens in it, so the
+  journal never holds a record it does not have
+  ([Workspace: provider terminal](design/workspace.md)).
 - **Contracts are schema-only, domain is pure.** `@octant/contracts` holds
   Effect Schema definitions and nothing else. `@octant/domain` holds pure
   policy and state transitions with no I/O.
@@ -17524,6 +17529,48 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
+- **Provider terminals.** A Code thread's `start-terminal`, and a Work task's
+  Project terminal `start` (with its `workThreadId`), may ask for
+  `program: "provider"`. The host then resolves the thread's provider's own
+  command-line program with the account binary, folder and launch environment
+  its turns use at the thread's Strict value, and runs it in place of the
+  interactive shell, in the thread's folder: Claude Code and Codex through
+  their tooling account, and an ACP agent whose profile names `interactiveArgs`
+  (Google Antigravity's `agy`, Gemini CLI's `gemini`, both bare) with the
+  environment `sanitizeAcpEnvironment` builds for its launch, less the guards
+  that only keep the piped ACP stream clean (`PROTOCOL_STREAM_GUARDS`:
+  `NO_COLOR`), its managed home and its host sign-in folder's variables, and
+  no API key. A Work task's start journals `program: "provider"` on
+  `code.project-terminal-started@1` (optional; absent is a shell), and a Zen
+  card pinned for it records the same, with the program's name, from the
+  host's answer. A Work task's runs
+  by the same rule below in mode `work`, at the task's own level rather than
+  the Full access a plain Project terminal takes outside Strict. It runs the
+  way the thread's turns do (maintainer decision, 2026-11-21): where a turn
+  runs without Octant's sandbox (`providerHoldsLevelWithoutSandbox`: Work or
+  Code outside Strict, outside Plan, with no kept Full-access sandbox and no
+  chosen sandbox policy), the program starts with no confinement wall and no
+  egress proxy, on the provider's own approvals. Under Strict, or where the
+  thread kept its sandbox or a turn holds a chosen sandbox policy, it starts
+  under the thread terminal's confinement, unwidened: an account folder
+  outside the thread's folders stays unwritable there, so a program that must
+  write it can fail to sign in, and the person opens it outside Strict
+  instead. On Linux the confined shell's `HOME` is its own state folder and an
+  account folder outside the thread's folders is not mounted at all, so a
+  program there starts as on a fresh machine. Windows has no Octant terminal
+  sandbox, so a provider terminal that would start confined is refused there
+  rather than opened unconfined: under Strict, including verified Codex at Full
+  access, whose turns the Windows AppContainer sandbox runs, and for a thread
+  that kept its sandbox, whose turns Windows refuses. The command names no
+  program, path or variable. The host refuses the start, and any write to such a
+  terminal, for every caller but the person (their local window or a device
+  they paired), before any approval is consulted, since keystrokes there
+  reach the provider past Octant's approvals (a Work task's is a Project
+  terminal, which already admits only the person). Plan, a Project on a
+  server, a Browser grant, a Project terminal with no Work task, and a
+  provider with no program are refused. Its output follows
+  the thread terminal's replay path and never enters the conversation,
+  transcript or usage ([Workspace: provider terminal](design/workspace.md)).
 - **Project actions.** A Work or Code Project keeps up to twelve named
   actions on its record: a unique name, a one-line command and a relative
   directory. The person saves the list from the Project overview through the
@@ -20764,8 +20811,9 @@ scope again under the sequence and confinement gate below. Work and Code run
 there at Full access only (step 3).
 
 Also out of scope, kept on 2026-11-14: physical phones and tablets and
-app-store upload (above), and an interactive raw provider terminal mode, whose
-rationale sits beside [the journal principle](#overview-and-principles).
+app-store upload (above). A person-operated provider terminal, excluded on
+2026-11-14, is in scope since 2026-11-21; its rationale sits beside [the
+journal principle](#overview-and-principles).
 
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local

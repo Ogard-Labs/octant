@@ -1236,6 +1236,61 @@ describe("CodeTerminalPane", () => {
     expect(onOpenAnotherTerminal).toHaveBeenCalledTimes(1);
     expect(client.executeOperation).not.toHaveBeenCalled();
   });
+
+  it("offers to open the thread's provider in a terminal of its own, next to New terminal", async () => {
+    const open = vi.fn();
+    const client = codeClient({ evidence: "ready" });
+    render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="approval-gated"
+        loadRuntime={xtermRuntime().loadRuntime}
+        onOpenAnotherTerminal={vi.fn()}
+        onOpenProviderTerminal={{ name: "Claude Code", open }}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    expect(await screen.findByRole("menuitem", { name: "New terminal" })).toBeVisible();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open Claude Code terminal" }));
+
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(client.executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("says a provider's own session stays outside the thread's record and restarts the provider, not a shell", async () => {
+    const client = codeClient({ evidence: "ready" });
+    render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="approval-gated"
+        loadRuntime={xtermRuntime().loadRuntime}
+        providerProgramName="Codex"
+        restart={{
+          columns: 100,
+          createTerminalId: () => ids.terminal as never,
+          credentialRefs: [],
+          program: "provider",
+          rows: 30,
+        }}
+        result={{ ...terminalResult, state: "exited", exitCode: 0 }}
+        scope={scope}
+      />,
+    );
+
+    expect(screen.getByText(/outside this thread's record and usage/)).toBeVisible();
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restart terminal" }));
+    await waitFor(() =>
+      expect(client.executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "start-terminal", program: "provider" }),
+      ),
+    );
+  });
 });
 
 describe("CodeTerminalPane Browser switch", () => {

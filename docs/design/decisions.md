@@ -49,7 +49,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 8         | 7       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 17        | 9       | 7            | 1                   |
-| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
+| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 10        | 6       | 4            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 13        | 6       | 7            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 7         | 4       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **290**   | **176** | **110**      | **4**               |
+| **All areas**                                                                         | **291**   | **176** | **111**      | **4**               |
 
 ## Principles and hard lines
 
@@ -156,7 +156,7 @@ The server decides every authority question, the event journal is the record, an
 - Commands append versioned events; read models are idempotent projections rebuildable from the journal.
 - Startup verifies only journal rows after a disposable watermark (sequence plus a fingerprint of the exact server build, the registry's names and versions, and the schema head); the status inspection then checks only the rows after it and skips SQLite's integrity check; the first start of a new build, a source run, a migration, a suspicious tail, a refused start, or rewrite or delete of a journal row forces a full scan ([Architecture: Persistence](../architecture.md#persistence)).
 - Contracts are schema-only and domain code is pure; dependencies point inward and provider payloads stop at the adapter.
-- No thread offers an interactive raw provider terminal: typing into a provider's own terminal program bypasses approvals and the journal (maintainer decision, 2026-11-14; rationale in the owner).
+- A provider's own program typed into in a terminal tab bypasses Octant's approvals and the journal, so it is offered only as a person-operated terminal whose activity the thread does not claim ([Provider terminals](#provider-terminals); maintainer decision, 2026-11-21, replacing the 2026-11-14 exclusion).
 - The host refuses unknown fields in everything it decodes; a client drops unknown fields in a host answer, except inside asks a person decides on, which stay strict.
 
 Status: Built. Detail: [Architecture: Overview and principles](../architecture.md#overview-and-principles).
@@ -513,7 +513,7 @@ The first release is the technical preview for Apple-silicon Macs with the provi
 - Connectors, a Code thread's own Git and pull-request work, a person's merge from any of their clients, host-local routines, the guardrail levels and the key providers' native features are in scope; Octant Shield is in scope and designed.
 - An agent merge or force-push on its own initiative, cloud scheduling, and an Octant-operated hosted service are out of scope.
 - Physical phones and tablets, and app-store upload, submission and release, are out of scope (maintainer decision, 2026-10-29, kept 2026-11-14); Octant drives the simulator only.
-- An interactive raw provider terminal mode, where the person types into a provider's own terminal program inside a thread, is out of scope (maintainer decision, 2026-11-14): it would bypass approvals and the journal ([Server authority, an authoritative journal, and strict host reads](#server-authority-an-authoritative-journal-and-strict-host-reads)).
+- A person-operated provider terminal, where the person runs a thread's provider's own program interactively in a terminal tab, is in scope (maintainer decision, 2026-11-21, lifting the 2026-11-14 exclusion; [Provider terminals](#provider-terminals)).
 - Public Canvas links are in scope through the self-hostable reference app at `apps/share`; Ogard Labs operates no share-service instance (maintainer decision, 2026-11-07).
 
 Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
@@ -2363,10 +2363,24 @@ A Project terminal is the person's shell, not an agent's. No provider, tool call
 - Only a person, at a local window whose workspace holds the Work or Code Project or at a paired device that reaches it, may start, attach to, type into, resize or stop it (maintainer decision, 2026-11-12; built for a device the host's own person paired: its own shell in a local Project, journaled as the device and ended when the device is revoked or sends nothing for a minute; saved actions, worktree setup and a server Project's shell stay at a window).
 - It runs at the Project's bound root through the same confinement as a thread terminal, with no credential references; Plan never applies. Outside Strict it runs unconfined, a Work Project's included, read at each start from the task's or the Project's Strict value ([Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on); built). A terminal on a Plan checkout stays read-only.
 - Its lifecycle is journaled on its own aggregate, its output is never journaled, and archiving the Project or relinking its root ends it as `authority-revoked`.
-- A Work Project shows a terminal only after its Developer tools are turned on; Chat has none.
+- A Work Project shows a terminal only after its Developer tools are turned on; Chat has none. One opened for a Work task may run that task's provider's own program for the person ([Provider terminals](#provider-terminals)); it stays a person-only Project terminal.
 - A server Work Project exposes that person-operated SSH shell only in its bound local Settings row, with the real user/alias/folder and Full remote access visible before launch. Its window, Work enablement, exact binding/registry and Developer tools are rechecked before dispatch, after acquisition and for the session lifetime. Closing/hiding/switching/revocation cancels only its owned session, including pending acquisition; unknown replies never replay. Saved Work actions retain closed stdin and reject interactive writes even without a task context. Closing SSH does not prove remote programs ended; see [Server Projects](server-projects.md#threads).
 
 Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Project terminals](../architecture.md#security-and-authority).
+
+### Provider terminals
+
+A person can run a thread's provider's own command-line program, in its own interface, in a terminal tab of that thread (maintainer decision, 2026-11-21). It is a person-operated terminal: its keystrokes reach the provider directly, past Octant's approvals, so the thread claims nothing that happens in it.
+
+- **Open <provider> terminal** sits beside New terminal in a Code thread's terminal actions, and beside Stop terminal on a Work task's Project terminal card in Zen, for a provider with such a program (built for Claude Code, Codex, and the ACP agents whose profile names `interactiveArgs`: Google Antigravity's `agy` and Gemini CLI's `gemini`, each run bare, as the repository's own sign-in guidance for them does). A Work task's opens as a Project terminal for that task, in its folder.
+- The host resolves the program from the thread's provider by the rules its own launch uses: the account's binary, its folder (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) and its launch environment, telemetry guards included; for an ACP agent, the environment its driver builds (`sanitizeAcpEnvironment`: Strict's passthrough list and guards, or the person's own outside Strict), its managed home and its host sign-in folder's variables, less the guards that only keep the piped ACP stream clean (`NO_COLOR`, the only one any profile sets), since the terminal is a TTY; every self-update, telemetry and configuration guard holds (built). The command names none of them. Plan, a Project on a server, and a provider with no such program are refused, and it lends no Browser.
+- It runs the way the thread's turns do (maintainer decision, 2026-11-21), by the same rule (`providerHoldsLevelWithoutSandbox`, mode `code` or `work`; a Work task's at the task's own level, not the Full access a plain Project terminal takes outside Strict): outside Strict and outside Plan, with no kept Full-access sandbox and no chosen sandbox policy, it starts in the thread's folder with no confinement wall and no egress proxy, on the provider's own approvals. Under Strict, or where the thread kept its sandbox or a turn holds a chosen sandbox policy, it starts under the confinement an ordinary Code terminal has at the thread's level, not widened: an account folder outside the thread's folders stays unwritable (on Linux, not mounted at all), so a program that must write there can fail to sign in. On Windows, which has no Octant terminal sandbox, a provider terminal that would start confined is refused instead: under Strict, Codex at Full access included though its turns run there, and for a thread that kept its sandbox.
+- Only the person opens one or types into it, from their own window or a device they paired; the host refuses every agent and other remote principal, whatever an approval would allow.
+- Its output stays out of the thread's transcript and usage; the tab says the provider's own session is outside Octant's record. A Work task's Project terminal journals `program: "provider"` on its start (an optional field; a start without it is a shell), and its Zen card records the same, and the program's name, from the host's answer at pinning, fixed for the card's life (the card's notice names that program, not whichever provider the window's Work task uses later), so restarting the card asks for the program again and the host decides that start afresh (built).
+- The terminal carries no secret: an account that signs in through its folder starts signed in, while an API-key or gateway account's key is not passed, so that program asks for its own sign-in.
+- Not built yet: the other ACP agents, whose CLI's interactive mode the repository does not yet record, an added ACP agent, and the other providers with a program.
+
+Status: Partly built. Since: 2026-11-21. Detail: [Workspace: provider terminal](workspace.md).
 
 ### Terminal output paths
 
@@ -3588,7 +3602,7 @@ Status: Partly built. Since: 2026-10-28. Detail: [Provider runtimes: artifact la
 
 Claude Code's Code Mode is a workflow Octant does not carry yet, recorded as a gap to close rather than a rule (maintainer decision, 2026-11-14): it runs only in an interactive terminal session and refuses to start while `DISABLE_TELEMETRY` is set.
 
-- Octant adds no terminal mode for it and no telemetry exception: provider telemetry stays off as a hard line.
+- Octant adds no telemetry exception for it. A [provider terminal](#provider-terminals) opens Claude Code's own interface in a Code thread with the environment that thread's turns launch with (maintainer decision, 2026-11-21): under Strict that sets `DISABLE_TELEMETRY`, so Code Mode still does not start there; outside Strict the telemetry guard follows the person's provider settings, so Octant's own guard no longer keeps Code Mode from starting in that terminal, as the person's own session outside the thread's record (not yet seen with a real Claude Code).
 - Once the Agent SDK supports Code Mode, Octant offers it under the thread's level like Claude's other tools. The `REPL` tool is already offered outside Plan under the shell's rules.
 
 Status: Designed, not built. Since: 2026-11-14. Detail: [Provider runtimes: Code Mode](provider-runtimes.md#code-mode).

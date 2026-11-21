@@ -269,13 +269,14 @@ shown only to identify the configured provider.
 
 Source paths:
 
-- https://github.com/lobehub/lobe-icons/blob/master/packages/static-svg/icons/antigravity.svg
+- https://github.com/lobehub/lobe-icons/blob/9752d967494e48d8f83f2808feb2b0207bf70997/packages/static-svg/icons/antigravity.svg
 - https://github.com/lobehub/lobe-icons/blob/master/packages/static-svg/icons/bfl.svg
 - https://github.com/lobehub/lobe-icons/blob/master/packages/static-svg/icons/ideogram.svg
 
 The BFL and Ideogram paths are distributed by the `@lobehub/icons-static-svg@1.94.0`
 package; the Antigravity path was taken from the same repository's `master`
-branch on 2026-11-20.
+branch on 2026-11-20, at commit 9752d967494e48d8f83f2808feb2b0207bf70997, whose path data it matches
+exactly.
 The package README identifies the package as MIT licensed and credits LobeHub.
 
 Copyright © 2023 LobeHub.

@@ -377,6 +377,8 @@ export interface WorkspaceViewProps {
      * is opening a second shell rather than returning to the thread's first.
      */
     terminalId?: import("@octant/contracts/code").CodeTerminalId,
+    /** The new terminal runs the thread's provider's own program rather than a shell. */
+    program?: "provider",
   ) => void;
   /**
    * Open one workspace surface, resolving to whether a tab bound to
@@ -1674,8 +1676,9 @@ function renderCodeTab(
             : props.onOpenCodeSurface(
                 kind,
                 tab.threadId,
-                codeSurfaceTitle(kind),
+                options.title ?? codeSurfaceTitle(kind),
                 options.terminalId,
+                options.program,
               )
         }
         {...(props.onOpenCodeFile === undefined

@@ -251,7 +251,7 @@ export const PROVIDER_LOGOS: Readonly<Record<string, ProviderLogoSpec>> = {
   "azure-foundry": simpleIcon(AZURE, "microsoftazure"),
   antigravity: officialAsset(
     ANTIGRAVITY,
-    "https://github.com/lobehub/lobe-icons/blob/master/packages/static-svg/icons/antigravity.svg",
+    "https://github.com/lobehub/lobe-icons/blob/9752d967494e48d8f83f2808feb2b0207bf70997/packages/static-svg/icons/antigravity.svg",
     "0 0 24 24",
     "MIT",
   ),

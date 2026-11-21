@@ -209,4 +209,58 @@ describe("ZenProjectTerminalCard", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/paused while this card is out of view/i);
     expect(paused.execute).not.toHaveBeenCalled();
   });
+
+  it("offers to open the Work task's provider in a terminal of its own, without starting it here", async () => {
+    const shell = client(() => running(""));
+    const open = vi.fn();
+    render(
+      <ZenProjectTerminalCard
+        client={shell}
+        live
+        loadRuntime={xtermRuntime().loadRuntime}
+        onOpenProviderTerminal={{ name: "Google Antigravity", open }}
+        projectId={projectId}
+        terminalId={terminalId}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "More terminal actions" }));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Open Google Antigravity terminal" }),
+    );
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(shell.execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "start" }),
+      expect.anything(),
+    );
+  });
+
+  it("says a Work task's provider program runs outside the task's record, and a shell's card does not", async () => {
+    const { unmount } = render(
+      <ZenProjectTerminalCard
+        client={client(() => running(""))}
+        live
+        loadRuntime={xtermRuntime().loadRuntime}
+        projectId={projectId}
+        providerProgramName="Gemini CLI"
+        terminalId={terminalId}
+      />,
+    );
+    expect(
+      await screen.findByText(/Gemini CLI runs here on its own, with its own approvals/),
+    ).toHaveTextContent("outside this task's record and usage");
+    unmount();
+
+    render(
+      <ZenProjectTerminalCard
+        client={client(() => running(""))}
+        live
+        loadRuntime={xtermRuntime().loadRuntime}
+        projectId={projectId}
+        terminalId={terminalId}
+      />,
+    );
+    await screen.findByRole("button", { name: "More terminal actions" });
+    expect(screen.queryByText(/runs here on its own/)).toBeNull();
+  });
 });
