@@ -2502,12 +2502,14 @@ function LaunchedShell(
     readonly action: string;
     readonly requiredCapability?: string;
     readonly projectHostId?: HostId;
+    readonly onlyThisHost?: boolean;
     readonly onRefuse: (reason: string) => void;
   }): HostId | undefined {
     const decision = assertCreateDestinationFromHosts({
       hosts,
       createHostId,
       action: input.action,
+      ...(input.onlyThisHost === undefined ? {} : { onlyThisHost: input.onlyThisHost }),
       ...(input.projectHostId === undefined ? {} : { projectHostId: input.projectHostId }),
       ...(input.requiredCapability === undefined
         ? {}
@@ -7498,6 +7500,7 @@ function LaunchedShell(
       const destinationHostId = refuseUnlessCreatableDestination({
         action: "create-code-thread",
         requiredCapability: "code",
+        onlyThisHost: true,
         onRefuse: (reason) => setDraftError(reason),
       });
       if (destinationHostId === undefined) return false;
@@ -7921,10 +7924,10 @@ function LaunchedShell(
         const destinationHostId = refuseUnlessCreatableDestination({
           action: "create-code-thread",
           requiredCapability: "code",
+          onlyThisHost: true,
           onRefuse: (reason) => setDraftError(reason),
         });
         if (destinationHostId === undefined) return false;
-        void destinationHostId;
         const resolution = resolveDraftProject({
           draftProjectId,
           candidates: projectController.projects,
@@ -9046,6 +9049,7 @@ function LaunchedShell(
             const destinationHostId = refuseUnlessCreatableDestination({
               action: "create-project",
               requiredCapability: mode,
+              onlyThisHost: true,
               onRefuse: (reason) => setDraftError(reason),
             });
             if (destinationHostId === undefined) {
