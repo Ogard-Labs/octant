@@ -2686,8 +2686,8 @@ function makeConnection(
             if (pending === undefined) {
               return Effect.fail(failure("protocol", `${name} approval request is not pending.`));
             }
-            state.approvals.delete(input.requestId);
             if (state.executionPolicy === "plan" && input.approved) {
+              state.approvals.delete(input.requestId);
               return request(() =>
                 state.client.respondPermission(pending.providerRequestId, pending.rejectOptionId),
               ).pipe(
@@ -2706,13 +2706,25 @@ function makeConnection(
               input.scope !== "once" &&
               pending.allowAlwaysOptionId !== undefined &&
               permissionPersistence(options) === "current-session";
-            // Offered only allow-always, an approval that does not hold for
-            // the session cannot choose it, so it rejects.
-            const selected = !input.approved
-              ? pending.rejectOptionId
-              : remembers && pending.allowAlwaysOptionId !== undefined
+            const allowOptionId =
+              remembers && pending.allowAlwaysOptionId !== undefined
                 ? pending.allowAlwaysOptionId
-                : (pending.allowOptionId ?? pending.rejectOptionId);
+                : pending.allowOptionId;
+            // Offered only allow-always, an approval that does not hold for
+            // the session has no option to choose. Sending the reject instead
+            // would let the host record an approval the agent never got, so
+            // nothing is sent and the request stays pending for a denial or an
+            // approval that holds for the session.
+            const selected = input.approved ? allowOptionId : pending.rejectOptionId;
+            if (selected === undefined) {
+              return Effect.fail(
+                failure(
+                  "unsupported",
+                  `${name} only offers Always allow here. Approve it for this session, or deny it.`,
+                ),
+              );
+            }
+            state.approvals.delete(input.requestId);
             return request(() =>
               state.client.respondPermission(pending.providerRequestId, selected),
             );

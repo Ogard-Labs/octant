@@ -4684,24 +4684,46 @@ describe("Google Antigravity's allow-always offer without allow-once", () => {
     expect(client.respondPermission).toHaveBeenCalledWith("always-provider", "always");
   });
 
-  it("rejects it when an approval holds for one call only", async () => {
-    const perProject = await run("approval-gated", "project-default", (connection) =>
-      connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
-    );
-    expect(perProject.client.respondPermission).toHaveBeenCalledWith("always-provider", "no");
-    expect(perProject.client.respondPermission).not.toHaveBeenCalledWith(
-      "always-provider",
-      "always",
-    );
-    const once = await run("approval-gated", "current-session", (connection) =>
-      connection.answerApproval({
-        sessionId,
-        requestId: "request-1",
-        approved: true,
-        scope: "once",
-      }),
-    );
-    expect(once.client.respondPermission).toHaveBeenCalledWith("always-provider", "no");
+  it("sends nothing for an approval that holds for one call only, and keeps the request for a denial", async () => {
+    const refusals: unknown[] = [];
+    const approveThenDeny =
+      (scope: "once" | undefined) =>
+      (
+        connection: Effect.Effect.Success<
+          ReturnType<ReturnType<typeof fixture>["driver"]["acquire"]>
+        >,
+      ) =>
+        Effect.gen(function* () {
+          refusals.push(
+            yield* Effect.flip(
+              connection.answerApproval({
+                sessionId,
+                requestId: "request-1",
+                approved: true,
+                ...(scope === undefined ? {} : { scope }),
+              }),
+            ),
+          );
+          yield* connection.answerApproval({ sessionId, requestId: "request-1", approved: false });
+        });
+    const perProject = await run("approval-gated", "project-default", approveThenDeny(undefined));
+    const once = await run("approval-gated", "current-session", approveThenDeny("once"));
+    for (const { client } of [perProject, once]) {
+      expect(client.respondPermission).toHaveBeenCalledTimes(1);
+      expect(client.respondPermission).toHaveBeenCalledWith("always-provider", "no");
+    }
+    expect(refusals).toEqual([
+      {
+        category: "unsupported",
+        message:
+          "Google Antigravity only offers Always allow here. Approve it for this session, or deny it.",
+      },
+      {
+        category: "unsupported",
+        message:
+          "Google Antigravity only offers Always allow here. Approve it for this session, or deny it.",
+      },
+    ]);
   });
 });
 

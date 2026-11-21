@@ -2704,7 +2704,10 @@ with the person's token. The CLI talks to Google itself.
   apply to it. An allow option is never a question's answer, and allow
   options with no reject fail the turn. Offered `allow_always` with no
   `allow_once`, an approval chooses it only where approvals hold for the
-  session and otherwise rejects.
+  session. Any other approval is refused as unsupported and nothing reaches
+  the CLI, so no approval is recorded that the CLI never got: the request
+  stays pending, and Code keeps the ask open for a denial, which sends the
+  reject.
 - **Turns that do not fail on stray updates** (`toleratesStrayUpdates`).
   Updates after the prompt answered (usage, background-command replies,
   scheduled wakes), a subagent's updates under its own session id, a repeated
