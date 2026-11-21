@@ -97,8 +97,10 @@ function toolingProgram(
  * environment the ACP driver builds for a launch of this thread. That is the
  * same sanitized host environment (Strict's passthrough list and guards, or
  * the person's own outside Strict), the instance's managed home, and the
- * variables that point the CLI at the person's own sign-in folder. No API key
- * is passed: an api-key account's CLI asks for its own sign-in.
+ * variables that point the CLI at the person's own sign-in folder. Only the
+ * guards that keep the piped ACP stream clean (`NO_COLOR`) are left out, since
+ * the terminal is a TTY. No API key is passed: an api-key account's CLI asks
+ * for its own sign-in.
  */
 function acpProgram(
   instance: ProviderInstance,
@@ -118,6 +120,8 @@ function acpProgram(
     managedHome,
     executionPolicy: input.executionPolicy ?? "approval-gated",
     mode: input.mode ?? "code",
+    // A TTY, not the ACP stream: the CLI keeps its colour.
+    interactive: true,
     // As the driver's launch: the open environment only outside Strict for a
     // thread that did not keep its sandbox.
     ...(input.strict === false && input.fullAccessSandbox !== true ? { strict: false } : {}),

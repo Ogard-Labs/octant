@@ -123,7 +123,9 @@ export function wireZen(deps: ZenDependencies) {
             read: (windowId, projectId, terminalId) => {
               if (!projectTerminals.owns(windowId, projectId, terminalId)) return undefined;
               const project = persistence.readProject(projectId);
-              return project === undefined ? undefined : { title: project.name };
+              if (project === undefined) return undefined;
+              const program = projectTerminals.program(terminalId);
+              return { title: project.name, ...(program === undefined ? {} : { program }) };
             },
           },
         }),

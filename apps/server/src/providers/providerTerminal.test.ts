@@ -191,6 +191,7 @@ describe("ACP agent terminal", () => {
         managedHome,
         executionPolicy: "approval-gated",
         mode: "work",
+        interactive: true,
       }),
     );
     expect(launch.environment.AGY_CLI_DISABLE_AUTO_UPDATE).toBe("1");
@@ -207,6 +208,7 @@ describe("ACP agent terminal", () => {
         managedHome,
         executionPolicy: "approval-gated",
         mode: "work",
+        interactive: true,
         strict: false,
       }),
     );
@@ -225,8 +227,43 @@ describe("ACP agent terminal", () => {
         managedHome,
         executionPolicy: "approval-gated",
         mode: "work",
+        interactive: true,
       }),
     );
+  });
+
+  it("opens an ACP agent's CLI in colour while keeping its self-update guard, and leaves its turns without colour", () => {
+    const { launch, managedHome } = resolveAcp(acpInstance("antigravity"));
+    if (launch.status !== "resolved") throw new Error("expected a launch");
+    // NO_COLOR keeps the ACP JSON-RPC stream free of escape codes; a person's
+    // terminal is a TTY, where it only takes the CLI's colour away.
+    expect(launch.environment.NO_COLOR).toBeUndefined();
+    expect(launch.environment.AGY_CLI_DISABLE_AUTO_UPDATE).toBe("1");
+    expect(
+      sanitizeAcpEnvironment(acpProviderProfiles.antigravity, HOST, {
+        managedHome,
+        executionPolicy: "approval-gated",
+        mode: "work",
+      }).NO_COLOR,
+    ).toBe("1");
+  });
+
+  it("keeps a person's own NO_COLOR in an ACP agent's terminal", () => {
+    const managedRoot = mkdtempSync(join(tmpdir(), "octant-acp-terminal-"));
+    directories.push(managedRoot);
+    const launch = resolveProviderTerminal({
+      instance: acpInstance("gemini"),
+      hostEnvironment: { ...HOST, NO_COLOR: "yes" },
+      homeDirectory: "/Users/person",
+      platform: "darwin",
+      shell: "/bin/zsh",
+      strict: true,
+      mode: "work",
+      executionPolicy: "approval-gated",
+      acpHome: (kind, instanceId) => join(managedRoot, kind, instanceId),
+    });
+    if (launch.status !== "resolved") throw new Error("expected a launch");
+    expect(launch.environment.NO_COLOR).toBe("yes");
   });
 
   it("offers no terminal for an ACP agent whose CLI has no interactive mode Octant knows", () => {

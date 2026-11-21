@@ -326,6 +326,11 @@ export const ProjectTerminalStarted = Schema.Struct({
   bindingRevisionId: BindingRevisionId,
   posture: ProjectTerminalPosture,
   startedAt: UtcTimestamp,
+  /**
+   * The terminal ran its Work task's provider program rather than a shell.
+   * Absent is a shell, which every start recorded before the field existed was.
+   */
+  program: Schema.optional(Schema.Literal("provider")),
 }).annotations(strict);
 export type ProjectTerminalStarted = typeof ProjectTerminalStarted.Type;
 

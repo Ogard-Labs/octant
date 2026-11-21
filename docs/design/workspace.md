@@ -1665,6 +1665,14 @@ confined exactly as an Octant terminal at the thread's level, not widened for
 the program: an account folder outside the thread's folders stays outside its
 writable roots, so a program that must write there can fail to sign in or save
 its session. A Work task's runs by the same rule at the task's own level.
+An ACP agent's program keeps every guard its turns set except the ones that
+only keep the piped ACP stream clean (`NO_COLOR`), since the terminal is a TTY:
+its self-update, telemetry and configuration guards hold, and a person's own
+`NO_COLOR` stays. A Work task's Zen card records that it runs the provider
+program, as the host says when the card is pinned, so restarting the card
+after the program ends or the host restarts asks for the program again (still
+decided by the host at that start, for the window's current Work task), and
+the terminal's start in the journal records `program: "provider"`.
 Not built yet: the other ACP agents (offered once a CLI's interactive mode is
 confirmed), an added ACP agent, and the other providers with a command-line
 program.

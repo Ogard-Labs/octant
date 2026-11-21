@@ -2284,6 +2284,30 @@ describe("Work task provider terminal", () => {
     }
   });
 
+  it("journals that the terminal ran the task's provider program and tells a Zen card so, while a plain terminal records none", async () => {
+    const f = providerHarness();
+    const plain = providerHarness();
+    try {
+      await f.service.execute(windowId, "local-window", providerStart());
+      await plain.service.execute(
+        windowId,
+        "local-window",
+        decodeProjectTerminalCommand({ ...start(), workThreadId }),
+      );
+      expect(f.events()[0]).toMatchObject({
+        name: "code.project-terminal-started@1",
+        payload: { kind: "project-terminal-started", program: "provider" },
+      });
+      expect(plain.events()[0]?.payload).not.toHaveProperty("program");
+      const terminalId = decodeCodeTerminalId(ids.terminal);
+      expect(f.service.program(terminalId)).toBe("provider");
+      expect(plain.service.program(terminalId)).toBeUndefined();
+    } finally {
+      f.connection.close();
+      plain.connection.close();
+    }
+  });
+
   it("runs the Work provider terminal unconfined outside Strict, as the task's turns run, and confined where the task keeps its sandbox", async () => {
     const outside = providerHarness({ strict: false });
     const kept = providerHarness({
