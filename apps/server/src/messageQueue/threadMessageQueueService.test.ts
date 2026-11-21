@@ -943,8 +943,9 @@ describe("durable ordinary thread queue", () => {
   it("keeps the queue usable while the running turn's runtime has not yet taken a message", async () => {
     let answer: (outcome: "steered") => void = () => undefined;
     const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(
-      () =>
+      (input) =>
         new Promise((resolve) => {
+          input.asking?.();
           answer = resolve;
         }),
     );
@@ -982,6 +983,25 @@ describe("durable ordinary thread queue", () => {
       ]),
     );
     expect(steer).toHaveBeenCalledOnce();
+  });
+  it("tells no reader anything when each pass's offer is ruled out at once, as on a running Chat turn", async () => {
+    // The port rules a Chat follow-up out before asking any runtime.
+    const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(
+      async () => "unavailable",
+    );
+    const f = fixture({ ...port(), steer });
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    await f.service.execute(windowId, enqueue());
+    for (let pass = 0; pass < 3; pass++) {
+      await f.service.tick();
+      await vi.waitFor(() => expect(steer).toHaveBeenCalledTimes(pass + 1));
+    }
+    expect(f.steeringChanged).not.toHaveBeenCalled();
+    expect((await snapshot(f.service)).items[0]).not.toHaveProperty("steering");
   });
   it("offers a message again when the running turn could not yet be asked", async () => {
     const steer = vi

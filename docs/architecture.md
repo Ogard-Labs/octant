@@ -7080,7 +7080,11 @@ ls-remote` against the thread's remote and the GitHub reads they already
   (host memory, never journaled), and the host publishes a
   `thread-message-queue` change when it starts or stops waiting, so a client
   disables its edit, move and remove controls and says it is being sent into
-  the running turn. A provider-switch handoff, a child's parent
+  the running turn. Both the mark and the change come only once every check
+  passed and the runtime is actually asked: the queue's once-a-second pass
+  offers a message the port rules out at once (a Chat turn, a runtime that
+  cannot steer), and announcing those would make every open queue panel
+  re-read unchanged data each second. A provider-switch handoff, a child's parent
   context and a thread export carry each steered message as a user message
   of its turn, after that turn's prompt, with the time it was sent, under the
   same limits and redaction as the turn's other messages. The message is not marked as dispatching

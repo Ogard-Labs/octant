@@ -109,6 +109,14 @@ export class ThreadMessageQueueService {
    * until the runtime answers, so it can never reach two turns.
    */
   readonly #steering = new Set<string>();
+  /**
+   * Of those, the messages a running turn's runtime is actually being asked
+   * to take. Readers see and are told about only these: the queue's
+   * once-a-second pass offers a message the port rules out at once (a Chat
+   * turn, a runtime that cannot steer), and announcing every such offer made
+   * each open queue panel read unchanged data every second.
+   */
+  readonly #asking = new Set<string>();
   #disposed = false;
   constructor(options: ThreadMessageQueueServiceOptions) {
     this.#clock = options.clock ?? (() => new Date().toISOString());
@@ -121,11 +129,11 @@ export class ThreadMessageQueueService {
   /** The queue as stored, with each message a running turn's runtime is still considering marked. */
   #snapshot(scope: ThreadMessageQueueScope): ThreadMessageQueueSnapshot {
     const stored = this.#store.snapshot(scope);
-    if (!stored.items.some((item) => this.#steering.has(item.messageId))) return stored;
+    if (!stored.items.some((item) => this.#asking.has(item.messageId))) return stored;
     return {
       ...stored,
       items: stored.items.map((item) =>
-        this.#steering.has(item.messageId) ? { ...item, steering: true as const } : item,
+        this.#asking.has(item.messageId) ? { ...item, steering: true as const } : item,
       ),
     };
   }
@@ -791,17 +799,22 @@ export class ThreadMessageQueueService {
     if (steer === undefined || this.#unsteerable.has(messageId) || this.#steering.has(messageId))
       return;
     this.#steering.add(messageId);
-    this.#steeringChanged();
+    const asking = () => {
+      if (this.#disposed || !this.#steering.has(messageId) || this.#asking.has(messageId)) return;
+      this.#asking.add(messageId);
+      this.#steeringChanged();
+    };
     void (async () => {
       let outcome: "steered" | "refused" | "unavailable";
       try {
-        outcome = await steer({ scope, messageId, payload: content.payload, windowId });
+        outcome = await steer({ scope, messageId, payload: content.payload, windowId, asking });
       } catch {
         outcome = "refused";
       }
       await this.#serial(scope, () => this.#settleSteer(scope, messageId, content, outcome));
     })().catch(() => {
-      if (this.#steering.delete(messageId)) this.#steeringChanged();
+      this.#steering.delete(messageId);
+      if (this.#asking.delete(messageId)) this.#steeringChanged();
     });
   }
   #steeringChanged(): void {
@@ -819,8 +832,9 @@ export class ThreadMessageQueueService {
   ): Promise<void> {
     this.#steering.delete(messageId);
     // A steered message's removal is journaled and notifies by itself; one
-    // that waits again changes nothing durable.
-    if (outcome !== "steered") this.#steeringChanged();
+    // that waits again changes nothing durable, and one never announced
+    // changes nothing a reader saw.
+    if (this.#asking.delete(messageId) && outcome !== "steered") this.#steeringChanged();
     if (this.#disposed) return;
     // Nothing was tried (the turn is still starting, say), so a later pass
     // asks again; asking now would only repeat the same answer.

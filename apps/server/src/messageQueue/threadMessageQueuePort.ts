@@ -112,6 +112,12 @@ export interface ThreadMessageQueueModePort {
     readonly messageId: ThreadQueueMessageId;
     readonly payload: ThreadMessageQueuePayload;
     readonly windowId: WindowId;
+    /**
+     * Called once every check passed and the running turn's runtime is about
+     * to be asked, so the queue shows the message as being sent only then,
+     * never for an offer ruled out at once.
+     */
+    readonly asking?: () => void;
   }) => Promise<"steered" | "refused" | "unavailable">;
   /** not-admitted is proof from durable mode state, never an absent live handle. */
   readonly reconcile: (input: {

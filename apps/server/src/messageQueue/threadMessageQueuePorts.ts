@@ -412,7 +412,7 @@ export function createThreadMessageQueuePort(
   const steer: ThreadMessageQueueModePort["steer"] =
     steering === undefined
       ? undefined
-      : async ({ scope, messageId, payload, windowId }) => {
+      : async ({ scope, messageId, payload, windowId, asking }) => {
           // Chat is not steered; its next message is a turn of its own.
           if (scope.mode === "chat" || scope.mode !== payload.mode) return "unavailable";
           if (!steering.isPersonWindow(windowId)) return "unavailable";
@@ -436,6 +436,7 @@ export function createThreadMessageQueuePort(
             String(live.providerInstanceId) !== String(facts.thread.providerInstanceId)
           )
             return "unavailable";
+          asking?.();
           const outcome = await Effect.runPromise(
             steerTurn({ sessionId: live.sessionId, message: text, source: "person" }).pipe(
               Effect.catchAll(() => Effect.succeed("unsupported" as const)),

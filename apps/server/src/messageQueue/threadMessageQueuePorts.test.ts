@@ -1215,6 +1215,7 @@ describe("a message sent while the thread's turn runs", () => {
         recordSteered: record,
       },
     });
+    const asking = vi.fn();
     const send = (
       prompt: string,
       from = windowId,
@@ -1227,15 +1228,18 @@ describe("a message sent while the thread's turn runs", () => {
         messageId,
         windowId: from,
         payload: decodeThreadMessageQueuePayload({ mode: "work", prompt, ...extra }),
+        asking,
       });
     };
-    return { send, record };
+    return { send, record, asking };
   }
 
   it("goes into the running turn as the person's note and is recorded on that turn", async () => {
     const steer = vi.fn<NonNullable<ProviderConnection["steer"]>>(() => Effect.succeed("steered"));
-    const { send, record } = steering(steer);
+    const { send, record, asking } = steering(steer);
     expect(await send("Use the staging database instead.")).toBe("steered");
+    // The queue shows the message as being sent once the runtime is asked.
+    expect(asking).toHaveBeenCalledOnce();
     expect(steer).toHaveBeenCalledWith({
       sessionId,
       message: "Use the staging database instead.",
@@ -1262,7 +1266,7 @@ describe("a message sent while the thread's turn runs", () => {
 
   it("is never steered when it carries more than text, is a command, or waits under another scope", async () => {
     const steer = vi.fn<NonNullable<ProviderConnection["steer"]>>(() => Effect.succeed("steered"));
-    const { send, record } = steering(steer);
+    const { send, record, asking } = steering(steer);
     const otherScope = decodeWindowId("92000000-0000-4000-8000-000000000030");
     expect(
       await send("See the attached log.", windowId, {
@@ -1273,5 +1277,7 @@ describe("a message sent while the thread's turn runs", () => {
     expect(await send("Use staging.", otherScope)).toBe("unavailable");
     expect(steer).not.toHaveBeenCalled();
     expect(record).not.toHaveBeenCalled();
+    // Nothing was asked, so the queue shows nothing as being sent.
+    expect(asking).not.toHaveBeenCalled();
   });
 });
