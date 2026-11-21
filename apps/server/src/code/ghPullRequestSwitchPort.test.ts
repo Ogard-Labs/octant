@@ -887,6 +887,51 @@ describe("forge switch port", () => {
       ),
     ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
 
+    // Without databaseId, every permutation of [undated queued, older failure, newer pass]
+    // resolves identically to pending (transitive, order-independent fallback).
+    const undatedOlderFail = {
+      __typename: "CheckRun",
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      startedAt: "2026-11-21T10:00:00Z",
+      completedAt: "2026-11-21T10:01:00Z",
+      checkSuite: {
+        id: "CS_6",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    const idLessTriplet = [undatedQueued, undatedOlderFail, undatedPass] as const;
+    const permutations = [
+      [0, 1, 2],
+      [0, 2, 1],
+      [1, 0, 2],
+      [1, 2, 0],
+      [2, 0, 1],
+      [2, 1, 0],
+    ] as const;
+    for (const [i, j, k] of permutations) {
+      expect(
+        await rerunPort([
+          idLessTriplet[i],
+          idLessTriplet[j],
+          idLessTriplet[k],
+        ]).observePullRequestCondition(request, { requiredChecks: true }, signal),
+      ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    }
+    // Mixed ID and ID-less attempts also remain permutation-invariant.
+    const mixedTriplet = [undatedQueued, oldFail, newPass] as const;
+    for (const [i, j, k] of permutations) {
+      expect(
+        await rerunPort([
+          mixedTriplet[i],
+          mixedTriplet[j],
+          mixedTriplet[k],
+        ]).observePullRequestCondition(request, { requiredChecks: true }, signal),
+      ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    }
+
     // Distinct workflows with different workflow ids never hide each other's failures.
     const workflowAFail = {
       __typename: "CheckRun",

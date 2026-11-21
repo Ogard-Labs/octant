@@ -1367,36 +1367,57 @@ function classifyStatusContext(state: unknown): "pass" | "pending" | "failing" |
   return undefined;
 }
 
+function commitCheckRecencyKey(entry: ObservedCommitCheck): number {
+  if (entry.timestampMs !== undefined) return entry.timestampMs;
+  // An undated queued/pending run fail-closed outranks any dated run regardless
+  // of input order; an undated completed run cannot claim to be newer than a
+  // dated run.
+  return entry.bucket === "pending" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+}
+
+function commitCheckBucketRank(bucket: ObservedCommitCheck["bucket"]): number {
+  if (bucket === "pending") return 2;
+  if (bucket === "failing") return 1;
+  return 0;
+}
+
+function compareNumberKey(left: number, right: number): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+/**
+ * Strict weak order over attempts sharing one check identity so choosing the
+ * latest attempt is transitive and independent of array order across any
+ * number of runs. Uses `databaseId` first when every attempt in the group has
+ * one; otherwise orders by deterministic numeric recency key, optional
+ * `databaseId`, and fail-closed bucket rank (`pending > failing > pass`).
+ */
 function pickNewerCommitCheck(
   existing: ObservedCommitCheck,
   candidate: ObservedCommitCheck,
+  useDatabaseIdPrimary: boolean,
 ): ObservedCommitCheck {
-  if (existing.databaseId !== undefined && candidate.databaseId !== undefined) {
-    if (candidate.databaseId !== existing.databaseId) {
-      return candidate.databaseId > existing.databaseId ? candidate : existing;
-    }
-  }
-  if (existing.timestampMs !== undefined && candidate.timestampMs !== undefined) {
-    if (candidate.timestampMs !== existing.timestampMs) {
-      return candidate.timestampMs > existing.timestampMs ? candidate : existing;
-    }
-  } else if (existing.timestampMs !== undefined || candidate.timestampMs !== undefined) {
-    // When ordering cannot be established (for example, a queued rerun with no
-    // startedAt/completedAt and no databaseId alongside a dated earlier pass),
-    // never let a dated pass erase an undated pending or failing run.
-    const undated = existing.timestampMs === undefined ? existing : candidate;
-    const dated = existing.timestampMs === undefined ? candidate : existing;
-    if (undated.bucket !== "pass" && dated.bucket === "pass") return undated;
-    return dated;
-  }
-  if (existing.bucket !== "pass" && candidate.bucket === "pass") return existing;
-  return candidate;
+  const compare = useDatabaseIdPrimary
+    ? compareNumberKey(existing.databaseId ?? -1, candidate.databaseId ?? -1) ||
+      compareNumberKey(commitCheckRecencyKey(existing), commitCheckRecencyKey(candidate)) ||
+      compareNumberKey(
+        commitCheckBucketRank(existing.bucket),
+        commitCheckBucketRank(candidate.bucket),
+      )
+    : compareNumberKey(commitCheckRecencyKey(existing), commitCheckRecencyKey(candidate)) ||
+      compareNumberKey(existing.databaseId ?? -1, candidate.databaseId ?? -1) ||
+      compareNumberKey(
+        commitCheckBucketRank(existing.bucket),
+        commitCheckBucketRank(candidate.bucket),
+      );
+  return compare < 0 ? candidate : existing;
 }
 
 function selectLatestCommitChecks(
   observed: ReadonlyArray<ObservedCommitCheck>,
 ): ReadonlyArray<ObservedCommitCheck> {
-  const latestByIdentity = new Map<string, ObservedCommitCheck>();
+  const groupsByIdentity = new Map<string, ObservedCommitCheck[]>();
   for (let index = 0; index < observed.length; index += 1) {
     const entry = observed[index];
     if (entry === undefined) continue;
@@ -1412,13 +1433,28 @@ function selectLatestCommitChecks(
       // unrelated failing checks cannot be collapsed by another run.
       key = `check-run-unkeyed\0${String(index)}`;
     }
-    const existing = latestByIdentity.get(key);
-    latestByIdentity.set(
-      key,
-      existing === undefined ? entry : pickNewerCommitCheck(existing, entry),
-    );
+    const group = groupsByIdentity.get(key);
+    if (group === undefined) {
+      groupsByIdentity.set(key, [entry]);
+    } else {
+      group.push(entry);
+    }
   }
-  return [...latestByIdentity.values()];
+  const latest: ObservedCommitCheck[] = [];
+  for (const group of groupsByIdentity.values()) {
+    const first = group[0];
+    if (first === undefined) continue;
+    const allHaveDatabaseId = group.every((entry) => entry.databaseId !== undefined);
+    let best = first;
+    for (let index = 1; index < group.length; index += 1) {
+      const candidate = group[index];
+      if (candidate !== undefined) {
+        best = pickNewerCommitCheck(best, candidate, allHaveDatabaseId);
+      }
+    }
+    latest.push(best);
+  }
+  return latest;
 }
 
 function evaluateCommitRequiredChecks(
