@@ -1355,19 +1355,27 @@ export function codexExecutionSettings(
     (policy === "approval-gated" || policy === "auto-accept-edits")
   ) {
     // Outside Strict Codex runs in its own workspace-write sandbox, as it
-    // does on its own, with the same approval policies as below. Auto's
-    // `on-request` now runs a command unasked inside Codex's own sandbox, as
-    // Codex's own Auto does, and a command that needs to leave it raises
-    // Codex's escalation, which reaches the person or Reviewed's reviewer as
-    // an approval. Ask first and Accept edits keep `untrusted`, which asks for
-    // every command Codex does not know to be read-only and escalates a
-    // command its sandbox refused.
+    // does on its own. Auto's `on-request` runs a command unasked inside
+    // Codex's own sandbox, as Codex's own Auto does, and a command that needs
+    // to leave it raises Codex's escalation, which reaches the person or
+    // Reviewed's reviewer as an approval. Accept edits is `on-request` too
+    // (maintainer decision, 2026-11-21): Codex decides when to ask, as in its
+    // own CLI, and its sandbox, not Octant's, refuses what leaves the
+    // Project's folders. That is safe only here: under Octant's external
+    // sandbox below, `on-request` would run every command unasked, so Accept
+    // edits keeps `untrusted` there. Ask first keeps `untrusted` everywhere,
+    // which asks for every command Codex does not know to be read-only and
+    // escalates a command its sandbox refused.
     const { approvalPolicy, approvalsReviewer } = codexExecutionSettings(
       policy,
       autoApprove,
       fullAccessSandbox,
     );
-    return { approvalPolicy, sandbox: "workspace-write", approvalsReviewer };
+    return {
+      approvalPolicy: policy === "auto-accept-edits" ? "on-request" : approvalPolicy,
+      sandbox: "workspace-write",
+      approvalsReviewer,
+    };
   }
   if (policy === "full-access") {
     // The opt-in sandbox at Full access runs the process inside Octant's

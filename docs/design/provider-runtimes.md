@@ -1528,11 +1528,14 @@ provider decides it (`providerHoldsLevelWithoutSandbox`, maintainer decision,
 2026-11-21; `codexRunsNativeSandbox`): a thread that chose a sandbox policy,
 or kept the sandbox at Full access, stays in Octant's profile, as Strict,
 Plan and Chat do. The mapping per level is Ask first `untrusted`, Accept
-edits `untrusted` with Octant answering in-root file changes, Auto
+edits `on-request` with Octant answering in-root file changes, Auto
 `on-request` with Codex's reviewer, each with `workspace-write`; Full access
-keeps `danger-full-access`. Accept edits stays `untrusted` rather than
-`on-request` because `on-request` would run every command unasked inside the
-sandbox, waiving the command asks Accept edits keeps.
+keeps `danger-full-access`. Accept edits runs `on-request` here (maintainer
+decision, 2026-11-21): Codex decides when to ask, as in its own CLI, and
+Codex's own sandbox refuses what leaves the Project's folders, raising its
+escalation. Under Octant's profile (Strict, a chosen sandbox policy) Accept
+edits stays `untrusted`, since under an external sandbox `on-request` would
+run every command unasked (below).
 
 - The app-server runs unwrapped, as Codex runs on its own; macOS refuses a
   Seatbelt profile inside another, so the native sandbox replaces Octant's.
@@ -1542,9 +1545,10 @@ sandbox, waiving the command asks Accept edits keeps.
   unless the launch took the egress proxy (Network limits on), which then
   carries the runtime's own traffic while a command reaches no network
   unless it is approved to leave the sandbox. The approval policies are those
-  below: Auto `on-request` with Codex's reviewer, so a command runs unasked
-  inside Codex's sandbox as in Codex's own Auto; Ask first and Accept edits
-  `untrusted`.
+  above: Auto `on-request` with Codex's reviewer, so a command runs unasked
+  inside Codex's sandbox as in Codex's own Auto; Accept edits `on-request`
+  with the person as reviewer, so Codex asks when it would on its own; Ask
+  first `untrusted`.
 - Codex's ask to run one command outside its sandbox arrives as an ordinary
   command approval and reaches the person, or Reviewed's reviewer, as an
   Octant approval. An approval is answered `accept`, never `acceptForSession`,
@@ -1615,9 +1619,11 @@ authorize a Strict launch.
   the sandbox under `on-request` (rust-v0.169.0, unchanged on the main
   branch read 2026-11-15). Such a command fails at the wall; outside Strict
   Codex's own sandbox carries the ask instead (above).
-- Ask first (approval-gated without the reviewer) and Accept edits
-  (auto-accept-edits) send `approvalPolicy: "untrusted"`, the strictest mode
-  Codex has, matching the strictest mode elsewhere. Under an external sandbox
+- Under Octant's profile, Ask first (approval-gated without the reviewer)
+  and Accept edits (auto-accept-edits) send `approvalPolicy: "untrusted"`,
+  the strictest mode Codex has, matching the strictest mode elsewhere
+  (outside Strict, in Codex's own sandbox, Accept edits sends `on-request`;
+  above). Under an external sandbox
   `on-request` would run every command without asking; `untrusted` asks for
   each command Codex does not know to be read-only and for every patch. On an
   auto-accept-edits thread the driver answers each file-change request itself,
@@ -3345,8 +3351,8 @@ its status are in
 - **Below Full access outside Strict** starts unconfined with the provider's
   own approvals: Claude's permission modes (`default`, `acceptEdits`,
   `plan`), Codex's own sandbox and approvals (`untrusted` in
-  `workspace-write` at Ask first and Accept edits, `on-request` in
-  `workspace-write` at Auto, `never` in `read-only` in Plan; never the
+  `workspace-write` at Ask first, `on-request` in `workspace-write` at Accept
+  edits and Auto, `never` in `read-only` in Plan; never the
   external sandbox Octant names when its own wall holds the process),
   OpenCode's permission rules, Pi's approval bridge and an ACP agent's own
   mode. Each ask reaches Octant's server, which answers and journals it.

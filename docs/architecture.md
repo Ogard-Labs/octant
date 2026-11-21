@@ -15266,7 +15266,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
 
   The Codex column is Strict's. Outside Strict, Codex's Auto, Ask first and
   Accept edits in Work and Code run its own `workspace-write` sandbox in place
-  of the external one, with the same approval policies (built;
+  of the external one, with the same approval policies except Accept edits,
+  which runs `on-request` there so Codex decides when to ask, as in its own
+  CLI (maintainer decision, 2026-11-21; built;
   [Providers run in their own sandbox](#security-and-authority)). The Claude
   Code column is Strict's, and Plan's and Chat's at every setting; outside
   Strict a Work or Code thread outside Plan runs Claude Code's own modes and
@@ -16701,7 +16703,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   proxy (Network limits on), which the runtime's own traffic keeps, and an
   approved command is answered `accept`, never `acceptForSession`, so it runs
   that one command and nothing is remembered. The thread starts
-  `workspace-write`, with the approval policies above. That lease is keyed on
+  `workspace-write`, with the approval policies above except Accept edits,
+  which runs `on-request` in Codex's own sandbox (maintainer decision,
+  2026-11-21): Codex decides when to ask, as in its own CLI, and its sandbox
+  refuses what leaves the Project's folders. Under Octant's external sandbox
+  Accept edits keeps `untrusted`, since `on-request` there would run every
+  command unasked. That lease is keyed on
   Strict as well as root, mode and posture, so it never serves a Strict
   session. Plan and Chat stay in Octant's read-only profile at every Strict
   value, and Strict keeps Octant's profile as described here. From Codex
