@@ -5533,11 +5533,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const once =
       ownerCurrent !== undefined ||
       active.thread.permissionPersistence !== input.thread.permissionPersistence;
+    const askedUnder = active.approvalPostures.get(input.approvalId);
     if (ownerCurrent === undefined) {
       active.approvals.delete(input.approvalId);
       active.approvalPostures.delete(input.approvalId);
     }
-    await Effect.runPromise(
+    const refused = await Effect.runPromise(
       Effect.suspend(() => {
         if (ownerCurrent !== undefined && !ownerCurrent())
           return Effect.die(new Error("Owner approval target changed before delivery."));
@@ -5558,8 +5559,25 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           approved: input.decision === "approved",
           ...(once ? { scope: "once" as const } : {}),
         });
-      }),
+      }).pipe(
+        Effect.as(undefined),
+        Effect.catchIf(
+          (failure) => failure.category === "unsupported",
+          (failure) => Effect.succeed(failure),
+        ),
+      ),
     );
+    // A runtime that cannot take the answer as asked (an agent offering only
+    // an allow that would outlast a one-call approval) heard nothing and still
+    // waits, so the ask stays open for a denial and nothing is journaled.
+    if (refused !== undefined) {
+      active.approvals.set(input.approvalId, providerRequestId);
+      if (askedUnder !== undefined) active.approvalPostures.set(input.approvalId, askedUnder);
+      // The person is waiting again, so the time from their refused answer
+      // until their next one is their wait, not the call's run time.
+      active.turnTiming.approvalReopened({ approvalId: input.approvalId });
+      return turnState("failed", { category: "failed", message: refused.message });
+    }
     // An owner's answer journals `owner-approval-settled` instead.
     if (ownerCurrent === undefined)
       this.#recordApprovalAnswered(active, input.approvalId, input.decision);

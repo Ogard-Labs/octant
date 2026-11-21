@@ -1936,6 +1936,8 @@ function runSessionTurn(
             // The clamped run authority is what reaches the provider. Nothing here
             // may widen it, and no parent-thread policy is consulted.
             executionPolicy: input.authority.executionPolicy,
+            // Every approval a helper gets holds for that one call.
+            answersOncePerCall: true,
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
             tools: input.appManagedTools?.definitions ?? [],
           })
@@ -1947,6 +1949,7 @@ function runSessionTurn(
               ? {}
               : { modelOptionValues: input.modelOptionValues }),
             executionPolicy: input.authority.executionPolicy,
+            answersOncePerCall: true,
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
             tools: input.appManagedTools?.definitions ?? [],
           });

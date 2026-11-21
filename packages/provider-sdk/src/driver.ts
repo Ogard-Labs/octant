@@ -195,6 +195,15 @@ export interface ProviderSessionStart {
    * never lets the runtime switch its own mode.
    */
   readonly levelChanges?: boolean;
+  /**
+   * Every approval this session's host answers holds for that one call only,
+   * as a helper run's do. A driver refuses on arrival a request it could only
+   * approve for longer (an agent offering `allow_always` with no
+   * `allow_once`), answering the runtime's reject and asking no one, since no
+   * answer the host can give would approve it. Absent, such a request is
+   * asked as usual.
+   */
+  readonly answersOncePerCall?: boolean;
 }
 
 /** One background task a session's runtime still runs, as the person may see it. */
@@ -332,6 +341,8 @@ export interface ProviderSessionResume {
   readonly outlivesTurn?: boolean;
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly levelChanges?: boolean;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly answersOncePerCall?: boolean;
 }
 
 /**
