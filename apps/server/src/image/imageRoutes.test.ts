@@ -1,17 +1,28 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  decodeAggregateVersion,
   decodeImageGenerationJobsResponse,
   decodeImageGenerationOfferDecisionResult,
   decodeImageGenerationOffersResponse,
   decodeImageGenerationProfilesResponse,
   decodeImageJob,
+  decodeProjectId,
   decodeProviderInstanceId,
   type ImageJob,
   type ProviderInstance,
 } from "@octant/contracts";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite } from "../persistence/sqlitePort";
+import { SpendCeilingService } from "../spendCeilingService";
+import { GeneratedImageStore } from "./generatedImageStore";
 import { ImageGenerationOfferService } from "./imageGenerationOfferService";
 import { createImageRouteHandler } from "./imageRoutes";
-import type { ImageJobService } from "./imageJobService";
+import { ImageJobService } from "./imageJobService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 
 const nowMs = Date.parse("2026-08-28T12:00:00.000Z");
@@ -441,6 +452,135 @@ describe("image routes", () => {
         request(`/api/image/offers?threadKind=code-thread&scopeId=${scopeId}`),
       );
       expect(response?.status).toBe(404);
+    });
+  });
+
+  describe("spend ceiling enforcement on manual generation", () => {
+    const directories: Array<string> = [];
+    const nowIso = "2026-08-28T12:00:00.000Z";
+    const projectId = "a3000000-0000-4000-8000-000000000091";
+
+    afterEach(() => {
+      for (const directory of directories.splice(0)) {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses a manual POST /api/image/jobs request over a thread or Project monetary ceiling without calling the provider", async () => {
+      const directory = mkdtempSync(join(tmpdir(), "octant-image-routes-ceiling-"));
+      directories.push(directory);
+      const connection = openSqlite(join(directory, "octant.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => nowIso);
+      const runtime = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: runtime.events,
+        projections: runtime.projections,
+        clock: () => nowIso,
+      });
+      const spendCeiling = new SpendCeilingService({
+        connection,
+        journal,
+        clock: () => nowIso,
+        uuid: () => crypto.randomUUID(),
+        threadExists: () => true,
+        projectExists: () => true,
+      });
+      const generate = vi.fn(async () => ({
+        status: "completed" as const,
+        images: [
+          {
+            bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47]),
+            mediaType: "image/png" as const,
+          },
+        ],
+      }));
+      const profile = imageProfile();
+      const jobs = new ImageJobService({
+        journal,
+        projection: runtime.imageJobProjection,
+        attachments: new GeneratedImageStore(directory),
+        readProviderInstance: (id) => (String(id) === String(profile.id) ? profile : undefined),
+        readImageGenerationCustomSources: () => [],
+        credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
+        uuid: () => crypto.randomUUID(),
+        clock: () => nowIso,
+        actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000002" as never },
+        createAdapter: () => ({ generate }),
+        spendCeiling,
+        resolveThreadProjectId: () => projectId,
+      });
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
+      const handler = createImageRouteHandler({
+        jobs,
+        listInstances: () => [profile],
+        readImageGenerationSettings: () => ({ customSources: [] }),
+        authorizeScope: async () => true,
+        saveToProject: async () => ({ status: "refused", reason: "none" }),
+        windowAuthorityStore,
+        now: () => nowMs,
+      });
+
+      // Thread ceiling refuses first.
+      spendCeiling.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: scopeId },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { costBudgetUsdCents: 2 },
+        window: { kind: "lifetime" },
+      });
+      const threadRefused = await handler(
+        request("/api/image/jobs", {
+          method: "POST",
+          body: {
+            threadKind: "chat-thread",
+            scopeId,
+            profileInstanceId: profileId,
+            modelId: "gpt-image-2",
+            quality: "high",
+            size: "1024x1024",
+            prompt: "a red cube",
+          },
+        }),
+      );
+      expect(threadRefused?.status).toBe(403);
+      expect(await threadRefused?.json()).toMatchObject({
+        refusal: { kind: "exhausted", dimension: "monetary", scopeKind: "thread" },
+      });
+
+      // Clear thread ceiling; Project ceiling still refuses.
+      spendCeiling.execute("local-window", {
+        kind: "clear-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: scopeId },
+        expectedVersion: decodeAggregateVersion(1),
+      });
+      spendCeiling.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "project", projectId: decodeProjectId(projectId) },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { costBudgetUsdCents: 2 },
+        window: { kind: "calendar", period: "day", timeZone: "UTC" },
+      });
+      const projectRefused = await handler(
+        request("/api/image/jobs", {
+          method: "POST",
+          body: {
+            threadKind: "chat-thread",
+            scopeId,
+            profileInstanceId: profileId,
+            modelId: "gpt-image-2",
+            quality: "high",
+            size: "1024x1024",
+            prompt: "a red cube",
+          },
+        }),
+      );
+      expect(projectRefused?.status).toBe(403);
+      expect(await projectRefused?.json()).toMatchObject({
+        refusal: { kind: "exhausted", dimension: "monetary", scopeKind: "project" },
+      });
+      expect(generate).not.toHaveBeenCalled();
     });
   });
 });

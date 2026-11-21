@@ -150,6 +150,7 @@
     "./live-turn-policy": "./src/liveTurnPolicy.ts",
     "./turn-metrics-display": "./src/turnMetricsDisplay.ts",
     "./local-usage-pricing": "./src/localUsagePricing.ts",
+    "./image-generation-pricing": "./src/imageGenerationPricing.ts",
     "./command-credential-policy": "./src/commandCredentialPolicy.ts",
     "./thread-wakeup-policy": "./src/threadWakeupPolicy.ts",
     "./strict-policy": "./src/strictPolicy.ts",

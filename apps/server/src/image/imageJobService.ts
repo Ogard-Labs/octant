@@ -20,10 +20,10 @@ import {
   decodeImageJobId,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  decodeSpendCeilingReservationId,
   decodeUsageReconciliationId,
   decodeUtcTimestamp,
   type GeminiImageAspectRatio,
-  type GeminiImageProviderInstance,
   type GeminiImageResolution,
   type ImageArtifactId,
   type ImageArtifactMediaType,
@@ -35,7 +35,6 @@ import {
   type ImageJobStatus,
   type ImageJobThreadKind,
   type OpenAiCompatibleProviderInstance,
-  type OpenAiImageProviderInstance,
   type OpenAiImageQuality,
   type OpenAiImageSize,
   type ProviderInstance,
@@ -43,6 +42,9 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
+  type SpendCeilingRefusal,
+  type SpendCeilingReservationId,
+  type SpendCeilingThreadType,
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
@@ -56,6 +58,7 @@ import {
   assertImageJobExpectedVersion,
   assertImageJobProfileEligible,
   assertImageJobTransitionAllowed,
+  estimateImageGenerationCost,
   isImageJobTerminalStatus,
   isImageProfileDriverKind,
   nextImageJobVersion,
@@ -65,6 +68,7 @@ import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
+import type { SpendCeilingService } from "../spendCeilingService";
 import { bflImageDriver } from "./bflImageAdapter";
 import { geminiImageDriver } from "./geminiImageAdapter";
 import {
@@ -110,11 +114,17 @@ const unavailableImageAdapter: ImageGenerationAdapter = {
 
 export class ImageJobServiceError extends Error {
   override readonly name = "ImageJobServiceError";
-  readonly category: "invalid" | "ineligible" | "conflict";
+  readonly category: "invalid" | "ineligible" | "conflict" | "spend-ceiling";
+  readonly refusal?: SpendCeilingRefusal;
 
-  constructor(category: ImageJobServiceError["category"], message: string) {
+  constructor(
+    category: ImageJobServiceError["category"],
+    message: string,
+    refusal?: SpendCeilingRefusal,
+  ) {
     super(message);
     this.category = category;
+    if (refusal !== undefined) this.refusal = refusal;
   }
 }
 
@@ -150,6 +160,26 @@ export interface ImageJobServiceOptions {
   /** Image driver kinds the plugin activation ladder admits; bundled policy by default. */
   readonly admittedImageDriverKinds?: ReadonlySet<ProviderDriverKind>;
   readonly concurrency?: number;
+  /** Host spend ceilings applied to thread-scoped image generation before dispatch. */
+  readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
+  /** Resolves the thread's current Project id so Project ceilings apply alongside thread ceilings. */
+  readonly resolveThreadProjectId?: (input: {
+    readonly threadType: SpendCeilingThreadType;
+    readonly threadId: string;
+  }) => string | undefined;
+}
+
+interface QueuedImageWork {
+  readonly prompt: string;
+  readonly references: NonNullable<ImageAdapterRequest["references"]>;
+  readonly variantCount: number;
+  readonly estimatedCostUsdMicros: number | "unknown";
+  readonly admittedProjectId?: string;
+  readonly needsReadmission?: boolean;
+  readonly quality?: OpenAiImageQuality;
+  readonly size?: OpenAiImageSize;
+  readonly aspectRatio?: GeminiImageAspectRatio;
+  readonly resolution?: GeminiImageResolution;
 }
 
 /**
@@ -173,9 +203,12 @@ export class ImageJobService {
   readonly #imageDrivers: ReadonlyArray<ImageGenerationDriver>;
   readonly #admittedImageDriverKinds: ReadonlySet<ProviderDriverKind>;
   readonly #concurrency: number;
+  readonly #spendCeiling: ImageJobServiceOptions["spendCeiling"];
+  readonly #resolveThreadProjectId: ImageJobServiceOptions["resolveThreadProjectId"];
   readonly #abort = new Map<string, AbortController>();
   readonly #waiters = new Map<string, Deferred<ImageJob>>();
   readonly #terminalPersistenceErrors = new Map<string, Error>();
+  readonly #spendReservations = new Map<string, SpendCeilingReservationId>();
   readonly #pending = new Array<ImageJobId>();
   #running = 0;
   #pumping = false;
@@ -196,6 +229,8 @@ export class ImageJobService {
     this.#admittedImageDriverKinds =
       options.admittedImageDriverKinds ?? admittedBundledImageDriverKinds();
     this.#concurrency = options.concurrency ?? IMAGE_JOB_HOST_CONCURRENCY;
+    this.#spendCeiling = options.spendCeiling;
+    this.#resolveThreadProjectId = options.resolveThreadProjectId;
     if (!Number.isSafeInteger(this.#concurrency) || this.#concurrency < 1) {
       throw new ImageJobServiceError(
         "invalid",
@@ -337,12 +372,57 @@ export class ImageJobService {
       );
     }
 
+    const scopeId = decodeImageGenerationScopeId(input.scopeId);
+    // Freeze the effective profile options at enqueue time so changing profile
+    // defaults while a job waits in the queue cannot dispatch a costlier
+    // request than the reservation covered.
+    const effectiveOptions = resolveEffectiveRequestOptions(instance, input);
+    const estimate = estimateImageGenerationCost({
+      driverKind: instance.driverKind,
+      modelId: String(input.modelId),
+      variantCount,
+      ...(effectiveOptions.quality === undefined ? {} : { quality: effectiveOptions.quality }),
+      ...(effectiveOptions.size === undefined ? {} : { size: effectiveOptions.size }),
+      ...(effectiveOptions.resolution === undefined
+        ? {}
+        : { resolution: effectiveOptions.resolution }),
+    });
+    const estimatedCostUsdMicros: number | "unknown" =
+      estimate.kind === "api-estimate" ? estimate.usdMicros : "unknown";
+    let admittedProjectId: string | undefined;
+    let reservationId: SpendCeilingReservationId | undefined;
+    if (this.#spendCeiling !== undefined && input.threadKind !== "image-library") {
+      admittedProjectId = this.#resolveThreadProjectId?.({
+        threadType: input.threadKind,
+        threadId: String(scopeId),
+      });
+      const candidateReservationId = decodeSpendCeilingReservationId(this.#uuid());
+      const admission = this.#spendCeiling.admit({
+        reservationId: candidateReservationId,
+        threadId: String(scopeId),
+        threadType: input.threadKind,
+        ...(admittedProjectId === undefined ? {} : { projectId: admittedProjectId }),
+        countsAsTurn: false,
+        skipTurnAndRunTimeCeiling: true,
+        skipTokenCeiling: true,
+        estimatedCostUsdMicros,
+      });
+      if (admission.status === "refused") {
+        throw new ImageJobServiceError(
+          "spend-ceiling",
+          admission.refusal.message,
+          admission.refusal,
+        );
+      }
+      reservationId = candidateReservationId;
+    }
+
     const now = decodeUtcTimestamp(this.#clock());
     const job = decodeImageJob({
       id: decodeImageJobId(this.#uuid()),
       status: "queued",
       threadKind: input.threadKind,
-      scopeId: decodeImageGenerationScopeId(input.scopeId),
+      scopeId,
       profileInstanceId: decodeProviderInstanceId(input.profileInstanceId),
       modelId: decodeProviderModelId(input.modelId),
       promptHash: hashPrompt(input.prompt),
@@ -354,16 +434,30 @@ export class ImageJobService {
         ? {}
         : { parentArtifactRef: input.parentArtifactRef }),
     });
-    this.#appendQueued(job);
+    if (reservationId !== undefined) {
+      this.#spendReservations.set(String(job.id), reservationId);
+    }
+    try {
+      this.#appendQueued(job);
+    } catch (error) {
+      this.#finishSpendReservation(job.id, "abandon");
+      throw error;
+    }
     this.#pending.push(job.id);
     this.#work.set(String(job.id), {
       prompt: input.prompt,
       references,
       variantCount,
-      ...(input.quality === undefined ? {} : { quality: input.quality }),
-      ...(input.size === undefined ? {} : { size: input.size }),
-      ...(input.aspectRatio === undefined ? {} : { aspectRatio: input.aspectRatio }),
-      ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
+      estimatedCostUsdMicros,
+      ...(admittedProjectId === undefined ? {} : { admittedProjectId }),
+      ...(effectiveOptions.quality === undefined ? {} : { quality: effectiveOptions.quality }),
+      ...(effectiveOptions.size === undefined ? {} : { size: effectiveOptions.size }),
+      ...(effectiveOptions.aspectRatio === undefined
+        ? {}
+        : { aspectRatio: effectiveOptions.aspectRatio }),
+      ...(effectiveOptions.resolution === undefined
+        ? {}
+        : { resolution: effectiveOptions.resolution }),
     });
     this.#pump();
     return job;
@@ -462,6 +556,7 @@ export class ImageJobService {
       if (index >= 0) this.#pending.splice(index, 1);
       this.#work.delete(String(job.id));
       const next = this.#transition(job, "cancelled");
+      this.#finishSpendReservation(job.id, "abandon");
       this.#resolve(next);
       return next;
     }
@@ -488,24 +583,14 @@ export class ImageJobService {
           message: IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE,
         },
       });
+      this.#finishSpendReservation(job.id, "abandon");
       this.#resolve(next);
       interrupted.push(next);
     }
     return interrupted;
   }
 
-  readonly #work = new Map<
-    string,
-    {
-      readonly prompt: string;
-      readonly references: NonNullable<ImageAdapterRequest["references"]>;
-      readonly variantCount: number;
-      readonly quality?: OpenAiImageQuality;
-      readonly size?: OpenAiImageSize;
-      readonly aspectRatio?: GeminiImageAspectRatio;
-      readonly resolution?: GeminiImageResolution;
-    }
-  >();
+  readonly #work = new Map<string, QueuedImageWork>();
 
   #defaultAdapter(instance: ProviderInstance): ImageGenerationAdapter {
     if (
@@ -550,7 +635,10 @@ export class ImageJobService {
         const jobId = this.#pending.shift();
         if (jobId === undefined) break;
         const job = this.#projection.getById(jobId);
-        if (job === undefined || job.status !== "queued") continue;
+        if (job === undefined || job.status !== "queued") {
+          this.#finishSpendReservation(jobId, "abandon");
+          continue;
+        }
         this.#running += 1;
         void this.#run(job)
           .catch((error: unknown) => {
@@ -575,12 +663,14 @@ export class ImageJobService {
           message: "The image job was interrupted by restart.",
         },
       });
+      this.#finishSpendReservation(queued.id, "abandon");
       this.#resolve(failed);
       return;
     }
     const running = this.#transition(queued, "running");
     const controller = new AbortController();
     this.#abort.set(String(running.id), controller);
+    let billedUsage: BilledImageUsage | undefined;
     try {
       const instance = this.#readProviderInstance(running.profileInstanceId);
       if (instance === undefined) {
@@ -593,11 +683,47 @@ export class ImageJobService {
         this.#resolve(failed);
         return;
       }
+      // If the thread moved to a different Project while this job waited in the
+      // queue (or an earlier FIFO reconciliation deferred its re-admission),
+      // reconcile stale queued reservations in FIFO order before dispatching so
+      // a later oversized job cannot block an affordable earlier one.
+      if (this.#spendCeiling !== undefined && running.threadKind !== "image-library") {
+        const currentProjectId = this.#resolveThreadProjectId?.({
+          threadType: running.threadKind,
+          threadId: String(running.scopeId),
+        });
+        if (work.needsReadmission === true || currentProjectId !== work.admittedProjectId) {
+          const readmission = this.#reconcileMovedQueuedJobs(running, work, currentProjectId);
+          if (readmission.status === "refused") {
+            const failed = this.#transition(running, "failed", {
+              failure: {
+                category: "unauthorized",
+                message: readmission.refusal.message,
+              },
+            });
+            this.#resolve(failed);
+            return;
+          }
+        }
+      }
       const adapter = this.#createAdapter(instance);
       const request = this.#adapterRequest(instance, running, work, controller.signal);
       const result = await adapter.generate(request);
+      if (result.status === "completed" && result.images.length > 0) {
+        billedUsage = {
+          imageCount: Math.min(result.images.length, MAX_IMAGE_VARIANTS),
+          adapterResult: result,
+          pricingContext: {
+            driverKind: instance.driverKind,
+            ...(work.quality === undefined ? {} : { quality: work.quality }),
+            ...(work.size === undefined ? {} : { size: work.size }),
+            ...(work.resolution === undefined ? {} : { resolution: work.resolution }),
+          },
+        };
+      }
       if (controller.signal.aborted) {
-        const cancelled = this.#transition(running, "cancelled");
+        const cancelled = this.#transition(running, "cancelled", {}, billedUsage);
+        if (billedUsage !== undefined) this.#finishSpendReservation(running.id, "settle");
         this.#resolve(cancelled);
         return;
       }
@@ -617,24 +743,34 @@ export class ImageJobService {
         return;
       }
       if (result.images.length > work.variantCount) {
-        const failed = this.#transition(running, "failed", {
-          failure: {
-            category: "protocol",
-            message: "The provider returned more images than requested.",
+        const failed = this.#transition(
+          running,
+          "failed",
+          {
+            failure: {
+              category: "protocol",
+              message: "The provider returned more images than requested.",
+            },
           },
-        });
+          billedUsage,
+        );
+        if (billedUsage !== undefined) this.#finishSpendReservation(running.id, "settle");
         this.#resolve(failed);
         return;
       }
       const artifacts = await this.#finalizeArtifacts(running, result.images);
       if (controller.signal.aborted) {
         await this.#removeArtifacts(running, artifacts);
-        const cancelled = this.#transition(running, "cancelled");
+        const cancelled = this.#transition(running, "cancelled", {}, billedUsage);
+        if (billedUsage !== undefined) this.#finishSpendReservation(running.id, "settle");
         this.#resolve(cancelled);
         return;
       }
       try {
-        const completed = this.#transition(running, "completed", { artifacts }, result);
+        // Record committed usage in the journal before releasing the spend
+        // reservation so concurrent checks neither miss the charge nor count it twice.
+        const completed = this.#transition(running, "completed", { artifacts }, billedUsage);
+        this.#finishSpendReservation(running.id, "settle");
         this.#resolve(completed);
       } catch (error) {
         await this.#removeArtifacts(running, artifacts);
@@ -642,15 +778,23 @@ export class ImageJobService {
       }
     } catch (error) {
       if (controller.signal.aborted) {
-        const cancelled = this.#transition(running, "cancelled");
+        const cancelled = this.#transition(running, "cancelled", {}, billedUsage);
+        if (billedUsage !== undefined) this.#finishSpendReservation(running.id, "settle");
         this.#resolve(cancelled);
         return;
       }
-      const failed = this.#transition(running, "failed", {
-        failure: storageOrGenericFailure(error),
-      });
+      const failed = this.#transition(
+        running,
+        "failed",
+        {
+          failure: storageOrGenericFailure(error),
+        },
+        billedUsage,
+      );
+      if (billedUsage !== undefined) this.#finishSpendReservation(running.id, "settle");
       this.#resolve(failed);
     } finally {
+      this.#finishSpendReservation(running.id, "abandon");
       this.#abort.delete(String(running.id));
       this.#work.delete(String(running.id));
     }
@@ -679,23 +823,17 @@ export class ImageJobService {
       ...(work.references.length === 0 ? {} : { references: work.references }),
     };
     if (instance.configuration.kind === "openai-image-http") {
-      const configuration = (instance as OpenAiImageProviderInstance).configuration;
-      const quality = work.quality ?? configuration.quality;
-      const size = work.size ?? configuration.size;
       return {
         ...request,
-        ...(quality === undefined ? {} : { quality }),
-        ...(size === undefined ? {} : { size }),
+        ...(work.quality === undefined ? {} : { quality: work.quality }),
+        ...(work.size === undefined ? {} : { size: work.size }),
       };
     }
     if (instance.configuration.kind === "gemini-native-image-http") {
-      const configuration = (instance as GeminiImageProviderInstance).configuration;
-      const aspectRatio = work.aspectRatio ?? configuration.aspectRatio;
-      const resolution = work.resolution ?? configuration.resolution;
       return {
         ...request,
-        ...(aspectRatio === undefined ? {} : { aspectRatio }),
-        ...(resolution === undefined ? {} : { resolution }),
+        ...(work.aspectRatio === undefined ? {} : { aspectRatio: work.aspectRatio }),
+        ...(work.resolution === undefined ? {} : { resolution: work.resolution }),
       };
     }
     return request;
@@ -779,19 +917,13 @@ export class ImageJobService {
       readonly failure?: ImageJob["failure"];
       readonly artifacts?: ImageJob["artifacts"];
     } = {},
-    adapterResult?: {
-      readonly usage?: {
-        readonly inputTokens?: number;
-        readonly outputTokens?: number;
-        readonly size?: string;
-        readonly outputQuality?: string;
-      };
-    },
+    billedUsage?: BilledImageUsage,
   ): ImageJob {
     assertImageJobTransitionAllowed(job.status, toStatus);
     assertImageJobExpectedVersion(job, job.version);
     const updatedAt = decodeUtcTimestamp(this.#clock());
-    const includeUsage = toStatus === "completed" && extras.artifacts !== undefined;
+    const includeUsage =
+      billedUsage !== undefined || (toStatus === "completed" && extras.artifacts !== undefined);
     const version = includeUsage
       ? ((job.version + 2) as ImageJob["version"])
       : nextImageJobVersion(job.version);
@@ -817,15 +949,17 @@ export class ImageJobService {
         occurredAt: updatedAt,
       },
     ];
-    if (includeUsage && extras.artifacts !== undefined) {
+    if (includeUsage) {
+      const imageCount = extras.artifacts?.length ?? billedUsage?.imageCount ?? 1;
       events.push({
         eventName: "context.usage-reconciled@1",
         payload: {
           reconciliation: this.#usageReconciliation(
             job,
-            extras.artifacts,
+            imageCount,
             updatedAt,
-            adapterResult,
+            billedUsage?.adapterResult,
+            billedUsage?.pricingContext,
           ),
         },
         occurredAt: updatedAt,
@@ -838,7 +972,7 @@ export class ImageJobService {
 
   #usageReconciliation(
     job: ImageJob,
-    artifacts: ImageJob["artifacts"],
+    imageCount: number,
     observedAt: UtcTimestamp,
     adapterResult:
       | {
@@ -850,11 +984,34 @@ export class ImageJobService {
           };
         }
       | undefined,
+    pricingContext:
+      | {
+          readonly driverKind: ProviderDriverKind;
+          readonly quality?: OpenAiImageQuality;
+          readonly size?: OpenAiImageSize;
+          readonly resolution?: GeminiImageResolution;
+        }
+      | undefined,
   ) {
     const inputTokens = adapterResult?.usage?.inputTokens ?? 0;
     const outputTokens = adapterResult?.usage?.outputTokens ?? 0;
     const size = adapterResult?.usage?.size;
     const outputQuality = adapterResult?.usage?.outputQuality;
+    const settledQuality = outputQuality ?? pricingContext?.quality;
+    const settledSize = typeof size === "string" && size.length > 0 ? size : pricingContext?.size;
+    const estimate =
+      pricingContext === undefined
+        ? undefined
+        : estimateImageGenerationCost({
+            driverKind: pricingContext.driverKind,
+            modelId: String(job.modelId),
+            variantCount: imageCount,
+            ...(settledQuality === undefined ? {} : { quality: settledQuality }),
+            ...(settledSize === undefined ? {} : { size: settledSize }),
+            ...(pricingContext.resolution === undefined
+              ? {}
+              : { resolution: pricingContext.resolution }),
+          });
     return {
       id: decodeUsageReconciliationId(this.#uuid()),
       providerInstanceId: job.profileInstanceId,
@@ -872,8 +1029,16 @@ export class ImageJobService {
       adapterResult?.usage?.outputTokens === undefined
         ? { providerReported: false }
         : {}),
+      ...(estimate?.kind === "api-estimate"
+        ? {
+            cost: {
+              kind: "api-estimate" as const,
+              usdMicros: estimate.usdMicros,
+            },
+          }
+        : {}),
       imageUnits: {
-        count: artifacts.length,
+        count: imageCount,
         quality: "exact" as const,
         ...(typeof size === "string" && size.length > 0 ? { size } : {}),
         ...(outputQuality === undefined ? {} : { outputQuality }),
@@ -926,6 +1091,7 @@ export class ImageJobService {
 
   #recordUnhandledFailure(job: ImageJob, error: unknown): void {
     void error;
+    this.#finishSpendReservation(job.id, "abandon");
     const current = this.#projection.getById(job.id) ?? job;
     if (isImageJobTerminalStatus(current.status)) {
       this.#resolve(current);
@@ -948,6 +1114,141 @@ export class ImageJobService {
           : new ImageJobServiceError("conflict", "The image job failed."),
       );
     }
+  }
+
+  #finishSpendReservation(jobId: ImageJobId, outcome: "settle" | "abandon"): void {
+    const key = String(jobId);
+    const reservationId = this.#spendReservations.get(key);
+    if (reservationId === undefined) return;
+    this.#spendReservations.delete(key);
+    if (outcome === "settle") {
+      this.#spendCeiling?.settle({ reservationId });
+    } else {
+      this.#spendCeiling?.abandon({ reservationId });
+    }
+  }
+
+  #updateWorkAdmission(
+    jobId: ImageJobId,
+    work: QueuedImageWork,
+    admittedProjectId: string | undefined,
+    needsReadmission: boolean,
+  ): void {
+    const {
+      admittedProjectId: _previousProjectId,
+      needsReadmission: _previousReadmission,
+      ...rest
+    } = work;
+    this.#work.set(String(jobId), {
+      ...rest,
+      ...(admittedProjectId === undefined ? {} : { admittedProjectId }),
+      ...(needsReadmission ? { needsReadmission: true } : {}),
+    });
+  }
+
+  /**
+   * Re-admits a moved queued job and any later stale queued jobs targeting the
+   * same destination Project (or same thread) in FIFO order. All stale source
+   * reservations are released before re-admission starts so a later oversized
+   * job cannot consume the destination budget and block an affordable earlier
+   * job. Any later job that cannot currently fit remains queued with no
+   * reservation and `needsReadmission: true` so it re-checks when dequeued.
+   */
+  #reconcileMovedQueuedJobs(
+    running: ImageJob,
+    work: QueuedImageWork,
+    currentProjectId: string | undefined,
+  ):
+    | { readonly status: "admitted" }
+    | { readonly status: "refused"; readonly refusal: SpendCeilingRefusal } {
+    if (this.#spendCeiling === undefined || running.threadKind === "image-library") {
+      return { status: "admitted" };
+    }
+    const affectedPending: Array<{
+      readonly job: ImageJob;
+      readonly threadType: SpendCeilingThreadType;
+      readonly work: QueuedImageWork;
+      readonly projectId: string | undefined;
+    }> = [];
+    for (const pendingId of this.#pending) {
+      const pendingJob = this.#projection.getById(pendingId);
+      if (
+        pendingJob === undefined ||
+        pendingJob.status !== "queued" ||
+        pendingJob.threadKind === "image-library"
+      ) {
+        continue;
+      }
+      const pendingWork = this.#work.get(String(pendingId));
+      if (pendingWork === undefined) continue;
+      const pendingProjectId = this.#resolveThreadProjectId?.({
+        threadType: pendingJob.threadKind,
+        threadId: String(pendingJob.scopeId),
+      });
+      const stale =
+        pendingWork.needsReadmission === true || pendingProjectId !== pendingWork.admittedProjectId;
+      if (!stale) continue;
+      const sameProject = currentProjectId !== undefined && pendingProjectId === currentProjectId;
+      const sameThread =
+        pendingJob.threadKind === running.threadKind &&
+        String(pendingJob.scopeId) === String(running.scopeId);
+      if (sameProject || sameThread) {
+        affectedPending.push({
+          job: pendingJob,
+          threadType: pendingJob.threadKind,
+          work: pendingWork,
+          projectId: pendingProjectId,
+        });
+      }
+    }
+
+    // Release every stale queued reservation before re-admitting in FIFO order.
+    this.#finishSpendReservation(running.id, "abandon");
+    for (const entry of affectedPending) {
+      this.#finishSpendReservation(entry.job.id, "abandon");
+      this.#updateWorkAdmission(entry.job.id, entry.work, entry.work.admittedProjectId, true);
+    }
+
+    const runningReservationId = decodeSpendCeilingReservationId(this.#uuid());
+    const runningAdmission = this.#spendCeiling.admit({
+      reservationId: runningReservationId,
+      threadId: String(running.scopeId),
+      threadType: running.threadKind,
+      ...(currentProjectId === undefined ? {} : { projectId: currentProjectId }),
+      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
+      skipTokenCeiling: true,
+      estimatedCostUsdMicros: work.estimatedCostUsdMicros,
+    });
+    if (runningAdmission.status === "admitted") {
+      this.#spendReservations.set(String(running.id), runningReservationId);
+      this.#updateWorkAdmission(running.id, work, currentProjectId, false);
+    }
+
+    for (const entry of affectedPending) {
+      const pendingReservationId = decodeSpendCeilingReservationId(this.#uuid());
+      const pendingAdmission = this.#spendCeiling.admit({
+        reservationId: pendingReservationId,
+        threadId: String(entry.job.scopeId),
+        threadType: entry.threadType,
+        ...(entry.projectId === undefined ? {} : { projectId: entry.projectId }),
+        countsAsTurn: false,
+        skipTurnAndRunTimeCeiling: true,
+        skipTokenCeiling: true,
+        estimatedCostUsdMicros: entry.work.estimatedCostUsdMicros,
+      });
+      if (pendingAdmission.status === "admitted") {
+        this.#spendReservations.set(String(entry.job.id), pendingReservationId);
+        // Keep `needsReadmission` true while this moved job remains queued so
+        // its reservation stays provisional and is rechecked against any
+        // ceiling installed or tightened before it actually dispatches.
+        this.#updateWorkAdmission(entry.job.id, entry.work, entry.projectId, true);
+      }
+    }
+
+    return runningAdmission.status === "refused"
+      ? { status: "refused", refusal: runningAdmission.refusal }
+      : { status: "admitted" };
   }
 
   #rejectWaiters(jobId: ImageJobId, error: Error): void {
@@ -994,6 +1295,24 @@ export class ImageJobService {
   }
 }
 
+interface BilledImageUsage {
+  readonly imageCount: number;
+  readonly adapterResult: {
+    readonly usage?: {
+      readonly inputTokens?: number;
+      readonly outputTokens?: number;
+      readonly size?: string;
+      readonly outputQuality?: string;
+    };
+  };
+  readonly pricingContext: {
+    readonly driverKind: ProviderDriverKind;
+    readonly quality?: OpenAiImageQuality;
+    readonly size?: OpenAiImageSize;
+    readonly resolution?: GeminiImageResolution;
+  };
+}
+
 interface Deferred<T> {
   readonly promise: Promise<T>;
   readonly resolve: (value: T) => void;
@@ -1002,6 +1321,39 @@ interface Deferred<T> {
 
 function hashPrompt(prompt: string): string {
   return createHash("sha256").update(prompt).digest("hex");
+}
+
+function resolveEffectiveRequestOptions(
+  instance: ProviderInstance,
+  input: {
+    readonly quality?: OpenAiImageQuality;
+    readonly size?: OpenAiImageSize;
+    readonly aspectRatio?: GeminiImageAspectRatio;
+    readonly resolution?: GeminiImageResolution;
+  },
+): {
+  readonly quality?: OpenAiImageQuality;
+  readonly size?: OpenAiImageSize;
+  readonly aspectRatio?: GeminiImageAspectRatio;
+  readonly resolution?: GeminiImageResolution;
+} {
+  if (instance.configuration.kind === "openai-image-http") {
+    const quality = input.quality ?? instance.configuration.quality;
+    const size = input.size ?? instance.configuration.size;
+    return {
+      ...(quality === undefined ? {} : { quality }),
+      ...(size === undefined ? {} : { size }),
+    };
+  }
+  if (instance.configuration.kind === "gemini-native-image-http") {
+    const aspectRatio = input.aspectRatio ?? instance.configuration.aspectRatio;
+    const resolution = input.resolution ?? instance.configuration.resolution;
+    return {
+      ...(aspectRatio === undefined ? {} : { aspectRatio }),
+      ...(resolution === undefined ? {} : { resolution }),
+    };
+  }
+  return {};
 }
 
 /**
