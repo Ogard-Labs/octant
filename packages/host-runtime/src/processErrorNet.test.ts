@@ -87,6 +87,39 @@ describe("process error net", () => {
     net.uninstall();
   });
 
+  it("preserves redacted stack frames even when the error message exceeds the redactor length cap", () => {
+    const target = new FakeProcessTarget();
+    const lines: string[] = [];
+    const fatalEvents: ProcessErrorNetEvent[] = [];
+    const exit = vi.fn();
+
+    const net = installProcessErrorNet({
+      processName: "host",
+      target,
+      stdioStreams: [],
+      homeDirectory: "/Users/ada",
+      writeLine: (line) => lines.push(line),
+      onFatal: (event) => fatalEvents.push(event),
+      exit,
+    });
+
+    const longMessage = `token=sk-longsecret12345 ${"x".repeat(10_000)}`;
+    const failure = new Error(longMessage);
+    failure.stack = `Error: ${longMessage}\n    at run (/Users/ada/repo/server.ts:42:7)\n    at main (/Users/ada/repo/index.ts:10:3)`;
+    target.emit("uncaughtException", failure);
+
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(lines).toHaveLength(1);
+    const logged = lines[0] ?? "";
+    expect(logged).not.toContain("sk-longsecret12345");
+    expect(logged).not.toContain("/Users/ada");
+    expect(logged).toContain("at run (~/repo/server.ts:42:7)");
+    expect(logged).toContain("at main (~/repo/index.ts:10:3)");
+    expect(fatalEvents[0]?.stack).toContain("at run (~/repo/server.ts:42:7)");
+
+    net.uninstall();
+  });
+
   it("ends a real child process non-zero with a redacted cause on an unhandled error event", () => {
     const script = [
       `import { installProcessErrorNet } from ${JSON.stringify(MODULE_PATH)};`,

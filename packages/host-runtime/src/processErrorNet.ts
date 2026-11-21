@@ -152,6 +152,23 @@ function safeWriteStderrSync(text: string): void {
   }
 }
 
+function extractRawStackFrames(
+  error: Error,
+): { readonly text: string; readonly strippedHeader: boolean } | undefined {
+  if (typeof error.stack !== "string") return undefined;
+  const name = error.name || "Error";
+  const prefix = error.message === "" ? name : `${name}: ${error.message}`;
+  if (
+    error.stack.startsWith(prefix) &&
+    (error.stack.length === prefix.length ||
+      error.stack[prefix.length] === "\n" ||
+      error.stack[prefix.length] === "\r")
+  ) {
+    return { text: error.stack.slice(prefix.length), strippedHeader: true };
+  }
+  return { text: error.stack, strippedHeader: false };
+}
+
 function formatEvent(
   kind: ProcessErrorNetKind,
   processName: ProcessErrorNetProcess,
@@ -173,17 +190,20 @@ function formatEvent(
     redact,
     MESSAGE_LIMIT,
   );
-  // Redact the complete stack before splitting so a multiline secret repeated
-  // in `error.stack` is scrubbed as one unit, then keep only real stack frames.
+  // Strip the error's own message header before redacting the frame block so a
+  // long message (>8 KiB) cannot push frames past the redactor's length cap and
+  // a multiline secret in the message never enters the frame block. If a custom
+  // stack omits that header, redact the complete stack before splitting.
+  const extractedStack = error instanceof Error ? extractRawStackFrames(error) : undefined;
   const stackLines =
-    error instanceof Error && typeof error.stack === "string"
-      ? redactUnbounded(error.stack, homeDirectory, redact)
+    extractedStack === undefined
+      ? []
+      : redactUnbounded(extractedStack.text, homeDirectory, redact)
           .split("\n")
-          .slice(1)
+          .slice(extractedStack.strippedHeader ? 0 : 1)
           .filter((line) => STACK_FRAME_LINE.test(line))
           .map((line) => line.trim().slice(0, STACK_LINE_LIMIT))
-          .slice(0, STACK_FRAME_LIMIT)
-      : [];
+          .slice(0, STACK_FRAME_LIMIT);
   const codeSuffix =
     code === undefined ? "" : ` (code=${sweepText(code, homeDirectory, redact, 64)})`;
   const header = `[octant:${processName}] fatal ${kind} (${timestamp}): ${message}${codeSuffix}`;
