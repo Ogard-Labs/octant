@@ -40,6 +40,13 @@ export interface AcpAgentProfileDescriptor {
   /** The agent's documented self-update arguments, when it has them. */
   readonly cliUpdateArgs?: ReadonlyArray<string>;
   /**
+   * The arguments that start the agent's own interactive command-line
+   * interface, which a person-operated provider terminal opens. Set only for
+   * an agent whose program is documented to open one this way; absent, no
+   * provider terminal is offered for it.
+   */
+  readonly interactiveArgs?: ReadonlyArray<string>;
+  /**
    * Seeds the bundled provider-driver plugin's extension id and digest. Each
    * profile keeps its serial for good: activation state is stored against the
    * id it derives, so a changed or reused serial would move another plugin's
@@ -140,6 +147,9 @@ export const ACP_AGENT_PROFILES = {
     apiKeyLabel: "Gemini API key",
     signInGuidance:
       "Run Gemini CLI in your terminal and complete its provider-owned login, then check the connection again.",
+    // `gemini` with no arguments is the CLI's own interactive session, the
+    // one its sign-in guidance sends the person to.
+    interactiveArgs: [],
     bundledPluginSerial: 0x10,
   },
   copilot: {
@@ -195,6 +205,9 @@ export const ACP_AGENT_PROFILES = {
     authenticationNote: "Uses your own Google account sign-in from the Antigravity CLI.",
     signInGuidance:
       "Run agy (or agy acp --login) in your terminal and sign in with your Google account, then check the connection again.",
+    // `agy` with no arguments is Google's own interactive CLI, where the
+    // person signs in.
+    interactiveArgs: [],
     // 0x1b is taken: copilot's 0x11 seed normalizes to the `1b` digest.
     bundledPluginSerial: 0x1c,
   },

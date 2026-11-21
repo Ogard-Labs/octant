@@ -1100,6 +1100,7 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      configuredDriverOptions,
       providerRuntimeNetwork,
       resolveThreadStrict,
       resolveProjectStrict,

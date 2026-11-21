@@ -161,7 +161,7 @@ import type { ProjectForgeChoices } from "./standingMergeAllowance";
 
 import type { ServerTerminalLogin, ServerTerminalRefusal } from "../serverProjects/serverTerminal";
 import type { ProviderTerminalLaunch } from "../providers/providerTerminal";
-import { activeSandboxPolicy } from "../process/sandboxRuntimePolicy";
+import { turnHoldsSandboxPolicy } from "../process/sandboxRuntimePolicy";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -4134,7 +4134,7 @@ export class CodeOperationService {
             executionPolicy: thread.executionPolicy,
             strict,
             fullAccessSandbox: thread.fullAccessSandbox,
-            sandboxPolicySelected: turnHoldsSandboxPolicy(thread.id),
+            sandboxPolicySelected: turnHoldsSandboxPolicy(String(thread.id)),
             purpose: "session",
           });
         }
@@ -7986,17 +7986,4 @@ function isSelectedHunkCommand(command: CodeOperationCommand): boolean {
     command.kind === "unstage-git-hunks" ||
     command.kind === "reverse-git-hunks"
   );
-}
-
-/**
- * Whether a running turn of the thread holds a chosen sandbox policy. A folder
- * that changed identity under that policy makes the read throw; the answer is
- * then yes, so the terminal stays confined rather than opening wider.
- */
-function turnHoldsSandboxPolicy(threadId: CodeThreadId): boolean {
-  try {
-    return activeSandboxPolicy(String(threadId)) !== undefined;
-  } catch {
-    return true;
-  }
 }

@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { decodeProviderInstance, type ProviderInstance } from "@octant/contracts";
+import { sanitizeAcpEnvironment } from "./acpProcess";
+import { acpProviderProfiles } from "./acpProfiles";
 import { resolveProviderTerminal } from "./providerTerminal";
 
 const HOST = {
@@ -118,5 +123,113 @@ describe("provider terminal", () => {
     expect(resolve(instance("ollama"))).toMatchObject({ status: "refused" });
     expect(resolve(instance("claude", { enabled: false }))).toMatchObject({ status: "refused" });
     expect(resolve(undefined)).toMatchObject({ status: "refused" });
+  });
+});
+
+describe("ACP agent terminal", () => {
+  const directories: string[] = [];
+  afterEach(() => {
+    for (const directory of directories.splice(0))
+      rmSync(directory, { recursive: true, force: true });
+  });
+
+  function acpInstance(kind: "antigravity" | "gemini" | "kilo"): ProviderInstance {
+    return decodeProviderInstance({
+      id: "80000000-0000-4000-8000-0000000000c1",
+      displayName: kind,
+      driverKind: kind,
+      configuration: {
+        kind: `${kind}-acp`,
+        binaryPath: `/opt/tools/${kind}`,
+        ...(kind === "gemini" ? { authentication: "provider-owned" } : {}),
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-11-21T09:00:00.000Z",
+      updatedAt: "2026-11-21T09:00:00.000Z",
+    });
+  }
+
+  function resolveAcp(
+    candidate: ProviderInstance,
+    options: { readonly strict?: boolean; readonly fullAccessSandbox?: boolean } = {},
+  ) {
+    const managedRoot = mkdtempSync(join(tmpdir(), "octant-acp-terminal-"));
+    directories.push(managedRoot);
+    const launch = resolveProviderTerminal({
+      instance: candidate,
+      hostEnvironment: HOST,
+      homeDirectory: "/Users/person",
+      platform: "darwin",
+      shell: "/bin/zsh",
+      strict: options.strict ?? true,
+      mode: "work",
+      executionPolicy: "approval-gated",
+      ...(options.fullAccessSandbox === undefined
+        ? {}
+        : { fullAccessSandbox: options.fullAccessSandbox }),
+      acpHome: (kind, instanceId) => join(managedRoot, kind, instanceId),
+    });
+    return {
+      launch,
+      managedHome: join(managedRoot, String(candidate.driverKind), String(candidate.id)),
+    };
+  }
+
+  it("opens Google Antigravity's own CLI with the environment its ACP driver builds for a launch", () => {
+    const { launch, managedHome } = resolveAcp(acpInstance("antigravity"));
+    expect(launch).toMatchObject({
+      status: "resolved",
+      name: "Google Antigravity",
+      // No `acp` arguments: `agy` alone is its interactive CLI.
+      command: "exec '/opt/tools/antigravity'",
+    });
+    if (launch.status !== "resolved") throw new Error("expected a launch");
+    expect(launch.environment).toMatchObject(
+      sanitizeAcpEnvironment(acpProviderProfiles.antigravity, HOST, {
+        managedHome,
+        executionPolicy: "approval-gated",
+        mode: "work",
+      }),
+    );
+    expect(launch.environment.AGY_CLI_DISABLE_AUTO_UPDATE).toBe("1");
+    // Under Strict the host's other providers' keys stay out, as for a turn.
+    expect(launch.environment.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it("gives Gemini CLI its managed home and the open environment of a thread outside Strict", () => {
+    const { launch, managedHome } = resolveAcp(acpInstance("gemini"), { strict: false });
+    expect(launch).toMatchObject({ status: "resolved", command: "exec '/opt/tools/gemini'" });
+    if (launch.status !== "resolved") throw new Error("expected a launch");
+    expect(launch.environment).toMatchObject(
+      sanitizeAcpEnvironment(acpProviderProfiles.gemini, HOST, {
+        managedHome,
+        executionPolicy: "approval-gated",
+        mode: "work",
+        strict: false,
+      }),
+    );
+    expect(launch.environment.HOME).toBe(managedHome);
+    expect(existsSync(managedHome)).toBe(true);
+  });
+
+  it("keeps the guarded environment for a thread that kept its sandbox outside Strict", () => {
+    const { launch, managedHome } = resolveAcp(acpInstance("gemini"), {
+      strict: false,
+      fullAccessSandbox: true,
+    });
+    if (launch.status !== "resolved") throw new Error("expected a launch");
+    expect(launch.environment).toMatchObject(
+      sanitizeAcpEnvironment(acpProviderProfiles.gemini, HOST, {
+        managedHome,
+        executionPolicy: "approval-gated",
+        mode: "work",
+      }),
+    );
+  });
+
+  it("offers no terminal for an ACP agent whose CLI has no interactive mode Octant knows", () => {
+    expect(resolveAcp(acpInstance("kilo")).launch).toMatchObject({ status: "refused" });
   });
 });

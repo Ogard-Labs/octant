@@ -154,8 +154,8 @@ The design rests on a small set of invariants that every package obeys:
   provider's own terminal program reach the provider directly, so its tool
   calls bypass Octant's approvals and never reach the journal. Excluding it
   also blocked workflows only a provider's own interface offers. A Code
-  thread's terminal tab may therefore run its provider's program, but only as
-  a person-operated terminal: only the person opens or types into it, it runs
+  thread's terminal tab, or a Work task's terminal, may therefore run its
+  provider's program, but only as a person-operated terminal: only the person opens or types into it, it runs
   the way the thread's turns do (outside Strict without Octant's sandbox, on
   the provider's own approvals; under Strict confined as that thread's
   terminals are), and the thread claims nothing that happens in it, so the
@@ -17474,11 +17474,18 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
-- **Provider terminals.** A Code thread's `start-terminal` may ask for
+- **Provider terminals.** A Code thread's `start-terminal`, and a Work task's
+  Project terminal `start` (with its `workThreadId`), may ask for
   `program: "provider"`. The host then resolves the thread's provider's own
-  command-line program (Claude Code, Codex) with the account binary, folder
-  and launch environment its turns use at the thread's Strict value, and runs
-  it in place of the interactive shell, in the thread's folder. It runs the
+  command-line program with the account binary, folder and launch environment
+  its turns use at the thread's Strict value, and runs it in place of the
+  interactive shell, in the thread's folder: Claude Code and Codex through
+  their tooling account, and an ACP agent whose profile names `interactiveArgs`
+  (Google Antigravity's `agy`, Gemini CLI's `gemini`, both bare) with the
+  environment `sanitizeAcpEnvironment` builds for its launch, its managed home
+  and its host sign-in folder's variables, and no API key. A Work task's runs
+  by the same rule below in mode `work`, at the task's own level rather than
+  the Full access a plain Project terminal takes outside Strict. It runs the
   way the thread's turns do (maintainer decision, 2026-11-21): where a turn
   runs without Octant's sandbox (`providerHoldsLevelWithoutSandbox`: Work or
   Code outside Strict, outside Plan, with no kept Full-access sandbox and no
@@ -17491,8 +17498,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   instead. The command names no program, path or variable. The host refuses the start, and any write to such a
   terminal, for every caller but the person (their local window or a device
   they paired), before any approval is consulted, since keystrokes there
-  reach the provider past Octant's approvals. Plan, a Project on a server, a
-  Browser grant and a provider with no program are refused. Its output follows
+  reach the provider past Octant's approvals (a Work task's is a Project
+  terminal, which already admits only the person). Plan, a Project on a
+  server, a Browser grant, a Project terminal with no Work task, and a
+  provider with no program are refused. Its output follows
   the thread terminal's replay path and never enters the conversation,
   transcript or usage ([Workspace: provider terminal](design/workspace.md)).
 - **Project actions.** A Work or Code Project keeps up to twelve named

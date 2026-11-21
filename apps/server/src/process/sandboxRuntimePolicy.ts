@@ -97,6 +97,18 @@ export function beginSandboxTurn(request: SandboxTurnRequest): SandboxTurnAdmiss
 export function activeSandboxPolicy(threadId: string): SandboxPolicySelection | undefined {
   return authority?.active(threadId);
 }
+/**
+ * Whether a running turn of the thread holds a chosen sandbox policy. A folder
+ * that changed identity under that policy makes the read throw; the answer is
+ * then yes, so a provider terminal stays confined rather than opening wider.
+ */
+export function turnHoldsSandboxPolicy(threadId: string): boolean {
+  try {
+    return activeSandboxPolicy(threadId) !== undefined;
+  } catch {
+    return true;
+  }
+}
 export function activeSandboxStrict(threadId: string): boolean | undefined {
   return authority?.strictForActiveTurn?.(threadId);
 }

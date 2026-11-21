@@ -31,6 +31,12 @@ export interface ZenProjectTerminalCardProps {
    * true once a new shell started, after which the card offers no second one.
    */
   readonly onRestart?: () => Promise<boolean>;
+  /**
+   * Opens a terminal running the window's Work task's provider program, in a
+   * card of its own. Absent when that provider has none; the host still
+   * decides, and refuses anyone but the person.
+   */
+  readonly onOpenProviderTerminal?: { readonly name: string; readonly open: () => void };
 }
 
 /**
@@ -236,9 +242,20 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
       {terminal.state === "running" ? (
         <div className="code-terminal-pane__actions-menu">
           <OctantMenu
-            items={[{ value: "stop", label: "Stop terminal" }]}
+            items={[
+              { value: "stop", label: "Stop terminal" },
+              ...(props.onOpenProviderTerminal === undefined
+                ? []
+                : [
+                    {
+                      value: "provider",
+                      label: `Open ${props.onOpenProviderTerminal.name} terminal`,
+                    },
+                  ]),
+            ]}
             onValueChange={(value) => {
               if (value === "stop") void stop();
+              else if (value === "provider") props.onOpenProviderTerminal?.open();
             }}
             selectionMode="action"
             trigger={<MoreHorizontal aria-hidden="true" size={16} />}

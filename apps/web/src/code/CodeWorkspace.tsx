@@ -26,10 +26,9 @@ import {
   isAppleSimulatorOpenInputKind,
   latestAppleScreenshotEvidence,
   presentAppleSimulatorLiveFrame,
-  providerTerminalName,
   type AppleSimulatorLiveFrameAttach,
-  type PickerGroup,
 } from "@octant/domain";
+import { providerTerminalOffer } from "./providerTerminalOffer";
 import { FolderGit2, TriangleAlert } from "../ui/icons";
 import { documentIsVisible } from "../polling/documentVisibility";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -1316,26 +1315,6 @@ function GitObservationLoading() {
  * line would arrive as the user's own request, which is exactly the confusion
  * the quoting exists to prevent and the worst case for a full-access provider.
  */
-/**
- * The provider program a thread's terminal tabs can open, named for the
- * person. Only a provider with its own command-line program offers one, and
- * Plan, which starts no terminal, offers none; the host decides again.
- */
-export function providerTerminalOffer(
-  providerGroups: ReadonlyArray<PickerGroup> | undefined,
-  thread: { readonly providerInstanceId: string; readonly executionPolicy: string },
-): { readonly providerProgramName?: string } {
-  if (thread.executionPolicy === "plan") return {};
-  const instance = providerGroups?.find(
-    (group) => String(group.instance.id) === String(thread.providerInstanceId),
-  )?.instance;
-  const name =
-    instance === undefined || !instance.enabled
-      ? undefined
-      : providerTerminalName(instance.driverKind);
-  return name === undefined ? {} : { providerProgramName: name };
-}
-
 export function appendTerminalSelection(draft: string, selection: string): string {
   const body = selection.replace(/\s+$/, "");
   const longestRun = [...body.matchAll(/`+/g)].reduce(

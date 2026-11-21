@@ -172,6 +172,13 @@ export const ProjectTerminalCommand = Schema.Union(
     ...Target,
     ...TerminalGeometry,
     ...Folder,
+    /**
+     * Start the Work task's provider's own command-line program, interactively,
+     * instead of a shell. It needs `workThreadId`; the host resolves the
+     * program, its account folder and its environment from that task's
+     * provider, and the command names none of them.
+     */
+    program: Schema.optional(Schema.Literal("provider")),
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("attach"), ...Target }).annotations(strict),
   Schema.Struct({
