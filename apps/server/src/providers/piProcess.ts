@@ -35,6 +35,8 @@ import { versionAtLeast } from "./acpProcess";
 import { approvedHomeBinDirs } from "./discoveryService";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
+import type { ProviderOwnChannels } from "@octant/provider-sdk";
+import { guardsForOwnChannels, launchOwnChannels } from "./providerOwnChannels";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
@@ -144,9 +146,11 @@ export interface PiProcessPort {
     /**
      * Whether the launch is Strict; absent is Strict. Off, the process gets the
      * host's environment less Octant's variables and other providers' keys,
-     * and Pi's telemetry follows the person's own setting.
+     * and Pi's telemetry and release check follow {@link ownChannels}.
      */
     readonly strict?: boolean;
+    /** The person's provider telemetry and self-update switches; read only outside Strict. */
+    readonly ownChannels?: ProviderOwnChannels;
     /** The Pi provider the thread's model runs on; only its credentials reach the process. */
     readonly modelProvider?: string;
     readonly onProcessStarted?: ProviderProcessStartedListener;
@@ -372,12 +376,16 @@ function failure(category: ProviderFailure["category"], message: string): Provid
 const PI_GUARDS = { PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1" } as const;
 
 /**
- * What a launch outside Strict still sets: the release check stays off,
- * because Octant installs and updates provider CLIs itself. Pi's telemetry
- * follows the person's own setting (Architecture: "Octant adds no
- * restrictions of its own unless Strict is on").
+ * Outside Strict Pi's telemetry guard is set only while the person keeps
+ * provider telemetry off, and its release check stays off unless the person
+ * lets providers update themselves, since Octant installs and updates
+ * provider CLIs itself (Architecture: "Octant adds no restrictions of its own
+ * unless Strict is on").
  */
-const OPEN_PI_GUARDS = { PI_SKIP_VERSION_CHECK: "1" } as const;
+const PI_CHANNEL_GUARD_NAMES = {
+  telemetry: ["PI_TELEMETRY"],
+  selfUpdate: ["PI_SKIP_VERSION_CHECK"],
+} as const;
 
 // `modelProvider` is the Pi provider a thread runs its model on. A discovery
 // run has no thread, so it names none and holds no provider credential.
@@ -387,6 +395,7 @@ export function sanitizePiEnvironment(
   approvals: "enabled" | "disabled" = "enabled",
   modelProvider?: string,
   strict = true,
+  ownChannels?: ProviderOwnChannels,
 ): NodeJS.ProcessEnv {
   const credentials = new Set(
     modelProvider === undefined ? [] : (PROVIDER_CREDENTIALS.get(modelProvider) ?? []),
@@ -398,7 +407,11 @@ export function sanitizePiEnvironment(
       ...providerHostEnvironment(host, credentials),
       HOME: piHome,
       PI_CODING_AGENT_DIR: piHome,
-      ...OPEN_PI_GUARDS,
+      ...guardsForOwnChannels(
+        PI_GUARDS,
+        PI_CHANNEL_GUARD_NAMES,
+        launchOwnChannels(false, ownChannels),
+      ),
       OCTANT_PI_APPROVALS: approvals,
       NO_COLOR: "1",
     };
@@ -429,8 +442,16 @@ export function piProcessEnvironment(
   approvals: "enabled" | "disabled" = "enabled",
   modelProvider?: string,
   strict = true,
+  ownChannels?: ProviderOwnChannels,
 ): NodeJS.ProcessEnv {
-  const sanitized = sanitizePiEnvironment(host, piHome, approvals, modelProvider, strict);
+  const sanitized = sanitizePiEnvironment(
+    host,
+    piHome,
+    approvals,
+    modelProvider,
+    strict,
+    ownChannels,
+  );
   const binaryDirectory = dirname(binaryPath);
   const path = sanitized.PATH?.split(delimiter).filter(Boolean) ?? [];
   const searched = [binaryDirectory, ...approvedHomeBinDirs(host.HOME), ...path];
@@ -1154,6 +1175,7 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             input.strict !== false ||
               input.fullAccessSandbox === true ||
               input.sandboxPolicy !== undefined,
+            input.ownChannels,
           );
           // On Windows the launch is decided from its own authority before
           // anything runs; an admitted one reads its version unconfined, as

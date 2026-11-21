@@ -42,6 +42,7 @@ import {
 import type {
   ProviderConnection,
   ProviderDriver,
+  ProviderOwnChannels,
   ProviderSessionCompaction,
   ProviderSessionOwnership,
 } from "@octant/provider-sdk/driver";
@@ -2490,6 +2491,7 @@ function makeConnection(
       ownSkills: boolean,
       ownSetup: ResolvedOwnSetup | undefined,
       blockedTools: ReadonlyArray<string> | undefined,
+      ownChannels: ProviderOwnChannels | undefined,
     ): Effect.Effect<OpenCodeClientPort, ProviderFailure> =>
       Effect.tryPromise({
         try: async () => {
@@ -2536,6 +2538,9 @@ function makeConnection(
                   executionPolicy,
                   ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
                   ...(strict ? {} : { strict: false }),
+                  // A running process keeps the self-update guard it started
+                  // with; a changed switch reaches the next process.
+                  ...(strict || ownChannels === undefined ? {} : { ownChannels }),
                   ...(!windowsChatDenyAll && ownSkills ? { ownSkills: true as const } : {}),
                   ...(windowsChatDenyAll ||
                   ownSetup === undefined ||
@@ -2960,6 +2965,7 @@ function makeConnection(
                 state.nativeSetup?.skills === true,
                 ownSetup,
                 input.blockedTools,
+                input.ownChannels,
               ),
             ),
             Effect.flatMap((runtimeClient) => {
@@ -3148,6 +3154,7 @@ function makeConnection(
                     state.nativeSetup?.skills === true,
                     ownSetup,
                     input.blockedTools,
+                    input.ownChannels,
                   ),
                 ),
                 Effect.flatMap((runtimeClient) => {

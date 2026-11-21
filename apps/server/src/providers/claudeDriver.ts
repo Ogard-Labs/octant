@@ -50,7 +50,9 @@ import type {
   ProviderNativeSessionMessage,
   ProviderNativeSessionCarry,
   ProviderNativeSessions,
+  ProviderOwnChannels,
 } from "@octant/provider-sdk/driver";
+import { launchOwnChannels } from "./providerOwnChannels";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
   isOctantInstructionContext,
@@ -3846,6 +3848,7 @@ function makeConnection(
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly fullAccessSandbox?: boolean;
         readonly strict?: boolean;
+        readonly ownChannels?: ProviderOwnChannels;
         readonly autoApprove?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
@@ -3959,8 +3962,12 @@ function makeConnection(
         void initialized.promise.catch(() => undefined);
         const terminalResult = deferred<void>();
         // Read at each launch, like every other choice here: outside Strict the
-        // runtime gets the host's environment and its own channel settings.
+        // runtime gets the host's environment, and its telemetry and
+        // self-update follow the person's provider switches.
         const strict = input.strict !== false;
+        // Whether the launch carries Octant's telemetry guards, which decides
+        // how the host's own opt-outs are read and what Claude artifacts lift.
+        const telemetryGuarded = !launchOwnChannels(strict, input.ownChannels).telemetry;
         const environment = await runSetupEffect(
           environmentFactory(options.authentication, {
             ...(apiKey !== undefined ? { apiKey } : {}),
@@ -3970,7 +3977,12 @@ function makeConnection(
             ...(options.configDirectory === undefined
               ? {}
               : { configDirectory: options.configDirectory }),
-            ...(strict ? {} : { strict: false }),
+            ...(strict
+              ? {}
+              : {
+                  strict: false,
+                  ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
+                }),
           }).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
@@ -4157,7 +4169,10 @@ function makeConnection(
           authentication: options.authentication,
           artifactDelivery: options.artifactDelivery?.() === true,
           threadChoseArtifacts: input.nativeArtifacts === true,
-          hostTrafficDisabled: disablesNonessentialTraffic(environment.environment, strict),
+          hostTrafficDisabled: disablesNonessentialTraffic(
+            environment.environment,
+            telemetryGuarded,
+          ),
           mode,
           executionPolicy: input.executionPolicy,
           strict,
@@ -4968,7 +4983,7 @@ function makeConnection(
           ...claudeGitIdentityEnvironment(gitIdentity),
         };
         const artifactEnvironment = offersArtifacts
-          ? claudeArtifactLaunchEnvironment(launchEnvironment, strict)
+          ? claudeArtifactLaunchEnvironment(launchEnvironment, telemetryGuarded)
           : launchEnvironment;
         // Read at each launch, like the artifact switch: the next turn after
         // the person turns the account's memory off launches guarded again.
@@ -5318,6 +5333,7 @@ function makeConnection(
                 ? {}
                 : { fullAccessSandbox: input.fullAccessSandbox }),
               ...(input.strict === false ? { strict: false } : {}),
+              ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(input.modelOptionValues === undefined
                 ? {}

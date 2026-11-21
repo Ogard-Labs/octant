@@ -55,6 +55,8 @@ import {
 import { secretGuardRefusal } from "../process/secretGuard";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
 import { awsProfileReadPaths } from "./providerHostEnvironment";
+import type { ProviderOwnChannels } from "@octant/provider-sdk";
+import { guardsForOwnChannels, launchOwnChannels } from "./providerOwnChannels";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import {
   acquireProviderRuntimeNetwork,
@@ -125,6 +127,12 @@ export interface OpenCodeProcessStartInput {
    * permission rules and no Octant sandbox.
    */
   readonly strict?: boolean;
+  /**
+   * The person's provider telemetry and self-update switches; read only
+   * outside Strict. OpenCode has no telemetry guard of Octant's, so only its
+   * self-update guard follows them.
+   */
+  readonly ownChannels?: ProviderOwnChannels;
   /**
    * `probe` for the readiness check Settings runs, which serves no one thread
    * and carries no Strict value of its own. On Windows it runs only for a host
@@ -267,15 +275,34 @@ function openCodeGuardsWithOwnSkills(): Readonly<Record<string, string>> {
   return kept;
 }
 
-/** The guards a launch keeps: `projectConfig` lifts only the Project configuration switch. */
+/**
+ * The guards a launch keeps: `projectConfig` lifts only the Project
+ * configuration switch, and `selfUpdate` only the updater switch.
+ */
 function openCodeLaunchGuards(
   ownSkills: boolean,
   projectConfig: boolean,
+  selfUpdate: boolean,
 ): Readonly<Record<string, string>> {
-  const guards = ownSkills ? openCodeGuardsWithOwnSkills() : OPENCODE_GUARDS;
+  const guards = guardsForOwnChannels(
+    ownSkills ? openCodeGuardsWithOwnSkills() : OPENCODE_GUARDS,
+    { selfUpdate: ["OPENCODE_DISABLE_AUTOUPDATE"] },
+    { telemetry: false, selfUpdate },
+  );
   if (!projectConfig) return guards;
   const { OPENCODE_DISABLE_PROJECT_CONFIG: _projectConfigOff, ...kept } = guards;
   return kept;
+}
+
+/**
+ * Whether a launch keeps Strict's guards: an explicit sandbox and a Full
+ * access thread that keeps the sandbox keep them as Strict does, as every
+ * other provider launch does.
+ */
+function launchIsStrict(input: OpenCodeProcessStartInput): boolean {
+  return (
+    input.strict !== false || input.fullAccessSandbox === true || input.sandboxPolicy !== undefined
+  );
 }
 
 /** Plan stays read-only and Chat keeps no folder, so neither loads a Project's own configuration. */
@@ -890,6 +917,7 @@ export function createPrivateOpenCodeProfile(
   ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
   projectConfig = false,
   chatDenyAll = false,
+  selfUpdate = false,
 ): PrivateOpenCodeProfile {
   const root = temporaryDirectory();
   const directories: string[] = [];
@@ -930,7 +958,7 @@ export function createPrivateOpenCodeProfile(
     Object.assign(environment, {
       OPENCODE_CONFIG: configPath,
       OPENCODE_CONFIG_DIR: configDirectory,
-      ...openCodeLaunchGuards(ownSkills, projectConfig),
+      ...openCodeLaunchGuards(ownSkills, projectConfig, selfUpdate),
       TMPDIR: tempHome,
       XDG_CACHE_HOME: cacheHome,
       XDG_CONFIG_HOME: configHome,
@@ -1795,6 +1823,7 @@ function acquireOpenCodeServer(
           windowsChatDenyAll ? undefined : input.ownToolServers,
           windowsChatDenyAll ? false : launchLoadsProjectConfig(input),
           windowsChatDenyAll,
+          launchOwnChannels(launchIsStrict(input), input.ownChannels).selfUpdate,
         );
       } catch {
         resume(

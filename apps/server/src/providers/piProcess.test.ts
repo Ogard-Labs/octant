@@ -129,7 +129,7 @@ describe("Pi process boundary", () => {
     });
   });
 
-  it("outside Strict gives a Pi process the host's environment less Octant's variables and other providers' keys, with telemetry left to the person", () => {
+  it("outside Strict gives a Pi process the host's environment less Octant's variables and other providers' keys, with telemetry off until the person turns it on", () => {
     const host = {
       PATH: "/usr/bin",
       HOME: "/Users/test",
@@ -148,13 +148,33 @@ describe("Pi process boundary", () => {
       GH_TOKEN: "gh-token",
       OPENAI_API_KEY: "openai-key",
       PI_SKIP_VERSION_CHECK: "1",
+      PI_TELEMETRY: "0",
     });
     expect(open).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(open).not.toHaveProperty("OCTANT_PI_TOOL_BRIDGE_TOKEN");
-    expect(open).not.toHaveProperty("PI_TELEMETRY");
     const strict = sanitizePiEnvironment(host, "/managed", "enabled", "openai");
     expect(strict).toMatchObject({ PI_TELEMETRY: "0" });
     expect(strict).not.toHaveProperty("GH_TOKEN");
+  });
+
+  it("outside Strict keeps Pi's telemetry guard when the person turned provider telemetry off and drops its release check when the person lets providers update themselves", () => {
+    const host = { PATH: "/usr/bin" };
+    const closed = sanitizePiEnvironment(host, "/managed", "enabled", "openai", false, {
+      telemetry: false,
+      selfUpdate: false,
+    });
+    expect(closed).toMatchObject({ PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1" });
+    const updating = sanitizePiEnvironment(host, "/managed", "enabled", "openai", false, {
+      telemetry: true,
+      selfUpdate: true,
+    });
+    expect(updating).not.toHaveProperty("PI_SKIP_VERSION_CHECK");
+    expect(updating).not.toHaveProperty("PI_TELEMETRY");
+    const strict = sanitizePiEnvironment(host, "/managed", "enabled", "openai", true, {
+      telemetry: true,
+      selfUpdate: true,
+    });
+    expect(strict).toMatchObject({ PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1" });
   });
 
   it("gives a discovery run, or a provider with no host variable, no provider credential", () => {

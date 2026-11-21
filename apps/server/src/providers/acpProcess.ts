@@ -31,6 +31,8 @@ import {
   type AcpSessionMode,
 } from "./acpProfiles";
 import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
+import { guardsForOwnChannels, launchOwnChannels } from "./providerOwnChannels";
+import type { ProviderOwnChannels } from "@octant/provider-sdk";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
@@ -131,6 +133,12 @@ export interface AcpConfinementInput {
   readonly sandboxPolicy?: SandboxPolicySelection;
   /** Whether the launch is Strict; absent is Strict. */
   readonly strict?: boolean;
+  /**
+   * The provider's own channels this launch opens, already resolved against
+   * Strict; absent opens none. Read for a profile whose telemetry switch is a
+   * command-line argument.
+   */
+  readonly ownChannels?: ProviderOwnChannels;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly environment: NodeJS.ProcessEnv;
@@ -192,9 +200,11 @@ export interface AcpProcessStartInput {
   /**
    * Whether the launch is Strict; absent is Strict. Off, the agent gets the
    * host's environment less Octant's variables and other providers' keys, and
-   * its channel guards follow the person's own settings.
+   * its telemetry and self-update guards follow {@link ownChannels}.
    */
   readonly strict?: boolean;
+  /** The person's provider telemetry and self-update switches; read only outside Strict. */
+  readonly ownChannels?: ProviderOwnChannels;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly apiKey?: string;
@@ -619,7 +629,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           options.temporaryDirectory ?? input.environment.TMPDIR ?? "/tmp",
           name,
         );
-        const args = profile.process.args({ root, managedHome });
+        const args = profile.process.args({
+          root,
+          managedHome,
+          ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
+        });
         const denyPaths = [
           ...hostAuthentication.forbiddenPaths,
           ...hostExtensionDenyPaths(
@@ -1241,6 +1255,8 @@ export function sanitizeAcpEnvironment(
     readonly nativeSetup?: ProviderNativeSetup;
     /** Absent is Strict: the profile's fixed passthrough list and every guard. */
     readonly strict?: boolean;
+    /** The person's provider telemetry and self-update switches; read only outside Strict. */
+    readonly ownChannels?: ProviderOwnChannels;
   },
 ): NodeJS.ProcessEnv {
   const strict = input.strict !== false;
@@ -1248,11 +1264,21 @@ export function sanitizeAcpEnvironment(
     executionPolicy: input.executionPolicy ?? "approval-gated",
     ...(input.mode === undefined ? {} : { mode: input.mode }),
   }).guards;
-  const channels = new Set(strict ? [] : (profile.process.channelGuards ?? []));
   const guards = Object.fromEntries(
-    Object.entries(profile.process.guards).filter(
-      ([name]) => !released.has(name) && !channels.has(name),
-    ),
+    Object.entries(
+      guardsForOwnChannels(
+        profile.process.guards,
+        {
+          ...(profile.process.channelGuards === undefined
+            ? {}
+            : { telemetry: profile.process.channelGuards }),
+          ...(profile.process.selfUpdateGuards === undefined
+            ? {}
+            : { selfUpdate: profile.process.selfUpdateGuards }),
+        },
+        launchOwnChannels(strict, input.ownChannels),
+      ),
+    ).filter(([name]) => !released.has(name)),
   );
   const passthrough = new Set(profile.process.passthroughVariables);
   // Outside Strict the agent gets the host's environment as in the person's
@@ -1521,17 +1547,19 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
                 }),
               }),
         });
+        const environmentStrict = !(
+          input.strict === false &&
+          input.fullAccessSandbox !== true &&
+          input.sandboxPolicy === undefined
+        );
+        const ownChannels = launchOwnChannels(environmentStrict, input.ownChannels);
         const environment = sanitizeAcpEnvironment(profile, inheritedEnvironment, {
           managedHome: input.managedHome,
           executionPolicy: input.executionPolicy,
           mode: input.mode,
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
-          ...(input.strict === false &&
-          input.fullAccessSandbox !== true &&
-          input.sandboxPolicy === undefined
-            ? { strict: false }
-            : {}),
+          ...(environmentStrict ? {} : { strict: false, ownChannels }),
         });
         const wall = acpWallPolicy(input);
         const network =
@@ -1576,6 +1604,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
           ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
           ...(input.strict === false ? { strict: false } : {}),
+          ownChannels,
           ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),

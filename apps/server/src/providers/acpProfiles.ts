@@ -23,6 +23,7 @@ import type {
   ProviderExecutionPolicy,
   ProviderNativeSetup,
 } from "@octant/contracts";
+import type { ProviderOwnChannels } from "@octant/provider-sdk";
 import type { AcpInitializeResult } from "./acpProtocol";
 import type { AcpTurnUsageWithoutTotal } from "./acpUsage";
 
@@ -89,12 +90,18 @@ export interface AcpProcessProfile {
   readonly passthroughVariables: ReadonlyArray<string>;
   readonly guards: Readonly<Record<string, string>>;
   /**
-   * The guards that close one of the agent's own channels to its vendor
-   * (telemetry, trace uploads, feedback). Under Strict they are set as today;
-   * outside Strict they follow the person's own settings. Self-update guards
-   * are not channels and stay set.
+   * The guards that close one of the agent's own telemetry channels to its
+   * vendor (usage metrics, trace uploads, feedback). Under Strict they are
+   * set; outside Strict they are left out while the person lets providers
+   * send their own telemetry, the default, and set otherwise.
    */
   readonly channelGuards?: ReadonlyArray<string>;
+  /**
+   * The guards that keep the agent from checking for or installing a newer
+   * version of itself. Under Strict they are set; outside Strict they are set
+   * unless the person lets providers update themselves.
+   */
+  readonly selfUpdateGuards?: ReadonlyArray<string>;
   /** User-owned configuration files the provider needs to read, never write. */
   readonly hostReadPaths?: ReadonlyArray<string>;
   /** The CLI starts a same-binary stdio server before serving ACP messages. */
@@ -128,6 +135,8 @@ export interface AcpProcessProfile {
   readonly args: (input: {
     readonly root: string;
     readonly managedHome: string;
+    /** The provider's own channels this launch opens; absent opens none. */
+    readonly ownChannels?: ProviderOwnChannels;
   }) => ReadonlyArray<string>;
   readonly managedFiles: (input: {
     readonly managedHome: string;
@@ -551,6 +560,7 @@ const opencodeProfile: AcpProviderProfile = {
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     requiresChildServer: true,
     hostReadPaths: opencodeGlobalConfigPaths,
+    selfUpdateGuards: ["OPENCODE_DISABLE_AUTOUPDATE"],
     guards: {
       NO_COLOR: "1",
       OPENCODE_DISABLE_AUTOUPDATE: "1",
@@ -624,6 +634,8 @@ const kiloProfile: AcpProviderProfile = {
       /^(?:kilo )?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?\r?\n?$/,
     minimumVersion: [1, 0, 0],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    channelGuards: ["KILO_TELEMETRY_LEVEL"],
+    selfUpdateGuards: ["KILO_DISABLE_AUTOUPDATE"],
     guards: {
       KILO_DISABLE_AUTOUPDATE: "1",
       KILO_DISABLE_AUTOCOMPACT: "1",
@@ -891,6 +903,7 @@ const vibeProfile: AcpProviderProfile = {
     minimumVersion: [2, 24, 1],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     channelGuards: ["VIBE_ENABLE_TELEMETRY"],
+    selfUpdateGuards: ["VIBE_ENABLE_UPDATE_CHECKS"],
     guards: {
       VIBE_ENABLE_TELEMETRY: "false",
       VIBE_ENABLE_UPDATE_CHECKS: "false",
@@ -1114,6 +1127,7 @@ const grokProfile: AcpProviderProfile = {
       "GROK_TELEMETRY_MIXPANEL_ENABLED",
       "GROK_FEEDBACK_ENABLED",
     ],
+    selfUpdateGuards: ["GROK_DISABLE_AUTOUPDATER"],
     guards: {
       GROK_TELEMETRY_ENABLED: "0",
       GROK_TELEMETRY_TRACE_UPLOAD: "0",
@@ -1649,6 +1663,7 @@ const fxProfile: AcpProviderProfile = {
     // encrypted with the root-only /var/db/SystemKey, which stays denied.
     readsSystemKeychain: true,
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    selfUpdateGuards: ["FX_AUTO_UPGRADE"],
     guards: {
       // fx's default `permission_mode` is `auto`, and its ACP `code` mode maps
       // to that same auto-review. Pin the profile default to `ask` and select
@@ -1725,6 +1740,7 @@ const kimiProfile: AcpProviderProfile = {
       "FORCE_COLOR",
     ],
     channelGuards: ["KIMI_DISABLE_TELEMETRY"],
+    selfUpdateGuards: ["KIMI_CODE_NO_AUTO_UPDATE"],
     guards: {
       KIMI_DISABLE_TELEMETRY: "1",
       KIMI_CODE_NO_AUTO_UPDATE: "1",
@@ -1844,13 +1860,19 @@ const antigravityProfile: AcpProviderProfile = {
     // (recorded `initialize` reply); later releases may still.
     protocolVersions: [1, 2],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    selfUpdateGuards: ["AGY_CLI_DISABLE_AUTO_UPDATE"],
     guards: { NO_COLOR: "1", AGY_CLI_DISABLE_AUTO_UPDATE: "1" },
     environment: () => ({}),
     // Google's ACP guide: `--process-per-session` serves each session from an
     // isolated worker and is required for HTTP MCP servers the client
     // configures, which is how Octant offers its tools; `--disable-telemetry`
-    // is the CLI's own switch.
-    args: () => ["acp", "--process-per-session", "--disable-telemetry"],
+    // is the CLI's own telemetry switch, so it follows the launch's telemetry
+    // channel as other agents' telemetry guards do.
+    args: ({ ownChannels }) => [
+      "acp",
+      "--process-per-session",
+      ...(ownChannels?.telemetry === true ? [] : ["--disable-telemetry"]),
+    ],
     managedFiles: () => [],
     readsLoginKeychain: true,
     // The CLI keeps its settings, conversations, instructions and skills

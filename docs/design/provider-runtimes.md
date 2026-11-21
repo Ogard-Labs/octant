@@ -250,9 +250,10 @@ at every level, Full access, a trusted Project, and the thread's On included
 (maintainer decision, 2026-11-15). Each driver honors it with the web-tools
 switch in the table above.
 
-Plan's read-only rule, Chat's withheld filesystem and shell, and the
-provider's telemetry and self-update channels stay off at every
-level. The provider's own memory is on by default in Work and Code outside
+Plan's read-only rule and Chat's withheld filesystem and shell stay at every
+level, and the provider's telemetry and self-update follow the person's two
+provider switches ([Provider channel switches](#provider-channel-switches)),
+which no native feature turns on. The provider's own memory is on by default in Work and Code outside
 Plan, as in the provider's own app, and the person turns it off per
 provider account (maintainer decision, 2026-11-14; the account stores only
 the off, as `ownMemory: false`, and an older stored `true` reads as on).
@@ -639,11 +640,13 @@ tool keeps every action, so Claude Design's `/design` and `/slides` run as
 in Claude Code: `quickstart`, publishing from a type with no local file,
 `read`, `list` and updates. A publish naming a local file follows the
 thread's file rules. Chat and Plan launches offer the read-only actions and
-refuse publishing. The telemetry guard follows the person's own provider
-settings outside Strict, so the switch no longer lifts it (built: outside
-Strict the launch carries no telemetry guard of Octant's, the switch only
-opts the runtime in with `CLAUDE_CODE_ARTIFACT`, and a host's own telemetry
-opt-out keeps the tool off). Built too (`claudeOffersArtifacts` and
+refuse publishing. The telemetry guard follows the person's provider
+telemetry switch outside Strict (built: with it off, the default, the launch
+carries Octant's telemetry guards and lifts only `DISABLE_TELEMETRY`, as under
+Strict, the host's own opt-out still kept as `DO_NOT_TRACK=1`; with it on, the
+launch carries no telemetry guard of Octant's, the switch only opts the runtime
+in with `CLAUDE_CODE_ARTIFACT`, and a host's own telemetry opt-out keeps the
+tool off). Built too (`claudeOffersArtifacts` and
 `claudeArtifactCallRefusal` with Strict off): the offer on the switch alone in
 every mode, every action in Work and Code, a publish naming a local file asking
 outside the session's folders below Full access as a `Write` would (the login
@@ -1498,11 +1501,10 @@ Claude Code's Code Mode is a recorded gap, not a refusal (maintainer
 decision, 2026-11-14; designed, not built). It runs only in an interactive
 terminal session, which an Agent SDK launch is not, and it refuses to start
 while `DISABLE_TELEMETRY` is set, which every Claude launch of Octant's under
-Strict sets (outside Strict telemetry follows the person's own settings; under
-Strict the one lift is the Claude artifacts launch above, which the person chooses
-because it sends usage telemetry). Octant adds no terminal mode to carry it
-and makes no telemetry exception for it: provider telemetry stays off as a
-hard line. Once the Agent SDK supports Code Mode, Octant offers it under the
+Strict sets, and a launch outside Strict only while the person keeps
+**Let providers send their own telemetry** off (under Strict the one lift is the
+Claude artifacts launch above, which the person chooses because it sends usage
+telemetry). Octant adds no terminal mode to carry it. Once the Agent SDK supports Code Mode, Octant offers it under the
 same gate and level as Claude's other tools. The `REPL` tool, which runs code
 in Claude's own process, is already offered outside Plan under the shell's
 rules (see [Native plan capture](#native-plan-capture)).
@@ -2708,8 +2710,11 @@ threads stay.
 
 Built (maintainer decision, 2026-11-20): Google Antigravity is a shipped ACP
 profile, `antigravity`, on Google's official CLI, `agy`, run unmodified as
-`agy acp --process-per-session --disable-telemetry` with
-`AGY_CLI_DISABLE_AUTO_UPDATE=1`, in the project directory.
+`agy acp --process-per-session` with `AGY_CLI_DISABLE_AUTO_UPDATE=1`, in the
+project directory. `--disable-telemetry` is added under Strict and while the
+person keeps provider telemetry off, and the self-update guard is left out only
+when the person lets providers update themselves outside Strict
+([Provider channel switches](#provider-channel-switches)).
 
 It stays inside Google's terms (read 2026-11-20). The Antigravity Additional
 Terms of Service (`antigravity.google/terms`) make "using third party
@@ -2835,7 +2840,8 @@ with the person's token. The CLI talks to Google itself.
   `runtime-does-not-report`.
 
 Kept, where other ACP clients of the CLI differ: the self-update guard (other
-clients both set and leave it), `--disable-telemetry`, Strict and Network
+clients both set and leave it), `--disable-telemetry` where the launch keeps
+telemetry closed, Strict and Network
 limits as the person sets them, and Chat and Plan, which those clients do not
 have. A prompt sent while a turn runs is refused as for every ACP agent;
 the CLI steers a running turn with it, which Octant does not offer yet.
@@ -3197,6 +3203,45 @@ items skipped); a body that is not a model list, no mappable item, a route-not-s
 "models can't be listed" state carrying the manual model IDs, never a
 protocol failure. Credential, usage-limit, and availability answers keep
 failing the check with their typed states.
+
+## Provider channel switches
+
+Two host switches in Settings › Providers & Models decide, outside Strict,
+whether a launch carries a provider's own telemetry and self-update guards
+(maintainer decision, 2026-11-21). The host stamps them on every session start
+and resume (`withProviderOwnChannels`, read from `providerTelemetry` and
+`providerSelfUpdate` in the shell settings), and each driver resolves them
+against Strict with `launchOwnChannels`: Strict keeps both closed whatever the
+switches say, as do an explicit sandbox and a Full access thread that keeps the
+sandbox. A version read always keeps every guard. A process kept warm across
+turns keeps the guards it started with; ACP and Pi runtimes do not reuse a warm
+process across a change, and an OpenCode 1.x server takes the change at its
+next start.
+
+| Runtime             | Telemetry guards (set while telemetry is off)                                                                                            | Self-update guards (set while self-update is off) |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Claude Code         | `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `DISABLE_BUG_COMMAND`, `DISABLE_FEEDBACK_COMMAND`, `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` | `DISABLE_AUTOUPDATER`                             |
+| Kimi Code           | `KIMI_DISABLE_TELEMETRY`                                                                                                                 | `KIMI_CODE_NO_AUTO_UPDATE`                        |
+| Grok Build          | `GROK_TELEMETRY_ENABLED`, `GROK_TELEMETRY_TRACE_UPLOAD`, `GROK_TELEMETRY_MIXPANEL_ENABLED`, `GROK_FEEDBACK_ENABLED`                      | `GROK_DISABLE_AUTOUPDATER`                        |
+| Mistral Vibe        | `VIBE_ENABLE_TELEMETRY`                                                                                                                  | `VIBE_ENABLE_UPDATE_CHECKS`                       |
+| Kilo                | `KILO_TELEMETRY_LEVEL`                                                                                                                   | `KILO_DISABLE_AUTOUPDATE`                         |
+| Google Antigravity  | the `--disable-telemetry` argument                                                                                                       | `AGY_CLI_DISABLE_AUTO_UPDATE`                     |
+| fx                  | none                                                                                                                                     | `FX_AUTO_UPGRADE`                                 |
+| OpenCode (ACP, 1.x) | none                                                                                                                                     | `OPENCODE_DISABLE_AUTOUPDATE`                     |
+| Pi                  | `PI_TELEMETRY`                                                                                                                           | `PI_SKIP_VERSION_CHECK`                           |
+
+Telemetry is off by default, for every provider and for a store saved before
+the switch existed (maintainer decision, 2026-11-21), so a launch outside Strict
+keeps its telemetry guards as every launch did before the switch; self-update
+is off by default, since Octant
+installs and updates provider CLIs itself through **Update CLI** below, which
+the switch does not touch. Marketplace auto-install, memory and the built-in
+subagents keep their own rules. Codex's app server takes neither kind of guard
+from Octant, and an added ACP agent's registry environment (Factory Droid's and
+Auggie's update switches) is the registry entry's own, so the switches change
+nothing for either. Telemetry guards that were set outside Strict before the switch existed,
+Kilo's and Antigravity's `--disable-telemetry` among them, stay set by default
+and are lifted only when the person turns the switch on.
 
 ## Runtime updates
 
