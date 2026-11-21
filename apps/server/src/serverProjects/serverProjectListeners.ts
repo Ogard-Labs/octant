@@ -5,6 +5,12 @@ export interface ServerProjectListener {
   readonly port: number;
   /** The process's short name, never its command line. */
   readonly processName: string;
+  /**
+   * Whether the socket answers on `127.0.0.1`, where the preview's SSH forward
+   * connects. A socket bound only to `[::1]` or a LAN address shares the port
+   * number but not the connection, so it is listed without a Preview.
+   */
+  readonly loopbackReachable: boolean;
 }
 
 export type ServerProjectListenerRead =
@@ -20,46 +26,84 @@ const NO_LISTING_TOOL = 3;
 /**
  * Lists the login's own listening TCP sockets with `lsof` (macOS and most
  * Linux) or `ss` (Linux), then keeps those whose process works inside the
- * Project folder (`$1`). Only the port and the process's short name leave the
- * server; never a command line or another login's process.
+ * Project folder (`$1`). Only the port, the bound address and the process's
+ * short name leave the server; never a command line or another login's
+ * process.
+ *
+ * The tool is chosen before the pipeline: an `exit` inside a pipeline's left
+ * side ends only that subshell, and the empty loop then reported success, so a
+ * server with neither tool read as serving nothing. `ss -p` shows every
+ * account's processes to a privileged login, so each process must also be
+ * owned by the login (`-O` on its `/proc` entry); `lsof -u` already restricts
+ * to the login.
  */
 export const SERVER_LISTENERS_SCRIPT = `folder="$1"
 tab="$(printf '\\t')"
-if command -v lsof >/dev/null 2>&1; then
+if command -v lsof >/dev/null 2>&1; then tool=lsof
+elif command -v ss >/dev/null 2>&1; then tool=ss
+else exit ${String(NO_LISTING_TOOL)}
+fi
+if [ "$tool" = lsof ]; then
   lsof -nP -a -u "$(id -u)" -iTCP -sTCP:LISTEN -Fpcn 2>/dev/null | awk '
     /^p/ { pid = substr($0, 2) }
     /^c/ { cmd = substr($0, 2) }
-    /^n/ { n = split(substr($0, 2), parts, ":"); print pid "\\t" cmd "\\t" parts[n] }'
-elif command -v ss >/dev/null 2>&1; then
+    /^n/ {
+      a = substr($0, 2); n = split(a, parts, ":")
+      print pid "\\t" cmd "\\t" parts[n] "\\t" substr(a, 1, length(a) - length(parts[n]) - 1)
+    }'
+else
   ss -Htlnp 2>/dev/null | awk '{
-    n = split($4, a, ":"); port = a[n]; s = $0
+    n = split($4, a, ":"); port = a[n]; host = substr($4, 1, length($4) - length(port) - 1); s = $0
     while (match(s, /\\("[^"]*",pid=[0-9]+/)) {
       m = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
       split(m, b, "\\""); pid = m; sub(/.*pid=/, "", pid)
-      print pid "\\t" b[2] "\\t" port
+      print pid "\\t" b[2] "\\t" port "\\t" host
     }
   }'
-else
-  exit ${String(NO_LISTING_TOOL)}
-fi | while IFS="$tab" read -r pid cmd port; do
+fi | while IFS="$tab" read -r pid cmd port host; do
+  if [ -d "/proc/$pid" ] && [ ! -O "/proc/$pid" ]; then continue; fi
   cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null)"
-  if [ -z "$cwd" ] && command -v lsof >/dev/null 2>&1; then
+  if [ -z "$cwd" ] && [ "$tool" = lsof ]; then
     cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
   fi
-  case "$cwd/" in "$folder"/*) printf '%s\\t%s\\n' "$port" "$cmd" ;; esac
+  case "$cwd/" in "$folder"/*) printf '%s\\t%s\\t%s\\n' "$port" "$cmd" "$host" ;; esac
 done`;
 
-/** Reads the script's lines: a valid port and a name, each port once, at most 64. */
+/**
+ * Bound addresses a connection to `127.0.0.1` reaches: IPv4 loopback, the IPv4
+ * wildcard, and the IPv6 wildcard, which takes IPv4 connections unless the
+ * socket is IPv6-only (Linux's default `bindv6only=0`). The tools write the
+ * wildcard as `*`, `0.0.0.0`, `[::]` or (older `ss`) `::`, `ss` with an optional
+ * `%interface`.
+ */
+function answersOnIpv4Loopback(host: string): boolean {
+  const bare = host.trim().replace(/%.*$/, "");
+  return ["127.0.0.1", "0.0.0.0", "*", "[::]", "::"].includes(bare);
+}
+
+/**
+ * Reads the script's lines: a valid port and a name, each port once, at most
+ * 64. A port held on several addresses is previewable when any of them answers
+ * on `127.0.0.1`.
+ */
 export function parseServerListeners(output: string): ReadonlyArray<ServerProjectListener> {
   const byPort = new Map<number, ServerProjectListener>();
   for (const line of output.split("\n")) {
-    const [portText, name] = line.split("\t");
+    const [portText, name, host = ""] = line.split("\t");
     if (portText === undefined || name === undefined || !/^\d{1,5}$/.test(portText)) continue;
     const port = Number(portText);
     const processName = name.trim().slice(0, MAX_PROCESS_NAME);
-    if (port < 1 || port > 65_535 || processName === "" || byPort.has(port)) continue;
-    byPort.set(port, { port, processName });
-    if (byPort.size >= MAX_LISTENERS) break;
+    if (port < 1 || port > 65_535 || processName === "") continue;
+    const loopbackReachable = answersOnIpv4Loopback(host);
+    const known = byPort.get(port);
+    if (known !== undefined) {
+      if (loopbackReachable && !known.loopbackReachable) {
+        byPort.set(port, { ...known, loopbackReachable });
+      }
+      continue;
+    }
+    if (byPort.size >= MAX_LISTENERS) continue;
+    byPort.set(port, { port, processName, loopbackReachable });
   }
   return [...byPort.values()].sort((left, right) => left.port - right.port);
 }

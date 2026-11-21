@@ -429,6 +429,8 @@ export const ServerProjectListenerList = Schema.Union(
       Schema.Struct({
         port: Schema.Int.pipe(Schema.between(1, 65535)),
         processName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+        /** Whether the socket answers on 127.0.0.1, where the preview's forward connects. */
+        loopbackReachable: Schema.Boolean,
       }).annotations(strict),
     ).pipe(Schema.maxItems(64)),
   }).annotations(strict),

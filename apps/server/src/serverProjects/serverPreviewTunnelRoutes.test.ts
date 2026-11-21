@@ -104,7 +104,10 @@ describe("person-operated server preview routes", () => {
       tunnels,
       listeners: async (project) => {
         asked.push(project);
-        return { status: "listed", listeners: [{ port: 5173, processName: "node" }] };
+        return {
+          status: "listed",
+          listeners: [{ port: 5173, processName: "node", loopbackReachable: true }],
+        };
       },
       now: () => 1,
     });
@@ -117,7 +120,7 @@ describe("person-operated server preview routes", () => {
     expect(listed?.status).toBe(200);
     expect(await listed?.json()).toEqual({
       status: "listed",
-      listeners: [{ port: 5173, processName: "node" }],
+      listeners: [{ port: 5173, processName: "node", loopbackReachable: true }],
     });
 
     const remote = read();
@@ -125,6 +128,9 @@ describe("person-operated server preview routes", () => {
       principal: {
         kind: "remote-device",
         deviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        credentialGeneration: 2,
+        sessionId: "sess-1",
+        admittedBy: "host-person",
       } as never,
       scopeId: id,
     });

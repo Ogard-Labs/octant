@@ -104,13 +104,16 @@ export function ServerProjectPreviewTunnel(props: {
     }
   }
   const running = view !== null && view.status !== "stopped" && view.status !== "revoked";
+  const localPortValid =
+    /^\d+$/.test(localPort) && Number(localPort) >= 0 && Number(localPort) <= 65535;
   const valid =
     /^\d+$/.test(remotePort) &&
     Number(remotePort) > 0 &&
     Number(remotePort) <= 65535 &&
-    /^\d+$/.test(localPort) &&
-    Number(localPort) >= 0 &&
-    Number(localPort) <= 65535;
+    localPortValid;
+  // Only a window on this computer is given the listing; a paired device's
+  // preview is relayed through a signed route, not a local TCP port.
+  const localWindow = client.listeners !== undefined;
   return (
     <OctantCollapsible
       className="w-full min-w-0"
@@ -123,14 +126,18 @@ export function ServerProjectPreviewTunnel(props: {
       </p>
       <p className="shield-servers__note">
         The remote endpoint is 127.0.0.1 on this Project's server. Opening a preview does not start
-        the dev server. Any TCP service works, not only web pages: a database on the server is
-        reached at the local address with its own client.
+        the dev server.
+        {localWindow
+          ? " Any TCP service works, not only web pages: a database on the server is reached at the local address with its own client."
+          : null}
       </p>
-      <p className="shield-servers__note">
-        The local address is 127.0.0.1 on this computer. Agents' guarded commands can't reach it
-        unless you allow that port for a thread; a Full access thread, and a provider that reaches
-        this computer's own ports, can reach it as they can any local service.
-      </p>
+      {localWindow ? (
+        <p className="shield-servers__note">
+          The local address is 127.0.0.1 on this computer. Agents' guarded commands can't reach it
+          unless you allow that port for a thread; a Full access thread, and a provider that reaches
+          this computer's own ports, can reach it as they can any local service.
+        </p>
+      ) : null}
       {serving === undefined ? null : serving.status === "unavailable" ? (
         <p className="shield-servers__note">{serving.message}</p>
       ) : serving.listeners.length === 0 ? (
@@ -141,20 +148,25 @@ export function ServerProjectPreviewTunnel(props: {
             <li key={listener.port}>
               <span>
                 {listener.processName} on port {listener.port}
+                {listener.loopbackReachable
+                  ? null
+                  : " · not on 127.0.0.1, so it can't be previewed"}
               </span>
-              <OctantButton
-                aria-label={`Preview ${listener.processName} on port ${String(listener.port)}`}
-                disabled={busy || running}
-                onClick={() => {
-                  setRemotePort(String(listener.port));
-                  void command("start", String(listener.port));
-                }}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Preview
-              </OctantButton>
+              {listener.loopbackReachable ? (
+                <OctantButton
+                  aria-label={`Preview ${listener.processName} on port ${String(listener.port)}`}
+                  disabled={busy || running || !localPortValid}
+                  onClick={() => {
+                    setRemotePort(String(listener.port));
+                    void command("start", String(listener.port));
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Preview
+                </OctantButton>
+              ) : null}
             </li>
           ))}
         </ul>

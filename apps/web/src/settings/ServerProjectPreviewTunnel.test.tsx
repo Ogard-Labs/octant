@@ -64,13 +64,25 @@ it("lists what the login serves from the Project's folder and previews one in a 
         previewCommand,
         listeners: async () => ({
           status: "listed",
-          listeners: [{ port: 5432, processName: "postgres" }],
+          listeners: [
+            { port: 5432, processName: "postgres", loopbackReachable: true },
+            { port: 5173, processName: "node", loopbackReachable: false },
+          ],
         }),
       }}
     />,
   );
   await user.click(screen.getByText("Dev server preview"));
-  await user.click(await screen.findByRole("button", { name: "Preview postgres on port 5432" }));
+  const preview = await screen.findByRole("button", { name: "Preview postgres on port 5432" });
+  // A socket the forward to 127.0.0.1 can't reach is listed without a Preview.
+  expect(screen.getByText(/node on port 5173 · not on 127.0.0.1/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Preview node on port 5173" })).toBeNull();
+  // A blank local port is refused here as it is by Start preview.
+  const localPort = screen.getByLabelText("Local port, 0 chooses an available port");
+  await user.clear(localPort);
+  expect(preview).toBeDisabled();
+  await user.type(localPort, "0");
+  await user.click(preview);
   expect(previewCommand).toHaveBeenCalledWith({
     kind: "start",
     projectId: project.id,
@@ -109,6 +121,8 @@ it("opens a host-relayed preview through the signed forwarder callback and never
   );
   const user = userEvent.setup();
   await user.click(screen.getByText("Dev server preview"));
+  // A client without the listing is a paired device, whose preview is no local TCP port.
+  expect(screen.queryByText(/local address is 127.0.0.1/)).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Start preview" }));
   expect(screen.queryByRole("link", { name: "Open preview" })).not.toBeInTheDocument();
   await user.click(await screen.findByRole("button", { name: "Open preview" }));

@@ -170,6 +170,11 @@ export function createRemoteProviderOAuth(bridge: RemoteSessionBridge) {
     }).catch(() => undefined);
 }
 
+function withoutServerListeners(client: ServerProjectsClient): ServerProjectsClient {
+  const { listeners: _listeners, ...rest } = client;
+  return rest;
+}
+
 /**
  * The ordinary product clients, carried over the paired device's
  * authenticated session. Nothing here knows about the desktop window.
@@ -220,6 +225,8 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
       canvas.importHtml?.(request) ?? Promise.reject(new Error("Import is unavailable.")),
     projectTerminal: createProjectTerminalClient(port),
     projectBrowser: createProjectBrowserClient(port),
-    serverProjects: createServerProjectsClient(port),
+    // Listing what a server serves is a window-on-this-computer read the remote
+    // gateway refuses, so a paired browser is not offered it.
+    serverProjects: withoutServerListeners(createServerProjectsClient(port)),
   };
 }

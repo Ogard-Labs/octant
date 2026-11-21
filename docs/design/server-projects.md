@@ -920,10 +920,15 @@ alias is not evidence of a paired-host identity.
 The panel lists what the SSH login serves from the Project's folder: the
 login's own listening TCP sockets, read on the server with `lsof` or `ss` over
 the pinned connection, kept when the process works inside the folder, with only
-the port and the process's short name returned (never a command line or another
-login's process). **Preview** on a row starts the preview for that port. Only a
-local window reads the list, under the same rule as starting a preview, and a
-server with neither tool says so.
+the port, the bound address and the process's short name returned (never a
+command line or another login's process; under a privileged login each process
+must also be owned by the login, since `ss` shows every account's). **Preview**
+on a row starts the preview for that port, offered only when the socket answers
+on `127.0.0.1` (IPv4 loopback or a wildcard bind), where the forward connects; a
+socket bound only to `[::1]` or a LAN address is listed without it. Only a local
+window reads the list, under the same rule as starting a preview; a paired
+device is not offered it and sees no local-address guidance, since its preview
+is relayed. A server with neither tool says so.
 
 The forward is raw TCP, so any service works, not only web pages: a database on
 the server is reached at the local address with its own client. The local

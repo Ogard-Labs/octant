@@ -77,6 +77,11 @@ export function createServerPreviewTunnelRoutes(dependencies: {
     // Listed for the window that starts the preview, under the same rule.
     if (url.pathname === LISTENERS_PATH) {
       if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
+      // The remote gateway already keeps this path local; refusing here too
+      // keeps a person-paired device out if that routing ever changes.
+      if (pairedDevice !== undefined) {
+        return json({ error: "Only a window on this computer lists what a server serves." }, 403);
+      }
       if (dependencies.listeners === undefined) {
         return json({ status: "unavailable", message: "Listing is unavailable on this host." });
       }
