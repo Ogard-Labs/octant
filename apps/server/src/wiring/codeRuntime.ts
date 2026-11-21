@@ -103,6 +103,7 @@ import {
   codeSiblingThreadState,
 } from "../siblingThreads/codeSiblingThreadSource";
 import { CoordinatorService } from "../coordinator/coordinatorService";
+import { createCoordinatorThreadDoneEvaluator } from "../coordinator/coordinatorDoneWhenEvidence";
 import type { ThreadWakeupModePort } from "../wakeups/threadWakeupService";
 import { createCoordinatorWakeJournal } from "../coordinator/coordinatorWakeJournal";
 import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
@@ -2142,6 +2143,51 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       rechooseAsBuilder: (coordinatorThreadId, filters) =>
         coordinatorService.rechooseAsBuilder(coordinatorThreadId, filters),
     });
+    // Merge when ready, Auto-fix, and coordinator done-when checks. The forge
+    // calls run through the host's own `gh`; with none installed every check
+    // answers unavailable.
+    const pullRequestSwitchForge = (() => {
+      if (options.ghExecutable === undefined) return undefined;
+      try {
+        return new GhPullRequestSwitchPort({
+          command: createGhCommandPort({ ghPath: options.ghExecutable }),
+        });
+      } catch {
+        return undefined;
+      }
+    })();
+    const coordinatorDoneWhenAbort = new AbortController();
+    const doneWhenSignal = () =>
+      AbortSignal.any([coordinatorDoneWhenAbort.signal, AbortSignal.timeout(15_000)]);
+    const doneWhenProbePath = decodeCodeRelativePath("package.json");
+    const isCoordinatorDoneWhenThreadDone = createCoordinatorThreadDoneEvaluator({
+      readThread: (threadId) => persistence.readCodeThread(threadId),
+      readCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+      projectExists: (projectId) => persistence.readProject(projectId) !== undefined,
+      resolveCheckoutRoot: async (thread, checkout, signal) => {
+        const resolved = await roots.resolve(
+          ROUTINE_HOST_SCOPE_ID,
+          thread,
+          checkout,
+          doneWhenProbePath,
+          signal,
+        );
+        return resolved?.rootPath;
+      },
+      git: gitObservationPort,
+      history: { read: (threadId) => codeBoardEventStore.summaryForThread(threadId) },
+      pullRequestLinks: pullRequestLinkService,
+      ...(pullRequestSwitchForge === undefined
+        ? {}
+        : {
+            observePullRequest: (request, signal) =>
+              pullRequestSwitchForge.observe(request, signal, {
+                failures: false,
+                activity: false,
+              }),
+          }),
+      createSignal: doneWhenSignal,
+    });
     // Coordinator threads and message wakes (docs/design/coordinator-threads.md):
     // a worker is created through the ordinary Code command path and started,
     // like a wake turn, as an agent-initiated host turn under the routine host
@@ -2322,6 +2368,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       },
       counts: createCoordinatorCountStore(persistence.connection),
       wakes: coordinatorWakes,
+      observePullRequest: async (target, readOptions) => {
+        if (pullRequestSwitchForge === undefined) return { status: "unavailable" };
+        return await pullRequestSwitchForge.observePullRequestCondition(
+          {
+            owner: target.repositoryOwner,
+            name: target.repositoryName,
+            number: target.number,
+          },
+          readOptions,
+          doneWhenSignal(),
+        );
+      },
+      isThreadDone: isCoordinatorDoneWhenThreadDone,
       uuid: randomUUID,
       now: () => Date.now(),
       onError: (message, error) => console.error(`[coordinators] ${message}`, error),
@@ -2336,6 +2395,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         unsubscribeCoordinator();
+        coordinatorDoneWhenAbort.abort();
         coordinatorService.stop();
       }),
     );
@@ -2520,18 +2580,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         return board.query(query);
       },
     );
-    // Merge when ready and Auto-fix. The forge calls run through the host's
-    // own `gh`; with none installed every switch answers unavailable.
-    const pullRequestSwitchForge = (() => {
-      if (options.ghExecutable === undefined) return undefined;
-      try {
-        return new GhPullRequestSwitchPort({
-          command: createGhCommandPort({ ghPath: options.ghExecutable }),
-        });
-      } catch {
-        return undefined;
-      }
-    })();
+    // Merge when ready and Auto-fix reuse `pullRequestSwitchForge` created above.
     const pullRequestSwitchService = new CodeProjectPullRequestSwitchService({
       limits: () => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();

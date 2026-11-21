@@ -446,6 +446,89 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("refuses setting or clearing a coordinator done-when condition from a non-person principal", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated" }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
+    const commands = [
+      {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId,
+        expectedVersion: 1,
+        doneWhen: {
+          items: [
+            {
+              kind: "pull-request-merged",
+              repositoryOwner: "Ogard-Labs",
+              repositoryName: "octant",
+              number: 42,
+            },
+          ],
+        },
+      },
+      {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId,
+        expectedVersion: 2,
+      },
+    ];
+    const from = (
+      command: unknown,
+      options: {
+        readonly admittedBy?: "host-person" | "hub-roster";
+        readonly origin?: string;
+      } = {},
+    ) => {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: options.origin ?? "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000942" as never,
+          ...(options.admittedBy === undefined ? {} : { admittedBy: options.admittedBy }),
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+
+    for (const command of commands) {
+      for (const nonPerson of [
+        {},
+        { admittedBy: "hub-roster" as const },
+        { origin: AGENT_ACCESS_ORIGIN },
+        { admittedBy: "host-person" as const, origin: AGENT_ACCESS_ORIGIN },
+      ]) {
+        const refused = await route(from(command, nonPerson));
+        expect(refused?.status).toBe(403);
+        expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+      }
+    }
+    expect(execute).not.toHaveBeenCalled();
+
+    // Person-paired device and local window are permitted to set and clear.
+    for (const command of commands) {
+      expect((await route(from(command, { admittedBy: "host-person" })))?.status).toBe(200);
+      const local = await route(
+        request("/api/code/commands", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(command),
+        }),
+      );
+      expect(local?.status).toBe(200);
+    }
+    expect(execute).toHaveBeenCalledTimes(4);
+  });
+
   it("lets a device the host's own person paired change Strict, restart continuation and account choices, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });

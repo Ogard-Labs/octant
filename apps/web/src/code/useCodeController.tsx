@@ -3,6 +3,7 @@ import type { ConversationInputPolicy } from "@octant/contracts/conversation-inp
 import type {
   CodeReviewFindingReference,
   CoordinatorBounds,
+  CoordinatorDoneWhen,
   CoordinatorOpenWorkerLimit,
   CoordinatorStartingByProject,
   CoordinatorStartingChoice,
@@ -129,6 +130,7 @@ import {
   reopenCodeThread,
   setCodeThreadCoordinator,
   setCodeThreadCoordinatorBounds,
+  setCodeThreadCoordinatorDoneWhen,
   setCodeThreadCoordinatorWake,
   setCodeThreadMessageWake,
   setCodeThreadRestartContinuation,
@@ -2270,6 +2272,10 @@ export function useCodeController(options: CodeControllerOptions) {
             ? await client.execute(command)
             : await client.execute(command, signal);
         if (!mounted.current) return undefined;
+        // Update the ref immediately so a sequential command awaited right
+        // after this one (such as saving bounds and done-when in one dialog
+        // click) reads the committed thread version before React re-renders.
+        bootstrapRef.current = applyResult(bootstrapRef.current, result);
         setBootstrap((current) => applyResult(current, result));
         setActiveView((current) => withUpdatedThread(current, result));
         const currentThreadId = activeThreadId.current;
@@ -2761,6 +2767,11 @@ export function useCodeController(options: CodeControllerOptions) {
   const setThreadCoordinatorBounds = useCallback(
     (threadId: CodeThreadId, bounds: CoordinatorBounds) =>
       restCommand(threadId, (thread) => setCodeThreadCoordinatorBounds(thread, bounds)),
+    [restCommand],
+  );
+  const setThreadCoordinatorDoneWhen = useCallback(
+    (threadId: CodeThreadId, doneWhen: CoordinatorDoneWhen | undefined) =>
+      restCommand(threadId, (thread) => setCodeThreadCoordinatorDoneWhen(thread, doneWhen)),
     [restCommand],
   );
   const setThreadMessageWake = useCallback(
@@ -3531,6 +3542,7 @@ export function useCodeController(options: CodeControllerOptions) {
     pinThread,
     setThreadCoordinator,
     setThreadCoordinatorBounds,
+    setThreadCoordinatorDoneWhen,
     setThreadCoordinatorWake,
     setThreadMessageWake,
     setThreadRestartContinuation,

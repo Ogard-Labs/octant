@@ -245,4 +245,20 @@ describe("coordinator wakes after a restart", () => {
       expect(host.wakes.open()).toEqual([]);
     }
   });
+
+  it("journals done-when satisfaction across restarts and clears it on reset", () => {
+    const connection = openStoreFile();
+    const first = startHost(connection, neverStarts);
+    expect(first.wakes.satisfiedDoneWhen?.().size).toBe(0);
+    first.wakes.markDoneWhenSatisfied?.(COORDINATOR, "pull-request-merged:ogard-labs/octant#42");
+
+    const second = startHost(connection, neverStarts);
+    expect(second.wakes.satisfiedDoneWhen?.().get(COORDINATOR)).toBe(
+      "pull-request-merged:ogard-labs/octant#42",
+    );
+
+    second.wakes.resetDoneWhen?.(COORDINATOR);
+    const third = startHost(connection, neverStarts);
+    expect(third.wakes.satisfiedDoneWhen?.().has(COORDINATOR)).toBe(false);
+  });
 });

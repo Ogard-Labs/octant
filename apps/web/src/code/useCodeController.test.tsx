@@ -4723,4 +4723,54 @@ describe("useCodeController moveThread choices", () => {
     expect(outcome.status).toBe("ok");
     expect(sentCommands(client)).toContain("move-code-thread");
   });
+
+  it("carries the updated thread version into a sequential done-when save right after saving coordinator bounds", async () => {
+    const initial = { ...thread(1), coordinator: true as const };
+    let currentVersion = 1;
+    const seen: Array<{ readonly kind: string; readonly expectedVersion?: number }> = [];
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => ({ ...bootstrap(), threads: [initial] })),
+      execute: vi.fn(async (command: CodeCommand) => {
+        if (
+          command.kind === "set-code-thread-coordinator-bounds" ||
+          command.kind === "set-code-thread-coordinator-done-when"
+        ) {
+          seen.push({ kind: command.kind, expectedVersion: command.expectedVersion });
+          expect(command.expectedVersion).toBe(currentVersion);
+          currentVersion += 1;
+          return {
+            kind: "thread-updated",
+            thread: { ...initial, version: currentVersion },
+          } as CodeCommandResult;
+        }
+        throw new Error(`Unexpected command ${command.kind}`);
+      }),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    // Invoke both saves sequentially in one async block without awaiting a React render in between.
+    await act(async () => {
+      const boundsOutcome = await result.current.setThreadCoordinatorBounds(ids.thread, {
+        rounds: 4,
+      });
+      expect(boundsOutcome).toEqual({ status: "ok" });
+      const doneWhenOutcome = await result.current.setThreadCoordinatorDoneWhen(ids.thread, {
+        items: [
+          {
+            kind: "pull-request-merged",
+            repositoryOwner: "Ogard-Labs",
+            repositoryName: "octant",
+            number: 42,
+          },
+        ],
+      });
+      expect(doneWhenOutcome).toEqual({ status: "ok" });
+    });
+
+    expect(seen).toEqual([
+      { kind: "set-code-thread-coordinator-bounds", expectedVersion: 1 },
+      { kind: "set-code-thread-coordinator-done-when", expectedVersion: 2 },
+    ]);
+  });
 });
