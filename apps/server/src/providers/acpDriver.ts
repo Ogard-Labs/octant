@@ -2205,7 +2205,16 @@ function makeConnection(
                 const refuse = () => {
                   void close().catch(() => undefined);
                 };
-                const removeNotification = client.onNotification(refuse);
+                // Google Antigravity sends a finished turn's usage and trailing
+                // chunks after its prompt answered; closing on them threw away
+                // the warm process it keeps open precisely to avoid a cold
+                // launch. Its updates are dropped while parked; a request,
+                // which needs an answer no turn is there to give, still closes.
+                const removeNotification = client.onNotification((message) => {
+                  if (profile.toleratesStrayUpdates === true && message.method === "session/update")
+                    return;
+                  refuse();
+                });
                 const removeRequest = client.onRequest(refuse);
                 removeIdle = () => {
                   removeNotification();

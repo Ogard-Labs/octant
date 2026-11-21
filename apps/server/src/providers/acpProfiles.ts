@@ -259,7 +259,8 @@ export interface AcpProviderProfile {
    * background replies), a subagent's updates under its own session id, a
    * tool update for a call never started or already finished. They are
    * ignored or read as the start they imply, a call left running is done
-   * when its turn is, and a permission request whose options are not an
+   * when its turn is, an update reaching a process parked between turns
+   * leaves it warm, and a permission request whose options are not an
    * allow-and-reject pair is asked as a question.
    */
   readonly toleratesStrayUpdates?: true;

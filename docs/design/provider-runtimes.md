@@ -2706,8 +2706,10 @@ with the person's token. The CLI talks to Google itself.
   tool start, a repeated finish and an update for a call never started are
   ignored or read as the start they imply, as other ACP clients of the CLI
   accept them; a call still running when the turn ends (a subagent's read
-  the CLI never finishes) is marked done with it. Every other profile keeps
-  the strict mapper. A turn the CLI ends with `refusal` says the account's
+  the CLI never finishes) is marked done with it. A late update that
+  reaches the process parked between turns is dropped rather than closing
+  it; a request there still closes it. Every other profile keeps the strict
+  mapper and closes a parked process on any message. A turn the CLI ends with `refusal` says the account's
   usage limit may be reached (`refusalMessage`).
 - **Prompts.** A prompt that opens with `/` is one of the CLI's own commands
   (`/plan`, `/goal`, `/compact`), which it runs only from the start of the

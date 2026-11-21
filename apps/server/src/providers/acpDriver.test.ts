@@ -3544,6 +3544,73 @@ it.each([
   );
 });
 
+it.each([
+  ["stays warm through a late update for the finished turn", "late-update"],
+  ["closes on a request it would have to answer", "request"],
+] as const)("Google Antigravity's process parked between turns %s", async (_label, activity) => {
+  const { driver, client, registry, starts, active } = fixture(acpProviderProfiles.antigravity, {
+    runtimeVersion: "9.9.9",
+  });
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, mode: "code", projectRoot });
+          const started = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          const events = yield* connection.subscribe;
+          const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          yield* Fiber.join(terminal);
+          yield* connection.stop(sessionId);
+          expect(active()).toBe(1);
+          if (activity === "late-update") {
+            // The CLI's delayed usage and a trailing chunk for the finished turn.
+            client.emit({
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "agent-session-1",
+                update: { sessionUpdate: "usage_update", used: 1200, size: 200000 },
+              },
+            });
+            client.emit({
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "agent-session-1",
+                update: {
+                  sessionUpdate: "agent_message_chunk",
+                  content: { type: "text", text: "late" },
+                },
+              },
+            });
+            expect(active()).toBe(1);
+            if (started.resumeCursor === undefined) throw new Error("Missing cursor");
+            const before = starts.length;
+            yield* connection.resume({
+              sessionId,
+              resumeCursor: started.resumeCursor,
+              executionPolicy: "approval-gated",
+            });
+            expect(starts).toHaveLength(before);
+            expect(client.resumeSession).not.toHaveBeenCalled();
+            yield* connection.stop(sessionId);
+          } else {
+            client.request(permissionRequest("late-permission", "late-call"));
+            yield* Effect.promise(() => vi.waitFor(() => expect(active()).toBe(0)));
+          }
+        }),
+      ),
+    );
+  } finally {
+    await registry.closeAll();
+  }
+});
+
 it("never takes up a retained session opened under another reviewer or another of the person's setups", async () => {
   const own = {
     subagents: false,
