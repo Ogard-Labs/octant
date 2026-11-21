@@ -56,4 +56,26 @@ describe("DelegatedCodeSetting", () => {
     await user.click(screen.getByRole("switch", { name: "Take Code work from other computers" }));
     expect(onChange).toHaveBeenCalledWith(undefined);
   });
+
+  it("refuses a base branch longer than the target allows with a message and sends nothing", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn(async () => true);
+    render(
+      <DelegatedCodeSetting
+        delegatedCode={undefined}
+        disabled={false}
+        now={now}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("switch", { name: "Take Code work from other computers" }));
+    const branch = screen.getByLabelText("Base branch");
+    await user.clear(branch);
+    await user.click(branch);
+    await user.paste(`team/${"b".repeat(255)}`);
+    expect(screen.getByText("Use a name of at most 255 characters.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Take delegated Code work" }));
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

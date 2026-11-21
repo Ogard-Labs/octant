@@ -13,8 +13,12 @@ type Outcome = CodeProjectDelegatedCode["outcomeKind"];
 const OUTCOMES: ReadonlyArray<{ readonly id: Outcome; readonly label: string }> = [
   { id: "local-implementation", label: "Commits on the thread's branch" },
   { id: "opened-pr", label: "An opened pull request" },
+  { id: "merged-pr", label: "A merged pull request" },
   { id: "investigation-result", label: "A written answer, no changes" },
 ];
+
+const TARGET_NAME_MAX = 255;
+const TOO_LONG = `Use a name of at most ${TARGET_NAME_MAX} characters.`;
 
 const OUTCOME_LINE: Readonly<Record<Outcome, string>> = {
   "investigation-result": "a written answer",
@@ -54,7 +58,12 @@ export function DelegatedCodeSetting(props: {
       .finally(() => setPending(false));
   };
   const marked = props.delegatedCode;
-  const ready = remoteName.trim() !== "" && baseBranch.trim() !== "";
+  // The target contract caps both names; a longer Git name is refused with a
+  // message rather than shortened, since a cut name can point elsewhere.
+  const remoteTooLong = remoteName.trim().length > TARGET_NAME_MAX;
+  const branchTooLong = baseBranch.trim().length > TARGET_NAME_MAX;
+  const ready =
+    remoteName.trim() !== "" && baseBranch.trim() !== "" && !remoteTooLong && !branchTooLong;
   return (
     <section className="project-overview-inspector">
       <div className="project-overview-inspector__row">
@@ -98,16 +107,22 @@ export function DelegatedCodeSetting(props: {
         >
           <label htmlFor={remoteId}>Remote</label>
           <OctantInput
+            aria-describedby={remoteTooLong ? `${remoteId}-error` : undefined}
+            aria-invalid={remoteTooLong}
             id={remoteId}
             onChange={(event) => setRemoteName(event.target.value)}
             value={remoteName}
           />
+          {remoteTooLong ? <p id={`${remoteId}-error`}>{TOO_LONG}</p> : null}
           <label htmlFor={branchId}>Base branch</label>
           <OctantInput
+            aria-describedby={branchTooLong ? `${branchId}-error` : undefined}
+            aria-invalid={branchTooLong}
             id={branchId}
             onChange={(event) => setBaseBranch(event.target.value)}
             value={baseBranch}
           />
+          {branchTooLong ? <p id={`${branchId}-error`}>{TOO_LONG}</p> : null}
           <OctantSelectField
             aria-label="What a delegated thread delivers"
             onValueChange={(value) => {
