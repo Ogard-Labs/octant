@@ -41,7 +41,7 @@ import {
   type OpenCodeProcessPort,
   type OpenCodeProcessStartInput,
 } from "./openCodeProcess";
-import { WINDOWS_STRICT_REFUSAL } from "@octant/domain/guardrail-policy";
+import { WINDOWS_STRICT_CHAT_REFUSAL } from "@octant/domain/guardrail-policy";
 import { SECRET_QUESTION_REFUSAL } from "./secretQuestion";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeOpenCodeCli.ts", import.meta.url));
@@ -1938,7 +1938,10 @@ describe("OpenCode driver", () => {
         ),
       ),
     );
-    expect(refused).toMatchObject({ category: "incompatible", message: WINDOWS_STRICT_REFUSAL });
+    expect(refused).toMatchObject({
+      category: "incompatible",
+      message: WINDOWS_STRICT_CHAT_REFUSAL,
+    });
   });
 
   it("offers app-managed tools in native Windows Chat outside Strict for a verified release with private config, and keeps unverified releases refused", async () => {

@@ -37,7 +37,9 @@ import { projectCodeEntries } from "@octant/domain";
 import {
   WINDOWS_KEPT_SANDBOX_REFUSAL,
   WINDOWS_SANDBOX_MISSING_REASON,
+  WINDOWS_STRICT_CHAT_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
 } from "@octant/domain/guardrail-policy";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
 
@@ -760,9 +762,13 @@ describe("ACP child-server profiles", () => {
     }
     for (const [level, message] of [
       [{ executionPolicy: "auto-accept-edits" }, WINDOWS_STRICT_REFUSAL],
+      [{ executionPolicy: "full-access", strict: true }, windowsStrictRuntimeRefusal("acp-agent")],
       [{ executionPolicy: "full-access", fullAccessSandbox: true }, WINDOWS_KEPT_SANDBOX_REFUSAL],
-      [{ mode: "chat", executionPolicy: "approval-gated", strict: true }, WINDOWS_STRICT_REFUSAL],
-      [{ mode: "chat", executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
+      [
+        { mode: "chat", executionPolicy: "approval-gated", strict: true },
+        WINDOWS_STRICT_CHAT_REFUSAL,
+      ],
+      [{ mode: "chat", executionPolicy: "approval-gated" }, WINDOWS_STRICT_CHAT_REFUSAL],
     ] as const) {
       expect(await prepare(level)).toMatchObject({
         _tag: "Left",

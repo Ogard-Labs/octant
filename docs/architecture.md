@@ -20551,15 +20551,19 @@ Windows gets the same provider behaviour the provider's own CLI gives there;
 claiming a sandbox Octant cannot enforce would be the dishonest part, so the
 picker names what is missing instead of refusing the level.
 
-Built (2026-11-16): a Work or Code provider turn on Windows below Full access
-starts outside Strict with the provider's own approvals, every ask still
-answered and journaled on the server (`hostProviderTurnRefusal` in the
-domain's `guardrailPolicy.ts`); Strict at every level is refused by name
-("Strict needs a sandbox Windows doesn't have yet") and so is Full access with
-the sandbox kept, before anything is journaled or started. The shared Strict
-control retains confinement at Full access too; it cannot be enabled on Windows.
-[Windows Strict, phase 1](#windows-strict-phase-1) proposes accepting it at Full
-access on a verified Codex runtime; it does not change current availability.
+Built (2026-11-16, updated 2026-11-21 for [Windows Strict, phase 1](#windows-strict-phase-1)):
+a Work or Code provider turn on Windows below Full access starts outside Strict
+with the provider's own approvals, every ask still answered and journaled on the
+server (`hostProviderTurnRefusal` in the domain's `guardrailPolicy.ts`). Under
+[Windows Strict, phase 1](#windows-strict-phase-1) (**Partly built** —
+implemented and verified in hosted Windows CI, pending Gate 5 real standard-user
+Windows 11 desktop smoke), the shared Strict control is accepted on Windows for
+Work and Code at Full access on a verified native Codex runtime through the
+packaged AppContainer and Job Object launcher (`octant-windows-confine.exe`).
+Every other Windows Strict case — Chat, Plan, levels below Full access, every
+other provider family, provider shims, and Octant-operated tools — keeps
+refusing by name before anything is journaled or started, and so does the legacy
+Full-access-only sandbox choice without Strict.
 The mode picker offers those levels with the line "On Windows the provider's
 own approvals decide; Octant's sandbox does not run here", and shows them
 unavailable on a Strict thread. Each provider launch decides again from its
@@ -21576,15 +21580,15 @@ user-added packages through the published seams and the credential broker.
 
 ### Windows Strict, phase 1
 
-**Designed, not built.** Phase 1 makes the one shared Strict control accepted
-on native Windows for Work and Code at Full access on a verified Codex runtime,
-confined by the AppContainer and Job Object launcher this section designs.
-Today the server refuses Strict on Windows at every level ("Strict needs a
-sandbox Windows doesn't have yet"). Neither the dormant launcher nor the
-unconfined Windows provider tests prove this combination, and admission does
-not ship until the gates below pass. This reframes the earlier proposal to keep
-the sandbox at Full access on Windows as a separate choice (maintainer
-decision, 2026-11-21).
+**Partly built.** Phase 1 makes the one shared Strict control accepted on native
+Windows for Work and Code at Full access on a verified native Codex runtime,
+confined by the packaged AppContainer and kill-on-close Job Object launcher
+(`octant-windows-confine.exe`) with durable pre-ACL lease recovery. Hosted
+Windows CI covers the launcher, ACL/profile recovery, and native Codex smoke;
+Gate 5 real standard-user Windows 11 desktop verification remains pending before
+promoting the status to Built. This reframes the earlier proposal to keep the
+sandbox at Full access on Windows as a separate choice (maintainer decision,
+2026-11-21).
 
 **Two postures, one control.** Outside Strict the provider holds the level with
 no Octant sandbox, on Windows as on macOS and Linux

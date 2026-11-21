@@ -4,7 +4,15 @@
 // administrator account); it runs no provider and lifts no Windows refusal.
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -286,7 +294,20 @@ try {
   );
 
   const marker = `octant-confine-${randomBytes(6).toString("hex")}`;
-  const held = prepare(cmd, ["/d", "/c", "cmd", "/d", "/c", `set /p OCTANT_WAIT= & rem ${marker}`]);
+  const killedLaunchId = randomBytes(16).toString("hex");
+  const killedContainer = `Octant.Confined.${killedLaunchId}`;
+  const heldPort = makeProcessConfinementLive({
+    platform: "win32",
+    windowsConfinement: { launcherPath, homeDirectory: home, launchId: killedLaunchId },
+  });
+  const held = heldPort.prepare({
+    executable: cmd,
+    args: ["/d", "/c", "cmd", "/d", "/c", `set /p OCTANT_WAIT= & rem ${marker}`],
+    boundRoot: granted,
+    temporaryDirectory: temporary,
+    readRoots: [readOnly],
+    networkEgress: "none",
+  });
   const launcher = spawn(held.command, [...held.args], { stdio: ["pipe", "ignore", "ignore"] });
   const markedProcesses = () =>
     spawnSync(
@@ -313,6 +334,105 @@ try {
     "ends the command's whole process tree when the launcher is killed",
     started !== "0" && remaining === "0",
     { started, remaining },
+  );
+
+  // Killing the launcher outright leaves its SID ACE on `granted`; start a
+  // second live launch on `granted` and verify `--recover` removes only the
+  // killed launch's SID ACE and profile while preserving the live launch.
+  const sidsBeforeRecovery = containerSids();
+  const survivorLaunch = prepare(cmd, shell("set /p OCTANT_WAIT= & echo survivor-ok"));
+  const survivor = spawn(survivorLaunch.command, [...survivorLaunch.args], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let survivorOut = "";
+  survivor.stdout.on("data", (chunk: Buffer) => (survivorOut += chunk.toString()));
+  const survivorDone = new Promise<number | null>((done) =>
+    survivor.on("close", (code) => done(code)),
+  );
+  for (
+    let attempt = 0;
+    attempt < 40 && containerSids().size <= sidsBeforeRecovery.size;
+    attempt += 1
+  ) {
+    await new Promise((done) => setTimeout(done, 250));
+  }
+  const recoverFirst = spawnSync(
+    launcherPath,
+    [
+      "--recover",
+      "--container",
+      killedContainer,
+      "--grant-path",
+      granted,
+      "--grant-path",
+      temporary,
+      "--grant-path",
+      readOnly,
+    ],
+    { encoding: "utf8", timeout: 30_000, windowsHide: true },
+  );
+  const recoverSecond = spawnSync(
+    launcherPath,
+    ["--recover", "--container", killedContainer, "--grant-path", granted],
+    { encoding: "utf8", timeout: 30_000, windowsHide: true },
+  );
+  const sidsWhileSurvivorAlive = containerSids().size;
+  survivor.stdin.end("go\r\n");
+  const survivorCode = await survivorDone;
+  const sidsAfterSurvivor = containerSids().size;
+  check(
+    "recovers an abruptly killed launch idempotently without disturbing a concurrent live launch",
+    sidsBeforeRecovery.size >= 1 &&
+      recoverFirst.status === 0 &&
+      recoverSecond.status === 0 &&
+      sidsWhileSurvivorAlive === 1 &&
+      survivorCode === 0 &&
+      survivorOut.includes("survivor-ok") &&
+      sidsAfterSurvivor === 0,
+    {
+      sidsBeforeRecovery: [...sidsBeforeRecovery],
+      recoverFirst,
+      recoverSecond,
+      sidsWhileSurvivorAlive,
+      survivorCode,
+      survivorOut,
+      sidsAfterSurvivor,
+    },
+  );
+
+  // Recovery on a machine-managed read-only directory where ALL APPLICATION
+  // PACKAGES already grants read (and the caller lacks WRITE_DAC, e.g.
+  // System32 owned by TrustedInstaller) must succeed without rewriting its
+  // DACL when no explicit container SID ACE exists.
+  const recoverSystemDir = spawnSync(
+    launcherPath,
+    ["--recover", "--container", killedContainer, "--grant-path", system32],
+    { encoding: "utf8", timeout: 30_000, windowsHide: true },
+  );
+  check(
+    "recovers cleanly without rewriting DACL on a read-only system directory with no container ACE",
+    recoverSystemDir.status === 0,
+    recoverSystemDir,
+  );
+
+  // An executable path passing through a junction must be refused before spawn.
+  // Target a small folder inside the temp fixture rather than System32 so the
+  // pre-launch browser-store pattern scan completes and the native launcher's
+  // own HeldPath junction check executes.
+  const exeTarget = join(root, "exe-target");
+  mkdirSync(exeTarget, { recursive: true });
+  copyFileSync(cmd, join(exeTarget, "cmd.exe"));
+  const exeAlias = join(root, "exe-alias");
+  const exeJunction = spawnSync(cmd, ["/d", "/c", "mklink", "/J", exeAlias, exeTarget], {
+    encoding: "utf8",
+  });
+  const linkedExe = run(join(exeAlias, "cmd.exe"), shell("exit 0"));
+  check(
+    "refuses an executable whose path passes through a junction",
+    exeJunction.status === 0 &&
+      linkedExe.status === 125 &&
+      /passes through a junction or link/u.test(linkedExe.stderr),
+    { exeJunction: exeJunction.stdout, linkedExe },
   );
 } finally {
   rmSync(homeFile, { force: true });

@@ -1,5 +1,5 @@
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -2163,17 +2163,23 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           // its memory stays off in Plan and Chat.
           memoryWrites: "background",
         });
+      const platform = options.platform ?? process.platform;
+      const isWindowsStrictConfined = (posture: CodexLeasePosture): boolean =>
+        platform === "win32" &&
+        posture.executionPolicy === "full-access" &&
+        (posture.explicitStrict || sandboxPolicy !== undefined);
+      // Every Windows Strict confined session or resume gets its own fresh
+      // confined process, never sharing across threads or adopting an earlier
+      // process.
+      const windowsStrictNonce = randomUUID();
       // Strict is part of the key too: a lease outside Strict gets the host's
       // environment, and below Full access Codex's own sandbox in place of
       // Octant's profile, so a Strict and a non-Strict session never share a
       // process.
-      const leaseKey = ({
-        executionPolicy,
-        ownSubagents,
-        fullAccessSandbox,
-        strict,
-      }: CodexLeasePosture) =>
-        JSON.stringify([
+      const leaseKey = (posture: CodexLeasePosture) => {
+        const { executionPolicy, ownSubagents, fullAccessSandbox, strict } = posture;
+        const windowsConfined = isWindowsStrictConfined(posture);
+        return JSON.stringify([
           projectRoot,
           // The read-only folders ride with the extra folders, so a lease's
           // shape (root, folders, mode, posture) stays what idle-lease
@@ -2184,12 +2190,18 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             keepsOwnMemory(executionPolicy) ? "+own-memory" : ""
           }${strict ? "" : "+not-strict"}`,
           ...(fullAccessSandbox ? ["+sandbox"] : []),
-          { strict: strict ?? "legacy" },
+          {
+            strict: strict ?? "legacy",
+            ...(windowsConfined ? { windowsStrictNonce } : {}),
+          },
           ...(sandboxPolicy === undefined ? [] : [sandboxPolicy]),
         ]);
+      };
       const leaseFor = (posture: CodexLeasePosture) =>
         Effect.gen(function* () {
-          const { executionPolicy, ownSubagents, fullAccessSandbox, strict } = posture;
+          const { executionPolicy, ownSubagents, fullAccessSandbox, strict, explicitStrict } =
+            posture;
+          const windowsConfined = isWindowsStrictConfined(posture);
           const runtime = yield* acquireRuntime(
             options,
             clientFactory,
@@ -2204,9 +2216,14 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               ...(ownSubagents ? { ownSubagents: true as const } : {}),
               ...(keepsOwnMemory(executionPolicy) ? { ownMemory: true as const } : {}),
               ...(fullAccessSandbox ? { fullAccessSandbox: true as const } : {}),
-              ...(strict ? {} : { strict: false as const }),
+              ...(explicitStrict && executionPolicy === "full-access"
+                ? { strict: true as const }
+                : strict
+                  ? {}
+                  : { strict: false as const }),
             },
             leaseKey(posture),
+            windowsConfined ? 0 : undefined,
           );
           // Turn starts probe first, but not every caller does (compaction,
           // summaries, agent runs), so the session itself refuses too. Only
@@ -2285,6 +2302,8 @@ interface CodexLeasePosture {
   readonly fullAccessSandbox: boolean;
   /** Absent from a session start or resume reads as Strict. */
   readonly strict: boolean;
+  /** True only when the caller explicitly requested canonical Strict. */
+  readonly explicitStrict: boolean;
 }
 
 function codexLeasePosture(input: {
@@ -2298,6 +2317,7 @@ function codexLeasePosture(input: {
     ownSubagents: codexRunsOwnSubagents(input),
     fullAccessSandbox: input.fullAccessSandbox === true,
     strict: input.strict !== false,
+    explicitStrict: input.strict === true,
   };
 }
 
@@ -3512,7 +3532,8 @@ function makeConnection(
           leased.executionPolicy === posture.executionPolicy &&
           leased.ownSubagents === posture.ownSubagents &&
           leased.fullAccessSandbox === posture.fullAccessSandbox &&
-          leased.strict === posture.strict;
+          leased.strict === posture.strict &&
+          leased.explicitStrict === posture.explicitStrict;
         if (leased !== undefined) {
           return sameAuthority()
             ? Effect.void
@@ -3640,10 +3661,15 @@ function makeConnection(
           Effect.gen(function* () {
             yield* ensureRuntime(codexLeasePosture(input));
             ensureSubscribed();
+            const effectiveExternalSandbox =
+              input.fullAccessSandbox === true ||
+              ((options.platform ?? process.platform) === "win32" &&
+                input.strict === true &&
+                input.executionPolicy === "full-access");
             const settings = codexExecutionSettings(
               input.executionPolicy,
               input.autoApprove,
-              input.fullAccessSandbox,
+              effectiveExternalSandbox,
               sessionSandbox(input),
             );
             const requestedOptions = input.modelOptionValues;
@@ -3918,7 +3944,10 @@ function makeConnection(
                         codexTurnExecutionSettings(
                           state.executionPolicy,
                           state.autoApprove,
-                          state.fullAccessSandbox,
+                          state.fullAccessSandbox === true ||
+                            ((options.platform ?? process.platform) === "win32" &&
+                              state.strict === true &&
+                              state.executionPolicy === "full-access"),
                           leasedNetworkOpen,
                           state.sandbox,
                         ),

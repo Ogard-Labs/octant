@@ -195,6 +195,7 @@ function piWindowsLaunch(input: {
     executionPolicy: input.executionPolicy,
     fullAccessSandbox: input.fullAccessSandbox,
     strict: input.sandboxPolicy === undefined ? input.strict : true,
+    driverKind: "pi",
   });
 }
 

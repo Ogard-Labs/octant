@@ -3871,6 +3871,7 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           fullAccessSandbox: input.fullAccessSandbox,
           strict: input.strict,
+          driverKind: "claude",
         });
         if (windows.status === "refused") throw failure("incompatible", windows.reason);
       }

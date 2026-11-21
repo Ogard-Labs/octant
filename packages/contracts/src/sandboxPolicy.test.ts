@@ -65,6 +65,28 @@ describe("sandbox policy contract", () => {
         filesystem: { ...policy.filesystem, readOnlyRoots: ["/home/person/shared library"] },
       }).filesystem.readOnlyRoots,
     ).toEqual(["/home/person/shared library"]);
+    expect(
+      decodeSandboxPolicy({
+        ...policy,
+        filesystem: { ...policy.filesystem, readOnlyRoots: ["C:\\Users\\Ada\\shared library"] },
+      }).filesystem.readOnlyRoots,
+    ).toEqual(["C:\\Users\\Ada\\shared library"]);
+    for (const badWindows of [
+      "C:\\",
+      "C:\\Work\\",
+      "C:\\Work\\..\\secret",
+      "C:\\Work\\\\src",
+      "\\\\server\\share\\repo",
+      "C:/Work/repo",
+      "C:\\Work\\stream:alt",
+    ]) {
+      expect(() =>
+        decodeSandboxPolicy({
+          ...policy,
+          filesystem: { ...policy.filesystem, readOnlyRoots: [badWindows] },
+        }),
+      ).toThrow();
+    }
   });
 
   it("rejects unknown nested requirements instead of discarding them", () => {

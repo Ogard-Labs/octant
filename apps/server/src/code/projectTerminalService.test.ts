@@ -622,7 +622,11 @@ describe("Project terminal actions", () => {
           `cd /d "${win32.join(root, "apps/web")}" && bun run dev`,
         ],
       ] as const) {
-        const { service, terminals } = harness({ projects: withActions("apps/web"), shell });
+        const { service, terminals } = harness({
+          projects: withActions("apps/web"),
+          shell,
+          strict: false,
+        });
         await service.execute(windowId, "local-window", start());
         const result = await service.execute(windowId, "local-window", run());
         expect(result).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
@@ -639,6 +643,7 @@ describe("Project terminal actions", () => {
       const { service, terminals } = harness({
         projects: withActions("."),
         shell: "C:\\msys64\\usr\\bin\\bash.exe",
+        strict: false,
       });
       await service.execute(windowId, "local-window", start());
       const before = terminals.launches.length;

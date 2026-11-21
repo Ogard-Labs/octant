@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import type { PickerGroup } from "@octant/domain";
 import type { ProviderInstanceId } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WINDOWS_STRICT_REFUSAL } from "@octant/domain/guardrail-policy";
+import {
+  WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
+} from "@octant/domain/guardrail-policy";
 import { HostPlatformContext } from "../platform";
 import {
   PermissionModePicker,
@@ -159,7 +162,7 @@ describe("the sandbox at Full access in the mode picker", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
     const item = await screen.findByRole("menuitemcheckbox", { name: /Strict/ });
     expect(item).toHaveAttribute("aria-disabled", "true");
-    expect(item).toHaveTextContent("can't keep the sandbox");
+    expect(item).toHaveTextContent("can't run under Strict at Full access");
   });
 
   it("lets an inherited sandbox be turned off on a provider that cannot keep it", async () => {
@@ -295,24 +298,67 @@ describe("the mode picker on a Windows host", () => {
     expect(onChange).toHaveBeenCalledWith("full-access");
   });
 
-  it("shows every level unavailable on a Windows Strict thread, naming Strict", async () => {
-    render(
+  it("admits Full access under Strict for Codex on Windows while keeping lower levels and unverified runtimes unavailable by name", async () => {
+    const onStrictChange = vi.fn();
+    const { rerender } = render(
       <HostPlatformContext.Provider value="win32">
         <PermissionModePicker
           autoSupported
+          driverKind="codex"
           onChange={() => undefined}
-          strict
+          onStrictChange={onStrictChange}
+          strict={false}
           value="full-access"
-          warningScope={{ projectId: `windows-${Math.random()}` }}
+          warningScope={{ projectId: `windows-codex-${Math.random()}` }}
         />
       </HostPlatformContext.Provider>,
     );
     await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
-    for (const name of [/^Auto/, /^Ask first/, /^Accept edits/, /^Plan/, /^Full access/]) {
+    const strictCheckbox = await screen.findByRole("menuitemcheckbox", { name: /^Strict/ });
+    expect(strictCheckbox).not.toHaveAttribute("aria-disabled", "true");
+    expect(strictCheckbox).toHaveTextContent("Windows AppContainer and Job Object");
+    await userEvent.click(strictCheckbox);
+    expect(onStrictChange).toHaveBeenCalledWith(true);
+
+    rerender(
+      <HostPlatformContext.Provider value="win32">
+        <PermissionModePicker
+          autoSupported
+          driverKind="codex"
+          onChange={() => undefined}
+          onStrictChange={onStrictChange}
+          strict
+          value="full-access"
+          warningScope={{ projectId: `windows-codex-strict-${Math.random()}` }}
+        />
+      </HostPlatformContext.Provider>,
+    );
+    expect(await screen.findByRole("menuitemradio", { name: /^Full access/ })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    for (const name of [/^Auto/, /^Ask first/, /^Accept edits/, /^Plan/]) {
       const item = await screen.findByRole("menuitemradio", { name });
       expect(item).toHaveAttribute("aria-disabled", "true");
       expect(item).toHaveAccessibleDescription(WINDOWS_STRICT_REFUSAL);
     }
+
+    rerender(
+      <HostPlatformContext.Provider value="win32">
+        <PermissionModePicker
+          autoSupported
+          driverKind="claude"
+          onChange={() => undefined}
+          onStrictChange={onStrictChange}
+          strict
+          value="full-access"
+          warningScope={{ projectId: `windows-claude-${Math.random()}` }}
+        />
+      </HostPlatformContext.Provider>,
+    );
+    const claudeFull = await screen.findByRole("menuitemradio", { name: /^Full access/ });
+    expect(claudeFull).toHaveAttribute("aria-disabled", "true");
+    expect(claudeFull).toHaveAccessibleDescription(windowsStrictRuntimeRefusal("claude"));
   });
 
   it("keeps every level available on a Mac host", async () => {

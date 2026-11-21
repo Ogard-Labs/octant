@@ -23,7 +23,7 @@ import {
 import type { OsNetworkEgress } from "../process/threadEgressPolicy";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { stopWindowsProcessTree, type WindowsProcessTreeStop } from "../process/windowsProcessTree";
-import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
+import { WINDOWS_SANDBOX_OPERATION_REFUSAL } from "@octant/domain/guardrail-policy";
 import { windowsShellArguments } from "./terminalShell";
 
 export const MAX_TERMINAL_INPUT_BYTES = 64 * 1024;
@@ -381,7 +381,7 @@ export class TerminalProcessPort {
       this.#dependencies.platform === "win32" &&
       (selection !== undefined || input.strict !== false)
     )
-      throw new ProcessConfinementError("incompatible", WINDOWS_SANDBOX_MISSING_REASON);
+      throw new ProcessConfinementError("incompatible", WINDOWS_SANDBOX_OPERATION_REFUSAL);
     const pty =
       this.#dependencies.platform === "win32"
         ? this.#spawnWindowsShell(input)

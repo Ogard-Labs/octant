@@ -3623,6 +3623,50 @@ describe("Codex execution authority and approvals", () => {
     ).toBe(false);
   });
 
+  it("uses a fresh confined process per session and externalSandbox with never approvals for Windows Strict at Full access", async () => {
+    const f = fixture();
+    const driver = makeCodexDriver({ ...f.options(), platform: "win32" });
+    const first = await acquireConnection(driver, "code");
+    await Effect.runPromise(
+      first.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        strict: true,
+      }),
+    );
+    await Effect.runPromise(
+      first.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
+    );
+    await first.close();
+
+    const second = await acquireConnection(driver, "code");
+    await Effect.runPromise(
+      second.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        strict: true,
+      }),
+    );
+    await second.close();
+
+    expect(f.authorities()).toHaveLength(2);
+    expect(f.authorities()[0]).toMatchObject({
+      kind: "thread",
+      executionPolicy: "full-access",
+      strict: true,
+    });
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+      sandbox: "read-only",
+      approvalPolicy: "never",
+    });
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      approvalPolicy: "never",
+      sandboxPolicy: { type: "externalSandbox" },
+    });
+  });
+
   it("runs Reviewed's escalation past Codex's reviewer in its own sandbox outside Strict", () => {
     const native = { kind: "native", writableRoots: [projectRoot] } as const;
     expect(codexTurnExecutionSettings("approval-gated", true, false, true, native)).toEqual({

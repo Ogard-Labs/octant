@@ -37,6 +37,7 @@ import {
 import { Schema } from "effect";
 import { statSync, realpathSync } from "node:fs";
 import { projectExtraFolderRoots } from "@octant/domain";
+import { WINDOWS_SANDBOX_OPERATION_REFUSAL } from "@octant/domain/guardrail-policy";
 import type { Journal } from "../persistence/journal";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
@@ -166,6 +167,8 @@ export interface ProjectTerminalServiceOptions {
   readonly clock: () => string;
   /** The shell a local Project terminal opens, read as each one starts. */
   readonly shell?: () => string;
+  /** Host platform override for tests; defaults to `process.platform`. */
+  readonly platform?: NodeJS.Platform;
   /**
    * A Work or Code Project on a registered server, which the local catalog never
    * holds. Absent for every local Project.
@@ -857,6 +860,11 @@ export class ProjectTerminalService {
         projectId: command.projectId,
         ...(command.workThreadId === undefined ? {} : { workThreadId: command.workThreadId }),
       }) ?? true;
+    // Project terminals and Project actions cannot run inside the Windows
+    // sandbox yet; refuse before journaling or spawning when Strict is on.
+    if ((this.#options.platform ?? process.platform) === "win32" && strict) {
+      return refused("unavailable", WINDOWS_SANDBOX_OPERATION_REFUSAL);
+    }
     const posture: ProjectTerminalPosture = !strict
       ? "full-access"
       : workThread !== undefined

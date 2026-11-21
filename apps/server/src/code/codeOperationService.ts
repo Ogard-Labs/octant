@@ -1,4 +1,4 @@
-import type { EventActor } from "@octant/contracts";
+import type { EventActor, ProviderDriverKind } from "@octant/contracts";
 import {
   attachedFilesMessage,
   partitionAttachedFiles,
@@ -1295,6 +1295,12 @@ export interface CodeOperationServiceOptions {
    * Absent reads as Strict.
    */
   readonly threadStrict?: (thread: CodeThread) => boolean;
+  /** The driver kind for a thread's provider instance, used for host admission. */
+  readonly providerDriverKind?: (
+    thread: CodeThread,
+  ) => ProviderDriverKind | undefined | Promise<ProviderDriverKind | undefined>;
+  /** Host platform override for tests; defaults to `process.platform`. */
+  readonly platform?: NodeJS.Platform;
   /**
    * Journal the head an operation established on the checkout it scoped: a
    * branch switch changes it without an observation event, and thread reads
@@ -6705,10 +6711,17 @@ export class CodeOperationService {
     // Checked before the worktree is prepared or any runtime starts. Below
     // Full access on a host without Octant's sandbox the provider's own
     // approvals hold the turn, so only Strict and a kept sandbox refuse there.
+    const hostPlatform = this.#options.platform ?? process.platform;
+    const strict = this.#options.threadStrict?.(thread) ?? true;
+    const driverKind =
+      hostPlatform === "win32" && strict && thread.executionPolicy === "full-access"
+        ? await this.#options.providerDriverKind?.(thread)
+        : undefined;
     const sandboxRefusal = hostProviderTurnRefusal({
-      platform: process.platform,
+      platform: hostPlatform,
       access: thread,
-      strict: this.#options.threadStrict?.(thread) ?? true,
+      strict,
+      driverKind,
     });
     if (sandboxRefusal !== undefined)
       return this.#failed(command.operationId, "unavailable", sandboxRefusal, "refused");

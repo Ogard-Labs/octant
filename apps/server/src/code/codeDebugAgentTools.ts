@@ -875,8 +875,7 @@ const REFUSAL_MESSAGES: Readonly<Record<CodeDebugRefusalReason, string>> = {
   "checkout-mismatch": "This thread's window is now on another checkout.",
   "checkout-unavailable": "This thread's checkout is unavailable right now.",
   "no-debug-adapter": "No debug adapter that is installed and switched on runs this configuration.",
-  "unsupported-platform":
-    "Debug sessions run on macOS and Linux, and on Windows only outside Strict, which needs a sandbox Windows does not have yet.",
+  "unsupported-platform": "This operation cannot run inside the Windows sandbox yet.",
   "mode-prohibited": "Only a Code thread debugs a program.",
   "plan-read-only": "Plan is read-only, so it runs and debugs no program.",
   "local-host-required": "Only this host's own windows and this thread's agent debug a program.",

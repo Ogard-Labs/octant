@@ -8,6 +8,7 @@ import {
   chmodSync,
   constants,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -23,11 +24,19 @@ import { Effect, type Scope } from "effect";
 
 import {
   WINDOWS_SANDBOX_MISSING_REASON,
-  WINDOWS_STRICT_REFUSAL,
+  WINDOWS_STRICT_NETWORK_REFUSAL,
+  WINDOWS_STRICT_SHIM_REFUSAL,
   windowsProviderLaunch,
   type WindowsProviderLaunch,
 } from "@octant/domain/guardrail-policy";
+import { isSameOrInside, windowsGuardPath } from "@octant/domain/secret-guard-policy";
+import { windowsNativePath } from "@octant/domain/windows-confinement-policy";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
+import { sandboxNetworkLimitsOn } from "../process/sandboxRuntimePolicy";
+import {
+  resolvePackagedWindowsConfineLauncher,
+  type WindowsConfinementOptions,
+} from "../process/windowsConfinement";
 import { WINDOWS_PROCESS_ENVIRONMENT_NAMES } from "../process/windowsEnvironment";
 import {
   resolveWindowsProviderProgram,
@@ -101,6 +110,13 @@ export type CodexLaunchAuthority =
        * platforms ignore it.
        */
       readonly unconfinedOnWindows?: true;
+      /**
+       * Read for a Windows Strict host when the packaged Windows confinement
+       * launcher is available: the catalog probe runs inside the AppContainer
+       * and Job Object sandbox with read-only access to the account home and a
+       * private scratch root, never unconfined. Other platforms ignore it.
+       */
+      readonly confinedOnWindows?: true;
     }
   | {
       readonly kind: "thread";
@@ -175,6 +191,7 @@ export interface CodexProbeOptions {
   readonly timeoutMs?: number;
   readonly onProcessStarted?: ProviderProcessStartedListener;
   readonly confinement?: ProcessConfinementPort;
+  readonly platform?: NodeJS.Platform;
 }
 
 export interface CodexProcessOptions {
@@ -188,6 +205,12 @@ export interface CodexProcessOptions {
   /** Confinement for the app-server below Full access; defaults to the platform's. */
   readonly confinement?: ProcessConfinementPort;
   readonly platform?: NodeJS.Platform;
+  /**
+   * Windows Strict phase 1 confinement configuration (packaged launcher path
+   * and durable pre-ACL lease store). Defaults to the host-packaged launcher
+   * when available on native Windows.
+   */
+  readonly windowsConfinement?: WindowsConfinementOptions;
   /**
    * Whether a catalog read on a Windows host runs unconfined, because the
    * host's new threads run with no Octant sandbox; read as each catalog read
@@ -217,37 +240,53 @@ function runsWithoutOctantConfinement(
   authority: CodexLaunchAuthority,
   platform: NodeJS.Platform,
 ): boolean {
+  if (platform === "win32") return codexWindowsLaunch(authority).status === "unconfined";
   if (authority.kind === "catalog") return true;
   return (
     authority.strict !== true &&
     authority.fullAccessSandbox !== true &&
     authority.sandboxPolicy === undefined &&
-    (authority.strict === false ||
-      authority.executionPolicy === "full-access" ||
-      platform === "win32")
+    (authority.strict === false || authority.executionPolicy === "full-access")
   );
 }
 
 /**
- * How one launch runs on Windows, from that launch's own authority. Windows
- * has no Octant sandbox, so a launch there runs unconfined (Full access, or a
- * level below it outside Strict, where Codex's own sandbox and approvals hold
- * it, or a catalog read made for such a host) or is refused with the reason.
+ * How one launch runs on Windows, from that launch's own authority. Outside
+ * Strict, launches run unconfined (Full access, or below Full access with
+ * Codex's own sandbox and approvals, or a catalog read for such a host). Under
+ * canonical Strict, phase 1 admits Full access on Work and Code inside the
+ * Windows AppContainer + Job Object sandbox and refuses every other Strict
+ * combination by name.
  */
 function codexWindowsLaunch(authority: CodexLaunchAuthority): WindowsProviderLaunch {
   if (authority.kind === "catalog") {
-    return authority.unconfinedOnWindows === true
-      ? { status: "unconfined", approvals: "none" }
-      : { status: "refused", reason: WINDOWS_SANDBOX_MISSING_REASON };
+    if (authority.unconfinedOnWindows === true) {
+      return { status: "unconfined", approvals: "none" };
+    }
+    if (authority.confinedOnWindows === true) {
+      return { status: "confined" };
+    }
+    return { status: "refused", reason: WINDOWS_SANDBOX_MISSING_REASON };
   }
-  if (authority.sandboxPolicy !== undefined)
-    return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
   return windowsProviderLaunch({
     mode: authority.mode,
     executionPolicy: authority.executionPolicy,
     fullAccessSandbox: authority.fullAccessSandbox,
-    strict: authority.strict,
+    strict: authority.sandboxPolicy !== undefined ? true : authority.strict,
+    driverKind: "codex",
   });
+}
+
+/**
+ * Windows Strict phase 1 admits only a native `.exe` Codex executable at a
+ * drive-absolute path — never a `.cmd`/`.bat`/`.ps1` shim or script launcher.
+ */
+function windowsStrictCodexBinaryRefusal(binaryPath: string): string | undefined {
+  const native = windowsNativePath(binaryPath);
+  if (native === undefined || !/\.exe$/iu.test(native)) {
+    return WINDOWS_STRICT_SHIM_REFUSAL;
+  }
+  return undefined;
 }
 
 const DEFAULT_OCTANT_VERSION = "0.0.0";
@@ -699,6 +738,7 @@ export function probeCodexBinary(
       environment: () =>
         codexProcessEnvironment(binaryPath, options.inheritedEnvironment ?? process.env),
       ...(options.confinement === undefined ? {} : { confinement: options.confinement }),
+      ...(options.platform === undefined ? {} : { platform: options.platform }),
     });
     if (probe.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
     const { launch } = probe;
@@ -710,6 +750,7 @@ export function probeCodexBinary(
         env: launch.environment,
         stdio: ["ignore", "pipe", "pipe"],
       });
+      if (child.pid !== undefined) launch.onSpawned?.(child.pid);
       let childExitedObserved = false;
       const childExited = new Promise<void>((resolveExit) =>
         child.once("exit", () => {
@@ -727,7 +768,15 @@ export function probeCodexBinary(
       const terminateProcess = makeProcessTerminator(child, shutdownTimeoutMs);
       // The scratch directory outlives the process it was granted to unless it
       // goes away with it, and every settle path here runs the terminator.
-      const terminate = () => terminateProcess().finally(launch.release);
+      // Verified Windows lease cleanup runs before removing the scratch folder.
+      const terminate = async () => {
+        try {
+          await terminateProcess();
+          await launch.verifyCleanup?.();
+        } finally {
+          launch.release();
+        }
+      };
       // The version line is read from stdout alone. Codex writes the version
       // there and keeps stderr for advice: given a throwaway home it warns that
       // it cannot install its PATH aliases, which a version read does not need
@@ -858,11 +907,14 @@ const CODEX_SEATBELT_SERVICE_RULES = [
 
 interface CodexLaunch {
   readonly sandboxPolicy?: SandboxPolicySelection;
+  readonly confined?: boolean;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly cwd: string | undefined;
   readonly environment: NodeJS.ProcessEnv;
   readonly release: () => void;
+  readonly onSpawned?: (pid: number) => void;
+  readonly verifyCleanup?: () => Promise<void>;
 }
 
 function existingRealPaths(paths: ReadonlyArray<string | undefined>): ReadonlyArray<string> {
@@ -1079,17 +1131,20 @@ export function prepareCodexLaunch(input: {
 }
 
 /**
- * A Codex launch on Windows, decided from that launch's own authority. Windows
- * has no Octant sandbox, so a launch runs unconfined, with Codex's own sandbox
- * and approvals below Full access (`codexExecutionSettings`), or is refused
- * with the reason. An npm shim is resolved to the program it starts, never run
- * through a shell.
+ * A Codex launch on Windows, decided from that launch's own authority.
+ * Outside Strict, launches run unconfined (resolving npm shims without a
+ * shell). Under canonical Strict, phase 1 admits verified native Codex `.exe`
+ * at Full access inside the Windows AppContainer + Job Object sandbox; every
+ * other Strict combination, shim, or proxy-only network policy is refused
+ * before spawn without retrying unconfined.
  */
 function prepareWindowsCodexLaunch(input: {
   readonly binaryPath: string;
   readonly args: ReadonlyArray<string>;
   readonly authority: CodexLaunchAuthority;
   readonly environment: NodeJS.ProcessEnv;
+  readonly confinement: ProcessConfinementPort;
+  readonly network?: ProviderRuntimeProxiedNetwork;
 }):
   | { readonly status: "prepared"; readonly launch: CodexLaunch }
   | { readonly status: "refused"; readonly failure: ProviderFailure } {
@@ -1097,6 +1152,212 @@ function prepareWindowsCodexLaunch(input: {
   const form = codexWindowsLaunch(authority);
   if (form.status === "refused") {
     return { status: "refused", failure: failure("incompatible", form.reason) };
+  }
+  if (form.status === "confined") {
+    const binaryRefusal = windowsStrictCodexBinaryRefusal(input.binaryPath);
+    if (binaryRefusal !== undefined) {
+      return { status: "refused", failure: failure("incompatible", binaryRefusal) };
+    }
+    const policy = authority.kind === "thread" ? authority.sandboxPolicy?.policy : undefined;
+    if (
+      input.network !== undefined ||
+      policy?.network === "deny" ||
+      policy?.hostServices === "blocked" ||
+      (policy?.approvedDestinations?.length ?? 0) > 0 ||
+      (policy?.localServices?.length ?? 0) > 0 ||
+      (policy?.network === "existing-policy" && sandboxNetworkLimitsOn())
+    ) {
+      return {
+        status: "refused",
+        failure: failure("incompatible", WINDOWS_STRICT_NETWORK_REFUSAL),
+      };
+    }
+    let temporaryDirectory: string | undefined;
+    const release = () => {
+      if (temporaryDirectory !== undefined) releaseScratch(temporaryDirectory);
+    };
+    const nativeRealpath = (path: string): string => {
+      try {
+        return process.platform === "win32" ? realpathSync.native(path) : path;
+      } catch {
+        return path;
+      }
+    };
+    const existingNativePaths = (
+      paths: ReadonlyArray<string | undefined>,
+    ): ReadonlyArray<string> => {
+      const resolved = new Set<string>();
+      for (const path of paths) {
+        if (path === undefined || windowsNativePath(path) === undefined) continue;
+        if (process.platform === "win32" && !existsSync(path)) continue;
+        const candidate = nativeRealpath(path);
+        const normalized = windowsNativePath(candidate);
+        if (normalized !== undefined) resolved.add(normalized);
+      }
+      return [...resolved];
+    };
+    const ensureDurableCodexStateDirs = (resolvedCodexHome: string): ReadonlyArray<string> => {
+      // Keep `archived_sessions` read-only and redirect `CODEX_SQLITE_HOME`
+      // into launch-private scratch so confined turns cannot mutate archived
+      // history or the shared SQLite state database. Codex hardcodes active
+      // rollout writes under `CODEX_HOME\sessions` (and runtime logs under
+      // `CODEX_HOME\log`) with no env override independent of `CODEX_HOME`,
+      // and moving `CODEX_HOME` would break Windows Credential Manager keyring
+      // lookup (keyed by canonical `CODEX_HOME` hash) and require copying
+      // `auth.json` (which Octant never reads). Keeping only `sessions` and
+      // `log` writable matches macOS/Linux confinement while keeping the rest
+      // of `CODEX_HOME` strictly read-only.
+      const subdirs = ["sessions", "log"] as const;
+      const writeRoots: string[] = [];
+      for (const sub of subdirs) {
+        const candidate = `${resolvedCodexHome}\\${sub}`;
+        if (process.platform === "win32") {
+          if (existsSync(candidate)) {
+            const meta = lstatSync(candidate);
+            if (!meta.isDirectory() || meta.isSymbolicLink()) {
+              throw new ProcessConfinementError(
+                "incompatible",
+                `Codex cannot run under Windows Strict: ${candidate} must be a regular directory.`,
+              );
+            }
+          } else {
+            mkdirSync(candidate, { recursive: true, mode: 0o700 });
+          }
+          const canonical = windowsNativePath(realpathSync.native(candidate));
+          if (canonical === undefined) {
+            throw new ProcessConfinementError(
+              "incompatible",
+              `Codex cannot run under Windows Strict: ${candidate} could not be resolved.`,
+            );
+          }
+          writeRoots.push(canonical);
+        } else {
+          const normalized = windowsNativePath(candidate);
+          if (normalized !== undefined) writeRoots.push(normalized);
+        }
+      }
+      return writeRoots;
+    };
+    try {
+      const createdScratch = mkdtempSync(join(tmpdir(), "octant-codex-"));
+      temporaryDirectory =
+        process.platform === "win32" ? realpathSync.native(createdScratch) : createdScratch;
+      const scratchSqliteHome = join(temporaryDirectory, "codex-sqlite");
+      mkdirSync(scratchSqliteHome, { recursive: true });
+      const root =
+        authority.kind === "thread" ? nativeRealpath(authority.root) : temporaryDirectory;
+      if (process.platform === "win32" && !statSync(root).isDirectory()) {
+        throw new Error("Codex root is not a directory.");
+      }
+      const extraFolders =
+        authority.kind === "thread"
+          ? existingNativePaths([
+              ...(authority.extraFolders ?? []),
+              ...(policy?.filesystem.readWriteRoots ?? []),
+            ])
+          : [];
+      const home = input.environment.USERPROFILE ?? input.environment.HOME ?? homedir();
+      const codexHome = input.environment.CODEX_HOME ?? `${home}\\.codex`;
+      // Windows AppContainer cannot carve read-only authority entries
+      // (`config.toml`, `hooks.json`, `.env`, `plugins`, `rules`, `skills`,
+      // `AGENTS.md`) out of a writable parent grant. Keep the shared Codex
+      // home, `archived_sessions`, and shared SQLite state read-only/isolated
+      // so a confined turn cannot poison startup config, integrations, or
+      // archived history for later launches, while granting write access only
+      // to `sessions` and `log` so fresh Windows Strict follow-up processes
+      // can resume saved conversations.
+      const accountReadRoots = existingNativePaths([codexHome]);
+      const resolvedCodexHome = accountReadRoots[0];
+      if (resolvedCodexHome !== undefined) {
+        const codexHomeForm = windowsGuardPath(`${resolvedCodexHome}\\`);
+        const homeForm = windowsGuardPath(`${home}\\`);
+        if (
+          codexHomeForm !== undefined &&
+          homeForm !== undefined &&
+          isSameOrInside(homeForm, codexHomeForm)
+        ) {
+          throw new ProcessConfinementError(
+            "incompatible",
+            "Windows Strict cannot use the user profile directory as CODEX_HOME.",
+          );
+        }
+        if (authority.kind === "thread") {
+          const writableProjectForms = [root, ...extraFolders]
+            .map((path) => windowsGuardPath(`${path}\\`))
+            .filter((form): form is string => form !== undefined);
+          if (
+            codexHomeForm !== undefined &&
+            writableProjectForms.some(
+              (writable) =>
+                isSameOrInside(codexHomeForm, writable) || isSameOrInside(writable, codexHomeForm),
+            )
+          ) {
+            throw new ProcessConfinementError(
+              "incompatible",
+              "Windows Strict cannot grant a writable Project folder that overlaps CODEX_HOME.",
+            );
+          }
+        }
+      }
+      const durableWriteRoots =
+        authority.kind === "thread" && resolvedCodexHome !== undefined
+          ? ensureDurableCodexStateDirs(resolvedCodexHome)
+          : [];
+      const explicitReadOnly = existingNativePaths([
+        ...(authority.readOnlyFolders ?? []),
+        ...(policy?.filesystem.readOnlyRoots ?? []),
+      ]);
+      const executable = nativeRealpath(input.binaryPath);
+      const launch = input.confinement.prepare({
+        executable,
+        args: input.args,
+        boundRoot: root,
+        extraBoundRoots: extraFolders,
+        writeBoundRoot: authority.kind === "thread",
+        temporaryDirectory,
+        ...(durableWriteRoots.length === 0 ? {} : { additionalWriteRoots: durableWriteRoots }),
+        readRoots: [...accountReadRoots],
+        ...(explicitReadOnly.length === 0 ? {} : { explicitReadOnlyRoots: explicitReadOnly }),
+        ownAccountPaths: [...accountReadRoots, ...durableWriteRoots],
+        networkEgress: "allow",
+        ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+          ? { sandboxPolicy: authority.sandboxPolicy }
+          : {}),
+      });
+      return {
+        status: "prepared",
+        launch: {
+          ...launch,
+          confined: true,
+          cwd: root,
+          environment: {
+            ...input.environment,
+            ...launch.environment,
+            CODEX_SQLITE_HOME: scratchSqliteHome,
+            TMP: temporaryDirectory,
+            TEMP: temporaryDirectory,
+            TMPDIR: temporaryDirectory,
+          },
+          release,
+          ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+            ? { sandboxPolicy: authority.sandboxPolicy }
+            : {}),
+        },
+      };
+    } catch (error) {
+      release();
+      return {
+        status: "refused",
+        failure: failure(
+          error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
+            ? "invalid-configuration"
+            : "incompatible",
+          error instanceof ProcessConfinementError
+            ? error.message
+            : "Codex cannot run under Windows Strict with this setup. No runtime was started.",
+        ),
+      };
+    }
   }
   const program = resolveWindowsProviderProgram({
     displayName: "Codex",
@@ -1191,6 +1452,7 @@ function acquireCodexAppServer(
       env: launch.environment,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    if (child.pid !== undefined) launch.onSpawned?.(child.pid);
     trackSandboxChild(launch.sandboxPolicy, child);
     const terminateGroup = makeProcessTerminator(child, options.shutdownTimeoutMs);
     const rpc = makeCodexRpcClient({
@@ -1224,6 +1486,7 @@ function acquireCodexAppServer(
         try {
           await Promise.race([childExited, wait(25)]);
           await terminateGroup();
+          await launch.verifyCleanup?.();
         } finally {
           launch.release();
           child.stdin.destroy();
@@ -1255,9 +1518,23 @@ function acquireCodexAppServer(
       );
     };
     const onError = () =>
-      finishFailure(failure("unavailable", "Codex app-server could not be started."));
+      finishFailure(
+        failure(
+          "unavailable",
+          launch.confined === true
+            ? "Confined Codex runtime did not start successfully."
+            : "Codex app-server could not be started.",
+        ),
+      );
     const onEarlyExit = () =>
-      finishFailure(failure("unavailable", "Codex app-server exited before initialization."));
+      finishFailure(
+        failure(
+          "unavailable",
+          launch.confined === true
+            ? "Confined Codex runtime did not start successfully and exited before initialization."
+            : "Codex app-server exited before initialization.",
+        ),
+      );
 
     child.once("error", onError);
     child.once("exit", onEarlyExit);
@@ -1340,31 +1617,58 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
     versionProbeConfinement: options.versionProbeConfinement,
   };
   const platform = options.platform ?? process.platform;
-  const confinement = options.confinement ?? makeProcessConfinementLive({ platform });
+  const packagedWindowsLauncher =
+    platform === "win32" && options.windowsConfinement === undefined
+      ? resolvePackagedWindowsConfineLauncher()
+      : undefined;
+  const windowsConfinement =
+    options.windowsConfinement ??
+    (packagedWindowsLauncher === undefined ? undefined : { launcherPath: packagedWindowsLauncher });
+  const confinement =
+    options.confinement ??
+    makeProcessConfinementLive({
+      platform,
+      ...(windowsConfinement === undefined ? {} : { windowsConfinement }),
+    });
 
   return {
     start: ({ binaryPath, authority: requested, environment, onProcessStarted }) =>
       Effect.suspend(() => {
         let terminate: (() => Promise<void>) | undefined;
         const authority: CodexLaunchAuthority =
-          requested.kind === "catalog" &&
-          platform === "win32" &&
-          options.windowsCatalogUnconfined?.() === true
-            ? { ...requested, unconfinedOnWindows: true }
+          requested.kind === "catalog" && platform === "win32"
+            ? options.windowsCatalogUnconfined?.() === true
+              ? { ...requested, unconfinedOnWindows: true }
+              : windowsConfinement !== undefined || options.confinement !== undefined
+                ? { ...requested, confinedOnWindows: true }
+                : requested
             : requested;
         // A native launch probes its executable natively. Metadata and version
         // results never authorize a restricted launch; Strict admits it afresh.
         const versionProbeConfinement = runsWithoutOctantConfinement(authority, platform)
           ? UNCONFINED
           : resolved.versionProbeConfinement;
-        // On Windows a launch that runs unconfined (Full access, a level below
-        // it outside Strict, or a catalog read made for such a host) reads its
-        // version unconfined too: the runtime it precedes has the same reach,
-        // and the confined read has no Windows form. Every other launch is
-        // refused there before anything runs.
+        // On Windows a launch outside Strict reads its version unconfined; under
+        // canonical Strict, phase 1 verifies a native `.exe` and probes inside
+        // the AppContainer sandbox (never unconfined). Every other Windows
+        // Strict combination refuses before probe or spawn.
         const windowsLaunch = platform === "win32" ? codexWindowsLaunch(authority) : undefined;
         if (windowsLaunch?.status === "refused") {
           return Effect.fail(failure("incompatible", windowsLaunch.reason));
+        }
+        if (windowsLaunch?.status === "confined") {
+          const binaryRefusal = windowsStrictCodexBinaryRefusal(binaryPath);
+          if (binaryRefusal !== undefined) {
+            return Effect.fail(failure("incompatible", binaryRefusal));
+          }
+          if (options.confinement === undefined && windowsConfinement === undefined) {
+            return Effect.fail(
+              failure(
+                "incompatible",
+                "Codex cannot run under Windows Strict with this installation: octant-windows-confine.exe is unavailable.",
+              ),
+            );
+          }
         }
         const strict = !(authority.kind === "thread" && authority.strict === false);
         const launchEnvironment =
@@ -1395,19 +1699,22 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                 : { inheritedEnvironment: launchEnvironment }),
               shutdownTimeoutMs: resolved.shutdownTimeoutMs,
               ...(onProcessStarted === undefined ? {} : { onProcessStarted }),
+              platform,
               ...(windowsLaunch === undefined
                 ? versionProbeConfinement === undefined
                   ? {}
                   : { confinement: versionProbeConfinement }
-                : {
-                    confinement: windowsUnconfinedLaunch({
-                      displayName: "Codex",
-                      ...(launchEnvironment === undefined
-                        ? {}
-                        : { environment: launchEnvironment }),
-                      programHint: CODEX_WINDOWS_PROGRAM_HINT,
+                : windowsLaunch.status === "confined"
+                  ? { confinement: resolved.versionProbeConfinement ?? confinement }
+                  : {
+                      confinement: windowsUnconfinedLaunch({
+                        displayName: "Codex",
+                        ...(launchEnvironment === undefined
+                          ? {}
+                          : { environment: launchEnvironment }),
+                        programHint: CODEX_WINDOWS_PROGRAM_HINT,
+                      }),
                     }),
-                  }),
             });
             const appServerEnvironment =
               launchEnvironment ?? codexProcessEnvironment(binaryPath, process.env, strict);
@@ -1415,11 +1722,12 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
             const keepsSandbox =
               runtimePolicy === "full-access" &&
               authority.kind === "thread" &&
-              authority.fullAccessSandbox === true;
+              (authority.fullAccessSandbox === true || windowsLaunch?.status === "confined");
             // Full access that keeps the sandbox stays inside Octant's profile,
             // so its network is held as Accept edits' is, as Claude's sandbox
             // asks for it; open Full access gets no proxy, and neither does a
-            // Windows launch, which has no Octant wall to hold a proxy to.
+            // Windows launch (which refuses proxied network rather than running
+            // a loopback proxy an AppContainer cannot reach).
             const network =
               (runtimePolicy === "full-access" && !keepsSandbox) || windowsLaunch !== undefined
                 ? undefined
@@ -1479,7 +1787,11 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
               onProcessStarted,
             );
             terminate = managed.terminate;
-            return network === undefined
+            const windowsDenyNetwork =
+              windowsLaunch?.status === "confined" &&
+              authority.kind === "thread" &&
+              authority.sandboxPolicy?.policy.network === "deny";
+            return network === undefined && !windowsDenyNetwork
               ? { ...managed.connection, networkOpen: true }
               : managed.connection;
           }),

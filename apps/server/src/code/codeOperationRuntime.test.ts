@@ -168,8 +168,9 @@ import {
   APPROVAL_REFUSED_IN_PLAN_MESSAGE,
   defaultWindowWorkspace,
   contextKeyForProject,
-  WINDOWS_SANDBOX_MISSING_REASON,
+  WINDOWS_SANDBOX_OPERATION_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
 } from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
@@ -243,7 +244,7 @@ describe("CodeOperationRuntime", () => {
           credentialRefs: [],
         }),
       ).rejects.toMatchObject({
-        failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+        failure: { category: "unavailable", message: WINDOWS_SANDBOX_OPERATION_REFUSAL },
       });
     } finally {
       vi.unstubAllGlobals();
@@ -271,7 +272,7 @@ describe("CodeOperationRuntime", () => {
             (result) => JSON.stringify(result),
             (error: unknown) => JSON.stringify(error),
           );
-        expect(outcome).not.toContain(WINDOWS_SANDBOX_MISSING_REASON);
+        expect(outcome).not.toContain(WINDOWS_SANDBOX_OPERATION_REFUSAL);
       } finally {
         vi.unstubAllGlobals();
       }
@@ -295,7 +296,7 @@ describe("CodeOperationRuntime", () => {
           credentialRefs: [],
         }),
       ).rejects.toMatchObject({
-        failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+        failure: { category: "unavailable", message: WINDOWS_SANDBOX_OPERATION_REFUSAL },
       });
     } finally {
       vi.unstubAllGlobals();
@@ -4667,6 +4668,132 @@ describe("CodeOperationRuntime", () => {
       vi.unstubAllGlobals();
       await fixture.runtime.close();
       fixture.close();
+    }
+  });
+
+  it("admits a Windows Strict Codex turn at Full access without offering Octant-operated tools, and refuses non-Codex by name", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const codexFixture = runtimeFixture({
+      provider: { ...providerDriver(connection), kind: "codex" },
+      resolveStrict: () => true,
+      supportsAppManagedTools: true,
+    });
+    codexFixture.setThread(
+      decodeCodeThread({ ...thread(), executionPolicy: "full-access", strict: true }),
+    );
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        codexFixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(17),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: codexFixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      const sent = vi.mocked(connection.send).mock.calls[0]?.[0];
+      expect(sent?.tools).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+      await codexFixture.runtime.close();
+      codexFixture.close();
+    }
+
+    const claudeQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const claudeConnection = providerConnection(claudeQueue);
+    const claudeFixture = runtimeFixture({
+      provider: { ...providerDriver(claudeConnection), kind: "claude" },
+      resolveStrict: () => true,
+    });
+    claudeFixture.setThread(
+      decodeCodeThread({ ...thread(), executionPolicy: "full-access", strict: true }),
+    );
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        claudeFixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(18),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: claudeFixture.prompt,
+        }),
+      ).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "unavailable",
+          message: windowsStrictRuntimeRefusal("claude"),
+        },
+      });
+      expect(claudeConnection.send).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      await claudeFixture.runtime.close();
+      claudeFixture.close();
+    }
+  });
+
+  it("validates non-default model options on a Full-access Codex Code thread under Windows Strict", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const baseThread = thread();
+    const probeProvider = vi.fn(async () => ({
+      readiness: "ready" as const,
+      models: [
+        {
+          id: baseThread.modelId,
+          displayName: "GPT-5.4",
+          reasoning: "supported" as const,
+          inputModalities: ["text" as const],
+          source: "discovered" as const,
+          verification: "verified" as const,
+          options: [
+            {
+              id: "effort",
+              displayName: "Effort",
+              kind: "selection" as const,
+              values: ["medium", "high"] as const,
+            },
+          ],
+        },
+      ],
+    }));
+    const codexFixture = runtimeFixture({
+      provider: { ...providerDriver(connection), kind: "codex" },
+      resolveStrict: () => true,
+      probeProvider,
+    });
+    codexFixture.setThread(
+      decodeCodeThread({
+        ...baseThread,
+        executionPolicy: "full-access",
+        strict: true,
+        modelOptionValues: { effort: "high" },
+      }),
+    );
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        codexFixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(19),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: codexFixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      expect(probeProvider).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    } finally {
+      vi.unstubAllGlobals();
+      await codexFixture.runtime.close();
+      codexFixture.close();
     }
   });
 

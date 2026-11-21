@@ -444,6 +444,7 @@ export interface WorkTurnServiceDependencies {
   readonly conversationInputTransfer?: Pick<ConversationInputTransfer, "prepare">;
   /** Carries a thread's session to another account of the same provider after a move. */
   readonly accountSessionCarrier?: AccountSessionCarrier;
+  readonly platform?: NodeJS.Platform;
   readonly supportsAttachments?: (input: {
     readonly providerInstanceId: WorkThread["providerInstanceId"];
     readonly modelId: WorkThread["modelId"];
@@ -779,8 +780,10 @@ export class WorkTurnService {
 
   readonly #moveHold: ((threadId: string) => boolean) | undefined;
   readonly #wakeupsForThread: WorkTurnServiceDependencies["wakeupsForThread"];
+  readonly #platform: NodeJS.Platform | undefined;
 
   constructor(dependencies: WorkTurnServiceDependencies) {
+    this.#platform = dependencies.platform;
     this.#moveHold = dependencies.moveHold;
     this.#wakeupsForThread = dependencies.wakeupsForThread;
     this.#runningAccess = dependencies.runningAccess ?? new Map();
@@ -1510,14 +1513,20 @@ export class WorkTurnService {
     // is journaled or started: on a host without Octant's sandbox a turn below
     // Full access runs with the provider's own approvals, and only Strict and
     // a kept sandbox, which need Octant's sandbox, refuse.
+    const platform = this.#platform ?? process.platform;
+    const providerInstance =
+      thread === undefined
+        ? this.#persistence.readProviderInstance(command.authority.providerInstanceId)
+        : this.#persistence.readProviderInstance(thread.providerInstanceId);
     const sandboxRefusal = hostProviderTurnRefusal({
-      platform: process.platform,
+      platform,
       access: {
         ...workThreadAccessOf(turnAccess),
         ...(thread?.strict === undefined ? {} : { strict: thread.strict }),
         ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
       },
       strict: this.#resolveStrict?.(String(command.threadId)) ?? true,
+      driverKind: providerInstance?.driverKind,
     });
     if (sandboxRefusal !== undefined) throw this.#failure("unavailable", sandboxRefusal);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
@@ -1814,10 +1823,21 @@ export class WorkTurnService {
       skillContext = resolved.context;
       extensionTools = resolved.tools;
     }
+    // Windows Strict phase 1 withholds Octant-operated host tools before
+    // continuation checks so follow-up turns compare the actual admitted empty
+    // tool catalog against the saved session instead of demanding a handoff.
+    const windowsStrictLocal =
+      server === undefined &&
+      platform === "win32" &&
+      (this.#resolveStrict?.(String(command.threadId)) ?? true);
+    if (windowsStrictLocal && extensionTools !== undefined) {
+      await extensionTools.close?.().catch(() => undefined);
+      extensionTools = undefined;
+    }
     const hostTools =
       server !== undefined
         ? server.tools
-        : thread === undefined
+        : windowsStrictLocal || thread === undefined
           ? undefined
           : this.#resolveAppManagedTools?.({
               thread,
@@ -1827,8 +1847,9 @@ export class WorkTurnService {
               turnId: command.turnId,
               ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
             });
-    const preparedTools =
-      extensionTools === undefined
+    const preparedTools = windowsStrictLocal
+      ? undefined
+      : extensionTools === undefined
         ? hostTools
         : combineAppManagedToolSets(hostTools, extensionTools);
     let toolsLaunched = false;
@@ -2954,7 +2975,12 @@ export class WorkTurnService {
         ? this.#turnFileObserver?.observe(input.projectRoot, input.extraFolders)
         : undefined;
 
-    const appManagedTools = input.preparedTools;
+    const launchStrict = this.#resolveStrict?.(String(input.command.threadId)) ?? true;
+    const windowsStrict = (this.#platform ?? process.platform) === "win32" && launchStrict;
+    const appManagedTools = windowsStrict ? undefined : input.preparedTools;
+    if (windowsStrict && input.preparedTools !== undefined) {
+      await input.preparedTools.close?.().catch(() => undefined);
+    }
     const toolEffects = this.#nativeHarness?.toolEffects?.({
       threadId: String(input.command.threadId),
       turnId: String(input.command.requestId),
@@ -3083,12 +3109,12 @@ export class WorkTurnService {
     });
     // Read as the turn launches, never carried from an earlier one: the
     // session starts with it, and the turn records what it kept.
-    const launchStrict = this.#resolveStrict?.(String(input.command.threadId)) ?? true;
     const strictKept = strictKeptForLaunch({
       strict: launchStrict,
       driverKind: input.driver.kind,
       executionPolicy: input.access === "full-access" ? "full-access" : "approval-gated",
       fullAccessSandbox: input.fullAccessSandbox,
+      ...(this.#platform === undefined ? {} : { platform: this.#platform }),
     });
     if (strictKept !== undefined) {
       const launching = this.#projection.lookup(input.command.requestId);

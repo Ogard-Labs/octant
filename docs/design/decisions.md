@@ -48,7 +48,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Native harness](#native-harness)                                                     | 7         | 5       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 8         | 7       | 1            | 0                   |
-| [Sandbox and confinement](#sandbox-and-confinement)                                   | 17        | 9       | 6            | 2                   |
+| [Sandbox and confinement](#sandbox-and-confinement)                                   | 17        | 9       | 7            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 13        | 6       | 7            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 7         | 4       | 3            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **290**   | **176** | **109**      | **5**               |
+| **All areas**                                                                         | **290**   | **176** | **110**      | **4**               |
 
 ## Principles and hard lines
 
@@ -2334,21 +2334,22 @@ A confined launch on Windows runs in a fresh AppContainer with ACL grants and a 
 - Plan and Chat get an active-process limit of one; the job ends the whole tree when the launcher ends, which is the Windows process-tree stop.
 - `none` has no capability and `allow` the client capabilities; `proxied`, the relays, read-everywhere, Seatbelt rules and a non-`.exe` program are refused as incompatible rather than dropped.
 - Full access is the job object alone, with no container or grants.
-- The port refuses `win32` unless its caller passes `unverifiedWindowsConfinement`, which no production caller does, and the launcher is not packaged. Full access with the sandbox off runs on Windows without the launcher, stopped by the tree stop instead of its job; every confined launch stays refused.
-- Hosted Windows evidence covers the mechanism on an administrator runner; an ordinary account, a desktop Windows release, ACL propagation cost on a large checkout, terminals and a real provider remain unverified.
+- The launcher (`octant-windows-confine.exe`) is packaged with Windows desktop builds and wired through `windowsConfinement` for the admitted [Windows Strict, phase 1](#windows-strict-phase-1) path (verified native Codex at Full access, plus confined Codex catalog reads) with durable pre-ACL lease records and idempotent `--recover` cleanup; every other Windows Strict launch stays refused by name, and Strict-off runs unconfined using the tree stop instead of a container.
+- Hosted Windows CI covers the confinement mechanism, recovery sweep, and native Codex smoke on an administrator runner; standard-user Windows 11 desktop verification (Gate 5), ACL propagation cost on a large checkout, terminals, and other providers remain unverified.
 
 Status: Partly built. Since: 2026-11-15. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
 ### Windows Strict, phase 1
 
-Proposed: the one shared Strict control becomes accepted on native Windows for Work and Code at Full access on a verified Codex runtime, confined by a fixed launcher's fresh AppContainer, ACL grants and a launch-owned kill-on-close Job Object, with verified recovery after abrupt loss (maintainer decision, 2026-11-21, reframing the earlier proposal to keep the sandbox at Full access on Windows as a separate choice).
+The one shared Strict control is accepted on native Windows for Work and Code at Full access on a verified Codex runtime, confined by a fixed packaged launcher's fresh AppContainer, ACL grants and a launch-owned kill-on-close Job Object, with durable pre-ACL lease records and verified recovery after abrupt loss (maintainer decision, 2026-11-21, reframing the earlier proposal to keep the sandbox at Full access on Windows as a separate choice).
 
 - Two postures: outside Strict the provider holds the level with no Octant sandbox; Strict is Octant's confinement at every level. Phase 1 adds no Windows-only label, switch or preference, and Strict keeps its thread, Project and Settings resolution and explicit Off.
 - The legacy Full-access-only sandbox preference never returns as a Windows control: a saved or inherited choice without Strict keeps refusing by name and is never read as Strict or migrated into it.
-- Every other Windows Strict case keeps refusing by name until its runtime is verified, one runtime at a time: Chat, Plan and every level below Full access, every other provider, and Octant's own file, terminal and command operations.
-- Nothing retries unconfined, and Windows behavior with Strict off is unchanged.
+- Every other Windows Strict case keeps refusing by name until its runtime is verified, one runtime at a time: Chat, Plan and every level below Full access, every other provider, proxy-only or blocked-network policies (`network: "deny"` until model traffic has a separate verified path), and Octant's own file, terminal and command operations.
+- Shared `CODEX_HOME` startup configuration, `archived_sessions`, and shared SQLite state stay read-only/isolated (`CODEX_SQLITE_HOME` uses launch-private scratch) while Codex's active `sessions` and `log` subdirectories stay writable so fresh follow-up sessions can resume saved threads; nothing retries unconfined, and Windows behavior with Strict off is unchanged.
+- Live check still owed: Gate 5 real standard-user Windows 11 desktop verification before promoting to Built.
 
-Status: Designed, not built. Detail: [Architecture: Windows Strict, phase 1](../architecture.md#windows-strict-phase-1).
+Status: Partly built. Since: 2026-11-21. Detail: [Architecture: Windows Strict, phase 1](../architecture.md#windows-strict-phase-1).
 
 ## Terminals, browsers and side surfaces
 

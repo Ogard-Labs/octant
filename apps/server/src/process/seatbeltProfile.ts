@@ -65,6 +65,7 @@ import { pinnedRecipientAdmission } from "./pinnedRecipientAdmission";
 import {
   buildWindowsConfinedLaunch,
   type UnverifiedWindowsConfinementOptions,
+  type WindowsConfinementOptions,
 } from "./windowsConfinement";
 
 export class ProcessConfinementError extends Error {
@@ -89,6 +90,12 @@ export interface SeatbeltProfileInput {
   readonly sandboxProviderChannel?: boolean;
   readonly policyBlockHostServices?: boolean;
   readonly policyReadOnlyRoots?: ReadonlyArray<string>;
+  /**
+   * Read-only roots that must stay strictly read-only even without a compiled
+   * `sandboxPolicy` (used by Windows Strict phase 1 to refuse a read-only grant
+   * beneath a writable grant).
+   */
+  readonly explicitReadOnlyRoots?: ReadonlyArray<string>;
   /** Folder grants never become provider sign-in exemptions. */
   readonly policyFolderRoots?: ReadonlyArray<string>;
   /** The bound filesystem root the process starts in and may write (unless writeBoundRoot is false). */
@@ -198,6 +205,10 @@ export interface ConfinedProcessLaunch {
   readonly policyReceipt?: SandboxLaunchPolicyReceipt;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
+  /** Records the spawned launcher PID on a durable Windows pre-ACL lease. */
+  readonly onSpawned?: (pid: number) => void;
+  /** Runs verified post-exit cleanup for a Windows confined launch. */
+  readonly verifyCleanup?: () => Promise<void>;
 }
 
 export interface ProcessConfinementPrepareInput {
@@ -207,6 +218,12 @@ export interface ProcessConfinementPrepareInput {
   readonly sandboxProviderChannel?: boolean;
   readonly policyBlockHostServices?: boolean;
   readonly policyReadOnlyRoots?: ReadonlyArray<string>;
+  /**
+   * Read-only roots that must stay strictly read-only even without a compiled
+   * `sandboxPolicy` (used by Windows Strict phase 1 to refuse a read-only grant
+   * beneath a writable grant).
+   */
+  readonly explicitReadOnlyRoots?: ReadonlyArray<string>;
   /** Folder grants never become provider sign-in exemptions. */
   readonly policyFolderRoots?: ReadonlyArray<string>;
   readonly executable: string;
@@ -302,6 +319,7 @@ export interface ProcessConfinementOptions {
    * been verified on real Windows with a real provider. Without it every
    * Windows launch is refused, as it was before the launcher existed.
    */
+  readonly windowsConfinement?: WindowsConfinementOptions;
   readonly unverifiedWindowsConfinement?: UnverifiedWindowsConfinementOptions;
 }
 
@@ -1087,6 +1105,23 @@ export function makeProcessConfinementLive(
           "invalid-configuration",
           "This sandbox policy expired or its folder binding changed before launch. Start a new turn after reviewing the restrictions.",
         );
+      // Route Windows before the POSIX-only sandbox compiler so admitted
+      // Windows Strict phase 1 launches carrying a SandboxRestrictionsService
+      // selection validate and materialize Windows-supported rules cleanly.
+      if (platform === "win32") {
+        const windowsConfinement =
+          options.windowsConfinement ?? options.unverifiedWindowsConfinement;
+        if (windowsConfinement === undefined) {
+          throw new ProcessConfinementError(
+            "incompatible",
+            "Confinement is supported only on macOS and Linux.",
+          );
+        }
+        return buildWindowsConfinedLaunch(
+          selectedPolicy === undefined ? input : { ...input, sandboxPolicy: selectedPolicy },
+          windowsConfinement,
+        );
+      }
       const toolNetwork = sandboxToolNetwork(selectedPolicy);
       const policyInput =
         selectedPolicy === undefined
@@ -1243,12 +1278,6 @@ export function makeProcessConfinementLive(
             ? pinLinuxLaunch(launch, authority, selectedPolicy)
             : launch,
         );
-      }
-      // Windows stays refused until its confinement has run on real Windows
-      // with a real provider; only a caller that names the unverified option
-      // reaches the dormant builder, and no production caller does.
-      if (platform === "win32" && options.unverifiedWindowsConfinement !== undefined) {
-        return buildWindowsConfinedLaunch(input, options.unverifiedWindowsConfinement);
       }
       throw new ProcessConfinementError(
         "incompatible",

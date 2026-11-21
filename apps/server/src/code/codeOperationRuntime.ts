@@ -745,6 +745,8 @@ export interface CodeOperationRuntimeOptions {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
   }) => AppManagedToolSet | undefined;
+  /** Host platform override for tests; defaults to `process.platform`. */
+  readonly platform?: NodeJS.Platform;
   /**
    * The agent-run tool set for this thread: the model petitions the server's
    * own run admission for a child run, scoped to this thread as the parent.
@@ -1518,7 +1520,10 @@ export function createCodeOperationRuntime(
   const readRuntimeWorks = options.persistence.readCodeRuntimeWorks;
   const service = new CodeOperationService({
     authority: authorityForTurn,
+    ...(options.platform === undefined ? {} : { platform: options.platform }),
     threadStrict: (thread: CodeThread) => options.resolveStrict?.(thread.id) ?? true,
+    providerDriverKind: async (thread: CodeThread) =>
+      (await options.resolveProviderDriver(thread))?.kind,
     ...(readRuntimeWorks === undefined
       ? {}
       : {
@@ -2144,7 +2149,7 @@ export function createCodeOperationRuntime(
           command.kind === "start-provider-turn"
             ? undefined
             : hostSandboxRefusal({
-                platform: process.platform,
+                platform: options.platform ?? process.platform,
                 ...operationAccess(windowId, command),
               });
         if (sandboxRefusal !== undefined)
@@ -6050,6 +6055,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   #appManagedTools(active: ActiveTurn): AppManagedToolSet | undefined {
+    // Windows Strict phase 1 withholds Octant-operated host tools (file reads/
+    // writes, thread terminals, checks, language/debug, browser/device/host
+    // tools) from advertised capabilities so the confined runtime uses only its
+    // own in-container tools.
+    if (
+      (this.#options.platform ?? process.platform) === "win32" &&
+      this.#strict(active.thread.id)
+    ) {
+      return undefined;
+    }
     if (active.serverTools !== undefined) {
       // The server tools and the few sets that touch only this host's
       // records: every other set reads or acts on a folder or a device of
@@ -6506,6 +6521,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       driverKind: active.driver.kind,
       executionPolicy: active.thread.executionPolicy,
       fullAccessSandbox: active.thread.fullAccessSandbox,
+      platform: this.#options.platform ?? process.platform,
     });
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,

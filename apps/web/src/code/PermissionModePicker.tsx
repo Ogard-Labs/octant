@@ -1,11 +1,15 @@
-import type { PermissionMode, ProviderExecutionPolicy } from "@octant/contracts/providers";
+import type {
+  PermissionMode,
+  ProviderDriverKind,
+  ProviderExecutionPolicy,
+  ProviderInstanceId,
+} from "@octant/contracts/providers";
 import {
   AUTO_UNSUPPORTED_REASON,
   fullAccessSandboxSupported,
   hostProviderTurnRefusal,
   threadAccessOf,
 } from "@octant/domain/guardrail-policy";
-import type { ProviderInstanceId } from "@octant/contracts/providers";
 import { clampTurnAccessPosture, type PickerGroup } from "@octant/domain";
 import type { AutoReview } from "./autoReview";
 import {
@@ -62,6 +66,15 @@ export function threadKeepsFullAccessSandbox(
     (candidate) => String(candidate.instance.id) === String(providerInstanceId),
   );
   return group !== undefined && fullAccessSandboxSupported(group.instance.driverKind);
+}
+
+/** The thread's provider driver kind, read from the picker's provider list. */
+export function threadProviderDriverKind(
+  groups: ReadonlyArray<PickerGroup>,
+  providerInstanceId: ProviderInstanceId,
+): ProviderDriverKind | undefined {
+  return groups.find((candidate) => String(candidate.instance.id) === String(providerInstanceId))
+    ?.instance.driverKind;
 }
 
 /** The modes in picker order, in the words the native apps use. */
@@ -155,6 +168,8 @@ export interface PermissionModePickerProps {
    * cannot, the choice stays listed but disabled, with the reason.
    */
   readonly fullAccessSandboxSupported?: boolean;
+  /** The thread's provider driver kind, used to judge Windows Strict phase 1 admission. */
+  readonly driverKind?: ProviderDriverKind | undefined;
   /**
    * Whether a running turn still holds a narrower mode than the one shown. A
    * wider mode takes effect from the next turn, so the tooltip says so rather
@@ -181,7 +196,8 @@ export const STRICT_DETAIL =
  * which has the room, keeps the list.
  */
 const STRICT_MENU_DETAIL = "Octant's own limits on top of the provider's.";
-const STRICT_WINDOWS_DETAIL = "Strict needs a sandbox Windows doesn't have yet.";
+const STRICT_WINDOWS_CODEX_DETAIL =
+  "Runs native Codex inside a Windows AppContainer and Job Object at Full access.";
 
 /** What a level below Full access runs with on Windows, said wherever it is offered. */
 export const WINDOWS_PROVIDER_APPROVALS_DETAIL =
@@ -190,7 +206,7 @@ export const WINDOWS_PROVIDER_APPROVALS_DETAIL =
 const SANDBOX_DETAIL =
   "Strict restores Octant's protection rules and required approvals. Some workflows that work in the provider's own app remain unavailable under Strict.";
 const SANDBOX_UNSUPPORTED_DETAIL =
-  "This provider can't keep the sandbox at Full access yet. Use Claude, Codex or an Octant Harness model.";
+  "This provider can't run under Strict at Full access yet. Use Claude, Codex or an Octant Harness model.";
 
 /**
  * One click from the composer to any mode. Each choice is the thread's
@@ -269,11 +285,10 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
     props.autoReview?.status === "none" ? props.autoReview.reason : AUTO_UNSUPPORTED_REASON;
   const autoFallsBack = props.value === "auto" && !autoSupported;
   const warning = useFullAccessWarning(props.warningScope ?? "machine");
-  // A host without Octant's sandbox (Windows today) runs the levels below Full
-  // access with the provider's own approvals and claims no sandbox there; it
-  // refuses only what needs Octant's sandbox (Strict below Full access, and
-  // Keep the sandbox). The picker shows those unavailable with the host's
-  // reason rather than offering a choice it refuses.
+  // On Windows outside Strict, levels below Full access run with the provider's
+  // own approvals and claim no Octant sandbox. Under canonical Strict, phase 1
+  // admits Codex at Full access (AppContainer + Job Object) and refuses every
+  // other Windows Strict provider or level by name.
   const hostPlatform = useHostPlatform();
   const effectiveStrict =
     inheritedStrict !== undefined && inheritedStrict.threadId === sandboxThreadId
@@ -293,12 +308,18 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
       platform: hostPlatform,
       access: threadAccessOf(mode),
       strict: effectiveStrict,
+      driverKind: props.driverKind,
     });
-  const sandboxHostRefusal = hostProviderTurnRefusal({
+  const strictHostRefusal = hostProviderTurnRefusal({
     platform: hostPlatform,
-    access: { executionPolicy: "full-access", fullAccessSandbox: true },
-    strict: false,
+    access: threadAccessOf(props.value),
+    strict: true,
+    driverKind: props.driverKind,
   });
+  const strictMenuDetail =
+    hostPlatform === "win32" && strictHostRefusal === undefined
+      ? STRICT_WINDOWS_CODEX_DETAIL
+      : STRICT_MENU_DETAIL;
   const withoutOctantSandbox = (mode: PermissionMode, detail: string | undefined) =>
     hostPlatform === "win32" && mode !== "full-access"
       ? `${detail === undefined ? "" : `${detail} `}${WINDOWS_PROVIDER_APPROVALS_DETAIL}`
@@ -435,7 +456,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                     // because that is what a refused turn asks the person to do.
                     disabled={
                       props.disabled === true ||
-                      ((!sandboxSupported || sandboxHostRefusal !== undefined) && !effectiveStrict)
+                      ((!sandboxSupported || strictHostRefusal !== undefined) && !effectiveStrict)
                     }
                     onCheckedChange={(checked) => {
                       if (props.disabled === true) return;
@@ -445,8 +466,8 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                     <span className="flex min-w-0 flex-col">
                       <span>{legacyStrict ? "Legacy sandbox" : "Strict"}</span>
                       <span className="oct-menu-detail" id={`${idPrefix}-sandbox-note`}>
-                        {sandboxHostRefusal ??
-                          (sandboxSupported ? STRICT_MENU_DETAIL : SANDBOX_UNSUPPORTED_DETAIL)}
+                        {strictHostRefusal ??
+                          (sandboxSupported ? strictMenuDetail : SANDBOX_UNSUPPORTED_DETAIL)}
                       </span>
                     </span>
                   </OctantMenuCheckboxItem>
