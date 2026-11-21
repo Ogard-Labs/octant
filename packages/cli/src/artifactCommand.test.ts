@@ -121,6 +121,7 @@ describe("resolveHeadlessArtifactCliCommand", () => {
       action: "install",
       artifactRoot: "/a",
       installRoot: "/default/install",
+      selfBuilt: false,
     });
     expect(
       resolveHeadlessArtifactCliCommand(
@@ -128,7 +129,39 @@ describe("resolveHeadlessArtifactCliCommand", () => {
         { artifact: "/a", "install-root": "/opt/atlas" },
         defaults,
       ),
-    ).toEqual({ action: "install", artifactRoot: "/a", installRoot: "/opt/atlas" });
+    ).toEqual({
+      action: "install",
+      artifactRoot: "/a",
+      installRoot: "/opt/atlas",
+      selfBuilt: false,
+    });
+  });
+
+  it("marks a build the person made themselves only when they pass --self-built", () => {
+    expect(
+      resolveHeadlessArtifactCliCommand(
+        ["install"],
+        { artifact: "/a", "self-built": true },
+        defaults,
+      ),
+    ).toMatchObject({ action: "install", selfBuilt: true });
+    expect(
+      resolveHeadlessArtifactCliCommand(
+        ["upgrade"],
+        { artifact: "/a", "self-built": true },
+        defaults,
+      ),
+    ).toMatchObject({ action: "upgrade", selfBuilt: true });
+    expect(
+      resolveHeadlessArtifactCliCommand(
+        ["install"],
+        { artifact: "/a", "self-built": "yes" },
+        defaults,
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveHeadlessArtifactCliCommand(["uninstall"], { "self-built": true }, defaults),
+    ).toBeUndefined();
   });
 
   it("rejects install without an artifact and with unknown flags", () => {
@@ -146,6 +179,7 @@ describe("resolveHeadlessArtifactCliCommand", () => {
       action: "upgrade",
       artifactRoot: "/a",
       installRoot: "/default/install",
+      selfBuilt: false,
     });
   });
 
@@ -183,7 +217,7 @@ describe("runHeadlessArtifactCliCommand", () => {
     const stdout = collector();
     const stderr = collector();
     const code = await runHeadlessArtifactCliCommand({
-      command: { action: "install", artifactRoot: artifact, installRoot },
+      command: { action: "install", artifactRoot: artifact, installRoot, selfBuilt: true },
       runtime,
       dataDirectory: join(installRoot, "..", "data"),
       ports: fixturePorts(),
@@ -208,6 +242,7 @@ describe("runHeadlessArtifactCliCommand", () => {
         action: "install",
         artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
         installRoot,
+        selfBuilt: true,
       },
       runtime,
       dataDirectory: join(stateDirectory, "..", "data"),
@@ -236,6 +271,7 @@ describe("runHeadlessArtifactCliCommand", () => {
         action: "install",
         artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
         installRoot,
+        selfBuilt: true,
       },
       runtime,
       dataDirectory: join(stateDirectory, "..", "data"),
@@ -260,6 +296,7 @@ describe("runHeadlessArtifactCliCommand", () => {
         action: "install",
         artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
         installRoot: join(stateDirectory, "install"),
+        selfBuilt: true,
       },
       runtime,
       dataDirectory: join(home, "data"),
@@ -280,7 +317,7 @@ describe("runHeadlessArtifactCliCommand", () => {
     const stdout = collector();
     const stderr = collector();
     const code = await runHeadlessArtifactCliCommand({
-      command: { action: "install", artifactRoot: artifact, installRoot },
+      command: { action: "install", artifactRoot: artifact, installRoot, selfBuilt: true },
       runtime,
       dataDirectory: join(installRoot, "..", "data"),
       ports: fixturePorts(),
@@ -291,6 +328,27 @@ describe("runHeadlessArtifactCliCommand", () => {
     expect(stderr.text()).toContain("rejected");
   });
 
+  it("refuses a build with no release signature and says how to proceed", async () => {
+    const installRoot = join(temporaryRoot("octant-cmd-install-"), "install");
+    const stderr = collector();
+    const code = await runHeadlessArtifactCliCommand({
+      command: {
+        action: "install",
+        artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
+        installRoot,
+        selfBuilt: false,
+      },
+      runtime,
+      dataDirectory: join(installRoot, "..", "data"),
+      ports: fixturePorts(),
+      stdout: collector(),
+      stderr,
+    });
+    expect(code).toBe(1);
+    expect(stderr.text()).toContain("--self-built");
+    expect(existsSync(join(installRoot, "versions", "1.0.0"))).toBe(false);
+  });
+
   it("reports a successful upgrade with exit code zero", async () => {
     const base = temporaryRoot("octant-cmd-upgrade-");
     const installRoot = join(base, "install");
@@ -299,6 +357,7 @@ describe("runHeadlessArtifactCliCommand", () => {
         action: "install",
         artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
         installRoot,
+        selfBuilt: true,
       },
       runtime,
       dataDirectory: join(base, "data"),
@@ -312,6 +371,7 @@ describe("runHeadlessArtifactCliCommand", () => {
         action: "upgrade",
         artifactRoot: writeArtifact({ version: "1.1.0", storeVersion: 2 }),
         installRoot,
+        selfBuilt: true,
       },
       runtime,
       dataDirectory: join(base, "data"),
@@ -331,6 +391,7 @@ describe("runHeadlessArtifactCliCommand", () => {
         action: "install",
         artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
         installRoot,
+        selfBuilt: true,
       },
       runtime,
       dataDirectory: join(base, "data"),
@@ -344,6 +405,7 @@ describe("runHeadlessArtifactCliCommand", () => {
         action: "upgrade",
         artifactRoot: writeArtifact({ version: "1.1.0", storeVersion: 2 }),
         installRoot,
+        selfBuilt: true,
       },
       runtime,
       dataDirectory: join(base, "data"),
@@ -364,6 +426,7 @@ describe("runHeadlessArtifactCliCommand", () => {
         action: "install",
         artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
         installRoot,
+        selfBuilt: true,
       },
       runtime,
       dataDirectory: join(base, "data"),
@@ -377,6 +440,7 @@ describe("runHeadlessArtifactCliCommand", () => {
         action: "upgrade",
         artifactRoot: writeArtifact({ version: "1.1.0", storeVersion: 2 }),
         installRoot,
+        selfBuilt: true,
       },
       runtime,
       dataDirectory: join(base, "data"),
@@ -399,6 +463,7 @@ describe("runHeadlessArtifactCliCommand", () => {
         action: "install",
         artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
         installRoot,
+        selfBuilt: true,
       },
       runtime,
       dataDirectory,

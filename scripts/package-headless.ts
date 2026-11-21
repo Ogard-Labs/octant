@@ -143,7 +143,7 @@ export async function buildHeadlessArtifact(
  * metadata: entries sorted by path, uid/gid 0, mtime 0, and role-derived
  * permissions. Byte-identical inputs produce byte-identical tarballs.
  */
-async function createDeterministicTarball(
+export async function createDeterministicTarball(
   artifactRoot: string,
   archivePrefix: string,
 ): Promise<Buffer> {

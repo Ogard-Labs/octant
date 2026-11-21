@@ -235,6 +235,16 @@ export {
   type KeyRejection,
 } from "./apiKeyPool";
 export {
+  canonicalHeadlessArtifactManifestBytes,
+  decodeHeadlessArtifactSignature,
+  encodeHeadlessArtifactSignature,
+  HEADLESS_ARTIFACT_SIGNATURE_FILENAME,
+  signHeadlessArtifactManifest,
+  verifyHeadlessArtifactSignature,
+  type HeadlessArtifactSignature,
+  type HeadlessArtifactSignatureCheck,
+} from "./artifactSignature";
+export {
   createReleaseFeedVerifier,
   RELEASE_PREVIEW_PUBLIC_KEY,
   RELEASE_STABLE_PUBLIC_KEY,
