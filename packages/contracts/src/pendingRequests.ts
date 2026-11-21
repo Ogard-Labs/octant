@@ -359,6 +359,11 @@ export const PendingRequest = Schema.Union(
     options: Schema.Array(
       Schema.Struct({ label: CodeQuestionOptionText }).annotations(strict),
     ).pipe(Schema.maxItems(MAX_CODE_QUESTION_OPTIONS)),
+    /**
+     * The question asks for a secret. The row finds it and leaves the answer
+     * to the thread's masked field, so no list answers it as evidence.
+     */
+    secret: Schema.optional(Schema.Literal(true)),
     answer: CodePendingQuestionAnswer,
   })
     .annotations(strict)

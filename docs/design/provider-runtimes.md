@@ -1635,13 +1635,24 @@ authorize a Strict launch.
   so a typed answer passes through. A set with a question Codex marks
   `isSecret`, or that asks for a password, passphrase, API key, access token,
   or private key, is never shown: Codex is answered at once with a refusal
-  telling the model Octant does not collect secrets in chat. Outside Strict
-  such a set is to be shown to the person as Codex shows it, its answer kept
-  out of the journal, logs and evidence (maintainer decision, 2026-11-21; not
-  built: each question surface, Chat's attempt record, the Work request's
-  resolution and delivery intent, the Code answer's evidence content, and an
-  agent run's interaction, records the answer text today, so the refusal
-  stays until a masked answer reaches Codex without being recorded). A subagent's set
+  telling the model Octant does not collect secrets in chat. Outside Strict,
+  in a Code thread, such a set is shown to the person as Codex shows it, its
+  answer kept out of the journal, logs and evidence (maintainer decision,
+  2026-11-21; built): each secret question carries `secret` on its
+  `user-input-request` and its journaled `input-requested`, the thread's card
+  takes the answer in a masked field with a reveal control, and
+  `answer-provider-input` carries it as `secretAnswer` (at most 4,096
+  characters) in place of a `response` put as evidence, so it reaches the
+  Codex process in memory and the record holds only that the question was
+  answered. Only the person answers it: the host refuses a `secretAnswer`
+  from anyone but a window on this host or a device they paired, refuses one
+  for a question not marked secret, and refuses an evidence answer to a
+  question that is, and a Needs you row for it finds the thread rather than
+  answering. The other questions of the set are asked and recorded as usual.
+  A Strict session, and every session but a Code thread's (a child run, Work,
+  Chat, whose question records keep the answer text), still refuses the set
+  unseen; Codex offers its form only in Plan, a Code level, so those surfaces
+  meet it only through a Codex Plan child run. A subagent's set
   (Codex offers the form to the root thread only) is answered empty. The
   capability is reported `supported`.
 

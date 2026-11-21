@@ -4705,6 +4705,95 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
+  it("asks a Code thread's secret question outside Strict as a masked question and hands Codex the typed answer", async () => {
+    const userInput = (id: string, questions: ReadonlyArray<object>): CodexServerMessage =>
+      ({
+        kind: "request",
+        id,
+        method: "item/tool/requestUserInput",
+        params: { threadId: "thread-1", turnId: "turn-1", itemId: `item-${id}`, questions },
+      }) as CodexServerMessage;
+    const secretSet = [
+      { id: "pw", header: "Database", question: "Database credential?", isSecret: true },
+      { id: "host", header: "Host", question: "Which host?", options: null },
+    ];
+    const open = async (mode: "code" | "work", strict: boolean) => {
+      const f = fixture();
+      let request = 0;
+      const acquired = await acquireConnection(
+        makeCodexDriver(f.options({ requestId: () => `request-${++request}` })),
+        mode,
+      );
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "plan",
+          strict,
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "plan it", attachments: [], tools: [] }),
+      );
+      return { f, acquired };
+    };
+
+    const { f, acquired } = await open("code", false);
+    const asked = takeEvents(acquired.connection, 2);
+    f.emit(userInput("ask-secret", secretSet));
+    const events = await asked;
+    expect(events).toMatchObject([
+      { kind: "user-input-request", prompt: "Database credential?", secret: true },
+      { kind: "user-input-request", prompt: "Which host?" },
+    ]);
+    expect(events[1]).not.toHaveProperty("secret");
+    for (const [event, answer] of [
+      [events[0], "hunter2-sentinel"],
+      [events[1], "db.internal"],
+    ] as const) {
+      if (event?.kind !== "user-input-request") throw new Error("Codex asked a question.");
+      await Effect.runPromise(
+        acquired.connection.answerUserInput({ sessionId, requestId: event.requestId, answer }),
+      );
+    }
+    expect(f.calls.filter((call) => call.method === "approval/respond")).toEqual([
+      {
+        method: "approval/respond",
+        input: {
+          providerRequestId: "ask-secret",
+          result: {
+            answers: { pw: { answers: ["hunter2-sentinel"] }, host: { answers: ["db.internal"] } },
+          },
+        },
+      },
+    ]);
+    await acquired.close();
+
+    // Strict, and every surface but a Code thread, still refuse the set unseen.
+    for (const [mode, strict] of [
+      ["code", true],
+      ["work", false],
+    ] as const) {
+      const held = await open(mode, strict);
+      held.f.emit(userInput("ask-held", secretSet));
+      await vi.waitFor(() =>
+        expect(held.f.calls.at(-1)).toEqual({
+          method: "approval/respond",
+          input: {
+            providerRequestId: "ask-held",
+            result: {
+              answers: {
+                pw: { answers: [SECRET_QUESTION_REFUSAL] },
+                host: { answers: [SECRET_QUESTION_REFUSAL] },
+              },
+            },
+          },
+        }),
+      );
+      await held.acquired.close();
+    }
+  });
+
   it("runs a Plan session in Codex's own Plan mode and returns a thread that recorded it to the default mode", async () => {
     const plan = fixture();
     const planned = await acquireConnection(makeCodexDriver(plan.options()));

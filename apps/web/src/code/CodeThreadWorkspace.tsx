@@ -2594,10 +2594,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       kind: "input",
                       requestId: request.requestId,
                       response,
+                      ...(request.secret === true ? { secret: true } : {}),
                     })
                   }
                   options={request.options.map((label) => ({ label }))}
                   prompt={request.prompt}
+                  secret={request.secret === true}
                 />
               ),
             )}
