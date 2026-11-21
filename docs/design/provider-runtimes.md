@@ -2662,8 +2662,10 @@ with the person's token. The CLI talks to Google itself.
   `daily-cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`,
   `www.googleapis.com`, `accounts.google.com`, `antigravity.google`).
 - **Sign-in.** The person runs `agy` in a terminal and signs in with their
-  own Google account; Octant reuses that sign-in as the CLI reads it, for one
-  person using it interactively. On macOS the CLI keeps it in the login
+  own Google account; Octant reuses that sign-in as the CLI reads it, in
+  threads and in Automations alike: Octant runs only `agy acp`, so a routine
+  drives the same ACP session a thread does (maintainer decision, 2026-11-21).
+  On macOS the CLI keeps it in the login
   keychain and reads it by running `/usr/bin/security`. Unconfined, that read
   needs nothing from Octant. A sandboxed launch sets `readsLoginKeychain`: the
   grant Claude Code's runtime measured as the least that reads a keychain
