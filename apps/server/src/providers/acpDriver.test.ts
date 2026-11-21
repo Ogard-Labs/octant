@@ -173,7 +173,14 @@ class FakeClient implements AcpClientPort {
   }
 }
 
-function permissionRequest(id: string, toolCallId: string) {
+function permissionRequest(
+  id: string,
+  toolCallId: string,
+  options: ReadonlyArray<{ optionId: string; name: string; kind: string }> = [
+    { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+    { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+  ],
+) {
   return {
     kind: "request" as const,
     id,
@@ -186,18 +193,24 @@ function permissionRequest(id: string, toolCallId: string) {
         kind: "edit" as const,
         rawInput: { path: "/tmp/acp-project/fixture.txt", content: "kept out of the reviewer" },
       },
-      options: [
-        { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
-        { optionId: "reject_once", name: "Reject", kind: "reject_once" },
-      ],
+      options: [...options],
     },
   };
 }
 
+const allowAlwaysOptions = [
+  { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+  { optionId: "allow_always", name: "Always allow", kind: "allow_always" },
+  { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+];
+
 function fixture(
   profile: AcpProviderProfile,
   overrides: Partial<
-    Pick<AcpDriverOptions, "authentication" | "managedToolsBridgeFactory" | "process">
+    Pick<
+      AcpDriverOptions,
+      "authentication" | "managedToolsBridgeFactory" | "permissionPersistence" | "process"
+    >
   > & {
     readonly mcpHttp?: boolean;
     readonly nativeResume?: boolean;
@@ -2473,6 +2486,45 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     },
   );
 
+  it("chooses the agent's own allow-always when approvals hold for the session, and allow-once for a one-call answer or a Project default", async () => {
+    const answered = async (
+      persistence: "current-session" | "project-default",
+      scope: "once" | undefined,
+    ) => {
+      const { driver, client } = fixture(profile, { permissionPersistence: () => persistence });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            client.request(permissionRequest("permission-always", "tool-1", allowAlwaysOptions));
+            yield* Effect.sleep("1 millis");
+            yield* connection.answerApproval({
+              sessionId,
+              requestId: "request-1",
+              approved: true,
+              ...(scope === undefined ? {} : { scope }),
+            });
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+      return client.respondPermission;
+    };
+    expect(await answered("current-session", undefined)).toHaveBeenCalledWith(
+      "permission-always",
+      "allow_always",
+    );
+    expect(await answered("current-session", "once")).toHaveBeenCalledWith(
+      "permission-always",
+      "allow_once",
+    );
+    expect(await answered("project-default", undefined)).toHaveBeenCalledWith(
+      "permission-always",
+      "allow_once",
+    );
+  });
+
   it.skipIf(profile.refuses?.("code", "plan") !== undefined)(
     "absorbs transport failure and keeps sequence contiguous for auto-rejected Plan side effects",
     async () => {
@@ -4670,6 +4722,111 @@ it("sends Google Antigravity its own command first and Octant's context after it
   if (!Array.isArray(blocks)) throw new Error("Expected separate text blocks");
   expect(blocks[0]).toBe("/compact");
   expect(String(blocks[1])).toContain("Octant's standing instructions.");
+});
+
+describe("steering a running ACP turn", () => {
+  const antigravity = acpProviderProfiles.antigravity;
+
+  function deferredPrompts(client: FakeClient) {
+    const answers: Array<(stopReason: string) => void> = [];
+    client.prompt.mockImplementation(
+      (sourceSessionId: string) =>
+        new Promise((resolve) => {
+          answers.push((stopReason) => {
+            client.emit({
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: sourceSessionId,
+                update: {
+                  sessionUpdate: "agent_message_chunk",
+                  content: { type: "text", text: `answer ${answers.length}` },
+                },
+              },
+            });
+            resolve({ stopReason });
+          });
+        }),
+    );
+    return answers;
+  }
+
+  it("sends a note to a running Google Antigravity turn as a second prompt, and the turn completes when the last prompt answers", async () => {
+    const { driver, client } = fixture(antigravity, { runtimeVersion: "1.5.12" });
+    const answers = deferredPrompts(client);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const steer = connection.steer;
+          if (steer === undefined) throw new Error("Expected Google Antigravity to steer");
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          expect(yield* steer({ sessionId, message: "too early" })).toBe("unsupported");
+          const runtimeEvents = yield* connection.subscribe;
+          const collected = yield* Effect.fork(
+            Effect.promise(() => collectTerminal(runtimeEvents)),
+          );
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          expect(yield* steer({ sessionId, message: "use the other file" })).toBe("steered");
+          expect(client.prompt).toHaveBeenCalledTimes(2);
+          expect(client.prompt.mock.calls[1]?.at(1)).toEqual(["use the other file"]);
+          // The agent answers the first prompt once the note took over its turn.
+          answers[0]?.("cancelled");
+          yield* Effect.sleep("1 millis");
+          answers[1]?.("end_turn");
+          const events = yield* Fiber.join(collected);
+          expect(events.map((event) => event.kind)).toEqual([
+            "text-delta",
+            "text-delta",
+            "completed",
+          ]);
+          expect(yield* steer({ sessionId, message: "too late" })).toBe("unsupported");
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+  });
+
+  it("ends an interrupted steered turn as interrupted once, after both prompts answer", async () => {
+    const { driver, client } = fixture(antigravity, { runtimeVersion: "1.5.12" });
+    const answers = deferredPrompts(client);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const runtimeEvents = yield* connection.subscribe;
+          const collected = yield* Effect.fork(
+            Effect.promise(() => collectTerminal(runtimeEvents)),
+          );
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          yield* connection.steer?.({ sessionId, message: "stop after this" }) ?? Effect.void;
+          yield* connection.interrupt(sessionId);
+          answers[1]?.("cancelled");
+          yield* Effect.sleep("1 millis");
+          answers[0]?.("cancelled");
+          const events = yield* Fiber.join(collected);
+          expect(events.filter((event) => event.kind === "interrupted")).toHaveLength(1);
+          expect(events.some((event) => event.kind === "completed")).toBe(false);
+        }),
+      ),
+    );
+  });
+
+  it.each(profiles.filter((profile) => profile.steersMidTurn !== true))(
+    "offers no steering for $displayName, which takes no prompt while a turn runs",
+    async (profile) => {
+      const { driver } = fixture(profile);
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            expect(connection.steer).toBeUndefined();
+          }),
+        ),
+      );
+    },
+  );
 });
 
 describe("ACP Chat on Windows", () => {
