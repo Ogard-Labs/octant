@@ -41,6 +41,7 @@ import {
 } from "../process/windowsProviderProgram";
 import {
   WINDOWS_SANDBOX_MISSING_REASON,
+  providerHoldsLevelWithoutSandbox,
   windowsProviderLaunch,
   type WindowsProviderLaunch,
 } from "@octant/domain/guardrail-policy";
@@ -541,10 +542,11 @@ function acpWallPolicy(input: {
 }
 
 /**
- * A profile that keeps no sandbox outside Strict starts Work and Code as Full
- * access does, at every level: its own mode asks Octant before each side
- * effect. A readiness check, Chat, Plan, Strict, an explicit sandbox and a
- * Full access thread that keeps the sandbox stay confined.
+ * Work and Code outside Strict start as Full access does, at every level: the
+ * agent's own mode asks Octant before each side effect
+ * (`providerHoldsLevelWithoutSandbox`). An agent whose shell runs without
+ * asking cannot hold a level that way, so it keeps the sandbox; an added agent
+ * the person has not trusted is started under Strict, so it does too.
  */
 function acpStartsUnconfinedBelowFullAccess(input: {
   readonly profile: AcpProviderProfile;
@@ -556,13 +558,15 @@ function acpStartsUnconfinedBelowFullAccess(input: {
   readonly sandboxPolicy?: SandboxPolicySelection;
 }): boolean {
   return (
-    input.profile.process.confinement.kind === "provider-approvals-outside-strict" &&
-    input.strict === false &&
-    input.sandboxPolicy === undefined &&
-    input.fullAccessSandbox !== true &&
-    input.purpose !== "probe" &&
-    (input.mode === "work" || input.mode === "code") &&
-    input.executionPolicy !== "plan"
+    input.profile.shellWithoutRequest !== true &&
+    providerHoldsLevelWithoutSandbox({
+      mode: input.mode,
+      executionPolicy: input.executionPolicy,
+      strict: input.strict,
+      fullAccessSandbox: input.fullAccessSandbox,
+      sandboxPolicySelected: input.sandboxPolicy !== undefined,
+      purpose: input.purpose,
+    })
   );
 }
 

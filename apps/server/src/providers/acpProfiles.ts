@@ -61,14 +61,13 @@ export type AcpHostAuthentication =
     };
 
 export type AcpConfinementStrategy =
-  /** Shared deny-default Seatbelt profile; explicit Full access runs unconfined. */
-  | { readonly kind: "deny-default-seatbelt" }
   /**
-   * Work and Code outside Strict start unconfined at every level, the agent's
-   * own mode asking Octant before each side effect; everything else takes
-   * the deny-default profile.
+   * Shared deny-default Seatbelt profile where Octant's sandbox applies: Chat,
+   * Plan, Strict, a chosen sandbox, a kept sandbox and readiness checks. Full
+   * access and Work and Code outside Strict run unconfined
+   * (`providerHoldsLevelWithoutSandbox`).
    */
-  | { readonly kind: "provider-approvals-outside-strict" };
+  { readonly kind: "deny-default-seatbelt" };
 
 export interface AcpProcessProfile {
   /** `agentInfo.name` the ACP `initialize` response must report. */
@@ -1876,7 +1875,7 @@ const antigravityProfile: AcpProviderProfile = {
         "Run agy (or agy acp --login) in your terminal and sign in with your Google account, then retry.",
       environment: (path) => ({ GEMINI_HOME: path }),
     },
-    confinement: { kind: "provider-approvals-outside-strict" },
+    confinement: { kind: "deny-default-seatbelt" },
   },
 };
 
