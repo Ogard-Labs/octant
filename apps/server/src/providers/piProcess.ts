@@ -281,6 +281,40 @@ const PROVIDER_CREDENTIALS: ReadonlyMap<string, ReadonlyArray<string>> = new Map
   ["xai", ["XAI_API_KEY"]],
 ]);
 /**
+ * Pi's read, grep, find and ls never ask. Where Octant's sandbox does not bound
+ * them (Work and Code outside Strict), the bridge lets a read through unasked
+ * only inside the launch's folders, links resolved, and asks for any other
+ * path, so another provider's sign-in is never read without the person's yes.
+ */
+export const READ_ROOTS_CHECK = `function readsInsideRoots(event) {
+  const configured = process.env.OCTANT_PI_READ_ROOTS;
+  if (configured === undefined) return true;
+  let roots;
+  try {
+    roots = JSON.parse(configured);
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(roots)) return false;
+  const input = event.input;
+  const requested =
+    typeof input === "object" && input !== null && typeof input.path === "string" ? input.path : ".";
+  let target = nodePath.resolve(process.cwd(), requested);
+  try {
+    target = nodeFs.realpathSync(target);
+  } catch {
+    try {
+      target = nodePath.join(nodeFs.realpathSync(nodePath.dirname(target)), nodePath.basename(target));
+    } catch {
+      return false;
+    }
+  }
+  return roots.some(
+    (root) => typeof root === "string" && (target === root || target.startsWith(root + nodePath.sep)),
+  );
+}`;
+
+/**
  * Refuses a tool the person blocked in Settings before any other rule, at
  * every level and for every tool, an extension's or Octant's own included:
  * the bridge is the one gate every Pi tool call passes.
@@ -289,14 +323,17 @@ const BLOCKED_TOOL_REASON = "Blocked in Octant Settings › Permissions › Bloc
 
 function approvalBridge(blocked: ReadonlyArray<string>): string {
   return `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import * as nodeFs from "node:fs";
+import * as nodePath from "node:path";
 
 const knownReads = new Set(${JSON.stringify(KNOWN_READ_TOOLS)});
+${READ_ROOTS_CHECK}
 const blocked = new Set(${javascriptLiteral(blocked)});
 
 export default function octantApprovalBridge(pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
     if (blocked.has(event.toolName)) return { block: true, reason: ${javascriptLiteral(BLOCKED_TOOL_REASON)} };
-    if (knownReads.has(event.toolName)) return undefined;
+    if (knownReads.has(event.toolName) && readsInsideRoots(event)) return undefined;
     if (process.env.OCTANT_PI_APPROVALS === "disabled") return undefined;
     if (!ctx.hasUI || typeof event.toolCallId !== "string" || event.toolCallId.length === 0) {
       return { block: true, reason: "Octant approval unavailable" };
@@ -324,12 +361,15 @@ export function piExtensionSource(
   if (tools.length === 0) return approvalBridge(blocked);
   const catalogAttestation = piToolCatalogAttestation(tools);
   return `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import * as nodeFs from "node:fs";
+import * as nodePath from "node:path";
 
 const definitions = ${javascriptLiteral(tools)};
 const bridgeUrl = process.env.OCTANT_PI_TOOL_BRIDGE_URL;
 const bridgeToken = process.env.OCTANT_PI_TOOL_BRIDGE_TOKEN;
 const catalogAttestation = "${catalogAttestation}";
 const knownReads = new Set(${javascriptLiteral(KNOWN_READ_TOOLS)});
+${READ_ROOTS_CHECK}
 const blocked = new Set(${javascriptLiteral(blocked)});
 const octantTools = new Set(definitions.map((definition) => definition.name));
 
@@ -376,7 +416,8 @@ export default function octantManagedTools(pi: ExtensionAPI) {
 
   pi.on("tool_call", async (event, ctx) => {
     if (blocked.has(event.toolName)) return { block: true, reason: ${javascriptLiteral(BLOCKED_TOOL_REASON)} };
-    if (knownReads.has(event.toolName) || octantTools.has(event.toolName)) return undefined;
+    if (octantTools.has(event.toolName)) return undefined;
+    if (knownReads.has(event.toolName) && readsInsideRoots(event)) return undefined;
     if (process.env.OCTANT_PI_APPROVALS === "disabled") return undefined;
     if (!ctx.hasUI || typeof event.toolCallId !== "string" || event.toolCallId.length === 0) {
       return { block: true, reason: "Octant approval unavailable" };
@@ -940,7 +981,23 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           return { command: program.command, args: [...program.args], cwd: root, environment };
         }
         if (piStartsUnconfined(input)) {
-          return { command: input.binaryPath, args, cwd: root, environment };
+          const readRoots = [
+            root,
+            ...(input.extraFolders ?? []),
+            ...(input.readOnlyFolders ?? []),
+          ].map((folder) => {
+            try {
+              return realpathSync(folder);
+            } catch {
+              return folder;
+            }
+          });
+          return {
+            command: input.binaryPath,
+            args,
+            cwd: root,
+            environment: { ...environment, OCTANT_PI_READ_ROOTS: JSON.stringify(readRoots) },
+          };
         }
         const temporaryDirectoryPath = yield* temporaryDirectory(
           options.temporaryDirectory ?? input.environment.TMPDIR ?? "/tmp",

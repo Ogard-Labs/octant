@@ -19,6 +19,7 @@ import {
 } from "@octant/domain/guardrail-policy";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  READ_ROOTS_CHECK,
   makePiConfinementLive,
   makePiProcessLive,
   piArguments,
@@ -448,6 +449,10 @@ describe("Pi process boundary", () => {
           const open = await launchFor({ mode, executionPolicy, strict: false });
           expect(open.command).toBe(f.binary);
           expect(open.environment.OCTANT_PI_APPROVALS).toBe("enabled");
+          // Pi's unasked reads are bounded to the launch's folders instead.
+          expect(JSON.parse(open.environment.OCTANT_PI_READ_ROOTS ?? "[]")).toContain(
+            realpathSync(f.root),
+          );
         }
       }
       for (const level of [
@@ -459,6 +464,7 @@ describe("Pi process boundary", () => {
       ] as const) {
         const confined = await launchFor(level);
         expect(confined.command).not.toBe(f.binary);
+        expect(confined.environment.OCTANT_PI_READ_ROOTS).toBeUndefined();
       }
     }
   });
@@ -781,12 +787,13 @@ describe("Pi process boundary", () => {
     const bridge = piExtensionSource([
       { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
     ]);
+    expect(bridge).toContain("if (octantTools.has(event.toolName)) return undefined;");
     expect(bridge).toContain(
-      "if (knownReads.has(event.toolName) || octantTools.has(event.toolName)) return undefined;",
+      "if (knownReads.has(event.toolName) && readsInsideRoots(event)) return undefined;",
     );
     expect(bridge).toContain('const knownReads = new Set(["read","grep","find","ls"]);');
     expect(piExtensionSource([])).toContain(
-      "if (knownReads.has(event.toolName)) return undefined;",
+      "if (knownReads.has(event.toolName) && readsInsideRoots(event)) return undefined;",
     );
   });
 
@@ -1065,5 +1072,43 @@ describe("Pi process boundary", () => {
     const profile = launch.args[1]!;
     expect(profile).not.toContain(seatbeltAllowRule("file-read*", shimDirectory));
     expect(profile).not.toContain(seatbeltDenyRule("file-read*", linkedBinary));
+  });
+});
+
+describe("Pi's unasked reads without Octant's sandbox", () => {
+  async function readCheck(roots: ReadonlyArray<string> | undefined, cwd: string) {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const fakeProcess = {
+      cwd: () => cwd,
+      env: roots === undefined ? {} : { OCTANT_PI_READ_ROOTS: JSON.stringify(roots) },
+    };
+    return new Function(
+      "nodeFs",
+      "nodePath",
+      "process",
+      `${READ_ROOTS_CHECK}\nreturn readsInsideRoots;`,
+    )(fs, path, fakeProcess) as (event: { readonly input?: unknown }) => boolean;
+  }
+
+  it("lets a read inside the launch's folders through and asks for any other path, links resolved", async () => {
+    const fs = await import("node:fs");
+    const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "octant-pi-reads-")));
+    const project = join(base, "project");
+    const outside = join(base, "outside");
+    fs.mkdirSync(project);
+    fs.mkdirSync(outside);
+    fs.writeFileSync(join(project, "notes.md"), "x");
+    fs.writeFileSync(join(outside, "auth.json"), "secret");
+    fs.symlinkSync(outside, join(project, "escape"));
+    const inside = await readCheck([project], project);
+    expect(inside({ input: { path: "notes.md" } })).toBe(true);
+    expect(inside({ input: {} })).toBe(true);
+    expect(inside({ input: { path: join(outside, "auth.json") } })).toBe(false);
+    expect(inside({ input: { path: "escape/auth.json" } })).toBe(false);
+    expect(inside({ input: { path: "../outside" } })).toBe(false);
+    // Where Octant's sandbox bounds the reads, no roots are set and nothing changes.
+    expect((await readCheck(undefined, project))({ input: { path: "/etc/hosts" } })).toBe(true);
+    fs.rmSync(base, { recursive: true, force: true });
   });
 });
