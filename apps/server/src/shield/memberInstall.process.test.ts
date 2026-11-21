@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -279,7 +280,7 @@ function setUp(
   });
   const serverId = String(store.servers()[0]?.serverId);
   const { hub, decisions } = standInHub(server.home, options.claimCode);
-  const service = new MemberInstallService({
+  const serviceOptions: ConstructorParameters<typeof MemberInstallService>[0] = {
     servers: () => store.servers(),
     connection: server.connection,
     builds: createHeadlessBuilds({
@@ -297,7 +298,8 @@ function setUp(
     sleep: (milliseconds) => new Promise((done) => setTimeout(done, Math.min(milliseconds, 50))),
     joinClaimMs: 10_000,
     joinFinishMs: 10_000,
-  });
+  };
+  const service = new MemberInstallService(serviceOptions);
   const records = () =>
     journal
       .replayAggregateType({
@@ -309,6 +311,7 @@ function setUp(
   return {
     server,
     service,
+    serviceOptions,
     serverId,
     decisions,
     records,
@@ -468,6 +471,57 @@ describe("making a registered server an Octant computer over SSH", () => {
         .split("\n")
         .filter((line) => line.startsWith("server install")),
     ).toHaveLength(1);
+  });
+
+  it("leaves a server that already runs this build untouched on a first attempt", async () => {
+    const setup = setUp();
+    expect((await installOver(setup)).progress.state).toBe("joined");
+    // A second hub window, or this one after a restart, has no failed attempt
+    // of its own here, so the CLI's refusal to install twice stands.
+    const fresh = new MemberInstallService(setup.serviceOptions);
+    const before = setup.server.calls().length;
+    const plan = planOf(await fresh.prepare(setup.serverId, person));
+    const confirmed = await fresh.confirm(
+      { planId: String(plan.planId), listenAddress: "192.168.1.20" },
+      person,
+    );
+    if (confirmed.kind !== "member-install-progress") throw new Error(JSON.stringify(confirmed));
+    let progress = confirmed.progress;
+    while (progress.state === "running") {
+      await new Promise((done) => setTimeout(done, 10));
+      const read = fresh.progress(String(progress.installId), person);
+      if (read.kind !== "member-install-progress") throw new Error(JSON.stringify(read));
+      progress = read.progress;
+    }
+    expect(progress.steps.find((step) => step.step === "install")?.state).toBe("failed");
+    const calls = setup.server.calls().slice(before);
+    expect(calls).not.toContain("listener enable");
+    expect(calls).not.toContain("server start");
+  });
+
+  it("refuses an archive that unpacks past its limit, or is not one, without failing the host", async () => {
+    const setup = setUp();
+    const [name] = readdirSync(setup.builds);
+    const path = join(setup.builds, String(name));
+    const keys = {
+      stable: [],
+      preview: [setup.releaseKey.publicKeyBase64],
+      candidate: [setup.releaseKey.publicKeyBase64],
+    };
+    const small = createHeadlessBuilds({
+      folder: setup.builds,
+      trustedKeys: keys,
+      maxUnpackedBytes: 1_024,
+    });
+    expect(await small.check(path, "linux-x64")).toMatchObject({ status: "refused" });
+    const corrupt = join(setup.builds, "octant-9.9.9-linux-x64.tar.gz");
+    writeFileSync(corrupt, "not a gzip archive");
+    expect(
+      await createHeadlessBuilds({ folder: setup.builds, trustedKeys: keys }).check(
+        corrupt,
+        "linux-x64",
+      ),
+    ).toMatchObject({ status: "refused" });
   });
 
   it("offers a final release over the candidate build that led to it", async () => {

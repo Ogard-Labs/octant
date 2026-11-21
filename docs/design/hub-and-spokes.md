@@ -622,10 +622,16 @@ after it.
    must be the very files checked here.
 3. **Install.** The build's own `octant server install --artifact …
 --install-root …` installs it, checking its signature again first; Octant
-   never passes `--self-built` here. When an earlier attempt failed after this
-   step and left this exact signed build current (the same manifest and
-   signature), a retry goes on past it instead of being refused as already
-   installed; any other installed build is still refused.
+   never passes `--self-built` here. The CLI refuses only a version whose
+   folder already exists; a different version already current is not
+   refused there, and it is switched to without the upgrade flow, so this is
+   no guard against installing over another version. When this hub's own
+   earlier attempt on this server (since the hub last started) installed this
+   build and failed at a later step, and `current` holds this exact signed
+   build (the same manifest and signature), the retry goes on past Install
+   instead of being refused as already installed. Otherwise that refusal
+   stands, so a first attempt never takes over a server that already runs
+   this build.
 4. **Start.** `octant server enable`, then `octant server start`, from the
    installed copy.
 5. **Listen.** `octant listener enable --hostname <picked address> --port

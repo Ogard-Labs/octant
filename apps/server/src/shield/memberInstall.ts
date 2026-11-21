@@ -140,12 +140,14 @@ printf '%s\\n%s\\n%s' "$r" "$(digest "$r/octant-artifact.json")" "$(digest "$r/o
 /**
  * `$1` the unpacked build, `$2` the install root, `$3` the work folder. The
  * build's own CLI installs it and checks its signature first; there is no
- * \`--self-built\` here, ever. An earlier attempt that failed after this step
- * left this exact signed build current (the same manifest and signature), and
- * the CLI refuses to install a version twice, so a retry resumes past it; any
- * other installed build is still refused by the CLI.
+ * \`--self-built\` here, ever. \`$4\` is \`resume\` only when this hub's own
+ * earlier attempt on this server installed this build and then failed at a
+ * later step: the CLI refuses to install a version twice, so that retry goes
+ * on past it when \`current\` holds this exact signed build (the same
+ * manifest and signature). Otherwise the CLI's refusal stands, so a server
+ * that already runs Octant is never taken over by a first attempt.
  */
-const INSTALL_SCRIPT = `if cmp -s -- "$1/octant-artifact.json" "$2/current/octant-artifact.json" &&
+const INSTALL_SCRIPT = `if [ "$4" = resume ] && cmp -s -- "$1/octant-artifact.json" "$2/current/octant-artifact.json" &&
   cmp -s -- "$1/octant-artifact.sig" "$2/current/octant-artifact.sig"; then
   echo "This build is already installed."
 else
@@ -218,6 +220,12 @@ export class MemberInstallService {
   readonly #options: MemberInstallOptions;
   readonly #plans = new Map<string, PreparedPlan>();
   readonly #installs = new Map<string, RunningInstall>();
+  /**
+   * The build each server's last attempt from this hub installed before a
+   * later step failed, by its SHA-256. Kept in memory: after a restart the
+   * CLI's refusal stands, which fails closed.
+   */
+  readonly #installedBefore = new Map<string, string>();
   /** The install running on each server now, so a second confirmation cannot race the first. */
   readonly #busy = new Map<string, string>();
   readonly #sleep: (milliseconds: number) => Promise<void>;
@@ -434,10 +442,17 @@ export class MemberInstallService {
       install: async () => {
         const call = await this.#call(server, {
           script: INSTALL_SCRIPT,
-          args: [unpacked, plan.installRoot, work],
+          args: [
+            unpacked,
+            plan.installRoot,
+            work,
+            this.#installedBefore.get(String(plan.serverId)) === build.sha256 ? "resume" : "fresh",
+          ],
           timeoutMs: STEP_TIMEOUT_MS,
         });
-        return call.ok ? { ok: true } : call;
+        if (!call.ok) return call;
+        this.#installedBefore.set(String(plan.serverId), build.sha256);
+        return { ok: true };
       },
       start: async () => {
         const call = await this.#call(server, {
@@ -498,6 +513,7 @@ export class MemberInstallService {
       install.state = "failed";
       return;
     }
+    this.#installedBefore.delete(String(prepared.plan.serverId));
     install.state = "joined";
   }
 

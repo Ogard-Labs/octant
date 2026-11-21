@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable, Writable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { createGunzip } from "node:zlib";
 import { AppVersion } from "@octant/contracts/app-updates";
@@ -75,6 +76,8 @@ export function createHeadlessBuilds(options: {
   readonly folder: string;
   /** The keys each ring believes; tests only, production reads Octant's release keys. */
   readonly trustedKeys?: Readonly<Record<ReleaseRing, ReadonlyArray<string>>>;
+  /** The unpacked size a build may claim; tests only. */
+  readonly maxUnpackedBytes?: number;
 }): HeadlessBuilds {
   const verifier = createReleaseFeedVerifier(options.trustedKeys ?? RELEASE_TRUSTED_KEYS);
   return {
@@ -103,7 +106,9 @@ export function createHeadlessBuilds(options: {
       } catch {
         return refused("unreadable");
       }
-      if (!(await unpacksWithin(path, MAX_UNPACKED_BYTES))) return refused("unreadable");
+      if (!(await unpacksWithin(bytes, options.maxUnpackedBytes ?? MAX_UNPACKED_BYTES))) {
+        return refused("unreadable");
+      }
       const workspace = await mkdtemp(join(tmpdir(), "octant-member-build-"));
       try {
         try {
@@ -185,14 +190,22 @@ export function compareBuildVersions(left: string, right: string): number {
     : left.localeCompare(right, undefined, { numeric: true });
 }
 
-/** Whether the gzip archive at `path` inflates to at most `limit` bytes, read without writing anything. */
-async function unpacksWithin(path: string, limit: number): Promise<boolean> {
+/**
+ * Whether the gzip archive inflates to at most `limit` bytes. It measures the
+ * bytes already read (the same ones hashed and sent), writing nothing, and
+ * `pipeline` closes every stream on an error or an early stop, so a corrupt
+ * or oversized archive is a refusal rather than an unhandled stream error.
+ */
+async function unpacksWithin(bytes: Buffer, limit: number): Promise<boolean> {
   let total = 0;
+  const counted = new Writable({
+    write(chunk: Buffer, _encoding, done) {
+      total += chunk.length;
+      done(total > limit ? new Error("The build unpacks past its limit.") : null);
+    },
+  });
   try {
-    for await (const chunk of createReadStream(path).pipe(createGunzip())) {
-      total += (chunk as Buffer).length;
-      if (total > limit) return false;
-    }
+    await pipeline(Readable.from([bytes]), createGunzip(), counted);
   } catch {
     return false;
   }
