@@ -242,8 +242,12 @@ function sortProviders(
   providers: ReadonlyArray<DiscoveredFolderProvider>,
 ): readonly [DiscoveredFolderProvider, ...DiscoveredFolderProvider[]] | undefined {
   const unique = new Set(providers);
-  const ordered = PROVIDER_ORDER.filter((provider) => unique.has(provider));
-  const [first, ...rest] = ordered;
+  const preferred = PROVIDER_ORDER.filter((provider) => unique.has(provider));
+  const preferredSet = new Set(preferred);
+  const additional = [...unique]
+    .filter((provider) => !preferredSet.has(provider))
+    .sort((left, right) => left.localeCompare(right));
+  const [first, ...rest] = [...preferred, ...additional];
   return first === undefined ? undefined : [first, ...rest];
 }
 

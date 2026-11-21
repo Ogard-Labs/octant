@@ -26,6 +26,7 @@ import type {
 import type { Effect, Scope, Stream } from "effect";
 import type { ProviderContextFactsSource, ProviderLocalUsageHistorySource } from "./contextFacts";
 import type { CloudSessionDriver } from "./cloudSessions";
+import type { ProviderProjectFolderDiscoveryPort } from "./projectFolderDiscovery";
 
 export type {
   ProviderAttachmentInput,
@@ -497,6 +498,8 @@ export interface ProviderDriver {
   readonly contextFacts?: ProviderContextFactsSource;
   /** Optional read-only local history reader owned by the configured driver. */
   readonly localUsageHistory?: ProviderLocalUsageHistorySource;
+  /** Optional read-only first-run folder discovery owned by the provider adapter. */
+  readonly projectFolderDiscovery?: ProviderProjectFolderDiscoveryPort;
   /**
    * The name of the runtime's own tool that publishes a document to the
    * person's account with the model's provider, when a thread in this mode

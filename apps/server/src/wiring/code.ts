@@ -649,6 +649,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "managedWorktreeRefsList"
     | "managedWorktreeSourcePreview"
     | "probeProviderForThreads"
+    | "providerFolderDiscoveryPorts"
     | "refreshStandaloneSkills"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
@@ -686,6 +687,7 @@ export function wireCode(deps: CodeDependencies) {
     probeProviderForThreads,
     projectRootPort,
     projectService,
+    providerFolderDiscoveryPorts,
     refreshStandaloneSkills,
     resolveHostStrict,
     selectCodeConversation,
@@ -870,6 +872,7 @@ export function wireCode(deps: CodeDependencies) {
     const providerFolderScan = new ProviderFolderScanService({
       homeDirectory: homedir(),
       env: process.env,
+      discoveryPorts: providerFolderDiscoveryPorts,
       readProviderInstances: () => persistence.readProviderInstances(),
       readActiveCodeProjects: () => persistence.readProjects({ type: "code", lifecycle: "active" }),
       isHostStrict: resolveHostStrict,

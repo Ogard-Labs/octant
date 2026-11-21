@@ -16,14 +16,14 @@ describe("provider folder scan contracts", () => {
         {
           repository: "acme/widget",
           label: "acme/widget",
-          providers: ["claude", "codex"],
+          providers: ["claude", "codex", "acme-agent"],
           sessionCount: 5,
           lastActivityAt: "2026-11-21T10:00:00.000Z",
           folders: [
             {
               id: FOLDER_ID,
               folderName: "widget",
-              providers: ["claude", "codex"],
+              providers: ["claude", "codex", "acme-agent"],
               sessionCount: 5,
               lastActivityAt: "2026-11-21T10:00:00.000Z",
               isGitRepository: true,

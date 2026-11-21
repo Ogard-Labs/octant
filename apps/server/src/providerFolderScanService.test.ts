@@ -22,11 +22,13 @@ import {
   type ProviderInstance,
   type WindowId,
 } from "@octant/contracts";
+import type { ProviderProjectFolderDiscoveryPort } from "@octant/provider-sdk";
 import { BindingReceiptStore } from "./bindingReceiptStore";
 import { openSqlite } from "./persistence/sqlitePort";
 import { ProjectRootPort } from "./projectRootPort";
 import type { ProjectServiceApi } from "./projectService";
 import { ProviderFolderScanService } from "./providerFolderScanService";
+import { BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS } from "./providers/providerFolderDiscoveryAdapters";
 
 const tempDirs: string[] = [];
 
@@ -299,6 +301,7 @@ describe("ProviderFolderScanService", () => {
     const fakeProjects = createFakeProjectService(receipts);
     const scanner = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {
         CLAUDE_CONFIG_DIR: envClaude,
         CODEX_HOME: envCodex,
@@ -393,6 +396,7 @@ describe("ProviderFolderScanService", () => {
 
     const scanner = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [registeredInstance],
       readActiveCodeProjects: () => fakeProjects.activeCodeProjects(),
@@ -473,6 +477,7 @@ describe("ProviderFolderScanService", () => {
 
     const fileBounded = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [],
       readActiveCodeProjects: () => [],
@@ -492,6 +497,7 @@ describe("ProviderFolderScanService", () => {
 
     const entryBounded = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [],
       readActiveCodeProjects: () => [],
@@ -512,6 +518,7 @@ describe("ProviderFolderScanService", () => {
     let ticks = 0;
     const timeBounded = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [],
       readActiveCodeProjects: () => [],
@@ -549,6 +556,7 @@ describe("ProviderFolderScanService", () => {
     let strict = false;
     const scanner = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [],
       readActiveCodeProjects: () => [],
@@ -622,6 +630,7 @@ describe("ProviderFolderScanService", () => {
 
     const scanner = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {
         OPENCODE_DATA: openCodeData,
         PI_CODING_AGENT_SESSION_DIR: customPiSessions,
@@ -663,6 +672,7 @@ describe("ProviderFolderScanService", () => {
     let requireGit = true;
     const scanner = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [],
       readActiveCodeProjects: () => fakeProjects.activeCodeProjects(),
@@ -723,6 +733,7 @@ describe("ProviderFolderScanService", () => {
     const fakeProjects = createFakeProjectService(receipts);
     const scanner = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [],
       readActiveCodeProjects: () => fakeProjects.activeCodeProjects(),
@@ -805,6 +816,7 @@ describe("ProviderFolderScanService", () => {
     const fakeProjects = createFakeProjectService(receipts);
     const scanner = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [],
       readActiveCodeProjects: () => [],
@@ -847,6 +859,7 @@ describe("ProviderFolderScanService", () => {
     let strictChecks = 0;
     const midScanStrict = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [],
       readActiveCodeProjects: () => [],
@@ -872,6 +885,7 @@ describe("ProviderFolderScanService", () => {
     };
     const midImportScanner = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [],
       readActiveCodeProjects: () => [],
@@ -913,6 +927,7 @@ describe("ProviderFolderScanService", () => {
     const fakeProjects = createFakeProjectService(receipts);
     const scanner = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [],
       readActiveCodeProjects: () => [],
@@ -975,6 +990,7 @@ describe("ProviderFolderScanService", () => {
     const fakeProjects = createFakeProjectService(receipts);
     const scanner = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => {
         callCount += 1;
@@ -1046,6 +1062,7 @@ describe("ProviderFolderScanService", () => {
     const fakeProjects = createFakeProjectService(receipts);
     const scanner = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [],
       readActiveCodeProjects: () => [],
@@ -1088,6 +1105,7 @@ describe("ProviderFolderScanService", () => {
     const fakeProjects = createFakeProjectService(receipts, clock);
     const scanner = new ProviderFolderScanService({
       homeDirectory: home,
+      discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
       env: {},
       readProviderInstances: () => [],
       readActiveCodeProjects: () => [],
@@ -1139,5 +1157,85 @@ describe("ProviderFolderScanService", () => {
       expect(freshImport.results[0]).toMatchObject({ status: "created" });
     }
     expect(fakeProjects.created.map((entry) => entry.canonicalRoot)).toEqual([repo]);
+  });
+
+  it("accepts folders from a custom third-party discovery port through the same host scan and import path", async () => {
+    const home = makeTempDir("octant-plugin-discovery-");
+    const pluginRepo = join(home, "code", "plugin-widget");
+    const downloadsFolder = join(home, "Downloads", "scratch");
+    createGitRepo(pluginRepo, "https://github.com/acme/plugin-widget.git");
+    createGitRepo(downloadsFolder, "https://github.com/acme/downloads-leak.git");
+
+    const customPort: ProviderProjectFolderDiscoveryPort = {
+      providerId: "acme-agent",
+      discoverFolders: async (context) => {
+        if (!context.consumeItemBudget()) return { status: "stopped", reason: "file-limit" };
+        context.observe({
+          workingDirectory: pluginRepo,
+          sessionKey: "plugin-session-1",
+          lastActivityMs: Date.parse("2026-11-21T12:00:00.000Z"),
+        });
+        if (!context.consumeItemBudget()) return { status: "stopped", reason: "file-limit" };
+        context.observe({
+          workingDirectory: pluginRepo,
+          sessionKey: "plugin-session-2",
+          lastActivityMs: Date.parse("2026-11-21T12:30:00.000Z"),
+        });
+        if (!context.consumeItemBudget()) return { status: "stopped", reason: "file-limit" };
+        context.observe({
+          workingDirectory: downloadsFolder,
+          sessionKey: "downloads-session",
+          lastActivityMs: Date.parse("2026-11-21T12:45:00.000Z"),
+        });
+        return { status: "completed" };
+      },
+    };
+    const brokenPort: ProviderProjectFolderDiscoveryPort = {
+      providerId: "broken-plugin",
+      discoverFolders: async () => {
+        throw new Error("simulated third-party adapter error");
+      },
+    };
+
+    const receipts = new BindingReceiptStore();
+    const fakeProjects = createFakeProjectService(receipts);
+    const scanner = new ProviderFolderScanService({
+      homeDirectory: home,
+      env: {},
+      discoveryPorts: [brokenPort, customPort],
+      readProviderInstances: () => [],
+      readActiveCodeProjects: () => [],
+      isHostStrict: () => false,
+      bindingReceiptStore: receipts,
+      projectRootPort: new ProjectRootPort(),
+      projectService: fakeProjects.service,
+    });
+
+    const windowId = decodeWindowId(randomUUID());
+    const scanned = await scanner.scan(windowId);
+    expect(scanned.status).toBe("ready");
+    if (scanned.status !== "ready") return;
+
+    const serialized = JSON.stringify(scanned);
+    expect(serialized).not.toContain(home);
+    expect(serialized).not.toContain(pluginRepo);
+    expect(scanned.groups).toHaveLength(1);
+    expect(scanned.groups[0]).toMatchObject({
+      repository: "acme/plugin-widget",
+      label: "acme/plugin-widget",
+      providers: ["acme-agent"],
+      sessionCount: 2,
+    });
+
+    const folderId = scanned.groups[0]?.folders[0]?.id;
+    expect(folderId).toBeDefined();
+    if (folderId === undefined) return;
+
+    const imported = await scanner.importFolders(windowId, { folderIds: [folderId] });
+    expect(imported.status).toBe("completed");
+    if (imported.status === "completed") {
+      expect(imported.results[0]).toMatchObject({ status: "created", name: "plugin-widget" });
+    }
+    expect(fakeProjects.created.map((entry) => entry.canonicalRoot)).toEqual([pluginRepo]);
   });
 });

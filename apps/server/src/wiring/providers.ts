@@ -55,10 +55,12 @@ import {
 import type { McpPlanServerProvider } from "@octant/contracts/mcp-plan-read-only";
 import type { BlockableToolProvider } from "@octant/contracts/blocked-tools";
 import { ExtensionProviderFamily } from "@octant/contracts/extensions";
-import type {
-  HarnessEndpointDriver,
-  ProviderDriver,
-  ProviderLocalUsageHistorySource,
+import {
+  collectProviderProjectFolderDiscoveryPorts,
+  type HarnessEndpointDriver,
+  type ProviderDriver,
+  type ProviderLocalUsageHistorySource,
+  type ProviderProjectFolderDiscoveryPort,
 } from "@octant/provider-sdk";
 import { Effect, Schema } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host";
@@ -191,6 +193,7 @@ import {
   createLocalUsageHistorySourceForDriver,
   localUsageHistorySourceKey,
 } from "../providers/providerUsageHistorySources";
+import { BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS } from "../providers/providerFolderDiscoveryAdapters";
 import { createExtensionRouteHandler } from "../extensionRoutes";
 import { createProviderToolingRouteHandler } from "../providerToolingRoutes";
 import { createMcpPlanReadOnlyRouteHandler } from "../mcpPlanReadOnlyRoutes";
@@ -2472,6 +2475,24 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       clock: () => new Date().toISOString(),
     });
+    const providerFolderDiscoveryPorts = (): ReadonlyArray<ProviderProjectFolderDiscoveryPort> => {
+      const contributed: ProviderProjectFolderDiscoveryPort[] = [
+        ...BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
+      ];
+      for (const instance of persistence.readProviderInstances()) {
+        if (!instance.enabled) continue;
+        let driver: ProviderDriver;
+        try {
+          driver = makeConfiguredProviderDriver(instance, configuredDriverOptions);
+        } catch {
+          continue;
+        }
+        if (driver.projectFolderDiscovery !== undefined) {
+          contributed.push(driver.projectFolderDiscovery);
+        }
+      }
+      return collectProviderProjectFolderDiscoveryPorts(contributed);
+    };
     // The last reading of each instance, so the usage rings have something
     // to show before the first turn of a new run reports. Loading it asks no
     // provider anything.
@@ -2641,6 +2662,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       probeProviderForThreads,
       verifyModelToolsOnFirstUse,
       providerDataDirectory,
+      providerFolderDiscoveryPorts,
       providerOAuthRoutes,
       providerRoutes,
       providerService,

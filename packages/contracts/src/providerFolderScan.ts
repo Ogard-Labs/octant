@@ -14,7 +14,15 @@ const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.bran
 export const DiscoveredProviderFolderId = brandedUuid("DiscoveredProviderFolderId");
 export type DiscoveredProviderFolderId = typeof DiscoveredProviderFolderId.Type;
 
-export const DiscoveredFolderProvider = Schema.Literal("claude", "codex", "opencode", "pi");
+/**
+ * Safe provider identifier contributed by a built-in or plugin folder
+ * discovery adapter (for example `"claude"`, `"codex"`, or a plugin's own
+ * slug). Never carries paths or whitespace.
+ */
+export const DiscoveredFolderProvider = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(64),
+  Schema.pattern(/^[a-z0-9][a-z0-9._-]*$/),
+);
 export type DiscoveredFolderProvider = typeof DiscoveredFolderProvider.Type;
 
 /**

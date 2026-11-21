@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
+import { lstat, open, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
@@ -30,9 +30,14 @@ import {
   type ObservedProviderFolder,
   type ParsedRemoteOwnerName,
 } from "@octant/domain/provider-folder-scan-policy";
+import {
+  collectProviderProjectFolderDiscoveryPorts,
+  type ProviderProjectFolderDiscoveryContext,
+  type ProviderProjectFolderDiscoveryPort,
+  type ProviderProjectFolderObservation,
+} from "@octant/provider-sdk";
 import type { BindingReceiptStorePort } from "./bindingReceiptStore";
 import { commonOfLinkedWorktree } from "./code/hostWorktreeDiscovery";
-import { openReadOnlySqlite } from "./persistence/sqlitePort";
 import type { ProjectRootPort } from "./projectRootPort";
 import type { ProjectServiceApi } from "./projectService";
 
@@ -52,13 +57,9 @@ export const DEFAULT_PROVIDER_FOLDER_SCAN_LIMITS: ProviderFolderScanLimits = {
 };
 
 const CANDIDATE_TTL_MS = 10 * 60_000;
-const SESSION_HEAD_BYTES = 64 * 1024;
 const GIT_FILE_MAX_BYTES = 64 * 1024;
 const GIT_CONFIG_MAX_BYTES = 256 * 1024;
-const OPENCODE_JSON_MAX_BYTES = 256 * 1024;
 const MAX_GIT_ANCESTOR_DEPTH = 20;
-const DATE_SEGMENT = /^\d{2,4}$/;
-const CODEX_ROLLOUT_FILE = /^rollout-.+\.jsonl$/;
 const STRICT_IMPORT_REFUSAL_MESSAGE =
   "Importing discovered provider folders is unavailable while Strict is on.";
 
@@ -74,6 +75,13 @@ export interface ProviderFolderScanApi {
 export interface ProviderFolderScanServiceOptions {
   readonly homeDirectory: string;
   readonly env?: NodeJS.ProcessEnv;
+  /**
+   * Provider-neutral folder discovery ports (built-in adapters and any
+   * plugin-contributed ports). May be passed as a static list or a getter.
+   */
+  readonly discoveryPorts:
+    | ReadonlyArray<ProviderProjectFolderDiscoveryPort>
+    | (() => ReadonlyArray<ProviderProjectFolderDiscoveryPort>);
   readonly readProviderInstances: () =>
     | ReadonlyArray<ProviderInstance>
     | Promise<ReadonlyArray<ProviderInstance>>;
@@ -117,20 +125,21 @@ interface ScanBudget {
 }
 
 /**
- * Host-side read-only discovery of folders the person already used with
- * Claude Code, Codex, OpenCode, and Pi during first run.
+ * Host-owned read-only discovery and import of folders the person already used
+ * with providers during first run.
  *
- * Scanning reads session metadata only, never writes to another tool's files,
- * never leaves the machine, and sends only opaque IDs and safe display labels
- * (`owner/name` or single-segment folder name) to the renderer. Importing
- * ticked opaque IDs re-verifies each directory's canonical path and inode
- * before creating Code Projects through the existing Project create path and
- * its folder receipts. Under Strict, scanning is hidden and importing is
- * refused on the server, re-checked throughout async steps.
+ * Provider-specific storage layouts and session parsing stay behind the
+ * provider-neutral `ProviderProjectFolderDiscoveryPort` SDK seam. This service
+ * owns scan budgets, Strict gating, cancellation, path canonicalization,
+ * symlink/worktree/Downloads exclusions, Git remote parsing, opaque IDs, and
+ * receipt-backed Code Project creation.
  */
 export class ProviderFolderScanService implements ProviderFolderScanApi {
   readonly #homeDirectory: string;
   readonly #env: NodeJS.ProcessEnv;
+  readonly #discoveryPorts:
+    | ReadonlyArray<ProviderProjectFolderDiscoveryPort>
+    | (() => ReadonlyArray<ProviderProjectFolderDiscoveryPort>);
   readonly #readProviderInstances: () =>
     | ReadonlyArray<ProviderInstance>
     | Promise<ReadonlyArray<ProviderInstance>>;
@@ -150,6 +159,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
   constructor(options: ProviderFolderScanServiceOptions) {
     this.#homeDirectory = options.homeDirectory;
     this.#env = options.env ?? process.env;
+    this.#discoveryPorts = options.discoveryPorts;
     this.#readProviderInstances = options.readProviderInstances;
     this.#readActiveCodeProjects = options.readActiveCodeProjects;
     this.#isHostStrict = options.isHostStrict;
@@ -231,12 +241,13 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
         activityMs: number,
       ): boolean => {
         if (shouldStopDiscovery()) return false;
-        if (!isAbsolute(cwd)) return true;
+        if (!isAbsolute(cwd) || sessionKey.trim() === "") return true;
+        const safeActivityMs = Number.isFinite(activityMs) && activityMs > 0 ? activityMs : 0;
         const existing = rawByCwd.get(cwd);
         if (existing !== undefined) {
           existing.providers.add(provider);
           existing.sessionKeys.add(`${provider}\0${sessionKey}`);
-          if (activityMs > existing.lastActivityMs) existing.lastActivityMs = activityMs;
+          if (safeActivityMs > existing.lastActivityMs) existing.lastActivityMs = safeActivityMs;
           return true;
         }
         if (rawByCwd.size >= budget.limits.maxEntries) {
@@ -246,25 +257,51 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
         rawByCwd.set(cwd, {
           providers: new Set([provider]),
           sessionKeys: new Set([`${provider}\0${sessionKey}`]),
-          lastActivityMs: activityMs,
+          lastActivityMs: safeActivityMs,
         });
         budget.entriesCounted = rawByCwd.size;
         return true;
       };
 
-      const roots = await this.#collectProviderHomes(canonicalHome);
-      for (const runPhase of [
-        () => this.#scanClaudeHomes(roots.claude, budget, shouldStopDiscovery, recordSession),
-        () => this.#scanCodexHomes(roots.codex, budget, shouldStopDiscovery, recordSession),
-        () => this.#scanOpenCodeHomes(roots.opencode, budget, shouldStopDiscovery, recordSession),
-        () => this.#scanPiHomes(roots.pi, budget, shouldStopDiscovery, recordSession),
-      ]) {
+      const providerInstances = await this.#readProviderInstances();
+      const rawPorts =
+        typeof this.#discoveryPorts === "function" ? this.#discoveryPorts() : this.#discoveryPorts;
+      const ports = collectProviderProjectFolderDiscoveryPorts(rawPorts);
+
+      for (const port of ports) {
         const strictNow = hiddenIfStrict();
         if (strictNow !== undefined) return strictNow;
         const supersededNow = emptyIfSuperseded();
         if (supersededNow !== undefined) return supersededNow;
         if (isDiscoveryStopped(budget)) break;
-        await runPhase();
+
+        const context: ProviderProjectFolderDiscoveryContext = {
+          homeDirectory: canonicalHome,
+          env: this.#env,
+          providerInstances,
+          isCancelled: shouldStopDiscovery,
+          remainingItemBudget: () =>
+            shouldStopDiscovery() || isDiscoveryStopped(budget)
+              ? 0
+              : Math.max(0, budget.limits.maxFiles - budget.filesScanned),
+          consumeItemBudget: () => !shouldStopDiscovery() && consumeFileBudget(budget),
+          observe: (observation: ProviderProjectFolderObservation) =>
+            recordSession(
+              observation.workingDirectory,
+              port.providerId,
+              observation.sessionKey,
+              observation.lastActivityMs,
+            ),
+        };
+
+        try {
+          const outcome = await port.discoverFolders(context);
+          if (outcome.status === "stopped") {
+            markStopped(budget, outcome.reason);
+          }
+        } catch {
+          // A failing discovery adapter must not prevent other adapters or first run from completing.
+        }
       }
 
       const strictBeforeInspect = hiddenIfStrict();
@@ -410,7 +447,6 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     for (let index = 0; index < request.folderIds.length; index += 1) {
       const folderId = request.folderIds[index];
       if (folderId === undefined) continue;
-
       if (this.#isHostStrict()) {
         this.#clearWindowCandidates(windowId);
         if (results.length === 0) {
@@ -597,208 +633,6 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
     );
   }
 
-  async #collectProviderHomes(canonicalHome: string): Promise<{
-    readonly claude: ReadonlyArray<string>;
-    readonly codex: ReadonlyArray<string>;
-    readonly opencode: ReadonlyArray<string>;
-    readonly pi: ReadonlyArray<string>;
-  }> {
-    const instances = await this.#readProviderInstances();
-
-    const claudeRaw: string[] = [join(canonicalHome, ".claude")];
-    if (isAbsoluteNonEmpty(this.#env.CLAUDE_CONFIG_DIR)) {
-      claudeRaw.push(this.#env.CLAUDE_CONFIG_DIR);
-    }
-    claudeRaw.push(...(await listSubdirectories(join(canonicalHome, ".claude-accounts"))));
-    for (const instance of instances) {
-      if (
-        instance.driverKind === "claude" &&
-        isAbsoluteNonEmpty(instance.configuration.configDirectory)
-      ) {
-        claudeRaw.push(instance.configuration.configDirectory);
-      }
-    }
-
-    const codexRaw: string[] = [join(canonicalHome, ".codex")];
-    if (isAbsoluteNonEmpty(this.#env.CODEX_HOME)) {
-      codexRaw.push(this.#env.CODEX_HOME);
-    }
-    codexRaw.push(...(await listSubdirectories(join(canonicalHome, ".codex-accounts"))));
-    for (const instance of instances) {
-      if (instance.driverKind === "codex" && isAbsoluteNonEmpty(instance.configuration.codexHome)) {
-        codexRaw.push(instance.configuration.codexHome);
-      }
-    }
-
-    const opencodeRaw: string[] = [];
-    if (isAbsoluteNonEmpty(this.#env.OPENCODE_DATA)) {
-      opencodeRaw.push(this.#env.OPENCODE_DATA);
-    }
-    if (isAbsoluteNonEmpty(this.#env.XDG_DATA_HOME)) {
-      opencodeRaw.push(join(this.#env.XDG_DATA_HOME, "opencode"));
-    }
-    if (isAbsoluteNonEmpty(this.#env.LOCALAPPDATA)) {
-      opencodeRaw.push(join(this.#env.LOCALAPPDATA, "opencode"));
-    }
-    opencodeRaw.push(join(canonicalHome, ".local", "share", "opencode"));
-
-    const piRaw: string[] = [];
-    if (isAbsoluteNonEmpty(this.#env.PI_CODING_AGENT_SESSION_DIR)) {
-      piRaw.push(this.#env.PI_CODING_AGENT_SESSION_DIR);
-    }
-    if (isAbsoluteNonEmpty(this.#env.PI_CODING_AGENT_DIR)) {
-      piRaw.push(join(this.#env.PI_CODING_AGENT_DIR, "sessions"));
-    }
-    piRaw.push(join(canonicalHome, ".pi", "agent", "sessions"));
-
-    return {
-      claude: await uniqueExistingDirectories(claudeRaw),
-      codex: await uniqueExistingDirectories(codexRaw),
-      opencode: await uniqueExistingDirectories(opencodeRaw),
-      pi: await uniqueExistingDirectories(piRaw),
-    };
-  }
-
-  async #scanClaudeHomes(
-    homes: ReadonlyArray<string>,
-    budget: ScanBudget,
-    shouldStop: () => boolean,
-    record: (
-      cwd: string,
-      provider: DiscoveredFolderProvider,
-      sessionKey: string,
-      activityMs: number,
-    ) => boolean,
-  ): Promise<void> {
-    for (const claudeHome of homes) {
-      if (shouldStop() || isDiscoveryStopped(budget)) return;
-      const projectsDir = join(claudeHome, "projects");
-      const folders = await safeReaddirWithTypes(projectsDir);
-      for (const folder of folders) {
-        if (shouldStop() || isDiscoveryStopped(budget)) return;
-        if (!folder.isDirectory() || folder.isSymbolicLink()) continue;
-        const folderPath = join(projectsDir, folder.name);
-        const entries = await safeReaddirWithTypes(folderPath);
-        for (const entry of entries) {
-          if (shouldStop() || isDiscoveryStopped(budget)) return;
-          if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".jsonl")) continue;
-          if (!consumeFileBudget(budget)) return;
-          const filePath = join(folderPath, entry.name);
-          const read = await readFileHead(filePath, SESSION_HEAD_BYTES);
-          if (read === undefined) continue;
-          const cwd = extractClaudeCwd(read.text);
-          if (cwd === undefined) continue;
-          const sessionKey = entry.name.slice(0, -".jsonl".length);
-          if (!record(cwd, "claude", sessionKey, read.mtimeMs)) return;
-        }
-      }
-    }
-  }
-
-  async #scanCodexHomes(
-    homes: ReadonlyArray<string>,
-    budget: ScanBudget,
-    shouldStop: () => boolean,
-    record: (
-      cwd: string,
-      provider: DiscoveredFolderProvider,
-      sessionKey: string,
-      activityMs: number,
-    ) => boolean,
-  ): Promise<void> {
-    const visitRollout = async (filePath: string, fileName: string): Promise<boolean> => {
-      if (shouldStop()) return false;
-      if (!consumeFileBudget(budget)) return false;
-      const read = await readFileHead(filePath, SESSION_HEAD_BYTES);
-      if (read === undefined) return true;
-      const meta = extractCodexMeta(read.text);
-      if (meta === undefined) return true;
-      const activityMs = Math.max(read.mtimeMs, meta.timestampMs ?? 0);
-      return record(meta.cwd, "codex", meta.sessionId ?? fileName, activityMs);
-    };
-
-    for (const codexHome of homes) {
-      if (shouldStop() || isDiscoveryStopped(budget)) return;
-      await walkCodexDateTree(join(codexHome, "sessions"), 0, budget, shouldStop, visitRollout);
-      if (shouldStop() || isDiscoveryStopped(budget)) return;
-      await walkCodexArchiveTree(
-        join(codexHome, "archived_sessions"),
-        0,
-        budget,
-        shouldStop,
-        visitRollout,
-      );
-    }
-  }
-
-  async #scanOpenCodeHomes(
-    homes: ReadonlyArray<string>,
-    budget: ScanBudget,
-    shouldStop: () => boolean,
-    record: (
-      cwd: string,
-      provider: DiscoveredFolderProvider,
-      sessionKey: string,
-      activityMs: number,
-    ) => boolean,
-  ): Promise<void> {
-    for (const dataDir of homes) {
-      if (shouldStop() || isDiscoveryStopped(budget)) return;
-      const names = await safeReaddir(dataDir);
-      const channelDbs = names
-        .filter(
-          (name) => name.startsWith("opencode") && name.endsWith(".db") && name !== "opencode.db",
-        )
-        .sort();
-      const dbNames = [...(names.includes("opencode.db") ? ["opencode.db"] : []), ...channelDbs];
-      for (const dbName of dbNames) {
-        if (shouldStop() || isDiscoveryStopped(budget)) return;
-        const dbPath = join(dataDir, dbName);
-        if (!(await isRegularFile(dbPath))) continue;
-        scanOpenCodeSqlite(dbPath, budget, shouldStop, record);
-      }
-
-      if (shouldStop() || isDiscoveryStopped(budget)) return;
-      const legacySessions = join(dataDir, "storage", "session");
-      await scanOpenCodeLegacyJson(legacySessions, budget, shouldStop, record);
-    }
-  }
-
-  async #scanPiHomes(
-    sessionDirs: ReadonlyArray<string>,
-    budget: ScanBudget,
-    shouldStop: () => boolean,
-    record: (
-      cwd: string,
-      provider: DiscoveredFolderProvider,
-      sessionKey: string,
-      activityMs: number,
-    ) => boolean,
-  ): Promise<void> {
-    for (const sessionsDir of sessionDirs) {
-      if (shouldStop() || isDiscoveryStopped(budget)) return;
-      const folders = await safeReaddirWithTypes(sessionsDir);
-      for (const folder of folders) {
-        if (shouldStop() || isDiscoveryStopped(budget)) return;
-        if (!folder.isDirectory() || folder.isSymbolicLink()) continue;
-        const folderPath = join(sessionsDir, folder.name);
-        const entries = await safeReaddirWithTypes(folderPath);
-        for (const entry of entries) {
-          if (shouldStop() || isDiscoveryStopped(budget)) return;
-          if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".jsonl")) continue;
-          if (!consumeFileBudget(budget)) return;
-          const filePath = join(folderPath, entry.name);
-          const read = await readFileHead(filePath, SESSION_HEAD_BYTES);
-          if (read === undefined) continue;
-          const header = extractPiHeader(read.text);
-          if (header === undefined) continue;
-          const activityMs = Math.max(read.mtimeMs, header.timestampMs ?? 0);
-          if (!record(header.cwd, "pi", header.id, activityMs)) return;
-        }
-      }
-    }
-  }
-
   #clearWindowCandidates(windowId: WindowId): void {
     for (const [id, candidate] of this.#candidates) {
       if (String(candidate.windowId) === String(windowId)) this.#candidates.delete(id);
@@ -838,204 +672,6 @@ function consumeFileBudget(budget: ScanBudget): boolean {
 
 function markStopped(budget: ScanBudget, reason: ProviderFolderScanStopReason): void {
   budget.stoppedReason ??= reason;
-}
-
-async function walkCodexDateTree(
-  directory: string,
-  depth: number,
-  budget: ScanBudget,
-  isStrict: () => boolean,
-  visit: (filePath: string, fileName: string) => Promise<boolean>,
-): Promise<void> {
-  if (isStrict() || isDiscoveryStopped(budget)) return;
-  const entries = await safeReaddirWithTypes(directory);
-  if (depth < 3) {
-    const dirs = entries
-      .filter(
-        (entry) => entry.isDirectory() && !entry.isSymbolicLink() && DATE_SEGMENT.test(entry.name),
-      )
-      .sort((left, right) => right.name.localeCompare(left.name));
-    for (const dir of dirs) {
-      if (isStrict() || isDiscoveryStopped(budget)) return;
-      await walkCodexDateTree(join(directory, dir.name), depth + 1, budget, isStrict, visit);
-    }
-    return;
-  }
-  const files = entries
-    .filter(
-      (entry) => entry.isFile() && !entry.isSymbolicLink() && CODEX_ROLLOUT_FILE.test(entry.name),
-    )
-    .sort((left, right) => right.name.localeCompare(left.name));
-  for (const file of files) {
-    if (isStrict() || isDiscoveryStopped(budget)) return;
-    const keepGoing = await visit(join(directory, file.name), file.name);
-    if (!keepGoing) return;
-  }
-}
-
-/**
- * Walks Codex's `archived_sessions` folder, which may hold flat `rollout-*.jsonl`
- * files or dated subdirectories up to depth 3, newest first.
- */
-async function walkCodexArchiveTree(
-  directory: string,
-  depth: number,
-  budget: ScanBudget,
-  isStrict: () => boolean,
-  visit: (filePath: string, fileName: string) => Promise<boolean>,
-): Promise<void> {
-  if (isStrict() || isDiscoveryStopped(budget)) return;
-  const entries = await safeReaddirWithTypes(directory);
-  const files = entries
-    .filter(
-      (entry) => entry.isFile() && !entry.isSymbolicLink() && CODEX_ROLLOUT_FILE.test(entry.name),
-    )
-    .sort((left, right) => right.name.localeCompare(left.name));
-  for (const file of files) {
-    if (isStrict() || isDiscoveryStopped(budget)) return;
-    const keepGoing = await visit(join(directory, file.name), file.name);
-    if (!keepGoing) return;
-  }
-  if (depth >= 3) return;
-  const dirs = entries
-    .filter(
-      (entry) => entry.isDirectory() && !entry.isSymbolicLink() && DATE_SEGMENT.test(entry.name),
-    )
-    .sort((left, right) => right.name.localeCompare(left.name));
-  for (const dir of dirs) {
-    if (isStrict() || isDiscoveryStopped(budget)) return;
-    await walkCodexArchiveTree(join(directory, dir.name), depth + 1, budget, isStrict, visit);
-  }
-}
-
-function scanOpenCodeSqlite(
-  dbPath: string,
-  budget: ScanBudget,
-  isStrict: () => boolean,
-  record: (
-    cwd: string,
-    provider: DiscoveredFolderProvider,
-    sessionKey: string,
-    activityMs: number,
-  ) => boolean,
-): void {
-  if (isStrict() || isDiscoveryStopped(budget)) return;
-  let db;
-  try {
-    db = openReadOnlySqlite(dbPath);
-  } catch {
-    return;
-  }
-  try {
-    const tableRow = db.all(
-      "SELECT count(*) AS present FROM sqlite_master WHERE type = 'table' AND name = 'session'",
-    )[0];
-    if (!isRecord(tableRow) || tableRow.present !== 1) return;
-
-    const columns = new Set(
-      db
-        .all("PRAGMA table_info(session)")
-        .filter(isRecord)
-        .map((row) => (typeof row.name === "string" ? row.name : "")),
-    );
-    if (!columns.has("directory")) return;
-
-    const selectCols = [
-      columns.has("id") ? "id" : "rowid AS id",
-      "directory",
-      columns.has("time_updated") ? "time_updated" : "NULL AS time_updated",
-      columns.has("time_created") ? "time_created" : "NULL AS time_created",
-    ];
-    const whereClauses = ["directory IS NOT NULL", "directory != ''"];
-    if (columns.has("parent_id")) {
-      whereClauses.push("(parent_id IS NULL OR parent_id = '')");
-    }
-    const orderClause = columns.has("time_updated") ? "ORDER BY time_updated DESC" : "";
-    const remaining = Math.max(0, budget.limits.maxFiles - budget.filesScanned);
-    const limit = remaining + 1;
-    const rows = db.all(
-      `SELECT ${selectCols.join(", ")} FROM session WHERE ${whereClauses.join(" AND ")} ${orderClause} LIMIT ${String(limit)}`,
-    );
-
-    for (const row of rows) {
-      if (isStrict()) return;
-      if (!isRecord(row) || typeof row.directory !== "string") continue;
-      if (!consumeFileBudget(budget)) return;
-      const id =
-        typeof row.id === "string" || typeof row.id === "number"
-          ? String(row.id)
-          : `${dbPath}:${String(budget.filesScanned)}`;
-      const updatedMs =
-        normalizeEpochMs(row.time_updated) ?? normalizeEpochMs(row.time_created) ?? 0;
-      if (!record(row.directory, "opencode", id, updatedMs)) return;
-    }
-  } catch {
-    // An unreadable or locked third-party database is skipped read-only.
-  } finally {
-    db.close();
-  }
-}
-
-async function scanOpenCodeLegacyJson(
-  sessionsRoot: string,
-  budget: ScanBudget,
-  isStrict: () => boolean,
-  record: (
-    cwd: string,
-    provider: DiscoveredFolderProvider,
-    sessionKey: string,
-    activityMs: number,
-  ) => boolean,
-): Promise<void> {
-  const top = await safeReaddirWithTypes(sessionsRoot);
-  for (const entry of top) {
-    if (isStrict() || isDiscoveryStopped(budget)) return;
-    if (entry.isSymbolicLink()) continue;
-    const entryPath = join(sessionsRoot, entry.name);
-    if (entry.isFile() && entry.name.endsWith(".json")) {
-      if (!consumeFileBudget(budget)) return;
-      const parsed = await readOpenCodeJsonSession(entryPath);
-      if (parsed !== undefined && !record(parsed.cwd, "opencode", parsed.id, parsed.activityMs)) {
-        return;
-      }
-      continue;
-    }
-    if (!entry.isDirectory()) continue;
-    const nested = await safeReaddirWithTypes(entryPath);
-    for (const file of nested) {
-      if (isStrict() || isDiscoveryStopped(budget)) return;
-      if (!file.isFile() || file.isSymbolicLink() || !file.name.endsWith(".json")) continue;
-      if (!consumeFileBudget(budget)) return;
-      const parsed = await readOpenCodeJsonSession(join(entryPath, file.name));
-      if (parsed !== undefined && !record(parsed.cwd, "opencode", parsed.id, parsed.activityMs)) {
-        return;
-      }
-    }
-  }
-}
-
-async function readOpenCodeJsonSession(
-  filePath: string,
-): Promise<{ readonly id: string; readonly cwd: string; readonly activityMs: number } | undefined> {
-  const read = await readSmallFile(filePath, OPENCODE_JSON_MAX_BYTES);
-  if (read === undefined) return undefined;
-  let value: unknown;
-  try {
-    value = JSON.parse(read.text) as unknown;
-  } catch {
-    return undefined;
-  }
-  if (!isRecord(value)) return undefined;
-  if (value.parentID !== undefined || value.parentId !== undefined) return undefined;
-  if (typeof value.directory !== "string" || !isAbsolute(value.directory)) return undefined;
-  const id = typeof value.id === "string" && value.id.trim() !== "" ? value.id : filePath;
-  const time = isRecord(value.time) ? value.time : undefined;
-  const activityMs =
-    normalizeEpochMs(time?.updated) ??
-    normalizeEpochMs(value.updated) ??
-    normalizeEpochMs(time?.created) ??
-    read.mtimeMs;
-  return { id, cwd: value.directory, activityMs };
 }
 
 async function verifyCandidateIdentity(candidate: StoredCandidate): Promise<boolean> {
@@ -1217,108 +853,6 @@ async function readGitRemoteOwnerName(
   return parsed.every((candidate) => candidate.groupKey === first.groupKey) ? first : undefined;
 }
 
-function extractClaudeCwd(text: string): string | undefined {
-  for (const line of text.split("\n")) {
-    if (line.trim() === "") continue;
-    let record: unknown;
-    try {
-      record = JSON.parse(line) as unknown;
-    } catch {
-      continue;
-    }
-    if (!isRecord(record)) continue;
-    if (record.isSidechain === true) continue;
-    if (typeof record.cwd === "string" && isAbsolute(record.cwd)) {
-      return record.cwd;
-    }
-  }
-  return undefined;
-}
-
-function extractCodexMeta(
-  text: string,
-):
-  | { readonly cwd: string; readonly sessionId?: string; readonly timestampMs?: number }
-  | undefined {
-  for (const line of text.split("\n")) {
-    if (line.trim() === "") continue;
-    let record: unknown;
-    try {
-      record = JSON.parse(line) as unknown;
-    } catch {
-      continue;
-    }
-    if (!isRecord(record) || record.type !== "session_meta" || !isRecord(record.payload)) continue;
-    const payload = record.payload;
-    if (typeof payload.parentThreadId === "string" && payload.parentThreadId !== "")
-      return undefined;
-    if (payload.source === "subagent") return undefined;
-    if (typeof payload.cwd !== "string" || !isAbsolute(payload.cwd)) return undefined;
-    const sessionId = typeof payload.id === "string" && payload.id !== "" ? payload.id : undefined;
-    const timestampMs =
-      typeof payload.timestamp === "string" ? parseIsoMs(payload.timestamp) : undefined;
-    return {
-      cwd: payload.cwd,
-      ...(sessionId === undefined ? {} : { sessionId }),
-      ...(timestampMs === undefined ? {} : { timestampMs }),
-    };
-  }
-  return undefined;
-}
-
-function extractPiHeader(
-  text: string,
-): { readonly id: string; readonly cwd: string; readonly timestampMs?: number } | undefined {
-  const firstLine = text.split("\n")[0];
-  if (firstLine === undefined || firstLine.trim() === "") return undefined;
-  let value: unknown;
-  try {
-    value = JSON.parse(firstLine) as unknown;
-  } catch {
-    return undefined;
-  }
-  if (!isRecord(value)) return undefined;
-  if (
-    value.type !== "session" ||
-    typeof value.id !== "string" ||
-    value.id.trim() === "" ||
-    typeof value.cwd !== "string" ||
-    !isAbsolute(value.cwd)
-  ) {
-    return undefined;
-  }
-  const timestampMs = typeof value.timestamp === "string" ? parseIsoMs(value.timestamp) : undefined;
-  return {
-    id: value.id,
-    cwd: value.cwd,
-    ...(timestampMs === undefined ? {} : { timestampMs }),
-  };
-}
-
-async function readFileHead(
-  path: string,
-  maxBytes: number,
-): Promise<{ readonly text: string; readonly mtimeMs: number } | undefined> {
-  let handle;
-  try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch {
-    return undefined;
-  }
-  try {
-    const info = await handle.stat();
-    if (!info.isFile()) return undefined;
-    const length = Math.min(info.size, maxBytes);
-    const buffer = Buffer.alloc(length);
-    const { bytesRead } = await handle.read(buffer, 0, length, 0);
-    return { text: buffer.subarray(0, bytesRead).toString("utf8"), mtimeMs: info.mtimeMs };
-  } catch {
-    return undefined;
-  } finally {
-    await handle.close();
-  }
-}
-
 async function readSmallFile(
   path: string,
   maxBytes: number,
@@ -1340,83 +874,6 @@ async function readSmallFile(
   } finally {
     await handle.close();
   }
-}
-
-async function listSubdirectories(parentDir: string): Promise<ReadonlyArray<string>> {
-  const entries = await safeReaddirWithTypes(parentDir);
-  return entries
-    .filter(
-      (entry) => entry.isDirectory() && !entry.isSymbolicLink() && !entry.name.startsWith("."),
-    )
-    .map((entry) => join(parentDir, entry.name))
-    .sort();
-}
-
-async function uniqueExistingDirectories(
-  candidates: ReadonlyArray<string>,
-): Promise<ReadonlyArray<string>> {
-  const seen = new Set<string>();
-  const directories: string[] = [];
-  for (const candidate of candidates) {
-    let canonical: string;
-    try {
-      canonical = await realpath(candidate);
-      const info = await stat(canonical);
-      if (!info.isDirectory()) continue;
-    } catch {
-      continue;
-    }
-    if (seen.has(canonical)) continue;
-    seen.add(canonical);
-    directories.push(canonical);
-  }
-  return directories;
-}
-
-async function isRegularFile(path: string): Promise<boolean> {
-  try {
-    const info = await lstat(path);
-    return info.isFile();
-  } catch {
-    return false;
-  }
-}
-
-async function safeReaddir(path: string): Promise<ReadonlyArray<string>> {
-  try {
-    return await readdir(path);
-  } catch {
-    return [];
-  }
-}
-
-async function safeReaddirWithTypes(path: string) {
-  try {
-    return await readdir(path, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-}
-
-function isAbsoluteNonEmpty(value: string | undefined): value is string {
-  return typeof value === "string" && value.trim().length > 0 && isAbsolute(value.trim());
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseIsoMs(value: string): number | undefined {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function normalizeEpochMs(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    return value < 1_000_000_000_000 ? Math.trunc(value * 1000) : Math.trunc(value);
-  }
-  if (typeof value === "string") return parseIsoMs(value);
-  return undefined;
 }
 
 function toUtcTimestamp(ms: number, fallbackClock: () => string): UtcTimestamp {

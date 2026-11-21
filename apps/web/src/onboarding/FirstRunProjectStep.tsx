@@ -52,7 +52,7 @@ const MODE_COPY: Record<FirstRunTaskMode, { readonly label: string; readonly lea
   },
 };
 
-const PROVIDER_LABELS: Record<DiscoveredFolderProvider, string> = {
+const PROVIDER_LABELS: Readonly<Record<string, string>> = {
   claude: "Claude Code",
   codex: "Codex",
   opencode: "OpenCode",
@@ -81,7 +81,7 @@ function chooseWithArrows(event: KeyboardEvent<HTMLElement>): void {
 }
 
 function formatProviders(providers: ReadonlyArray<DiscoveredFolderProvider>): string {
-  return providers.map((provider) => PROVIDER_LABELS[provider]).join(", ");
+  return providers.map((provider) => PROVIDER_LABELS[provider] ?? provider).join(", ");
 }
 
 function formatSessionCount(count: number): string {
