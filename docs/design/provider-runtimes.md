@@ -745,11 +745,18 @@ that source cannot be read for those alone: it also brings the plugins,
 agents and commands the person's own Octant switches keep out. So a launch
 outside Strict whose setup reads no home settings (none of skills, hooks,
 tool servers or the Project's code on; subagents and web tools alone read
-none) keeps Octant's gate and Octant's configured sandbox, as under Strict,
-rather than running with neither protection (`claudeOwnPermissions`, which
+none) keeps Octant's gate, as under Strict (`claudeOwnPermissions`, which
 `claudeReadsPersonSettings` gates). The SDK port refuses a launch asking for
 Claude's own permissions that would read no person's settings, so the rule
-fails closed at both ends.
+fails closed at both ends. Such a launch in Work or Code outside Plan carries
+no sandbox settings either (maintainer decision, 2026-11-21; built,
+`claudeOctantConfiguresSandbox` on the shared
+`providerHoldsLevelWithoutSandbox`): as on Windows, Claude's own permission
+mode and the gate hold the level, and the gate keeps every per-call rule (the
+secret guard's protected paths, the folders the session holds, its own ask
+for a command, a publish, a workflow start or a level change). Chat, Plan, a
+Full access thread that kept its sandbox, and a legacy chosen sandbox policy
+keep Octant's configured sandbox; Strict keeps it as described above.
 
 A Work or Code session outside Plan launches with Claude Code's own tool
 preset (`tools: { type: "preset", preset: "claude_code" }`) rather than a
@@ -1513,7 +1520,16 @@ Under
 [Providers run in their own sandbox](../architecture.md#security-and-authority)
 (maintainer decision, 2026-11-15; built for Codex), a Work or Code thread at
 Guarded or Reviewed outside Strict runs Codex's native workspace-write sandbox
-and escalation in place of Octant's profile:
+and escalation in place of Octant's profile. The shared rule for every
+provider decides it (`providerHoldsLevelWithoutSandbox`, maintainer decision,
+2026-11-21; `codexRunsNativeSandbox`): a thread that chose a sandbox policy,
+or kept the sandbox at Full access, stays in Octant's profile, as Strict,
+Plan and Chat do. The mapping per level is Ask first `untrusted`, Accept
+edits `untrusted` with Octant answering in-root file changes, Auto
+`on-request` with Codex's reviewer, each with `workspace-write`; Full access
+keeps `danger-full-access`. Accept edits stays `untrusted` rather than
+`on-request` because `on-request` would run every command unasked inside the
+sandbox, waiving the command asks Accept edits keeps.
 
 - The app-server runs unwrapped, as Codex runs on its own; macOS refuses a
   Seatbelt profile inside another, so the native sandbox replaces Octant's.

@@ -101,6 +101,7 @@ import {
   claudeAccountUsesStoredKey,
   mcpServerTool,
   planReadOnlyToolServers,
+  providerHoldsLevelWithoutSandbox,
   providerOwnMemoryLaunches,
   windowsProviderLaunch,
 } from "@octant/domain";
@@ -882,8 +883,8 @@ function isPlanShellCommand(
  * and their `permissions.allow`, `ask` and `deny` rules live. The source
  * cannot be read for those alone, because it also brings the plugins,
  * agents and commands the person's Octant switches keep out, so a session
- * that reads no home settings keeps Octant's gate and sandbox instead of
- * running with neither protection.
+ * that reads no home settings keeps Octant's gate, which asks before each
+ * command and each edit the level does not waive.
  */
 export function claudeOwnPermissions(input: {
   readonly strict: boolean;
@@ -902,17 +903,36 @@ export function claudeOwnPermissions(input: {
 /**
  * Whether Octant configures Claude's command sandbox for a session. Under
  * Strict it is today's configuration (the Project's folders, Network limits,
- * no unasked sandboxed commands); outside Strict Octant leaves Claude's
- * sandbox to the person's own Claude settings and passes it nothing. A Full
- * access thread that kept its sandbox keeps Octant's at every setting.
+ * no unasked sandboxed commands). Outside Strict a Work or Code launch
+ * below Full access outside Plan runs with no sandbox of Octant's
+ * (`providerHoldsLevelWithoutSandbox`, maintainer decision, 2026-11-21), as on
+ * Windows: Claude's own permission modes, the person's own Claude settings
+ * where the session reads them, and Octant's gate hold the level. Chat and
+ * Plan keep Octant's configuration, as does a legacy chosen sandbox policy in
+ * a session that reads none of the person's settings. A Full access thread
+ * that kept its sandbox keeps Octant's at every setting.
  */
 export function claudeOctantConfiguresSandbox(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox: boolean;
   readonly ownPermissions: boolean;
+  readonly mode: ProviderAcquireInput["mode"] | undefined;
+  readonly strict: boolean;
+  readonly sandboxPolicySelected: boolean;
 }): boolean {
   if (input.executionPolicy === "full-access" && input.fullAccessSandbox) return true;
-  return claudeRunsSandbox(input.executionPolicy) && !input.ownPermissions;
+  return (
+    claudeRunsSandbox(input.executionPolicy) &&
+    !input.ownPermissions &&
+    !providerHoldsLevelWithoutSandbox({
+      mode: input.mode ?? "code",
+      executionPolicy: input.executionPolicy,
+      strict: input.strict,
+      fullAccessSandbox: input.fullAccessSandbox,
+      sandboxPolicySelected: input.sandboxPolicySelected,
+      purpose: "session",
+    })
+  );
 }
 
 function claudePolicyOptions(
@@ -4009,6 +4029,9 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           fullAccessSandbox: sandboxedFullAccess,
           ownPermissions,
+          mode,
+          strict,
+          sandboxPolicySelected: options.sandboxPolicy !== undefined,
         });
         const networkPolicy = sandboxedFullAccess ? "auto-accept-edits" : input.executionPolicy;
         // Claude's own process: its inference and in-process web fetch. It
