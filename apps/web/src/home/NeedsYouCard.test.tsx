@@ -170,10 +170,19 @@ describe("the Needs you card", () => {
         offerHostRun: "before",
       })
       .mockResolvedValue({ requests: [], truncated: false, offerHostRun: "after" });
-    const options = source({ pendingRequestClient: { list }, onOpenAsk });
+    const beforeRecovery = { list };
+    const afterRecovery = { list };
+    const options = source({ onOpenAsk });
     const dashboard = (feedRevision: number, modes: NeedsYouCardSource["modes"] = ["chat"]) => (
       <HomeDashboard
-        cards={[createNeedsYouCard({ ...options, feedRevision, modes })]}
+        cards={[
+          createNeedsYouCard({
+            ...options,
+            feedRevision,
+            modes,
+            pendingRequestClient: feedRevision === 0 ? beforeRecovery : afterRecovery,
+          }),
+        ]}
         customization={{ order: [], visibility: [] }}
         onCustomizationChange={vi.fn()}
       />
