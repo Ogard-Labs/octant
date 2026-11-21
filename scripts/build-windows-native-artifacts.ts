@@ -11,6 +11,7 @@ export const WINDOWS_NATIVE_ARTIFACTS = [
   "octant-windows-host-owner.node",
   "octant-credential-helper.exe",
   "octant-desktop-peer-windows.node",
+  "octant-windows-confine.exe",
 ] as const;
 
 /** Native resources contain only the fixed runtime artifacts, never QA readers or build files. */
@@ -109,6 +110,7 @@ export async function buildWindowsNativeArtifacts(destination: string): Promise<
     const ownerBuild = join(stage, "owner");
     const credentialBuild = join(stage, "credentials");
     const peerBuild = join(stage, "desktop-peer");
+    const confineBuild = join(stage, "windows-confine");
     await run(
       "cmake",
       [
@@ -164,6 +166,16 @@ export async function buildWindowsNativeArtifacts(destination: string): Promise<
       ["--build", peerBuild, "--config", "Release", "--target", "octant-desktop-peer-windows"],
       { cwd: root },
     );
+    await run(
+      "cmake",
+      ["-S", join(root, "apps/desktop/native/windows-confine"), "-B", confineBuild, "-A", "x64"],
+      { cwd: root },
+    );
+    await run(
+      "cmake",
+      ["--build", confineBuild, "--config", "Release", "--target", "octant-windows-confine"],
+      { cwd: root },
+    );
     await mkdir(destination, { recursive: true });
     await cp(
       join(ownerBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[0]),
@@ -176,6 +188,10 @@ export async function buildWindowsNativeArtifacts(destination: string): Promise<
     await cp(
       join(peerBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[2]),
       join(destination, WINDOWS_NATIVE_ARTIFACTS[2]),
+    );
+    await cp(
+      join(confineBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[3]),
+      join(destination, WINDOWS_NATIVE_ARTIFACTS[3]),
     );
     await validateWindowsNativeArtifacts(destination);
   } finally {

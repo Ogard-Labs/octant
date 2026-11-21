@@ -50,6 +50,7 @@ import {
   PERMISSION_MODE_LABEL,
   PermissionModePicker,
   threadKeepsFullAccessSandbox,
+  threadProviderDriverKind,
 } from "../code/PermissionModePicker";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
@@ -3518,6 +3519,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     }
                     legacyStrict={thread.strict === undefined && thread.fullAccessSandbox === true}
                     fullAccessSandboxSupported={threadKeepsFullAccessSandbox(
+                      props.providerGroups ?? [],
+                      thread.providerInstanceId,
+                    )}
+                    driverKind={threadProviderDriverKind(
                       props.providerGroups ?? [],
                       thread.providerInstanceId,
                     )}

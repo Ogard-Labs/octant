@@ -13,9 +13,12 @@ import {
   hostReadsProviderCatalogUnconfined,
   hostSandboxRefusal,
   hostStartsThreadsAtOpenFullAccess,
+  isWindowsStrictConfinedTurn,
   windowsProviderLaunch,
+  windowsStrictRuntimeRefusal,
   WINDOWS_KEPT_SANDBOX_REFUSAL,
-  WINDOWS_SANDBOX_MISSING_REASON,
+  WINDOWS_SANDBOX_OPERATION_REFUSAL,
+  WINDOWS_STRICT_CHAT_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
   outsideContentRecordedOnly,
   permissionModeOf,
@@ -229,8 +232,8 @@ describe("guardrail levels", () => {
   });
 });
 
-describe("levels on a host without Octant's sandbox", () => {
-  it("runs Octant's own terminals and commands on Windows at every level outside Strict and names the missing sandbox under Strict or a kept sandbox", () => {
+describe("levels on a Windows host (Windows Strict, phase 1)", () => {
+  it("runs Octant's own terminals and commands on Windows at every level outside Strict and refuses them under Strict or a legacy sandbox choice", () => {
     for (const access of [
       { executionPolicy: "full-access" },
       { executionPolicy: "approval-gated" },
@@ -240,11 +243,11 @@ describe("levels on a host without Octant's sandbox", () => {
     ] as const) {
       expect(hostSandboxRefusal({ platform: "win32", access, strict: false })).toBeUndefined();
       expect(hostSandboxRefusal({ platform: "win32", access, strict: true })).toBe(
-        WINDOWS_SANDBOX_MISSING_REASON,
+        WINDOWS_SANDBOX_OPERATION_REFUSAL,
       );
       // Work that cannot say whether it is Strict is refused as Strict.
       expect(hostSandboxRefusal({ platform: "win32", access })).toBe(
-        WINDOWS_SANDBOX_MISSING_REASON,
+        WINDOWS_SANDBOX_OPERATION_REFUSAL,
       );
     }
     expect(
@@ -253,15 +256,17 @@ describe("levels on a host without Octant's sandbox", () => {
         access: { executionPolicy: "full-access", fullAccessSandbox: true },
         strict: false,
       }),
-    ).toBe(WINDOWS_SANDBOX_MISSING_REASON);
+    ).toBe(WINDOWS_SANDBOX_OPERATION_REFUSAL);
     expect(
       hostSandboxRefusal({
         platform: "win32",
         access: { executionPolicy: "approval-gated", strict: true },
         strict: false,
       }),
-    ).toBe(WINDOWS_SANDBOX_MISSING_REASON);
-    expect(WINDOWS_SANDBOX_MISSING_REASON).toMatch(/sandbox.*Windows/);
+    ).toBe(WINDOWS_SANDBOX_OPERATION_REFUSAL);
+    expect(WINDOWS_SANDBOX_OPERATION_REFUSAL).toBe(
+      "This operation cannot run inside the Windows sandbox yet.",
+    );
   });
 
   it("counts a host as starting threads at open Full access only when a Code or Work default is Full access without the sandbox", () => {
@@ -283,7 +288,7 @@ describe("levels on a host without Octant's sandbox", () => {
     expect(hostStartsThreadsAtOpenFullAccess({ work: { defaultAccess: "auto" } })).toBe(false);
   });
 
-  it("starts a provider turn at every level outside Strict on Windows and refuses Strict and a kept sandbox by name", () => {
+  it("admits Codex at Full access under Windows Strict while refusing every other provider, lower level, and legacy sandbox setting by name", () => {
     for (const access of [
       { executionPolicy: "full-access" },
       { executionPolicy: "approval-gated" },
@@ -293,29 +298,67 @@ describe("levels on a host without Octant's sandbox", () => {
     ] as const) {
       expect(hostProviderTurnRefusal({ platform: "win32", access, strict: false })).toBeUndefined();
     }
+    // Phase 1 admits Codex at Full access under canonical Strict.
     expect(
       hostProviderTurnRefusal({
         platform: "win32",
-        access: { executionPolicy: "approval-gated" },
+        access: { executionPolicy: "full-access" },
         strict: true,
+        driverKind: "codex",
       }),
-    ).toBe(WINDOWS_STRICT_REFUSAL);
-    expect(WINDOWS_STRICT_REFUSAL).toMatch(/^Strict needs a sandbox Windows doesn't have yet/);
+    ).toBeUndefined();
     expect(
-      hostProviderTurnRefusal({
+      isWindowsStrictConfinedTurn({
         platform: "win32",
-        access: { executionPolicy: "full-access", fullAccessSandbox: true },
-        strict: false,
+        access: { executionPolicy: "full-access" },
+        strict: true,
+        driverKind: "codex",
+        mode: "code",
       }),
-    ).toBe(WINDOWS_KEPT_SANDBOX_REFUSAL);
-    // Strict keeps its boundary at Full access too.
+    ).toBe(true);
+    // Every other provider at Full access under Strict refuses by name.
+    for (const driverKind of [
+      "claude",
+      "opencode",
+      "pi",
+      "acp-agent",
+      "openai-compatible",
+    ] as const) {
+      expect(
+        hostProviderTurnRefusal({
+          platform: "win32",
+          access: { executionPolicy: "full-access" },
+          strict: true,
+          driverKind,
+        }),
+      ).toBe(windowsStrictRuntimeRefusal(driverKind));
+    }
+    // Omitted driverKind fails closed.
     expect(
       hostProviderTurnRefusal({
         platform: "win32",
         access: { executionPolicy: "full-access" },
         strict: true,
       }),
+    ).toBe(windowsStrictRuntimeRefusal(undefined));
+    // Levels below Full access refuse under Strict even on Codex.
+    expect(
+      hostProviderTurnRefusal({
+        platform: "win32",
+        access: { executionPolicy: "approval-gated" },
+        strict: true,
+        driverKind: "codex",
+      }),
     ).toBe(WINDOWS_STRICT_REFUSAL);
+    // Legacy fullAccessSandbox without canonical Strict stays refused (not reused).
+    expect(
+      hostProviderTurnRefusal({
+        platform: "win32",
+        access: { executionPolicy: "full-access", fullAccessSandbox: true },
+        strict: false,
+        driverKind: "codex",
+      }),
+    ).toBe(WINDOWS_KEPT_SANDBOX_REFUSAL);
     expect(
       hostProviderTurnRefusal({
         platform: "linux",
@@ -325,16 +368,36 @@ describe("levels on a host without Octant's sandbox", () => {
     ).toBeUndefined();
   });
 
-  it("decides each Windows provider launch from its own mode, level and Strict value", () => {
-    for (const executionPolicy of [
-      "approval-gated",
-      "auto-accept-edits",
-      "plan",
-      "full-access",
-    ] as const) {
-      expect(windowsProviderLaunch({ mode: "code", executionPolicy, strict: true })).toEqual({
+  it("decides each Windows provider launch from its own mode, level, driver kind and Strict value", () => {
+    for (const mode of ["code", "work"] as const) {
+      expect(
+        windowsProviderLaunch({
+          mode,
+          executionPolicy: "full-access",
+          strict: true,
+          driverKind: "codex",
+        }),
+      ).toEqual({ status: "confined" });
+    }
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits", "plan"] as const) {
+      expect(
+        windowsProviderLaunch({ mode: "code", executionPolicy, strict: true, driverKind: "codex" }),
+      ).toEqual({
         status: "refused",
         reason: WINDOWS_STRICT_REFUSAL,
+      });
+    }
+    for (const driverKind of ["claude", "opencode", "pi", "acp-agent"] as const) {
+      expect(
+        windowsProviderLaunch({
+          mode: "code",
+          executionPolicy: "full-access",
+          strict: true,
+          driverKind,
+        }),
+      ).toEqual({
+        status: "refused",
+        reason: windowsStrictRuntimeRefusal(driverKind),
       });
     }
     expect(windowsProviderLaunch({ mode: "code", executionPolicy: "full-access" })).toEqual({
@@ -361,6 +424,7 @@ describe("levels on a host without Octant's sandbox", () => {
         executionPolicy: "full-access",
         fullAccessSandbox: true,
         strict: false,
+        driverKind: "codex",
       }),
     ).toEqual({ status: "refused", reason: WINDOWS_KEPT_SANDBOX_REFUSAL });
     expect(windowsProviderLaunch({ mode: "chat", executionPolicy: "plan", strict: false })).toEqual(
@@ -385,8 +449,9 @@ describe("levels on a host without Octant's sandbox", () => {
             mode: "chat",
             executionPolicy,
             strict,
+            driverKind: "codex",
           }),
-        ).toEqual({ status: "refused", reason: WINDOWS_STRICT_REFUSAL });
+        ).toEqual({ status: "refused", reason: WINDOWS_STRICT_CHAT_REFUSAL });
       }
       expect(
         windowsProviderLaunch({
@@ -434,7 +499,8 @@ describe("Work levels", () => {
     expect(workThreadAccessOf("auto-accept-edits")).toEqual(threadAccessOf("accept-edits"));
     expect(workThreadAccessOf("full-access")).toEqual(threadAccessOf("full-access"));
     expect(workThreadAccessOf("plan")).toEqual(threadAccessOf("plan"));
-    expect(workAccessOfPermissionMode("plan")).toBeUndefined();
+    // Plan is a Work default as any other level is (maintainer decision, 2026-11-21).
+    expect(workAccessOfPermissionMode("plan")).toBe("plan");
     expect(workThreadAccessOfMode("plan")).toBe("plan");
     expect(workAccessOfPermissionMode("accept-edits")).toBe("auto-accept-edits");
   });

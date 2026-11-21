@@ -25,6 +25,7 @@ import type {
 import { Effect, type Scope } from "effect";
 import {
   HOST_PASSTHROUGH_VARIABLES,
+  PROTOCOL_STREAM_GUARDS,
   acpExactReleaseClaim,
   acpSubagentsRun,
   type AcpProviderProfile,
@@ -261,6 +262,7 @@ function acpWindowsLaunch(
     executionPolicy: input.executionPolicy,
     fullAccessSandbox: input.fullAccessSandbox,
     strict: input.sandboxPolicy === undefined ? input.strict : true,
+    driverKind: "acp-agent",
   });
 }
 
@@ -1241,9 +1243,16 @@ export function sanitizeAcpEnvironment(
     readonly nativeSetup?: ProviderNativeSetup;
     /** Absent is Strict: the profile's fixed passthrough list and every guard. */
     readonly strict?: boolean;
+    /**
+     * For a person's interactive provider terminal, never an ACP launch: the
+     * protocol-stream guards are left out, so the host's own value of such a
+     * variable, where the environment passes one, stays.
+     */
+    readonly interactive?: boolean;
   },
 ): NodeJS.ProcessEnv {
   const strict = input.strict !== false;
+  const streamGuards = new Set(input.interactive === true ? PROTOCOL_STREAM_GUARDS : []);
   const released = releasedByNativeSetup(profile, input.nativeSetup, {
     executionPolicy: input.executionPolicy ?? "approval-gated",
     ...(input.mode === undefined ? {} : { mode: input.mode }),
@@ -1251,7 +1260,7 @@ export function sanitizeAcpEnvironment(
   const channels = new Set(strict ? [] : (profile.process.channelGuards ?? []));
   const guards = Object.fromEntries(
     Object.entries(profile.process.guards).filter(
-      ([name]) => !released.has(name) && !channels.has(name),
+      ([name]) => !released.has(name) && !channels.has(name) && !streamGuards.has(name),
     ),
   );
   const passthrough = new Set(profile.process.passthroughVariables);

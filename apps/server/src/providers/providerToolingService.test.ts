@@ -128,6 +128,7 @@ function make(
   options: {
     broker?: Broker | null;
     now?: () => number;
+    confirmMinutes?: () => number;
     replace?: ProviderInstance;
     /** Holds every command until it resolves, to queue a second one behind the first. */
     gate?: Promise<void>;
@@ -159,6 +160,7 @@ function make(
     ...(broker === undefined ? {} : { secrets: broker }),
     record: (change) => records.push(change),
     ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.confirmMinutes === undefined ? {} : { confirmMinutes: options.confirmMinutes }),
   });
   return {
     service,
@@ -385,6 +387,17 @@ describe("provider tooling service", () => {
       reason: "expired-plan",
     });
     expect(existsSync(`${log}.codex.json`)).toBe(false);
+  });
+
+  it("keeps a shown command runnable for as many minutes as the person set in Settings", async () => {
+    let clock = 1_000_000;
+    const { service } = make({ now: () => clock, confirmMinutes: () => 30 });
+    const plan = await planned(service, CODEX_ID, { kind: "mcp-remove", name: "files" });
+    expect(Date.parse(plan.expiresAt) - clock).toBe(30 * 60_000);
+    clock += 29 * 60_000;
+    expect(
+      await service.apply(LOCAL, { planId: plan.planId, digest: plan.digest }),
+    ).not.toMatchObject({ reason: "expired-plan" });
   });
 
   it("refuses to run a plan whose account moved to another folder after it was shown", async () => {

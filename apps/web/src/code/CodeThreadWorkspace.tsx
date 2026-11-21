@@ -199,6 +199,7 @@ import {
   PermissionModePicker,
   runningTurnKeepsNarrowerMode,
   threadKeepsFullAccessSandbox,
+  threadProviderDriverKind,
 } from "./PermissionModePicker";
 import { useRegisterComposerModeMenu } from "./composerModeMenu";
 import { ThreadGuardrailLevel } from "./GuardrailLevelIndicator";
@@ -3057,6 +3058,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     providerGroups,
                     thread.providerInstanceId,
                   )}
+                  driverKind={threadProviderDriverKind(providerGroups, thread.providerInstanceId)}
                   appliesFromNextMessage={runningTurnKeepsNarrowerMode({
                     turnRunning:
                       props.controller.turnStatus === "running" ||

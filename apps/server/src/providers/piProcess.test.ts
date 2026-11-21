@@ -15,7 +15,9 @@ import type { ProviderExecutionPolicy, ProviderToolDefinition } from "@octant/co
 import { Effect } from "effect";
 import {
   WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_CHAT_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
 } from "@octant/domain/guardrail-policy";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -311,7 +313,11 @@ describe("Pi process boundary", () => {
     });
     expect(await prepare({ mode: "chat", executionPolicy: "approval-gated" })).toMatchObject({
       _tag: "Left",
-      left: { category: "incompatible", message: WINDOWS_STRICT_REFUSAL },
+      left: { category: "incompatible", message: WINDOWS_STRICT_CHAT_REFUSAL },
+    });
+    expect(await prepare({ executionPolicy: "full-access", strict: true })).toMatchObject({
+      _tag: "Left",
+      left: { category: "incompatible", message: windowsStrictRuntimeRefusal("pi") },
     });
     expect(
       await prepare({ executionPolicy: "full-access", fullAccessSandbox: true, strict: false }),

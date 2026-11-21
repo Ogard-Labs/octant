@@ -14,7 +14,6 @@ import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import type { CodeController } from "./useCodeController";
 import type { CodeThreadControllers } from "./codeThreadControllers";
 import type { OctantHostBridge } from "../shell/hostBridge";
-import type { CodeOverviewSurfaceKind } from "./CodeOverview";
 import { nativeCodeWorkspaceApprovals } from "./codeWorkspaceApprovals";
 import { noticeTouches, useCodeFileChangeWatch } from "./useCodeFileChangeWatch";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
@@ -54,10 +53,7 @@ export default function CodeWorkspaceTab(props: {
   /** Opens one changed repository file as a Code file tab, from the diff. */
   readonly onOpenFile?: (relativePath: string) => void;
   readonly onOpenReview?: (request?: CodeReviewFileRequest) => void;
-  readonly onOpenSurface?: (
-    kind: CodeOverviewSurfaceKind,
-    options?: { readonly terminalId?: import("@octant/contracts/code").CodeTerminalId },
-  ) => void;
+  readonly onOpenSurface?: CodeWorkspaceProps["onOpenSurface"];
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly harnessAutoReviewSupported?: boolean;
   readonly strictDefault?: CodeWorkspaceProps["strictDefault"];

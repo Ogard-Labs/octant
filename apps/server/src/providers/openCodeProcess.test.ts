@@ -21,7 +21,9 @@ import { Effect, Either, Fiber } from "effect";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_CHAT_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
 } from "@octant/domain/guardrail-policy";
 import {
   captureOpenCodeRuntimeConfig,
@@ -843,11 +845,18 @@ describe("OpenCodeProcessPort", () => {
     for (const [launch, message] of [
       [{ mode: "code", executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
       [
+        { mode: "code", executionPolicy: "full-access", strict: true },
+        windowsStrictRuntimeRefusal("opencode"),
+      ],
+      [
         { mode: "code", executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
         WINDOWS_KEPT_SANDBOX_REFUSAL,
       ],
-      [{ mode: "chat", executionPolicy: "approval-gated", strict: true }, WINDOWS_STRICT_REFUSAL],
-      [{ mode: "chat", executionPolicy: "plan" }, WINDOWS_STRICT_REFUSAL],
+      [
+        { mode: "chat", executionPolicy: "approval-gated", strict: true },
+        WINDOWS_STRICT_CHAT_REFUSAL,
+      ],
+      [{ mode: "chat", executionPolicy: "plan" }, WINDOWS_STRICT_CHAT_REFUSAL],
     ] as const) {
       const prepare = vi.fn((input: { executable: string; args: ReadonlyArray<string> }) => ({
         command: input.executable,

@@ -4,6 +4,7 @@ import {
   planWindowsConfinedLaunch,
   type WindowsConfinementInput,
   windowsConfinedLauncherArguments,
+  windowsConfinedRecoveryArguments,
   windowsFullAccessLauncherArguments,
   windowsNativePath,
 } from "./windowsConfinementPolicy";
@@ -149,6 +150,35 @@ describe("Windows confined launch plan", () => {
     expect(refusal({ additionalWriteRoots: [`${DATA}\\providers`], ownAccountPaths: [own] })).toBe(
       "covers-protected",
     );
+
+    // Default `%USERPROFILE%\.codex` encloses `.codex\auth.json` (an
+    // own-account-exempt sign-in entry): admit it only for its own runtime,
+    // never for another runtime, an ancestor above it, or a non-exempt secret.
+    const defaultCodexHome = `${HOME}\\.codex`;
+    expect(
+      planned({ readRoots: [defaultCodexHome], ownAccountPaths: [defaultCodexHome] }).grants,
+    ).toContainEqual({
+      path: defaultCodexHome,
+      access: "read",
+    });
+    expect(refusal({ readRoots: [defaultCodexHome] })).toBe("covers-protected");
+    expect(refusal({ readRoots: [defaultCodexHome], ownAccountPaths: [`${HOME}\\.claude`] })).toBe(
+      "covers-protected",
+    );
+    expect(refusal({ readRoots: [HOME], ownAccountPaths: [defaultCodexHome] })).toBe(
+      "covers-protected",
+    );
+    const withCustomSecret = resolveProtectedFiles(
+      { platform: "win32", home: HOME, dataDirectory: DATA },
+      { added: ["~/.codex/private.key"], removed: [] },
+    );
+    expect(
+      refusal({
+        readRoots: [defaultCodexHome],
+        ownAccountPaths: [defaultCodexHome],
+        protectedEntries: withCustomSecret,
+      }),
+    ).toBe("covers-protected");
   });
 
   it("asks for a pattern scan beneath a grant inside a browser-store folder", () => {
@@ -226,5 +256,60 @@ describe("Windows confined launch plan", () => {
     expect(windowsNativePath("c:/Users/Ada/src/")).toBe("C:\\Users\\Ada\\src");
     expect(windowsNativePath("C:\\")).toBe("C:");
     expect(windowsNativePath("C:\\a\\.\\b")).toBeUndefined();
+  });
+
+  it("refuses an explicit read-only root overlapping a writable grant in either direction and names the Windows network limit refusal", () => {
+    const belowWritable = planWindowsConfinedLaunch(
+      input({
+        explicitReadOnlyRoots: [`${HOME}\\src\\octant\\readonly-dir`],
+      }),
+    );
+    expect(belowWritable).toMatchObject({ status: "refused", refusal: "writable-above-read-only" });
+
+    const aboveWritable = planWindowsConfinedLaunch(
+      input({
+        explicitReadOnlyRoots: [`${HOME}\\src`],
+      }),
+    );
+    expect(aboveWritable).toMatchObject({ status: "refused", refusal: "writable-above-read-only" });
+    if (aboveWritable.status === "refused") {
+      expect(aboveWritable.message).toMatch(/read-only while .* inside it is writable/u);
+    }
+
+    const proxied = planWindowsConfinedLaunch(input({ network: "proxied" }));
+    expect(proxied).toEqual({
+      status: "refused",
+      refusal: "proxied-network",
+      message: "The requested network limits are not supported by the Windows sandbox.",
+    });
+  });
+
+  it("builds recovery arguments only for valid container names and native paths", () => {
+    expect(
+      windowsConfinedRecoveryArguments({
+        appContainerName: `Octant.Confined.${LAUNCH_ID}`,
+        grants: ["c:/Work/repo", "D:\\Temp\\scratch"],
+      }),
+    ).toEqual([
+      "--recover",
+      "--container",
+      `Octant.Confined.${LAUNCH_ID}`,
+      "--grant-path",
+      "C:\\Work\\repo",
+      "--grant-path",
+      "D:\\Temp\\scratch",
+    ]);
+    expect(
+      windowsConfinedRecoveryArguments({
+        appContainerName: "Other.Container",
+        grants: ["C:\\Work\\repo"],
+      }),
+    ).toBeUndefined();
+    expect(
+      windowsConfinedRecoveryArguments({
+        appContainerName: `Octant.Confined.${LAUNCH_ID}`,
+        grants: ["\\\\server\\share\\repo"],
+      }),
+    ).toBeUndefined();
   });
 });

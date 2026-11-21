@@ -24,6 +24,8 @@ import {
   runAcpAgentInstallScripts,
 } from "../providers/acpAgentInstall";
 import { makeProcessConfinementLive } from "../process/seatbeltProfile";
+import { resolvePackagedWindowsConfineLauncher } from "../process/windowsConfinement";
+import { WindowsConfinementLeaseStore } from "../process/windowsConfinementRecovery";
 import { homedir, tmpdir } from "node:os";
 import {
   makeAccountSessionCarrier,
@@ -290,6 +292,7 @@ import { protectedAtLevel, secretGuardEntries } from "../process/secretGuard";
 import type { OpenCodeProtectedPaths } from "../providers/openCodeDriver";
 
 export interface ConfiguredProviderDriverOptions {
+  readonly octantVersion?: string;
   readonly openCodeProcess: OpenCodeProcessPort;
   readonly codexProcess: CodexProcessPort;
   readonly acpProcess?: AcpProcessPort;
@@ -416,6 +419,7 @@ export function makeConfiguredProviderDriver(
     driver = runDirectEndpointOnNativeHarness(
       makeOpenAiCompatibleDriver({
         instanceId: instance.id,
+        ...(options.octantVersion === undefined ? {} : { octantVersion: options.octantVersion }),
         configuration: instance.configuration,
         runtimeRegistry: options.runtimeRegistry,
         ...(options.credentialResolver === undefined
@@ -866,6 +870,14 @@ export function wireProviders(deps: ProvidersDependencies) {
         code: persistence.readCodeSettings()?.settings,
         work: workThreadProjection.settings(),
       });
+    const windowsConfinementLeases = new WindowsConfinementLeaseStore({
+      leaseDirectory: join(providerDataDirectory, "windows-confinement", "leases"),
+    });
+    if (process.platform === "win32") {
+      yield* Effect.promise(() => windowsConfinementLeases.recoverAll());
+    }
+    const packagedWindowsLauncher =
+      process.platform === "win32" ? resolvePackagedWindowsConfineLauncher() : undefined;
     const openCodeProcess =
       options.openCodeProcess ??
       makeOpenCodeProcessLive({ runtimeNetwork, serverAccess, windowsCatalogUnconfined });
@@ -876,6 +888,14 @@ export function wireProviders(deps: ProvidersDependencies) {
         runtimeNetwork,
         serverAccess,
         windowsCatalogUnconfined,
+        ...(packagedWindowsLauncher === undefined
+          ? {}
+          : {
+              windowsConfinement: {
+                launcherPath: packagedWindowsLauncher,
+                leaseStore: windowsConfinementLeases,
+              },
+            }),
       });
     const codexProcess: CodexProcessPort = {
       start: (input) =>
@@ -1416,6 +1436,9 @@ export function wireProviders(deps: ProvidersDependencies) {
         hostEnvironment: () => process.env,
         homeDirectory: homedir(),
         workingDirectory: join(providerDataDirectory, "provider-tooling"),
+        confirmMinutes: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .toolingCommandConfirmMinutes,
         ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
           ? {}
           : {
@@ -2059,6 +2082,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, {
             hostStrict: () => deps.resolveHostStrict(),
+            octantVersion: version,
             openCodeProcess,
             codexProcess,
             acpProcess,
@@ -2292,6 +2316,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       return openAdmittedSqlite(admission);
     };
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
+      octantVersion: version,
       runtimeTurnsPerTurn: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).runtimeTurnsPerTurn,
       compactionShare: (keeper) => {

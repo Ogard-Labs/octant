@@ -133,7 +133,7 @@ export type AutomationDependencies = {
     | "contributeServerCodeTools"
     | "routeCodeService"
   > &
-  Pick<ChatWiring, "chatService"> &
+  Pick<ChatWiring, "chatService" | "contributeChatTools"> &
   Pick<WorkWiring, "workThreadService" | "workThreadServiceWithWorkflows" | "workTurnService"> &
   Pick<
     FoundationsWiring,
@@ -149,6 +149,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     externalContentIngestionStore,
     readHarnessProcessReceipts,
     chatService,
+    contributeChatTools,
     codeCompletedThreadSource,
     codeEvidence,
     codeBoardEventStore,
@@ -458,7 +459,7 @@ export function wireAutomation(deps: AutomationDependencies) {
   const automationChatDispatch = createAutomationChatDispatchPort({
     chat: {
       read: (threadId) => chatService.read(threadId),
-      execute: async (command) => chatService.execute(command),
+      execute: async (command, context) => chatService.execute(command, context),
     },
     clock: () => new Date().toISOString() as UtcTimestamp,
   });
@@ -706,9 +707,35 @@ export function wireAutomation(deps: AutomationDependencies) {
         }
       },
     },
+    followUpLatenessLimitHours: () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+        .followUpLatenessLimitHours,
     readFollowUpThread: ({ mode, threadId }) => {
-      // Chat has no follow-ups: a Chat definition cannot target a thread.
-      if (mode === "chat") return { kind: "missing" };
+      if (mode === "chat") {
+        const chatThreadId = decodeChatThreadId(String(threadId));
+        let view;
+        try {
+          view = chatService.read(chatThreadId);
+        } catch {
+          return { kind: "missing" };
+        }
+        const thread = view.thread;
+        if (
+          thread.projectId === undefined ||
+          thread.lifecycle === "deleting" ||
+          thread.lifecycle === "deleted"
+        )
+          return { kind: "missing" };
+        return {
+          kind: "present",
+          projectId: String(thread.projectId),
+          archived: thread.lifecycle === "archived",
+          done: thread.completedAt !== undefined,
+          busy: chatService.isTurnActive(chatThreadId),
+          providerInstanceId: String(thread.providerInstanceId),
+          modelId: String(thread.modelId),
+        };
+      }
       if (mode === "work") {
         const thread = workThreadProjection.read(decodeWorkThreadId(String(threadId)));
         if (
@@ -906,12 +933,44 @@ export function wireAutomation(deps: AutomationDependencies) {
   // routine records alone, so a server thread may propose, read, and report
   // on its Project's routines as a local one does.
   contributeServerCodeTools(routineToolsForCodeTurn);
+  // A Chat thread in a Chat Project may propose a follow-up in itself, and
+  // nothing else; one outside a Project has nowhere for a routine to live.
+  // Its answer is the host's own receipt, so it does not mark the thread.
+  contributeChatTools(
+    (windowId, thread) =>
+      thread.projectId === undefined
+        ? undefined
+        : createRoutineProposalTools({
+            windowId,
+            thread: { id: String(thread.id), mode: "chat", projectId: String(thread.projectId) },
+            isAutomationOrigin: isRoutineHostScope(windowId),
+            proposals: routineProposalService,
+            now: Date.now,
+          }),
+    { results: "host-answers" },
+  );
   const draftThreadRoutine = (proposal: RoutineProposal) =>
     buildThreadRoutineDraft(
       {
         hostId: String(LOCAL_HOST_ID),
         actorId: OCTANT_LOCAL_ACTOR_ID,
         readThread: (mode, threadId) => {
+          if (mode === "chat") {
+            let thread;
+            try {
+              thread = chatService.read(decodeChatThreadId(threadId)).thread;
+            } catch {
+              return undefined;
+            }
+            return thread.projectId === undefined
+              ? undefined
+              : {
+                  projectId: String(thread.projectId),
+                  active: thread.lifecycle === "active",
+                  providerInstanceId: String(thread.providerInstanceId),
+                  modelId: String(thread.modelId),
+                };
+          }
           if (mode === "work") {
             const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
             return thread === undefined
@@ -968,6 +1027,15 @@ export function wireAutomation(deps: AutomationDependencies) {
                   ? serverWorkBindingRevisionId(serverProject)
                   : serverCodeCheckout(serverProject).bindingRevisionId,
               ),
+            };
+          }
+          if (project?.type === "chat") {
+            return {
+              name: project.name,
+              mode: "chat",
+              active: project.lifecycle === "active",
+              version: project.version,
+              bindingRevisionId: undefined,
             };
           }
           if (project === undefined || (project.type !== "work" && project.type !== "code")) {

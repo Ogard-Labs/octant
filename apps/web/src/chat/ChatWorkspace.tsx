@@ -27,7 +27,8 @@ import type {
   MentionableThreadId,
   SideChatSidecar,
 } from "@octant/contracts";
-import type { ThreadMentionClient } from "@octant/client-runtime";
+import type { AutomationClient, ThreadMentionClient } from "@octant/client-runtime";
+import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import {
   buildImageAttachmentCapability,
   chatFileRefusal,
@@ -134,6 +135,8 @@ export interface ChatWorkspaceProps {
   readonly sideChatReturnPending?: boolean;
   readonly extensionClient?: ExtensionClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
+  /** Answers a follow-up this thread's agent proposed; nothing exists until the person confirms. */
+  readonly automationClient?: AutomationClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly narrow?: boolean;
   readonly onAttachCanvasContext?: (selection: CanvasContextSelection) => void;
@@ -1540,6 +1543,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           <ProjectMemoryProposalPrompt
             className="chat-workspace__tool-approval thread-column"
             client={props.memoryProposalClient}
+            threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
+            turnActive={turnActive}
+          />
+          <RoutineProposalPrompt
+            className="chat-workspace__tool-approval thread-column"
+            client={props.automationClient}
             threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
             turnActive={turnActive}
           />

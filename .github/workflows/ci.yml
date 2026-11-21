@@ -215,6 +215,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'The fake Pi did not compile' }
           bun build --compile apps/server/src/providers/fixtures/fakeKiloAcpAgent.ts --outfile "$env:RUNNER_TEMP/fake-kilo/kilo.exe"
           if ($LASTEXITCODE -ne 0) { throw 'The fake Kilo ACP agent did not compile' }
+          cmake -S apps/desktop/native/windows-confine -B "$env:RUNNER_TEMP/confine-build" -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'The Windows confinement launcher did not configure' }
+          cmake --build "$env:RUNNER_TEMP/confine-build" --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'The Windows confinement launcher did not compile' }
       - name: Run provider launches, shells and terminals on Windows
         working-directory: apps/server
         shell: pwsh
@@ -224,6 +228,7 @@ jobs:
           $env:OCTANT_FAKE_OPENCODE_EXE = "$env:RUNNER_TEMP/fake-opencode/opencode.exe"
           $env:OCTANT_FAKE_PI_EXE = "$env:RUNNER_TEMP/fake-pi/pi.exe"
           $env:OCTANT_FAKE_ACP_EXE = "$env:RUNNER_TEMP/fake-kilo/kilo.exe"
+          $env:OCTANT_WINDOWS_CONFINE_EXE = "$env:RUNNER_TEMP/confine-build/Release/octant-windows-confine.exe"
           bun run test src/process/windowsProcessTree.test.ts src/code/terminalProcessPort.windows.test.ts src/code/repositoryTestProcessPort.windows.test.ts src/code/languageServices.windows.test.ts src/code/terminalShell.test.ts src/harness/windowsFullAccessShell.test.ts src/providers/codexProcess.windows.test.ts src/providers/providerFamilies.windows.test.ts src/process/windowsProviderProgram.test.ts src/process/nodeOwnedProcessReceipt.windows.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

@@ -31,6 +31,9 @@ import {
   MAX_CODE_OPERATION_REPLAY_LIMIT,
 } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
+import { resolveSpeechEndpoint } from "@octant/domain";
+import { makeOpenAiCompatibleSpeechAdapter } from "./speech/speechAdapter";
+import type { TranscriptionForTurn } from "./speech/transcriptionTool";
 import { CredentialRequests } from "./credentials/credentialRequests";
 import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
 import { registeredCredentialOperations } from "./credentials/credentialRequestTools";
@@ -297,6 +300,8 @@ export function startOctantServer(
       routineProposalService,
       imageGenerationOffers,
       serviceOffers,
+      speechGates,
+      threadTranscription,
       simulatorInputGrants,
       unsubscribeMachineChanges,
       unsubscribeThreadArchivals,
@@ -630,6 +635,24 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    const transcriptionForTurn: TranscriptionForTurn = (turn) =>
+      threadTranscription.forTurn({
+        ...turn,
+        offers: serviceOffers,
+        gates: speechGates,
+        uuid: randomUUID,
+        recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
+        endpoint: () =>
+          resolveSpeechEndpoint(
+            persistence.readShellSettings()?.settings.voice.transcription,
+            persistence.readProviderInstances(),
+          ),
+        adapter: ({ instance }) =>
+          makeOpenAiCompatibleSpeechAdapter({
+            instance,
+            ...(credentialResolver === undefined ? {} : { credentialResolver }),
+          }),
+      });
     const {
       readHarnessProcessReceipts,
       beginGoogleCliChange,
@@ -951,6 +974,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      transcriptionForTurn,
       imageDescriber,
       resolveThreadStrict,
       isPairedDeviceScope,
@@ -1100,6 +1124,7 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      configuredDriverOptions,
       providerRuntimeNetwork,
       resolveThreadStrict,
       resolveProjectStrict,
@@ -1239,6 +1264,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      transcriptionForTurn,
       imageDescriber,
       resolveThreadStrict,
       machineChangeFeed,
@@ -1451,6 +1477,7 @@ export function startOctantServer(
       workResearchProjection,
       workResearchRoutes,
     } = wireWorkFiles({
+      speechGates,
       credentialResolver,
       serviceOffers,
       keptImageChoices,
@@ -1498,6 +1525,7 @@ export function startOctantServer(
       capacityScheduler,
       chatService,
       codeCompletedThreadSource,
+      contributeChatTools,
       contributeCodeTools,
       contributeServerCodeTools,
       liveTurns,

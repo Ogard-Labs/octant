@@ -27,6 +27,7 @@ const CONTENTS: ReadonlyArray<readonly [string, string, string]> = [
   ["migrations", "share/migrations.json", "{}"],
   ["notices", "share/NOTICES.txt", "notices"],
   ["service-template", "share/service/octant.service.template", "[Unit]"],
+  ["runtime", "lib/runtime/bun", "runtime-bytes"],
 ];
 
 function writeArtifact(storeVersion: number): string {

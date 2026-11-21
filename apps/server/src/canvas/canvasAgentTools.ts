@@ -202,6 +202,14 @@ export interface CanvasAgentToolPort {
     { readonly id: string; readonly type: string; readonly lifecycle: string } | undefined
   >;
   /**
+   * The thread's own Project as the host records it, read without a window
+   * for a Chat turn the host runs with none (a routine's or a follow-up's).
+   * Absent on a host that runs no such turn, which is then refused a Canvas.
+   */
+  readonly threadProject?: (
+    projectId: string,
+  ) => { readonly id: string; readonly type: string; readonly lifecycle: string } | undefined;
+  /**
    * The brand kit of the thread's own Project, when the person defined one.
    * Keyed by the Project the host bound the thread to, never by anything the
    * model names, and read without a window so describe stays free of window
@@ -427,6 +435,41 @@ async function resolveCanvasTarget(
       originThreadId: owner.thread.id,
     },
     project: { id: project.id, type: owner.mode, lifecycle: "active" },
+  };
+}
+
+/**
+ * Where a host-run Chat turn's Canvas belongs. There is no window whose active
+ * Chat Project could decide it, so the thread's own Project does: the one the
+ * host bound the thread to, which must still be an active Chat Project. The
+ * scope is the same one a window showing that Project would give, and never
+ * wider: a thread in no Project owns its Canvas itself, as it does from a
+ * window.
+ */
+async function resolveHostRunChatCanvasTarget(
+  owner: Extract<CanvasToolOwner, { readonly mode: "chat" }>,
+  port: CanvasAgentToolPort,
+): Promise<ResolvedCanvasTarget> {
+  const projectId = owner.thread.projectId;
+  if (projectId === undefined) {
+    return {
+      kind: "ready",
+      mode: "chat",
+      workspace: { kind: "chat-virtual", projectId: null },
+      context: { mode: "chat", projectId: null, originThreadId: owner.thread.id },
+      project: undefined,
+    };
+  }
+  const project = port.threadProject?.(projectId);
+  if (project === undefined || project.lifecycle !== "active" || project.type !== "chat") {
+    return { kind: "refused", error: "The Canvas Project is unavailable." };
+  }
+  return {
+    kind: "ready",
+    mode: "chat",
+    workspace: { kind: "chat-virtual", projectId },
+    context: { mode: "chat", projectId, originThreadId: owner.thread.id },
+    project: { id: project.id, type: "chat", lifecycle: "active" },
   };
 }
 
@@ -1086,6 +1129,11 @@ export function createCanvasAgentTools(
   options: {
     readonly windowId: WindowId;
     readonly port: CanvasAgentToolPort;
+    /**
+     * A Chat turn the host runs with no window: its Canvas belongs to the
+     * thread's own Chat Project, never to one a window shows.
+     */
+    readonly hostRun?: true;
   } & (
     | { readonly mode?: "chat"; readonly thread: ChatThread }
     | { readonly mode: "work" | "code"; readonly thread: CanvasAuthoringThread }
@@ -1120,7 +1168,10 @@ export function createCanvasAgentTools(
       owner.thread.projectId === undefined
         ? undefined
         : options.port.brandKit?.(owner.thread.projectId),
-    resolveTarget: () => resolveCanvasTarget(options.windowId, owner, options.port),
+    resolveTarget: () =>
+      options.hostRun === true && owner.mode === "chat"
+        ? resolveHostRunChatCanvasTarget(owner, options.port)
+        : resolveCanvasTarget(options.windowId, owner, options.port),
   });
 }
 

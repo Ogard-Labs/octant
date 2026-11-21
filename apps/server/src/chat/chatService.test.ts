@@ -10,13 +10,12 @@ import {
 } from "@octant/contracts";
 import { listEligibleImageProfiles } from "@octant/domain";
 import { createThreadImageAgentTools, IMAGE_TOOL_NAME } from "../image/imageAgentTools";
-import {
-  ImageGenerationOfferService,
-  type ImageOfferAnswer,
-} from "../image/imageGenerationOfferService";
+import { ImageGenerationOfferService } from "../image/imageGenerationOfferService";
 import { imageOfferDecisionRules } from "../image/imageOfferDecisionRules";
+import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
 import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
 import { ServiceOfferService } from "../offers/serviceOfferService";
+import { transcriptionDecision } from "../speech/transcriptionTool";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createRemoteDevicePrincipal } from "../clientPrincipal";
@@ -344,6 +343,9 @@ function openFixture(options?: {
   ) => Promise<import("./research/researchRouter").ProviderNativeResearchResultSet>;
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
+    readonly thread: ChatThread;
+  }) => import("../providers/appManagedToolSet").AppManagedToolSet | undefined;
+  readonly resolveHostRunTools?: (input: {
     readonly thread: ChatThread;
   }) => import("../providers/appManagedToolSet").AppManagedToolSet | undefined;
   readonly resolveComputerUseTools?: (input: {
@@ -831,6 +833,9 @@ function openFixture(options?: {
     ...(options?.resolveComputerUseTools === undefined
       ? {}
       : { resolveComputerUseTools: options.resolveComputerUseTools }),
+    ...(options?.resolveHostRunTools === undefined
+      ? {}
+      : { resolveHostRunTools: options.resolveHostRunTools }),
     ...(options?.resolveExtensionSelectionContext === undefined
       ? {}
       : { resolveExtensionSelectionContext: options.resolveExtensionSelectionContext }),
@@ -1448,7 +1453,7 @@ describe("ChatService", () => {
       listInstances: () => [profile],
       readImageGenerationSettings: () => ({ customSources: [] }),
     };
-    const waiting = new ServiceOfferService<ServiceOffer, ImageOfferAnswer>(5, {
+    const waiting = new ServiceOfferService<ServiceOffer, ServiceOfferAnswer>(5, {
       uuid: () => crypto.randomUUID(),
       now: Date.now,
     });
@@ -1490,7 +1495,7 @@ describe("ChatService", () => {
     const chat = createChatRouteHandler({ service, windowAuthorityStore });
     const offerRoute = createServiceOfferRouteHandler({
       offers: waiting,
-      rules: imageOfferDecisionRules(imageProfiles),
+      rules: { ...imageOfferDecisionRules(imageProfiles), transcribe: transcriptionDecision },
       authorizeScope: async (_scope, kind, id) =>
         kind === "chat-thread" &&
         service.read(decodeChatThreadId(id)).thread.lifecycle === "active",
@@ -1592,6 +1597,49 @@ describe("ChatService", () => {
     });
     expect(fakeDriver.sentTurns[1]?.tools.map(({ name }) => name)).not.toContain("octant_canvas");
     expect(JSON.stringify(fakeDriver.sentTurns[1]?.context)).not.toContain("octant_canvas");
+  });
+
+  it("gives a turn the host sends with no window the host-run Canvas, and none of the window's tools", async () => {
+    const windowTools = vi.fn(() => ({
+      definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+    }));
+    const hostRunTools = vi.fn(() => ({
+      definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+    }));
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: windowTools,
+      resolveComputerUseTools: windowTools,
+      resolveHostRunTools: hostRunTools,
+    });
+    for (const hostRun of [true, false]) {
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: hostRun ? "Routine run" : "No window",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Write the weekly memo",
+        },
+        hostRun ? { hostRun: true } : {},
+      );
+    }
+    const toolNames = fakeDriver.sentTurns.map((turn) => turn.tools.map(({ name }) => name));
+    expect(toolNames[0]).toContain("octant_canvas");
+    expect(toolNames[0]).not.toContain("octant_computer");
+    expect(hostRunTools).toHaveBeenCalledTimes(1);
+    expect(hostRunTools).toHaveBeenCalledWith(
+      expect.objectContaining({ thread: expect.objectContaining({ title: "Routine run" }) }),
+    );
+    // A window-less send that is not the host's own takes nothing.
+    expect(toolNames[1]).not.toContain("octant_canvas");
+    expect(windowTools).not.toHaveBeenCalled();
   });
 
   it("offers Octant's tools only to a model the host verified, not one the driver's probe claims", async () => {
@@ -12509,6 +12557,52 @@ describe("handing a Chat conversation to a new provider session", () => {
 
   const lastAttempt = (fixture: ReturnType<typeof openFixture>, threadId: ChatThreadId) =>
     fixture.service.read(threadId).turns.at(-1)?.attempts.at(-1);
+
+  it("sends a follow-up without the host-run Canvas when the saved session's tools lack it, rather than failing for a handoff no one can choose", async () => {
+    const canvas = vi.fn(() => ({
+      definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+      close: vi.fn(async () => undefined),
+    }));
+    const fixture = openMoving({
+      nativeConversation: true,
+      // A fixed catalog recorded before the Canvas existed: only adding it
+      // needs a handoff.
+      toolCatalogContinuation: ({ tools }) =>
+        tools.some((tool) => tool.name === "octant_canvas") ? "handoff-required" : "unchanged",
+      resolveHostRunTools: canvas,
+    });
+    const threadId = await answeredThread(fixture);
+    await fixture.service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: fixture.service.read(threadId).thread.version,
+        prompt: "Scheduled follow-up",
+      },
+      { hostRun: true },
+    );
+    expect(fixture.service.read(threadId).turns).toHaveLength(2);
+    expect(fixture.fakeDriver.sentTurns.at(-1)?.tools.map(({ name }) => name)).not.toContain(
+      "octant_canvas",
+    );
+    // The saved session is resumed, not replaced by a handed-over one.
+    expect(fixture.fakeDriver.startedSessionIds).toHaveLength(1);
+    expect(lastAttempt(fixture, threadId)?.handoff).toBeUndefined();
+    expect(canvas.mock.results[0]?.value.close).toHaveBeenCalled();
+
+    // A person's own send keeps the explicit choice: no window-less hostRun,
+    // so nothing is dropped for them and the changed-tools refusal stands.
+    const refusing = openMoving({
+      nativeConversation: true,
+      toolCatalogContinuation: () => "handoff-required",
+      resolveHostRunTools: canvas,
+    });
+    const other = await answeredThread(refusing);
+    await expect(sendFollowUp(refusing, other, "Use the new tools")).rejects.toThrow(
+      "different tools",
+    );
+  });
 
   it("keeps the draft unaccepted until the person chooses a text handoff for changed tools", async () => {
     const fixture = openMoving({

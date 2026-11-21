@@ -33,10 +33,15 @@ import {
   type ProjectTerminalRefusalReason,
   type ProjectTerminalResult,
   type WindowId,
+  type WorkThreadId,
 } from "@octant/contracts";
+import { providerHoldsLevelWithoutSandbox } from "@octant/domain/guardrail-policy";
+import { turnHoldsSandboxPolicy } from "../process/sandboxRuntimePolicy";
+import type { ProviderTerminalLaunch } from "../providers/providerTerminal";
 import { Schema } from "effect";
 import { statSync, realpathSync } from "node:fs";
 import { projectExtraFolderRoots } from "@octant/domain";
+import { WINDOWS_SANDBOX_OPERATION_REFUSAL } from "@octant/domain/guardrail-policy";
 import type { Journal } from "../persistence/journal";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
@@ -68,6 +73,8 @@ interface ActionCheckout {
   readonly preparationThread?: { readonly threadId: string; readonly checkoutId: string };
   readonly root: string;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /** A Work task at Full access that kept Octant's sandbox. */
+  readonly fullAccessSandbox?: boolean | undefined;
   readonly branch?: string;
   readonly head?: string;
   readonly current: () => boolean;
@@ -166,6 +173,18 @@ export interface ProjectTerminalServiceOptions {
   readonly clock: () => string;
   /** The shell a local Project terminal opens, read as each one starts. */
   readonly shell?: () => string;
+  /** Host platform override for tests; defaults to `process.platform`. */
+  readonly platform?: NodeJS.Platform;
+  /**
+   * The program a Work task's provider terminal opens, resolved from the
+   * task's provider as its own launch would be. Absent on a host that opens
+   * none: a start that asks for one is then refused and starts nothing.
+   */
+  readonly providerTerminal?: (input: {
+    readonly workThreadId: WorkThreadId;
+    readonly shell: string;
+    readonly strict: boolean;
+  }) => ProviderTerminalLaunch;
   /**
    * A Work or Code Project on a registered server, which the local catalog never
    * holds. Absent for every local Project.
@@ -229,6 +248,10 @@ interface Owner {
   readonly action?: ActionReceipt;
   readonly authorized?: () => boolean;
   readonly serverWorkShell?: true;
+  /** Set for a terminal that runs its Work task's provider program. */
+  readonly program?: "provider";
+  /** That program's name as the host resolved it at the start, e.g. "Gemini CLI". */
+  readonly programName?: string;
   uncertainty?: "server-transport-lost" | "server-stop-unconfirmed";
   /** Who the journal names for this shell's start and end: the device that opened it, if one did. */
   readonly actor?: EventActorValue;
@@ -581,6 +604,24 @@ export class ProjectTerminalService {
   }
 
   /**
+   * What a running Project terminal runs, as its start recorded it: its Work
+   * task's provider program, or undefined for a shell or a terminal this host
+   * does not hold. A Zen card records it, so its restart asks for the same.
+   */
+  program(terminalId: CodeTerminalId): "provider" | undefined {
+    return this.#owners.get(String(terminalId))?.program;
+  }
+
+  /**
+   * The name of the provider program a running Project terminal runs, as its
+   * start resolved it, so its Zen card names the program it really started
+   * rather than whatever the window's Work task now uses.
+   */
+  programName(terminalId: CodeTerminalId): string | undefined {
+    return this.#owners.get(String(terminalId))?.programName;
+  }
+
+  /**
    * End every running terminal of a Project that is no longer what its shells
    * were opened against: archived, or relinked to another root. Called when
    * the journal commits a Project lifecycle or binding change, so a shell does
@@ -811,6 +852,19 @@ export class ProjectTerminalService {
     if (this.#owners.has(String(command.terminalId))) {
       return refused("unavailable", "This terminal id is already in use.");
     }
+    // A provider terminal belongs to a Work task on this computer: a Code
+    // thread opens its own from its terminal tab, and a server Project's
+    // provider runs on the server, out of this host's reach.
+    if (
+      command.program === "provider" &&
+      (action !== undefined || command.workThreadId === undefined)
+    )
+      return refused("unavailable", "A provider terminal opens only for a Work task.");
+    if (command.program === "provider" && authority.kind === "allowed-on-server")
+      return refused(
+        "unavailable",
+        "This is not available for a Project on a server yet. Use a terminal on the server.",
+      );
     if (authority.kind === "allowed-on-server") {
       return this.#startOnServer(windowId, command, authority, device);
     }
@@ -857,6 +911,11 @@ export class ProjectTerminalService {
         projectId: command.projectId,
         ...(command.workThreadId === undefined ? {} : { workThreadId: command.workThreadId }),
       }) ?? true;
+    // Project terminals and Project actions cannot run inside the Windows
+    // sandbox yet; refuse before journaling or spawning when Strict is on.
+    if ((this.#options.platform ?? process.platform) === "win32" && strict) {
+      return refused("unavailable", WINDOWS_SANDBOX_OPERATION_REFUSAL);
+    }
     const posture: ProjectTerminalPosture = !strict
       ? "full-access"
       : workThread !== undefined
@@ -876,6 +935,28 @@ export class ProjectTerminalService {
           ? (workThread?.executionPolicy ?? posture)
           : "full-access";
     const shell = this.#options.shell?.() ?? defaultTerminalShell();
+    // A provider terminal runs the Work task's provider's own program in the
+    // task's folder, as the person's own terminal; the host names the program
+    // and its account environment, the command cannot.
+    let providerProgram: Extract<ProviderTerminalLaunch, { status: "resolved" }> | undefined;
+    const providerTask = command.program === "provider" ? command.workThreadId : undefined;
+    if (providerTask !== undefined && workThread !== undefined) {
+      if (workThread.executionPolicy === "plan")
+        return refused("unavailable", "Plan does not open a provider terminal.");
+      const launch = this.#options.providerTerminal?.({
+        workThreadId: providerTask,
+        shell,
+        strict,
+      }) ?? { status: "refused", message: "This host does not open provider terminals." };
+      if (launch.status === "refused") return refused("unavailable", launch.message);
+      providerProgram = launch;
+    }
+    // The program holds the task's own level, never the wider one a plain
+    // terminal outside Strict takes.
+    const terminalPolicy =
+      providerProgram !== undefined && workThread !== undefined
+        ? workThread.executionPolicy
+        : launchPolicy;
     // On Windows an action runs in the shell Settings › Code names, written in
     // that shell's own words; a shell Octant cannot write it for is refused
     // before anything is journaled.
@@ -928,7 +1009,7 @@ export class ProjectTerminalService {
           projectId: String(command.projectId),
           root: workThread?.workingRoot ?? workThread?.root ?? root,
           mode: authority.project.type === "work" ? "work" : "code",
-          executionPolicy: launchPolicy,
+          executionPolicy: terminalPolicy,
           ...(command.workThreadId === undefined ? {} : { workThreadId: command.workThreadId }),
         },
         this.#options.network,
@@ -947,6 +1028,30 @@ export class ProjectTerminalService {
       protections = prepared;
       const deviceStillCurrent = () =>
         device === undefined || this.#deviceOwnerCurrent(windowId, device.binding);
+      // The program runs the way the task's turns do (maintainer decision,
+      // 2026-11-21), by the rule a Code thread's provider terminal follows:
+      // where a turn runs without Octant's sandbox, so does the program, on
+      // the provider's own approvals; under Strict, a kept Full-access
+      // sandbox or a chosen sandbox policy it stays confined at the task's
+      // level, even where a plain terminal outside Strict would not be.
+      const providerUnconfined =
+        providerTask !== undefined &&
+        workThread !== undefined &&
+        providerHoldsLevelWithoutSandbox({
+          mode: "work",
+          executionPolicy: workThread.executionPolicy,
+          strict,
+          fullAccessSandbox: workThread.fullAccessSandbox,
+          sandboxPolicySelected:
+            prepared.launch.sandboxPolicy !== undefined ||
+            turnHoldsSandboxPolicy(String(providerTask)),
+          purpose: "session",
+        });
+      const {
+        strict: preparedStrict,
+        environment: preparedEnvironment,
+        ...preparedLaunch
+      } = prepared.launch;
       await this.#options.terminals.launch({
         terminalId: String(command.terminalId),
         ...(action === undefined
@@ -998,8 +1103,19 @@ export class ProjectTerminalService {
         columns: command.columns,
         rows: command.rows,
         credentialReferences: [],
-        executionPolicy: launchPolicy,
-        ...prepared.launch,
+        executionPolicy: terminalPolicy,
+        ...preparedLaunch,
+        ...(providerProgram === undefined
+          ? {
+              ...(preparedStrict === undefined ? {} : { strict: preparedStrict }),
+              ...(preparedEnvironment === undefined ? {} : { environment: preparedEnvironment }),
+            }
+          : {
+              command: providerProgram.command,
+              // A proxied egress's variables win over the program's own.
+              environment: { ...providerProgram.environment, ...preparedEnvironment },
+              ...(providerUnconfined ? { strict: false } : {}),
+            }),
         ...(prepared.managed
           ? {
               onClosed: prepared.end,
@@ -1060,6 +1176,7 @@ export class ProjectTerminalService {
       workThread?.active,
       false,
       device,
+      providerProgram === undefined ? undefined : providerProgram.name,
     );
   }
 
@@ -1257,6 +1374,8 @@ export class ProjectTerminalService {
     authorized?: () => boolean,
     serverWorkShell = false,
     device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
+    /** The provider program's name, for a terminal that runs one. */
+    programName?: string,
   ): Promise<ProjectTerminalResult> {
     const personPairedDevice = this.#options.personPairedDevice;
     // A device's shell holds only while that device still acts as the person.
@@ -1275,6 +1394,7 @@ export class ProjectTerminalService {
       ...(action === undefined ? {} : { action }),
       ...(held === undefined ? {} : { authorized: held }),
       ...(serverWorkShell ? { serverWorkShell: true } : {}),
+      ...(programName === undefined ? {} : { program: "provider", programName }),
       ...(device === undefined
         ? {}
         : {
@@ -1299,6 +1419,7 @@ export class ProjectTerminalService {
             bindingRevisionId,
             posture,
             startedAt: this.#options.clock(),
+            ...(programName === undefined ? {} : { program: "provider" }),
           },
           owner.actor,
         );

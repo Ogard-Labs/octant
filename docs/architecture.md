@@ -149,13 +149,18 @@ The design rests on a small set of invariants that every package obeys:
 - **The event journal is authoritative; projections are rebuildable.** Commands
   append versioned events to a SQLite journal. Read models are idempotent
   projections that can be dropped and rebuilt from the journal at any time.
-  _Rationale for no interactive raw provider terminal mode_ (maintainer
-  decision, 2026-11-14): Octant offers no mode in which the person types into
-  a provider's own terminal program inside a thread. Keystrokes typed there
-  reach the provider directly, so its tool calls bypass Octant's approvals and
-  never reach the journal; the thread would claim a record it does not hold.
-  The person can still run a provider's CLI in an ordinary terminal, outside
-  any thread's authority.
+  _Rationale for a person-operated provider terminal_ (maintainer decision,
+  2026-11-21, replacing the 2026-11-14 exclusion): keystrokes typed into a
+  provider's own terminal program reach the provider directly, so its tool
+  calls bypass Octant's approvals and never reach the journal. Excluding it
+  also blocked workflows only a provider's own interface offers. A Code
+  thread's terminal tab, or a Work task's terminal, may therefore run its
+  provider's program, but only as a person-operated terminal: only the person opens or types into it, it runs
+  the way the thread's turns do (outside Strict without Octant's sandbox, on
+  the provider's own approvals; under Strict confined as that thread's
+  terminals are), and the thread claims nothing that happens in it, so the
+  journal never holds a record it does not have
+  ([Workspace: provider terminal](design/workspace.md)).
 - **Contracts are schema-only, domain is pure.** `@octant/contracts` holds
   Effect Schema definitions and nothing else. `@octant/domain` holds pure
   policy and state transitions with no I/O.
@@ -569,11 +574,32 @@ services that append to the journal. Providers, tools, Git, terminals,
 subagents, extensions, and recovery live here. A headless host runs the same
 server through `@octant/cli` (`octant server run`, `octant web`). The
 installable headless artifact (`scripts/package-headless.ts`) is self-contained:
-it carries the bundled CLI (`bin/octant`), the bundled server (`lib/server`), the
-web assets, and a top-level `node_modules` holding the third-party and native
+it carries the bundled CLI (`bin/octant.mjs`), the bundled server (`lib/server`),
+the web assets, a top-level `node_modules` holding the third-party and native
 dependencies both bundles leave external, built on the target platform itself,
-and the target's bundled TypeScript language server with its license notice.
-An installed CLI starts that server under its own Bun runtime with
+the target's bundled TypeScript language server with its license notice, and
+the Bun runtime the repository pins (`lib/runtime/bun`, with Bun's license in
+`share/NOTICES.txt`), so the computer needs no Bun of its own. The build
+carries the Bun that runs the packaging script and refuses any other version;
+its digest is in the manifest like every file's. `bin/octant` is a `sh`
+launcher that runs the CLI bundle under that runtime. It follows a link to
+itself but not the directory it sits in, and the service an installed CLI
+writes runs that launcher through the install's `current` link, so the next
+start after an upgrade runs the new version's Bun.
+A published build also carries `octant-artifact.sig` beside its manifest: the
+release key of its ring (the feed keys, stable or preview) over the manifest's
+canonical bytes, which name every file's digest. Each target is built on its
+own runner with no key, and a separate job that holds only the ring's key and
+runs only the workflow's own scripts checks every file against the manifest,
+signs it and attaches the build to the release
+(`.github/workflows/release-headless.yml`). Octant Nightly releases carry no
+headless build. `octant server install` and `upgrade` refuse a build whose
+signature is missing, unreadable, or not made by a key trusted for the ring it
+names, before anything is staged, and check the staged copy again;
+`--self-built` installs a build the person made themselves without one,
+because an unsigned build proves nothing about who produced it. The server's
+own start-up check and the build's self-inspection need no signature.
+An installed CLI starts that server under the same runtime with
 `OCTANT_ARTIFACT_ROOT` and `OCTANT_ARTIFACT_VERSION` set. The server verifies
 every listed file before it opens the store, and reports that version on
 `/health`, in a diagnostics export, and on the owner receipt. When the stamped
@@ -4171,9 +4197,12 @@ file, shell, or Git authority for a routine to widen: its definition binds an
 active Chat Project (the receipt names the Project and its version, with no
 folder or binding revision), its authority snapshot grants no filesystem,
 shell, Git, or subagents, and the contract refuses a Chat definition that
-does. It has no level to pick and no follow-up (`same-thread`) target, and no
-thread's agent proposes one, because a Chat thread has no Environment to
-propose from. Each run creates a Chat thread in the Project through
+does. It has no level to pick, and no thread's agent proposes one that starts
+new threads. A follow-up (`same-thread`) may target a Chat thread (maintainer
+decision, 2026-11-21): the person sets it up from the Chat thread's
+Environment, or the thread's agent proposes it and the person confirms the
+chip, and its one turn goes into that thread on the thread's own model, as
+below. Every other run creates a Chat thread in the Project through
 `create-chat-thread`, puts it on the routine's provider and model, and sends
 the task as one `send-chat-turn` under a submission identity derived from the
 occurrence, so a retry after a crash finds the turn it already sent. The
@@ -4185,7 +4214,20 @@ at most one new thread (target policy `new-thread`) and runs its first turn
 through the ordinary thread and turn services; a routine cannot do anything the
 thread it creates could not do. The one exception is a follow-up (target
 policy `same-thread`, below), which creates no thread and sends one turn into
-the thread it came from.
+the thread it came from. A Chat run's turn, a follow-up's included, is sent as
+the host with no window and takes Chat's host-run tool set (maintainer
+decision, 2026-11-21): the Canvas only, bound to the thread's own Chat Project
+as the host records it (an active Chat Project, else refused) or to the thread
+alone when it is in none. That is the scope a window showing that Project
+gives, never wider, and the Canvas tool asks the person nothing, so no answer
+is borrowed from a window. Where the thread's saved session has a fixed tool
+catalog without the Canvas (a Codex session begun before it), the turn goes
+without the Canvas and resumes that session, since no person is there to
+choose Continue with updated tools; a person's own send still asks. Chat has no Browser, from a window or not, and the
+other window tools (Computer, the window's harness, thread dialogue, image
+generation) are keyed on the window that sends a turn, so a host-run turn
+takes none of them. A child's result delivery and a usage-limit retry into
+Chat still take no app-managed tools.
 
 - **File arrivals.** A person configures the existing main Work or Code Project root,
   a relative existing input directory, included suffixes, excluded directories,
@@ -4428,7 +4470,9 @@ the thread it came from.
   bounds above, or weekly at a local time in an IANA zone), and a missed-run
   policy. It names nothing else: the thread's own Project and mode are implied,
   and the agent cannot choose another Project, a profile, a model, or any
-  authority. Chat is never offered the tool, a turn that runs as the host (a
+  authority. A Chat thread in a Chat Project is offered it only for a
+  follow-up in itself (below); a Chat thread outside a Project and a Side Chat
+  are not offered it. A turn that runs as the host (a
   routine's run, or a usage-limit resume) is refused it as
   `automation-recursion`. A turn in Plan is offered and may call it, as it
   may offer a side task: a proposal records only a suggestion the person
@@ -4571,7 +4615,20 @@ the thread it came from.
   chip, or the person sets it up from the thread with
   `POST /api/automations/follow-ups` (`schedule-follow-up`: thread, time,
   prompt), which builds the definition from the thread's live facts exactly as
-  a confirmed proposal does. Chat threads cannot have one, and the proposal
+  a confirmed proposal does. A Chat thread in a Chat Project may have one too
+  (maintainer decision, 2026-11-21): the person sets it up from the Chat
+  thread's Environment, the host builds it with Chat's authority from the
+  Chat thread's live facts (`AutomationFollowUpRequest.mode` takes `chat`),
+  and the Chat dispatcher sends its one turn into that thread under the same
+  heading, on the thread's own model. The Chat thread's agent may propose
+  one with `octant_propose_routine` (maintainer decision, 2026-11-21): its
+  Chat definition offers only trigger `follow-up`, any other trigger is
+  refused as `chat-follow-up-only` and the draft refuses a Chat proposal that
+  is not a follow-up again at confirmation, and the proposal always waits on
+  the same chip in the Chat transcript, since Chat has no Full access and a
+  paused follow-up would never fire. The tool's answer is the host's own
+  receipt, so it does not mark the Chat thread as having read outside
+  content, and Chat is still offered no `octant_routines`. The proposal
   refusals above apply. Moving it (`reschedule-follow-up`) is an ordinary
   update of its time; cancelling it is the ordinary archive. An edit cannot
   change any routine's target policy, and Run now is refused for a follow-up,
@@ -4595,14 +4652,18 @@ the thread it came from.
   anything is sent, so a thread archived or marked Done during the wait
   still refuses. A follow-up archived while it waits ends its run
   `cancelled`, a paused one keeps waiting, and one still waiting a day past
-  its time fails as `follow-up-missed`. The run's one first-turn request id
+  its time (the lateness limit below) fails as `follow-up-missed`. The run's one first-turn request id
   keeps the turn from being sent twice. (`thread-busy` is no longer
   recorded; it stays in the contract so older journals decode.) A refusal fails the run with its
   reason in the journal and sends nothing; unlike other routines, a follow-up
   is not left paused, because the once trigger then ends it.
 - **Follow-up missed window.** A follow-up missed while the host was asleep or
-  off runs once on return if it is at most 24 hours late. Past that it fails
-  as `follow-up-missed` and sends nothing: a check made a day late is stale.
+  off runs once on return if it is at most the person's lateness limit late:
+  24 hours by default, a host setting in Settings › Permissions
+  (`followUpLatenessLimitHours`, 1 to 720; maintainer decision, 2026-11-21).
+  Past that it fails as `follow-up-missed` and sends nothing: a check made
+  that late is stale. The same limit ends a follow-up still waiting on a busy
+  thread.
   Either way it runs at most once and then ends itself as `exhausted`, the
   state every spent one-time routine reaches, with its run history kept.
 - **Asleep or offline.** The scheduler is an in-process timer in the running
@@ -5048,7 +5109,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   refused in Plan, on excluded profiles and cancelled turns; managed children,
   and Chat gain no messaging rights. Sending again, including retrying a
   send, creates a new durable message; receipt retries use the existing ID.
-- **Expiry.** Each newly admitted message records an explicit deadline 24 hours after admission under the maintainer-approved lifetime policy. The host journals `agent.message-expired@1` before deleting a queued body or freeing its slot; expiry is a separate receipt and never counts as provider delivery or refusal. Delivery rechecks expiry before carrying a message, startup reconciles it, and a scoped host sweep checks at most once a minute. An append failure retains the body for retry. Older records without a deadline retain their existing lifetime; no timestamp is reinterpreted as consent. A message already journaled delivered or acknowledged does not expire. The Chat mention path is unchanged.
+- **Expiry.** A newly admitted message records no deadline and waits until a turn carries it, it is refused, or its thread is purged (maintainer decision, 2026-11-21; before, each recorded a deadline 24 hours after admission, which lost a message sent to a thread the person returned to the next week). The body store's disk budget bounds what waits. A deadline an earlier host recorded still applies: the host journals `agent.message-expired@1` before deleting a queued body or freeing its slot; expiry is a separate receipt and never counts as provider delivery or refusal. Delivery rechecks expiry before carrying a message, startup reconciles it, and a scoped host sweep checks at most once a minute. An append failure retains the body for retry. No timestamp is reinterpreted as a deadline. A message already journaled delivered or acknowledged does not expire. The Chat mention path is unchanged.
 - **Refusals in the Agents center.** A refusal is journaled at the send, at
   the tool (a turn in Plan, a profile without the tool, a call with no
   message; a cancelled turn is not a refusal), and at delivery, with these
@@ -5637,8 +5698,8 @@ unless the call asks for 1 to 10. It opens no page.
   ending the turn.
 - **Outside content.** A successful result marks the thread as having read
   outside content. On a harness thread the call also passes the harness's
-  tool-call policy, which refuses a tainted thread's query that looks like it
-  carries data ([Search queries on a tainted thread](design/search-query-taint.md));
+  tool-call policy, which under Strict refuses a tainted thread's query that
+  looks like it carries data ([Search queries on a tainted thread](design/search-query-taint.md));
   a Chat thread on another provider searches through its research route, as
   its search did before, without that refusal.
 - **Rationale for the name.** `web-search` was already the harness's tool, with
@@ -7855,6 +7916,21 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and `/api/speech/synthesis` behind window authority, sniffs and bounds the
   audio, persists nothing, and reports each direction `ready`, `unconfigured`,
   or `unavailable` with the Settings link that fixes it.
+  An attended Work or Code agent outside Plan can use `octant_transcribe`
+  only when its provider carries Octant tools and transcription is ready.
+  The host checks that a file under the turn's current folder contains supported
+  audio (WAV, WebM, Ogg, MPEG, MP4 or FLAC, at most 10 MiB). Before sending
+  it, the thread's offer names its relative path, byte count, Voice endpoint
+  and model. A person-paired device can confirm its own turn's offer.
+  A remembered answer lives only in host memory for this thread, provider
+  instance, endpoint address and model. A changed file, destination or lost
+  authority while the card waits sends nothing. Agents and paired microphone
+  clips share at most one transcription slot, leaving one for local dictation.
+  Unlike dictation, the agent's returned text is a tool result in the thread,
+  marked as outside content and checked by Shield. Up to eight transcripts
+  are cached in host memory by thread, content, destination and language.
+  Pages carry at most 32,000 characters; a missing continuation refuses
+  rather than silently making another paid call.
   Every desktop composer (Chat, Work, Code, the welcome and draft composers) and
   Navigator show a microphone beside the attach control only while
   transcription is `ready`; the clip is recorded by the browser's own encoder,
@@ -8141,6 +8217,14 @@ Octant tools. It reads the thread's own attachment store, a confined file
 read, and the host's model routing and data rules, and the public Code-tool
 port in `@octant/plugin-api` carries none of those; giving a plugin an image
 description port would be a seam extension of its own.
+
+Rationale for registering `transcribe` in the host (maintainer decision,
+2026-11-21): it is host-owned for the same reason. It reads a confined file
+under the turn's folder behind the host's secret guard, asks through the
+host's consent and offer service, and sends audio only to the Voice endpoint
+the host routes to; the public Code-tool port carries none of those. A public
+media-tool port is a seam extension of its own, deferred to a follow-up
+([Plugin boundaries](#plugin-boundaries-and-remaining-extraction)).
 
 - **Spend.** Each describe is admitted under the thread's and its Project's
   spend ceilings before the image is sent (it is spend, not a turn of its
@@ -10450,6 +10534,15 @@ the model at another size.
   module, apart from the retry policy. Verify tools sends its capability echo
   outside any session, so a session never offers an unverified model even the
   echo.
+- **OpenCode Go request identity.** On the official Go OpenAI-compatible
+  endpoint, the harness identifies itself with `User-Agent: octant-harness/<host version>`.
+  Responses and Chat Completions requests carry the transcript's opaque ID in
+  `x-opencode-session`. Tool results, retries, resume and Code's in-place
+  compaction keep that ID. A fork has its own transcript. Chat and Work
+  start a new transcript when they rebuild history after host compaction. Each Verify tools
+  check gets a fresh ID shared by all attempts of that check. Listing models
+  identifies the client only. The host matches the Go base URL, including
+  for an endpoint added by hand. [OpenCode Go client guidelines](https://opencode.ai/docs/console/go/#where-can-i-use-it).
 - **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
   each step as it happens (`native-harness-transcript`, one aggregate per
   session): the user message once the request is known to fit, each reply,
@@ -10667,9 +10760,12 @@ the model at another size.
   the thread; [Persistence](#persistence), Untrusted-content taint). A person's clear ends this until the next
   result that taints ([Persistence](#persistence), Clearing taint).
   `web-search` does not ask under taint: it
-  reaches only the search endpoint the person configured, so the tool-call
-  policy instead refuses a tainted thread's query that looks like it carries
-  data, before any request leaves, at every level below Full access. It is a
+  reaches only the search endpoint the person configured, so under Strict the
+  tool-call policy instead refuses a tainted thread's query that looks like it
+  carries data, before any request leaves, at every level below Full access;
+  outside Strict the query goes and the mark stays (maintainer decision,
+  2026-11-21; `resolveToolCall` reads the thread's Strict value, and a caller
+  that cannot say reads as Strict). Under Strict it is a
   guard, not a privacy rule, so the person lowers it with the
   outside-content gate above: choosing Full access for a thread, or for a
   Project's new threads, in Work and Code alike, turns the refusal off and
@@ -11024,8 +11120,8 @@ the model at another size.
   answer, an expiry, or a cancellation from any surface clears it. The
   question and its answer stay journaled on the session (Work, Code) or the
   attempt (Chat) and nowhere else. At most 32
-  questions and 32 approvals wait at once across the whole host, the cap MCP
-  and browser tool approvals use; one
+  questions and 32 approvals wait at once across the whole host, the cap
+  browser tool approvals use; one
   past it is refused at once as `question-too-many-waiting` or
   `approval-too-many-waiting`, journals nothing, and tells the lead nobody
   was asked. `NativeHarnessTurnObserver` puts the stable
@@ -12667,11 +12763,10 @@ that is not yet effective for the thread is refused and never reaches the model.
     its registration's deadline even before the expiry is reconciled) goes
     to nobody else and runs out.
 
-  At most 32 of those approvals
-  wait at once across the whole host; the cap is shared by every thread and
-  window, not counted per thread. A call past that cap is denied immediately
-  with the refusal a declined call already uses, and answering frees the
-  slot. An unanswered approval does not expire: it waits in Needs you until a
+  Any number of those approvals may wait across the host (maintainer
+  decision, 2026-11-21; before, a host-wide cap of 32 denied the next call at
+  once): a call waits for its answer before its turn can make another, so
+  the turns running bound how many wait. An unanswered approval does not expire: it waits in Needs you until a
   person answers it, and a host-run turn with no window (a routine, a goal
   loop) waits there too instead of being refused (maintainer request,
   2026-11-12). Built: an approval has no expiry and holds no timer; it is
@@ -13210,7 +13305,9 @@ person reads the exact command first**, as the shell-quoted command line with
 the account's folder variable and a `<secret>` placeholder, plus a plain
 sentence on what it adds, and chooses Run this command once; `plan` returns a
 plan id and a random confirmation token, `apply` runs only that plan with its token, once,
-within ten minutes, in the window that asked, and refuses when the account or
+within the time set in Settings › Permissions (`toolingCommandConfirmMinutes`,
+ten minutes by default, up to a day; maintainer decision, 2026-11-21), in the
+window that asked, and refuses when the account or
 its folder changed since (`changed-plan`), comparing the command written out as text when its turn comes, not a hash. **The person only**: every step
 needs a local window's capability or a paired device's session (maintainer
 decision, 2026-11-12; not built yet: today a request forwarded from a paired
@@ -14223,22 +14320,33 @@ feature: usage, diagnostics, Navigator, the automations UI, browser and
 computer use, agent hierarchy, remote and mobile access, the Apple workbench,
 and the marketplace and plugin registry are no longer extraction candidates.
 
-| Surface                                                               | Status and boundary to preserve                                                                                            |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| GitHub                                                                | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                          |
-| Thread boards                                                         | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board    |
-| Zen                                                                   | Switchable bundled plugin; appearance contributions and their scoped state                                                 |
-| Linear, Azure Resource Manager reads                                  | Bundled Integration plugins with no switch; integration ports and contributed views                                        |
-| Declarative Code tools                                                | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned |
-| Pull request reviewers                                                | Code-only plugin seam (`pull-request-reviewer`); host owns Plan read-only turns, head-staleness, findings, and opt-ins     |
-| Canvas, preview viewers, backgrounds, theme presets                   | Core; scoped artifact contracts, registered viewers, and appearance contributions                                          |
-| Usage, diagnostics, Navigator, automations UI                         | Core; underlying authority stays in the host                                                                               |
-| Project memory and its agent tool                                     | Core; the journal, the person's confirmation, and purge stay host-owned                                                    |
-| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`) | Core; part of the harness loop's closed catalog, judged by the same authority path                                         |
-| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Core; capability, lifecycle, and security remain app-managed                                                               |
-| Marketplace and plugin registry                                       | Core; they stay in the host because they admit and activate other components                                               |
-| Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned       |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                      |
+| Surface                                                                      | Status and boundary to preserve                                                                                                                                                                 |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub                                                                       | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                                                                                               |
+| Thread boards                                                                | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board                                                                         |
+| Zen                                                                          | Switchable bundled plugin; appearance contributions and their scoped state                                                                                                                      |
+| Linear, Azure Resource Manager reads                                         | Bundled Integration plugins with no switch; integration ports and contributed views                                                                                                             |
+| Declarative Code tools                                                       | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned                                                                      |
+| Pull request reviewers                                                       | Code-only plugin seam (`pull-request-reviewer`); host owns Plan read-only turns, head-staleness, findings, and opt-ins                                                                          |
+| Canvas, preview viewers, backgrounds, theme presets                          | Core; scoped artifact contracts, registered viewers, and appearance contributions                                                                                                               |
+| Usage, diagnostics, Navigator, automations UI                                | Core; underlying authority stays in the host                                                                                                                                                    |
+| Project memory and its agent tool                                            | Core; the journal, the person's confirmation, and purge stay host-owned                                                                                                                         |
+| Host media tools (`octant_look`, `octant_transcribe`, `octant_create_image`) | Core; host-registered exception while thread-scoped attachments, confined files, host model/speech routing, paid service offers, and outside-content tainting stay outside the public tool port |
+| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`)        | Core; part of the harness loop's closed catalog, judged by the same authority path                                                                                                              |
+| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench        | Core; capability, lifecycle, and security remain app-managed                                                                                                                                    |
+| Marketplace and plugin registry                                              | Core; they stay in the host because they admit and activate other components                                                                                                                    |
+| Provider drivers                                                             | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned                                                                            |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                               | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                                                                                           |
+
+**Host media tools stay in the host (maintainer decision, 2026-11-21).**
+`octant_look`, `octant_transcribe`, and `octant_create_image` are registered in
+the host rather than through the public declarative Code-tool port.
+_Rationale:_ these media tools rely on thread-scoped attachments or confined
+turn files, host model or speech endpoint routing, paid service offers, and
+outside-content tainting that the current `CodeToolHostPort` does not carry.
+Until a capability-scoped public media port is designed and built in its own
+change, they stay in the host as an explicit core exception, and no third-party
+plugin is given private access to those host services.
 
 **Themes as plugin contributions** (maintainer decision, 2026-11-14; built).
 A plugin may contribute one or more themes as data only. Each is a component
@@ -15006,11 +15114,13 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     default for every new thread, Work and
     Code; Settings › Work and Settings › Code change it, a Project, Work or Code, may override
     it, and any thread can switch mode at any time from the composer in one
-    click (maintainer decision, 2026-10-31). No Work thread starts in Plan,
-    so a Plan answer leaves new Work threads at Ask first. A new Work thread
-    takes its Project's mode, else Work's default; a Project override can be
-    Auto, Ask first, Accept edits, or Full access, and a device the host's
-    own person did not pair cannot pick Full access for it. A Work thread
+    click (maintainer decision, 2026-10-31). A Plan answer starts new Work
+    threads in Plan too (maintainer decision, 2026-11-21; before, it left
+    them at Ask first). A new Work thread takes its Project's mode, else
+    Work's default, decided on the host; a Project override can be Auto, Ask
+    first, Accept edits, Plan, or Full access, and a device the host's own
+    person did not pair cannot pick Full access for it. A routine or
+    benchmark run in a Project whose start mode is Plan asks first. A Work thread
     moves to Plan from its own mode picker, as a Code thread does.
   - **Computer asks below Full access (and under Strict at Full access):**
     outside Strict, Full access requires no first-action approval (maintainer
@@ -15383,8 +15493,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     default access, behind the one-time warning).
   - **Plan in Work.** Work threads get the Plan level, so the provider's
     own plan mode, `EnterPlanMode` and `ExitPlanMode` work there as in Code.
-    Built: Plan is a Work thread's level (`access: "plan"`, never a Settings
-    or Project default), journaled through `change-work-thread-access` like
+    Built: Plan is a Work thread's level (`access: "plan"`, and since
+    2026-11-21 also a Settings › Work default and a Work Project's start
+    mode, `WorkDefaultAccess` and `WorkProjectPermissionMode`), journaled through `change-work-thread-access` like
     any level change and offered by the web and phone mode pickers, the
     owner posture card and `octant agent --access plan`. In Plan, Work is
     read-only on the host as Code's Plan is: the provider launches with
@@ -15554,6 +15665,14 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     up to an hour, and the host refuses a wait past the setting; a Claude Code
     thread still ends one tool call at eleven minutes; maintainer decision,
     2026-11-19; built).
+  - **Octant Shield, follow-ups and shown commands** (maintainer decision,
+    2026-11-21; built). Shield's brakes (3 denials in a row, 20 in a thread),
+    how late a follow-up may still run (24 hours, up to 720) and how long a
+    shown provider command may still be run (ten minutes, up to a day) are
+    host settings with those defaults. Removed instead of made settings: the
+    host-wide cap of 32 waiting MCP tool approvals, and the 24-hour deadline
+    on a newly queued thread message; neither protected anything a person
+    would tune, and each refused or lost real work.
   - **Routines.** A file routine's 64-run activity window can be cleared or
     raised, and a setting, off by default, **Start agent-created routines
     active at Full access** lets a routine an agent creates at Full access
@@ -15945,8 +16064,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `octant settings access <mode> [--work]` sets the global default new
   threads start at, Code unless `--work`, through `update-code-settings` /
   `update-work-settings`. A Work thread
-  takes the same levels, Plan included, though Plan is never a default:
-  Settings › Work sets the one a new thread starts at and its composer
+  takes the same levels, Plan included, as a default too
+  (`octant settings access plan --work`): Settings › Work sets the one a new
+  thread starts at and its composer
   changes it
   ([Modes](#modes-chat-work-and-code)).
   One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
@@ -17478,6 +17598,48 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
+- **Provider terminals.** A Code thread's `start-terminal`, and a Work task's
+  Project terminal `start` (with its `workThreadId`), may ask for
+  `program: "provider"`. The host then resolves the thread's provider's own
+  command-line program with the account binary, folder and launch environment
+  its turns use at the thread's Strict value, and runs it in place of the
+  interactive shell, in the thread's folder: Claude Code and Codex through
+  their tooling account, and an ACP agent whose profile names `interactiveArgs`
+  (Google Antigravity's `agy`, Gemini CLI's `gemini`, both bare) with the
+  environment `sanitizeAcpEnvironment` builds for its launch, less the guards
+  that only keep the piped ACP stream clean (`PROTOCOL_STREAM_GUARDS`:
+  `NO_COLOR`), its managed home and its host sign-in folder's variables, and
+  no API key. A Work task's start journals `program: "provider"` on
+  `code.project-terminal-started@1` (optional; absent is a shell), and a Zen
+  card pinned for it records the same, with the program's name, from the
+  host's answer. A Work task's runs
+  by the same rule below in mode `work`, at the task's own level rather than
+  the Full access a plain Project terminal takes outside Strict. It runs the
+  way the thread's turns do (maintainer decision, 2026-11-21): where a turn
+  runs without Octant's sandbox (`providerHoldsLevelWithoutSandbox`: Work or
+  Code outside Strict, outside Plan, with no kept Full-access sandbox and no
+  chosen sandbox policy), the program starts with no confinement wall and no
+  egress proxy, on the provider's own approvals. Under Strict, or where the
+  thread kept its sandbox or a turn holds a chosen sandbox policy, it starts
+  under the thread terminal's confinement, unwidened: an account folder
+  outside the thread's folders stays unwritable there, so a program that must
+  write it can fail to sign in, and the person opens it outside Strict
+  instead. On Linux the confined shell's `HOME` is its own state folder and an
+  account folder outside the thread's folders is not mounted at all, so a
+  program there starts as on a fresh machine. Windows has no Octant terminal
+  sandbox, so a provider terminal that would start confined is refused there
+  rather than opened unconfined: under Strict, including verified Codex at Full
+  access, whose turns the Windows AppContainer sandbox runs, and for a thread
+  that kept its sandbox, whose turns Windows refuses. The command names no
+  program, path or variable. The host refuses the start, and any write to such a
+  terminal, for every caller but the person (their local window or a device
+  they paired), before any approval is consulted, since keystrokes there
+  reach the provider past Octant's approvals (a Work task's is a Project
+  terminal, which already admits only the person). Plan, a Project on a
+  server, a Browser grant, a Project terminal with no Work task, and a
+  provider with no program are refused. Its output follows
+  the thread terminal's replay path and never enters the conversation,
+  transcript or usage ([Workspace: provider terminal](design/workspace.md)).
 - **Project actions.** A Work or Code Project keeps up to twelve named
   actions on its record: a unique name, a one-line command and a relative
   directory. The person saves the list from the Project overview through the
@@ -19952,8 +20114,11 @@ past the thread's level; a `network-access` answer yields `call` rules only,
 as the [egress rules](#security-and-authority) state for the reviewer. Once a
 thread is tainted, Shield cannot allow irreversible, publish, or new-egress
 classes; those go to the person, as taint already withdraws the provider's
-own reviewer. After 3 denials in a row, or 20 in one thread, Shield pauses
-and the next call goes to the person.
+own reviewer. After a number of denials in a row (3 by default), or in one
+thread (20 by default), Shield pauses and the next call goes to the person;
+both counts are host settings in Settings › Permissions, read at each review
+([Octant's own limits become settings](#security-and-authority); maintainer
+decision, 2026-11-21).
 
 **Watcher.** The Watcher reads outside content as it enters the thread, with
 deterministic detectors and no model call. Built for every successful result
@@ -20510,7 +20675,9 @@ Those three are one deliverable: an updater on an unsigned app is an
 unauthenticated code-delivery channel, and on macOS Squirrel.Mac refuses a
 replacement that does not satisfy the running app's designated requirement. A
 ring publishes a signed feed or publishes none. A local package built without
-signing credentials a maintainer holds is unsigned.
+signing credentials a maintainer holds is unsigned. The headless build is
+attached to Octant's candidate and stable releases only when signed with that
+ring's key, and no feed lists it ([Process topology](#process-topology)).
 
 The Octant app also ships as a disk image for first install,
 `Octant-<version>-darwin-arm64.dmg`: the app, an Applications link, and a
@@ -20560,15 +20727,19 @@ Windows gets the same provider behaviour the provider's own CLI gives there;
 claiming a sandbox Octant cannot enforce would be the dishonest part, so the
 picker names what is missing instead of refusing the level.
 
-Built (2026-11-16): a Work or Code provider turn on Windows below Full access
-starts outside Strict with the provider's own approvals, every ask still
-answered and journaled on the server (`hostProviderTurnRefusal` in the
-domain's `guardrailPolicy.ts`); Strict at every level is refused by name
-("Strict needs a sandbox Windows doesn't have yet") and so is Full access with
-the sandbox kept, before anything is journaled or started. The shared Strict
-control retains confinement at Full access too; it cannot be enabled on Windows.
-[Windows Strict, phase 1](#windows-strict-phase-1) proposes accepting it at Full
-access on a verified Codex runtime; it does not change current availability.
+Built (2026-11-16, updated 2026-11-21 for [Windows Strict, phase 1](#windows-strict-phase-1)):
+a Work or Code provider turn on Windows below Full access starts outside Strict
+with the provider's own approvals, every ask still answered and journaled on the
+server (`hostProviderTurnRefusal` in the domain's `guardrailPolicy.ts`). Under
+[Windows Strict, phase 1](#windows-strict-phase-1) (**Partly built** —
+implemented and verified in hosted Windows CI, pending Gate 5 real standard-user
+Windows 11 desktop smoke), the shared Strict control is accepted on Windows for
+Work and Code at Full access on a verified native Codex runtime through the
+packaged AppContainer and Job Object launcher (`octant-windows-confine.exe`).
+Every other Windows Strict case — Chat, Plan, levels below Full access, every
+other provider family, provider shims, and Octant-operated tools — keeps
+refusing by name before anything is journaled or started, and so does the legacy
+Full-access-only sandbox choice without Strict.
 The mode picker offers those levels with the line "On Windows the provider's
 own approvals decide; Octant's sandbox does not run here", and shows them
 unavailable on a Strict thread. Each provider launch decides again from its
@@ -20712,8 +20883,9 @@ scope again under the sequence and confinement gate below. Work and Code run
 there at Full access only (step 3).
 
 Also out of scope, kept on 2026-11-14: physical phones and tablets and
-app-store upload (above), and an interactive raw provider terminal mode, whose
-rationale sits beside [the journal principle](#overview-and-principles).
+app-store upload (above). A person-operated provider terminal, excluded on
+2026-11-14, is in scope since 2026-11-21; its rationale sits beside [the
+journal principle](#overview-and-principles).
 
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local
@@ -21585,15 +21757,15 @@ user-added packages through the published seams and the credential broker.
 
 ### Windows Strict, phase 1
 
-**Designed, not built.** Phase 1 makes the one shared Strict control accepted
-on native Windows for Work and Code at Full access on a verified Codex runtime,
-confined by the AppContainer and Job Object launcher this section designs.
-Today the server refuses Strict on Windows at every level ("Strict needs a
-sandbox Windows doesn't have yet"). Neither the dormant launcher nor the
-unconfined Windows provider tests prove this combination, and admission does
-not ship until the gates below pass. This reframes the earlier proposal to keep
-the sandbox at Full access on Windows as a separate choice (maintainer
-decision, 2026-11-21).
+**Partly built.** Phase 1 makes the one shared Strict control accepted on native
+Windows for Work and Code at Full access on a verified native Codex runtime,
+confined by the packaged AppContainer and kill-on-close Job Object launcher
+(`octant-windows-confine.exe`) with durable pre-ACL lease recovery. Hosted
+Windows CI covers the launcher, ACL/profile recovery, and native Codex smoke;
+Gate 5 real standard-user Windows 11 desktop verification remains pending before
+promoting the status to Built. This reframes the earlier proposal to keep the
+sandbox at Full access on Windows as a separate choice (maintainer decision,
+2026-11-21).
 
 **Two postures, one control.** Outside Strict the provider holds the level with
 no Octant sandbox, on Windows as on macOS and Linux

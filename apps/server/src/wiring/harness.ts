@@ -980,6 +980,13 @@ export function wireHarness(deps: HarnessDependencies) {
     codeOperationRuntime: { threadWithActiveTurnPosture: codeParentActiveTurn },
   });
   const hostShield = createHostShield({
+    brakeLimits: () => {
+      const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+      return {
+        denialsInARow: settings.shieldDenialsInARow,
+        denialsPerThread: settings.shieldDenialsPerThread,
+      };
+    },
     readCodeThread: (threadId) => persistence.readCodeThread(threadId),
     chosenReviewer: (thread) => {
       const project = persistence.readProject(thread.projectId);
@@ -1173,6 +1180,7 @@ export function wireHarness(deps: HarnessDependencies) {
       runningWorkTurnAccess,
       readThreadTaint: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId),
+      readStrict: (threadId) => resolveThreadStrict(threadId),
       holdsServerCodeThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
       holdsServerWorkThread: (thread) =>
         serverWorkProjectOf(serverProjectStore, thread) !== undefined,

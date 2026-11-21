@@ -94,7 +94,9 @@ function dueOrder(summary: AutomationSummary): number {
  * be paused, resumed, or opened in Automations from its "…" menu, and a follow-up here
  * moved or cancelled. The row is always offered in a Work or Code thread,
  * because both ways to create one start here: Follow up later, and New
- * routine, which the host builds from this thread's Project and mode.
+ * routine, which the host builds from this thread's Project and mode. A Chat
+ * thread in a Chat Project offers Follow up later only; a Chat routine that
+ * starts a new thread per run is made in Automations.
  *
  * The read lives outside the collapsible group because the group mounts its
  * body only while open, and a closed row could otherwise never show its count.
@@ -103,7 +105,7 @@ export function EnvironmentRoutines(props: {
   readonly client: AutomationClient;
   readonly threadId: string;
   readonly projectId: string;
-  readonly mode: "work" | "code";
+  readonly mode: "chat" | "work" | "code";
   readonly onOpenRoutine?: (automationId: string) => void;
   /**
    * Offers "Set a goal…" in the "+" menu. The Work panel passes it while its
@@ -223,7 +225,9 @@ export function EnvironmentRoutines(props: {
         <OctantMenu
           items={[
             { value: "follow-up", label: "Follow up later", disabled: busy },
-            { value: "routine", label: "New routine", disabled: busy },
+            ...(mode === "chat"
+              ? []
+              : [{ value: "routine", label: "New routine", disabled: busy }]),
             ...(props.onSetGoal === undefined ? [] : [{ value: "goal", label: "Set a goal…" }]),
           ]}
           onValueChange={(value) =>
@@ -260,7 +264,7 @@ export function EnvironmentRoutines(props: {
           }
         />
       ) : null}
-      {opened?.kind === "new" ? (
+      {opened?.kind === "new" && mode !== "chat" ? (
         <EnvironmentRoutineForm
           busy={busy}
           mode={mode}

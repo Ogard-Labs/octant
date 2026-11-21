@@ -28,6 +28,7 @@ import { createImageRouteHandler } from "../image/imageRoutes";
 import { imageOfferDecisionRules } from "../image/imageOfferDecisionRules";
 import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
 import { createSpeechRouteHandler } from "../speech/speechRoutes";
+import { transcriptionDecision } from "../speech/transcriptionTool";
 import {
   createPreviewRouteHandler,
   resolvePreviewActiveContext,
@@ -57,7 +58,7 @@ import type { HarnessStateWiring } from "./harnessState";
 import { createServerWorkFileListing } from "../serverProjects/serverWorkFiles";
 
 export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<AuthorityWiring, "serviceOffers" | "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "serviceOffers" | "speechGates" | "windowAuthorityStore"> &
   Pick<WorkspaceWiring, "keptImageChoices" | "projectService" | "shellService"> &
   Pick<ProvidersWiring, "credentialResolver" | "imageJobService" | "providerDataDirectory"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
@@ -171,6 +172,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     }),
   });
   const speechRoutes = createSpeechRouteHandler({
+    gates: deps.speechGates,
     readVoiceSettings: () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings()).voice,
     listInstances: () => persistence.readProviderInstances(),
@@ -184,7 +186,10 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   };
   const serviceOfferRoutes = createServiceOfferRouteHandler({
     offers: serviceOffers,
-    rules: imageOfferDecisionRules({ ...imageProfiles, kept: keptImageChoices }),
+    rules: {
+      ...imageOfferDecisionRules({ ...imageProfiles, kept: keptImageChoices }),
+      transcribe: transcriptionDecision,
+    },
     listImageProfiles: () =>
       listEligibleImageProfiles(
         imageProfiles.listInstances(),

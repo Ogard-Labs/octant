@@ -111,8 +111,10 @@ export function strictKeptForLaunch(input: {
   readonly fullAccessSandbox?: boolean | undefined;
   readonly platform?: NodeJS.Platform;
 }): StrictKeptProtections | undefined {
+  const platform = input.platform ?? process.platform;
   const sandboxed =
-    (input.platform ?? process.platform) !== "win32" &&
-    (input.executionPolicy !== "full-access" || input.fullAccessSandbox === true);
+    platform === "win32"
+      ? input.strict && input.driverKind === "codex" && input.executionPolicy === "full-access"
+      : input.executionPolicy !== "full-access" || input.fullAccessSandbox === true;
   return strictKeptAtLaunch({ strict: input.strict, driverKind: input.driverKind, sandboxed });
 }
