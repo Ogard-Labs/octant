@@ -27,7 +27,14 @@ export interface AutomationChatService {
     };
     readonly turns: ReadonlyArray<unknown>;
   };
-  readonly execute: (command: unknown) => Promise<{ readonly kind: string }>;
+  /**
+   * `hostRun` marks a turn the host sends itself with no window, which takes
+   * Chat's host-run tools (the Canvas, bound to the thread's own Project).
+   */
+  readonly execute: (
+    command: unknown,
+    context?: { readonly hostRun: true },
+  ) => Promise<{ readonly kind: string }>;
 }
 
 export interface CreateAutomationChatDispatchPortOptions {
@@ -141,13 +148,19 @@ async function startOrRecover(
         };
       }
     }
-    await options.chat.execute({
-      kind: "send-chat-turn",
-      threadId: input.threadId,
-      expectedVersion: thread.version,
-      prompt: followUp ? automationFollowUpTurnPrompt(snapshot.taskPrompt) : snapshot.taskPrompt,
-      submissionId: automationChatSubmissionId(input.run),
-    });
+    await options.chat.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: input.threadId,
+        expectedVersion: thread.version,
+        prompt: followUp ? automationFollowUpTurnPrompt(snapshot.taskPrompt) : snapshot.taskPrompt,
+        submissionId: automationChatSubmissionId(input.run),
+      },
+      // The run is the host's own, with no window: a routine's turn and a
+      // follow-up take the host-run tools, as a person's turn would take a
+      // window's.
+      { hostRun: true },
+    );
     return {
       kind: "accepted",
       runtimeReceipt: `chat-turn:${String(input.run.firstTurnRequestId)}`,

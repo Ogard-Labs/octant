@@ -688,6 +688,12 @@ export interface ChatServiceExecutionContext {
    * Host-only: the wire commands cannot carry it.
    */
   readonly inheritedMark?: InheritedExternalContentMark;
+  /**
+   * Set by the host when it sends a turn itself with no window: a Chat
+   * routine's run or a follow-up. The turn then takes the host-run tool set
+   * rather than none. Host-only: the wire commands cannot carry it.
+   */
+  readonly hostRun?: true;
 }
 
 interface PreparedChatContent {
@@ -826,6 +832,15 @@ export interface ChatServiceOptions {
    * The turn's Computer tool, offered on every eligible turn without a
    * composer selection; undefined when the turn cannot use it.
    */
+  /**
+   * The app-managed tools a turn the host sends with no window takes
+   * (`hostRun`): only those that need no window, bound to the thread's own
+   * Project. Absent, such a turn takes none.
+   */
+  readonly resolveHostRunTools?: (input: {
+    readonly thread: ChatThread;
+    readonly turnId?: ChatTurn["id"];
+  }) => AppManagedToolSet | undefined;
   readonly resolveComputerUseTools?: (input: {
     readonly thread: ChatThread;
     readonly windowId: WindowId;
@@ -1234,6 +1249,7 @@ export class ChatService {
   readonly #resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
   readonly #verifyModelToolsOnFirstUse: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
+  readonly #resolveHostRunTools?: ChatServiceOptions["resolveHostRunTools"];
   readonly #personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
   readonly #octantInstructionBlocks?: ChatServiceOptions["octantInstructionBlocks"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
@@ -1321,6 +1337,8 @@ export class ChatService {
     this.#verifyModelToolsOnFirstUse = options.verifyModelToolsOnFirstUse;
     if (options.resolveComputerUseTools !== undefined)
       this.#resolveComputerUseTools = options.resolveComputerUseTools;
+    if (options.resolveHostRunTools !== undefined)
+      this.#resolveHostRunTools = options.resolveHostRunTools;
     if (options.personMemoryBlock !== undefined)
       this.#personMemoryBlock = options.personMemoryBlock;
     if (options.octantInstructionBlocks !== undefined)
@@ -4913,9 +4931,19 @@ export class ChatService {
     );
     const researchRoute = this.#resolveResearchRoute(thread, settings, probe);
     this.#assertResearchAvailable(thread, researchRoute);
-    const carriesAppTools =
-      executionContext?.windowId !== undefined &&
+    const toolsSupported =
       this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)) === "supported";
+    const carriesAppTools = executionContext?.windowId !== undefined && toolsSupported;
+    // A turn the host sends with no window takes only the tools that need
+    // none; the window-scoped set (Computer, the window's harness and the
+    // other tools keyed on a window) stays with turns a window sends.
+    const hostRunTools =
+      !carriesAppTools && executionContext?.hostRun === true && toolsSupported
+        ? this.#resolveHostRunTools?.({
+            thread,
+            ...(executionContext.turnId === undefined ? {} : { turnId: executionContext.turnId }),
+          })
+        : undefined;
     const hostAppTools =
       carriesAppTools && this.#resolveAppManagedTools !== undefined
         ? this.#resolveAppManagedTools({
@@ -4927,7 +4955,7 @@ export class ChatService {
               ? {}
               : { coordinationDepth: executionContext.coordinationDepth }),
           })
-        : undefined;
+        : hostRunTools;
     // Computer is offered on every eligible turn, built here against the
     // provider the turn routes to rather than with the send's selections.
     const computerTools = carriesAppTools

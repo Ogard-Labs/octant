@@ -4180,9 +4180,16 @@ through the ordinary thread and turn services; a routine cannot do anything the
 thread it creates could not do. The one exception is a follow-up (target
 policy `same-thread`, below), which creates no thread and sends one turn into
 the thread it came from. A Chat run's turn, a follow-up's included, is sent as
-the host with no window, as a child's result delivery and a usage-limit retry
-into Chat are, so it carries none of the app-managed tools a Chat turn takes
-from the window that sends it (Browser, Canvas, Computer and the rest).
+the host with no window and takes Chat's host-run tool set (maintainer
+decision, 2026-11-21): the Canvas only, bound to the thread's own Chat Project
+as the host records it (an active Chat Project, else refused) or to the thread
+alone when it is in none. That is the scope a window showing that Project
+gives, never wider, and the Canvas tool asks the person nothing, so no answer
+is borrowed from a window. Chat has no Browser, from a window or not, and the
+other window tools (Computer, the window's harness, thread dialogue, image
+generation) are keyed on the window that sends a turn, so a host-run turn
+takes none of them. A child's result delivery and a usage-limit retry into
+Chat still take no app-managed tools.
 
 - **File arrivals.** A person configures the existing main Work or Code Project root,
   a relative existing input directory, included suffixes, excluded directories,

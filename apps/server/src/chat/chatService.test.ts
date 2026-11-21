@@ -346,6 +346,9 @@ function openFixture(options?: {
     readonly windowId: WindowId;
     readonly thread: ChatThread;
   }) => import("../providers/appManagedToolSet").AppManagedToolSet | undefined;
+  readonly resolveHostRunTools?: (input: {
+    readonly thread: ChatThread;
+  }) => import("../providers/appManagedToolSet").AppManagedToolSet | undefined;
   readonly resolveComputerUseTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: ChatThread;
@@ -831,6 +834,9 @@ function openFixture(options?: {
     ...(options?.resolveComputerUseTools === undefined
       ? {}
       : { resolveComputerUseTools: options.resolveComputerUseTools }),
+    ...(options?.resolveHostRunTools === undefined
+      ? {}
+      : { resolveHostRunTools: options.resolveHostRunTools }),
     ...(options?.resolveExtensionSelectionContext === undefined
       ? {}
       : { resolveExtensionSelectionContext: options.resolveExtensionSelectionContext }),
@@ -1592,6 +1598,49 @@ describe("ChatService", () => {
     });
     expect(fakeDriver.sentTurns[1]?.tools.map(({ name }) => name)).not.toContain("octant_canvas");
     expect(JSON.stringify(fakeDriver.sentTurns[1]?.context)).not.toContain("octant_canvas");
+  });
+
+  it("gives a turn the host sends with no window the host-run Canvas, and none of the window's tools", async () => {
+    const windowTools = vi.fn(() => ({
+      definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+    }));
+    const hostRunTools = vi.fn(() => ({
+      definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+    }));
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: windowTools,
+      resolveComputerUseTools: windowTools,
+      resolveHostRunTools: hostRunTools,
+    });
+    for (const hostRun of [true, false]) {
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: hostRun ? "Routine run" : "No window",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Write the weekly memo",
+        },
+        hostRun ? { hostRun: true } : {},
+      );
+    }
+    const toolNames = fakeDriver.sentTurns.map((turn) => turn.tools.map(({ name }) => name));
+    expect(toolNames[0]).toContain("octant_canvas");
+    expect(toolNames[0]).not.toContain("octant_computer");
+    expect(hostRunTools).toHaveBeenCalledTimes(1);
+    expect(hostRunTools).toHaveBeenCalledWith(
+      expect.objectContaining({ thread: expect.objectContaining({ title: "Routine run" }) }),
+    );
+    // A window-less send that is not the host's own takes nothing.
+    expect(toolNames[1]).not.toContain("octant_canvas");
+    expect(windowTools).not.toHaveBeenCalled();
   });
 
   it("offers Octant's tools only to a model the host verified, not one the driver's probe claims", async () => {

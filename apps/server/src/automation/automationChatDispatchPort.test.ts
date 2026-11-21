@@ -85,7 +85,7 @@ function chatService(options: { readonly existing?: boolean; readonly model?: st
       }
     : undefined;
   const sent: Array<unknown> = [];
-  const execute = vi.fn(async (command: unknown) => {
+  const execute = vi.fn(async (command: unknown, _context?: { readonly hostRun: true }) => {
     const { kind } = command as { kind: string };
     if (kind === "send-chat-turn") sent.push(command);
     if (kind === "create-chat-thread") {
@@ -177,9 +177,10 @@ describe("createAutomationChatDispatchPort", () => {
       expectedVersion: 2,
     });
     expect(sent[2]?.submissionId).toBe(sent[3]?.submissionId);
+    expect(execute.mock.calls[2]?.[1]).toEqual({ hostRun: true });
   });
 
-  it("sends a follow-up into its own thread under the scheduled heading, leaving the thread's model alone", async () => {
+  it("sends a follow-up into its own thread under the scheduled heading as the host's own turn, leaving the thread's model alone", async () => {
     const { service, execute } = chatService({ existing: true, model: "the-thread-model" });
     const port = createAutomationChatDispatchPort({ chat: service, clock: () => now });
     const run = chatRun({
@@ -201,6 +202,9 @@ describe("createAutomationChatDispatchPort", () => {
     const sent = execute.mock.calls.map(([command]) => command as Record<string, unknown>);
     expect(sent.map((command) => command.kind)).toEqual(["send-chat-turn"]);
     expect(sent[0]?.prompt).toBe(automationFollowUpTurnPrompt(run.definitionSnapshot.taskPrompt));
+    // Sent as the host with no window, so the turn takes Chat's host-run
+    // tools (the Canvas on the thread's own Project) rather than none.
+    expect(execute.mock.calls[0]?.[1]).toEqual({ hostRun: true });
   });
 
   it("leaves a model the person chose after the first send alone on a retry", async () => {

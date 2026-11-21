@@ -84,6 +84,7 @@ import { hydrateAgentMessageProjectionFromJournal } from "../agentMessage/agentM
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { defaultShellSettings, findWorkspacePresetTarget } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
@@ -485,6 +486,22 @@ export function wireChat(deps: ChatDependencies) {
         for (const guard of attachmentPurgeGuards) await guard(threadId);
       },
       agentRuns: agentRunPersistence,
+      // A routine's or a follow-up's turn runs as the host with no window, so
+      // it takes only the Canvas, bound to the thread's own Chat Project, the
+      // scope a window showing that Project would give. Chat has no Browser
+      // at all, and the other window tools need the window they are keyed on.
+      // The Canvas tool asks the person nothing, so no answer is borrowed.
+      resolveHostRunTools: ({ thread }) =>
+        withheldFromSideChat({
+          sideChat: sideChatSidecars.findBySidecarThread(thread.id) !== undefined,
+          tools: () =>
+            createCanvasAgentTools({
+              windowId: ROUTINE_HOST_SCOPE_ID,
+              hostRun: true,
+              thread,
+              port: canvasAgentToolPort,
+            }),
+        }),
       resolveComputerUseTools: ({ windowId, thread }) =>
         withheldFromSideChat({
           sideChat: sideChatSidecars.findBySidecarThread(thread.id) !== undefined,

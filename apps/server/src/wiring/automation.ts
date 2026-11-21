@@ -459,7 +459,7 @@ export function wireAutomation(deps: AutomationDependencies) {
   const automationChatDispatch = createAutomationChatDispatchPort({
     chat: {
       read: (threadId) => chatService.read(threadId),
-      execute: async (command) => chatService.execute(command),
+      execute: async (command, context) => chatService.execute(command, context),
     },
     clock: () => new Date().toISOString() as UtcTimestamp,
   });
