@@ -68,3 +68,29 @@ export const MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING = 32;
 /** A child run's `wait`, in seconds. */
 export const DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS = 120;
 export const MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING = 3_600;
+
+/**
+ * Octant Shield's brakes: after this many denials in a row the next call goes
+ * to the person, and after this many in one thread every call does. The tops
+ * stay finite so the brake always exists; the person may only move it.
+ */
+export const DEFAULT_SHIELD_DENIALS_IN_A_ROW = 3;
+export const MAX_SHIELD_DENIALS_IN_A_ROW_SETTING = 50;
+export const DEFAULT_SHIELD_DENIALS_PER_THREAD = 20;
+export const MAX_SHIELD_DENIALS_PER_THREAD_SETTING = 500;
+
+/**
+ * How late, in hours, a follow-up may still run after its time, whether the
+ * host was asleep or its thread was busy. Past it the follow-up is recorded
+ * missed rather than sending a check-in that may no longer make sense.
+ */
+export const DEFAULT_FOLLOW_UP_LATENESS_LIMIT_HOURS = 24;
+export const MAX_FOLLOW_UP_LATENESS_LIMIT_HOURS_SETTING = 720;
+
+/**
+ * How long, in minutes, a provider command shown in Settings › Skills &
+ * Extensions may still be run with "Run this command once". A secret held for
+ * a shown command is deleted when this runs out, so the top stays finite.
+ */
+export const DEFAULT_TOOLING_COMMAND_CONFIRM_MINUTES = 10;
+export const MAX_TOOLING_COMMAND_CONFIRM_MINUTES_SETTING = 1_440;

@@ -224,7 +224,6 @@ export async function changeMobileDefaultLevel(input: {
   const { subject } = input;
   if (subject.mode === "work") {
     const defaultAccess = workAccessOfPermissionMode(input.level);
-    if (defaultAccess === undefined) return DEFAULT_REFUSED;
     const { settings } = subject;
     return sendLevelCommand(
       input.transport,

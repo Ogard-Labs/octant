@@ -217,16 +217,18 @@ describe("automation contracts", () => {
     }
     expect(() => persists({ ...chat, projectLevel: "opted-in" })).toThrow();
     expect(() => persists({ ...chat, runLevel: "ask-first" })).toThrow();
-    expect(() =>
+    // A Chat thread may have a follow-up, as a Work or Code thread may.
+    expect(
       persists({
         ...chat,
         targetPolicy: "same-thread",
         originThreadId: ids.run,
         trigger: { kind: "once", scheduledAt: weeklyDueAt },
+        missedRunPolicy: "run-once",
         nextDueAt: weeklyDueAt,
         nextDueResolution: undefined,
       }),
-    ).toThrow();
+    ).toMatchObject({ eventName: "automation-definition-created@1" });
   });
 
   it("takes one level choice on a Work or Code routine: the Project's, or a named one", () => {

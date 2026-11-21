@@ -5,6 +5,7 @@ import type {
   ChatThreadId,
   UtcTimestamp,
 } from "@octant/contracts";
+import { automationFollowUpTurnPrompt } from "@octant/contracts";
 import { ChatServiceError } from "../chat/chatService";
 import {
   createAutomationChatDispatchPort,
@@ -176,6 +177,30 @@ describe("createAutomationChatDispatchPort", () => {
       expectedVersion: 2,
     });
     expect(sent[2]?.submissionId).toBe(sent[3]?.submissionId);
+  });
+
+  it("sends a follow-up into its own thread under the scheduled heading, leaving the thread's model alone", async () => {
+    const { service, execute } = chatService({ existing: true, model: "the-thread-model" });
+    const port = createAutomationChatDispatchPort({ chat: service, clock: () => now });
+    const run = chatRun({
+      targetPolicy: "same-thread",
+      originThreadId: threadId,
+      trigger: { kind: "once", scheduledAt: "2026-08-11T09:00:00.000Z" },
+      missedRunPolicy: "run-once",
+    } as never);
+
+    expect(
+      await port.startOrRecoverFirstTurn({
+        run,
+        threadId,
+        firstTurnRequestId: run.firstTurnRequestId,
+        promptDigest: "unused" as never,
+      }),
+    ).toMatchObject({ kind: "accepted" });
+
+    const sent = execute.mock.calls.map(([command]) => command as Record<string, unknown>);
+    expect(sent.map((command) => command.kind)).toEqual(["send-chat-turn"]);
+    expect(sent[0]?.prompt).toBe(automationFollowUpTurnPrompt(run.definitionSnapshot.taskPrompt));
   });
 
   it("leaves a model the person chose after the first send alone on a retry", async () => {

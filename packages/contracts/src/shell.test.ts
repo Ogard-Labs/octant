@@ -118,6 +118,10 @@ const settings = {
   siblingThreadWaitsPerTurn: 4,
   browserWaitLimitMinutes: 10,
   childRunWaitLimitSeconds: 120,
+  shieldDenialsInARow: 3,
+  shieldDenialsPerThread: 20,
+  followUpLatenessLimitHours: 24,
+  toolingCommandConfirmMinutes: 10,
   agentRoutinesStartActiveAtFullAccess: false,
   navigatorAssistant: {},
   voice: {},
@@ -392,6 +396,26 @@ describe("shell bootstrap contracts", () => {
     ).toBe(120);
     expect(() => decodeShellSettings({ ...settings, stalledTurnLimitMinutes: 4 })).toThrow();
     expect(() => decodeShellSettings({ ...settings, stalledTurnLimitMinutes: 481 })).toThrow();
+  });
+
+  it("reads a store from before the Shield brake, follow-up and shown-command settings at their former fixed values", () => {
+    const {
+      shieldDenialsInARow: _row,
+      shieldDenialsPerThread: _thread,
+      followUpLatenessLimitHours: _lateness,
+      toolingCommandConfirmMinutes: _confirm,
+      ...before
+    } = settings;
+    const decoded = decodeShellSettings(before);
+    expect(decoded.shieldDenialsInARow).toBe(3);
+    expect(decoded.shieldDenialsPerThread).toBe(20);
+    expect(decoded.followUpLatenessLimitHours).toBe(24);
+    expect(decoded.toolingCommandConfirmMinutes).toBe(10);
+    expect(decodeShellSettings({ ...settings, shieldDenialsInARow: 6 }).shieldDenialsInARow).toBe(
+      6,
+    );
+    expect(() => decodeShellSettings({ ...settings, shieldDenialsInARow: 0 })).toThrow();
+    expect(() => decodeShellSettings({ ...settings, followUpLatenessLimitHours: 721 })).toThrow();
   });
 
   it("reads a store from before the longest tool-call pause at two hours, and keeps Off and a bounded choice", () => {

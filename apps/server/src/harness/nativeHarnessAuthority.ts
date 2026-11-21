@@ -32,6 +32,8 @@ export interface NativeHarnessAuthorityOptions {
    */
   readonly runningWorkTurnAccess?: (threadId: string) => WorkAccess | undefined;
   readonly readThreadTaint: (threadId: string) => ThreadExternalContentTaint;
+  /** Whether Strict is on for a thread now; absent reads as Strict. */
+  readonly readStrict?: (threadId: string) => boolean;
   /**
    * Whether a Code thread runs in a server Project, on the checkout that
    * Project derives. Such a Project lives in its own catalog, not in the
@@ -130,6 +132,7 @@ export function createNativeHarnessAuthority(
         executionPolicy,
         approvalSatisfied: executionPolicy === "full-access",
         externalContentIngested: options.readThreadTaint(threadId).externalContentIngested,
+        strict: options.readStrict?.(threadId) ?? true,
         ...(code?.toolConstraints === undefined ? {} : { toolConstraints: code.toolConstraints }),
         ...(code?.profileDisplayName === undefined
           ? {}

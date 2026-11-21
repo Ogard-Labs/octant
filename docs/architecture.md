@@ -4137,9 +4137,12 @@ file, shell, or Git authority for a routine to widen: its definition binds an
 active Chat Project (the receipt names the Project and its version, with no
 folder or binding revision), its authority snapshot grants no filesystem,
 shell, Git, or subagents, and the contract refuses a Chat definition that
-does. It has no level to pick and no follow-up (`same-thread`) target, and no
-thread's agent proposes one, because a Chat thread has no Environment to
-propose from. Each run creates a Chat thread in the Project through
+does. It has no level to pick, and no thread's agent proposes one that starts
+new threads. A follow-up (`same-thread`) may target a Chat thread (maintainer
+decision, 2026-11-21): the person sets it up from the Chat thread's
+Environment, or the thread's agent proposes it and the person confirms the
+chip, and its one turn goes into that thread on the thread's own model, as
+below. Every other run creates a Chat thread in the Project through
 `create-chat-thread`, puts it on the routine's provider and model, and sends
 the task as one `send-chat-turn` under a submission identity derived from the
 occurrence, so a retry after a crash finds the turn it already sent. Each occurrence creates
@@ -4390,7 +4393,9 @@ the thread it came from.
   bounds above, or weekly at a local time in an IANA zone), and a missed-run
   policy. It names nothing else: the thread's own Project and mode are implied,
   and the agent cannot choose another Project, a profile, a model, or any
-  authority. Chat is never offered the tool, a turn that runs as the host (a
+  authority. A Chat thread in a Chat Project is offered it only for a
+  follow-up in itself (below); a Chat thread outside a Project and a Side Chat
+  are not offered it. A turn that runs as the host (a
   routine's run, or a usage-limit resume) is refused it as
   `automation-recursion`. A turn in Plan is offered and may call it, as it
   may offer a side task: a proposal records only a suggestion the person
@@ -4533,7 +4538,20 @@ the thread it came from.
   chip, or the person sets it up from the thread with
   `POST /api/automations/follow-ups` (`schedule-follow-up`: thread, time,
   prompt), which builds the definition from the thread's live facts exactly as
-  a confirmed proposal does. Chat threads cannot have one, and the proposal
+  a confirmed proposal does. A Chat thread in a Chat Project may have one too
+  (maintainer decision, 2026-11-21): the person sets it up from the Chat
+  thread's Environment, the host builds it with Chat's authority from the
+  Chat thread's live facts (`AutomationFollowUpRequest.mode` takes `chat`),
+  and the Chat dispatcher sends its one turn into that thread under the same
+  heading, on the thread's own model. The Chat thread's agent may propose
+  one with `octant_propose_routine` (maintainer decision, 2026-11-21): its
+  Chat definition offers only trigger `follow-up`, any other trigger is
+  refused as `chat-follow-up-only` and the draft refuses a Chat proposal that
+  is not a follow-up again at confirmation, and the proposal always waits on
+  the same chip in the Chat transcript, since Chat has no Full access and a
+  paused follow-up would never fire. The tool's answer is the host's own
+  receipt, so it does not mark the Chat thread as having read outside
+  content, and Chat is still offered no `octant_routines`. The proposal
   refusals above apply. Moving it (`reschedule-follow-up`) is an ordinary
   update of its time; cancelling it is the ordinary archive. An edit cannot
   change any routine's target policy, and Run now is refused for a follow-up,
@@ -4557,14 +4575,18 @@ the thread it came from.
   anything is sent, so a thread archived or marked Done during the wait
   still refuses. A follow-up archived while it waits ends its run
   `cancelled`, a paused one keeps waiting, and one still waiting a day past
-  its time fails as `follow-up-missed`. The run's one first-turn request id
+  its time (the lateness limit below) fails as `follow-up-missed`. The run's one first-turn request id
   keeps the turn from being sent twice. (`thread-busy` is no longer
   recorded; it stays in the contract so older journals decode.) A refusal fails the run with its
   reason in the journal and sends nothing; unlike other routines, a follow-up
   is not left paused, because the once trigger then ends it.
 - **Follow-up missed window.** A follow-up missed while the host was asleep or
-  off runs once on return if it is at most 24 hours late. Past that it fails
-  as `follow-up-missed` and sends nothing: a check made a day late is stale.
+  off runs once on return if it is at most the person's lateness limit late:
+  24 hours by default, a host setting in Settings › Permissions
+  (`followUpLatenessLimitHours`, 1 to 720; maintainer decision, 2026-11-21).
+  Past that it fails as `follow-up-missed` and sends nothing: a check made
+  that late is stale. The same limit ends a follow-up still waiting on a busy
+  thread.
   Either way it runs at most once and then ends itself as `exhausted`, the
   state every spent one-time routine reaches, with its run history kept.
 - **Asleep or offline.** The scheduler is an in-process timer in the running
@@ -5010,7 +5032,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   refused in Plan, on excluded profiles and cancelled turns; managed children,
   and Chat gain no messaging rights. Sending again, including retrying a
   send, creates a new durable message; receipt retries use the existing ID.
-- **Expiry.** Each newly admitted message records an explicit deadline 24 hours after admission under the maintainer-approved lifetime policy. The host journals `agent.message-expired@1` before deleting a queued body or freeing its slot; expiry is a separate receipt and never counts as provider delivery or refusal. Delivery rechecks expiry before carrying a message, startup reconciles it, and a scoped host sweep checks at most once a minute. An append failure retains the body for retry. Older records without a deadline retain their existing lifetime; no timestamp is reinterpreted as consent. A message already journaled delivered or acknowledged does not expire. The Chat mention path is unchanged.
+- **Expiry.** A newly admitted message records no deadline and waits until a turn carries it, it is refused, or its thread is purged (maintainer decision, 2026-11-21; before, each recorded a deadline 24 hours after admission, which lost a message sent to a thread the person returned to the next week). The body store's disk budget bounds what waits. A deadline an earlier host recorded still applies: the host journals `agent.message-expired@1` before deleting a queued body or freeing its slot; expiry is a separate receipt and never counts as provider delivery or refusal. Delivery rechecks expiry before carrying a message, startup reconciles it, and a scoped host sweep checks at most once a minute. An append failure retains the body for retry. No timestamp is reinterpreted as a deadline. A message already journaled delivered or acknowledged does not expire. The Chat mention path is unchanged.
 - **Refusals in the Agents center.** A refusal is journaled at the send, at
   the tool (a turn in Plan, a profile without the tool, a call with no
   message; a cancelled turn is not a refusal), and at delivery, with these
@@ -5599,8 +5621,8 @@ unless the call asks for 1 to 10. It opens no page.
   ending the turn.
 - **Outside content.** A successful result marks the thread as having read
   outside content. On a harness thread the call also passes the harness's
-  tool-call policy, which refuses a tainted thread's query that looks like it
-  carries data ([Search queries on a tainted thread](design/search-query-taint.md));
+  tool-call policy, which under Strict refuses a tainted thread's query that
+  looks like it carries data ([Search queries on a tainted thread](design/search-query-taint.md));
   a Chat thread on another provider searches through its research route, as
   its search did before, without that refusal.
 - **Rationale for the name.** `web-search` was already the harness's tool, with
@@ -10565,9 +10587,12 @@ the model at another size.
   the thread; [Persistence](#persistence), Untrusted-content taint). A person's clear ends this until the next
   result that taints ([Persistence](#persistence), Clearing taint).
   `web-search` does not ask under taint: it
-  reaches only the search endpoint the person configured, so the tool-call
-  policy instead refuses a tainted thread's query that looks like it carries
-  data, before any request leaves, at every level below Full access. It is a
+  reaches only the search endpoint the person configured, so under Strict the
+  tool-call policy instead refuses a tainted thread's query that looks like it
+  carries data, before any request leaves, at every level below Full access;
+  outside Strict the query goes and the mark stays (maintainer decision,
+  2026-11-21; `resolveToolCall` reads the thread's Strict value, and a caller
+  that cannot say reads as Strict). Under Strict it is a
   guard, not a privacy rule, so the person lowers it with the
   outside-content gate above: choosing Full access for a thread, or for a
   Project's new threads, in Work and Code alike, turns the refusal off and
@@ -10922,8 +10947,8 @@ the model at another size.
   answer, an expiry, or a cancellation from any surface clears it. The
   question and its answer stay journaled on the session (Work, Code) or the
   attempt (Chat) and nowhere else. At most 32
-  questions and 32 approvals wait at once across the whole host, the cap MCP
-  and browser tool approvals use; one
+  questions and 32 approvals wait at once across the whole host, the cap
+  browser tool approvals use; one
   past it is refused at once as `question-too-many-waiting` or
   `approval-too-many-waiting`, journals nothing, and tells the lead nobody
   was asked. `NativeHarnessTurnObserver` puts the stable
@@ -12565,11 +12590,10 @@ that is not yet effective for the thread is refused and never reaches the model.
     its registration's deadline even before the expiry is reconciled) goes
     to nobody else and runs out.
 
-  At most 32 of those approvals
-  wait at once across the whole host; the cap is shared by every thread and
-  window, not counted per thread. A call past that cap is denied immediately
-  with the refusal a declined call already uses, and answering frees the
-  slot. An unanswered approval does not expire: it waits in Needs you until a
+  Any number of those approvals may wait across the host (maintainer
+  decision, 2026-11-21; before, a host-wide cap of 32 denied the next call at
+  once): a call waits for its answer before its turn can make another, so
+  the turns running bound how many wait. An unanswered approval does not expire: it waits in Needs you until a
   person answers it, and a host-run turn with no window (a routine, a goal
   loop) waits there too instead of being refused (maintainer request,
   2026-11-12). Built: an approval has no expiry and holds no timer; it is
@@ -13108,7 +13132,9 @@ person reads the exact command first**, as the shell-quoted command line with
 the account's folder variable and a `<secret>` placeholder, plus a plain
 sentence on what it adds, and chooses Run this command once; `plan` returns a
 plan id and a random confirmation token, `apply` runs only that plan with its token, once,
-within ten minutes, in the window that asked, and refuses when the account or
+within the time set in Settings › Permissions (`toolingCommandConfirmMinutes`,
+ten minutes by default, up to a day; maintainer decision, 2026-11-21), in the
+window that asked, and refuses when the account or
 its folder changed since (`changed-plan`), comparing the command written out as text when its turn comes, not a hash. **The person only**: every step
 needs a local window's capability or a paired device's session (maintainer
 decision, 2026-11-12; not built yet: today a request forwarded from a paired
@@ -14904,11 +14930,13 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     default for every new thread, Work and
     Code; Settings › Work and Settings › Code change it, a Project, Work or Code, may override
     it, and any thread can switch mode at any time from the composer in one
-    click (maintainer decision, 2026-10-31). No Work thread starts in Plan,
-    so a Plan answer leaves new Work threads at Ask first. A new Work thread
-    takes its Project's mode, else Work's default; a Project override can be
-    Auto, Ask first, Accept edits, or Full access, and a device the host's
-    own person did not pair cannot pick Full access for it. A Work thread
+    click (maintainer decision, 2026-10-31). A Plan answer starts new Work
+    threads in Plan too (maintainer decision, 2026-11-21; before, it left
+    them at Ask first). A new Work thread takes its Project's mode, else
+    Work's default, decided on the host; a Project override can be Auto, Ask
+    first, Accept edits, Plan, or Full access, and a device the host's own
+    person did not pair cannot pick Full access for it. A routine or
+    benchmark run in a Project whose start mode is Plan asks first. A Work thread
     moves to Plan from its own mode picker, as a Code thread does.
   - **Computer asks below Full access (and under Strict at Full access):**
     outside Strict, Full access requires no first-action approval (maintainer
@@ -15281,8 +15309,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     default access, behind the one-time warning).
   - **Plan in Work.** Work threads get the Plan level, so the provider's
     own plan mode, `EnterPlanMode` and `ExitPlanMode` work there as in Code.
-    Built: Plan is a Work thread's level (`access: "plan"`, never a Settings
-    or Project default), journaled through `change-work-thread-access` like
+    Built: Plan is a Work thread's level (`access: "plan"`, and since
+    2026-11-21 also a Settings › Work default and a Work Project's start
+    mode, `WorkDefaultAccess` and `WorkProjectPermissionMode`), journaled through `change-work-thread-access` like
     any level change and offered by the web and phone mode pickers, the
     owner posture card and `octant agent --access plan`. In Plan, Work is
     read-only on the host as Code's Plan is: the provider launches with
@@ -15452,6 +15481,14 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     up to an hour, and the host refuses a wait past the setting; a Claude Code
     thread still ends one tool call at eleven minutes; maintainer decision,
     2026-11-19; built).
+  - **Octant Shield, follow-ups and shown commands** (maintainer decision,
+    2026-11-21; built). Shield's brakes (3 denials in a row, 20 in a thread),
+    how late a follow-up may still run (24 hours, up to 720) and how long a
+    shown provider command may still be run (ten minutes, up to a day) are
+    host settings with those defaults. Removed instead of made settings: the
+    host-wide cap of 32 waiting MCP tool approvals, and the 24-hour deadline
+    on a newly queued thread message; neither protected anything a person
+    would tune, and each refused or lost real work.
   - **Routines.** A file routine's 64-run activity window can be cleared or
     raised, and a setting, off by default, **Start agent-created routines
     active at Full access** lets a routine an agent creates at Full access
@@ -15843,8 +15880,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `octant settings access <mode> [--work]` sets the global default new
   threads start at, Code unless `--work`, through `update-code-settings` /
   `update-work-settings`. A Work thread
-  takes the same levels, Plan included, though Plan is never a default:
-  Settings › Work sets the one a new thread starts at and its composer
+  takes the same levels, Plan included, as a default too
+  (`octant settings access plan --work`): Settings › Work sets the one a new
+  thread starts at and its composer
   changes it
   ([Modes](#modes-chat-work-and-code)).
   One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
@@ -19837,8 +19875,11 @@ past the thread's level; a `network-access` answer yields `call` rules only,
 as the [egress rules](#security-and-authority) state for the reviewer. Once a
 thread is tainted, Shield cannot allow irreversible, publish, or new-egress
 classes; those go to the person, as taint already withdraws the provider's
-own reviewer. After 3 denials in a row, or 20 in one thread, Shield pauses
-and the next call goes to the person.
+own reviewer. After a number of denials in a row (3 by default), or in one
+thread (20 by default), Shield pauses and the next call goes to the person;
+both counts are host settings in Settings › Permissions, read at each review
+([Octant's own limits become settings](#security-and-authority); maintainer
+decision, 2026-11-21).
 
 **Watcher.** The Watcher reads outside content as it enters the thread, with
 deterministic detectors and no model call. Built for every successful result

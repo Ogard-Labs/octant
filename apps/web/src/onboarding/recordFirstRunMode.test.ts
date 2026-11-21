@@ -13,10 +13,10 @@ describe("recording the first-run mode", () => {
     expect(saveWork).toHaveBeenCalledWith("auto-accept-edits");
   });
 
-  it("leaves Work asking first when the answer is Plan, which Work does not have", async () => {
+  it("starts new Work threads in Plan when the answer is Plan", async () => {
     const saveWork = vi.fn(async () => true);
     await recordFirstRunMode("plan", { saveCode: async () => true, saveWork });
-    expect(saveWork).toHaveBeenCalledWith("ask-first");
+    expect(saveWork).toHaveBeenCalledWith("plan");
   });
 
   it("sets Full access for Work too", async () => {
