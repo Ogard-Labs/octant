@@ -15,7 +15,8 @@
 import { EventEmitter } from "node:events";
 import type { SpawnedProcess, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
 import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
-import { claudeProjectFolderName } from "./claudeProcess";
+import { claudeProjectFolderName, parseAuthenticationStatus } from "./claudeProcess";
+import type { ServerSignIn } from "./serverSignIn";
 
 /** The program a placed launch runs: whatever `claude` an SSH login there finds. */
 export const CLAUDE_SERVER_PROGRAM = "claude";
@@ -25,6 +26,7 @@ export const CLAUDE_SERVER_STRICT_REFUSAL =
   "Strict needs Octant's own sandbox, which can't run on a server. Turn Strict off for this thread to run Claude Code there.";
 
 const VERSION_TIMEOUT_MS = 20_000;
+const SIGN_IN_TIMEOUT_MS = 20_000;
 const SESSION_LOOKUP_TIMEOUT_MS = 20_000;
 const VERSION_PATTERN = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?: \(Claude Code\))?\s*$/;
 /** Claude Code names its sessions by UUID; anything else is not looked up. */
@@ -77,6 +79,33 @@ export async function readClaudeVersionOnServer(
         message: `Octant could not read the Claude Code version on ${placement.serverName}.`,
       }
     : { status: "found", version };
+}
+
+/** Said when Claude Code on the server reports no sign-in for the server's login. */
+export function claudeServerSignInRefusal(serverName: string): string {
+  return `Claude Code isn't signed in on ${serverName}. Sign in there as the server's login, for example by running \`claude auth login\` in the Project terminal, then try again.`;
+}
+
+/**
+ * Whether Claude Code is signed in on the server, from its own
+ * `claude auth status --json` there, whose `loggedIn` says so. Nothing else
+ * it prints is kept.
+ */
+export async function readClaudeSignInOnServer(
+  placement: ProviderServerPlacement,
+): Promise<ServerSignIn> {
+  const ran = await placement.run([CLAUDE_SERVER_PROGRAM, "auth", "status", "--json"], {
+    timeoutMs: SIGN_IN_TIMEOUT_MS,
+  });
+  if (ran.status === "unreachable") return { status: "refused", message: ran.message };
+  // It exits 1 when signed out, still printing its answer.
+  const status = parseAuthenticationStatus(ran.output);
+  if (status === "authenticated") return { status: "signed-in" };
+  if (status === "unauthenticated") return { status: "signed-out" };
+  return {
+    status: "refused",
+    message: `Octant could not read whether Claude Code is signed in on ${placement.serverName}. Check \`claude auth status\` in the Project terminal; an older Claude Code may need an update.`,
+  };
 }
 
 /**

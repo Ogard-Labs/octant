@@ -130,7 +130,11 @@ import {
   secretGuardSearchRefusal,
   secretGuardNativeReadOverlap,
 } from "../process/secretGuard";
-import { CLAUDE_SERVER_STRICT_REFUSAL, claudeSessionOnServer } from "./claudeServerProcess";
+import {
+  CLAUDE_SERVER_STRICT_REFUSAL,
+  claudeServerSignInRefusal,
+  claudeSessionOnServer,
+} from "./claudeServerProcess";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 import { isAtLeastRelease } from "./releaseVersion";
@@ -4119,9 +4123,27 @@ function makeConnection(
           options.process.probeVersion(options.binaryPath, serverPlacement),
           signal,
         );
-        // A placed session signs in as the server login, which this host's
-        // sign-in check cannot read; the runtime there reports its own.
-        if (serverPlacement === undefined && options.authentication === "subscription") {
+        // A placed session signs in as the server login, whatever this
+        // host's account is, so Claude Code's own status command answers for
+        // it there, before anything starts.
+        if (serverPlacement !== undefined) {
+          const status = await runSetupEffect(
+            options.process.probeSubscription(
+              options.binaryPath,
+              {},
+              {
+                projectRoot,
+                executionPolicy: input.executionPolicy,
+                strict: false,
+                server: serverPlacement,
+              },
+            ),
+            signal,
+          );
+          if (status === "unauthenticated") {
+            throw failure("unauthenticated", claudeServerSignInRefusal(serverPlacement.serverName));
+          }
+        } else if (options.authentication === "subscription") {
           // A confined launch reads its sign-in from inside the sandbox, so the
           // check runs there too. An unconfined check said "signed in" while
           // the confined runtime could not reach the Keychain, and the turn

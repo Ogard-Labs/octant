@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -20,6 +21,7 @@ import {
   SERVER_PLACEMENT_STRICT_REFUSAL,
   serverCodeCheckout,
 } from "../serverProjects/serverProjectThreads";
+import { ServerRuntimeRecords } from "../serverProjects/serverRuntimeRecords";
 import { makeClaudeProcessLive } from "./claudeProcess";
 import { CLAUDE_SERVER_PROGRAM, CLAUDE_SERVER_STRICT_REFUSAL } from "./claudeServerProcess";
 
@@ -43,12 +45,20 @@ function standInServer() {
   const home = join(scratch, "home", "build");
   const folder = join(home, "service");
   const launched = join(scratch, "launched");
+  const signedOut = join(scratch, "signed-out");
+  const statusReads = join(scratch, "status-reads");
   mkdirSync(bin);
   mkdirSync(folder, { recursive: true });
   writeFileSync(
     join(bin, "claude"),
     `#!/usr/bin/env node
 if (process.argv[2] === '--version') { console.log('2.1.300 (Claude Code)'); process.exit(0); }
+if (process.argv.slice(2).join(' ') === 'auth status --json') {
+  require('node:fs').appendFileSync(${JSON.stringify(statusReads)}, 'read\\n');
+  const loggedIn = !require('node:fs').existsSync(${JSON.stringify(signedOut)});
+  console.log(JSON.stringify({ loggedIn, authMethod: loggedIn ? 'claude.ai' : 'none' }));
+  process.exit(loggedIn ? 0 : 1);
+}
 require('node:fs').writeFileSync(${JSON.stringify(launched)}, 'launched');
 const report = 'cwd=' + process.cwd() + ' args=' + process.argv.slice(2).join(' ') +
   ' key=' + (process.env.ANTHROPIC_API_KEY ?? 'none') + ' home=' + process.env.HOME +
@@ -86,7 +96,7 @@ child.on('exit', (code) => process.exit(code ?? 1));`,
     agentSocket: () => undefined,
     controlDirectory: () => scratch,
   });
-  return { connection, folder, home, bin, launched };
+  return { connection, folder, home, bin, launched, signedOut, statusReads };
 }
 
 function bind(
@@ -121,6 +131,7 @@ function bind(
       },
       connection,
       composition: { forServerCode: () => undefined },
+      runtimes: new ServerRuntimeRecords({ connection, hostId: () => "stand-in-host" }),
       record: () => "recorded",
     },
     {
@@ -221,6 +232,36 @@ describe.skipIf(process.platform === "win32")("Claude Code on a server Project's
         signal: new AbortController().signal,
       }),
     ).toThrow(CLAUDE_SERVER_STRICT_REFUSAL);
+    expect(existsSync(launched)).toBe(false);
+  });
+
+  it("reads Claude Code's sign-in on the server with its own status command, launching nothing", async () => {
+    const { connection, folder, launched, signedOut, statusReads } = standInServer();
+    const bound = bind(connection, folder, { placesOnServer: true, strict: false });
+    if (bound.status !== "placed") throw new Error("not placed");
+    const port = makeClaudeProcessLive();
+    const signIn = () =>
+      Effect.runPromise(
+        port.probeSubscription(
+          "/nonexistent/claude-on-this-host",
+          {},
+          {
+            projectRoot: folder,
+            executionPolicy: "approval-gated",
+            strict: false,
+            server: bound.placement,
+          },
+        ),
+      );
+
+    writeFileSync(signedOut, "");
+    expect(await signIn()).toBe("unauthenticated");
+    // A signed-out answer is not held: signing in there counts at once,
+    // and that answer is then held for later turns.
+    rmSync(signedOut);
+    expect(await signIn()).toBe("authenticated");
+    expect(await signIn()).toBe("authenticated");
+    expect(readFileSync(statusReads, "utf8").trim().split("\n")).toHaveLength(2);
     expect(existsSync(launched)).toBe(false);
   });
 

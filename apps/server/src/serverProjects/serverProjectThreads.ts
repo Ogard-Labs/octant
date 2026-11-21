@@ -20,6 +20,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ServerConnection } from "./serverConnection";
 import { ServerFileSystem } from "./serverFiles";
 import type { ServerProjectStore } from "./serverProjectStore";
+import type { ServerRuntimeRecords } from "./serverRuntimeRecords";
 import { createServerShell, type ServerShellOptions } from "./serverShell";
 
 /**
@@ -221,7 +222,11 @@ export const SERVER_RUNTIME_NOT_HARNESS =
 export const SERVER_PLACEMENT_STRICT_REFUSAL =
   "Strict needs Octant's own sandbox, which can't run on a server. Turn Strict off for this thread to run this provider there.";
 
-/** Every program a placed runtime starts runs in the Project's folder on the server. */
+/**
+ * Every program a placed runtime runs does so in the Project's folder on the
+ * server; a long-running one starts there behind its record
+ * (`ServerRuntimeRecords`).
+ */
 const IN_FOLDER_SCRIPT = 'cd "$1" || exit 1\nshift\nexec "$@"';
 const SERVER_RUN_OUTPUT_BYTES = 64 * 1024;
 const SERVER_NOT_REGISTERED =
@@ -238,6 +243,8 @@ export function bindServerCodeTurn(
     readonly connection: Pick<ServerConnection, "run"> &
       Partial<Pick<ServerConnection, "refusal" | "openStream">>;
     readonly composition: Pick<NativeHarnessComposition, "forServerCode">;
+    /** Records every program a placed runtime starts, so one a dropped connection leaves running is stopped. */
+    readonly runtimes: Pick<ServerRuntimeRecords, "begin" | "connected">;
     readonly record: (
       input: Parameters<ServerShellOptions["record"]>[0] & {
         readonly threadId: string;
@@ -302,24 +309,29 @@ export function bindServerCodeTurn(
       start: (program) => {
         const server = address();
         if (server === undefined || options.connection.openStream === undefined) return unreachable;
-        const stream = options.connection.openStream(server, {
-          script: IN_FOLDER_SCRIPT,
-          args: [place.folder, ...program],
-        });
-        return stream.status === "open"
-          ? {
-              status: "open",
-              stdin: stream.stdin,
-              stdout: stream.stdout,
-              stderr: stream.stderr,
-              stop: stream.stop,
-              exited: stream.exited,
-            }
-          : stream;
+        const recorded = options.runtimes.begin(server, place.folder, program);
+        const stream = options.connection.openStream(server, recorded.input);
+        if (stream.status !== "open") {
+          recorded.ended(0);
+          return stream;
+        }
+        void stream.exited.then(
+          ({ exitCode }) => recorded.ended(exitCode),
+          () => recorded.ended(null),
+        );
+        return {
+          status: "open",
+          stdin: stream.stdin,
+          stdout: stream.stdout,
+          stderr: stream.stderr,
+          stop: stream.stop,
+          exited: stream.exited,
+        };
       },
       run: async (program, { timeoutMs }) => {
         const server = address();
         if (server === undefined) return unreachable;
+        options.runtimes.connected(server);
         const ran = await options.connection.run(server, {
           script: IN_FOLDER_SCRIPT,
           args: [place.folder, ...program],

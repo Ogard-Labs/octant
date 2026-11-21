@@ -57,7 +57,8 @@ import {
 } from "../network/providerRuntimeNetwork";
 import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import { decodeInitializeResult } from "./codexProtocol";
-import { startCodexOnServer } from "./codexServerProcess";
+import { readCodexSignInOnServer, startCodexOnServer } from "./codexServerProcess";
+import { ServerSignIns } from "./serverSignIn";
 import {
   CodexRpcClientFailure,
   makeCodexRpcClient,
@@ -1335,6 +1336,9 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
   };
   const platform = options.platform ?? process.platform;
   const confinement = options.confinement ?? makeProcessConfinementLive({ platform });
+  // One port serves every Codex instance, and on a server each signs in as
+  // that server's login, so its answer is held per server alone.
+  const serverSignIns = new ServerSignIns(readCodexSignInOnServer);
 
   return {
     start: ({ binaryPath, authority: requested, environment, onProcessStarted, server }) =>
@@ -1348,6 +1352,7 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
           return startCodexOnServer({
             placement: server,
             octantVersion: resolved.octantVersion,
+            signIns: serverSignIns,
             args: (version) =>
               codexAppServerArgs(version, {
                 ...(requested.ownSubagents === true ? { ownSubagents: true } : {}),
