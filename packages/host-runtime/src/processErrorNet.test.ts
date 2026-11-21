@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { readHostCrashRecords } from "./crashRecords";
+import { readHostCrashRecords, recordHostCrashSync } from "./crashRecords";
 import {
   installProcessErrorNet,
   REVIEWED_BENIGN_TEARDOWN_ERRORS,
@@ -92,7 +92,63 @@ describe("process error net", () => {
     net.uninstall();
   });
 
-  it("preserves redacted native stack frames even when the error message exceeds the redactor length cap", () => {
+  it("redacts a multiline custom-registered secret before normalizing line breaks in summary and crash record", async () => {
+    const dataDirectory = mkdtempSync(join(tmpdir(), "octant-process-error-net-multiline-"));
+    try {
+      const target = new FakeProcessTarget();
+      const lines: string[] = [];
+      const fatalEvents: ProcessErrorNetEvent[] = [];
+      const exit = vi.fn();
+      const multilineSecret = "first-secret-line\nsecond-secret-line";
+
+      const net = installProcessErrorNet({
+        processName: "host",
+        target,
+        stdioStreams: [],
+        homeDirectory: "/Users/ada",
+        redact: (text) => text.replaceAll(multilineSecret, "[REDACTED]"),
+        writeLine: (line) => lines.push(line),
+        onFatal: (event) => {
+          fatalEvents.push(event);
+          recordHostCrashSync(dataDirectory, {
+            recordedAt: event.timestamp,
+            process: "host",
+            exitReason: event.kind,
+            lastLines: event.line.split("\n"),
+            homeDirectory: "/Users/ada",
+          });
+        },
+        exit,
+      });
+
+      target.emit("uncaughtException", new Error(`broker secret leaked: ${multilineSecret}`));
+
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(lines).toHaveLength(1);
+      const logged = lines[0] ?? "";
+      expect(logged).toContain("broker secret leaked: [REDACTED]");
+      expect(logged).not.toContain("first-secret-line");
+      expect(logged).not.toContain("second-secret-line");
+      expect(fatalEvents[0]?.message).toContain("[REDACTED]");
+      expect(fatalEvents[0]?.message ?? "").not.toContain("first-secret-line");
+      expect(fatalEvents[0]?.message ?? "").not.toContain("second-secret-line");
+      expect(fatalEvents[0]?.stack ?? "").not.toContain("first-secret-line");
+      expect(fatalEvents[0]?.stack ?? "").not.toContain("second-secret-line");
+
+      const records = await readHostCrashRecords(dataDirectory);
+      expect(records).toHaveLength(1);
+      const joined = records[0]?.lastLines.join("\n") ?? "";
+      expect(joined).toContain("broker secret leaked: [REDACTED]");
+      expect(joined).not.toContain("first-secret-line");
+      expect(joined).not.toContain("second-secret-line");
+
+      net.uninstall();
+    } finally {
+      rmSync(dataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves redacted native leaf and caller stack frames even when the error message exceeds the redactor length cap", () => {
     const target = new FakeProcessTarget();
     const lines: string[] = [];
     const fatalEvents: ProcessErrorNetEvent[] = [];
@@ -113,7 +169,10 @@ describe("process error net", () => {
     function buildLongMessageFailure(): Error {
       return new Error(longMessage);
     }
-    target.emit("uncaughtException", buildLongMessageFailure());
+    function invokeLongMessageFailure(): Error {
+      return buildLongMessageFailure();
+    }
+    target.emit("uncaughtException", invokeLongMessageFailure());
 
     expect(exit).toHaveBeenCalledWith(1);
     expect(lines).toHaveLength(1);
@@ -122,15 +181,31 @@ describe("process error net", () => {
     expect(logged).not.toContain(homeDirectory);
     expect(logged).toContain("~/secret-dir");
     expect(logged).toContain("buildLongMessageFailure");
+    expect(logged).toContain("invokeLongMessageFailure");
     expect(logged).toContain("~/processErrorNet.test.ts");
-    expect(fatalEvents[0]?.stack).toContain("buildLongMessageFailure");
-    expect(fatalEvents[0]?.stack).toContain("~/processErrorNet.test.ts");
+    const stackLines = (fatalEvents[0]?.stack ?? "").split("\n");
+    expect(
+      stackLines.some(
+        (line) =>
+          line.startsWith("at ") &&
+          line.includes("buildLongMessageFailure") &&
+          line.includes("~/processErrorNet.test.ts"),
+      ),
+    ).toBe(true);
+    expect(
+      stackLines.some(
+        (line) =>
+          line.startsWith("at ") &&
+          line.includes("invokeLongMessageFailure") &&
+          line.includes("~/processErrorNet.test.ts"),
+      ),
+    ).toBe(true);
     expect(fatalEvents[0]?.stack ?? "").not.toContain(homeDirectory);
 
     net.uninstall();
   });
 
-  it("ends a real child process non-zero with redacted cause and native stack frames in stderr and crash record", async () => {
+  it("ends a real child process non-zero with redacted cause and native leaf and caller stack frames in stderr and crash record", async () => {
     const dataDirectory = mkdtempSync(join(tmpdir(), "octant-process-error-net-"));
     const childCwd = process.cwd();
     try {
@@ -155,8 +230,11 @@ describe("process error net", () => {
         `function explodeInChildProcess() {`,
         `  throw new Error(\`fatal crash at \${homeDirectory}/repo Authorization: Bearer topsecretvalue12345 \${"x".repeat(10_000)}\`);`,
         `}`,
-        `setTimeout(() => {`,
+        `function callExplodeInChildProcess() {`,
         `  explodeInChildProcess();`,
+        `}`,
+        `setTimeout(() => {`,
+        `  callExplodeInChildProcess();`,
         `}, 5);`,
       ].join("\n");
 
@@ -170,8 +248,17 @@ describe("process error net", () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("[octant:host] fatal uncaughtException");
       expect(result.stderr).toContain("fatal crash at ~/repo");
-      expect(result.stderr).toContain("explodeInChildProcess");
-      expect(result.stderr).toMatch(/\nat\s+/);
+      const stderrLines = result.stderr.trim().split("\n");
+      expect(
+        stderrLines.some(
+          (line) => line.startsWith("at ") && line.includes("explodeInChildProcess"),
+        ),
+      ).toBe(true);
+      expect(
+        stderrLines.some(
+          (line) => line.startsWith("at ") && line.includes("callExplodeInChildProcess"),
+        ),
+      ).toBe(true);
       expect(result.stderr).not.toContain(childCwd);
       expect(result.stderr).not.toContain("topsecretvalue12345");
 
@@ -185,6 +272,11 @@ describe("process error net", () => {
       expect(
         record?.lastLines.some(
           (line) => line.startsWith("at ") && line.includes("explodeInChildProcess"),
+        ),
+      ).toBe(true);
+      expect(
+        record?.lastLines.some(
+          (line) => line.startsWith("at ") && line.includes("callExplodeInChildProcess"),
         ),
       ).toBe(true);
       const joined = record?.lastLines.join("\n") ?? "";

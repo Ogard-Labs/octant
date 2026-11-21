@@ -141,7 +141,12 @@ function sweepText(
   redact: ((text: string) => string) | undefined,
   limit: number,
 ): string {
-  return redactUnbounded(text, homeDirectory, redact).slice(0, limit);
+  // Redact before normalizing line breaks so exact-value secret redactors match
+  // multiline credentials verbatim, then collapse newlines and bound length.
+  return redactUnbounded(text, homeDirectory, redact)
+    .replace(/[\r\n]+/g, " ")
+    .trim()
+    .slice(0, limit);
 }
 
 function safeWriteStderrSync(text: string): void {
@@ -184,12 +189,7 @@ function formatEvent(
       : typeof error === "string"
         ? error
         : String(error);
-  const message = sweepText(
-    rawMessage.replace(/[\r\n]+/g, " ").trim() || "Unknown error",
-    homeDirectory,
-    redact,
-    MESSAGE_LIMIT,
-  );
+  const message = sweepText(rawMessage, homeDirectory, redact, MESSAGE_LIMIT) || "Unknown error";
   // Strip the error's own message header before redacting the frame block so a
   // long message (>8 KiB) cannot push frames past the redactor's length cap and
   // a multiline secret in the message never enters the frame block. If a custom
@@ -204,8 +204,8 @@ function formatEvent(
           .filter((line) => STACK_FRAME_LINE.test(line))
           .map((line) => line.trim().slice(0, STACK_LINE_LIMIT))
           .slice(0, STACK_FRAME_LIMIT);
-  const codeSuffix =
-    code === undefined ? "" : ` (code=${sweepText(code, homeDirectory, redact, 64)})`;
+  const sweptCode = code === undefined ? "" : sweepText(code, homeDirectory, redact, 64);
+  const codeSuffix = sweptCode === "" ? "" : ` (code=${sweptCode})`;
   const header = `[octant:${processName}] fatal ${kind} (${timestamp}): ${message}${codeSuffix}`;
   // Total output stays within 4 lines so the desktop's 5-line / 1,000-char
   // stderr tail retains both the summary header and the top stack frames.
@@ -215,7 +215,7 @@ function formatEvent(
     process: processName,
     timestamp,
     message,
-    ...(code === undefined ? {} : { code }),
+    ...(sweptCode === "" ? {} : { code: sweptCode }),
     ...(stackLines.length === 0 ? {} : { stack: stackLines.join("\n") }),
     line,
   };
