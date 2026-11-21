@@ -10196,14 +10196,11 @@ capability: an ACP release newer than the one Octant reviewed keeps its usage
 at every level (maintainer decision, 2026-11-21), so such a release counts as
 any measuring provider at every level, its reported usage counting and a turn
 that ended with no report refusing `unknown-spend` (before, only at Full
-access: maintainer decision, 2026-11-19, "count it at full access"). A Code
-turn's row still records whether the turn ran at Full access
-(`ran_at_full_access`, from the `executionPolicy` its
-`conversation-turn-started` event journals; null for Work turns, child runs,
-and Code turns journaled before the upgrade that added the record, which a
-boundary the migration stores, `usage_turn_level_boundary`, keeps unrecorded
-on rebuild), but no ceiling reads it since no runtime reports a separate Full
-access value. A provider that
+access: maintainer decision, 2026-11-19, "count it at full access"). The
+ledger therefore records no level: an upgrade drops the per-turn Full access
+column and its replay boundary that the earlier rule read, keeping every other
+column of each row, and the turn's level stays in the `executionPolicy` its
+`conversation-turn-started` event journals. A provider that
 can report usage keeps the rule above, so its failed, cancelled, or
 interrupted turn that reported nothing still refuses `unknown-spend`; counting
 it as nothing would make an interrupted turn free. An instance that no longer
