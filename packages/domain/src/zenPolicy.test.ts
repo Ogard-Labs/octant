@@ -12,7 +12,6 @@ import {
   processZenCommand,
   applyTimerAction,
   reconcileScheduledTimer,
-  checkChecklistIsolation,
   resolveAccessibilityFallbacks,
   validateGeometry,
   validateSafeUrl,
@@ -805,28 +804,6 @@ describe("recoverSpace", () => {
     expect(result.viewport).toEqual(DEFAULT_ZEN_VIEWPORT);
     expect(result.appearance).toEqual(DEFAULT_ZEN_APPEARANCE);
     expect(result.version).toBe(4);
-  });
-});
-
-describe("checkChecklistIsolation", () => {
-  it("returns true for clean space", () => {
-    expect(checkChecklistIsolation(makeSpace())).toBe(true);
-  });
-
-  it("returns true for space with checklist", () => {
-    const space = makeSpace(0, [
-      {
-        elementId: makeId("22222222") as ZenElementId,
-        kind: "checklist",
-        widgetVersion: 0 as AggregateVersion,
-        items: [{ itemId: makeId("66666666"), text: "Task 1", done: false }],
-        geometry: { x: 100, y: 100, width: 400, height: 300 },
-        zIndex: 1 as any,
-        minimized: false,
-        locked: false,
-      },
-    ]);
-    expect(checkChecklistIsolation(space)).toBe(true);
   });
 });
 

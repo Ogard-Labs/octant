@@ -49,12 +49,6 @@ export const LINEAR_ISSUE_LIST_OPERATION = "list-issues";
 export const LINEAR_ISSUE_GET_OPERATION = "get-issue";
 export const LINEAR_ISSUE_FILTERS_OPERATION = "list-issue-filters";
 
-export const LINEAR_ISSUE_OPERATION_IDS = [
-  LINEAR_ISSUE_LIST_OPERATION,
-  LINEAR_ISSUE_GET_OPERATION,
-  LINEAR_ISSUE_FILTERS_OPERATION,
-] as const;
-
 export function linearIssueBrowseAvailable(
   capabilities: ReadonlyArray<{ readonly operationId: string; readonly available: boolean }>,
 ): boolean {

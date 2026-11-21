@@ -1528,6 +1528,8 @@ type ClaudeEnvironmentFactory = (
 
 export interface ClaudeDriverOptions {
   readonly sandboxPolicy?: SandboxPolicySelection;
+  /** Whether the host currently enforces Strict; read on probe so Bedrock/custom routing works outside Strict. */
+  readonly hostStrict?: () => boolean;
   readonly instanceId: ProviderInstanceId;
   /** The host's platform; defaults to the running one. */
   readonly platform?: NodeJS.Platform;
@@ -2543,10 +2545,12 @@ function probeSdk(
       executionPolicy: "plan",
       environment: environment.environment,
     });
+    const strict = environmentOptions.strict !== false;
     const query = yield* options.sdk.openQuery({
       binaryPath: options.binaryPath,
       projectRoot: probeRoot,
       authEnvironment: environment.environment,
+      ...(strict ? {} : { strict: false }),
       ...(network === undefined ? {} : { network }),
       model: PROBE_MODEL,
       executionPolicy: "plan",
@@ -2561,7 +2565,7 @@ function probeSdk(
     if (!account.ready) {
       return yield* Effect.fail(failure("unauthenticated", "Claude authentication is required."));
     }
-    if (account.apiProvider !== undefined && account.apiProvider !== "firstParty") {
+    if (strict && account.apiProvider !== undefined && account.apiProvider !== "firstParty") {
       return yield* Effect.fail(
         failure("protocol", "Claude initialized an unsupported account routing policy."),
       );
@@ -2600,14 +2604,17 @@ function makeProbe(
     }
     return Effect.gen(function* () {
       const version = yield* options.process.probeVersion(options.binaryPath);
+      const strict = options.hostStrict?.() ?? true;
       let apiKey: string | undefined;
       let hostTrafficDisabled = false;
       if (options.authentication === "subscription") {
-        const environment = yield* environmentFactory(
-          "subscription",
-          options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory },
-        );
-        hostTrafficDisabled = disablesNonessentialTraffic(environment.environment);
+        const environment = yield* environmentFactory("subscription", {
+          ...(options.configDirectory === undefined
+            ? {}
+            : { configDirectory: options.configDirectory }),
+          ...(strict ? {} : { strict: false }),
+        });
+        hostTrafficDisabled = disablesNonessentialTraffic(environment.environment, strict);
         const status = yield* options.process.probeSubscription(
           options.binaryPath,
           environment.environment,
@@ -2677,6 +2684,7 @@ function makeProbe(
         ...(options.configDirectory === undefined
           ? {}
           : { configDirectory: options.configDirectory }),
+        ...(strict ? {} : { strict: false }),
       }).pipe(
         Effect.map((probed) => ({ kind: "ready" as const, ...probed })),
         Effect.catchAll((providerFailure) =>
@@ -3909,7 +3917,6 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           fullAccessSandbox: input.fullAccessSandbox,
           strict: input.strict,
-          chatWithoutFolderOrShell: true,
         });
         if (windows.status === "refused") throw failure("incompatible", windows.reason);
       }
@@ -4158,6 +4165,7 @@ function makeConnection(
                 ? {
                     projectRoot,
                     executionPolicy: input.executionPolicy,
+                    ...(strict ? {} : { strict: false }),
                     ...(ownNetwork === undefined ? {} : { network: ownNetwork }),
                   }
                 : undefined,
@@ -5243,7 +5251,7 @@ function makeConnection(
         const account = query.initialization.account;
         if (
           account.ready !== true ||
-          (account.apiProvider !== undefined && account.apiProvider !== "firstParty")
+          (strict && account.apiProvider !== undefined && account.apiProvider !== "firstParty")
         ) {
           throw failure("protocol", "Claude initialized an unsupported account routing policy.");
         }

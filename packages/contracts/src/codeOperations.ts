@@ -17,6 +17,7 @@ import { ProviderNativeSessionId } from "./providerNativeSession";
 import { ThreadPublishedPage } from "./threadToolSteps";
 import { ThreadCallTiming } from "./threadToolStepList";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
+import { ThreadBoardFinishedMark } from "./finishedReceipt";
 import { DescribedImageName, DescribedTurnImages, ImageDescribedBy } from "./imageDescription";
 import { Schema } from "effect";
 import {
@@ -77,8 +78,20 @@ import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention"
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
+import {
+  GithubRepositoryName,
+  GithubRepositoryNodeId,
+  GithubRepositoryOwner,
+} from "./githubCatalogue";
+import { GithubPullRequestNodeId } from "./pullRequestIdentity";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 import { StrictKeptProtections } from "./strictNotice";
+import {
+  TurnLoopNotice,
+  TurnLoopNoticeCount,
+  TurnLoopNoticeToolName,
+  TurnStallNotice,
+} from "./turnLoopNotice";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -343,6 +356,16 @@ export const CodeReviewProvenance = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("provider", "test", "git"),
     sourceId: boundedNonEmptyText(512),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("pull-request-reviewer"),
+    reviewerId: boundedNonEmptyText(128),
+    reviewId: boundedNonEmptyText(128),
+    runId: Schema.optional(boundedNonEmptyText(128)),
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+    effort: Schema.optional(boundedNonEmptyText(64)),
+    headSha: GitObjectId,
   }).annotations(strict),
 );
 export type CodeReviewProvenance = typeof CodeReviewProvenance.Type;
@@ -1050,6 +1073,19 @@ const PrepareReviewCorrection = Schema.Struct({
     }).annotations(strict),
   ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CODE_REVIEW_CORRECTION_FINDINGS)),
 }).annotations(strict);
+/**
+ * Pull request whose diff a set of line notes came from. The host resolves
+ * the observed pull request's author against the signed-in `gh` viewer login
+ * before starting the turn; when they differ or either cannot be read, the
+ * host marks the thread as having read outside content.
+ */
+export const CodePullRequestLineNotesSource = Schema.Struct({
+  repositoryOwner: GithubRepositoryOwner,
+  repositoryName: GithubRepositoryName,
+  number: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type CodePullRequestLineNotesSource = typeof CodePullRequestLineNotesSource.Type;
+
 const StartProviderTurn = Schema.Struct({
   kind: Schema.Literal("start-provider-turn"),
   /** Explicit consent to a fresh native session with a bounded conversation handoff. */
@@ -1084,6 +1120,7 @@ const StartProviderTurn = Schema.Struct({
   ),
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
+  pullRequestLineNotesSource: Schema.optional(CodePullRequestLineNotesSource),
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),
@@ -1461,6 +1498,10 @@ const PullRequestResult = Schema.Union(
     baseBranch: GitBranchName,
     /** Whether GitHub holds it as a draft, when the host knows. */
     draft: Schema.optional(Schema.Boolean),
+    /** GitHub GraphQL node ID of the pull request, when available. */
+    pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
+    /** GitHub GraphQL node ID of the base repository, when available. */
+    baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-request-state"),
@@ -1586,6 +1627,10 @@ const PullRequestReviewResult = Schema.Union(
     checks: boundedReviewArray(CodePullRequestReviewCheck),
     reviews: boundedReviewArray(CodePullRequestReviewOpinion),
     comments: boundedReviewArray(CodePullRequestReviewComment),
+    /** GitHub GraphQL node ID of the pull request, when available. */
+    pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
+    /** GitHub GraphQL node ID of the base repository, when available. */
+    baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-request-review"),
@@ -2137,6 +2182,36 @@ const ConversationTurnStopRequestedEvent = Schema.Struct({
   kind: Schema.Literal("conversation-turn-stop-requested"),
 }).annotations(strict);
 
+/**
+ * The turn called the same tool with the same canonical input repeatedly in a
+ * row outside Strict. The turn is not stopped; the thread shows one quiet line
+ * with a Stop button.
+ */
+const TurnLoopNoticedEvent = Schema.Struct({
+  kind: Schema.Literal("turn-loop-noticed"),
+  toolName: TurnLoopNoticeToolName,
+  count: TurnLoopNoticeCount,
+}).annotations(strict);
+
+/**
+ * The turn called the same tool with the same canonical input repeatedly in a
+ * row under Strict and was stopped by Octant.
+ */
+const TurnLoopStoppedEvent = Schema.Struct({
+  kind: Schema.Literal("turn-loop-stopped"),
+  toolName: TurnLoopNoticeToolName,
+  count: TurnLoopNoticeCount,
+}).annotations(strict);
+
+/**
+ * The turn stayed silent past the stalled-turn limit outside Strict. The turn
+ * is not stopped; the thread shows one quiet line with a Stop button.
+ */
+const TurnStallNoticedEvent = Schema.Struct({
+  kind: Schema.Literal("turn-stall-noticed"),
+  idleMs: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+
 const ProviderSessionReadyEvent = Schema.Struct({
   kind: Schema.Literal("provider-session-ready"),
   sessionId: ProviderSessionId,
@@ -2434,6 +2509,9 @@ export const CodeOperationEvent = Schema.Union(
   RuntimeTurnStartedEvent,
   NativeSessionAdoptedEvent,
   ConversationTurnStopRequestedEvent,
+  TurnLoopNoticedEvent,
+  TurnLoopStoppedEvent,
+  TurnStallNoticedEvent,
   ResultEvent,
 );
 export type CodeOperationEvent = typeof CodeOperationEvent.Type;
@@ -2599,6 +2677,10 @@ export const CodeConversationTurn = Schema.Struct({
    * the launch was not Strict or the host did not record it.
    */
   strictKept: Schema.optional(StrictKeptProtections),
+  /** Repeated identical tool call notice or Strict stop recorded on this turn. */
+  loopNotice: Schema.optional(TurnLoopNotice),
+  /** Silent-turn notice recorded outside Strict when the stalled-turn limit elapsed. */
+  stallNotice: Schema.optional(TurnStallNotice),
   /**
    * Forks of this thread whose conversation this turn carried because a
    * person merged it back, oldest first. Absent on every other turn.
@@ -3181,6 +3263,8 @@ export const CodeBoardCard = Schema.Struct({
    * is never a card.
    */
   coordinatorThreadId: Schema.optional(CodeThreadId),
+  /** Fresh finished-with-proof mark; absent when none exists or when stale. Never moves the column. */
+  finishedReceipt: Schema.optional(ThreadBoardFinishedMark),
 }).annotations(strict);
 export type CodeBoardCard = typeof CodeBoardCard.Type;
 

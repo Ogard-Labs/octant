@@ -708,7 +708,10 @@ describe("native harness session store", () => {
       "approval-not-found",
     );
     expect(approvals.decide(threadId, String(pending!.id), "deny")).toBe("decided");
+    // A second submission before the waiting call resumes keeps the first answer.
+    expect(approvals.decide(threadId, String(pending!.id), "approve")).toBe("already-settled");
     await expect(first).resolves.toBe("denied");
+    expect(sessions.read(threadId)?.approvals?.[0]).toMatchObject({ status: "denied" });
     expect(approvals.decide(threadId, String(pending!.id), "approve")).toBe("already-settled");
 
     const second = ask();

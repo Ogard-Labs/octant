@@ -110,10 +110,10 @@ checks never change registry/configuration or journal state.
 
 ### Binding
 
-- Only a person, at a local window or a paired device, binds, renames, or
-  removes a server Project; a routine and an agent are refused (maintainer decision, 2026-11-12).
-  Not built yet: today a paired device is refused
-  `needs-local-window` too; the design is [Paired devices](#paired-devices).
+- Only a person, at a local window or a device the host's own person paired,
+  binds, renames, or removes a server Project; a hub-introduced or restricted
+  device, a routine, and an agent are refused `needs-person` (maintainer
+  decision, 2026-11-12; built under [Paired devices](#paired-devices)).
 - A binding names a registered server and an absolute folder path. Before it
   is journaled, the host connects and resolves the folder on the server to its
   real path (`cd` then `pwd -P`); a folder that does not exist, is not a
@@ -362,9 +362,23 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
   against the journaled digest, and the turn names its path there. The thread's
   file tools read that folder and write nowhere in it; another thread's do not
   read it, even through a Project folder that holds the login's home. The copy
-  is made before the turn's start is journaled, so a failed copy leaves no turn. A copy that fails refuses the turn with a sentence saying so. The
-  copies stay on the server when the thread is deleted (not built: removing
-  them). The same holds for a Work thread there
+  is made before the turn's start is journaled, so a failed copy leaves no turn.
+  A copy that fails refuses the turn with a sentence saying so. When the thread
+  is deleted or purged, or marked Leave no trace, Octant removes
+  `~/.octant/thread-attachments/<thread>/` over the Project's SSH connection,
+  refusing any unsafe thread identifier or symlink outside that folder before
+  touching the server. If the server cannot be reached, local deletion, purge,
+  or Leave no trace is never held up: a pending removal is journaled under
+  `server-attachment-cleanup` (`server-attachment-cleanup.pending@1`, retained
+  across thread purge and host restart) and retried automatically on the next
+  regular SSH connection to that exact server alias and login, retiring the
+  mark with `server-attachment-cleanup.settled@1` once removed. Read-only setup
+  probes never trigger cleanup. Removing a whole server Project deletes its
+  threads' attachment folders when the server is reachable; when the server is
+  unreachable or no longer registered, Project removal still succeeds and
+  returns a notice naming the folder left on the server
+  (`~/.octant/thread-attachments/` or the specific thread folder(s)) so the
+  person knows what to clean up. The same holds for a Work thread there
   ([Plan and Chat tool parity](../architecture.md#security-and-authority)).
 - **The same levels.** The thread's guardrail level is resolved as it is for
   any Code thread (thread, then the account default), and decides each call as
@@ -788,12 +802,12 @@ Project's connection, under the same levels, approvals, and journal.
 
 ## Paired devices
 
-Designed, not built (maintainer request, 2026-11-18). A device the host's own
-person paired already reads the catalog and a server's load. This design
-lets it do what a local window does with a server Project: bind, rename and
-remove one, edit and run its saved actions, switch a Work Project's Developer
-tools, run the read-only setup check, open the Project's own terminal, open a
-dev-server preview, and act on machines in the person's cloud account.
+Built (maintainer request, 2026-11-18). A device the host's own person paired
+reads the catalog and a server's load and does what a local window does with a
+server Project: bind, rename and remove one, edit and run its saved actions,
+switch a Work Project's Developer tools, run the read-only setup check, open
+the Project's own terminal, open a dev-server preview, and act on machines in
+the person's cloud account.
 
 - **Who.** A `person-paired-device` principal over its signed session. A
   device the hub's roster introduced, an agent grant's session, a routine, an
@@ -917,12 +931,11 @@ service stays out of scope
   that target and act; the target names the handle and never sees the value.
   The journal records the reference, never a value or a handle.
 - **Every act is the person's.** Creating, binding, refreshing, suspending,
-  resuming and destroying are the person's acts at a local window
-  (`/api/cloud-machines`). An agent and a routine are refused `needs-person`
-  before any target or broker is asked. The design also lets a device the
-  host's own person paired act; not built yet, it is refused
-  `needs-local-window`, as binding a server Project still is
-  ([Paired devices](#paired-devices)).
+  resuming and destroying are the person's acts at a local window or a device
+  the host's own person paired (`/api/cloud-machines`; built under
+  [Paired devices](#paired-devices)). A hub-introduced or restricted device, an
+  agent, and a routine are refused `needs-person` before any target or broker
+  is asked.
 - **Destroy asks once.** Destroying is irreversible and ends what the
   person's account pays for, so it needs a confirmation the host issues for
   exactly that machine (`request-cloud-machine-destroy`). The confirmation is

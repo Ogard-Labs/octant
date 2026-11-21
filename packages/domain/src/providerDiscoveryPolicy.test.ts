@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  canConnectCandidate,
   isDuplicateInstallation,
   groupByDriverKind,
   isScanStale,
@@ -35,26 +34,6 @@ function makeSnapshot(candidates: DiscoveryCandidate[]): DiscoverySnapshot {
     status: "completed",
   } as unknown as DiscoverySnapshot;
 }
-
-describe("canConnectCandidate", () => {
-  it("allows candidate present in snapshot", () => {
-    const candidate = makeCandidate();
-    expect(canConnectCandidate(candidate, makeSnapshot([candidate])).kind).toBe("allowed");
-  });
-
-  it("denies candidate not in snapshot", () => {
-    const candidate = makeCandidate();
-    expect(canConnectCandidate(candidate, makeSnapshot([])).kind).toBe("denied");
-  });
-
-  it("denies candidate with changed path", () => {
-    const candidate = makeCandidate();
-    const stale = makeCandidate({
-      binaryPath: "/other/bin/codex" as DiscoveryCandidate["binaryPath"],
-    });
-    expect(canConnectCandidate(stale, makeSnapshot([candidate])).kind).toBe("denied");
-  });
-});
 
 describe("isDuplicateInstallation", () => {
   it("returns false for unique candidate", () => {

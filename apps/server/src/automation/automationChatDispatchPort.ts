@@ -1,5 +1,4 @@
 import {
-  decodeChatSubmissionId,
   type AggregateVersion,
   type AutomationRun,
   type ChatThreadId,
@@ -8,7 +7,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { ChatServiceError } from "../chat/chatService";
-import { deterministicUuid } from "../deterministicUuid";
+import { automationChatSubmissionId } from "./automationRunIdentity";
 import type {
   AutomationChatDispatchPort,
   AutomationFirstTurnLaunchOutcome,
@@ -141,9 +140,7 @@ async function startOrRecover(
       threadId: input.threadId,
       expectedVersion: thread.version,
       prompt: snapshot.taskPrompt,
-      submissionId: decodeChatSubmissionId(
-        deterministicUuid(`automation-chat-turn:${String(input.run.occurrenceKey)}`),
-      ),
+      submissionId: automationChatSubmissionId(input.run),
     });
     return {
       kind: "accepted",

@@ -1,18 +1,21 @@
 import { randomUUID } from "node:crypto";
+import { chmodSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { redactHostRuntimeText } from "./redaction";
 
 /**
- * Local crash records: one small owner-only JSON file per unexpected host
- * exit, kept in the host's data directory. They stay on this machine and
- * leave it only inside a support bundle the person saves themselves.
+ * Local crash records: one small owner-only JSON file per unexpected host or
+ * desktop exit, kept in the host's data directory. They stay on this machine
+ * and leave it only inside a support bundle the person saves themselves.
  *
- * The record is written by the process that watched the host die (the
- * desktop app), so a host that crashed hard still gets one. Every text is
- * redacted on write: secrets go, and the home folder becomes `~`.
+ * For a desktop-managed host, the record is written by the desktop that watched
+ * the host die, so a host that crashed hard still gets one. For an unwatched
+ * host or a desktop main-process crash, the process error net can write a
+ * bounded synchronous record on the way out. Every text is redacted on write:
+ * secrets go, and the home folder becomes `~`.
  */
-export type HostCrashProcess = "host";
+export type HostCrashProcess = "host" | "desktop";
 
 export interface HostCrashRecord {
   readonly recordedAt: string;
@@ -52,17 +55,16 @@ function sweep(text: string, homeDirectory: string | undefined, limit: number): 
   return redactHostRuntimeText(local).slice(0, limit);
 }
 
-export async function recordHostCrash(
-  dataDirectory: string,
-  input: {
-    readonly recordedAt: string;
-    readonly process: HostCrashProcess;
-    readonly exitReason: string;
-    readonly lastLines: ReadonlyArray<string>;
-    readonly homeDirectory?: string;
-  },
-): Promise<HostCrashRecordOutcome> {
-  const record: HostCrashRecord = {
+interface HostCrashRecordInput {
+  readonly recordedAt: string;
+  readonly process: HostCrashProcess;
+  readonly exitReason: string;
+  readonly lastLines: ReadonlyArray<string>;
+  readonly homeDirectory?: string;
+}
+
+function buildHostCrashRecord(input: HostCrashRecordInput): HostCrashRecord {
+  return {
     recordedAt: input.recordedAt,
     process: input.process,
     exitReason: sweep(input.exitReason, input.homeDirectory, REASON_CHARACTER_LIMIT),
@@ -72,6 +74,13 @@ export async function recordHostCrash(
       .slice(-HOST_CRASH_RECORD_LINE_LIMIT)
       .map((line) => sweep(line, input.homeDirectory, LINE_CHARACTER_LIMIT)),
   };
+}
+
+export async function recordHostCrash(
+  dataDirectory: string,
+  input: HostCrashRecordInput,
+): Promise<HostCrashRecordOutcome> {
+  const record = buildHostCrashRecord(input);
   const directory = hostCrashRecordsDirectory(dataDirectory);
   const stamp = input.recordedAt.replace(/[^0-9TZ]/g, "-");
   try {
@@ -96,8 +105,42 @@ export async function recordHostCrash(
 }
 
 /**
+ * Synchronous crash record writer for last-resort process exit paths where the
+ * event loop cannot be resumed to await async filesystem calls.
+ */
+export function recordHostCrashSync(
+  dataDirectory: string,
+  input: HostCrashRecordInput,
+): HostCrashRecordOutcome {
+  const record = buildHostCrashRecord(input);
+  const directory = hostCrashRecordsDirectory(dataDirectory);
+  const stamp = input.recordedAt.replace(/[^0-9TZ]/g, "-");
+  try {
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    chmodSync(directory, 0o700);
+    writeFileSync(
+      join(directory, `crash-${stamp}-${randomUUID()}.json`),
+      `${JSON.stringify(record, null, 2)}\n`,
+      { encoding: "utf8", mode: 0o600, flag: "wx" },
+    );
+    const names = readdirSync(directory)
+      .filter((name) => RECORD_FILE.test(name))
+      .sort();
+    for (const name of names.slice(0, Math.max(0, names.length - HOST_CRASH_RECORD_LIMIT))) {
+      rmSync(join(directory, name), { force: true });
+    }
+    return { status: "recorded" };
+  } catch (error) {
+    return {
+      status: "failed",
+      reason: error instanceof Error ? redactHostRuntimeText(error.message) : "unknown",
+    };
+  }
+}
+
+/**
  * What a host starting after an unclean exit keeps. A watching desktop may
- * already have written a richer record for the same exit (any record at or
+ * already have written a richer record for the same exit (any host record at or
  * after the dead process's last reading); that one is reused. Otherwise the
  * host writes its own, which is the only record a background-service host or
  * an unwatched native host ever gets: no process saw it die.
@@ -112,7 +155,7 @@ export async function keepUncleanStopCrashRecord(
   },
 ): Promise<HostCrashRecord | undefined> {
   const existing = (await readHostCrashRecords(dataDirectory)).find(
-    (record) => record.recordedAt >= input.lastSeenAt,
+    (record) => record.process === "host" && record.recordedAt >= input.lastSeenAt,
   );
   if (existing !== undefined) return existing;
   const outcome = await recordHostCrash(dataDirectory, {
@@ -124,19 +167,23 @@ export async function keepUncleanStopCrashRecord(
   });
   if (outcome.status === "failed") return undefined;
   return (await readHostCrashRecords(dataDirectory)).find(
-    (record) => record.recordedAt === input.recordedAt,
+    (record) => record.process === "host" && record.recordedAt === input.recordedAt,
   );
 }
 
 function decodeRecord(value: unknown): HostCrashRecord | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const record = value as Record<string, unknown>;
-  if (typeof record.recordedAt !== "string" || record.process !== "host") return undefined;
+  if (
+    typeof record.recordedAt !== "string" ||
+    (record.process !== "host" && record.process !== "desktop")
+  )
+    return undefined;
   if (typeof record.exitReason !== "string" || !Array.isArray(record.lastLines)) return undefined;
   const lastLines = record.lastLines.filter((line): line is string => typeof line === "string");
   return {
     recordedAt: record.recordedAt,
-    process: "host",
+    process: record.process,
     exitReason: record.exitReason,
     lastLines,
   };

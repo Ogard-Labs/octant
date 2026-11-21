@@ -44,7 +44,6 @@ import {
   browserTransferRemembered,
   replaceShellSettings,
   resolveFirstRunOnboarding,
-  resolveEffectivePresentation,
   resolveSurfaceDescriptors,
   resolveWorkspaceContext,
   sameWorkspaceSurface,
@@ -236,6 +235,8 @@ describe("shell settings policy", () => {
       pullRequestWatchDays: 3,
       autoFixAttemptsPerFailure: 3,
       threadMessagesPerTurn: 3,
+      siblingThreadReadsPerTurn: 8,
+      siblingThreadWaitsPerTurn: 4,
       browserWaitLimitMinutes: 10,
       childRunWaitLimitSeconds: 120,
       agentRoutinesStartActiveAtFullAccess: false,
@@ -265,6 +266,7 @@ describe("shell settings policy", () => {
       browserHeldDownloadLimit: 5,
       browserUploadFileCountLimit: 5,
       rememberedBrowserTransfers: [],
+      rememberedComputerUseApps: [],
       persistentBrowserOwner: false,
       pairedDeviceLifetime: "30-days",
     });
@@ -287,6 +289,7 @@ describe("shell settings policy", () => {
       browserHeldDownloadLimit: 5,
       browserUploadFileCountLimit: 5,
       rememberedBrowserTransfers: [],
+      rememberedComputerUseApps: [],
       persistentBrowserOwner: false,
     });
     expect(current.chatEnabled).toBe(true);
@@ -363,6 +366,34 @@ describe("shell settings policy", () => {
     const { profile: _profile, ...anyPage } = entry;
     expect(() =>
       replaceShellSettings(current, { ...current, rememberedBrowserTransfers: [anyPage] }),
+    ).toThrow();
+  });
+
+  it("lets Settings forget a remembered Computer use app and refuses adding or altering one", () => {
+    const settings = defaultShellSettings();
+    const entry = {
+      projectId: "30000000-0000-4000-8000-000000000001" as never,
+      appId: "com.apple.Preview",
+      grantedBy: {
+        kind: "local-user" as const,
+        actorId: "00000000-0000-4000-8000-000000000002" as never,
+      },
+      grantedAt: "2026-11-19T12:00:00.000Z" as never,
+    };
+    const current: ShellSettings = { ...settings, rememberedComputerUseApps: [entry] };
+
+    expect(
+      replaceShellSettings(current, { ...current, rememberedComputerUseApps: [] })
+        .rememberedComputerUseApps,
+    ).toEqual([]);
+    expect(() =>
+      replaceShellSettings(settings, { ...settings, rememberedComputerUseApps: [entry] }),
+    ).toThrow();
+    expect(() =>
+      replaceShellSettings(current, {
+        ...current,
+        rememberedComputerUseApps: [{ ...entry, appId: "com.apple.Mail" }],
+      }),
     ).toThrow();
   });
 
@@ -2084,21 +2115,6 @@ describe("environment presentation policy", () => {
     expect(state.byTab).toEqual([]);
   });
 
-  it("resolves the per-mode default when no tab override exists", () => {
-    const state = defaultEnvironmentPresentationState();
-    expect(resolveEffectivePresentation(state, "code", ids.tabA)).toBe("floating");
-    expect(resolveEffectivePresentation(state, "chat", ids.tabA)).toBe("hidden");
-    expect(resolveEffectivePresentation(state, "work", ids.tabA)).toBe("floating");
-  });
-
-  it("resolves a tab override over the mode default", () => {
-    const state = replaceEnvironmentPresentation(defaultEnvironmentPresentationState(), {
-      tabId: ids.tabA,
-      presentation: "hidden",
-    });
-    expect(resolveEffectivePresentation(state, "code", ids.tabA)).toBe("hidden");
-  });
-
   it("replaces an existing tab override instead of duplicating", () => {
     const base = replaceEnvironmentPresentation(defaultEnvironmentPresentationState(), {
       tabId: ids.tabA,
@@ -2108,17 +2124,16 @@ describe("environment presentation policy", () => {
       tabId: ids.tabA,
       presentation: "hidden",
     });
-    expect(updated.byTab).toHaveLength(1);
-    expect(resolveEffectivePresentation(updated, "code", ids.tabA)).toBe("hidden");
+    expect(updated.byTab).toEqual([{ tabId: ids.tabA, presentation: "hidden" }]);
   });
 
-  it("removes a tab override so the mode default applies again", () => {
+  it("removes a tab override", () => {
     const withOverride = replaceEnvironmentPresentation(defaultEnvironmentPresentationState(), {
       tabId: ids.tabA,
       presentation: "floating",
     });
     const removed = removeEnvironmentPresentation(withOverride, ids.tabA);
-    expect(resolveEffectivePresentation(removed, "code", ids.tabA)).toBe("floating");
+    expect(removed.byTab).toEqual([]);
   });
 
   it("normalizes a full presentation state by keeping the first entry per tab", () => {

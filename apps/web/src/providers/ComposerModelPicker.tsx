@@ -29,6 +29,7 @@ import { isConstrained, roomOf } from "../usage/providerRoom";
 import { useProviderRooms } from "../usage/useProviderRooms";
 import { ProviderGlyph } from "./ProviderGlyph";
 import { useModelToolVerifier } from "./ModelToolVerificationContext";
+import { ComposerBenchmarkHint, type ComposerBenchmarkScope } from "./ComposerBenchmarkHint";
 
 /**
  * One selectable option the selected model declares (effort, reasoning, speed
@@ -72,6 +73,7 @@ const DEFAULT_LEVEL_ID = "__default__";
 const STANDARD_TIER_ID = "__standard__";
 
 export interface ComposerModelPickerProps {
+  readonly benchmarkScope?: ComposerBenchmarkScope | undefined;
   readonly threadId?: string;
   readonly rememberChoice?: boolean;
   readonly groups: ReadonlyArray<PickerGroup>;
@@ -536,18 +538,18 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
 
   function chooseRow(row: ModelRow) {
     if (row.picker.unavailableReason !== undefined) return;
-    rememberModel(row.group.instance.id, row.picker.model.id);
-    if (props.rememberChoice !== false)
-      rememberModelChoice({
-        providerInstanceId: row.group.instance.id,
-        modelId: row.picker.model.id,
-      });
     // The menu stays open: the next thing a person often does is set
     // the reasoning level for the model they just chose.
-    selectModel({
+    chooseModel({
       providerInstanceId: row.group.instance.id,
       modelId: row.picker.model.id,
     });
+  }
+  function chooseModel(selection: ModelPickerSelection) {
+    if (controlsDisabled) return;
+    rememberModel(selection.providerInstanceId, selection.modelId);
+    if (props.rememberChoice !== false) rememberModelChoice(selection);
+    selectModel(selection);
   }
   shortcuts.current = { rows: shortcutRows, choose: chooseRow };
 
@@ -827,6 +829,22 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         triggerVariant="ghost"
         triggerDisabled={controlsDisabled}
       >
+        {!open ||
+        controlsDisabled ||
+        props.benchmarkScope === undefined ||
+        props.selectedProviderInstanceId === undefined ||
+        props.selectedModelId === undefined ? null : (
+          <ComposerBenchmarkHint
+            key={`${props.benchmarkScope.kind}:${props.benchmarkScope.projectId}`}
+            scope={props.benchmarkScope}
+            groups={props.groups}
+            selected={{
+              providerInstanceId: props.selectedProviderInstanceId,
+              modelId: props.selectedModelId,
+            }}
+            onSelect={chooseModel}
+          />
+        )}
         <div
           aria-label="Providers"
           aria-orientation="horizontal"

@@ -1,4 +1,5 @@
 import type { ProviderInstanceId } from "@octant/contracts";
+import { credentialStoreFailureCauseOf } from "@octant/host-runtime";
 import {
   CloudSessionRequestRefused,
   type CloudSessionPorts,
@@ -20,6 +21,8 @@ export function makeProviderCloudPorts(input: {
   readonly credentialResolver: ProviderCredentialResolver;
   readonly admission: () => boolean;
   readonly intent: CloudSessionIntent;
+  readonly principalKind?: "local-window" | "person-paired-device";
+  readonly onCredentialUnlockRequired?: () => void;
   readonly onCreateDispatch?: () => void;
   readonly onCreated?: (remoteId: ProviderCloudRemoteId) => void;
   readonly fetch?: (url: string, init?: RequestInit) => Promise<Response>;
@@ -58,7 +61,17 @@ export function makeProviderCloudPorts(input: {
             interrupted.promise,
           ])
         ).credential;
-      } catch {
+      } catch (error) {
+        const rawCause =
+          error !== null && typeof error === "object"
+            ? (error as { readonly cause?: unknown }).cause
+            : undefined;
+        const locked =
+          credentialStoreFailureCauseOf(rawCause) === "locked" ||
+          rawCause === "linked-store-locked";
+        if (input.principalKind === "person-paired-device" && locked) {
+          input.onCredentialUnlockRequired?.();
+        }
         throw new CloudSessionRequestRefused();
       } finally {
         signal.removeEventListener("abort", onInterrupted);

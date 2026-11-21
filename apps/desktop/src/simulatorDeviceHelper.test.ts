@@ -50,11 +50,11 @@ function fakeChild(options: { readonly stubborn?: boolean } = {}) {
       },
     },
     stdout: {
-      off: () => {
-        emitData = () => {};
+      off: (event) => {
+        if (event === "data") emitData = () => {};
       },
-      on: (_event, listener) => {
-        emitData = listener;
+      on: (event, listener) => {
+        if (event === "data") emitData = listener as (chunk: Uint8Array) => void;
       },
     },
     frames: {

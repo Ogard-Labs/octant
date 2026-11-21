@@ -298,6 +298,66 @@ describe("ProjectClient", () => {
       expect.objectContaining({ signal: controller.signal }),
     );
   });
+
+  it("scans and imports provider folders over the authenticated project routes", async () => {
+    const folderId = "44444444-4444-4444-8444-444444444444";
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/projects/provider-folders/scan")) {
+        return Response.json({
+          status: "ready",
+          groups: [
+            {
+              repository: "acme/widget",
+              label: "acme/widget",
+              providers: ["claude"],
+              sessionCount: 2,
+              lastActivityAt: "2026-11-21T10:00:00.000Z",
+              folders: [
+                {
+                  id: folderId,
+                  folderName: "widget",
+                  providers: ["claude"],
+                  sessionCount: 2,
+                  lastActivityAt: "2026-11-21T10:00:00.000Z",
+                  isGitRepository: true,
+                  alreadyImported: false,
+                },
+              ],
+            },
+          ],
+          requireGitRepository: true,
+          stoppedEarly: false,
+          scannedAt: "2026-11-21T10:01:00.000Z",
+        });
+      }
+      return Response.json({
+        status: "completed",
+        results: [
+          {
+            folderId,
+            status: "created",
+            projectId,
+            name: "widget",
+          },
+        ],
+      });
+    });
+    const client = createProjectClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+
+    const scanned = await client.scanProviderFolders?.();
+    expect(scanned?.status).toBe("ready");
+
+    const imported = await client.importProviderFolders?.({ folderIds: [folderId as never] });
+    expect(imported).toEqual({
+      status: "completed",
+      results: [{ folderId, status: "created", projectId, name: "widget" }],
+    });
+  });
 });
 
 function memoryEntry() {

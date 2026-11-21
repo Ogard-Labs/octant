@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyFileMention,
   boundFileMentionText,
   classifyFileMentionExtraFolderPath,
   classifyFileMentionRelativePath,
   FILE_MENTION_OUT_OF_ROOT_CONTEXT,
   formatFileMentionContext,
-  parseFileMentionToken,
   fileMentionQueryEscapesRoot,
   rankFileMentionCandidates,
   reconcileFileMentionPaths,
@@ -39,35 +37,11 @@ describe("classifyFileMentionRelativePath", () => {
   });
 });
 
-describe("parseFileMentionToken", () => {
-  it("opens at a word-boundary @", () => {
-    expect(parseFileMentionToken("look at @src/co", 15)).toEqual({ start: 8, query: "src/co" });
-    expect(parseFileMentionToken("@", 1)).toEqual({ start: 0, query: "" });
-  });
-
-  it("leaves an email address and completed token as ordinary text", () => {
-    expect(parseFileMentionToken("mail henrik@ogard.no", 20)).toBeUndefined();
-    expect(parseFileMentionToken("@src/co and then", 16)).toBeUndefined();
-  });
-});
-
 describe("rankFileMentionCandidates", () => {
   it("prefers a closer filename match", () => {
     expect(rankFileMentionCandidates(CANDIDATES, "code").map((entry) => entry.path)).toEqual([
       "src/code.ts",
     ]);
-  });
-});
-
-describe("applyFileMention", () => {
-  it("writes the chosen path into the draft and leaves a trailing space for a file", () => {
-    const draft = "look at @src/co";
-    const token = parseFileMentionToken(draft, 15);
-    expect(token).toBeDefined();
-    expect(applyFileMention(draft, token!, CANDIDATES[2]!)).toEqual({
-      draft: "look at @src/index.ts ",
-      caret: 22,
-    });
   });
 });
 

@@ -19,8 +19,8 @@ import {
 } from "../../composer/useComposerSlashCommands";
 import {
   ComposerAtTypeahead,
-  composerProviderMentions,
   useComposerAtMenu,
+  useThreadProviderMentions,
 } from "../../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import type { CodeCheckoutId, CodeRepositoryId } from "@octant/contracts/code";
@@ -337,13 +337,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
     ...(storedExtensionReceipts.length === 0 ? {} : { initialReceipts: storedExtensionReceipts }),
   });
-  const atMenu = useComposerAtMenu({
-    provider: composerProviderMentions(providerGroups, props.selectedProviderInstanceId),
-    textarea: () => textareaRef.current,
-    draft: prompt,
-    onDraftChange: setPrompt,
-    onResolveExtensionReference: extensionDraft.resolveReference,
-  });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerIdRef = useRef(globalThis.crypto.randomUUID());
   useEffect(() => {
@@ -448,6 +441,20 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     draft: prompt,
     onDraftChange: setPrompt,
     provider: composerProviderCommands(providerGroups, props.selectedProviderInstanceId),
+  });
+  const providerMentions = useThreadProviderMentions(providerGroups, {
+    kind: "draft",
+    mode: "code",
+    projectId: isServer ? undefined : props.projectId,
+    providerInstanceId: props.selectedProviderInstanceId,
+    executionPolicy,
+  });
+  const atMenu = useComposerAtMenu({
+    provider: providerMentions,
+    textarea: () => textareaRef.current,
+    draft: prompt,
+    onDraftChange: setPrompt,
+    onResolveExtensionReference: extensionDraft.resolveReference,
   });
   // F2: the default delivery branch must never collide with the base branch
   // (e.g. `development`), which normally exists. Derive a unique

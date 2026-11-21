@@ -1,6 +1,7 @@
 import {
   deriveAutomationOccurrenceKey,
   decodeAutomationDefinition,
+  decodeChatThreadId,
   decodeWorkTurnRequestId,
   type WorkTurnRequestId,
   type WorkTurnState,
@@ -12,8 +13,12 @@ import {
   type AutomationScheduledOccurrence,
   type AutomationFileArrivalOccurrence,
   type AutomationIntegrationEventOccurrence,
+  type ChatAttemptOutcome,
+  type ChatSubmissionId,
+  type ChatThreadId,
   type CodeConversationTurn,
   type CodeThread,
+  type ProjectId,
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
@@ -38,7 +43,7 @@ import {
 } from "./automationRunIdentity";
 import type { AutomationFileObservationDecision } from "./automationFileSourceState";
 import type { AutomationEventObservation } from "./automationEventSourceState";
-import { automationCodeOperationId } from "./automationRunIdentity";
+import { automationChatSubmissionId, automationCodeOperationId } from "./automationRunIdentity";
 import { automationDispatchPromptText } from "./automationFileContext";
 import { automationFollowUpTurnPrompt } from "@octant/contracts";
 
@@ -125,6 +130,17 @@ export interface AutomationSchedulerServiceOptions {
         readonly prompt: string;
       }
     | undefined;
+  /** Only the persisted Chat thread; never starts or recovers a provider call. */
+  readonly readChatThread?: (threadId: ChatThreadId) =>
+    | {
+        readonly thread: { readonly id: ChatThreadId; readonly projectId?: ProjectId | undefined };
+        readonly turns: ReadonlyArray<{
+          readonly threadId: ChatThreadId;
+          readonly submissionId?: ChatSubmissionId | undefined;
+          readonly attempts: ReadonlyArray<{ readonly outcome: ChatAttemptOutcome }>;
+        }>;
+      }
+    | undefined;
   readonly onRunStatusChanged?: (input: {
     readonly run: AutomationRun;
     readonly previousLifecycle: AutomationRun["lifecycle"];
@@ -176,6 +192,7 @@ export class AutomationSchedulerService {
   readonly #stopFileSources: AutomationSchedulerServiceOptions["stopFileSources"];
   readonly #readWorkTurn: AutomationSchedulerServiceOptions["readWorkTurn"];
   readonly #readCodeTurn: AutomationSchedulerServiceOptions["readCodeTurn"];
+  readonly #readChatThread: AutomationSchedulerServiceOptions["readChatThread"];
   readonly #onRunStatusChanged: AutomationSchedulerServiceOptions["onRunStatusChanged"];
   readonly #offered = new Set<string>();
   #notify: (() => void) | undefined;
@@ -191,6 +208,7 @@ export class AutomationSchedulerService {
     this.#config = { ...AUTOMATION_SCHEDULER_DEFAULTS, ...options.config };
     this.#readWorkTurn = options.readWorkTurn;
     this.#readCodeTurn = options.readCodeTurn;
+    this.#readChatThread = options.readChatThread;
     this.#reconcileFileSources = options.reconcileFileSources;
     this.#stopFileSources = options.stopFileSources;
     this.#onRunStatusChanged = options.onRunStatusChanged;
@@ -451,6 +469,7 @@ export class AutomationSchedulerService {
     const previousActive = this.#projection.activeRun(definition.id);
     if (previousActive !== undefined) this.#observeWorkTurn(previousActive, out);
     if (previousActive !== undefined) this.#observeCodeTurn(previousActive, out);
+    if (previousActive !== undefined) this.#observeChatTurn(previousActive, out);
     const active = this.#projection.activeRun(definition.id);
     if (active !== undefined) this.#recoverAndOffer(definition, active, out);
 
@@ -503,38 +522,7 @@ export class AutomationSchedulerService {
             : turn.status === "waiting"
               ? "waiting"
               : "running";
-    if (lifecycle === run.lifecycle) return;
-    try {
-      this.#store.appendRunStatusChanged({
-        automationId: run.automationId,
-        runId: run.id,
-        previousLifecycle: run.lifecycle,
-        lifecycle,
-        version: run.version + 1,
-        expectedVersion: run.version,
-        ...(lifecycle === "failed"
-          ? {
-              failure: {
-                reason: "runtime-failed" as const,
-                message: "The routine's Work turn failed. Open its thread for details.",
-              },
-            }
-          : {}),
-        updatedAt: out.now,
-      });
-    } catch (error) {
-      if (!isConflict(error)) throw error;
-      this.#rehydrate();
-      return;
-    }
-    const current = this.#projection.getRun(run.id);
-    if (current !== undefined) {
-      try {
-        this.#onRunStatusChanged?.({ run: current, previousLifecycle: run.lifecycle });
-      } catch {
-        /* Notification failure never changes the persisted run outcome. */
-      }
-    }
+    this.#recordTurnLifecycle(run, lifecycle, "Work", out);
   }
 
   #observeCodeTurn(run: AutomationRun, out: PassCollector): void {
@@ -568,6 +556,54 @@ export class AutomationSchedulerService {
     )
       return;
     const lifecycle = turn.status === "incomplete" ? "running" : turn.status;
+    this.#recordTurnLifecycle(run, lifecycle, "Code", out);
+  }
+
+  /**
+   * A Chat run's task turn is the thread's turn sent under the run's own
+   * submission identity, so a turn the person sends into the thread later
+   * never finishes the run. The newest attempt is the turn's outcome: a
+   * retried turn settles on its retry.
+   */
+  #observeChatTurn(run: AutomationRun, out: PassCollector): void {
+    const snapshot = run.definitionSnapshot;
+    if (
+      snapshot.mode !== "chat" ||
+      snapshot.binding.kind !== "chat" ||
+      (run.lifecycle !== "running" && run.lifecycle !== "waiting") ||
+      run.threadId === undefined ||
+      run.firstTurnAcceptance?.runtimeReceipt !== `chat-turn:${String(run.firstTurnRequestId)}`
+    )
+      return;
+    const threadId = String(run.threadId);
+    const view = this.#readChatThread?.(decodeChatThreadId(threadId));
+    if (
+      view === undefined ||
+      String(view.thread.id) !== threadId ||
+      String(view.thread.projectId) !== String(snapshot.projectId)
+    )
+      return;
+    const submissionId = String(automationChatSubmissionId(run));
+    const turn = view.turns.find(
+      (entry) => String(entry.submissionId) === submissionId && String(entry.threadId) === threadId,
+    );
+    const outcome = turn?.attempts.at(-1)?.outcome;
+    if (outcome === undefined) return;
+    const lifecycle =
+      outcome === "completed" || outcome === "failed" || outcome === "waiting"
+        ? outcome
+        : outcome === "cancelled" || outcome === "interrupted"
+          ? "interrupted"
+          : "running";
+    this.#recordTurnLifecycle(run, lifecycle, "Chat", out);
+  }
+
+  #recordTurnLifecycle(
+    run: AutomationRun,
+    lifecycle: "running" | "waiting" | "completed" | "failed" | "interrupted",
+    mode: "Work" | "Code" | "Chat",
+    out: PassCollector,
+  ): void {
     if (lifecycle === run.lifecycle) return;
     try {
       this.#store.appendRunStatusChanged({
@@ -581,7 +617,7 @@ export class AutomationSchedulerService {
           ? {
               failure: {
                 reason: "runtime-failed",
-                message: "The routine's Code turn failed. Open its thread for details.",
+                message: `The routine's ${mode} turn failed. Open its thread for details.`,
               },
             }
           : {}),

@@ -1,3 +1,4 @@
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryProposalPrompt";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -60,6 +61,7 @@ export default function CodeWorkspaceTab(props: {
   readonly autoReview?: AutoReview;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly serviceOfferClient?: ServiceOfferClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
@@ -233,6 +235,9 @@ export default function CodeWorkspaceTab(props: {
         {...(props.imageGenerationClient === undefined
           ? {}
           : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.serviceOfferClient === undefined
+          ? {}
+          : { serviceOfferClient: props.serviceOfferClient })}
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}

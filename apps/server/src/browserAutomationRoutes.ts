@@ -1,7 +1,25 @@
 import type { EventActor } from "@octant/contracts";
-import { principalActsAsHostPerson } from "./clientPrincipal";
+import {
+  isAgentGrantSession,
+  principalActsAsHostPerson,
+  principalAuthorityKind,
+  type ClientPrincipal,
+} from "./clientPrincipal";
 import { eventActorForPrincipal } from "./principalEventActor";
 import { boundPrincipalIsRestricted } from "./principalRouteContext";
+import {
+  MAX_PAIRED_BROWSER_FILE_BYTES,
+  decodePairedBrowserChooserId,
+  decodePairedBrowserLeaseId,
+  decodePairedBrowserRequest,
+  decodePairedBrowserResponse,
+  decodePairedBrowserStreamRequest,
+  type PairedBrowserResponse,
+} from "@octant/contracts/paired-browser-control";
+import type {
+  PairedBrowserActor,
+  PairedBrowserControlService,
+} from "./browser/pairedBrowserControl";
 import {
   decodeBrowserDownloadPermissionsCommand,
   decodeBrowserDownloadPermissionsResult,
@@ -176,6 +194,12 @@ export interface BrowserAutomationRouteDependencies {
   /** The Projects' saved Browser flows, listed and deleted by the person; absent on a host without them. */
   readonly flows?: Pick<BrowserFlowService, "summaries" | "delete">;
   readonly flowRuns?: BrowserFlowRuns;
+  readonly pairedBrowserControl?: PairedBrowserControlService;
+  readonly resolvePairedDeviceName?: (deviceId: string) => string | undefined;
+  readonly isPairedDeviceSessionCurrent?: (
+    principal: Extract<ClientPrincipal, { readonly kind: "remote-device" }>,
+    sessionNow?: () => number,
+  ) => boolean;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize: number;
 }
@@ -201,23 +225,22 @@ export function createBrowserAutomationRouteHandler(
   // history, and an archived thread opened from the archive still shows them.
   const captureReadRefusal = async (
     windowId: WindowId,
-    callerKind: "local-window" | "remote-device",
+    canActAsPerson: boolean,
     threadId: BrowserThreadId,
     origin: string | null,
   ): Promise<Response | undefined> =>
-    callerKind === "local-window" &&
-    (await dependencies.windowCanOpenThread?.(windowId, threadId)) === true
+    canActAsPerson && (await dependencies.windowCanOpenThread?.(windowId, threadId)) === true
       ? undefined
       : notThisWindowsThread(origin);
   // Taking a capture drives the Browser, so it needs the thread's live Browser
   // authority, which reading does not.
   const captureTakeRefusal = (
     windowId: WindowId,
-    callerKind: "local-window" | "remote-device",
+    canActAsPerson: boolean,
     threadId: BrowserThreadId,
     origin: string | null,
   ): Response | undefined =>
-    callerKind === "local-window" &&
+    canActAsPerson &&
     BROWSER_MODES.some((mode) => dependencies.authority.canAccessWindow(windowId, threadId, mode))
       ? undefined
       : notThisWindowsThread(origin);
@@ -242,12 +265,15 @@ export function createBrowserAutomationRouteHandler(
 
     let windowId;
     let callerKind: "local-window" | "remote-device";
+    let authenticatedPrincipal: ClientPrincipal;
+    let authorityKind: "local-window" | "person-paired-device" | "remote-device";
     // A device the host's own person paired, judged as the person where a
     // route says so; it stays the principal and the actor.
     let actsAsHostPerson: boolean;
     // Who the journal names for what this request changes: the device, when a
     // device asked.
     let actor: EventActor;
+    let sessionNow: (() => number) | undefined;
     try {
       const principal = authenticateRoutePrincipal({
         request,
@@ -255,16 +281,105 @@ export function createBrowserAutomationRouteHandler(
         now: Date.now(),
       });
       windowId = principal.scopeId;
+      authenticatedPrincipal = principal.principal;
       callerKind = principal.principal.kind;
+      authorityKind = principalAuthorityKind(principal.principal);
       actsAsHostPerson = principalActsAsHostPerson(principal.principal);
       actor = eventActorForPrincipal(principal.principal);
+      sessionNow = principal.sessionNow;
     } catch {
+      if (
+        url.pathname === "/api/browser/remote-control/input" ||
+        url.pathname === "/api/browser/remote-control/stream" ||
+        url.pathname === "/api/browser/remote-control/file"
+      ) {
+        return pairedControlJson(
+          { status: "refused", reason: "remote-control-not-person" },
+          403,
+          origin,
+        );
+      }
       return failure(
         { category: "unauthorized", message: "Window authority is invalid." },
         401,
         origin,
       );
     }
+
+    const pairedActor = (): PairedBrowserActor | undefined => {
+      if (authenticatedPrincipal.kind !== "remote-device") return undefined;
+      const remote = authenticatedPrincipal;
+      const deviceId = String(remote.deviceId);
+      return {
+        principalKind: principalAuthorityKind(remote),
+        isAgentGrant: isAgentGrantSession(remote),
+        deviceId,
+        deviceName: dependencies.resolvePairedDeviceName?.(deviceId) ?? "Paired device",
+        sessionId: String(remote.sessionId),
+        credentialGeneration: remote.credentialGeneration,
+        current: () =>
+          dependencies.isPairedDeviceSessionCurrent === undefined
+            ? true
+            : dependencies.isPairedDeviceSessionCurrent(remote, sessionNow),
+      };
+    };
+
+    const flowSessionFingerprint =
+      authenticatedPrincipal.kind === "remote-device"
+        ? `${String(authenticatedPrincipal.deviceId)}:${String(authenticatedPrincipal.sessionId)}:${authenticatedPrincipal.credentialGeneration}`
+        : undefined;
+
+    if (url.pathname === "/api/browser/remote-control/file") {
+      const remote = pairedActor();
+      if (
+        remote === undefined ||
+        remote.principalKind !== "person-paired-device" ||
+        remote.isAgentGrant === true
+      ) {
+        return pairedControlJson(
+          { status: "refused", reason: "remote-control-not-person" },
+          403,
+          origin,
+        );
+      }
+      if (dependencies.pairedBrowserControl === undefined) {
+        return pairedControlJson({ status: "refused", reason: "page-not-here" }, 503, origin);
+      }
+      let leaseId;
+      let chooserId;
+      try {
+        leaseId = decodePairedBrowserLeaseId(
+          request.headers.get("x-octant-browser-lease-id") ?? "",
+        );
+        chooserId = decodePairedBrowserChooserId(
+          request.headers.get("x-octant-browser-chooser-id") ?? "",
+        );
+      } catch {
+        return failure(
+          { category: "invalid", message: "Browser file-choice headers are invalid." },
+          400,
+          origin,
+        );
+      }
+      const declaredLength = Number(request.headers.get("content-length"));
+      if (Number.isFinite(declaredLength) && declaredLength > MAX_PAIRED_BROWSER_FILE_BYTES) {
+        return pairedControlJson({ status: "refused", reason: "rate-limited" }, 413, origin);
+      }
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      if (bytes.byteLength === 0 || bytes.byteLength > MAX_PAIRED_BROWSER_FILE_BYTES) {
+        return pairedControlJson({ status: "refused", reason: "rate-limited" }, 413, origin);
+      }
+      const fileName = request.headers.get("x-octant-browser-file-name") ?? "upload.bin";
+      const result = await dependencies.pairedBrowserControl.uploadFile(remote, {
+        leaseId,
+        chooserId,
+        fileName,
+        bytes,
+        signal: request.signal,
+      });
+      return pairedControlResponse(result, origin);
+    }
+
     const decoded = await readJson(request, dependencies.maxRequestBodySize);
     if (decoded.kind !== "ok") {
       return failure(
@@ -280,9 +395,100 @@ export function createBrowserAutomationRouteHandler(
       );
     }
 
-    // A paired device sees that a signed-in page exists and nothing it shows.
+    if (url.pathname === "/api/browser/remote-control/input") {
+      const remote = pairedActor();
+      if (
+        remote === undefined ||
+        remote.principalKind !== "person-paired-device" ||
+        remote.isAgentGrant === true
+      ) {
+        return pairedControlJson(
+          { status: "refused", reason: "remote-control-not-person" },
+          403,
+          origin,
+        );
+      }
+      if (dependencies.pairedBrowserControl === undefined) {
+        return pairedControlJson({ status: "refused", reason: "page-not-here" }, 503, origin);
+      }
+      let command;
+      try {
+        command = decodePairedBrowserRequest(decoded.value);
+      } catch {
+        return failure(
+          { category: "invalid", message: "Browser remote-control request is invalid." },
+          400,
+          origin,
+        );
+      }
+      if (
+        command.kind === "take-over" &&
+        !BROWSER_MODES.some((mode) =>
+          dependencies.authority.canAccessWindow(windowId, command.target.threadId, mode),
+        )
+      ) {
+        return pairedControlJson({ status: "refused", reason: "authority-ended" }, 403, origin);
+      }
+      const result = await dependencies.pairedBrowserControl.execute(
+        remote,
+        command,
+        request.signal,
+      );
+      return pairedControlResponse(result, origin);
+    }
+
+    if (url.pathname === "/api/browser/remote-control/stream") {
+      const remote = pairedActor();
+      if (
+        remote === undefined ||
+        remote.principalKind !== "person-paired-device" ||
+        remote.isAgentGrant === true
+      ) {
+        return pairedControlJson(
+          { status: "refused", reason: "remote-control-not-person" },
+          403,
+          origin,
+        );
+      }
+      if (dependencies.pairedBrowserControl === undefined) {
+        return pairedControlJson({ status: "refused", reason: "page-not-here" }, 503, origin);
+      }
+      let streamCommand;
+      try {
+        streamCommand = decodePairedBrowserStreamRequest(decoded.value);
+      } catch {
+        return failure(
+          { category: "invalid", message: "Browser remote-control stream request is invalid." },
+          400,
+          origin,
+        );
+      }
+      const opened = dependencies.pairedBrowserControl.openStream(
+        remote,
+        streamCommand.leaseId,
+        request.signal,
+      );
+      if (opened.status === "refused") {
+        return pairedControlResponse(opened, origin);
+      }
+      return new Response(opened.stream, {
+        status: 200,
+        headers: {
+          "content-type": "application/x-ndjson",
+          "cache-control": "no-store",
+          ...corsHeaders(origin),
+        },
+      });
+    }
+
+    // A hub-introduced or restricted device sees that a signed-in page exists
+    // and nothing it shows; the host's own person (at a local window or on a
+    // device they paired) sees the page.
     const shown = (snapshot: BrowserAutomationSnapshot): BrowserAutomationSnapshot =>
-      callerKind === "remote-device" ? withheldFromRemote(snapshot) : snapshot;
+      !actsAsHostPerson ? withheldFromRemote(snapshot) : snapshot;
+    const personCaller: "local-window" | "remote-device" = actsAsHostPerson
+      ? "local-window"
+      : "remote-device";
     try {
       if (
         url.pathname === "/api/browser/task-profile/current" ||
@@ -293,7 +499,7 @@ export function createBrowserAutomationRouteHandler(
           ? decodeBrowserTaskProfileSelectCommand(decoded.value)
           : decodeBrowserTaskProfileReadCommand(decoded.value);
         if (
-          callerKind !== "local-window" ||
+          !actsAsHostPerson ||
           !dependencies.authority.canAccessWindow(windowId, command.threadId, command.mode)
         )
           return notThisWindowsThread(origin);
@@ -416,34 +622,11 @@ export function createBrowserAutomationRouteHandler(
           );
         }
         const command = decodeProjectBrowserCommand(decoded.value);
-        // A device the host's own person paired opens the person's own
-        // Project page as a window does; its page belongs to its scope. A
-        // profile page opens in the desktop's native Browser with the
-        // person's sign-ins, so from a device it waits for profile pages over
-        // the remote channel, and only a Private page opens.
-        if (
-          callerKind === "remote-device" &&
-          actsAsHostPerson &&
-          command.kind === "open" &&
-          command.profile !== undefined &&
-          command.profile !== "private"
-        ) {
-          return success(
-            decodeProjectBrowserResult({
-              kind: "project-browser-refused",
-              reason: "profile-unavailable",
-              message: "A profile page opens at a window on this computer.",
-            }),
-            origin,
-          );
-        }
+        // A device the host's own person paired opens Project pages (Private or
+        // stored profiles) as a local window does; restricted devices stay refused.
         return success(
           decodeProjectBrowserResult(
-            await dependencies.projectBrowsers.execute(
-              windowId,
-              actsAsHostPerson ? "local-window" : callerKind,
-              command,
-            ),
+            await dependencies.projectBrowsers.execute(windowId, personCaller, command),
           ),
           origin,
         );
@@ -476,7 +659,7 @@ export function createBrowserAutomationRouteHandler(
                 dependencies.authority.canAccessWindow(windowId, threadId, input.mode)
                   ? pages.threadTitle(threadId, input.mode)
                   : undefined,
-              remote: callerKind === "remote-device",
+              remote: !actsAsHostPerson,
             }),
           }),
           origin,
@@ -493,12 +676,7 @@ export function createBrowserAutomationRouteHandler(
         const command = decodeBrowserExtensionsCommand(decoded.value);
         return success(
           decodeBrowserExtensionsResult(
-            await dependencies.extensions.execute(
-              windowId,
-              callerKind === "local-window" ? "local-window" : "remote-device",
-              command,
-              actor,
-            ),
+            await dependencies.extensions.execute(windowId, personCaller, command, actor),
           ),
           origin,
         );
@@ -514,11 +692,7 @@ export function createBrowserAutomationRouteHandler(
         const command = decodeBrowserProfilesCommand(decoded.value);
         return success(
           decodeBrowserProfilesResult(
-            await dependencies.profiles.execute(
-              callerKind === "local-window" ? "local-window" : "remote-device",
-              command,
-              actor,
-            ),
+            await dependencies.profiles.execute(authorityKind, command, actor),
           ),
           origin,
         );
@@ -533,8 +707,9 @@ export function createBrowserAutomationRouteHandler(
         }
         const command = decodeBrowserFlowsCommand(decoded.value);
         // Flows are a Project's data that a replay would navigate and type
-        // from; a paired device may not run, save or delete them.
-        if (callerKind !== "local-window") {
+        // from; only the host's own person (at a local window or on a device
+        // they paired) may list, run, save, or delete them.
+        if (!actsAsHostPerson) {
           return success(
             decodeBrowserFlowsResult({
               kind: "browser-flows-refused",
@@ -565,17 +740,28 @@ export function createBrowserAutomationRouteHandler(
             command.kind === "run-tasks"
               ? runs.tasks(windowId, command.projectId)
               : command.kind === "review-run"
-                ? runs.review(windowId, command.projectId, command.name, {
-                    threadId: command.threadId,
-                    mode: command.mode,
-                  })
+                ? runs.review(
+                    windowId,
+                    command.projectId,
+                    command.name,
+                    {
+                      threadId: command.threadId,
+                      mode: command.mode,
+                    },
+                    flowSessionFingerprint,
+                  )
                 : command.kind === "start-run"
-                  ? await runs.start(windowId, command.runId, command.values)
+                  ? await runs.start(
+                      windowId,
+                      command.runId,
+                      command.values,
+                      flowSessionFingerprint,
+                    )
                   : command.kind === "resume-run"
-                    ? await runs.resume(windowId, command.runId)
+                    ? await runs.resume(windowId, command.runId, flowSessionFingerprint)
                     : command.kind === "cancel-run"
-                      ? runs.cancel(windowId, command.runId)
-                      : runs.inspect(windowId, command.runId);
+                      ? runs.cancel(windowId, command.runId, flowSessionFingerprint)
+                      : runs.inspect(windowId, command.runId, flowSessionFingerprint);
           return success(decodeBrowserFlowsResult(result), origin);
         }
         return success(
@@ -740,10 +926,15 @@ export function createBrowserAutomationRouteHandler(
             await dependencies.service.create({
               windowId,
               ...input,
-              // A signed-in page opens only for the person at this Mac; the
-              // service refuses a paired device before any runtime is asked.
+              // A signed-in page opens for the host's own person (at a local
+              // window or on a device they paired); a hub-introduced or
+              // restricted device is refused before any runtime is asked.
               ...(callerKind === "remote-device"
-                ? { profileCaller: "remote-device" as const }
+                ? {
+                    profileCaller: actsAsHostPerson
+                      ? ("person-paired-device" as const)
+                      : ("remote-device" as const),
+                  }
                 : {}),
             }),
           ),
@@ -801,7 +992,12 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/captures") {
         const input = decodeBrowserCapturesCommand(decoded.value);
-        const refusal = await captureReadRefusal(windowId, callerKind, input.threadId, origin);
+        const refusal = await captureReadRefusal(
+          windowId,
+          actsAsHostPerson,
+          input.threadId,
+          origin,
+        );
         if (refusal !== undefined) return refusal;
         return success(
           decodeBrowserCapturesResponse({
@@ -812,9 +1008,14 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/steps") {
         // The step list is the Browser's history beside the captures, so it
-        // answers the same callers: a local window that can open the thread.
+        // answers the same callers: a local window or person-paired device.
         const input = decodeBrowserStepsCommand(decoded.value);
-        const refusal = await captureReadRefusal(windowId, callerKind, input.threadId, origin);
+        const refusal = await captureReadRefusal(
+          windowId,
+          actsAsHostPerson,
+          input.threadId,
+          origin,
+        );
         if (refusal !== undefined) return refusal;
         return success(
           decodeBrowserStepsResponse({
@@ -827,7 +1028,7 @@ export function createBrowserAutomationRouteHandler(
         // The person's Screenshot control. The ordinary action route keeps
         // nothing, and a model cannot reach this path through tool input.
         const input = decodeBrowserCaptureTakeCommand(decoded.value);
-        const refusal = captureTakeRefusal(windowId, callerKind, input.threadId, origin);
+        const refusal = captureTakeRefusal(windowId, actsAsHostPerson, input.threadId, origin);
         if (refusal !== undefined) return refusal;
         if (input.request.kind !== "screenshot") {
           return failure(
@@ -859,7 +1060,12 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/captures/image") {
         const input = decodeBrowserCaptureImageCommand(decoded.value);
-        const refusal = await captureReadRefusal(windowId, callerKind, input.threadId, origin);
+        const refusal = await captureReadRefusal(
+          windowId,
+          actsAsHostPerson,
+          input.threadId,
+          origin,
+        );
         if (refusal !== undefined) return refusal;
         const found = await dependencies.captures?.read(input.threadId, input.captureId);
         if (found === undefined) {
@@ -890,19 +1096,72 @@ export function createBrowserAutomationRouteHandler(
         url.pathname === "/api/browser/contexts/take-over" ||
         url.pathname === "/api/browser/contexts/hand-back"
       ) {
-        // The person's, and only from a window of this computer that can see
-        // the thread: this route decides it, never the pane. A paired device
-        // may not, even on a page it can tap: it cannot type, and the gateway
-        // does not admit this path for it either. The service adds the rest (a
-        // routine's window, the agent's own sign-in ask).
         const input = decodeBrowserThreadContextCommand(decoded.value);
+        const isTakeOver = url.pathname === "/api/browser/contexts/take-over";
         if (callerKind === "remote-device") {
-          return failure(
-            {
-              category: "unauthorized",
-              message: "Taking over the page is for the person at this computer.",
-            },
-            403,
+          const remote = pairedActor();
+          if (
+            remote === undefined ||
+            remote.principalKind !== "person-paired-device" ||
+            remote.isAgentGrant === true
+          ) {
+            return pairedControlJson(
+              { status: "refused", reason: "remote-control-not-person" },
+              403,
+              origin,
+            );
+          }
+          if (
+            !BROWSER_MODES.some((mode) =>
+              dependencies.authority.canAccessWindow(windowId, input.threadId, mode),
+            )
+          ) {
+            return notThisWindowsThread(origin);
+          }
+          if (dependencies.pairedBrowserControl === undefined) {
+            return failure(
+              { category: "unavailable", message: "Taking over the page is unavailable." },
+              503,
+              origin,
+            );
+          }
+          if (isTakeOver) {
+            const held = await dependencies.pairedBrowserControl.takeOver(
+              remote,
+              input.threadId,
+              request.signal,
+            );
+            if (held.status !== "held") {
+              return pairedControlResponse(held, origin);
+            }
+            const currentSnapshot = dependencies.service.inspectThread(windowId, input.threadId);
+            return success(
+              decodeBrowserAutomationSnapshot({
+                ...withAvailability(windowId, currentSnapshot),
+                pairedLease: {
+                  leaseId: held.leaseId,
+                  expiresAt: held.expiresAt,
+                  target: held.target,
+                },
+              }),
+              origin,
+            );
+          }
+          const handed = await dependencies.pairedBrowserControl.handBackForThread(
+            remote,
+            input.threadId,
+            input.leaseId,
+          );
+          if (handed.status !== "released") {
+            return pairedControlResponse(handed, origin);
+          }
+          return success(
+            decodeBrowserAutomationSnapshot(
+              withAvailability(
+                windowId,
+                dependencies.service.inspectThread(windowId, input.threadId),
+              ),
+            ),
             origin,
           );
         }
@@ -913,10 +1172,7 @@ export function createBrowserAutomationRouteHandler(
         ) {
           return notThisWindowsThread(origin);
         }
-        const hold =
-          url.pathname === "/api/browser/contexts/take-over"
-            ? dependencies.service.takeOver
-            : dependencies.service.handBack;
+        const hold = isTakeOver ? dependencies.service.takeOver : dependencies.service.handBack;
         if (hold === undefined) {
           return failure(
             { category: "unavailable", message: "Taking over the page is unavailable." },
@@ -979,7 +1235,7 @@ export function createBrowserAutomationRouteHandler(
                 // device is left out: it reaches the page only through this
                 // route, which acts on approved origins alone, so a page that
                 // followed a redirect off them would leave it unable to act.
-                ...(callerKind === "local-window" && pictured.kind === "navigate"
+                ...(actsAsHostPerson && pictured.kind === "navigate"
                   ? { startedBy: "person" as const }
                   : {}),
               }),
@@ -1091,6 +1347,36 @@ function corsHeaders(origin: string | null): Record<string, string> {
     "access-control-allow-origin": origin ?? "",
     "access-control-allow-methods": METHODS,
     "access-control-allow-headers": HEADERS,
-    "access-control-expose-headers": "content-type",
+    "access-control-expose-headers": "content-type, retry-after",
   };
+}
+
+function pairedControlJson(
+  payload: PairedBrowserResponse,
+  status: number,
+  origin: string | null,
+  retryAfterSeconds?: number,
+): Response {
+  return new Response(JSON.stringify(decodePairedBrowserResponse(payload)), {
+    status,
+    headers: {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      ...(retryAfterSeconds === undefined ? {} : { "retry-after": String(retryAfterSeconds) }),
+      ...corsHeaders(origin),
+    },
+  });
+}
+
+function pairedControlResponse(result: PairedBrowserResponse, origin: string | null): Response {
+  if (result.status !== "refused") {
+    return pairedControlJson(result, 200, origin);
+  }
+  const status =
+    result.reason === "remote-control-not-person" || result.reason === "authority-ended"
+      ? 403
+      : result.reason === "rate-limited"
+        ? 429
+        : 409;
+  return pairedControlJson(result, status, origin, result.retryAfterSeconds);
 }

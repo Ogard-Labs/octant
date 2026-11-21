@@ -1,7 +1,16 @@
 import { createProductFeedbackThreadScope } from "../browser/productFeedbackThreadScope";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
-import { HubMemberId, ProductFeedbackUpdated, decodeProject } from "@octant/contracts";
+import {
+  ContentIngestedPayload,
+  HubMemberId,
+  ProductFeedbackUpdated,
+  THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
+  decodeProject,
+} from "@octant/contracts";
 import { providerApprovalCall } from "../providers/providerApprovalCall";
+import { makeCodexDriver, type CodexClientPort } from "../providers/codexDriver";
+import type { CodexAppServerConnection } from "../providers/codexProcess";
+import type { CodexServerMessage } from "../providers/codexProtocol";
 import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
 import { createExistingWorktreeCodeFileRootAuthority } from "../wiring/code";
@@ -133,7 +142,10 @@ import { AgentMessageBodyStore } from "../agentMessage/agentMessageBodyStore";
 import { admittedParentCodeContext } from "../agentRun/agentRunParentContext";
 import { EXTERNAL_CONTENT_FRAME_OPEN_PREFIX } from "../context/externalContentFraming";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  ExternalContentTaintProjection,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
@@ -6233,6 +6245,180 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("counts the person's wait through an allow the agent refused, until their later deny", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    let clockNow = "2026-07-21T13:00:00.000Z";
+    const at = (seconds: number) =>
+      new Date(Date.parse("2026-07-21T13:00:00.000Z") + seconds * 1_000).toISOString();
+    const connection = {
+      ...providerConnection(queue),
+      answerApproval: vi.fn((input: { readonly approved: boolean }) => {
+        if (!input.approved) return Effect.void;
+        // The agent takes three seconds to refuse the allow.
+        clockNow = at(8);
+        return Effect.fail({
+          category: "unsupported" as const,
+          message: "The agent only offers Always allow here.",
+        });
+      }),
+    };
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      clock: () => clockNow,
+    });
+    const startOperation = operationId(35);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      const offer = (value: Parameters<typeof providerEvent>[0]) =>
+        Effect.runPromise(Queue.offer(queue, providerEvent(value)));
+      await offer({
+        kind: "tool-start",
+        toolCallId: "call-1",
+        toolName: "Edit",
+        occurredAt: at(0),
+      });
+      clockNow = at(2);
+      await offer({
+        kind: "approval-request",
+        requestId: "ask-always-only",
+        toolCallId: "call-1",
+        action: "Edit",
+        description: "Edit src/a.ts",
+      });
+      let approvalId: string | undefined;
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        approvalId = events
+          .find((event) => event.kind === "approval-requested")
+          ?.approvalId.toString();
+        expect(approvalId).toBeDefined();
+      });
+      const answer = (decision: "approved" | "denied", operation: number) =>
+        fixture.runtime.execute(windowId, {
+          kind: "answer-provider-approval",
+          operationId: operationId(operation),
+          threadId,
+          checkoutId,
+          approvalId: approvalId as never,
+          decision,
+        });
+      clockNow = at(5);
+      await expect(answer("approved", 96)).resolves.toMatchObject({ kind: "provider-turn-state" });
+      clockNow = at(20);
+      await answer("denied", 97);
+      await offer({
+        kind: "tool-success",
+        toolCallId: "call-1",
+        summary: "done",
+        occurredAt: at(40),
+      });
+      await vi.waitFor(async () => {
+        const completed = (await operationEvents(fixture.runtime, startOperation)).find(
+          (event) =>
+            event.kind === "tool-activity" &&
+            event.toolCallId === "call-1" &&
+            event.state === "completed",
+        );
+        // Asked at :02, the allow at :05 refused at :08 put the ask back,
+        // denied at :20: all eighteen seconds are the person's wait.
+        expect(completed).toMatchObject({
+          timing: { startedAt: at(0), endedAt: at(40), approvalWaitMs: 18_000 },
+        });
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("keeps an approval the agent cannot take as asked pending, journals no approval, and still takes a denial", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const refusal =
+      "The agent only offers Always allow here. Approve it for this session, or deny it.";
+    const connection = {
+      ...providerConnection(queue),
+      answerApproval: vi.fn((input: { readonly approved: boolean }) =>
+        input.approved
+          ? Effect.fail({ category: "unsupported" as const, message: refusal })
+          : Effect.void,
+      ),
+    };
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(34);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "ask-always-only",
+            action: "Edit",
+            description: "Edit src/a.ts",
+          }),
+        ),
+      );
+      let approvalId: string | undefined;
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        approvalId = events
+          .find((event) => event.kind === "approval-requested")
+          ?.approvalId.toString();
+        expect(approvalId).toBeDefined();
+      });
+      const answer = (decision: "approved" | "denied", operation: number) =>
+        fixture.runtime.execute(windowId, {
+          kind: "answer-provider-approval",
+          operationId: operationId(operation),
+          threadId,
+          checkoutId,
+          approvalId: approvalId as never,
+          decision,
+        });
+      await expect(answer("approved", 94)).resolves.toMatchObject({
+        failure: { message: refusal },
+      });
+      expect(
+        (await operationEvents(fixture.runtime, startOperation)).some(
+          (event) => event.kind === "approval-answered",
+        ),
+      ).toBe(false);
+      await expect(answer("denied", 95)).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "running",
+      });
+      expect(connection.answerApproval).toHaveBeenLastCalledWith({
+        sessionId,
+        requestId: "ask-always-only",
+        approved: false,
+      });
+      expect(
+        (await operationEvents(fixture.runtime, startOperation)).filter(
+          (event) => event.kind === "approval-answered",
+        ),
+      ).toMatchObject([{ kind: "approval-answered", decision: "denied" }]);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("journals no timing for a call whose bounds a batch stamped", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -10985,6 +11171,456 @@ describe("provider switch handoff", () => {
     }
   });
 
+  function codexRewindHarness(options: {
+    readonly version: string;
+    readonly failFork?: boolean;
+    readonly omitFirstTurnAnchor?: boolean;
+    readonly rewriteFirstCursorMode?: "work";
+  }) {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    const listeners = new Set<(message: CodexServerMessage) => void>();
+    const calls: Array<{ readonly method: string; readonly input: unknown }> = [];
+    let startedThreads = 0;
+    let startedTurns = 0;
+    let startedProcesses = 0;
+    let closedProcesses = 0;
+    let workingDirectory: string | undefined;
+    const emit = (message: CodexServerMessage) => {
+      for (const listener of listeners) listener(message);
+    };
+    const codexThread = (id: string, cwd: string) => ({
+      thread: { id },
+      model: "gpt-5.4",
+      modelProvider: "openai",
+      serviceTier: null,
+      cwd,
+      approvalPolicy: "on-request" as const,
+      sandbox: { type: "workspaceWrite" as const },
+      reasoningEffort: null,
+    });
+    const client: CodexClientPort = {
+      accountRead: async () => ({ account: { type: "chatgpt" }, requiresOpenaiAuth: true }),
+      rateLimitsRead: async () => ({ rateLimits: { rateLimitReachedType: null } }),
+      modelList: async () => ({
+        data: [
+          {
+            id: "gpt-5.4",
+            model: "gpt-5.4",
+            displayName: "GPT-5.4",
+            hidden: false,
+            defaultReasoningEffort: "medium",
+            supportedReasoningEfforts: [],
+            defaultServiceTier: null,
+            serviceTiers: [],
+            inputModalities: ["text"],
+            isDefault: true,
+          },
+        ],
+        nextCursor: null,
+      }),
+      configRead: async () => ({ config: {} }),
+      skillsList: async () => ({ data: [{ skills: [], errors: [] }] }),
+      threadStart: async (input) => {
+        calls.push({ method: "thread/start", input });
+        return codexThread(`thread-${++startedThreads}`, input.cwd);
+      },
+      threadResume: async (input) => {
+        calls.push({ method: "thread/resume", input });
+        return codexThread(input.threadId, workingDirectory ?? "/private/exact");
+      },
+      threadFork: async (input) => {
+        calls.push({ method: "thread/fork", input });
+        if (options.failFork === true) throw new Error("Codex fork failed");
+        return {
+          thread: { id: `copy-of-${input.threadId}` },
+          model: "gpt-5.4",
+          modelProvider: "openai",
+          serviceTier: null,
+          cwd: input.cwd,
+        };
+      },
+      turnStart: async (input) => {
+        calls.push({ method: "turn/start", input });
+        const turnNumber = ++startedTurns;
+        const turnId = `turn-${turnNumber}`;
+        const reply =
+          turnNumber === 1 ? "First reply." : turnNumber === 2 ? "Second reply." : "Third reply.";
+        queueMicrotask(() => {
+          emit({
+            kind: "notification",
+            method: "turn/started",
+            params: {
+              threadId: input.threadId,
+              turn: { id: turnId, status: "inProgress" },
+            },
+          });
+          emit({
+            kind: "notification",
+            method: "item/agentMessage/delta",
+            params: {
+              threadId: input.threadId,
+              turnId,
+              itemId: `msg-${turnNumber}`,
+              delta: reply,
+            },
+          });
+          emit({
+            kind: "notification",
+            method: "turn/completed",
+            params: {
+              threadId: input.threadId,
+              turn: { id: turnId, status: "completed" },
+            },
+          });
+        });
+        return { turn: { id: turnId, status: "inProgress" } };
+      },
+      turnInterrupt: async () => undefined,
+      respondApproval: async () => undefined,
+      respondTool: async () => undefined,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const driver = makeCodexDriver({
+      instanceId: providerInstance,
+      binaryPath: "/usr/local/bin/codex",
+      process: {
+        start: () =>
+          Effect.acquireRelease(
+            Effect.sync(() => {
+              startedProcesses += 1;
+              return {
+                version: options.version,
+                pid: 400 + startedProcesses,
+                rpc: {} as CodexAppServerConnection["rpc"],
+                exited: new Promise<void>(() => undefined),
+              };
+            }),
+            () =>
+              Effect.sync(() => {
+                closedProcesses += 1;
+              }),
+          ),
+      },
+      runtimeRegistry,
+      clientFactory: () => client,
+      idleLeaseMs: 0,
+      clock: () => now,
+      correlationId: () => "80000000-0000-4000-8000-000000000313",
+      requestId: () => "request-1",
+      taskId: () => "task-1",
+      toolCallId: () => "tool-1",
+    });
+    let omittedAnchor = false;
+    let rewroteFirstStart = false;
+    const rewriteMode = options.rewriteFirstCursorMode;
+    const fixture = runtimeFixture({
+      resolveProviderDriver: async () =>
+        rewriteMode === undefined && options.omitFirstTurnAnchor !== true
+          ? driver
+          : {
+              ...driver,
+              acquire: (acquireInput) =>
+                driver.acquire(acquireInput).pipe(
+                  Effect.map((connection) => ({
+                    ...connection,
+                    ...(options.omitFirstTurnAnchor !== true
+                      ? {}
+                      : {
+                          subscribe: connection.subscribe.pipe(
+                            Effect.map((stream) =>
+                              Stream.map(stream, (event) => {
+                                if (event.kind === "completed" && !omittedAnchor) {
+                                  omittedAnchor = true;
+                                  const { nativeAnchor: _dropped, ...withoutAnchor } = event;
+                                  return withoutAnchor;
+                                }
+                                return event;
+                              }),
+                            ),
+                          ),
+                        }),
+                    ...(rewriteMode === undefined
+                      ? {}
+                      : {
+                          start: (startInput) =>
+                            connection.start(startInput).pipe(
+                              Effect.map((handle) => {
+                                const cursor = handle.resumeCursor;
+                                const binding = cursor?.binding;
+                                if (
+                                  rewroteFirstStart ||
+                                  cursor === undefined ||
+                                  binding === undefined
+                                )
+                                  return handle;
+                                rewroteFirstStart = true;
+                                return {
+                                  ...handle,
+                                  resumeCursor: {
+                                    ...cursor,
+                                    binding: {
+                                      ...binding,
+                                      mode: rewriteMode,
+                                    },
+                                  },
+                                };
+                              }),
+                            ),
+                        }),
+                  })),
+                ),
+            },
+      resolveCheckoutRoot: async () => ({
+        checkoutRoot: "/private/exact",
+        ...(workingDirectory === undefined ? {} : { workingDirectory }),
+        shell: "/bin/zsh",
+        credentialReferences: [],
+        environment: {},
+      }),
+      supportsSessionRollback: (current) =>
+        runtimeRegistry.observedState(current.providerInstanceId)?.capabilities.sessionRollback ===
+        "supported",
+    });
+    fixture.setThread(onProvider(providerInstance, "gpt-5.4"));
+    const runTurn = async (
+      op: number,
+      sid: ProviderSessionId,
+      text: string,
+      extra: { readonly toolCatalogHandoff?: boolean } = {},
+    ) => {
+      const promptRef = storedEvidence(op + 200, text);
+      fixture.evidenceValues.set(promptRef.contentId, text);
+      const started = await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(op),
+        threadId,
+        checkoutId,
+        sessionId: sid,
+        prompt: promptRef,
+        ...(extra.toolCatalogHandoff === true ? { toolCatalogHandoff: true as const } : {}),
+      });
+      expect(started).not.toMatchObject({ kind: "operation-failed" });
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(op), 0, 50);
+        expect(frames.map((frame) => frame.event)).toContainEqual(
+          expect.objectContaining({ kind: "operation-state", state: "completed" }),
+        );
+      });
+    };
+    return {
+      fixture,
+      driver,
+      runtimeRegistry,
+      calls,
+      setWorkingDirectory: (next: string) => {
+        workingDirectory = next;
+        fixture.setThread(
+          decodeCodeThread({
+            ...onProvider(providerInstance, "gpt-5.4", 2),
+            workingFolderId: `folder_${"a".repeat(64)}`,
+          }),
+        );
+      },
+      processCounts: () => ({ started: startedProcesses, closed: closedProcesses }),
+      probe: () => Effect.runPromise(Effect.scoped(driver.probe({ instanceId: providerInstance }))),
+      runTwoTurns: async () => {
+        await runTurn(84, sessionId, "Implement this.");
+        if (options.rewriteFirstCursorMode !== undefined) {
+          await runTurn(85, switchSession, "Carry on.", { toolCatalogHandoff: true });
+        } else {
+          await runTurn(85, sessionId, "Carry on.");
+        }
+      },
+      runTurnAfterRewind: () =>
+        runTurn(87, decodeProviderSessionId("90000000-0000-4000-8000-000000000089"), "Try again."),
+      close: async () => {
+        await fixture.runtime.close();
+        fixture.close();
+      },
+    };
+  }
+
+  it("rewinds a Codex 0.143.0+ Code thread onto its own session copy and resumes that copy on the next turn", async () => {
+    const codex = codexRewindHarness({ version: "0.170.0" });
+    try {
+      const probed = await codex.probe();
+      expect(probed.capabilities.sessionRollback).toBe("supported");
+      await codex.runTwoTurns();
+
+      expect(await previewRollback(codex.fixture, 85)).toBe("native");
+      await codex.fixture.runtime.execute(windowId, rewindFrom(85));
+      await codex.runTurnAfterRewind();
+
+      expect(codex.calls).toContainEqual({
+        method: "thread/fork",
+        input: {
+          threadId: "thread-1",
+          lastTurnId: "turn-1",
+          cwd: "/private/exact",
+          excludeTurns: true,
+        },
+      });
+      // The third turn resumes the copied session, leaving thread-1 untouched, and sends no text handoff.
+      const resumes = codex.calls.filter((call) => call.method === "thread/resume");
+      expect(resumes.at(-1)?.input).toMatchObject({ threadId: "copy-of-thread-1" });
+      const turnStarts = codex.calls.filter((call) => call.method === "turn/start");
+      expect(turnStarts.at(-1)?.input).toMatchObject({ threadId: "copy-of-thread-1" });
+      expect(JSON.stringify(turnStarts.at(-1)?.input)).not.toContain("rewound the thread");
+
+      const frames = await codex.fixture.runtime.subscribe(
+        windowId,
+        threadId,
+        operationId(87),
+        0,
+        50,
+      );
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({
+        reason: "rewind-native-session",
+        throughOperationId: operationId(84),
+        nativeSessionTransferred: true,
+      });
+    } finally {
+      await codex.close();
+    }
+  });
+
+  it("reports sessionRollback unsupported and falls back to text handoff on Codex releases older than 0.143.0", async () => {
+    const codex = codexRewindHarness({ version: "0.142.5" });
+    try {
+      const probed = await codex.probe();
+      expect(probed.capabilities.sessionRollback).toBe("unsupported");
+      await codex.runTwoTurns();
+
+      expect(await previewRollback(codex.fixture, 85)).toBe("handoff");
+      await codex.fixture.runtime.execute(windowId, rewindFrom(85));
+      await codex.runTurnAfterRewind();
+
+      expect(codex.calls.some((call) => call.method === "thread/fork")).toBe(false);
+      expect(codex.calls.filter((call) => call.method === "thread/start")).toHaveLength(2);
+      const turnStarts = codex.calls.filter((call) => call.method === "turn/start");
+      expect(JSON.stringify(turnStarts.at(-1)?.input)).toContain("rewound the thread");
+      const frames = await codex.fixture.runtime.subscribe(
+        windowId,
+        threadId,
+        operationId(87),
+        0,
+        50,
+      );
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind" });
+    } finally {
+      await codex.close();
+    }
+  });
+
+  it("falls back cleanly to text handoff when a Codex rewind lacks an anchor, changes folder or mode, or fails to copy", async () => {
+    // 1. Missing turn anchor.
+    const noAnchor = codexRewindHarness({ version: "0.170.0", omitFirstTurnAnchor: true });
+    try {
+      await noAnchor.probe();
+      await noAnchor.runTwoTurns();
+      expect(await previewRollback(noAnchor.fixture, 85)).toBe("handoff");
+      await noAnchor.fixture.runtime.execute(windowId, rewindFrom(85));
+      await noAnchor.runTurnAfterRewind();
+      expect(noAnchor.calls.some((call) => call.method === "thread/fork")).toBe(false);
+      const frames = await noAnchor.fixture.runtime.subscribe(
+        windowId,
+        threadId,
+        operationId(87),
+        0,
+        50,
+      );
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind" });
+    } finally {
+      await noAnchor.close();
+    }
+
+    // 2. Folder changed between the kept turn and the rewind.
+    const movedFolder = codexRewindHarness({ version: "0.170.0" });
+    try {
+      await movedFolder.probe();
+      await movedFolder.runTwoTurns();
+      movedFolder.setWorkingDirectory("/private/other-folder");
+      expect(await previewRollback(movedFolder.fixture, 85)).toBe("handoff");
+      await movedFolder.fixture.runtime.execute(windowId, rewindFrom(85));
+      await movedFolder.runTurnAfterRewind();
+      expect(movedFolder.calls.some((call) => call.method === "thread/fork")).toBe(false);
+      const frames = await movedFolder.fixture.runtime.subscribe(
+        windowId,
+        threadId,
+        operationId(87),
+        0,
+        50,
+      );
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind" });
+    } finally {
+      await movedFolder.close();
+    }
+
+    // 3. Cursor bound to a different mode than Code.
+    const differentMode = codexRewindHarness({
+      version: "0.170.0",
+      rewriteFirstCursorMode: "work",
+    });
+    try {
+      await differentMode.probe();
+      await differentMode.runTwoTurns();
+      expect(await previewRollback(differentMode.fixture, 85)).toBe("handoff");
+      await differentMode.fixture.runtime.execute(windowId, rewindFrom(85));
+      await differentMode.runTurnAfterRewind();
+      expect(differentMode.calls.some((call) => call.method === "thread/fork")).toBe(false);
+      const frames = await differentMode.fixture.runtime.subscribe(
+        windowId,
+        threadId,
+        operationId(87),
+        0,
+        50,
+      );
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind" });
+    } finally {
+      await differentMode.close();
+    }
+
+    // 4. Fork copy failure falls back to text handoff and closes the copy process.
+    const copyFailed = codexRewindHarness({ version: "0.170.0", failFork: true });
+    try {
+      await copyFailed.probe();
+      await copyFailed.runTwoTurns();
+      expect(await previewRollback(copyFailed.fixture, 85)).toBe("native");
+      await copyFailed.fixture.runtime.execute(windowId, rewindFrom(85));
+      await copyFailed.runTurnAfterRewind();
+      expect(copyFailed.calls.some((call) => call.method === "thread/fork")).toBe(true);
+      expect(copyFailed.calls.filter((call) => call.method === "thread/start")).toHaveLength(2);
+      const turnStarts = copyFailed.calls.filter((call) => call.method === "turn/start");
+      expect(JSON.stringify(turnStarts.at(-1)?.input)).toContain("rewound the thread");
+      const frames = await copyFailed.fixture.runtime.subscribe(
+        windowId,
+        threadId,
+        operationId(87),
+        0,
+        50,
+      );
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind" });
+      expect(copyFailed.processCounts().closed).toBe(copyFailed.processCounts().started);
+    } finally {
+      await copyFailed.close();
+    }
+  });
+
   it("continues a harness session cut back at the last kept turn after a rewind", async () => {
     const drivers = twoHarnesses();
     const forkProviderSession = vi.fn(async () => ({
@@ -12739,6 +13375,10 @@ function runtimeFixture(options: {
   recordExternalContentIngestion?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["recordExternalContentIngestion"];
+  useSharedExternalContentStore?: true;
+  resolvePullRequestLineNotesAuthorship?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["resolvePullRequestLineNotesAuthorship"];
   forkProviderSession?: Parameters<typeof createCodeOperationRuntime>[0]["forkProviderSession"];
   supportsSessionRollback?: Parameters<
     typeof createCodeOperationRuntime
@@ -12761,12 +13401,24 @@ function runtimeFixture(options: {
       .register("code.review-finding-updated@1", 1, CodeReviewFindingUpdated)
       .register("feedback.note-captured@1", 1, ProductFeedbackCaptured)
       .register("feedback.note-delivered@1", 1, ProductFeedbackDelivered)
-      .register("feedback.note-updated@1", 1, ProductFeedbackUpdated),
+      .register("feedback.note-updated@1", 1, ProductFeedbackUpdated)
+      .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload),
     projections: new ProjectionRegistry()
       .register(new AggregateHeadsProjection())
       .register(new CodeProjection())
-      .register(new ProductFeedbackProjection()),
+      .register(new ProductFeedbackProjection())
+      .register(new ExternalContentTaintProjection()),
     clock: options.clock ?? (() => now),
+  });
+  const sharedExternalContentStore = new ExternalContentIngestionStore({
+    journal,
+    connection,
+    uuid: randomUUID,
+    clock: options.clock ?? (() => now),
+    actor: {
+      kind: "system",
+      actorId: Schema.decodeUnknownSync(ActorId)("90000000-0000-4000-8000-0000000000ff"),
+    },
   });
   if (options.failRuntimeWorkJournal === true) {
     const append = journal.append.bind(journal);
@@ -13090,9 +13742,18 @@ function runtimeFixture(options: {
     ...(options.forkMergeBackContext === "none"
       ? {}
       : { forkMergeBackContext: options.forkMergeBackContext ?? selectForkMergeBack }),
-    ...(options.recordExternalContentIngestion === undefined
+    ...(options.recordExternalContentIngestion !== undefined
+      ? { recordExternalContentIngestion: options.recordExternalContentIngestion }
+      : options.useSharedExternalContentStore === true
+        ? {
+            recordExternalContentIngestion: (input) => sharedExternalContentStore.record(input),
+          }
+        : {}),
+    ...(options.resolvePullRequestLineNotesAuthorship === undefined
       ? {}
-      : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
+      : {
+          resolvePullRequestLineNotesAuthorship: options.resolvePullRequestLineNotesAuthorship,
+        }),
     ...(options.forkProviderSession === undefined
       ? {}
       : { forkProviderSession: options.forkProviderSession }),
@@ -13272,6 +13933,7 @@ function runtimeFixture(options: {
       gitObservationReadHook = hook;
     },
     reviewFindings: () => readCodeReviewFindings(connection, threadId),
+    readExternalContentTaint: () => readThreadExternalContentTaint(connection, String(threadId)),
     /** Journal a runtime work record directly, as an earlier process left it. */
     appendRuntimeWork: (work: Record<string, unknown> & { readonly id: string }) =>
       journal.append({
@@ -14321,7 +14983,25 @@ describe("the threads tool on Code turns", () => {
         prompt: fixture.prompt,
       });
       await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
-      await ask([...Array<"read">(9).fill("read"), ...Array<"wait">(5).fill("wait")], "first");
+      await ask(
+        [
+          "read",
+          "read",
+          "wait",
+          "read",
+          "read",
+          "wait",
+          "read",
+          "read",
+          "wait",
+          "read",
+          "read",
+          "wait",
+          "read",
+          "wait",
+        ],
+        "first",
+      );
       await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalledTimes(14));
       expect(answers().filter((entry) => entry.reason === "rate-limited")).toHaveLength(2);
       expect(answer).toHaveBeenCalledTimes(12);
@@ -14349,6 +15029,67 @@ describe("the threads tool on Code turns", () => {
           .map((entry) => entry.reason),
       ).toEqual([undefined, undefined]);
       expect(answer).toHaveBeenCalledTimes(14);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("sanitizes checkout paths and secrets in provider tool names before journaling a loop notice", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const secretCheckout = "/private/exact-secret-repo";
+    const fixture = runtimeFixture({
+      checkoutRoot: secretCheckout,
+      provider: providerDriver(connection),
+      resolveStrict: () => false,
+    });
+    const rawToolName = `mcp__${secretCheckout}/sk-ant-api03-1234567890abcdefghijklmnop`;
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1214),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
+      for (let i = 1; i <= 6; i += 1) {
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "tool-start",
+              sequence: i * 2 - 1,
+              toolCallId: `tool-${i}`,
+              toolName: rawToolName,
+            }),
+          ),
+        );
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "tool-call-content",
+              sequence: i * 2,
+              toolCallId: `tool-${i}`,
+              part: "input",
+              text: '{"q":"same"}',
+            }),
+          ),
+        );
+      }
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
+
+      const conversation = fixture.conversation();
+      const loopNotice = conversation.turns[0]?.loopNotice;
+      expect(loopNotice).toBeDefined();
+      expect(loopNotice?.kind).toBe("turn-loop-noticed");
+      expect(loopNotice?.toolName).toContain("[CHECKOUT]");
+      expect(loopNotice?.toolName).not.toContain(secretCheckout);
+      expect(loopNotice?.toolName).not.toContain("sk-ant-api03-1234567890abcdefghijklmnop");
     } finally {
       await fixture.runtime.close();
       fixture.close();
@@ -18734,6 +19475,332 @@ describe("continuing a Code turn a restart cut off", () => {
       expect(next.connection.send).not.toHaveBeenCalled();
     } finally {
       for (const host of hosts) host.close();
+    }
+  });
+});
+
+describe("pull request line notes runtime admission", () => {
+  it("does not record an outside-content mark when a busy thread refuses pull request line notes, and records it once admitted", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["pull-request-line-notes"] },
+    }));
+    const host = runtimeFixture({
+      provider: providerDriver(connection),
+      recordExternalContentIngestion,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+    });
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    try {
+      await expect(
+        host.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(71),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: evidence(40),
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+
+      // While the first turn is still running, sending outside-author PR line
+      // notes must be refused without permanently marking the thread.
+      await expect(
+        host.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(72),
+          threadId,
+          checkoutId,
+          sessionId: decodeProviderSessionId("b0000000-0000-4000-8000-000000000072"),
+          prompt: evidence(40),
+          pullRequestLineNotesSource: source,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "failed" });
+      expect(recordExternalContentIngestion).not.toHaveBeenCalled();
+
+      // Finish the first turn so the thread can admit the line-notes follow-up.
+      await expect(
+        host.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(73),
+          threadId,
+          checkoutId,
+        }),
+      ).resolves.toMatchObject({ state: "interrupted" });
+
+      await expect(
+        host.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(74),
+          threadId,
+          checkoutId,
+          sessionId: decodeProviderSessionId("b0000000-0000-4000-8000-000000000074"),
+          prompt: evidence(40),
+          pullRequestLineNotesSource: source,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      expect(recordExternalContentIngestion).toHaveBeenCalledTimes(1);
+      expect(recordExternalContentIngestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId,
+          provenance: { origin: "external-content", sourceLabel: "pull-request-line-notes" },
+          correlationId: operationId(74),
+          authorized: true,
+        }),
+      );
+    } finally {
+      host.close();
+    }
+  });
+
+  it("does not record outside-content provenance when product feedback changes before delivery", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const entered = Promise.withResolvers<void>();
+    const credential = Promise.withResolvers<string>();
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["pull-request-line-notes"] },
+    }));
+    const host = runtimeFixture({
+      provider: providerDriver(connection),
+      recordExternalContentIngestion,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+      credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
+      credentialResolver: {
+        resolve: () => {
+          entered.resolve();
+          return credential.promise;
+        },
+      },
+    });
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    try {
+      const captured = await host.feedback.execute(windowId, {
+        kind: "capture-product-feedback",
+        threadId,
+        mode: "code",
+        contextId: operationId(40),
+        point: { x: 0.3, y: 0.5 },
+        comment: "Original product note",
+      });
+      if (captured.kind !== "feedback-captured") throw Error("Fixture capture refused");
+
+      const pending = host.runtime.execute(
+        windowId,
+        {
+          kind: "start-provider-turn",
+          operationId: operationId(75),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: evidence(40),
+          pullRequestLineNotesSource: source,
+        },
+        { initiator: "user" },
+      );
+      await entered.promise;
+      expect(
+        await host.feedback.execute(
+          windowId,
+          {
+            kind: "update-product-feedback",
+            noteId: captured.note.id,
+            expectedVersion: captured.note.version,
+            comment: "Edited while turn prepared",
+          },
+          { admissionCurrent: () => true },
+        ),
+      ).toMatchObject({ kind: "feedback-updated" });
+
+      credential.resolve("credential-value");
+      await expect(pending).resolves.toMatchObject({ admission: "refused", state: "failed" });
+      expect(connection.send).not.toHaveBeenCalled();
+      expect(recordExternalContentIngestion).not.toHaveBeenCalled();
+      expect(host.feedback.pendingForTurn(threadId)).toMatchObject([
+        { comment: "Edited while turn prepared", version: 2 },
+      ]);
+    } finally {
+      credential.resolve("credential-value");
+      host.close();
+    }
+  });
+
+  it("refuses fail-closed and keeps pending product feedback intact when outside-content provenance recording fails", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "refused" as const,
+      reason: "malformed" as const,
+    }));
+    const host = runtimeFixture({
+      provider: providerDriver(connection),
+      recordExternalContentIngestion,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+    });
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    try {
+      const captured = await host.feedback.execute(windowId, {
+        kind: "capture-product-feedback",
+        threadId,
+        mode: "code",
+        contextId: operationId(40),
+        point: { x: 0.3, y: 0.5 },
+        comment: "Must survive provenance failure",
+      });
+      if (captured.kind !== "feedback-captured") throw Error("Fixture capture refused");
+
+      await expect(
+        host.runtime.execute(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: operationId(76),
+            threadId,
+            checkoutId,
+            sessionId,
+            prompt: evidence(40),
+            pullRequestLineNotesSource: source,
+          },
+          { initiator: "user" },
+        ),
+      ).resolves.toMatchObject({ admission: "refused", state: "failed" });
+      expect(connection.send).not.toHaveBeenCalled();
+      expect(recordExternalContentIngestion).toHaveBeenCalledTimes(1);
+      expect(host.feedback.pendingForTurn(threadId)).toMatchObject([
+        { comment: "Must survive provenance failure", version: 1 },
+      ]);
+    } finally {
+      host.close();
+    }
+  });
+
+  it("commits product feedback delivery and outside-content provenance together in the shared journal, and leaves neither on refusal", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const entered = Promise.withResolvers<void>();
+    const credential = Promise.withResolvers<string>();
+    let pauseCredentials = true;
+    const host = runtimeFixture({
+      provider: providerDriver(connection),
+      useSharedExternalContentStore: true,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+      credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
+      credentialResolver: {
+        resolve: () => {
+          if (pauseCredentials) {
+            entered.resolve();
+            return credential.promise;
+          }
+          return Promise.resolve("credential-value");
+        },
+      },
+    });
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    try {
+      const captured = await host.feedback.execute(windowId, {
+        kind: "capture-product-feedback",
+        threadId,
+        mode: "code",
+        contextId: operationId(40),
+        point: { x: 0.3, y: 0.5 },
+        comment: "Shared journal note",
+      });
+      if (captured.kind !== "feedback-captured") throw Error("Fixture capture refused");
+
+      // Changing the note while preparing refuses the turn with neither record persisted.
+      const refused = host.runtime.execute(
+        windowId,
+        {
+          kind: "start-provider-turn",
+          operationId: operationId(77),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: evidence(40),
+          pullRequestLineNotesSource: source,
+        },
+        { initiator: "user" },
+      );
+      await entered.promise;
+      expect(
+        await host.feedback.execute(
+          windowId,
+          {
+            kind: "update-product-feedback",
+            noteId: captured.note.id,
+            expectedVersion: captured.note.version,
+            comment: "Shared journal note v2",
+          },
+          { admissionCurrent: () => true },
+        ),
+      ).toMatchObject({ kind: "feedback-updated" });
+      credential.resolve("credential-value");
+      await expect(refused).resolves.toMatchObject({ admission: "refused", state: "failed" });
+      expect(host.readExternalContentTaint().externalContentIngested).toBe(false);
+      expect(host.feedback.pendingForTurn(threadId)).toMatchObject([
+        { comment: "Shared journal note v2", version: 2 },
+      ]);
+
+      // Retrying cleanly commits both the feedback delivery and the provenance record together.
+      pauseCredentials = false;
+      await expect(
+        host.runtime.execute(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: operationId(78),
+            threadId,
+            checkoutId,
+            sessionId: decodeProviderSessionId("b0000000-0000-4000-8000-000000000078"),
+            prompt: evidence(40),
+            pullRequestLineNotesSource: source,
+          },
+          { initiator: "user" },
+        ),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      expect(host.readExternalContentTaint()).toMatchObject({
+        externalContentIngested: true,
+        ingestedSources: ["pull-request-line-notes"],
+      });
+      expect(host.feedback.pendingForTurn(threadId)).toEqual([]);
+      expect(await host.feedback.list(windowId, threadId)).toMatchObject([
+        { comment: "Shared journal note v2", lifecycle: "delivered", version: 3 },
+      ]);
+    } finally {
+      credential.resolve("credential-value");
+      host.close();
     }
   });
 });

@@ -5,6 +5,8 @@ import { createDesktopPaneClient } from "@octant/client-runtime/desktop-pane-cli
 import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
+import type { PullRequestReviewClient } from "@octant/client-runtime/pull-request-review-client";
+import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
 import type {
   ProjectAction,
@@ -35,6 +37,7 @@ import { ProjectFoldersSection } from "./ProjectFoldersSection";
 import type { ExtraFolderChange, ProjectChange } from "./useProjectController";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
 import { ProjectAutoReviewerSection } from "./ProjectAutoReviewerSection";
+import { ProjectPullRequestReviewerSection } from "../code/PullRequestReviewerSettings";
 import {
   ProjectModelRolesSection,
   type ProjectModelRolesSectionProps,
@@ -156,6 +159,8 @@ export interface ProjectOverviewProps {
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
   /** Off hides the Project's spend ceiling row, unless a ceiling is set. */
   readonly spendCeilingShown?: boolean;
+  readonly pullRequestReviewClient?: PullRequestReviewClient;
+  readonly providerSnapshot?: ProviderRegistrySnapshot;
   /** Absent when the window cannot reach the host's model roles; the Models section is then not shown. */
   readonly modelRoles?: Omit<ProjectModelRolesSectionProps, "projectId" | "disabled">;
 }
@@ -788,6 +793,20 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                     (await props.onAutoReviewerChange?.(props.project.id, reviewer)) ?? false
                   }
                   project={props.project}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type === "code" && props.pullRequestReviewClient !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-pr-reviewer`}
+                label="Pull request reviewer"
+                summary="Optional second-model review on pushed pull request heads"
+              >
+                <ProjectPullRequestReviewerSection
+                  client={props.pullRequestReviewClient}
+                  disabled={archived || connectionStale}
+                  projectId={props.project.id}
+                  providerSnapshot={props.providerSnapshot}
                 />
               </ProjectOverviewInspector>
             ) : null}

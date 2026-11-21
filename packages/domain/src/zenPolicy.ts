@@ -1102,31 +1102,6 @@ export function processZenCommand(
 }
 
 /**
- * Check whether a Zen space's checklist items could implicitly enter
- * persistent task or Thread Board projections. Returns true if the space
- * is clean (no implicit task leakage).
- */
-export function checkChecklistIsolation(space: ZenSpace): boolean {
-  // Zen-local checklist items are bounded by the ZenSpace aggregate and
-  // never reference thread IDs or board models. This is a structural invariant.
-  for (const element of space.elements) {
-    if (element.kind === "checklist") {
-      // Checklist items only have itemId, text, and done — no thread/board refs
-      for (const item of element.items) {
-        if (
-          typeof item.itemId !== "string" ||
-          typeof item.text !== "string" ||
-          typeof item.done !== "boolean"
-        ) {
-          return false;
-        }
-      }
-    }
-  }
-  return true;
-}
-
-/**
  * Resolve accessibility fallbacks for a Zen appearance given system settings.
  */
 export function resolveAccessibilityFallbacks(

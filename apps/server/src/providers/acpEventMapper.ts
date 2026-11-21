@@ -59,6 +59,8 @@ export interface AcpEventContext {
   readonly unnamedPermissionDescription?: string;
   /** The profile's `unseenChildCalls`. */
   readonly unseenChildCalls?: { readonly readOnlyAgents: ReadonlyArray<string> };
+  /** The profile's `toleratesStrayUpdates`. */
+  readonly toleratesStrayUpdates?: true;
   /**
    * The calls Octant never saw that an agent without child sessions asked
    * permission for, each already journaled as a subagent run.
@@ -80,7 +82,10 @@ export type AcpMappedPermission =
       readonly providerRequestId: string | number;
       /** The ACP tool kind the agent declared, or `tool` when it named none. */
       readonly toolKind: string;
-      readonly allowOptionId: string;
+      /** Absent where the agent offers only its remember-this option. */
+      readonly allowOptionId?: string;
+      /** The agent's own remember-this option, where it offers one. */
+      readonly allowAlwaysOptionId?: string;
       readonly rejectOptionId: string;
       readonly event: ProviderRuntimeEvent;
       /** Events journaled before the approval, in order. */
@@ -215,8 +220,12 @@ function mapTool(
     return [protocolFailure(`${context.displayName} tool update was missing an ID.`)];
   const state = context.tools.get(providerId);
   if (update.sessionUpdate === "tool_call") {
-    if (state !== undefined)
+    if (state !== undefined) {
+      // A repeated start restates the call: it is read as an update.
+      if (context.toleratesStrayUpdates === true)
+        return mapTool(context, { ...update, sessionUpdate: "tool_call_update" });
       return [protocolFailure(`${context.displayName} repeated a tool start.`)];
+    }
     // A tool_call may carry its kind but no title; the kind is still the
     // provider's own bounded word for the call and reads better than a bare
     // fallback. The provider's call ID never doubles as the display name.
@@ -235,10 +244,19 @@ function mapTool(
       ...childRun(context, created, update),
     ];
   }
-  if (state === undefined)
+  if (state === undefined) {
+    // An update for a call never started (a subagent's call) starts it first.
+    if (context.toleratesStrayUpdates === true)
+      return [
+        ...mapTool(context, { ...update, sessionUpdate: "tool_call" }),
+        ...mapTool(context, update),
+      ];
     return [protocolFailure(`${context.displayName} updated a tool that was not started.`)];
-  if (state.terminal)
+  }
+  if (state.terminal) {
+    if (context.toleratesStrayUpdates === true) return [{ kind: "ignored" }];
     return [protocolFailure(`${context.displayName} repeated a terminal tool update.`)];
+  }
   const title = normalized(update.title, SUMMARY_MAX_CHARACTERS);
   const toolKind = normalized(update.kind, LABEL_MAX_CHARACTERS);
   if (title !== undefined) state.title = title;
@@ -472,10 +490,17 @@ export function mapAcpNotification(
   notification: AcpServerNotification,
 ): ReadonlyArray<AcpMappedNotification> {
   if (notification.params.sessionId !== context.sourceSessionId) {
+    // A subagent's own session reports under its id; such an agent's turn
+    // does not fail on it.
+    if (context.toleratesStrayUpdates === true) return [{ kind: "ignored" }];
     return [protocolFailure(`${context.displayName} update did not match the active session.`)];
   }
-  if (context.terminal)
+  if (context.terminal) {
+    // Usage, background-command replies and scheduled wakes arrive after the
+    // prompt answered; they change nothing about the finished turn.
+    if (context.toleratesStrayUpdates === true) return [{ kind: "ignored" }];
     return [protocolFailure(`${context.displayName} sent an update after terminal state.`)];
+  }
   const update = notification.params.update;
   switch (update.sessionUpdate) {
     case "agent_message_chunk":
@@ -645,8 +670,40 @@ export function mapAcpPermissionRequest(
     };
   }
   const allow = request.params.options.find((option) => option.kind === "allow_once");
+  const allowAlways = request.params.options.find((option) => option.kind === "allow_always");
   const reject = request.params.options.find((option) => option.kind.startsWith("reject"));
-  if (allow === undefined || reject === undefined) {
+  // A request with no allow option is a question the agent asks through its
+  // permission channel: each other option is an answer, and a reject option
+  // is what skipping the question sends. An allow
+  // option is never an answer: offered `allow_always` and a reject, the
+  // chosen allow went back through the question path, so Plan and one-call
+  // approvals never saw it.
+  if (
+    context.toleratesStrayUpdates === true &&
+    request.params.options.length > 0 &&
+    !request.params.options.some((option) => option.kind.startsWith("allow"))
+  ) {
+    const answers = request.params.options.filter((option) => !option.kind.startsWith("reject"));
+    return {
+      kind: "question",
+      requestId,
+      providerRequestId: request.id,
+      optionIds: new Map(answers.map((option) => [option.name, option.optionId])),
+      ...(reject === undefined ? {} : { skipOptionId: reject.optionId }),
+      event: mappedEvent(context, {
+        kind: "user-input-request",
+        requestId,
+        prompt: title,
+        options: answers.map((option) => ({ label: option.name })),
+      }),
+    };
+  }
+  // Such an agent may offer only `allow_always` beside its reject; that is
+  // still an approval, which the driver answers with allow-always only where
+  // approvals hold for the session.
+  const approvable =
+    allow !== undefined || (context.toleratesStrayUpdates === true && allowAlways !== undefined);
+  if (!approvable || reject === undefined) {
     return {
       kind: "protocol-failure",
       failure: {
@@ -665,7 +722,8 @@ export function mapAcpPermissionRequest(
     requestId,
     providerRequestId: request.id,
     toolKind,
-    allowOptionId: allow.optionId,
+    ...(allow === undefined ? {} : { allowOptionId: allow.optionId }),
+    ...(allowAlways === undefined ? {} : { allowAlwaysOptionId: allowAlways.optionId }),
     rejectOptionId: reject.optionId,
     ...(preceding.length === 0 ? {} : { preceding }),
     event: mappedEvent(context, {

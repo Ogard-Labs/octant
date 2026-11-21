@@ -3984,6 +3984,62 @@ describe("useCodeController", () => {
     });
   });
 
+  it("sends pull request line notes to a linked thread that is not open with pullRequestLineNotesSource", async () => {
+    const executeOperation = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "provider-turn-state", state: "running" })
+      .mockResolvedValueOnce({
+        kind: "operation-failed",
+        failure: { category: "waiting", message: "A turn is already running on this thread." },
+      });
+    const putEvidence = vi.fn(async () => ({
+      contentId: "80000000-0000-4000-8000-000000000001",
+      digest: "a".repeat(64),
+      byteLength: 24,
+    }));
+    const client = fakeClient({
+      executeOperation: executeOperation as never,
+      putEvidence: putEvidence as never,
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    let outcome: Awaited<ReturnType<typeof result.current.sendPullRequestLineNotes>> | undefined;
+    await act(async () => {
+      outcome = await result.current.sendPullRequestLineNotes(
+        ids.thread,
+        "Notes on the changed lines:\n\n1. src/refresh.ts, new line 12\n   Why 42?",
+        source,
+      );
+    });
+    expect(outcome).toEqual({ status: "sent" });
+    expect(putEvidence).toHaveBeenCalledWith(
+      ids.thread,
+      "Notes on the changed lines:\n\n1. src/refresh.ts, new line 12\n   Why 42?",
+    );
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "start-provider-turn",
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        pullRequestLineNotesSource: source,
+      }),
+    );
+
+    await act(async () => {
+      outcome = await result.current.sendPullRequestLineNotes(ids.thread, "Second try", source);
+    });
+    expect(outcome).toEqual({
+      status: "refused",
+      message: "A turn is already running on this thread.",
+    });
+  });
+
   it("marks a manual follow-up with a strictly newer trigger sequence", async () => {
     const executeFollowUp = vi.fn(async () => ({ kind: "follow-up-updated" }) as never);
     const client = fakeClient({
@@ -4722,5 +4778,55 @@ describe("useCodeController moveThread choices", () => {
     const outcome = await result.current.moveThread(ids.thread, ids.project);
     expect(outcome.status).toBe("ok");
     expect(sentCommands(client)).toContain("move-code-thread");
+  });
+
+  it("carries the updated thread version into a sequential done-when save right after saving coordinator bounds", async () => {
+    const initial = { ...thread(1), coordinator: true as const };
+    let currentVersion = 1;
+    const seen: Array<{ readonly kind: string; readonly expectedVersion?: number }> = [];
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => ({ ...bootstrap(), threads: [initial] })),
+      execute: vi.fn(async (command: CodeCommand) => {
+        if (
+          command.kind === "set-code-thread-coordinator-bounds" ||
+          command.kind === "set-code-thread-coordinator-done-when"
+        ) {
+          seen.push({ kind: command.kind, expectedVersion: command.expectedVersion });
+          expect(command.expectedVersion).toBe(currentVersion);
+          currentVersion += 1;
+          return {
+            kind: "thread-updated",
+            thread: { ...initial, version: currentVersion },
+          } as CodeCommandResult;
+        }
+        throw new Error(`Unexpected command ${command.kind}`);
+      }),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    // Invoke both saves sequentially in one async block without awaiting a React render in between.
+    await act(async () => {
+      const boundsOutcome = await result.current.setThreadCoordinatorBounds(ids.thread, {
+        rounds: 4,
+      });
+      expect(boundsOutcome).toEqual({ status: "ok" });
+      const doneWhenOutcome = await result.current.setThreadCoordinatorDoneWhen(ids.thread, {
+        items: [
+          {
+            kind: "pull-request-merged",
+            repositoryOwner: "Ogard-Labs",
+            repositoryName: "octant",
+            number: 42,
+          },
+        ],
+      });
+      expect(doneWhenOutcome).toEqual({ status: "ok" });
+    });
+
+    expect(seen).toEqual([
+      { kind: "set-code-thread-coordinator-bounds", expectedVersion: 1 },
+      { kind: "set-code-thread-coordinator-done-when", expectedVersion: 2 },
+    ]);
   });
 });

@@ -1,5 +1,6 @@
 import type { WindowsTerminalShell } from "@octant/contracts";
 import type { OctantMode, ProviderContextBlock } from "@octant/contracts";
+import { appToolHostLines, type OfferedAppTool } from "../providers/appToolHostLines";
 
 /**
  * The stable prefix every harness turn starts with. It names the tools by
@@ -34,7 +35,7 @@ const ABOUT_OCTANT = [
   "About Octant:",
   "- Octant is a local-first workspace on the person's computer for Chat, Work, and Code with AI models from several providers.",
   "- A Chat thread is a conversation with no folder, filesystem, or shell. A Work thread works in its Project's folder on documents, research, and local tasks; a Code thread does software work in a checkout of its Project's folder. Both may read, write, and run commands there at the thread's access level. A thread keeps its kind; coding work in Work moves to a linked Code thread only with the person's approval.",
-  "- A Project groups threads. Work and Code Projects have a board showing each thread's state. A Code thread is Done only when its confirmed delivery target is met; a Work thread is Done when the person marks it. You can never mark a thread Done: report what is finished and what is left.",
+  "- A Project groups threads. Work and Code Projects have a board showing each thread's state. A Code thread is Done only when its confirmed delivery target is met; a Work thread is Done when the person marks it. You can never mark a thread Done: when octant_report_finished is offered, report finished with proof from host-run checks, and otherwise report what is finished and what is left.",
   "- The access level decides which actions the person approves first. Plan mode is read-only: investigate and propose, change nothing.",
   "- Project memory is the Project's curated notes; they reach every thread in the Project. When a memory tool is offered, keep durable facts and decisions there; below Full access the person approves each change unless the Project lets agents write it.",
   "- Skills the person turned on arrive as instructions. When a skill tool is offered, load a skill whose description fits the task before you start it.",
@@ -86,61 +87,39 @@ export function nativeHarnessInstructions(
 }
 
 /**
- * What each Octant tool is for, in one line. A tool's own schema says how to
- * call it; this says when to reach for it, which a model meeting `octant_apple`
- * for the first time cannot infer from a parameter list.
+ * The harness's own tools that need a line beside the shared Octant guide.
+ * Every `octant_*` line comes from `appToolHostLines`, the one source every
+ * runtime reads, so the harness says the same thing about a tool as Codex or
+ * Claude Code hears.
  */
-const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
+const HARNESS_TOOL_LINES: Readonly<Record<string, string>> = {
   diagnostics:
-    "run the checkout's typecheck and lint and get the problems back as a short list of file, line, and message; use it after edits instead of reading raw command output",
-  octant_agents: "start, watch, and stop helper agents that work beside you",
-  octant_ask_thread: "ask a Chat thread the user mentioned something and wait for its reply",
-  octant_android:
-    "drive an Android emulator: boot, install, launch, read the screen, tap, type, read app logs",
-  octant_apple: "build, test, and run Apple apps, drive the iOS Simulator, and read app logs",
-  octant_browser: "drive the built-in browser: open pages, read them, click, type, screenshot",
-  octant_canvas: "write substantial deliverables as a Canvas document the user can open",
-  octant_code:
-    "ask the language server about a saved file: its errors, where a name is defined, where it is used",
-  octant_computer: "operate macOS apps on the user's desktop",
-  octant_create_image:
-    "generate a picture with an image model instead of drawing it as SVG; the person picks the model and confirms first",
-  octant_credential:
-    "have the person authorize a credential for a registered operation or saved command; not a command runner",
-  octant_debug:
-    "run a program of the checkout under the debugger: breakpoints, stepping, the stopped program's stack and variables",
-  octant_github:
-    "read the repository's issues, pull requests, and projects, one issue in full, or search them",
-  octant_memory:
-    "read this Project's memory and add, replace, or retract an entry; below Full access the user confirms each change unless the Project lets agents write it",
-  octant_offer_side_task: "offer the user a separate task for work outside this request",
-  octant_past_threads: "search what Octant remembers of the user's earlier threads",
-  octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",
-  octant_pull_request:
-    "open or change this thread's own pull request (draft, stacked, ready) when the user asks, or watch it to be woken when checks finish or reviews arrive instead of polling",
-  octant_routines:
-    "see this Project's routines, ask the user to pause or archive one this thread started, or report a routine run's result",
-  octant_side_chat_list_files: "list the files of the thread this side chat is about",
-  octant_side_chat_read_file: "read one file of the thread this side chat is about",
-  octant_side_chat_search_files: "search the files of the Code thread this side chat is about",
-  octant_terminal: "run long-lived processes such as dev servers and read their output",
-  octant_threads:
-    "see this Project's other threads (list, read, wait); its operation list names anything more this turn may do",
-  octant_zen: "read and arrange this Zen space: pin threads, add widgets, move elements",
+    "After edits, run the checkout's typecheck and lint with diagnostics and get the problems back as file, line, and message instead of reading raw command output.",
   skill:
-    "list the skills active for this thread and load one's instructions when the task matches it; skills the person selected for this turn are already in your context",
+    "When a skill fits the task, list the skills active for this thread and load its instructions with skill; skills the person selected for this turn are already in your context.",
 };
 
 /**
- * A guide to the Octant tools this turn offers, or undefined when it offers
- * none. Names are sorted so the same tool set always yields the same bytes and
+ * A guide to the Octant tools this turn offers, or undefined when it has
+ * nothing to add. A line the turn already carries as an instruction (Chat,
+ * Work, Code, and child runs send the shared lines as instruction blocks) is
+ * left out, so each tool is described once in the system prompt. Lines are
+ * sorted by tool name so the same tool set always yields the same bytes and
  * the provider's prefix cache survives.
  */
-export function nativeHarnessToolGuide(toolNames: ReadonlyArray<string>): string | undefined {
-  const lines = [...new Set(toolNames)]
-    .filter((name) => OCTANT_TOOL_PURPOSE[name] !== undefined)
-    .sort()
-    .map((name) => `- ${name}: ${OCTANT_TOOL_PURPOSE[name]}`);
+export function nativeHarnessToolGuide(
+  tools: ReadonlyArray<OfferedAppTool>,
+  alreadySent: ReadonlyArray<string> = [],
+): string | undefined {
+  const sent = new Set(alreadySent);
+  const harness = [...new Set(tools.map((tool) => tool.name))].flatMap((name) => {
+    const text = HARNESS_TOOL_LINES[name];
+    return text === undefined ? [] : [{ tool: name, text }];
+  });
+  const lines = [...appToolHostLines(tools), ...harness]
+    .filter((line) => !sent.has(line.text))
+    .sort((left, right) => (left.tool < right.tool ? -1 : left.tool > right.tool ? 1 : 0))
+    .map((line) => `- ${line.text}`);
   return lines.length === 0
     ? undefined
     : ["Octant tools in this session (you can call each of them):", ...lines].join("\n");

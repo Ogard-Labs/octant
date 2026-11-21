@@ -17,20 +17,22 @@ import { actsAsHostPerson, type PrincipalKind } from "./remoteAccessPolicy";
 /** `other` is any host platform that is neither macOS nor Linux. */
 export type LanguageServerHostPlatform = "macos" | "linux" | "windows" | "other";
 
+/**
+ * Who caused the start: the host's own person (at a local window or on a
+ * device they paired), another device session, or an agent's tool call.
+ */
+export type LanguageServerStarter = PrincipalKind | "agent";
+
 export interface LanguageServerLaunchRequest {
   readonly launchClass: ExtensionLanguageServerClass;
-  /** The posture of the Code thread whose read starts the server. */
+  /** The posture the Code thread or its active turn runs at. */
   readonly posture: ProviderExecutionPolicy;
   readonly platform: LanguageServerHostPlatform;
+  readonly startedBy: LanguageServerStarter;
   /**
-   * Who caused the start: a local window, or anything that is not the person
-   * at the machine (a paired device's read, or an agent's tool call).
-   */
-  readonly startedBy: PrincipalKind;
-  /**
-   * The shell-command approval for this checkout and component. Only a
-   * `repo-tooling` start reads it; a `static` server falls in no approval
-   * category.
+   * The shell-command approval for this checkout and component. Read only for
+   * a `repo-tooling` start below Full access; `static` servers and Full access
+   * starts need none.
    */
   readonly shellCommandApproval: "granted" | "absent";
   /**
@@ -155,11 +157,19 @@ function repositoryToolingRefusal(
   request: LanguageServerLaunchRequest,
 ): LanguageServerLaunchRefusal | undefined {
   if (request.posture === "plan") return "plan-read-only";
+  if (request.startedBy === "agent") {
+    // Below Full access starting repository tooling stays the person's act;
+    // at Full access the agent's shell could run the same tooling unasked, so
+    // its read starts the server with no approval.
+    return request.posture === "full-access" ? undefined : "local-host-required";
+  }
   // Running the repository's tooling on the host is the person's to start, at
   // the machine or on a device they paired, as terminal input is. An approval
   // on record does not let any other device session start one.
   if (!actsAsHostPerson(request.startedBy)) return "local-host-required";
-  if (request.shellCommandApproval !== "granted") return "approval-required";
+  if (request.posture !== "full-access" && request.shellCommandApproval !== "granted") {
+    return "approval-required";
+  }
   return undefined;
 }
 
@@ -181,14 +191,17 @@ export type AgentRepositoryToolingReadDecision =
   | { readonly status: "refused"; readonly reason: LanguageServerLaunchRefusal };
 
 /**
- * Whether an agent's code tool may read through a `repo-tooling` server.
- * Canonical: docs/design/language-services.md § Agent read rules.
+ * Whether an agent's code tool may read through an already running
+ * `repo-tooling` server. Canonical: docs/design/language-services.md § Agent
+ * read rules.
  *
- * It never decides a launch: an agent reads only through a server the person
- * at the machine already started under an approval that still covers it, so a
- * server that is not running is refused exactly as a start would be. Plan
- * refuses, as it refuses every use of the class, because the file the read
- * opens is one the server then runs the repository's tooling on.
+ * It never decides a launch: below Full access an agent reads only through a
+ * server the person already started under an approval that still covers it, so
+ * a server that is not running is refused exactly as a start would be. At Full
+ * access no approval is required; starting a stopped server there goes through
+ * {@link decideLanguageServerLaunch}. Plan refuses every use of the class,
+ * because the file the read opens is one the server then runs the repository's
+ * tooling on.
  */
 export function decideAgentReadThroughRepositoryTooling(
   request: AgentRepositoryToolingReadRequest,
@@ -197,7 +210,7 @@ export function decideAgentReadThroughRepositoryTooling(
     return { status: "refused", reason: "unsupported-platform" };
   }
   if (request.posture === "plan") return { status: "refused", reason: "plan-read-only" };
-  if (request.shellCommandApproval !== "granted") {
+  if (request.posture !== "full-access" && request.shellCommandApproval !== "granted") {
     return { status: "refused", reason: "approval-required" };
   }
   if (request.server !== "running") return { status: "refused", reason: "local-host-required" };

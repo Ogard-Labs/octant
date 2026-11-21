@@ -89,6 +89,8 @@
     "./event-policy": "./src/eventPolicy.ts",
     "./thread-retention-policy": "./src/threadRetentionPolicy.ts",
     "./thread-completion-policy": "./src/threadCompletionPolicy.ts",
+    "./finished-receipt-policy": "./src/finishedReceiptPolicy.ts",
+    "./replayable-run-case-policy": "./src/replayableRunCasePolicy.ts",
     "./thread-project-move-policy": "./src/threadProjectMovePolicy.ts",
     "./managed-device-stream": "./src/managedDeviceStream.ts",
     "./memory-policy": "./src/memoryPolicy.ts",
@@ -111,6 +113,7 @@
     "./provider-catalog-policy": "./src/providerCatalogPolicy.ts",
     "./spend-ceiling-policy": "./src/spendCeilingPolicy.ts",
     "./provider-policy": "./src/providerPolicy.ts",
+    "./provider-folder-scan-policy": "./src/providerFolderScanPolicy.ts",
     "./provider-runtime-integration": "./src/providerRuntimeIntegration.ts",
     "./research-policy": "./src/researchPolicy.ts",
     "./web-search-policy": "./src/webSearchPolicy.ts",
@@ -137,6 +140,7 @@
     "./code-project-pull-request-policy": "./src/codeProjectPullRequestPolicy.ts",
     "./code-pull-request-action-policy": "./src/codePullRequestActionPolicy.ts",
     "./code-pull-request-switch-policy": "./src/codePullRequestSwitchPolicy.ts",
+    "./pull-request-identity-policy": "./src/pullRequestIdentityPolicy.ts",
     "./code-project-pull-request-cadence-policy": "./src/codeProjectPullRequestCadencePolicy.ts",
     "./canvas-share-snapshot-policy": "./src/canvasShareSnapshotPolicy.ts",
     "./canvas-share-access-log-policy": "./src/canvasShareAccessLogPolicy.ts",
@@ -147,9 +151,11 @@
     "./live-turn-policy": "./src/liveTurnPolicy.ts",
     "./turn-metrics-display": "./src/turnMetricsDisplay.ts",
     "./local-usage-pricing": "./src/localUsagePricing.ts",
+    "./image-generation-pricing": "./src/imageGenerationPricing.ts",
     "./command-credential-policy": "./src/commandCredentialPolicy.ts",
     "./thread-wakeup-policy": "./src/threadWakeupPolicy.ts",
-    "./strict-policy": "./src/strictPolicy.ts"
+    "./strict-policy": "./src/strictPolicy.ts",
+    "./pull-request-review-policy": "./src/pullRequestReviewPolicy.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

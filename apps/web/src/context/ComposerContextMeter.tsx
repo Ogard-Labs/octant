@@ -10,6 +10,8 @@ import { matchKeybinding } from "@octant/domain";
 import { ChevronDown, ChevronRight } from "../ui/icons";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { isApplePlatform } from "../platform";
+import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
+import { formatDateTime, type TimestampFormatPreference } from "../theme/timestampFormat";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import type { ContextCompactionExecutor } from "@octant/contracts/context";
 import { ContextInspector } from "./ContextInspector";
@@ -767,6 +769,7 @@ function ContextUsagePopover(props: {
   readonly windowModel: ReturnType<typeof contextWindowModel>;
 }) {
   const { windowModel, snapshot } = props;
+  const timestampFormat = useTimestampFormat();
   const [expanded, setExpanded] = useState(false);
   const breakdownId = useId();
   const now = Date.now();
@@ -841,7 +844,9 @@ function ContextUsagePopover(props: {
         {snapshot.serviceLimits.retry.status === "active" ? (
           <p className="context-window-popover__limit-state" data-state="rate-limited">
             <span>Retry</span>
-            <span>Rate limited until {formatTime(snapshot.serviceLimits.retry.until)}</span>
+            <span>
+              Rate limited until {formatTime(snapshot.serviceLimits.retry.until, timestampFormat)}
+            </span>
           </p>
         ) : null}
       </LimitSection>
@@ -984,12 +989,15 @@ function SegmentLegend(props: { readonly segments: ReadonlyArray<ContextWindowSe
 }
 
 function LimitSection(props: { readonly children: ReactNode; readonly updatedAt?: string }) {
+  const timestampFormat = useTimestampFormat();
   return (
     <section aria-label="Provider account limits" className="context-window-popover__limits">
       <div className="context-window-popover__limits-heading">
         <h3>Provider account limits</h3>
         {props.updatedAt === undefined ? null : (
-          <time dateTime={props.updatedAt}>Updated {formatRelativeTime(props.updatedAt)}</time>
+          <time dateTime={props.updatedAt}>
+            Updated {formatRelativeTime(props.updatedAt, timestampFormat)}
+          </time>
         )}
       </div>
       {props.children}
@@ -1280,21 +1288,19 @@ function quotaLabel(quota: ContextInspectorSnapshot["serviceLimits"]["quota"]): 
         : "Unknown";
 }
 
-const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "short",
-  timeStyle: "short",
-});
-
-function formatTime(timestamp: string): string {
-  return dateTimeFormat.format(new Date(timestamp));
+function formatTime(timestamp: string, timestampFormat?: TimestampFormatPreference): string {
+  return formatDateTime(timestamp, { dateStyle: "short", timeStyle: "short" }, timestampFormat);
 }
 
-function formatRelativeTime(timestamp: string): string {
+function formatRelativeTime(
+  timestamp: string,
+  timestampFormat?: TimestampFormatPreference,
+): string {
   const elapsedMs = Math.max(0, Date.now() - new Date(timestamp).getTime());
   if (elapsedMs < 60_000) return "just now";
   const minutes = Math.floor(elapsedMs / 60_000);
   if (minutes < 60) return `${String(minutes)}m ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${String(hours)}h ago`;
-  return formatTime(timestamp);
+  return formatTime(timestamp, timestampFormat);
 }

@@ -32,6 +32,19 @@ describe("Code external editor desktop route", () => {
     expect(resolve).toHaveBeenCalledWith(ids);
   });
 
+  it("resolves a default-application file target without requiring a configured external editor", async () => {
+    const resolve = vi.fn(async () => ({ file: "/private/repo/assets/logo.png" }));
+    const handle = createCodeExternalEditorRouteHandler({ desktopBridgeSecret: secret, resolve });
+    const response = await handle(request({ ...ids, defaultApplication: true }));
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({
+      file: "/private/repo/assets/logo.png",
+      line: 12,
+      column: 4,
+    });
+    expect(resolve).toHaveBeenCalledWith({ ...ids, defaultApplication: true });
+  });
+
   it.each([
     ["wrong", undefined, 401],
     [secret, "file://", 401],

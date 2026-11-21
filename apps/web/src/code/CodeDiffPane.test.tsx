@@ -706,6 +706,78 @@ describe("CodeDiffPane", () => {
     expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
   });
 
+  it("blocks Discard changes while keeping Open in editor when a staged rename has a non-UTF-8 source and valid destination", async () => {
+    const renameDiff = [
+      'diff --git "a/file-\\303.txt" b/report.txt',
+      "similarity index 100%",
+      'rename from "file-\\303.txt"',
+      "rename to report.txt",
+      "",
+    ].join("\n");
+    const base = available();
+    const diffWithRename: Extract<CodeDiffProjection, { readonly state: "available" }> = {
+      ...base,
+      observation: {
+        ...base.observation,
+        status: [{ path: "report.txt", index: "R", worktree: " " }],
+        changedPaths: ["report.txt"],
+      } as unknown as CodeOperationResult & { readonly kind: "git-observed" },
+    };
+
+    render(
+      <CodeDiffPane
+        client={client({ bytes: new TextEncoder().encode(renameDiff) })}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        defaultLayout="side-by-side"
+        diff={diffWithRename}
+        executionPolicy="full-access"
+        loadRuntime={runtime().loadRuntime}
+        onOpenFile={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "report.txt" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open in editor" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
+  });
+
+  it("allows Discard changes for a staged copy from a non-UTF-8 source when the destination is valid UTF-8", async () => {
+    const copyDiff = [
+      'diff --git "a/file-\\303.txt" b/copy.txt',
+      "similarity index 100%",
+      'copy from "file-\\303.txt"',
+      "copy to copy.txt",
+      "",
+    ].join("\n");
+    const base = available();
+    const diffWithCopy: Extract<CodeDiffProjection, { readonly state: "available" }> = {
+      ...base,
+      observation: {
+        ...base.observation,
+        status: [{ path: "copy.txt", index: "C", worktree: " " }],
+        changedPaths: ["copy.txt"],
+      } as unknown as CodeOperationResult & { readonly kind: "git-observed" },
+    };
+
+    render(
+      <CodeDiffPane
+        client={client({ bytes: new TextEncoder().encode(copyDiff) })}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        defaultLayout="side-by-side"
+        diff={diffWithCopy}
+        executionPolicy="full-access"
+        loadRuntime={runtime().loadRuntime}
+        onOpenFile={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "copy.txt" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open in editor" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Discard changes" })).toBeVisible();
+  });
+
   it("uses the Settings default until a thread stores its own layout", async () => {
     render(
       <CodeDiffPane

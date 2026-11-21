@@ -306,9 +306,19 @@ export class GitMutationPort {
     const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    // `--literal-pathspecs` prevents glob characters (such as `[1]` or `*`) in
+    // a validated filename from matching and discarding sibling files.
     return this.#apply(
       input.checkoutRoot,
-      ["restore", "--staged", "--worktree", "--source=HEAD", "--", ...input.paths],
+      [
+        "--literal-pathspecs",
+        "restore",
+        "--staged",
+        "--worktree",
+        "--source=HEAD",
+        "--",
+        ...input.paths,
+      ],
       signal,
       input.executionPolicy,
     );

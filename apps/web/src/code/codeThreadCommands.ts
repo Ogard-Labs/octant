@@ -1,4 +1,9 @@
-import type { CoordinatorBounds, CoordinatorWorkerLevel, UtcTimestamp } from "@octant/contracts";
+import type {
+  CoordinatorBounds,
+  CoordinatorDoneWhen,
+  CoordinatorWorkerLevel,
+  UtcTimestamp,
+} from "@octant/contracts";
 import type { CodeCommand, CodeThread, CodeThreadId } from "@octant/contracts/code";
 import type { ProjectId } from "@octant/contracts/projects";
 
@@ -115,6 +120,19 @@ export function setCodeThreadCoordinatorBounds(
     threadId: thread.id,
     expectedVersion: thread.version,
     bounds,
+  };
+}
+
+/** A coordinator's host-checked done-when condition; absent clears it. */
+export function setCodeThreadCoordinatorDoneWhen(
+  thread: CodeThread,
+  doneWhen: CoordinatorDoneWhen | undefined,
+): CodeCommand {
+  return {
+    kind: "set-code-thread-coordinator-done-when",
+    threadId: thread.id,
+    expectedVersion: thread.version,
+    ...(doneWhen === undefined ? {} : { doneWhen }),
   };
 }
 

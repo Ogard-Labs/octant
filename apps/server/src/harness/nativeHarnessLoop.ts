@@ -1800,7 +1800,10 @@ function composeSystem(
   instructions: ReadonlyArray<string>,
   tools: ReadonlyArray<ProviderToolDefinition>,
 ): string | undefined {
-  const guide = nativeHarnessToolGuide(tools.map((tool) => tool.name));
+  // Chat, Work, Code, and child runs already send each offered tool's line as
+  // an instruction; the guide adds only what they did not, so no tool is
+  // described twice.
+  const guide = nativeHarnessToolGuide(tools, instructions);
   const parts = [...instructions, ...(guide === undefined ? [] : [guide])];
   return parts.length === 0 ? undefined : parts.join("\n\n");
 }

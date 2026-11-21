@@ -1,7 +1,7 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
 import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import { strictKeptForLaunch } from "../strictResolution";
-import type { StalledTurnScope } from "../providers/turnBudget";
+import { sanitizeLoopNoticeToolName, type StalledTurnScope } from "../providers/turnBudget";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
@@ -119,6 +119,7 @@ import type {
 import type { Journal } from "../persistence/journal";
 import type { OutlivingSessions } from "../providers/outlivingSessions";
 import { createGhPullRequestPort } from "./ghPullRequestActionPort";
+import type { PullRequestLinkReader, PullRequestLinkRecorder } from "./pullRequestLinkService";
 import { createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
 import {
@@ -527,6 +528,7 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<Pick<ProviderProbeResult, "readiness" | "models">>;
   readonly ghExecutable?: string;
   readonly pullRequestPort?: CodeOperationPullRequestPort;
+  readonly pullRequestLinks?: PullRequestLinkRecorder & Partial<PullRequestLinkReader>;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
   readonly terminalProcessPort?: Pick<TerminalProcessPort, "start"> & {
     readonly reconcile?: () => Promise<void>;
@@ -709,6 +711,7 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly readThread: () => CodeThread | undefined;
     readonly folders: ReadonlyArray<string>;
+    readonly operationId?: string;
     /** The routine run this turn was started for, from the dispatcher only. */
     readonly routineRun?: AutomationRunReference;
     /**
@@ -756,6 +759,8 @@ export interface CodeOperationRuntimeOptions {
   readonly nativeHarnessTools?: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
+    /** The main checkout root when `checkoutRoot` is a selected subdirectory or extra folder. */
+    readonly mainCheckoutRoot?: string;
     readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
     /** The turn's resolved credential values, which a journal read redacts. */
@@ -932,6 +937,7 @@ export interface CodeOperationRuntimeOptions {
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   readonly resolveSideChatReturns?: CodeOperationServiceOptions["resolveSideChatReturns"];
+  readonly resolvePullRequestLineNotesAuthorship?: CodeOperationServiceOptions["resolvePullRequestLineNotesAuthorship"];
   /** Reads the `@file` mentions a turn names against this thread's bound root. */
   readonly resolveFileMentionContext?: CodeOperationServiceOptions["resolveFileMentionContext"];
   /** Takes the notes the user pointed at the running product into the next turn. */
@@ -1047,6 +1053,9 @@ export interface CodeOperationRuntime {
     threadId: CodeThreadId,
     checkoutId: import("@octant/contracts").CodeCheckoutId,
   ): Promise<import("@octant/contracts").CodeRepositoryTestStatus>;
+  createReviewFinding?: ReviewFindingService["create"];
+  resolveReviewTarget?: CodeOperationService["resolveReviewTarget"];
+  retainPullRequestDiff?: CodeOperationService["retainPullRequestDiff"];
   conversation(
     windowId: WindowId,
     threadId: CodeThreadId,
@@ -1654,28 +1663,47 @@ export function createCodeOperationRuntime(
     ...(options.supportsSessionRollback === undefined
       ? {}
       : {
-          supportsSessionRollback: async (thread, lastKeptTurn) => {
+          supportsSessionRollback: async (thread, lastKeptTurn, providerRoot) => {
             if (options.supportsSessionRollback?.(thread) !== true) return false;
             if (lastKeptTurn === undefined) return true;
             // A runtime that copies its own session cuts only at the anchor
-            // the last kept turn journaled; without one the rewind sends the
-            // text handoff, so the preview must not promise a copy. The
-            // harness's transcript copy needs no anchor.
+            // the last kept turn journaled, and only for the same folder and
+            // mode; otherwise the rewind sends the text handoff, so the
+            // preview must not promise a copy. The harness's transcript copy
+            // needs no anchor.
             const driver = await Promise.resolve(options.resolveProviderDriver(thread)).catch(
               () => undefined,
             );
             if (driver?.forkSession === undefined) return true;
             const anchor = options.nativeTurnAnchor?.(thread.id, String(lastKeptTurn));
-            return (
-              anchor !== undefined &&
-              String(anchor.providerInstanceId) === String(thread.providerInstanceId)
-            );
+            if (
+              anchor === undefined ||
+              anchor.anchor.trim().length === 0 ||
+              String(anchor.providerInstanceId) !== String(thread.providerInstanceId)
+            )
+              return false;
+            const binding = anchor.resumeCursor.binding;
+            if (binding !== undefined) {
+              if (
+                String(binding.instanceId) !== String(thread.providerInstanceId) ||
+                binding.mode !== "code" ||
+                (providerRoot !== undefined && binding.projectRoot !== providerRoot)
+              )
+                return false;
+            }
+            return true;
           },
         }),
+    ...(options.pullRequestLinks === undefined
+      ? {}
+      : { pullRequestLinks: options.pullRequestLinks }),
     events,
     ...(options.resolveSideChatReturns === undefined
       ? {}
       : { resolveSideChatReturns: options.resolveSideChatReturns }),
+    ...(options.resolvePullRequestLineNotesAuthorship === undefined
+      ? {}
+      : { resolvePullRequestLineNotesAuthorship: options.resolvePullRequestLineNotesAuthorship }),
     ...(options.resolveThreadMentionContext === undefined
       ? {}
       : { resolveThreadMentionContext: options.resolveThreadMentionContext }),
@@ -2581,6 +2609,11 @@ export function createCodeOperationRuntime(
       service.subscribe(windowId, threadId, operationId, afterCursor, limit),
     readRepositoryTestStatus: (windowId, threadId, checkoutId) =>
       service.readRepositoryTestStatus(windowId, threadId, checkoutId),
+    createReviewFinding: (windowId, input, admissionCurrent, actor) =>
+      reviewFindings.create(windowId, input, admissionCurrent, actor),
+    resolveReviewTarget: (windowId, input, admissionCurrent) =>
+      service.resolveReviewTarget(windowId, input, admissionCurrent),
+    retainPullRequestDiff: (windowId, input) => service.retainPullRequestDiff(windowId, input),
     conversation: async (windowId, threadId, afterCursor, limit) => {
       const thread = options.persistence.readCodeThread(threadId);
       if (thread === undefined || thread.id !== threadId) {
@@ -4241,16 +4274,57 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return refuseRevokedAdmission();
     }
     // Feedback stays pending through every preparation refusal. Consuming it
-    // here does not yield between the final admission check and owning the turn.
-    let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
-    try {
-      feedback = input.takeProductFeedback?.(MAX_PROVIDER_ATTACHMENTS - originalInputCount);
-    } catch {
+    // here does not yield between the final admission check and owning the turn;
+    // any pull-request outside-content mark returns a value inside the same
+    // delivery transaction so a feedback refusal never taints the thread and a
+    // provenance refusal rolls back pending feedback notes without throwing.
+    const recordOutsideContent = input.recordOutsideContent;
+    let outsideContentRecorded = false;
+    let feedback:
+      | Extract<
+          ReturnType<NonNullable<typeof input.takeProductFeedback>>,
+          { readonly status: "taken" }
+        >["delivery"]
+      | undefined;
+    if (input.takeProductFeedback !== undefined) {
+      const taken = input.takeProductFeedback(
+        MAX_PROVIDER_ATTACHMENTS - originalInputCount,
+        recordOutsideContent === undefined
+          ? undefined
+          : () => {
+              if (!recordOutsideContent()) return { status: "refused" };
+              outsideContentRecorded = true;
+              return { status: "accepted" };
+            },
+      );
+      if (taken.status === "claim-refused") {
+        await serverTools?.close?.().catch(() => undefined);
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return {
+          ...failStart(
+            "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
+          ),
+          admission: "refused" as const,
+        };
+      }
+      if (taken.status === "feedback-changed") {
+        await serverTools?.close?.().catch(() => undefined);
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return {
+          ...failStart(
+            "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+          ),
+          admission: "refused" as const,
+        };
+      }
+      feedback = taken.delivery;
+    }
+    if (recordOutsideContent !== undefined && !outsideContentRecorded && !recordOutsideContent()) {
       await serverTools?.close?.().catch(() => undefined);
       await input.extensionTools?.close?.().catch(() => undefined);
       return {
         ...failStart(
-          "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+          "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
         ),
         admission: "refused" as const,
       };
@@ -5479,11 +5553,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const once =
       ownerCurrent !== undefined ||
       active.thread.permissionPersistence !== input.thread.permissionPersistence;
+    const askedUnder = active.approvalPostures.get(input.approvalId);
     if (ownerCurrent === undefined) {
       active.approvals.delete(input.approvalId);
       active.approvalPostures.delete(input.approvalId);
     }
-    await Effect.runPromise(
+    const refused = await Effect.runPromise(
       Effect.suspend(() => {
         if (ownerCurrent !== undefined && !ownerCurrent())
           return Effect.die(new Error("Owner approval target changed before delivery."));
@@ -5504,8 +5579,25 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           approved: input.decision === "approved",
           ...(once ? { scope: "once" as const } : {}),
         });
-      }),
+      }).pipe(
+        Effect.as(undefined),
+        Effect.catchIf(
+          (failure) => failure.category === "unsupported",
+          (failure) => Effect.succeed(failure),
+        ),
+      ),
     );
+    // A runtime that cannot take the answer as asked (an agent offering only
+    // an allow that would outlast a one-call approval) heard nothing and still
+    // waits, so the ask stays open for a denial and nothing is journaled.
+    if (refused !== undefined) {
+      active.approvals.set(input.approvalId, providerRequestId);
+      if (askedUnder !== undefined) active.approvalPostures.set(input.approvalId, askedUnder);
+      // The person is waiting again, so the time from their refused answer
+      // until their next one is their wait, not the call's run time.
+      active.turnTiming.approvalReopened({ approvalId: input.approvalId });
+      return turnState("failed", { category: "failed", message: refused.message });
+    }
     // An owner's answer journals `owner-approval-settled` instead.
     if (ownerCurrent === undefined)
       this.#recordApprovalAnswered(active, input.approvalId, input.decision);
@@ -6161,6 +6253,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           thread: active.thread,
           readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
           folders: [active.providerRoot, ...active.extraFolders],
+          operationId: String(active.operationId),
           ...(active.routineRun === undefined ? {} : { routineRun: active.routineRun }),
           askPerson: (summary, signal) => {
             const bounded = boundProviderSummary(summary);
@@ -6194,6 +6287,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
           checkoutRoot: active.providerRoot,
+          mainCheckoutRoot: active.checkoutRoot,
           ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           windowId: active.windowId,
           secrets: active.secrets,
@@ -6665,6 +6759,37 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(active.onContextDelivered === undefined
             ? {}
             : { onPromptSent: active.onContextDelivered }),
+          onLoopNotice: (notice) =>
+            Effect.sync(() => {
+              const toolName = sanitizeLoopNoticeToolName(notice.toolName, (value) =>
+                sanitizeProviderText(value, active.checkoutRoot, active.secrets),
+              );
+              const frame = this.#appendTurnEvent(active, {
+                event:
+                  notice.kind === "turn-loop-stopped"
+                    ? {
+                        kind: "turn-loop-stopped",
+                        toolName,
+                        count: notice.count,
+                      }
+                    : {
+                        kind: "turn-loop-noticed",
+                        toolName,
+                        count: notice.count,
+                      },
+              });
+              active.cursor = frame.cursor;
+            }),
+          onStallNotice: (notice) =>
+            Effect.sync(() => {
+              const frame = this.#appendTurnEvent(active, {
+                event: {
+                  kind: "turn-stall-noticed",
+                  idleMs: notice.idleMs,
+                },
+              });
+              active.cursor = frame.cursor;
+            }),
           persistEvent: (event) =>
             // The provider's own completion, interruption, or failure is
             // journaled as the turn's terminal state, ahead of the outcome

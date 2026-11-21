@@ -4,7 +4,6 @@ import {
   MAX_SIDEBAR_BACKGROUND_BYTES,
   SIDEBAR_BACKGROUND_MEDIA_TYPES,
   SidebarBackgroundUploadResult,
-  THEME_EVENT_NAMES,
   ThemeDensity,
   ThemeFontFamily,
   ThemeFontSize,
@@ -50,13 +49,6 @@ const validSettings = {
 } as const;
 
 describe("theme contracts", () => {
-  it("publishes the durable theme event vocabulary", () => {
-    expect(THEME_EVENT_NAMES).toEqual([
-      "theme.settings-updated@1",
-      "theme.sidebar-background-updated@1",
-    ]);
-  });
-
   it.each(["system", "light", "dark"] as const)("decodes the %s theme mode", (mode) => {
     expect(Schema.decodeUnknownSync(ThemeMode)(mode)).toBe(mode);
   });
@@ -231,10 +223,6 @@ describe("theme contracts", () => {
 });
 
 describe("sidebar background contracts", () => {
-  it("publishes the sidebar background event in the theme vocabulary", () => {
-    expect(THEME_EVENT_NAMES).toContain("theme.sidebar-background-updated@1");
-  });
-
   it("exports bounded background constants", () => {
     expect(MAX_SIDEBAR_BACKGROUND_BYTES).toBe(8_388_608);
     expect([...SIDEBAR_BACKGROUND_MEDIA_TYPES]).toEqual(["image/png", "image/jpeg", "image/webp"]);

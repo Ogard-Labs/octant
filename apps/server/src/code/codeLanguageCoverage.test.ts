@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { decodeCodeThreadId, decodeProjectId } from "@octant/contracts";
 import type { LanguageServerHostPlatform } from "@octant/domain";
 import { foldersHoldCoveredFile } from "./codeLanguageCoverage";
 import { CodeLanguageService, type CodeLanguageServerComponent } from "./codeLanguageService";
@@ -40,12 +41,14 @@ function server(
 function service(
   components: ReadonlyArray<CodeLanguageServerComponent>,
   platform: LanguageServerHostPlatform = "linux",
+  threadStrict?: () => boolean,
 ) {
   return new CodeLanguageService({
     authority: {} as never,
     components: () => components,
     processes: { launch: async () => ({ status: "confinement-unavailable" }) },
     platform,
+    ...(threadStrict === undefined ? {} : { threadStrict }),
     cacheRoot: "/nonexistent",
   });
 }
@@ -71,10 +74,48 @@ describe("Code language reads offered to agents", () => {
     expect(service([typescript]).servesAgentsIn([python])).toBe(false);
     // The Settings switch removes the bundled server from the effective set.
     expect(service([]).servesAgentsIn([typed])).toBe(false);
-    // An agent's read never starts or reads through a `repo-tooling` server.
-    // A `repo-tooling` server counts only once it runs, and none does here.
-    expect(service([server(["python"], "repo-tooling")]).servesAgentsIn([python])).toBe(false);
+    // Below Full access, a `repo-tooling` server counts only once it runs, and none does here.
+    const projectId = decodeProjectId("40000000-0000-4000-8000-000000000001");
+    const threadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000001");
+    const tooling = service([server(["python"], "repo-tooling")]);
+    expect(tooling.servesAgentsIn([python])).toBe(false);
+    expect(tooling.servesAgentsIn([python], { projectId, posture: "plan", threadId })).toBe(false);
+    expect(
+      tooling.servesAgentsIn([python], { projectId, posture: "approval-gated", threadId }),
+    ).toBe(false);
+    expect(
+      tooling.servesAgentsIn([python], { projectId, posture: "auto-accept-edits", threadId }),
+    ).toBe(false);
     expect(service([typescript], "windows").servesAgentsIn([typed])).toBe(false);
+  });
+
+  it("are offered for a repository-tooling server at Full access, and refused on Windows under Strict", () => {
+    const python = checkout({ "pyproject.toml": "", "src/app/main.py": "print(1)\n" });
+    const typed = checkout({ "src/index.ts": "export {};\n" });
+    const projectId = decodeProjectId("40000000-0000-4000-8000-000000000001");
+    const threadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000001");
+    const tooling = server(["python"], "repo-tooling");
+
+    expect(
+      service([tooling]).servesAgentsIn([python], { projectId, posture: "full-access", threadId }),
+    ).toBe(true);
+    expect(
+      service([tooling]).servesAgentsIn([typed], { projectId, posture: "full-access", threadId }),
+    ).toBe(false);
+    expect(
+      service([tooling], "windows", () => false).servesAgentsIn([python], {
+        projectId,
+        posture: "full-access",
+        threadId,
+      }),
+    ).toBe(true);
+    expect(
+      service([tooling], "windows", () => true).servesAgentsIn([python], {
+        projectId,
+        posture: "full-access",
+        threadId,
+      }),
+    ).toBe(false);
   });
 
   it("ignore dependencies and hidden folders, and do not follow links out of the checkout", () => {

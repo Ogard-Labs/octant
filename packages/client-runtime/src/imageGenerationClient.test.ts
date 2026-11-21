@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { createImageGenerationClient } from "./imageGenerationClient";
+import { createImageGenerationClient, createThreadImageResults } from "./imageGenerationClient";
+import {
+  THREAD_IMAGE_CHUNK_BYTES,
+  decodeImageJobId,
+  decodeImageArtifactId,
+} from "@octant/contracts";
 
 const profileId = "a3000000-0000-4000-8000-000000000001";
 const scopeId = "a3000000-0000-4000-8000-000000000002";
@@ -23,6 +28,35 @@ function job() {
 }
 
 describe("createImageGenerationClient", () => {
+  it("downloads paired images larger than a remote response without returning truncated bytes", async () => {
+    const size = THREAD_IMAGE_CHUNK_BYTES * 2 + 3;
+    let truncate = false;
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/api/image/thread-artifact");
+      const offset = Number(url.searchParams.get("offset"));
+      const end = Math.min(offset + THREAD_IMAGE_CHUNK_BYTES, size);
+      return new Response(new Uint8Array(end - offset - (truncate ? 1 : 0)), {
+        status: 206,
+        headers: {
+          "content-type": "image/png",
+          "content-range": `bytes ${offset}-${end - 1}/${size}`,
+        },
+      });
+    });
+    const client = createThreadImageResults({
+      baseUrl: "http://127.0.0.1",
+      fetch,
+      windowCapability: "fixture",
+    });
+    const read = () => client.artifact(decodeImageJobId(jobId), decodeImageArtifactId(scopeId));
+    const image = await read();
+    expect(image.size).toBe(size);
+    expect(image.type).toBe("image/png");
+    expect(fetch).toHaveBeenCalledTimes(3);
+    truncate = true;
+    await expect(read()).rejects.toThrow("incomplete");
+  });
   it("lists profiles and enqueues a job", async () => {
     const fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

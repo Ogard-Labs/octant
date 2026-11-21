@@ -6,6 +6,7 @@ import type { ShieldModelChoice } from "@octant/contracts/shield";
 import type { SettingsSettingId } from "@octant/contracts";
 import {
   AUTOMATIC_MODEL_DISCLOSURE,
+  AUTOMATIC_MODEL_JOB_LABELS,
   AUTOMATIC_MODEL_NO_SWITCH_NOTE,
   DECISION_REVIEW_OFF_LABEL,
   automaticModelUnavailableReason,
@@ -262,7 +263,7 @@ export function AutomaticModelSettings(props: AutomaticModelSettingsProps) {
             <JobNote choice={judgeChoice} job="shield-judge" snapshot={props.providerSnapshot} />
           }
           focused={props.focusedSetting === "automatic-model-judge"}
-          label="Octant Shield's Judge"
+          label={AUTOMATIC_MODEL_JOB_LABELS["shield-judge"]}
           scope="host"
           settingId="automatic-model-judge"
         >
@@ -280,7 +281,7 @@ export function AutomaticModelSettings(props: AutomaticModelSettingsProps) {
             <JobNote choice={memoryChoice} job="person-memory" snapshot={props.providerSnapshot} />
           }
           focused={props.focusedSetting === "automatic-model-memory"}
-          label="Memory distilling"
+          label={AUTOMATIC_MODEL_JOB_LABELS["person-memory"]}
           scope="host"
           settingId="automatic-model-memory"
         >
@@ -306,7 +307,7 @@ export function AutomaticModelSettings(props: AutomaticModelSettingsProps) {
             />
           }
           focused={props.focusedSetting === "automatic-model-decision-review"}
-          label="Second opinion on decisions"
+          label={AUTOMATIC_MODEL_JOB_LABELS["decision-review"]}
           scope="host"
           settingId="automatic-model-decision-review"
         >

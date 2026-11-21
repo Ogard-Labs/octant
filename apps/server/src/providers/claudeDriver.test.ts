@@ -271,6 +271,7 @@ function harness(
     readonly platform?: NodeJS.Platform;
     readonly maxTrackedToolUses?: number;
     readonly runtimeTurnsPerTurn?: () => number;
+    readonly hostStrict?: () => boolean;
     readonly gitIdentity?: (checkoutRoot: string) => Promise<{ name?: string; email?: string }>;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
@@ -414,6 +415,7 @@ function harness(
       ...(options.runtimeTurnsPerTurn === undefined
         ? {}
         : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),
+      ...(options.hostStrict === undefined ? {} : { hostStrict: options.hostStrict }),
       ...(options.configDirectory === undefined
         ? {}
         : { configDirectory: options.configDirectory }),
@@ -6139,6 +6141,38 @@ describe("Claude session lifecycle", () => {
     expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
     await acquired.close();
     expect(f.queries[0]?.close).toHaveBeenCalledOnce();
+  });
+
+  it("allows Claude Code on Bedrock outside Strict for both probe and session start while keeping Strict refusal intact", async () => {
+    const f = harness("subscription", "current-session", {
+      hostStrict: () => false,
+    });
+    f.setOpenQuery((input) => {
+      const query = new FakeQuery("bedrock-session", undefined, input.model, {
+        ready: true,
+        apiProvider: "bedrock",
+      });
+      query.accountInfo.mockReturnValue(Effect.succeed({ ready: true, apiProvider: "bedrock" }));
+      f.queries.push(query);
+      return Effect.acquireRelease(Effect.succeed(query), (value) => value.close());
+    });
+
+    const probed = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    expect(probed).toMatchObject({ readiness: "ready", detectedVersion: "2.1.211" });
+
+    const acquired = await acquire(f.driver);
+    const openStart = await Effect.runPromise(
+      Effect.exit(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      ),
+    );
+    expect(openStart._tag).toBe("Success");
+    await acquired.close();
   });
 
   it("aborts a held identity write without allowing late post-close mutation", async () => {

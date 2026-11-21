@@ -35,6 +35,20 @@ rather than on every turn; a launch outside Strict shows nothing. It is the
 same meta-ink note as a provider handoff's (`role="note"`), not a page banner
 or a card. `strictKeptSentence` in `@octant/domain` is the one wording.
 
+## Loop and stall notices
+
+Outside Strict, neither a repeated-tool loop (6 identical consecutive calls)
+nor silence past the stalled-turn limit stops the turn. Instead, the host
+journals `turn-loop-noticed` (tool name and count) or `turn-stall-noticed`,
+and the turn shows one quiet meta-ink line (`role="note"`,
+`TurnLoopStallNotice` in `apps/web/src/transcript/`, styled like
+`OutputLimitNote` with no card or banner) with an inline **Stop** button while
+the turn runs. Once the turn settles, **Stop** disappears and the quiet line
+stays as the record. Under Strict, a 6-call loop stops the turn, journals
+`turn-loop-stopped`, shows one quiet line without **Stop**, and leaves the
+thread ready to accept the next message straight away. `turnLoopNoticeSentence`
+and `turnStallNoticeSentence` in `@octant/domain` are the shared wordings.
+
 ## Reply actions
 
 A finished reply (completed, failed, interrupted or cancelled) ends with one
@@ -91,7 +105,7 @@ answered is a 28px line among them, not a disclosure: a 14px shield mark
 allowed", "asked you", or "denied", the call in detail-size mono, the
 one-sentence reason in the muted ink, and the rule or model and the latency
 at the right as detail text. It always names Shield, never the provider, and
-does not count as a tool call. A Code turn that changed files ends with one card, the only card in a reply: "N files changed while this ran", then a 28px row per path with the folder in the meta ink, the name in the primary ink, and the added and removed line counts in the diff inks at the right. It folds after five rows, says "Showing n of N" when the record is incomplete rather than summing rows it never saw, and never says who wrote a file. A turn paused on the person uses a neutral composer-adjacent request row with
+does not count as a tool call. A Code turn that changed files ends with one card: "N files changed while this ran", then a 28px row per path with the folder in the meta ink, the name in the primary ink, and the added and removed line counts in the diff inks at the right. It folds after five rows, says "Showing n of N" when the record is incomplete rather than summing rows it never saw, and never says who wrote a file. When a Work or Code lead records a finished receipt through `octant_report_finished`, the turn ends with a **"Finished, with proof"** card showing the summary, the observed diff file and line counts (or `Diff unavailable`), each host-run check or goal criterion with its status (`Proven`, `Failed`, `Claimed`, `Unavailable`) and expandable output, and a `Stale` notice whenever a later file-change journal event landed after the receipt. The same card sits above the last reply on the Review page, where Send back prefills any failed or claimed items. A turn paused on the person uses a neutral composer-adjacent request row with
 an icon and explicit answer controls. Follow-up composers use one compact
 hairline message surface across Chat, Work, and Code. Feedback above the toolbar
 appears only when it has content; empty feedback consumes no space. A held
@@ -176,7 +190,9 @@ halves instead ("waited 4m · ran 2s"): the wait is the journaled ask-to-answer
 span of the approval that gated that call alone, never time a neighbouring
 call waited. Chat and Work calls carry the same recorded bounds as Code's; a
 call the host ran itself is timed from its own start and finish, and a settle
-that no person made (an automated review, an expiry) is never wait time. A
+that no person made (an automated review, an expiry) is never wait time. An
+answer the agent refused and Code put back (an allow it cannot take as asked)
+does not end the wait; it runs on to the person's next answer. A
 call still running, and any call whose bounds are missing or cannot be
 trusted, shows no time rather than an invented one. The preview is drawn, not read: the detail under the row
 stays the one place the summary's words are, and clicking the row opens it as

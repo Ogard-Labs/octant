@@ -1,7 +1,6 @@
 import {
   DEFAULT_NATIVE_HARNESS_JOB_SLOTS,
   NATIVE_HARNESS_BUILT_IN_SLOTS,
-  nativeHarnessSlotCandidateKey,
   type AgentRunRole,
   type NativeHarnessCandidateRejectionReason,
   type NativeHarnessJob,
@@ -190,11 +189,4 @@ function slotFor(
     input.project?.slots.find((slot) => slot.id === slotId) ??
     input.host.slots.find((slot) => slot.id === slotId)
   );
-}
-
-export function sameNativeHarnessCandidate(
-  left: NativeHarnessSlotCandidate,
-  right: NativeHarnessSlotCandidate,
-): boolean {
-  return nativeHarnessSlotCandidateKey(left) === nativeHarnessSlotCandidateKey(right);
 }

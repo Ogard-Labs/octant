@@ -8,6 +8,7 @@ import {
   ProviderRegistrySnapshot,
   ThreadNativeSetupResult,
   ThreadProjectCodeResult,
+  ThreadProviderMentionsResult,
   decodeHostAnswer,
   type ThreadNativeSetupRequest,
 } from "@octant/contracts";
@@ -24,12 +25,16 @@ export interface ProviderClient {
   probe(instanceId: ProviderInstanceId): Promise<ProviderProbeResult>;
   /** Reads or sets one thread's own choice about its key provider's native setup. */
   threadNativeSetup?(
-    request: Exclude<ThreadNativeSetupRequest, { kind: "project-code" }>,
+    request: Extract<ThreadNativeSetupRequest, { kind: "get" | "set" }>,
   ): Promise<ThreadNativeSetupResult>;
   /** Whether a Work or Code thread's Project holds untrusted Project code for its provider. */
   threadProjectCode?(
     request: Extract<ThreadNativeSetupRequest, { kind: "project-code" }>,
   ): Promise<ThreadProjectCodeResult>;
+  /** Provider skills and plugins available for a Work or Code thread or draft in its bound folder. */
+  threadProviderMentions?(
+    request: Extract<ThreadNativeSetupRequest, { kind: "mentions" | "draft-mentions" }>,
+  ): Promise<ThreadProviderMentionsResult>;
 }
 
 export class ProviderClientFailure extends Error {
@@ -100,6 +105,19 @@ export function createProviderClient(options: ProviderClientOptions): ProviderCl
           body: JSON.stringify(threadRequest),
         },
         decodeHostAnswer(ThreadProjectCodeResult),
+        "command",
+      );
+    },
+    threadProviderMentions(threadRequest) {
+      return request(
+        options.fetch,
+        new URL("/api/providers/thread-native-setup", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(threadRequest),
+        },
+        decodeHostAnswer(ThreadProviderMentionsResult),
         "command",
       );
     },

@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit, Scope, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { appToolHostLines } from "./appToolHostLines";
 import { makePiDriver, type PiClientPort } from "./piDriver";
 import { piToolCatalogAttestation, type PiProcessPort, type PiRpcConnection } from "./piProcess";
 import { createPiManagedToolsBridge, type PiManagedToolsBridge } from "./piManagedTools";
@@ -1167,8 +1168,20 @@ describe("Pi provider driver", () => {
       const bridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
       expect(bridge).toBeDefined();
       const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      const [line] = appToolHostLines([tool]);
+      if (line === undefined) throw new Error("Missing Browser guide");
       await Effect.runPromise(
-        connection.send({ sessionId, prompt: "use the browser", attachments: [], tools: [tool] }),
+        connection.send({
+          sessionId,
+          prompt: "use the browser",
+          attachments: [],
+          tools: [tool],
+          context: [{ kind: "instructions", ...line }],
+        }),
+      );
+      expect(client.request).toHaveBeenCalledWith(
+        "prompt",
+        expect.objectContaining({ message: expect.stringContaining(line.text) }),
       );
       client.emit({
         type: "tool_execution_start",

@@ -76,6 +76,7 @@ import {
   readClaudeVersionOnServer,
   spawnClaudeOnServer,
 } from "./claudeServerProcess";
+import { awsProfileReadPaths } from "./providerHostEnvironment";
 import { ServerSignIns } from "./serverSignIn";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
@@ -535,6 +536,8 @@ function runProbe(
       );
 
       child.stdout.on("data", onStdout);
+      child.stdout.on("error", () => undefined);
+      child.stderr.on("error", () => undefined);
       child.stderr.on("data", onStderr);
       child.once("error", onError);
       child.once("close", onClose);
@@ -1405,6 +1408,8 @@ function confineClaudeLaunch(
         );
       }
     }
+    const openProfile = confinement.strict === false && confinement.sandboxPolicy === undefined;
+    const awsReadPaths = openProfile ? awsProfileReadPaths(spawnOptions.env) : [];
     const launch = options.confinement.prepare({
       sandboxProviderChannel: true,
       executable: spawnOptions.command,
@@ -1421,6 +1426,7 @@ function confineClaudeLaunch(
         temporaryDirectory,
         ...stateRoots.readRoots,
         ...readOnlyFolders,
+        ...awsReadPaths,
         ...(shellFolder === undefined ? [] : [shellFolder]),
       ],
       privateHomeAllowPaths: [
@@ -1429,8 +1435,10 @@ function confineClaudeLaunch(
         temporaryDirectory,
         ...stateRoots.readRoots,
         ...readOnlyFolders,
+        ...awsReadPaths,
         ...(shellFolder === undefined ? [] : [shellFolder]),
       ],
+      ...(openProfile ? { protectedFiles: "provider-sign-ins" as const } : {}),
       // The runtime calls its own control plane, so it resolves the runtime
       // egress policy rather than the thread default. This driver
       // carries Code threads, and the policy no longer reads the mode.
@@ -1574,6 +1582,8 @@ function spawnOwnedClaudeProcess(
     resolveExited = resolve;
   });
 
+  child.stdin.on("error", () => requestTermination("SIGTERM"));
+  child.stderr.on("error", () => undefined);
   child.stderr.on("data", onStderr);
   child.stderr.once("close", () => {
     let pending: Buffer | string | null = child.stderr.read();

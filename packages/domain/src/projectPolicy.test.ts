@@ -21,9 +21,7 @@ import {
   ProjectPolicyRejected,
   addProjectExtraFolder,
   extraFolderRefusal,
-  isPathInProjectFolders,
   projectExtraFolderRoots,
-  projectFolderRoots,
   removeProjectExtraFolder,
   changeCodeProjectAccess,
   changeCodeProjectActions,
@@ -960,13 +958,7 @@ describe("Project extra folders", () => {
       addedAt: updatedAt,
     });
     expect(project).toMatchObject({ version: 2, updatedAt, extraFolders: [folder] });
-    const folders = projectFolderRoots(project);
-    expect(folders).toEqual(["/Users/example/Workspace", "/Users/example/Notes"]);
     expect(projectExtraFolderRoots(project)).toEqual(["/Users/example/Notes"]);
-    expect(isPathInProjectFolders(folders, "/Users/example/Notes/today.md")).toBe(true);
-    expect(isPathInProjectFolders(folders, "/Users/example/Workspace/a.txt")).toBe(true);
-    expect(isPathInProjectFolders(folders, "/Users/example/Notes-old/a.txt")).toBe(false);
-    expect(isPathInProjectFolders(folders, "/Users/example/Desktop")).toBe(false);
   });
 
   it("refuses the main folder, a folder inside or around it, and a duplicate or nested extra", () => {

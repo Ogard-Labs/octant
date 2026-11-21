@@ -27,7 +27,8 @@
     "./image-generation-conformance": "./src/imageGenerationConformance.ts",
     "./cloud-sessions": "./src/cloudSessions.ts",
     "./openai-cloud-session-protocol": "./src/openAiCloudSessionProtocol.ts",
-    "./cloud-session-conformance": "./src/cloudSessionConformance.ts"
+    "./cloud-session-conformance": "./src/cloudSessionConformance.ts",
+    "./project-folder-discovery": "./src/projectFolderDiscovery.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

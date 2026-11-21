@@ -1013,7 +1013,7 @@ describe("SpendCeilingService", () => {
       threadType: "chat-thread",
     });
     expect(before).toMatchObject({
-      threadRemaining: { ceilingUsdCents: 25_00, usedUsdCents: 10_40, remainingUsdCents: 14_60 },
+      threadRemaining: { ceilingUsdCents: 25_00, usedUsdCents: 10_40, remainingUsdCents: 14_59 },
     });
 
     expect(
@@ -1051,7 +1051,7 @@ describe("SpendCeilingService", () => {
       }),
     ).toMatchObject({
       thread: { policy: { costBudgetUsdCents: 40_00 } },
-      threadRemaining: { ceilingUsdCents: 40_00, usedUsdCents: 10_40, remainingUsdCents: 29_60 },
+      threadRemaining: { ceilingUsdCents: 40_00, usedUsdCents: 10_40, remainingUsdCents: 29_59 },
     });
   });
 
@@ -1267,6 +1267,514 @@ describe("SpendCeilingService", () => {
     expect(refused.status).toBe("refused");
     if (refused.status !== "refused") return;
     expect(refused.refusal).toMatchObject({ dimension: "turns", ceilingTurns: 2 });
+  });
+
+  it("reserves monetary cents for concurrent image admissions and releases cleanly on settle or abandon", () => {
+    const { service } = openService();
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 10 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+    const first = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+      estimatedCostUsdCents: 6,
+      countsAsTurn: false,
+      skipTokenCeiling: true,
+    });
+    expect(first).toMatchObject({ status: "admitted", reservedCostUsdCents: 6 });
+
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+        "project",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 10, usedUsdCents: 0, remainingUsdCents: 4 });
+
+    const second = service.admit({
+      reservationId: ids.reservationB,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+      estimatedCostUsdCents: 6,
+      countsAsTurn: false,
+      skipTokenCeiling: true,
+    });
+    expect(second).toMatchObject({
+      status: "refused",
+      refusal: {
+        kind: "exhausted",
+        dimension: "monetary",
+        scopeKind: "project",
+        remainingUsdCents: 4,
+        ceilingUsdCents: 10,
+      },
+    });
+
+    service.abandon({ reservationId: ids.reservationA });
+    const retried = service.admit({
+      reservationId: ids.reservationB,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+      estimatedCostUsdCents: 6,
+      countsAsTurn: false,
+      skipTokenCeiling: true,
+    });
+    expect(retried).toMatchObject({ status: "admitted", reservedCostUsdCents: 6 });
+    service.settle({ reservationId: ids.reservationB });
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+        "project",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 10, usedUsdCents: 0, remainingUsdCents: 10 });
+  });
+
+  it("counts settled image-job cost against thread and Project monetary ceilings even when the image provider reports no tokens", () => {
+    const { connection, service } = openService();
+    seedChatThread(connection, ids.thread, ids.project);
+    const jobId = "73000000-0000-4000-8000-0000000000d1";
+    connection
+      .prepare(
+        `INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+          event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+        ) VALUES (?, 'image-job', ?, 1, 'image.job-queued@1', 1, ?, 'system', ?, ?, ?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        jobId,
+        crypto.randomUUID(),
+        ids.provider,
+        now,
+        JSON.stringify({ job: { id: jobId, threadKind: "chat-thread", scopeId: ids.thread } }),
+      );
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-0000000000d2",
+      subjectType: "image-job",
+      subjectId: jobId,
+      tokens: { input: 0, output: 0 },
+      quality: "unavailable",
+      costUsdMicros: 80_000,
+      costKind: "api-estimate",
+      sequence: 1,
+    });
+
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 10 },
+      window: { kind: "lifetime" },
+    });
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 10 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+
+    const snapshot = service.snapshot({
+      principalKind: "local-window",
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+    });
+    expect(remainingOf(snapshot, "thread")).toMatchObject({
+      ceilingUsdCents: 10,
+      usedUsdCents: 8,
+      remainingUsdCents: 2,
+    });
+    expect(remainingOf(snapshot, "project")).toMatchObject({
+      ceilingUsdCents: 10,
+      usedUsdCents: 8,
+      remainingUsdCents: 2,
+    });
+
+    const refused = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+      estimatedCostUsdCents: 4,
+      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
+      skipTokenCeiling: true,
+    });
+    expect(refused).toMatchObject({
+      status: "refused",
+      refusal: {
+        kind: "exhausted",
+        dimension: "monetary",
+        remainingUsdCents: 2,
+        ceilingUsdCents: 10,
+      },
+    });
+  });
+
+  it("still refuses a non-turn Shield-style admission when the active turn exhausted the thread turn ceiling", () => {
+    const { service } = openService();
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "work-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { turnBudget: 1 },
+      window: { kind: "lifetime" },
+    });
+    expect(
+      service.admit({
+        reservationId: ids.reservationA,
+        threadId: ids.thread,
+        threadType: "work-thread",
+      }).status,
+    ).toBe("admitted");
+
+    // Without skipTurnAndRunTimeCeiling, countsAsTurn: false still respects the turn ceiling.
+    const shieldLike = service.admit({
+      reservationId: ids.reservationB,
+      threadId: ids.thread,
+      threadType: "work-thread",
+      countsAsTurn: false,
+    });
+    expect(shieldLike).toMatchObject({
+      status: "refused",
+      refusal: { kind: "exhausted", dimension: "turns", ceilingTurns: 1 },
+    });
+  });
+
+  it("follows a Chat thread's current Project for live monetary reservations when the thread moves Projects", () => {
+    const { connection, service } = openService();
+    const projectB = "73000000-0000-4000-8000-000000000099";
+    seedChatThread(connection, ids.thread, ids.project);
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 4 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(projectB) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 4 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+
+    const first = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+      estimatedCostUsdMicros: 40_000,
+      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
+      skipTokenCeiling: true,
+    });
+    expect(first.status).toBe("admitted");
+
+    // Move the Chat thread from Project A to Project B while the image job is still in flight.
+    connection
+      .prepare("UPDATE chat_thread_projection SET project_id = ? WHERE thread_id = ?")
+      .run(projectB, ids.thread);
+
+    // Project A's 4-cent budget is freed immediately; Project B now carries the 4-cent reservation.
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+        "project",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 4, remainingUsdCents: 4 });
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: projectB }),
+        "project",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 4, remainingUsdCents: 0 });
+
+    const refusedOnB = service.admit({
+      reservationId: ids.reservationB,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: projectB,
+      estimatedCostUsdMicros: 40_000,
+      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
+      skipTokenCeiling: true,
+    });
+    expect(refusedOnB).toMatchObject({
+      status: "refused",
+      refusal: {
+        kind: "exhausted",
+        dimension: "monetary",
+        scopeKind: "project",
+        scopeId: projectB,
+      },
+    });
+  });
+
+  it("follows a moved Work thread's latest Project for both live reservations and settled image spend", () => {
+    const { connection, service } = openService();
+    const projectB = "73000000-0000-4000-8000-000000000098";
+    const jobId = "73000000-0000-4000-8000-000000000097";
+    connection
+      .prepare(
+        `INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+          event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+        ) VALUES (?, 'work-thread', ?, 1, 'work.thread-created@1', 1, ?, 'system', ?, ?, ?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        ids.thread,
+        crypto.randomUUID(),
+        ids.provider,
+        now,
+        JSON.stringify({
+          kind: "thread-created",
+          thread: { id: ids.thread, projectId: ids.project },
+        }),
+      );
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 4 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(projectB) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 4 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+
+    const first = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "work-thread",
+      projectId: ids.project,
+      estimatedCostUsdMicros: 40_000,
+      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
+      skipTokenCeiling: true,
+    });
+    expect(first.status).toBe("admitted");
+
+    // Move the Work thread from Project A to Project B via work.thread-updated@1.
+    connection
+      .prepare(
+        `INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+          event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+        ) VALUES (?, 'work-thread', ?, 2, 'work.thread-updated@1', 1, ?, 'system', ?, ?, ?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        ids.thread,
+        crypto.randomUUID(),
+        ids.provider,
+        now,
+        JSON.stringify({ kind: "thread-updated", thread: { id: ids.thread, projectId: projectB } }),
+      );
+
+    // While the first reservation is still live, it counts against Project B and frees Project A.
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+        "project",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 4, remainingUsdCents: 4 });
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: projectB }),
+        "project",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 4, remainingUsdCents: 0 });
+    expect(
+      service.admit({
+        reservationId: ids.reservationB,
+        threadId: ids.thread,
+        threadType: "work-thread",
+        projectId: projectB,
+        estimatedCostUsdMicros: 40_000,
+        countsAsTurn: false,
+        skipTurnAndRunTimeCeiling: true,
+        skipTokenCeiling: true,
+      }),
+    ).toMatchObject({
+      status: "refused",
+      refusal: {
+        kind: "exhausted",
+        dimension: "monetary",
+        scopeKind: "project",
+        scopeId: projectB,
+      },
+    });
+
+    // Once the image job settles its usage row, the charge stays on Project B rather than reverting to A.
+    connection
+      .prepare(
+        `INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+          event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+        ) VALUES (?, 'image-job', ?, 1, 'image.job-queued@1', 1, ?, 'system', ?, ?, ?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        jobId,
+        crypto.randomUUID(),
+        ids.provider,
+        now,
+        JSON.stringify({ job: { id: jobId, threadKind: "work-thread", scopeId: ids.thread } }),
+      );
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000197",
+      subjectType: "image-job",
+      subjectId: jobId,
+      tokens: { input: 0, output: 0 },
+      quality: "unavailable",
+      costUsdMicros: 40_000,
+      costKind: "api-estimate",
+      sequence: 1,
+    });
+    service.settle({ reservationId: ids.reservationA });
+
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+        "project",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 4, usedUsdCents: 0, remainingUsdCents: 4 });
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: projectB }),
+        "project",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 4, usedUsdCents: 4, remainingUsdCents: 0 });
+    expect(
+      service.admit({
+        reservationId: ids.reservationB,
+        threadId: ids.thread,
+        threadType: "work-thread",
+        projectId: projectB,
+        estimatedCostUsdMicros: 40_000,
+        countsAsTurn: false,
+        skipTurnAndRunTimeCeiling: true,
+        skipTokenCeiling: true,
+      }),
+    ).toMatchObject({
+      status: "refused",
+      refusal: {
+        kind: "exhausted",
+        dimension: "monetary",
+        scopeKind: "project",
+        scopeId: projectB,
+      },
+    });
+  });
+
+  it("refuses a fractional-cent image admission and never overstates remaining spend in the readout", () => {
+    const { connection, service } = openService();
+    // Three 53,000-micro images = 159,000 micros (15.9 cents) under a 21-cent ceiling (210,000 micros).
+    for (const [index, jobSuffix] of ["e1", "e2", "e3"].entries()) {
+      const jobId = `73000000-0000-4000-8000-0000000000${jobSuffix}`;
+      connection
+        .prepare(
+          `INSERT INTO event_journal (
+            event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+            event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+          ) VALUES (?, 'image-job', ?, 1, 'image.job-queued@1', 1, ?, 'system', ?, ?, ?)`,
+        )
+        .run(
+          crypto.randomUUID(),
+          jobId,
+          crypto.randomUUID(),
+          ids.provider,
+          now,
+          JSON.stringify({ job: { id: jobId, threadKind: "chat-thread", scopeId: ids.thread } }),
+        );
+      insertUsage(connection, {
+        id: `73000000-0000-4000-8000-0000000001${jobSuffix}`,
+        subjectType: "image-job",
+        subjectId: jobId,
+        tokens: { input: 0, output: 0 },
+        quality: "unavailable",
+        costUsdMicros: 53_000,
+        costKind: "api-estimate",
+        sequence: index + 1,
+      });
+    }
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 21 },
+      window: { kind: "lifetime" },
+    });
+
+    // Exact remaining is 51,000 micros (5.1 cents), so the readout floors to 5 cents, not 6.
+    expect(
+      remainingOf(
+        service.snapshot({
+          principalKind: "local-window",
+          threadId: ids.thread,
+          threadType: "chat-thread",
+        }),
+        "thread",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 21, usedUsdCents: 15, remainingUsdCents: 5 });
+
+    const fourth = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      estimatedCostUsdMicros: 53_000,
+      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
+      skipTokenCeiling: true,
+    });
+    expect(fourth).toMatchObject({
+      status: "refused",
+      refusal: {
+        kind: "exhausted",
+        dimension: "monetary",
+        remainingUsdCents: 5,
+        ceilingUsdCents: 21,
+      },
+    });
+
+    // A live fractional-cent reservation (4.5 cents) on top of 15.9 cents leaves 0.6 cents -> 0 whole cents.
+    expect(
+      service.admit({
+        reservationId: ids.reservationB,
+        threadId: ids.thread,
+        threadType: "chat-thread",
+        estimatedCostUsdMicros: 45_000,
+        countsAsTurn: false,
+        skipTurnAndRunTimeCeiling: true,
+        skipTokenCeiling: true,
+      }).status,
+    ).toBe("admitted");
+    expect(
+      remainingOf(
+        service.snapshot({
+          principalKind: "local-window",
+          threadId: ids.thread,
+          threadType: "chat-thread",
+        }),
+        "thread",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 21, usedUsdCents: 15, remainingUsdCents: 0 });
+    service.abandon({ reservationId: ids.reservationB });
   });
 });
 

@@ -1,5 +1,5 @@
 import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
-import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type { ThreadImageResults } from "@octant/client-runtime/image-generation-client";
 import { useEffect, useState } from "react";
 import { selectPreviewViewer } from "../preview/previewViewers";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -9,7 +9,7 @@ export interface GeneratedImageCardProps {
   readonly job: ImageJob;
   readonly artifact: ImageArtifactRecord;
   readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
-  readonly client: ImageGenerationClient;
+  readonly client: ThreadImageResults;
   readonly onAttach?: (file: File) => void;
   readonly onRevise?: (job: ImageJob, artifact: ImageArtifactRecord) => void;
   readonly onSaveToProject?: (job: ImageJob, artifact: ImageArtifactRecord) => void;

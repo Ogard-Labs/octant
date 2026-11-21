@@ -400,13 +400,6 @@ export function canvasMockupUsesCatalog(block: {
   );
 }
 
-// Descriptive aliases keep budget names discoverable without creating a
-// second source of truth.
-export const CANVAS_MAX_ROWS = CANVAS_MAX_TABLE_ROWS;
-export const CANVAS_MAX_NODE_EDGE_NODES = CANVAS_MAX_DIAGRAM_NODES;
-export const CANVAS_MAX_NODE_EDGE_EDGES = CANVAS_MAX_DIAGRAM_EDGES;
-export const CANVAS_MAX_PAYLOAD = CANVAS_MAX_PAYLOAD_BYTES;
-
 export const DEFAULT_CANVAS_BUDGETS = {
   maxDepth: CANVAS_MAX_DEPTH,
   maxBlocks: CANVAS_MAX_BLOCKS,

@@ -29,7 +29,10 @@ export type ProviderLimitsReporting =
 
 export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimitsReporting {
   // The ACP protocol has no limits channel. Devin differs only because Octant
-  // reads its plan windows from Devin's own usage endpoint.
+  // reads its plan windows from Devin's own usage endpoint. Google
+  // Antigravity's own `/usage` is reached only through its headless mode,
+  // which Google does not support wrapping inside another application on
+  // consumer plans, so Octant does not read it.
   if (isAcpAgentKind(kind)) {
     return kind === "devin" ? "account-endpoint" : "runtime-does-not-report";
   }

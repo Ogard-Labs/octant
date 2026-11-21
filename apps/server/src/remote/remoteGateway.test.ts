@@ -35,7 +35,8 @@ vi.mock("./remoteRequestRegistry", async (importOriginal) => {
   };
 });
 import { decodeStableHostId, type PairedDeviceLifetime } from "@octant/contracts/remote-access";
-import { buildHostHelloSignaturePayload } from "@octant/domain";
+import { buildHostHelloSignaturePayload, buildRemoteRequestProofPayload } from "@octant/domain";
+import { isPairedDeviceSessionCurrent } from "../browser/pairedBrowserControl";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { Journal } from "../persistence/journal";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -129,6 +130,7 @@ interface SetupOptions {
   readonly designPage?: RemoteGatewayOptions["designPage"];
   readonly serve?: Serve;
   readonly now?: () => number;
+  readonly monotonicSource?: () => number;
   readonly clock?: () => string;
   readonly registrationLifetime?: () => PairedDeviceLifetime;
   readonly uuid?: () => string;
@@ -203,6 +205,7 @@ function setup(options: SetupOptions = {}) {
     ...(options.designPage === undefined ? {} : { designPage: options.designPage }),
     serve: options.serve ?? defaultServe,
     now: options.now ?? (() => nowMs),
+    ...(options.monotonicSource === undefined ? {} : { monotonicSource: options.monotonicSource }),
     uuid,
     clock: options.clock ?? (() => nowIso),
     ...(options.registrationLifetime === undefined
@@ -1593,5 +1596,196 @@ describe("RemoteGateway — approval for a window that never finished", () => {
     expect(stream.ended()).toBe(false);
     expect(admin.listDevices().map((entry) => entry.state)).toEqual(["active"]);
     await gateway.stop();
+  });
+
+  it("shares its monotonic clock with product dispatch so Browser session checks match gateway expiry across forward wall-clock jumps", async () => {
+    let wallMs = nowMs;
+    let steadyMs = 5_000;
+    let capturedSessionNow: (() => number) | undefined;
+    const capturing = createCapturingServe();
+    const { gateway, connection } = setup({
+      serve: capturing.serve,
+      now: () => wallMs,
+      monotonicSource: () => steadyMs,
+      productDispatch: async (handoff) => {
+        capturedSessionNow = handoff.sessionNow;
+        return Response.json({ ok: true });
+      },
+    });
+    await gateway.start();
+    try {
+      const fetch = capturing.getFetch();
+      if (fetch === undefined) throw new Error("Expected captured gateway fetch");
+
+      const deviceKeys = generateKeyPairSync("ec", { namedCurve: "P-256" });
+      const publicPem = deviceKeys.publicKey
+        .export({ format: "pem", type: "spki" })
+        .toString()
+        .trim();
+      const keyFacts = canonicalDeviceKeyFacts(publicPem);
+      if (keyFacts === undefined) throw new Error("Expected valid P-256 key facts");
+      const deviceId = "22222222-2222-4222-8222-222222222222";
+      const sessionId = "33333333-3333-4333-8333-333333333333";
+      const sessionDigest = createHash("sha256").update(sessionId, "utf8").digest("hex");
+      const csrfToken = "csrf-token-value";
+      const csrfDigest = createHash("sha256").update(csrfToken, "utf8").digest("hex");
+
+      connection
+        .prepare(
+          `INSERT INTO remote_device_projection (
+             device_id, host_id, device_key_fingerprint, device_public_key,
+             device_label, origin, protocol_floor, credential_generation,
+             created_at, expires_at, last_seen_at, state, revoked_at, revoked_reason
+           ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'active', NULL, NULL)`,
+        )
+        .run(
+          deviceId,
+          hostId,
+          keyFacts.fingerprint,
+          publicPem,
+          "Paired Phone",
+          ORIGIN,
+          nowIso,
+          new Date(wallMs + 7 * 24 * 60 * 60_000).toISOString(),
+          nowIso,
+        );
+      connection
+        .prepare(
+          `INSERT INTO remote_security_audit_projection (
+             event_kind, host_id, device_id, protocol_version, credential_generation,
+             source_class, result_category, reason_code, correlation_id, occurred_at
+           ) VALUES ('device-approved', ?, ?, 1, 1, 'lan-private', 'ok', 'user-approved', ?, ?)`,
+        )
+        .run(hostId, deviceId, "44444444-4444-4444-8444-444444444444", nowIso);
+      connection
+        .prepare(
+          `INSERT INTO remote_session_store (
+             session_id_digest, host_id, device_id, credential_generation, origin,
+             protocol_version, capability_digest, issued_at, last_seen_at,
+             idle_expires_at, absolute_expires_at, csrf_digest, state
+           ) VALUES (?, ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?, 'active')`,
+        )
+        .run(
+          sessionDigest,
+          hostId,
+          deviceId,
+          ORIGIN,
+          "c".repeat(64),
+          wallMs,
+          wallMs,
+          wallMs + 15 * 60_000,
+          wallMs + 60 * 60_000,
+          csrfDigest,
+        );
+
+      const signedProductRequest = (nonce: string, commandId: string, timestampMs: number) => {
+        const body = JSON.stringify({ threadId: "55555555-5555-4555-8555-555555555555" });
+        const bodyDigest = createHash("sha256").update(body, "utf8").digest("hex");
+        const timestamp = new Date(timestampMs).toISOString();
+        const proof = {
+          method: "POST",
+          canonicalPathQuery: "/api/browser/contexts/current",
+          timestamp,
+          nonce,
+          bodyDigest,
+          csrfDigest,
+        };
+        const payload = buildRemoteRequestProofPayload({
+          sessionId,
+          proof,
+        });
+        const signature = sign("sha256", Buffer.from(payload, "utf8"), {
+          key: deviceKeys.privateKey,
+          dsaEncoding: "ieee-p1363",
+        }).toString("base64url");
+        const encodedProof = Buffer.from(JSON.stringify({ ...proof, signature }), "utf8").toString(
+          "base64url",
+        );
+        return new Request(`${ORIGIN}/api/browser/contexts/current`, {
+          method: "POST",
+          headers: {
+            host: "192.168.1.20:9443",
+            origin: ORIGIN,
+            "sec-fetch-site": "same-origin",
+            "content-type": "application/json",
+            cookie: `__Secure-octant-remote-session=${sessionId}`,
+            "x-octant-csrf": csrfToken,
+            "x-octant-command-id": commandId,
+            "x-octant-device-proof": encodedProof,
+          },
+          body,
+        });
+      };
+
+      const first = await fetch(
+        signedProductRequest("nonce-1", "66666666-6666-4666-8666-666666666666", wallMs),
+        lanFacts,
+      );
+      expect(first.status).toBe(200);
+      if (capturedSessionNow === undefined) {
+        throw new Error("Expected product dispatch to receive gateway sessionNow");
+      }
+
+      // Jump wall time 20 minutes past idle_expires_at without advancing steady time.
+      wallMs += 20 * 60_000;
+      const principal = { deviceId, sessionId, credentialGeneration: 1 };
+      expect(isPairedDeviceSessionCurrent(connection, principal, wallMs)).toBe(false);
+      const boundedNow = capturedSessionNow();
+      expect(boundedNow).toBeLessThan(nowMs + 15 * 60_000);
+      // Repeated Browser frame-poll checks during the jump must not ratchet the
+      // gateway's monotonic clock forward past idle_expires_at.
+      for (let i = 0; i < 20; i++) {
+        expect(capturedSessionNow()).toBe(boundedNow);
+        expect(isPairedDeviceSessionCurrent(connection, principal, capturedSessionNow())).toBe(
+          true,
+        );
+      }
+
+      // Calling the handed-off sessionNow observed the forward jump on the
+      // gateway's own monotonic clock (not a second clock), putting the gateway
+      // in recovery-required posture for new trust issuance.
+      const challengeDuringJump = await fetch(
+        new Request(`${ORIGIN}/api/remote/auth/challenge`, {
+          method: "POST",
+          headers: {
+            host: "192.168.1.20:9443",
+            origin: ORIGIN,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ hostId, deviceId, credentialGeneration: 1 }),
+        }),
+        lanFacts,
+      );
+      expect(challengeDuringJump.status).toBe(503);
+
+      // Even while wall time is still jumped, the gateway's bounded clock has
+      // not ratcheted, so product dispatch and Browser checks agree the session
+      // is still active.
+      const secondDuringJump = await fetch(
+        signedProductRequest("nonce-2", "77777777-7777-4777-8777-777777777777", boundedNow),
+        lanFacts,
+      );
+      expect(secondDuringJump.status).toBe(200);
+
+      // Correcting wall time back to true elapsed time recovers gateway posture
+      // immediately (without leaving the high-water mark 16+ minutes ahead).
+      wallMs = nowMs + 5_000;
+      steadyMs += 5_000;
+      const challengeAfterCorrection = await fetch(
+        new Request(`${ORIGIN}/api/remote/auth/challenge`, {
+          method: "POST",
+          headers: {
+            host: "192.168.1.20:9443",
+            origin: ORIGIN,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ hostId, deviceId, credentialGeneration: 1 }),
+        }),
+        lanFacts,
+      );
+      expect(challengeAfterCorrection.status).toBe(200);
+    } finally {
+      await gateway.stop();
+    }
   });
 });

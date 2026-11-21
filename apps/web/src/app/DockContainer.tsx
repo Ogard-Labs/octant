@@ -120,6 +120,7 @@ export interface DockContainerProps {
     | "selectProjectPullRequest"
     | "selectProjectPullRequestIdentity"
     | "selectWorkThread"
+    | "sendPullRequestLineNotes"
     | "setDockSidecarsByThread"
     | "setDockStatesByThread"
     | "setFallbackDockState"
@@ -300,6 +301,7 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
     canvasClient,
     chatClient,
     codeClient,
+    pullRequestReviewClient,
     nativeHarnessClient,
     planClient,
     shipClient,
@@ -427,6 +429,7 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
         codeProviderGroups={codeProviderGroups}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         planClient={planClient}
+        pullRequestReviewClient={pullRequestReviewClient}
         shipClient={shipClient}
         {...(writtenDocumentPath === undefined ? {} : { writtenDocumentPath })}
         {...(writtenCanvasId === undefined ? {} : { writtenCanvasId })}
@@ -504,6 +507,8 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
     ...(codeClient.setProjectPullRequestAutoFix === undefined
       ? {}
       : { setAutoFix: codeClient.setProjectPullRequestAutoFix.bind(codeClient) }),
+    onSendLineNotes: actions.sendPullRequestLineNotes,
+    pullRequestReviewClient,
   };
 
   function bottomToolContent(surface: RightUtilityDockSurfaceId) {

@@ -27,6 +27,12 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const MAX_NATIVE_HARNESS_SLOT_CANDIDATES = 16;
 export const MAX_NATIVE_HARNESS_SLOTS = 32;
 
+/**
+ * Built-in routing slot ids. `plan` and `smol` stay in the wire schema so
+ * saved routing configurations and journaled decisions carrying them continue
+ * to decode cleanly, even though Settings hides them while no server caller
+ * resolves them.
+ */
 export const NATIVE_HARNESS_BUILT_IN_SLOT_IDS = [
   "default",
   "plan",
@@ -62,7 +68,9 @@ export const NATIVE_HARNESS_BUILT_IN_SLOTS = {
 /**
  * The kinds of model call the harness makes. Jobs resolve to slots through an
  * editable mapping; a new job reuses an existing slot rather than growing the
- * configuration.
+ * configuration. `planner`, `explorer`, `title`, `summary`, and `compaction`
+ * remain in the schema so saved routing bindings continue to decode cleanly,
+ * while Settings hides them until the server resolves them.
  */
 export const NativeHarnessJob = Schema.Literal(
   "lead",

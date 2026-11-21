@@ -102,8 +102,8 @@ Missing or invalid native metadata refuses creation/use without removing stores.
   host resolves Project to the thread's live Project, never another Project
   named by a caller. A fork or new task starts without the choice.
 - Only a person, at a local window or a paired device, changes this default
-  (maintainer decision, 2026-11-12; not built yet: today a paired device
-  cannot). A routine, child, terminal grant, agent, plugin, or imported thread cannot set
+  (maintainer decision, 2026-11-12; server policy admits a person-paired device
+  and refuses hub-introduced devices; paired UI follow-up remains). A routine, child, terminal grant, agent, plugin, or imported thread cannot set
   it. It is a default, not a pin: an explicit agent profile request still
   follows the ordinary approval path and does not rewrite the default.
   Selecting a stored profile grants no access; callers that cannot use it are
@@ -170,7 +170,8 @@ Missing or invalid native metadata refuses creation/use without removing stores.
   storage (cookies, storage, cache, service workers). The Settings row has the
   same action.
 - Clearing is the person's, at a local window or a paired device (maintainer
-  decision, 2026-11-12; not built yet: today a local window only), and has two scopes: all of a
+  decision, 2026-11-12; server policy admits a person-paired device and refuses
+  hub-introduced devices; paired UI follow-up remains), and has two scopes: all of a
   profile's storage (what "Sign out" does) or its cookies alone. The host closes
   the profile's pages, in the server's records and in the desktop app's views,
   before it removes anything, and journals `browser.profile-cleared@1` with the
@@ -332,18 +333,17 @@ thread made.
   open and stopping the thread's own Browser, and refuses every other
   operation ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode));
   a read of a profile page still needs its (origin, profile) approval.
-- **Paired devices.** A paired device opens a profile page, switches a page to
-  a profile, answers a profile site approval, acts on a profile page, lists and
-  clears a profile, and sees a profile page's picture, text, address, and
-  title, as a local window does (maintainer decision, 2026-11-12). A turn that
-  a phone started raises the approval and that phone answers it, as does any
-  window or device that can see the thread. Not built yet: today a paired
-  device may do none of these and sees "Signed-in page — open it on this
-  Mac."; a profile approval from a phone-started turn waits for a local
-  window, and the phone neither sees nor answers it. An approval for a page
-  outside a profile is answered as every Browser approval is. The design that
-  opens these is
-  [What a paired device sees of a signed-in page](#what-a-paired-device-sees-of-a-signed-in-page).
+- **Paired devices.** A person-paired device opens a profile page, switches a
+  page to a profile, answers a profile site approval, acts on a profile page,
+  lists and clears a profile, and sees a profile page's picture, text, address,
+  and title, as a local window does (maintainer decision, 2026-11-12; built
+  under [What a paired device sees of a signed-in page](#what-a-paired-device-sees-of-a-signed-in-page)).
+  A turn that a person-paired phone started raises the approval and that phone
+  answers it, as does any window or person-paired device that can see the
+  thread. A roster-only or restricted device still sees "Signed-in page — open
+  it on this Mac." and neither sees nor answers profile site approvals. An
+  approval for a page outside a profile is answered as every Browser approval
+  is.
 - **Unattended turns.** A routine or managed child uses a stored profile only with
   the explicit, persistent [delegated session permission](#delegated-sessions) below; it
   never inherits another caller's page, sign-in permission or authority.
@@ -370,13 +370,12 @@ floating page preview both show the profile's name. The toolbar's profile
 icon shows the page's profile at all times. The person can take the page
 from the agent with **Take over**
 ([Person and agent together](browser-agent-tool.md#person-and-agent-together));
-a paired device can too (maintainer decision, 2026-11-12; not built yet: today a
-paired device cannot, signed in or not; designed in
+a person-paired device can too (maintainer decision, 2026-11-12; built under
 [A paired device holds the page](browser-agent-tool.md#a-paired-device-holds-the-page)).
 
 ### What a paired device sees of a signed-in page
 
-Designed, not built (maintainer request, 2026-11-18). A device the host's own
+Built (maintainer request, 2026-11-18). A device the host's own
 person paired is the person, so it sees a profile page as the person at the
 Mac does; what changes is how the content travels and what may keep it.
 
@@ -693,8 +692,8 @@ browser…" beside "Install extension…".
   from. It is installed but off everywhere, is enabled per profile after the
   person confirms what it can read and change, and never loads into a Private
   page. Importing is the person's, at a local window or a paired device
-  (maintainer decision, 2026-11-12; not built yet: today a paired device is
-  refused and sees no list).
+  (maintainer decision, 2026-11-12; server policy admits a person-paired device
+  and refuses hub-introduced devices; paired UI follow-up remains).
 - **Unsupported, with the reason.** An extension that uses Manifest V2 is listed
   as unsupported ("It uses the older Manifest V2 format, which Octant cannot
   run."), and so is one that needs native messaging ("It needs to talk to a
@@ -719,8 +718,8 @@ browser…" beside "Install extension…".
   journals `browser.extension-enabled@1` with the profile; disabling journals
   `browser.extension-disabled@1`.
 - A local window or a paired device enables or disables (maintainer decision, 2026-11-12;
-  not built yet: today a paired device sees the list and
-  changes nothing, `extension-not-local`). An agent cannot install, enable, or disable an extension, and
+  server policy admits a person-paired device and refuses hub-introduced devices
+  with `extension-not-local`; paired UI follow-up remains). An agent cannot install, enable, or disable an extension, and
   no plugin, skill, or structured reference can either.
 - An extension's own pages (`chrome-extension://` addresses: popups, options)
   are outside every agent allowlist. The agent cannot open or act on them.
@@ -793,17 +792,17 @@ work without it, and takes no extension-support package:
 
 ## Refusals
 
-| Reason                   | When                                                                                                                                                        |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `profile-not-local`      | A paired device tries to open, switch to, or answer for a profile page                                                                                      |
-| `profile-needs-a-person` | A routine, a subagent, or a terminal Browser grant tries to use a profile page                                                                              |
-| `profile-unavailable`    | The Project is archived, its mode is off, the native Browser is not available, or the store is locked                                                       |
-| `source-not-found`       | A cookie import names a browser or profile that is not on this Mac                                                                                          |
-| `invalid`                | A cookie import's site names no web host                                                                                                                    |
-| `keychain-refused`       | The person declined the Keychain prompt for the browser's cookie key, or macOS would not answer                                                             |
-| `source-unreadable`      | A cookie database could not be opened or decrypted, or the browser keeps no key in the Keychain                                                             |
-| `extension-not-local`    | A caller that is not the person tries to install, enable, or disable an extension (today a paired device too; not built yet: a paired device is the person) |
-| `extension-unsupported`  | The manifest is not Manifest V3, it needs native messaging, or the host has no desktop app                                                                  |
+| Reason                   | When                                                                                                                                                             |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `profile-not-local`      | A hub-introduced or restricted device tries to open, switch to, list, create, or clear a profile, or any remote device tries to run local Keychain cookie import |
+| `profile-needs-a-person` | A routine, a subagent, or a terminal Browser grant tries to use a profile page                                                                                   |
+| `profile-unavailable`    | The Project is archived, its mode is off, the native Browser is not available, or the store is locked                                                            |
+| `source-not-found`       | A cookie import names a browser or profile that is not on this Mac                                                                                               |
+| `invalid`                | A cookie import's site names no web host                                                                                                                         |
+| `keychain-refused`       | The person declined the Keychain prompt for the browser's cookie key, or macOS would not answer                                                                  |
+| `source-unreadable`      | A cookie database could not be opened or decrypted, or the browser keeps no key in the Keychain                                                                  |
+| `extension-not-local`    | A caller other than a local window or person-paired device (such as a hub-introduced or restricted device) tries to install, enable, or disable an extension     |
+| `extension-unsupported`  | The manifest is not Manifest V3, it needs native messaging, or the host has no desktop app                                                                       |
 
 Each refusal is a value the pane shows in words; none is a silent no-op.
 

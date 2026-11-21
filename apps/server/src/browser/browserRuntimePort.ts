@@ -7,9 +7,9 @@ import type {
 import type { BrowserAccountProfileCreateResult } from "@octant/contracts/browser-profiles";
 import type { BrowserTransferLimits } from "@octant/domain";
 import type {
-  OwnerBrowserNativeCommand,
-  OwnerBrowserNativeResult,
-} from "@octant/contracts/owner-browser";
+  PairedBrowserNativeCommand,
+  PairedBrowserNativeResult,
+} from "@octant/contracts/paired-browser-control";
 import type {
   BrowserPageScriptNativeCommand,
   BrowserPageScriptPreparation,
@@ -327,10 +327,10 @@ export interface PersistentBrowserOwnerPort {
 
 export interface BrowserRuntimePort {
   readonly persistentOwner?: PersistentBrowserOwnerPort | undefined;
-  readonly ownerControl?: (
-    command: OwnerBrowserNativeCommand,
+  readonly pairedControl?: (
+    command: PairedBrowserNativeCommand,
     signal: AbortSignal,
-  ) => Promise<OwnerBrowserNativeResult>;
+  ) => Promise<PairedBrowserNativeResult>;
   readonly runPageScript?: (
     command: BrowserPageScriptNativeCommand,
     signal: AbortSignal,
@@ -431,4 +431,8 @@ export interface BrowserRuntimePort {
    * the person through relayed actions, which the service already knows of.
    */
   readonly onPersonInput?: (listener: (contextId: BrowserContextId) => void) => () => void;
+  /** Local input at the computer reclaimed a paired-device lease on this context. */
+  readonly onPairedControlReclaimed?: (
+    listener: (contextId: BrowserContextId) => void,
+  ) => () => void;
 }
