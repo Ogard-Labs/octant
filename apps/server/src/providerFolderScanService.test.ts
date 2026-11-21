@@ -147,7 +147,7 @@ function writeOpenCodeDatabase(
   return dbPath;
 }
 
-function createFakeProjectService(receipts: BindingReceiptStore) {
+function createFakeProjectService(receipts: BindingReceiptStore, now: () => number = Date.now) {
   const created: Array<{
     readonly windowId: WindowId;
     readonly name: string;
@@ -172,7 +172,7 @@ function createFakeProjectService(receipts: BindingReceiptStore) {
         receiptId: command.receiptId,
         authenticatedWindowId: windowId,
         projectType: "code",
-        now: Date.now(),
+        now: now(),
       });
       const timestamp = "2026-11-21T10:00:00.000Z" as CodeProject["createdAt"];
       const project: CodeProject = {
@@ -1081,10 +1081,11 @@ describe("ProviderFolderScanService", () => {
       "2026-11-21T10:00:00.000Z",
     );
 
-    const initialTimeMs = Date.now() - 11 * 60_000;
+    const initialTimeMs = 10_000;
     let currentTimeMs = initialTimeMs;
+    const clock = () => currentTimeMs;
     const receipts = new BindingReceiptStore();
-    const fakeProjects = createFakeProjectService(receipts);
+    const fakeProjects = createFakeProjectService(receipts, clock);
     const scanner = new ProviderFolderScanService({
       homeDirectory: home,
       env: {},
@@ -1094,7 +1095,7 @@ describe("ProviderFolderScanService", () => {
       bindingReceiptStore: receipts,
       projectRootPort: new ProjectRootPort(),
       projectService: fakeProjects.service,
-      now: () => currentTimeMs,
+      now: clock,
     });
 
     const closedWindowId = decodeWindowId(randomUUID());
