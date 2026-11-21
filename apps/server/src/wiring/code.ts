@@ -571,6 +571,7 @@ export function createProjectPullRequestPorts(ghExecutable: string | undefined):
       detail: {
         observeReviewByIdentity: (request, signal) => port.observeReviewByIdentity(request, signal),
         observeIssueClosure: (request, signal) => port.observeIssueClosure(request, signal),
+        observeViewerLogin: (signal) => port.observeViewerLogin(signal),
       },
       merge: {
         mergeByIdentity: (request, signal) => port.mergeByIdentity(request, signal),

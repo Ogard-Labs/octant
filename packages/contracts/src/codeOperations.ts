@@ -78,7 +78,11 @@ import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention"
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
-import { GithubRepositoryNodeId } from "./githubCatalogue";
+import {
+  GithubRepositoryName,
+  GithubRepositoryNodeId,
+  GithubRepositoryOwner,
+} from "./githubCatalogue";
 import { GithubPullRequestNodeId } from "./pullRequestIdentity";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 import { StrictKeptProtections } from "./strictNotice";
@@ -1069,6 +1073,19 @@ const PrepareReviewCorrection = Schema.Struct({
     }).annotations(strict),
   ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CODE_REVIEW_CORRECTION_FINDINGS)),
 }).annotations(strict);
+/**
+ * Pull request whose diff a set of line notes came from. The host resolves
+ * the observed pull request's author against the signed-in `gh` viewer login
+ * before starting the turn; when they differ or either cannot be read, the
+ * host marks the thread as having read outside content.
+ */
+export const CodePullRequestLineNotesSource = Schema.Struct({
+  repositoryOwner: GithubRepositoryOwner,
+  repositoryName: GithubRepositoryName,
+  number: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type CodePullRequestLineNotesSource = typeof CodePullRequestLineNotesSource.Type;
+
 const StartProviderTurn = Schema.Struct({
   kind: Schema.Literal("start-provider-turn"),
   /** Explicit consent to a fresh native session with a bounded conversation handoff. */
@@ -1103,6 +1120,7 @@ const StartProviderTurn = Schema.Struct({
   ),
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
+  pullRequestLineNotesSource: Schema.optional(CodePullRequestLineNotesSource),
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),

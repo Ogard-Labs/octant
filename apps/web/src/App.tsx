@@ -5927,6 +5927,7 @@ function LaunchedShell(
       selectWorkThread,
       sendBackChatTurn: chatController.sendBackTurn,
       sendBackCodeTurn: codeController.sendBackTurn,
+      sendPullRequestLineNotes: codeController.sendPullRequestLineNotes,
       setAgentsCenterOpen,
       setArchiveOpen,
       setArtifactLibraryOpen,

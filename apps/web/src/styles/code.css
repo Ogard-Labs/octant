@@ -384,6 +384,16 @@ html:not([data-octant-reduced-transparency="true"])
   justify-self: start;
 }
 
+.code-line-notes__thread-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.code-line-notes__thread-select {
+  max-width: 100%;
+}
+
 /* ─── repository file tree ─────────────────────────────────────────────
    The Files dock is 320px wide, so every row spends its width the same
    way: one fixed indent step for files and folders alike, one row height,
@@ -938,9 +948,14 @@ html:not([data-octant-reduced-transparency="true"])
 }
 
 .unified-diff__renamed,
+.unified-diff__mode,
 .unified-diff__change {
   flex: none;
   color: var(--oct-muted);
+}
+
+.unified-diff__mode {
+  font-family: var(--oct-font-mono);
 }
 
 .unified-diff__counts {
@@ -1012,6 +1027,19 @@ html:not([data-octant-reduced-transparency="true"])
 
 .unified-diff__line[data-kind="removed"] .unified-diff__marker {
   color: var(--oct-danger-fg);
+}
+
+.unified-diff__meta {
+  color: var(--oct-meta);
+  font-style: italic;
+}
+
+.unified-diff__meta[data-kind="added"] {
+  background: var(--oct-success-soft);
+}
+
+.unified-diff__meta[data-kind="removed"] {
+  background: var(--oct-danger-soft);
 }
 
 .unified-diff__gap td {

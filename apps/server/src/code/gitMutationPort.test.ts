@@ -329,6 +329,30 @@ describe("GitMutationPort", () => {
     expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("initial\n");
   });
 
+  it("discards a staged copy whose name contains brackets without touching uncommitted edits in a sibling file", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, "source.txt"), "copied body\n");
+    writeFileSync(join(repository, "Report copy 1.txt"), "original sibling\n");
+    git(repository, "add", "--", "source.txt", "Report copy 1.txt");
+    git(repository, "commit", "-m", "add source and sibling");
+
+    // Stage a copy with glob brackets in its filename and edit the matching sibling.
+    writeFileSync(join(repository, "Report copy [1].txt"), "copied body\n");
+    git(repository, "--literal-pathspecs", "add", "--", "Report copy [1].txt");
+    writeFileSync(join(repository, "Report copy 1.txt"), "uncommitted sibling edit\n");
+
+    const port = new GitMutationPort(undefined, confinedOptions());
+    await expect(
+      port.discard({ checkoutRoot: repository, paths: ["Report copy [1].txt"] }),
+    ).resolves.toEqual({ status: "applied" });
+
+    expect(readFileSync(join(repository, "Report copy 1.txt"), "utf8")).toBe(
+      "uncommitted sibling edit\n",
+    );
+    expect(readFileSync(join(repository, "source.txt"), "utf8")).toBe("copied body\n");
+    expect(gitOutput(repository, "status", "--porcelain")).not.toContain("Report copy [1].txt");
+  });
+
   it("takes a path back out of the index while its edit survives in the working tree", async () => {
     const repository = createRepository(temporaryDirectory());
     writeFileSync(join(repository, "README.md"), "staged edit\n");

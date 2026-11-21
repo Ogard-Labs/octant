@@ -1042,6 +1042,7 @@ function controller(): CodeController {
     wakeThread: vi.fn(async () => ({ status: "ok" }) as const),
     moveThread: vi.fn(async () => ({ status: "ok" }) as const),
     sendBackTurn: vi.fn(async () => ({ status: "ok" }) as const),
+    sendPullRequestLineNotes: vi.fn(async () => ({ status: "sent" }) as const),
     threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
     restoreUndo: undefined,
     noteRestoreUndo: vi.fn(),

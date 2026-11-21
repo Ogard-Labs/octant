@@ -933,6 +933,7 @@ export interface CodeOperationRuntimeOptions {
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   readonly resolveSideChatReturns?: CodeOperationServiceOptions["resolveSideChatReturns"];
+  readonly resolvePullRequestLineNotesAuthorship?: CodeOperationServiceOptions["resolvePullRequestLineNotesAuthorship"];
   /** Reads the `@file` mentions a turn names against this thread's bound root. */
   readonly resolveFileMentionContext?: CodeOperationServiceOptions["resolveFileMentionContext"];
   /** Takes the notes the user pointed at the running product into the next turn. */
@@ -1696,6 +1697,9 @@ export function createCodeOperationRuntime(
     ...(options.resolveSideChatReturns === undefined
       ? {}
       : { resolveSideChatReturns: options.resolveSideChatReturns }),
+    ...(options.resolvePullRequestLineNotesAuthorship === undefined
+      ? {}
+      : { resolvePullRequestLineNotesAuthorship: options.resolvePullRequestLineNotesAuthorship }),
     ...(options.resolveThreadMentionContext === undefined
       ? {}
       : { resolveThreadMentionContext: options.resolveThreadMentionContext }),
@@ -4251,16 +4255,57 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return refuseRevokedAdmission();
     }
     // Feedback stays pending through every preparation refusal. Consuming it
-    // here does not yield between the final admission check and owning the turn.
-    let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
-    try {
-      feedback = input.takeProductFeedback?.(MAX_PROVIDER_ATTACHMENTS - originalInputCount);
-    } catch {
+    // here does not yield between the final admission check and owning the turn;
+    // any pull-request outside-content mark returns a value inside the same
+    // delivery transaction so a feedback refusal never taints the thread and a
+    // provenance refusal rolls back pending feedback notes without throwing.
+    const recordOutsideContent = input.recordOutsideContent;
+    let outsideContentRecorded = false;
+    let feedback:
+      | Extract<
+          ReturnType<NonNullable<typeof input.takeProductFeedback>>,
+          { readonly status: "taken" }
+        >["delivery"]
+      | undefined;
+    if (input.takeProductFeedback !== undefined) {
+      const taken = input.takeProductFeedback(
+        MAX_PROVIDER_ATTACHMENTS - originalInputCount,
+        recordOutsideContent === undefined
+          ? undefined
+          : () => {
+              if (!recordOutsideContent()) return { status: "refused" };
+              outsideContentRecorded = true;
+              return { status: "accepted" };
+            },
+      );
+      if (taken.status === "claim-refused") {
+        await serverTools?.close?.().catch(() => undefined);
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return {
+          ...failStart(
+            "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
+          ),
+          admission: "refused" as const,
+        };
+      }
+      if (taken.status === "feedback-changed") {
+        await serverTools?.close?.().catch(() => undefined);
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return {
+          ...failStart(
+            "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+          ),
+          admission: "refused" as const,
+        };
+      }
+      feedback = taken.delivery;
+    }
+    if (recordOutsideContent !== undefined && !outsideContentRecorded && !recordOutsideContent()) {
       await serverTools?.close?.().catch(() => undefined);
       await input.extensionTools?.close?.().catch(() => undefined);
       return {
         ...failStart(
-          "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+          "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
         ),
         admission: "refused" as const,
       };

@@ -68,6 +68,7 @@ export interface ReaderPagesContainerProps {
     | "selectWorkThread"
     | "sendBackChatTurn"
     | "sendBackCodeTurn"
+    | "sendPullRequestLineNotes"
     | "setAgentsCenterOpen"
     | "setArchiveOpen"
     | "setArtifactLibraryOpen"
@@ -469,6 +470,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         onOpenLinkedThread={(thread) =>
           actions.openLinkedProjectPullRequestThread(thread, row.projectId)
         }
+        onSendLineNotes={actions.sendPullRequestLineNotes}
         query={query}
         refresh={(command) => codeClient.refreshProjectPullRequestDetail(command)}
         updatedAt={row.updatedAt}

@@ -18,8 +18,11 @@ import type {
   CodeProjectPullRequestSwitchOutcome,
   CodeProjectPullRequestSwitchTarget,
   CodeProjectPullRequestSwitchesView,
+  CodePullRequestLineNotesSource,
+  CodeThreadId,
 } from "@octant/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CodeLineNotesSendResult } from "../code/CodeLineNotes";
 import type { ProjectPullRequestPersonAction } from "../code/ProjectPullRequestActions";
 import { ProjectPullRequestReviewPane } from "../code/ProjectPullRequestReviewPane";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -56,6 +59,11 @@ export interface DockProjectPullRequestReviewToolProps {
   readonly setAutoFix?: (
     command: CodeProjectPullRequestAutoFixCommand,
   ) => Promise<CodeProjectPullRequestSwitchOutcome>;
+  readonly onSendLineNotes?: (
+    threadId: CodeThreadId,
+    message: string,
+    source: CodePullRequestLineNotesSource,
+  ) => Promise<CodeLineNotesSendResult>;
   readonly pullRequestReviewClient?: PullRequestReviewClient;
 }
 
@@ -356,6 +364,24 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
                 return applySwitch(() =>
                   set(enabled ? { kind: "enable", target, threadId } : { kind: "disable", target }),
                 );
+              },
+            })}
+        {...(props.onSendLineNotes === undefined
+          ? {}
+          : {
+              onSendLineNotes: (threadId: CodeThreadId, message: string) => {
+                const send = props.onSendLineNotes;
+                if (send === undefined) {
+                  return Promise.resolve({
+                    status: "refused",
+                    message: "Line notes cannot be sent from this view.",
+                  } as const);
+                }
+                return send(threadId, message, {
+                  repositoryOwner,
+                  repositoryName,
+                  number,
+                });
               },
             })}
         onRefresh={() => void runRefresh()}

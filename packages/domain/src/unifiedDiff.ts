@@ -23,6 +23,8 @@ export interface DiffLine {
   readonly oldNumber?: number;
   /** Line number on the modified side; absent for a removed line. */
   readonly newNumber?: number;
+  /** True when git emitted `\ No newline at end of file` immediately after this line. */
+  readonly noNewlineAtEndOfFile?: true;
 }
 
 /** String offsets into the exact supplied patch, never a reconstructed file. */
@@ -43,12 +45,43 @@ export interface DiffHunk {
   readonly source?: DiffSourceRange;
 }
 
+export interface DiffFileModeChange {
+  readonly oldMode: string;
+  readonly newMode: string;
+}
+
 export interface ParsedDiffFile {
   /** Stable key for lists and model URIs. */
   readonly id: string;
   /** Path as the user knows it: the new path, or the old one for a deletion. */
   readonly path: string;
   readonly previousPath?: string;
+  /** Present when git recorded an `old mode` → `new mode` permission change. */
+  readonly modeChange?: DiffFileModeChange;
+  /** Present when git recorded a `new file mode` or `deleted file mode`. */
+  readonly fileMode?: string;
+  /**
+   * True only when the file changed permissions (`old mode` → `new mode`) with
+   * no textual hunks and no binary or blob content change.
+   */
+  readonly modeOnly?: true;
+  /**
+   * True only when a created or deleted file carried no textual hunks and no
+   * binary or non-empty blob content change.
+   */
+  readonly emptyFile?: true;
+  /**
+   * True when Git quoted a path whose octal byte escapes were not valid UTF-8,
+   * so `path` retains the escaped form rather than substituting U+FFFD.
+   */
+  readonly nonUtf8Path?: true;
+  /**
+   * True when a rename or copy source (`previousPath`) failed UTF-8 decoding,
+   * so destructive checkout restoration cannot safely restore the source path.
+   */
+  readonly nonUtf8PreviousPath?: true;
+  /** True when git recorded a `copy from` / `copy to` header rather than a rename. */
+  readonly copied?: true;
   readonly change: DiffFileChange;
   readonly additions: number;
   readonly deletions: number;
@@ -78,40 +111,213 @@ interface HunkAccumulator {
 interface FileAccumulator {
   oldPath?: string;
   newPath?: string;
+  oldPathNonUtf8: boolean;
+  newPathNonUtf8: boolean;
+  oldMode?: string;
+  newMode?: string;
+  fileMode?: string;
+  copied: boolean;
   change: DiffFileChange;
   additions: number;
   deletions: number;
   original: string[];
   modified: string[];
   sawHunk: boolean;
+  sawBinaryContent: boolean;
   hunks: HunkAccumulator[];
   source?: { start: number; end: number; headerEnd: number };
 }
 
 const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$/;
+const CONTENT_INDEX = /^index ([0-9a-f]+)\.\.([0-9a-f]+)(?:\s|$)/i;
+const EMPTY_SHA1_BLOB = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+const EMPTY_SHA256_BLOB = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
+
+function isNullOid(oid: string): boolean {
+  return /^0+$/.test(oid);
+}
+
+function isEmptyBlobOid(oid: string): boolean {
+  const lower = oid.toLowerCase();
+  return (
+    lower.length >= 7 && (EMPTY_SHA1_BLOB.startsWith(lower) || EMPTY_SHA256_BLOB.startsWith(lower))
+  );
+}
+
+function isEmptyFileIndexPair(oldOid: string, newOid: string): boolean {
+  return (
+    (isNullOid(oldOid) && isEmptyBlobOid(newOid)) || (isEmptyBlobOid(oldOid) && isNullOid(newOid))
+  );
+}
 
 function newAccumulator(): FileAccumulator {
   return {
+    oldPathNonUtf8: false,
+    newPathNonUtf8: false,
+    copied: false,
     change: "modified",
     additions: 0,
     deletions: 0,
     original: [],
     modified: [],
     sawHunk: false,
+    sawBinaryContent: false,
     hunks: [],
   };
 }
 
-function unquote(path: string): string {
-  const trimmed = path.trim();
-  if (!trimmed.startsWith('"') || !trimmed.endsWith('"') || trimmed.length < 2) return trimmed;
-  return trimmed.slice(1, -1).replace(/\\(.)/g, "$1");
+interface DecodedPath {
+  readonly value: string;
+  readonly nonUtf8: boolean;
 }
 
-function stripPrefix(path: string): string {
-  const unquoted = unquote(path);
-  if (unquoted === "/dev/null") return unquoted;
-  return unquoted.replace(/^[abciow]\//, "");
+const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+const C_ESCAPES: Readonly<Record<string, number>> = {
+  a: 0x07,
+  b: 0x08,
+  t: 0x09,
+  n: 0x0a,
+  v: 0x0b,
+  f: 0x0c,
+  r: 0x0d,
+  '"': 0x22,
+  "\\": 0x5c,
+};
+
+function unquotePath(path: string, options: { readonly trim?: boolean } = {}): DecodedPath {
+  const candidate = options.trim === false ? path : path.trim();
+  if (!candidate.startsWith('"') || !candidate.endsWith('"') || candidate.length < 2) {
+    return { value: candidate, nonUtf8: false };
+  }
+  const inner = candidate.slice(1, -1);
+  const bytes: number[] = [];
+  let cursor = 0;
+  while (cursor < inner.length) {
+    const slash = inner.indexOf("\\", cursor);
+    if (slash === -1) {
+      for (const byte of UTF8_ENCODER.encode(inner.slice(cursor))) bytes.push(byte);
+      break;
+    }
+    if (slash > cursor) {
+      for (const byte of UTF8_ENCODER.encode(inner.slice(cursor, slash))) bytes.push(byte);
+    }
+    const next = inner[slash + 1];
+    if (next === undefined) {
+      bytes.push(0x5c);
+      break;
+    }
+    const octal = /^[0-7]{1,3}/.exec(inner.slice(slash + 1));
+    if (octal !== null) {
+      bytes.push(Number.parseInt(octal[0], 8) & 0xff);
+      cursor = slash + 1 + octal[0].length;
+      continue;
+    }
+    const mapped = C_ESCAPES[next];
+    if (mapped !== undefined) {
+      bytes.push(mapped);
+      cursor = slash + 2;
+      continue;
+    }
+    for (const byte of UTF8_ENCODER.encode(next)) bytes.push(byte);
+    cursor = slash + 2;
+  }
+  try {
+    return { value: UTF8_DECODER.decode(new Uint8Array(bytes)), nonUtf8: false };
+  } catch {
+    // Keep the original escaped bytes intact instead of replacing invalid
+    // bytes with U+FFFD, which could collide with a real file containing U+FFFD.
+    return { value: inner, nonUtf8: true };
+  }
+}
+
+function stripPrefix(path: string, options?: { readonly trim?: boolean }): DecodedPath {
+  const unquoted = unquotePath(path, options);
+  if (unquoted.value === "/dev/null") return unquoted;
+  return { value: unquoted.value.replace(/^[abciow]\//, ""), nonUtf8: unquoted.nonUtf8 };
+}
+
+/**
+ * Unified diff `---` / `+++` headers separate the path from an optional
+ * timestamp with a literal tab (Git appends a trailing `\t` for unquoted paths
+ * containing or ending with spaces). Strip only that delimiter so trailing
+ * spaces in the filename itself stay intact.
+ */
+function parsePatchFileHeaderPath(raw: string): DecodedPath {
+  const withoutCr = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+  const tab = withoutCr.indexOf("\t");
+  const withoutDelimiter = tab === -1 ? withoutCr : withoutCr.slice(0, tab);
+  return stripPrefix(withoutDelimiter, { trim: false });
+}
+
+function readQuotedEnd(text: string, start: number): number | undefined {
+  if (text[start] !== '"') return undefined;
+  let index = start + 1;
+  while (index < text.length) {
+    if (text[index] === "\\") {
+      index += 2;
+      continue;
+    }
+    if (text[index] === '"') return index + 1;
+    index += 1;
+  }
+  return undefined;
+}
+
+function parseDiffGitHeader(
+  line: string,
+): { readonly oldPath: DecodedPath; readonly newPath: DecodedPath } | undefined {
+  const rawRest = line.slice("diff --git ".length);
+  const rest = rawRest.endsWith("\r") ? rawRest.slice(0, -1) : rawRest;
+  if (rest.startsWith('"')) {
+    const firstEnd = readQuotedEnd(rest, 0);
+    if (firstEnd !== undefined && rest[firstEnd] === " ") {
+      return {
+        oldPath: stripPrefix(rest.slice(0, firstEnd), { trim: false }),
+        newPath: stripPrefix(rest.slice(firstEnd + 1), { trim: false }),
+      };
+    }
+  }
+  if (rest.endsWith('"')) {
+    let search = rest.indexOf(' "');
+    while (search !== -1) {
+      const end = readQuotedEnd(rest, search + 1);
+      if (end === rest.length) {
+        return {
+          oldPath: stripPrefix(rest.slice(0, search), { trim: false }),
+          newPath: stripPrefix(rest.slice(search + 1), { trim: false }),
+        };
+      }
+      search = rest.indexOf(' "', search + 1);
+    }
+  }
+  // Unquoted paths with spaces cannot be split on whitespace directly, but
+  // non-renamed `diff --git a/<X> b/<X>` headers are exactly symmetric around
+  // the middle space.
+  if ((rest.length - 1) % 2 === 0) {
+    const mid = (rest.length - 1) / 2;
+    if (rest[mid] === " ") {
+      const left = rest.slice(0, mid);
+      const right = rest.slice(mid + 1);
+      if (
+        /^[abciow]\//.test(left) &&
+        /^[abciow]\//.test(right) &&
+        left.slice(2) === right.slice(2)
+      ) {
+        const path = left.slice(2);
+        return {
+          oldPath: { value: path, nonUtf8: false },
+          newPath: { value: path, nonUtf8: false },
+        };
+      }
+    }
+  }
+  const paths = /^(.+?) (\S+)$/.exec(rest);
+  if (paths?.[1] !== undefined && paths[2] !== undefined) {
+    return { oldPath: stripPrefix(paths[1]), newPath: stripPrefix(paths[2]) };
+  }
+  return undefined;
 }
 
 function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | undefined {
@@ -133,10 +339,34 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
         : renamed
           ? "renamed"
           : accumulator.change;
+  const modeChange =
+    accumulator.oldMode !== undefined &&
+    accumulator.newMode !== undefined &&
+    accumulator.oldMode !== accumulator.newMode
+      ? { oldMode: accumulator.oldMode, newMode: accumulator.newMode }
+      : undefined;
+  const modeOnly =
+    !accumulator.sawHunk && modeChange !== undefined && !accumulator.sawBinaryContent;
+  const emptyFile =
+    !accumulator.sawHunk &&
+    !accumulator.sawBinaryContent &&
+    (change === "created" || change === "deleted");
+  const nonUtf8Path =
+    newPath !== undefined && newPath !== "/dev/null"
+      ? accumulator.newPathNonUtf8
+      : accumulator.oldPathNonUtf8;
+  const nonUtf8PreviousPath = renamed && accumulator.oldPathNonUtf8;
   return {
     id: `${String(index)}:${path}`,
     path,
     ...(renamed && oldPath !== undefined ? { previousPath: oldPath } : {}),
+    ...(modeChange === undefined ? {} : { modeChange }),
+    ...(accumulator.fileMode === undefined ? {} : { fileMode: accumulator.fileMode }),
+    ...(modeOnly ? { modeOnly: true as const } : {}),
+    ...(emptyFile ? { emptyFile: true as const } : {}),
+    ...(nonUtf8Path ? { nonUtf8Path: true as const } : {}),
+    ...(nonUtf8PreviousPath ? { nonUtf8PreviousPath: true as const } : {}),
+    ...(renamed && accumulator.copied ? { copied: true as const } : {}),
     change,
     additions: accumulator.additions,
     deletions: accumulator.deletions,
@@ -178,20 +408,96 @@ export function parseUnifiedDiff(
         accumulator.source = { start, end: diff.length, headerEnd: diff.length };
       // `diff --git a/x b/y` is the only reliable path source for a file whose
       // hunks are absent, such as a binary or pure-mode change.
-      const paths = /^diff --git (.+?) (\S+)$/.exec(line);
-      if (paths?.[1] !== undefined && paths[2] !== undefined) {
-        accumulator.oldPath = stripPrefix(paths[1]);
-        accumulator.newPath = stripPrefix(paths[2]);
+      const paths = parseDiffGitHeader(line);
+      if (paths !== undefined) {
+        accumulator.oldPath = paths.oldPath.value;
+        accumulator.oldPathNonUtf8 = paths.oldPath.nonUtf8;
+        accumulator.newPath = paths.newPath.value;
+        accumulator.newPathNonUtf8 = paths.newPath.nonUtf8;
       }
       continue;
     }
     if (accumulator === undefined) continue;
+    if (!accumulator.sawHunk && line.startsWith("rename from ")) {
+      const decoded = unquotePath(line.slice("rename from ".length), { trim: false });
+      accumulator.oldPath = decoded.value;
+      accumulator.oldPathNonUtf8 = decoded.nonUtf8;
+      accumulator.copied = false;
+      accumulator.change = "renamed";
+      continue;
+    }
+    if (!accumulator.sawHunk && line.startsWith("rename to ")) {
+      const decoded = unquotePath(line.slice("rename to ".length), { trim: false });
+      accumulator.newPath = decoded.value;
+      accumulator.newPathNonUtf8 = decoded.nonUtf8;
+      accumulator.copied = false;
+      accumulator.change = "renamed";
+      continue;
+    }
+    if (!accumulator.sawHunk && line.startsWith("copy from ")) {
+      const decoded = unquotePath(line.slice("copy from ".length), { trim: false });
+      accumulator.oldPath = decoded.value;
+      accumulator.oldPathNonUtf8 = decoded.nonUtf8;
+      accumulator.copied = true;
+      accumulator.change = "renamed";
+      continue;
+    }
+    if (!accumulator.sawHunk && line.startsWith("copy to ")) {
+      const decoded = unquotePath(line.slice("copy to ".length), { trim: false });
+      accumulator.newPath = decoded.value;
+      accumulator.newPathNonUtf8 = decoded.nonUtf8;
+      accumulator.copied = true;
+      accumulator.change = "renamed";
+      continue;
+    }
+    if (!accumulator.sawHunk && line.startsWith("old mode ")) {
+      const mode = line.slice("old mode ".length).trim();
+      if (mode.length > 0) accumulator.oldMode = mode;
+      continue;
+    }
+    if (!accumulator.sawHunk && line.startsWith("new mode ")) {
+      const mode = line.slice("new mode ".length).trim();
+      if (mode.length > 0) accumulator.newMode = mode;
+      continue;
+    }
+    if (!accumulator.sawHunk && line.startsWith("new file mode ")) {
+      const mode = line.slice("new file mode ".length).trim();
+      if (mode.length > 0) accumulator.fileMode = mode;
+      accumulator.change = "created";
+      continue;
+    }
+    if (!accumulator.sawHunk && line.startsWith("deleted file mode ")) {
+      const mode = line.slice("deleted file mode ".length).trim();
+      if (mode.length > 0) accumulator.fileMode = mode;
+      accumulator.change = "deleted";
+      continue;
+    }
+    if (!accumulator.sawHunk) {
+      if (line.startsWith("Binary files ") || line === "GIT binary patch") {
+        accumulator.sawBinaryContent = true;
+        continue;
+      }
+      const indexMatch = CONTENT_INDEX.exec(line);
+      if (
+        indexMatch?.[1] !== undefined &&
+        indexMatch[2] !== undefined &&
+        indexMatch[1] !== indexMatch[2] &&
+        !isEmptyFileIndexPair(indexMatch[1], indexMatch[2])
+      ) {
+        accumulator.sawBinaryContent = true;
+        continue;
+      }
+    }
     if (!accumulator.sawHunk && line.startsWith("--- ")) {
-      accumulator.oldPath = stripPrefix(line.slice(4));
+      const decoded = parsePatchFileHeaderPath(line.slice(4));
+      accumulator.oldPath = decoded.value;
+      accumulator.oldPathNonUtf8 = decoded.nonUtf8;
       continue;
     }
     if (!accumulator.sawHunk && line.startsWith("+++ ")) {
-      accumulator.newPath = stripPrefix(line.slice(4));
+      const decoded = parsePatchFileHeaderPath(line.slice(4));
+      accumulator.newPath = decoded.value;
+      accumulator.newPathNonUtf8 = decoded.nonUtf8;
       continue;
     }
     const range = HUNK.exec(line);
@@ -255,7 +561,16 @@ export function parseUnifiedDiff(
       }
       continue;
     }
-    // `\ No newline at end of file` and any trailing blank line carry no content.
+    if (line.trimEnd() === "\\ No newline at end of file") {
+      if (hunk !== undefined) {
+        const last = hunk.lines.at(-1);
+        if (last !== undefined) {
+          hunk.lines[hunk.lines.length - 1] = { ...last, noNewlineAtEndOfFile: true };
+        }
+      }
+      continue;
+    }
+    // Any trailing blank line carries no content.
   }
   flush(diff.length);
   return files;
