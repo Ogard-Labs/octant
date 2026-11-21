@@ -22,6 +22,7 @@ import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts
 import { Effect, type Scope } from "effect";
 
 import {
+  providerHoldsLevelWithoutSandbox,
   WINDOWS_SANDBOX_MISSING_REASON,
   WINDOWS_STRICT_REFUSAL,
   windowsProviderLaunch,
@@ -136,28 +137,43 @@ export type CodexLaunchAuthority =
     };
 
 /**
- * Whether a thread lease runs in Codex's own workspace-write sandbox instead
- * of Octant's profile: a Work or Code thread at Guarded or Reviewed outside
- * Strict (Architecture: "Providers run in their own sandbox"). macOS refuses a
- * Seatbelt profile inside another, so the native sandbox replaces Octant's
- * rather than running in it. Plan and Chat keep Octant's read-only profile,
- * whose read-only enforcement the rule leaves unchanged, and Full access keeps
- * no sandbox unless the thread keeps Octant's.
+ * Whether a thread lease runs in Codex's own sandbox instead of Octant's
+ * profile: a Work or Code thread below Full access outside Strict, outside
+ * Plan, with no chosen sandbox policy (`providerHoldsLevelWithoutSandbox`,
+ * maintainer decision, 2026-11-21). Codex's own `workspace-write` sandbox and
+ * approval policy then hold the level (`codexExecutionSettings`). macOS
+ * refuses a Seatbelt profile inside another, so the native sandbox replaces
+ * Octant's rather than running in it. Plan and Chat keep Octant's read-only
+ * profile, and Full access keeps no sandbox unless the thread keeps Octant's.
  */
 export function codexRunsNativeSandbox(input: {
   readonly mode: "chat" | "work" | "code";
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly strict?: boolean | undefined;
+  readonly fullAccessSandbox?: boolean | undefined;
+  readonly sandboxPolicySelected?: boolean | undefined;
 }): boolean {
   return (
-    input.strict === false &&
-    input.mode !== "chat" &&
-    (input.executionPolicy === "approval-gated" || input.executionPolicy === "auto-accept-edits")
+    input.executionPolicy !== "full-access" &&
+    providerHoldsLevelWithoutSandbox({
+      mode: input.mode,
+      executionPolicy: input.executionPolicy,
+      strict: input.strict,
+      fullAccessSandbox: input.fullAccessSandbox,
+      sandboxPolicySelected: input.sandboxPolicySelected,
+      purpose: "session",
+    })
   );
 }
 
 function threadRunsNativeSandbox(authority: CodexLaunchAuthority): boolean {
-  return authority.kind === "thread" && codexRunsNativeSandbox(authority);
+  return (
+    authority.kind === "thread" &&
+    codexRunsNativeSandbox({
+      ...authority,
+      sandboxPolicySelected: authority.sandboxPolicy !== undefined,
+    })
+  );
 }
 
 export interface CodexProcessPort {
@@ -881,8 +897,9 @@ function existingRealPaths(paths: ReadonlyArray<string | undefined>): ReadonlyAr
 
 /**
  * Builds the app-server launch for one lease. Full access keeps the runtime
- * unwrapped, as the sandbox rules define it. Every other posture, and the catalog lease,
- * runs under Octant's deny-default profile: the thread's root (writable only
+ * unwrapped, as the sandbox rules define it, and so does a level below it that
+ * Codex's own sandbox holds (`codexRunsNativeSandbox`). Every other posture,
+ * and the catalog lease, runs under Octant's deny-default profile: the thread's root (writable only
  * where the posture writes), the account home, a private temporary directory,
  * and the program itself. The rest of `HOME` is denied, which is what Codex's
  * own `read-only` sandbox never did: it reads the whole disk.
@@ -905,7 +922,7 @@ export function prepareCodexLaunch(input: {
   if (input.platform === "win32") return prepareWindowsCodexLaunch({ ...input, authority });
   if (
     authority.kind === "thread" &&
-    (authority.executionPolicy === "full-access" || threadRunsNativeSandbox(authority)) &&
+    authority.executionPolicy === "full-access" &&
     authority.strict !== true &&
     authority.fullAccessSandbox !== true &&
     authority.sandboxPolicy === undefined

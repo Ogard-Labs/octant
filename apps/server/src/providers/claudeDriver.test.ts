@@ -9785,13 +9785,39 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
         executionPolicy: "plan",
         fullAccessSandbox: false,
         ownPermissions: false,
+        mode: "work",
+        strict: false,
+        sandboxPolicySelected: false,
       }),
     ).toBe(false);
   });
 
-  it("keeps Octant's sandbox and gate outside Strict when the session reads none of the person's Claude settings", async () => {
+  it("keeps Octant's sandbox configuration under Strict, in Chat and for a chosen sandbox policy, and drops it for Work and Code outside Strict", () => {
+    const configures = (input: {
+      readonly mode: "chat" | "work" | "code";
+      readonly strict: boolean;
+      readonly sandboxPolicySelected?: boolean;
+    }) =>
+      claudeOctantConfiguresSandbox({
+        executionPolicy: "approval-gated",
+        fullAccessSandbox: false,
+        ownPermissions: false,
+        mode: input.mode,
+        strict: input.strict,
+        sandboxPolicySelected: input.sandboxPolicySelected ?? false,
+      });
+    expect(configures({ mode: "work", strict: false })).toBe(false);
+    expect(configures({ mode: "code", strict: false })).toBe(false);
+    expect(configures({ mode: "code", strict: true })).toBe(true);
+    expect(configures({ mode: "chat", strict: false })).toBe(true);
+    expect(configures({ mode: "code", strict: false, sandboxPolicySelected: true })).toBe(true);
+  });
+
+  it("runs on Claude's permission modes and Octant's gate with no sandbox outside Strict when the session reads none of the person's Claude settings", async () => {
     // With no setup, or only subagents and web tools on, the launch reads no
-    // home settings, so the person's own sandbox and deny rules would not load.
+    // home settings, so the person's own rules do not load and Octant's gate
+    // answers every call, with no sandbox of Octant's around the commands
+    // (maintainer decision, 2026-11-21).
     for (const nativeSetup of [
       undefined,
       { ...readsHome, skills: false, subagents: true, webTools: true },
@@ -9803,10 +9829,7 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
         nativeSetup === undefined ? {} : { nativeSetup },
       );
       expect(session.open.ownPermissions).toBeUndefined();
-      expect(session.open.sandbox).toMatchObject({
-        enabled: true,
-        autoAllowBashIfSandboxed: false,
-      });
+      expect(session.open.sandbox).toBeUndefined();
       await Effect.runPromise(
         session.acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
       );
@@ -9820,6 +9843,18 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
           signal: new AbortController().signal,
         }),
       ).resolves.toEqual({ behavior: "allow" });
+      // A command is never settled unasked: Claude's own `default` mode
+      // decides it, and its ask reaches the person through `canUseTool`.
+      await expect(
+        session.open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Bash",
+          input: { command: "touch a.ts" },
+          toolUseId: "bash",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual({ behavior: "own-rules" });
       await session.acquired.close();
     }
     expect(

@@ -745,11 +745,18 @@ that source cannot be read for those alone: it also brings the plugins,
 agents and commands the person's own Octant switches keep out. So a launch
 outside Strict whose setup reads no home settings (none of skills, hooks,
 tool servers or the Project's code on; subagents and web tools alone read
-none) keeps Octant's gate and Octant's configured sandbox, as under Strict,
-rather than running with neither protection (`claudeOwnPermissions`, which
+none) keeps Octant's gate, as under Strict (`claudeOwnPermissions`, which
 `claudeReadsPersonSettings` gates). The SDK port refuses a launch asking for
 Claude's own permissions that would read no person's settings, so the rule
-fails closed at both ends.
+fails closed at both ends. Such a launch in Work or Code outside Plan carries
+no sandbox settings either (maintainer decision, 2026-11-21; built,
+`claudeOctantConfiguresSandbox` on the shared
+`providerHoldsLevelWithoutSandbox`): as on Windows, Claude's own permission
+mode and the gate hold the level, and the gate keeps every per-call rule (the
+secret guard's protected paths, the folders the session holds, its own ask
+for a command, a publish, a workflow start or a level change). Chat, Plan, a
+Full access thread that kept its sandbox, and a legacy chosen sandbox policy
+keep Octant's configured sandbox; Strict keeps it as described above.
 
 A Work or Code session outside Plan launches with Claude Code's own tool
 preset (`tools: { type: "preset", preset: "claude_code" }`) rather than a
@@ -1513,7 +1520,19 @@ Under
 [Providers run in their own sandbox](../architecture.md#security-and-authority)
 (maintainer decision, 2026-11-15; built for Codex), a Work or Code thread at
 Guarded or Reviewed outside Strict runs Codex's native workspace-write sandbox
-and escalation in place of Octant's profile:
+and escalation in place of Octant's profile. The shared rule for every
+provider decides it (`providerHoldsLevelWithoutSandbox`, maintainer decision,
+2026-11-21; `codexRunsNativeSandbox`): a thread that chose a sandbox policy,
+or kept the sandbox at Full access, stays in Octant's profile, as Strict,
+Plan and Chat do. The mapping per level is Ask first `untrusted`, Accept
+edits `on-request` with Octant answering in-root file changes, Auto
+`on-request` with Codex's reviewer, each with `workspace-write`; Full access
+keeps `danger-full-access`. Accept edits runs `on-request` here (maintainer
+decision, 2026-11-21): Codex decides when to ask, as in its own CLI, and
+Codex's own sandbox refuses what leaves the Project's folders, raising its
+escalation. Under Octant's profile (Strict, a chosen sandbox policy) Accept
+edits stays `untrusted`, since under an external sandbox `on-request` would
+run every command unasked (below).
 
 - The app-server runs unwrapped, as Codex runs on its own; macOS refuses a
   Seatbelt profile inside another, so the native sandbox replaces Octant's.
@@ -1523,9 +1542,10 @@ and escalation in place of Octant's profile:
   unless the launch took the egress proxy (Network limits on), which then
   carries the runtime's own traffic while a command reaches no network
   unless it is approved to leave the sandbox. The approval policies are those
-  below: Auto `on-request` with Codex's reviewer, so a command runs unasked
-  inside Codex's sandbox as in Codex's own Auto; Ask first and Accept edits
-  `untrusted`.
+  above: Auto `on-request` with Codex's reviewer, so a command runs unasked
+  inside Codex's sandbox as in Codex's own Auto; Accept edits `on-request`
+  with the person as reviewer, so Codex asks when it would on its own; Ask
+  first `untrusted`.
 - Codex's ask to run one command outside its sandbox arrives as an ordinary
   command approval and reaches the person, or Reviewed's reviewer, as an
   Octant approval. An approval is answered `accept`, never `acceptForSession`,
@@ -1596,9 +1616,11 @@ authorize a Strict launch.
   the sandbox under `on-request` (rust-v0.169.0, unchanged on the main
   branch read 2026-11-15). Such a command fails at the wall; outside Strict
   Codex's own sandbox carries the ask instead (above).
-- Ask first (approval-gated without the reviewer) and Accept edits
-  (auto-accept-edits) send `approvalPolicy: "untrusted"`, the strictest mode
-  Codex has, matching the strictest mode elsewhere. Under an external sandbox
+- Under Octant's profile, Ask first (approval-gated without the reviewer)
+  and Accept edits (auto-accept-edits) send `approvalPolicy: "untrusted"`,
+  the strictest mode Codex has, matching the strictest mode elsewhere
+  (outside Strict, in Codex's own sandbox, Accept edits sends `on-request`;
+  above). Under an external sandbox
   `on-request` would run every command without asking; `untrusted` asks for
   each command Codex does not know to be read-only and for every patch. On an
   auto-accept-edits thread the driver answers each file-change request itself,
@@ -2302,6 +2324,53 @@ never written. A kept turn with no anchor, a thread now on another model, or
 a copy that fails goes back with the text handoff. Files come back only
 through Octant's checkpoints, as for every provider.
 
+### OpenCode and Pi without Octant's sandbox
+
+On macOS and Linux a Work or Code launch of OpenCode or Pi below Full access
+outside Strict starts with no Octant sandbox, as every Windows launch does,
+and the provider's own approvals hold the thread's level (maintainer
+decision, 2026-11-21; built). The rule is the domain's
+`providerHoldsLevelWithoutSandbox` (`guardrailPolicy.ts`), shared with the
+ACP agents; `openCodeStartsUnconfined` (`openCodeProcess.ts`) and
+`piStartsUnconfined` (`piProcess.ts`) apply it.
+
+- **OpenCode** keeps its session permission rules unchanged: below Full
+  access `edit` asks at Ask first, `bash` and every other tool ask at Ask
+  first and Accept edits, and `external_directory` asks for any folder
+  outside the Project, each ask answered and journaled on Octant's server.
+  Its read refusals for other providers' sign-ins still hold for its own
+  tools. A verified release on Octant's private configuration (no Project
+  config loaded) is attested `privateConfiguration`, which admits Octant's
+  app-managed tools without claiming OS confinement, as on Windows; a
+  release the probe did not verify, or a launch that loads a trusted
+  Project's own configuration, gets them only as before.
+- **Pi** has an approval channel of its own: Octant's bridge extension asks
+  Octant, by the thread's level, before every tool call but `read`, `grep`,
+  `find`, `ls` and Octant's app tools, so `bash`, `edit` and `write` and an
+  extension's own tools all ask. The launch is otherwise the one the
+  sandbox wrapped: the same arguments, the same environment, approvals on.
+- **Still wrapped:** Chat, Plan, Strict, a Full access thread that keeps its
+  sandbox, a chosen sandbox policy, and the readiness check and version
+  read. Open Full access stays unwrapped as before.
+- **No wall:** an unwrapped launch takes no egress proxy and no
+  registered-server folder, as Full access does, so Network limits and the
+  Project's server folder do not bind it.
+
+Cost, accepted with the decision: below Full access the process may read and
+write anything the person can, and only the approvals it asks for bind it.
+Pi's `read`, `grep`, `find` and `ls` ask nothing inside the launch's folders
+(the Project root, its extra folders and the thread's attachments); unwrapped,
+Octant's approval bridge asks before one reaches any other path, links
+resolved (`OCTANT_PI_READ_ROOTS`), so another provider's sign-in is never read
+without the person's yes. OpenCode asks for an outside folder and refuses
+those sign-ins by rule. The person's own Pi extensions and OpenCode plugins
+in a trusted Project run unwrapped too. A person who wants the wall turns
+Strict on. Rationale: both providers already carry every side effect to
+Octant as an approval, the same rule that holds the level for them on
+Windows, so outside Strict the wall below Full access only added a limit of
+Octant's own ([Architecture: Octant adds no restrictions of its own unless
+Strict is on](../architecture.md#security-and-authority)).
+
 ## ACP agents
 
 Every ACP agent runs on one shared stack: `acpDriver.ts`, `acpProcess.ts`,
@@ -2740,8 +2809,9 @@ with the person's token. The CLI talks to Google itself.
 - **No sandbox in Work and Code outside Strict.** There the CLI starts as the
   person's own terminal would start it, at every level: no Octant sandbox, no
   network allowlist, the person's whole environment, and its own sign-in read
-  as it reads it (`confinement: provider-approvals-outside-strict`). This is
-  the rule Windows already applies to ACP agents below Full access: the CLI's
+  as it reads it. Every ACP agent now runs this way
+  (`providerHoldsLevelWithoutSandbox`, maintainer decision, 2026-11-21), the
+  rule Windows already applied to ACP agents below Full access: the CLI's
   `default` mode asks Octant before every edit and command, so the thread's
   level holds through Octant's approvals rather than the OS. Rationale: other
   ACP clients of the CLI run it this way, and the person asked for the same
@@ -3241,8 +3311,8 @@ its status are in
 - **Below Full access outside Strict** starts unconfined with the provider's
   own approvals: Claude's permission modes (`default`, `acceptEdits`,
   `plan`), Codex's own sandbox and approvals (`untrusted` in
-  `workspace-write` at Ask first and Accept edits, `on-request` in
-  `workspace-write` at Auto, `never` in `read-only` in Plan; never the
+  `workspace-write` at Ask first, `on-request` in `workspace-write` at Accept
+  edits and Auto, `never` in `read-only` in Plan; never the
   external sandbox Octant names when its own wall holds the process),
   OpenCode's permission rules, Pi's approval bridge and an ACP agent's own
   mode. Each ask reaches Octant's server, which answers and journals it.

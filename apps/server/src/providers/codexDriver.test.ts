@@ -1160,7 +1160,12 @@ describe("Codex driver probe and runtime lifecycle", () => {
                   : "externalSandbox"
                 : "workspaceWrite",
           },
-          approvalPolicy: executionPolicy === "plan" ? "never" : "untrusted",
+          approvalPolicy:
+            executionPolicy === "plan"
+              ? "never"
+              : executionPolicy === "auto-accept-edits"
+                ? "on-request"
+                : "untrusted",
         });
       } finally {
         await acquired.close();
@@ -3579,14 +3584,17 @@ describe("Codex execution authority and approvals", () => {
           turn: f.calls.find(({ method }) => method === "turn/start")?.input,
         };
       };
+      // Outside Strict Accept edits lets Codex decide when to ask, as its own
+      // CLI does; Ask first keeps asking for every command it does not know.
+      const openApprovals = policy === "auto-accept-edits" ? "on-request" : "untrusted";
       const open = await turnFor(false);
       expect(open.authority).toMatchObject({ kind: "thread", strict: false });
       expect(open.thread).toMatchObject({
         sandbox: "workspace-write",
-        approvalPolicy: "untrusted",
+        approvalPolicy: openApprovals,
       });
       expect(open.turn).toMatchObject({
-        approvalPolicy: "untrusted",
+        approvalPolicy: openApprovals,
         sandboxPolicy: {
           type: "workspaceWrite",
           writableRoots: [projectRoot, extra],
@@ -3598,8 +3606,11 @@ describe("Codex execution authority and approvals", () => {
       for (const strict of [true, undefined]) {
         const held = await turnFor(strict);
         expect(held.authority).not.toHaveProperty("strict");
-        expect(held.thread).toMatchObject({ sandbox: "read-only" });
+        // Under Octant's external sandbox `on-request` would run every command
+        // unasked, so both levels keep `untrusted` there.
+        expect(held.thread).toMatchObject({ sandbox: "read-only", approvalPolicy: "untrusted" });
         expect(held.turn).toMatchObject({
+          approvalPolicy: "untrusted",
           sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
         });
       }
@@ -3619,6 +3630,28 @@ describe("Codex execution authority and approvals", () => {
     expect(
       codexRunsNativeSandbox({ mode: "work", executionPolicy: "full-access", strict: false }),
     ).toBe(false);
+  });
+
+  it("runs Codex's own sandbox for Work and Code outside Strict and keeps Octant's profile under Strict or a chosen sandbox", () => {
+    for (const mode of ["work", "code"] as const) {
+      for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+        expect(codexRunsNativeSandbox({ mode, executionPolicy, strict: false })).toBe(true);
+        expect(codexRunsNativeSandbox({ mode, executionPolicy, strict: true })).toBe(false);
+        // A caller that never resolved Strict keeps Octant's profile.
+        expect(codexRunsNativeSandbox({ mode, executionPolicy })).toBe(false);
+        expect(
+          codexRunsNativeSandbox({
+            mode,
+            executionPolicy,
+            strict: false,
+            sandboxPolicySelected: true,
+          }),
+        ).toBe(false);
+        expect(
+          codexRunsNativeSandbox({ mode, executionPolicy, strict: false, fullAccessSandbox: true }),
+        ).toBe(false);
+      }
+    }
   });
 
   it("runs Reviewed's escalation past Codex's reviewer in its own sandbox outside Strict", () => {
