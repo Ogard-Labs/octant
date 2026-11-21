@@ -129,4 +129,30 @@ describe("a paired computer's work in this window", () => {
     expect(only?.title).toBe("Fix login");
     expect(only?.readOnly).toBe(true);
   });
+
+  it("lists a Code thread's waiting asks and leaves out Work and Chat ones its Code screen cannot open", () => {
+    const ask = (askId: string, mode: "code" | "work", threadTitle: string) => ({
+      kind: "browser-approval" as const,
+      askId,
+      mode,
+      projectId: "20000000-0000-4000-8000-000000000001",
+      threadId: waiting,
+      threadTitle,
+      requestedAt: now,
+      text: "Open https://example.com?",
+    });
+    const items = pairedComputerReadItems({
+      hostId: studio,
+      navigation: decodeCodeNavigation({ threads: [], plannerThreadIds: [] }),
+      pendingRequests: decodePendingRequestList({
+        requests: [],
+        truncated: false,
+        asks: [
+          ask("80000000-0000-4000-8000-000000000001", "code", "Bump deps"),
+          ask("80000000-0000-4000-8000-000000000002", "work", "Quarterly report"),
+        ],
+      }),
+    });
+    expect(items.map((item) => item.title)).toEqual(["Bump deps"]);
+  });
 });

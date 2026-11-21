@@ -48,7 +48,7 @@ export interface NeedsYouCardSource extends PendingRequestRowsSource {
 export interface OtherComputerAsk {
   readonly hostId: string;
   readonly computer: string;
-  readonly request: PendingRequest;
+  readonly request: PendingRequest | WaitingAsk;
   /** True while that computer is not connected: listed, but not openable. */
   readonly readOnly: boolean;
 }
@@ -141,7 +141,7 @@ function useNeedsYouListRows(source: NeedsYouCardSource): HomeListRead {
       ...(source.otherComputerAsks ?? []).map((ask) => {
         const open = source.onOpenOtherComputerAsk;
         return {
-          id: `other-computer:${ask.hostId}:${pendingRequestKey(ask.request)}`,
+          id: `other-computer:${ask.hostId}:${"askId" in ask.request ? `ask:${String(ask.request.askId)}` : pendingRequestKey(ask.request)}`,
           section: "needs-you" as const,
           glyph: "ask" as const,
           tone: "warning" as const,

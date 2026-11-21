@@ -1,5 +1,5 @@
 import type { CodeNavigation } from "@octant/contracts/code";
-import type { PendingRequest, PendingRequestList } from "@octant/contracts";
+import type { PendingRequest, PendingRequestList, WaitingAsk } from "@octant/contracts";
 import { buildFederatedReadItem, type FederatedReadItem } from "./hostFederationMergedReads";
 
 /** What a paired computer's Code thread shows in this window's lists. */
@@ -12,9 +12,13 @@ export interface PairedComputerThreadPayload {
   readonly updatedAt: string;
 }
 
-/** An approval or question a paired computer holds for the person. */
+/**
+ * An approval, question, or other waiting ask a paired computer holds for the
+ * person. Only Code-mode entries are listed: the row opens the thread in that
+ * computer's Code start screen, which cannot show a Work or Chat thread.
+ */
 export interface PairedComputerAskPayload {
-  readonly request: PendingRequest;
+  readonly request: PendingRequest | WaitingAsk;
 }
 
 export type PairedComputerReadItem = Omit<
@@ -62,11 +66,20 @@ export function pairedComputerReadItems(input: {
         }),
       );
     });
-  const asks = (input.pendingRequests?.requests ?? []).map((request) =>
+  const requests = (input.pendingRequests?.requests ?? [])
+    .filter((request) => request.mode === "code")
+    .map((request) => ({
+      request,
+      entityId: `${String(request.threadId)}:${request.kind}:${String(request.requestedAt)}`,
+    }));
+  const waitingAsks = (input.pendingRequests?.asks ?? [])
+    .filter((ask) => ask.mode === "code")
+    .map((ask) => ({ request: ask, entityId: `ask:${String(ask.askId)}` }));
+  const asks = [...requests, ...waitingAsks].map(({ request, entityId }) =>
     withoutPresentation(
       buildFederatedReadItem<PairedComputerAskPayload>({
         hostId: input.hostId,
-        entityId: `${String(request.threadId)}:${request.kind}:${String(request.requestedAt)}`,
+        entityId,
         kind: "approval",
         hostDisplayName: "",
         title: request.threadTitle,

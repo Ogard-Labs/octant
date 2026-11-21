@@ -23,6 +23,8 @@ export interface PairedComputerCodeSurfaceProps {
   readonly viewScope?: CreateHostViewScope;
   /** A thread on that computer to open, chosen from this window's list of its threads. */
   readonly initialThreadId?: CodeThreadId;
+  /** Counts each request to open `initialThreadId`, so the same thread can be reopened. */
+  readonly initialThreadRequest?: number;
 }
 
 /**
@@ -96,6 +98,9 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
         providerGroups={providerGroups}
         followsContinuationLink={false}
         {...(props.initialThreadId === undefined ? {} : { initialThreadId: props.initialThreadId })}
+        {...(props.initialThreadRequest === undefined
+          ? {}
+          : { initialThreadRequest: props.initialThreadRequest })}
         onNavigate={() => undefined}
         onOpenCanvas={() => undefined}
       />

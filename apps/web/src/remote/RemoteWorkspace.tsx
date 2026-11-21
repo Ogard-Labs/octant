@@ -450,6 +450,12 @@ export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "client
    * still pick another one here.
    */
   readonly initialThreadId?: CodeThreadId;
+  /**
+   * Counts each time the desktop asks for `initialThreadId`. Picking the same
+   * thread again after the person moved to another one here must still open
+   * it, and an unchanged id alone would not.
+   */
+  readonly initialThreadRequest?: number;
 }
 
 /**
@@ -464,10 +470,10 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
     const link = readContinuationLink(globalThis.location?.href ?? "");
     return link?.mode === "code" ? decodeCodeThreadId(link.threadId) : undefined;
   });
-  const { initialThreadId } = props;
+  const { initialThreadId, initialThreadRequest } = props;
   useEffect(() => {
     if (initialThreadId !== undefined) setActiveThreadId(initialThreadId);
-  }, [initialThreadId]);
+  }, [initialThreadId, initialThreadRequest]);
   const controller = useCodeController({
     client: props.clients.code,
     ...(activeThreadId === undefined ? {} : { activeThreadId }),

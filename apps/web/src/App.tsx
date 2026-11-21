@@ -2488,11 +2488,12 @@ function LaunchedShell(
     [pairedComputerAsks],
   );
   const [pairedThreadToOpen, setPairedThreadToOpen] = useState<
-    { readonly hostId: string; readonly threadId: CodeThreadId } | undefined
+    | { readonly hostId: string; readonly threadId: CodeThreadId; readonly request: number }
+    | undefined
   >(undefined);
   const pairedThreadToOpenHere =
     pairedThreadToOpen !== undefined && pairedThreadToOpen.hostId === String(createHostId)
-      ? pairedThreadToOpen.threadId
+      ? pairedThreadToOpen
       : undefined;
   const renderPairedComputerCodeStart =
     pairedComputerCodeBridge === undefined
@@ -2507,7 +2508,10 @@ function LaunchedShell(
             viewScope={createHostViewScope}
             {...(pairedThreadToOpenHere === undefined
               ? {}
-              : { initialThreadId: pairedThreadToOpenHere })}
+              : {
+                  initialThreadId: pairedThreadToOpenHere.threadId,
+                  initialThreadRequest: pairedThreadToOpenHere.request,
+                })}
           />
         );
   function refuseUnlessCreatableDestination(input: {
@@ -6889,10 +6893,17 @@ function LaunchedShell(
   // A thread listed from another computer opens in that computer's Code start
   // screen, the same surface the picker shows, so every act on it goes to that
   // computer over its session and none is aimed at this one.
+  // It opens an existing thread, not a new task, so it leaves the unsent Code
+  // draft as it is: resetting it here erased a typed prompt and attachments.
   function openPairedComputerThread(hostId: string, threadId: string) {
     handleSelectCreateHost(decodeHostId(hostId));
-    setPairedThreadToOpen({ hostId, threadId: decodeCodeThreadId(threadId) });
-    openDraftInActiveProject("code");
+    setPairedThreadToOpen((previous) => ({
+      hostId,
+      threadId: decodeCodeThreadId(threadId),
+      request: (previous?.request ?? 0) + 1,
+    }));
+    closeWorkspaceReaders();
+    void controller.openDraftThread("code");
   }
 
   function openDraftInActiveProject(mode: "work" | "code") {
