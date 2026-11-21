@@ -778,4 +778,35 @@ describe("createCodeHomeForgeRead", () => {
     expect(merged).toMatchObject({ status: "unavailable", reason: "not-connected" });
     expect(observe).toHaveBeenCalledTimes(1);
   });
+
+  it("reports the signed-in viewer login even when activity probes are scope-limited", async () => {
+    const limited = fixture({
+      snapshot: {
+        state: "scope-limited",
+        account: { login: "Henrik", gitProtocol: "https", scopes: ["repo"] },
+        capabilities: [{ kind: "pull-requests-read", available: false }],
+      },
+    });
+    expect(await limited.slot.current()?.viewerLogin?.(new AbortController().signal)).toBe(
+      "henrik",
+    );
+
+    const disabled = fixture({ effective: false });
+    expect(disabled.slot.current()).toBeUndefined();
+    expect(disabled.capabilitySnapshot).not.toHaveBeenCalled();
+
+    const insecure = fixture({
+      snapshot: { state: "insecure-storage", capabilities: [] },
+    });
+    expect(
+      await insecure.slot.current()?.viewerLogin?.(new AbortController().signal),
+    ).toBeUndefined();
+
+    const signedOut = fixture({
+      snapshot: { state: "unauthorized", capabilities: [] },
+    });
+    expect(
+      await signedOut.slot.current()?.viewerLogin?.(new AbortController().signal),
+    ).toBeUndefined();
+  });
 });

@@ -56,6 +56,11 @@ export interface ParsedDiffFile {
   readonly previousPath?: string;
   /** Present when git recorded an `old mode` → `new mode` permission change. */
   readonly modeChange?: DiffFileModeChange;
+  /**
+   * True only when the file changed permissions (`old mode` → `new mode`) with
+   * no textual hunks and no binary or blob content change.
+   */
+  readonly modeOnly?: true;
   readonly change: DiffFileChange;
   readonly additions: number;
   readonly deletions: number;
@@ -93,11 +98,13 @@ interface FileAccumulator {
   original: string[];
   modified: string[];
   sawHunk: boolean;
+  sawBinaryContent: boolean;
   hunks: HunkAccumulator[];
   source?: { start: number; end: number; headerEnd: number };
 }
 
 const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$/;
+const CONTENT_INDEX = /^index ([0-9a-f]+)\.\.([0-9a-f]+)(?:\s|$)/i;
 
 function newAccumulator(): FileAccumulator {
   return {
@@ -107,6 +114,7 @@ function newAccumulator(): FileAccumulator {
     original: [],
     modified: [],
     sawHunk: false,
+    sawBinaryContent: false,
     hunks: [],
   };
 }
@@ -148,11 +156,14 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     accumulator.oldMode !== accumulator.newMode
       ? { oldMode: accumulator.oldMode, newMode: accumulator.newMode }
       : undefined;
+  const modeOnly =
+    !accumulator.sawHunk && modeChange !== undefined && !accumulator.sawBinaryContent;
   return {
     id: `${String(index)}:${path}`,
     path,
     ...(renamed && oldPath !== undefined ? { previousPath: oldPath } : {}),
     ...(modeChange === undefined ? {} : { modeChange }),
+    ...(modeOnly ? { modeOnly: true as const } : {}),
     change,
     additions: accumulator.additions,
     deletions: accumulator.deletions,
@@ -211,6 +222,21 @@ export function parseUnifiedDiff(
       const mode = line.slice("new mode ".length).trim();
       if (mode.length > 0) accumulator.newMode = mode;
       continue;
+    }
+    if (!accumulator.sawHunk) {
+      if (line.startsWith("Binary files ") || line === "GIT binary patch") {
+        accumulator.sawBinaryContent = true;
+        continue;
+      }
+      const indexMatch = CONTENT_INDEX.exec(line);
+      if (
+        indexMatch?.[1] !== undefined &&
+        indexMatch[2] !== undefined &&
+        indexMatch[1] !== indexMatch[2]
+      ) {
+        accumulator.sawBinaryContent = true;
+        continue;
+      }
     }
     if (!accumulator.sawHunk && line.startsWith("--- ")) {
       accumulator.oldPath = stripPrefix(line.slice(4));

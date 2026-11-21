@@ -61,11 +61,16 @@ it("keeps header-like removed and added source lines inside their hunk", () => {
   }
 });
 
-it("preserves old and new file modes for mode-only and mixed mode-and-content diffs", () => {
+it("preserves old and new file modes for mode-only, binary-plus-mode, and mixed mode-and-content diffs", () => {
   const patch = [
     "diff --git a/scripts/check.sh b/scripts/check.sh",
     "old mode 100644",
     "new mode 100755",
+    "diff --git a/assets/logo.png b/assets/logo.png",
+    "old mode 100644",
+    "new mode 100755",
+    "index 1111111..2222222",
+    "Binary files a/assets/logo.png and b/assets/logo.png differ",
     "diff --git a/scripts/run.sh b/scripts/run.sh",
     "old mode 100755",
     "new mode 100644",
@@ -79,8 +84,14 @@ it("preserves old and new file modes for mode-only and mixed mode-and-content di
   const files = parseUnifiedDiff(patch);
   expect(files[0]?.path).toBe("scripts/check.sh");
   expect(files[0]?.binary).toBe(true);
+  expect(files[0]?.modeOnly).toBe(true);
   expect(files[0]?.modeChange).toEqual({ oldMode: "100644", newMode: "100755" });
-  expect(files[1]?.path).toBe("scripts/run.sh");
-  expect(files[1]?.binary).toBe(false);
-  expect(files[1]?.modeChange).toEqual({ oldMode: "100755", newMode: "100644" });
+  expect(files[1]?.path).toBe("assets/logo.png");
+  expect(files[1]?.binary).toBe(true);
+  expect(files[1]?.modeOnly).toBeUndefined();
+  expect(files[1]?.modeChange).toEqual({ oldMode: "100644", newMode: "100755" });
+  expect(files[2]?.path).toBe("scripts/run.sh");
+  expect(files[2]?.binary).toBe(false);
+  expect(files[2]?.modeOnly).toBeUndefined();
+  expect(files[2]?.modeChange).toEqual({ oldMode: "100755", newMode: "100644" });
 });

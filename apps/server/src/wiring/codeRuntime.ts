@@ -1886,11 +1886,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           }
           // Read the signed-in GitHub login through the integration's
           // registered port so disabling the GitHub integration fails closed
-          // without wiring concrete GitHub host services into Code runtime.
-          const account = await repositoryActivitySource()
-            ?.account("prs-merged", signal)
+          // without wiring concrete GitHub host services into Code runtime,
+          // and without gating viewer identity on activity-history probes.
+          const viewerLogin = await repositoryActivitySource()
+            ?.viewerLogin?.(signal)
             .catch(() => undefined);
-          const viewerLogin = account?.status === "connected" ? account.account : undefined;
           return { pullRequestAuthor, viewerLogin };
         },
         outsideContentMarks: runtimeOutsideContentMarks,

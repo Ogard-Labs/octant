@@ -441,12 +441,17 @@ describe("the pull-request reading pane", () => {
     expect(onSendLineNotes.mock.calls[1]?.[0]).toBe(linkedThreadTwo.threadId);
   });
 
-  it("preserves mode-change metadata in the pull request diff for mode-only and mixed changes", async () => {
+  it("preserves mode-change metadata in the pull request diff without claiming a changed binary has no content changes", async () => {
     const user = userEvent.setup();
     const modeDiff = [
       "diff --git a/scripts/check.sh b/scripts/check.sh",
       "old mode 100644",
       "new mode 100755",
+      "diff --git a/assets/logo.png b/assets/logo.png",
+      "old mode 100644",
+      "new mode 100755",
+      "index 1111111..2222222",
+      "Binary files a/assets/logo.png and b/assets/logo.png differ",
       "diff --git a/scripts/run.sh b/scripts/run.sh",
       "old mode 100755",
       "new mode 100644",
@@ -466,13 +471,29 @@ describe("the pull-request reading pane", () => {
     });
 
     await user.click(await screen.findByRole("tab", { name: /Changes/ }));
-    expect(screen.getByText("mode 100644 → 100755")).toBeVisible();
+    const modeOnlyFile = screen.getByRole("region", { name: "scripts/check.sh" });
+    expect(within(modeOnlyFile).getByText("mode 100644 → 100755")).toBeVisible();
     expect(
-      screen.getByText("File mode changed from 100644 to 100755 with no content changes."),
+      within(modeOnlyFile).getByText(
+        "File mode changed from 100644 to 100755 with no content changes.",
+      ),
     ).toBeVisible();
-    expect(screen.getByText("mode 100755 → 100644")).toBeVisible();
+
+    const binaryModeFile = screen.getByRole("region", { name: "assets/logo.png" });
+    expect(within(binaryModeFile).getByText("mode 100644 → 100755")).toBeVisible();
     expect(
-      screen.getByRole("button", { name: "Comment on scripts/run.sh modified line 1" }),
+      within(binaryModeFile).getByText(
+        "This file changed without a textual diff, so there is nothing to compare.",
+      ),
+    ).toBeVisible();
+    expect(within(binaryModeFile).queryByText(/no content changes/i)).toBeNull();
+
+    const textModeFile = screen.getByRole("region", { name: "scripts/run.sh" });
+    expect(within(textModeFile).getByText("mode 100755 → 100644")).toBeVisible();
+    expect(
+      within(textModeFile).getByRole("button", {
+        name: "Comment on scripts/run.sh modified line 1",
+      }),
     ).toBeVisible();
   });
 

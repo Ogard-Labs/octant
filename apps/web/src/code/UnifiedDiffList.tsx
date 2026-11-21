@@ -509,9 +509,9 @@ function renderFileSection(input: {
           data-index={input.binaryVirtualIndex}
           ref={input.binaryVirtualIndex === undefined ? undefined : input.measureRef}
         >
-          {file.modeChange === undefined
-            ? "This file changed without a textual diff, so there is nothing to compare."
-            : `File mode changed from ${file.modeChange.oldMode} to ${file.modeChange.newMode} with no content changes.`}
+          {file.modeOnly === true && file.modeChange !== undefined
+            ? `File mode changed from ${file.modeChange.oldMode} to ${file.modeChange.newMode} with no content changes.`
+            : "This file changed without a textual diff, so there is nothing to compare."}
         </p>
       ) : (
         <table aria-label={`Diff for ${file.path}`} className="unified-diff__table">
