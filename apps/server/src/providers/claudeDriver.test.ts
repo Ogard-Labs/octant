@@ -10104,6 +10104,9 @@ describe("Claude Code on a server Project's server", () => {
       start: () => ({ status: "unreachable", message: "Not started in this test." }),
       run: async (program) => {
         runs.push(program);
+        // The server holds no instruction files in this stand-in.
+        if (program[2]?.startsWith("for f in") === true)
+          return { status: "ran", exitCode: 0, output: "", errorOutput: "" };
         const asked = program.at(-1) ?? "";
         return {
           status: "ran",
@@ -10232,6 +10235,32 @@ describe("Claude Code on a server Project's server", () => {
     expect(f.opens).toHaveLength(0);
     expect(f.credentialResolver.resolve).not.toHaveBeenCalled();
     await acquired.close();
+  });
+
+  it("gives a placed session the server's instruction files when Claude Code would not load them itself", async () => {
+    const f = harness("api-key", "current-session");
+    const placement: ProviderServerPlacement = {
+      serverName: "devbox",
+      start: () => ({ status: "unreachable", message: "Not started in this test." }),
+      run: async () => ({
+        status: "ran",
+        exitCode: 0,
+        output: "\u001eCLAUDE.md\nRun the unit tests first.\n",
+        errorOutput: "",
+      }),
+    };
+    const acquired = await acquirePlaced(f.driver, placement);
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    await acquired.close();
+    expect(f.opens[0]?.instructions).toContain("CLAUDE.md:\nRun the unit tests first.");
   });
 
   it("refuses Claude Code on a server under Strict, before anything starts", async () => {

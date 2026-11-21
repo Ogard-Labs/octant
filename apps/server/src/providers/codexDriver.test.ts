@@ -3108,6 +3108,46 @@ describe("Codex execution authority and approvals", () => {
     expect(linux.turn).toMatchObject({ sandboxPolicy: { type: "externalSandbox" } });
   });
 
+  it("keeps a Plan session on a server in Codex's own read-only sandbox, since no outside sandbox runs there", async () => {
+    // Octant's profile cannot run on a server, so naming the sandbox external
+    // with `never` would leave Plan's commands free to write there.
+    const f = fixture();
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      makeCodexDriver(f.options({ platform: "linux" }))
+        .acquire({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          serverPlacement: {
+            serverName: "devbox",
+            start: () => ({ status: "unreachable", message: "Not reached." }),
+            run: async () => ({ status: "unreachable", message: "Not reached." }),
+          },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    await Effect.runPromise(
+      connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "plan",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(
+      connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+      sandbox: "read-only",
+      approvalPolicy: "never",
+    });
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      sandboxPolicy: { type: "readOnly" },
+    });
+  });
+
   it("tells Codex its sandbox has network when the launch took no egress proxy", () => {
     // Network limits are off by default, so the process keeps open network;
     // `restricted` would tell the model it has none.

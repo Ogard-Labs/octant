@@ -23,7 +23,12 @@ import {
 } from "../serverProjects/serverProjectThreads";
 import { ServerRuntimeRecords } from "../serverProjects/serverRuntimeRecords";
 import { makeClaudeProcessLive } from "./claudeProcess";
-import { CLAUDE_SERVER_PROGRAM, CLAUDE_SERVER_STRICT_REFUSAL } from "./claudeServerProcess";
+import {
+  CLAUDE_SERVER_PROGRAM,
+  CLAUDE_SERVER_STRICT_REFUSAL,
+  claudeSessionOnServer,
+  readClaudeInstructionsOnServer,
+} from "./claudeServerProcess";
 
 const scratches: string[] = [];
 afterEach(() => {
@@ -263,6 +268,45 @@ describe.skipIf(process.platform === "win32")("Claude Code on a server Project's
     expect(await signIn()).toBe("authenticated");
     expect(readFileSync(statusReads, "utf8").trim().split("\n")).toHaveLength(2);
     expect(existsSync(launched)).toBe(false);
+  });
+
+  it("reads the server's instruction files as text when their setting source is off, never through a link", async () => {
+    const { connection, folder, home } = standInServer();
+    mkdirSync(join(folder, ".claude", "rules"), { recursive: true });
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(folder, "CLAUDE.md"), "Run the unit tests first.\n");
+    writeFileSync(join(folder, ".claude", "rules", "style.md"), "Two-space indents.\n");
+    writeFileSync(join(home, ".claude", "CLAUDE.md"), "Answer briefly.\n");
+    writeFileSync(join(home, "secret.txt"), "not an instruction\n");
+    symlinkSync(join(home, "secret.txt"), join(folder, "CLAUDE.local.md"));
+    const bound = bind(connection, folder, { placesOnServer: true, strict: false });
+    if (bound.status !== "placed") throw new Error("not placed");
+
+    const both = await readClaudeInstructionsOnServer(bound.placement, {
+      project: true,
+      account: true,
+    });
+    expect(both).toContain("Run the unit tests first.");
+    expect(both).toContain("Two-space indents.");
+    expect(both).toContain("Answer briefly.");
+    expect(both).not.toContain("not an instruction");
+    const projectOnly = await readClaudeInstructionsOnServer(bound.placement, {
+      project: true,
+      account: false,
+    });
+    expect(projectOnly).not.toContain("Answer briefly.");
+    expect(
+      await readClaudeInstructionsOnServer(bound.placement, { project: false, account: false }),
+    ).toBeUndefined();
+  });
+
+  it("reports a Project folder it cannot open as unreachable, not as a lost session", async () => {
+    const { connection, folder } = standInServer();
+    const bound = bind(connection, join(folder, "gone"), { placesOnServer: true, strict: false });
+    if (bound.status !== "placed") throw new Error("not placed");
+    expect(
+      await claudeSessionOnServer(bound.placement, "33333333-3333-4333-8333-333333333333"),
+    ).toMatchObject({ status: "unreachable" });
   });
 
   it("says Claude Code is missing on the server rather than running anything here", async () => {

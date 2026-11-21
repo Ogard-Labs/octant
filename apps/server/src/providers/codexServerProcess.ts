@@ -141,6 +141,9 @@ export function startCodexOnServer(input: {
           pid: 0,
           rpc,
           exited,
+          // No egress proxy runs on the server, so its commands reach the
+          // network as the server allows; the sandbox should say so.
+          networkOpen: true,
         };
         return { connection, stop: stream.stop };
       },

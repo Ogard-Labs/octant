@@ -41,7 +41,7 @@ import { OutlivingSessions, type RuntimeTurnStarter } from "../providers/outlivi
 import { createWorkSessionRouteHandler } from "../work/workSessionRoutes";
 import { stopKeptSessionsOfChangedWorkThreads } from "../work/workKeptSessions";
 import { codeThreadTurns } from "../code/codeForkPoint";
-import { SERVER_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
+import { SERVER_WORK_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
 import {
   bindServerWorkTurn,
   serverWorkBindingRevisionId,
@@ -656,7 +656,7 @@ export function wireWork(deps: WorkDependencies) {
         holds: (thread) => serverWorkProjectOf(serverProjectStore, thread) !== undefined,
         bind: (thread, turn) => {
           if (nativeHarnessComposition === undefined)
-            return { status: "refused", message: SERVER_RUNTIME_NOT_HARNESS };
+            return { status: "refused", message: SERVER_WORK_RUNTIME_NOT_HARNESS };
           const bound = bindServerWorkTurn(
             {
               store: serverProjectStore,

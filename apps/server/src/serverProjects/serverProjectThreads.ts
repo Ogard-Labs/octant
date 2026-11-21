@@ -218,6 +218,10 @@ export type ServerCodeTurnBinding =
 export const SERVER_RUNTIME_NOT_HARNESS =
   "A thread in a Project on a server runs on the Octant Harness, or on a runtime that runs on the server itself, such as Codex. This one acts on this computer's files. Choose another model.";
 
+/** Said when a Work thread in a server Project picks a runtime other than the Octant Harness. */
+export const SERVER_WORK_RUNTIME_NOT_HARNESS =
+  "A Work thread in a Project on a server runs on the Octant Harness. This model's runtime acts on this computer's files or runs on the server only in Code. Choose another model.";
+
 /** Said when Strict is on for a thread whose runtime would run on its server. */
 export const SERVER_PLACEMENT_STRICT_REFUSAL =
   "Strict needs Octant's own sandbox, which can't run on a server. Turn Strict off for this thread to run this provider there.";

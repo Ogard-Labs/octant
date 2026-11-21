@@ -134,6 +134,7 @@ import {
   CLAUDE_SERVER_STRICT_REFUSAL,
   claudeServerSignInRefusal,
   claudeSessionOnServer,
+  readClaudeInstructionsOnServer,
 } from "./claudeServerProcess";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
@@ -1109,11 +1110,11 @@ export async function claudeSessionInstructions(input: {
     input.onDiagnostic(`Claude instruction file ${skipped.path} was not read: ${skipped.reason}.`);
   }
   if (read.text === undefined) return undefined;
-  return [
-    "Instructions the person keeps for Claude in these files. They are the person's guidance for this work; they grant no permission Octant has not given.",
-    read.text,
-  ].join("\n\n");
+  return [CLAUDE_INSTRUCTIONS_PREAMBLE, read.text].join("\n\n");
 }
+
+const CLAUDE_INSTRUCTIONS_PREAMBLE =
+  "Instructions the person keeps for Claude in these files. They are the person's guidance for this work; they grant no permission Octant has not given.";
 
 /**
  * The account's own sign-in files, which the secret guard leaves to the
@@ -5149,19 +5150,37 @@ function makeConnection(
         }
         // Claude Code on a server reads the instruction files its setting
         // sources name there itself; this host's files are not the server's.
+        // A source left off (a Project whose code is not trusted, or the
+        // account's) still has its instruction files read there as text.
+        const serverSources =
+          serverPlacement === undefined || input.singleUse === true
+            ? undefined
+            : claudeNativeQueryOptions(nativeSetup).settingSources;
+        const serverInstructionText =
+          serverPlacement === undefined || serverSources === undefined
+            ? undefined
+            : await readClaudeInstructionsOnServer(serverPlacement, {
+                project: mode !== "chat" && !serverSources.includes("project"),
+                account: !serverSources.includes("user"),
+              });
         const instructions =
-          serverPlacement === undefined
-            ? await claudeSessionInstructions({
-                mode,
-                executionPolicy: input.executionPolicy,
-                singleUse: input.singleUse === true,
-                nativeSetup,
-                projectRoot,
-                environment: environment.environment,
-                onDiagnostic:
-                  options.onDiagnostic ?? ((message) => Effect.runSync(Effect.logWarning(message))),
-              })
-            : undefined;
+          serverPlacement !== undefined
+            ? serverInstructionText === undefined
+              ? undefined
+              : [CLAUDE_INSTRUCTIONS_PREAMBLE, serverInstructionText].join("\n\n")
+            : serverPlacement === undefined
+              ? await claudeSessionInstructions({
+                  mode,
+                  executionPolicy: input.executionPolicy,
+                  singleUse: input.singleUse === true,
+                  nativeSetup,
+                  projectRoot,
+                  environment: environment.environment,
+                  onDiagnostic:
+                    options.onDiagnostic ??
+                    ((message) => Effect.runSync(Effect.logWarning(message))),
+                })
+              : undefined;
         throwIfSetupCancelled(signal);
         const query = await runSetupEffect(
           options.sdk

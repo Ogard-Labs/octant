@@ -212,7 +212,14 @@ checks never change registry/configuration or journal state.
   terminal so bytes pass through unchanged. Its script ends by `exec`-ing the
   program, so the program reads standard input directly; stopping the stream
   closes standard input and ends the connection if it is still open two
-  seconds later. Nothing is forwarded, and no secret goes in the command line,
+  seconds later; output still unread when the stream has not closed by four
+  seconds after the stop is discarded, so the stream's end never waits on a caller that stopped
+  reading. As with a command, a mark goes out before the program
+  starts, so a login shell's greeting never reaches the caller, and the call
+  sets `StdinNull=no` so a person's ssh config cannot hand the program EOF.
+  Because the program replaces the shell, its exit status is reported as it
+  is: a stream's 255 may be the program's own or ssh's, and a caller tells
+  them apart by whether the program answered at all. Nothing is forwarded, and no secret goes in the command line,
   which the server's process list shows. Built; Codex's app-server and Claude
   Code run over it ([Providers running on the server](#providers-running-on-the-server)).
 - **Fail closed.** When a call cannot reach the server (the connection drops,
@@ -305,14 +312,19 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     Octant's sandbox at Full access is refused the same way.
   - Claude Code there reads nothing of this host's Claude account: not its
     environment or account folder, not its instruction files (Claude Code
-    reads the server's own), not its stored task list (the panel starts empty
+    reads the server's own; where a setting source is off, such as a Project
+    whose code is not trusted, Octant reads that source's `CLAUDE.md` and
+    rules files on the server as text, skipping links and leaving imports as
+    written, and trusts nothing by reading them), not its stored task list (the panel starts empty
     and follows the task tools), not its Git identity, sign-in check or egress
     proxy, and it gets no Artifact tool, since a publish snapshots a file on
     this host.
   - Claude Code resumes its own session on the server: before each turn the
     host asks the server whether the session's transcript is in the login's
     `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/<folder>/`, where `<folder>` comes
-    from the folder's canonical path there. A missing transcript ends the
+    from the folder's canonical path there. A folder that does not open
+    there leaves the session as it was, like a server that does not answer.
+    A missing transcript ends the
     resume as a stale one, so the thread carries on with the text handoff a
     missing session gets on this host; a server that does not answer leaves
     the session as it was. A rewind sends the text handoff, as for any server

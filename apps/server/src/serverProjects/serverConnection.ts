@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import type { Readable, Writable } from "node:stream";
+import { Transform, type Readable, type Writable } from "node:stream";
 import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { SERVER_CONTROL_SOCKET_PREFIX } from "../process/seatbeltProfile";
@@ -222,6 +222,11 @@ export function serverSshArguments(
     readonly controlSocket?: string | undefined;
     /** A known hosts file holding only the server's pinned keys. */
     readonly pinnedKnownHosts?: string | undefined;
+    /**
+     * A stream's program reads this call's standard input, so a `StdinNull`
+     * in the person's own ssh config, which would hand it EOF, is overridden.
+     */
+    readonly readsStandardInput?: boolean | undefined;
   },
 ): ReadonlyArray<string> {
   const control =
@@ -238,6 +243,7 @@ export function serverSshArguments(
       ...SERVER_CONNECTION_OPTIONS,
       ...pinnedHostKeyOptions(options.pinnedKnownHosts),
       ...control,
+      ...(options.readsStandardInput === true ? ["StdinNull=no"] : []),
     ].flatMap((option) => ["-o", option]),
     options.terminal ? "-tt" : "-T",
     "-l",
@@ -511,7 +517,10 @@ export class ServerConnection {
         message: "This call holds a NUL byte, which no server command can carry. Nothing ran.",
       };
     }
-    const remoteCommand = serverRemoteCommand(input.script, words);
+    // As in `run`, a mark goes out before the program starts, so whatever a
+    // login shell's startup files print (a greeting, a notice) is dropped
+    // here instead of reaching a caller that expects the program's protocol.
+    const remoteCommand = serverRemoteCommand(`printf '\\036'\n${input.script}`, words);
     if (remoteCommand.length > MAX_REMOTE_COMMAND_BYTES) {
       return {
         status: "unreachable",
@@ -536,11 +545,24 @@ export class ServerConnection {
           configFile: this.#options.configFile,
           controlSocket,
           pinnedKnownHosts: this.pinnedKnownHostsFile(server, pinned),
+          readsStandardInput: true,
         }),
       ],
       { env: this.#environment(), stdio: ["pipe", "pipe", "pipe"] },
     );
     child.stdin.on("error", () => undefined);
+    let reached = false;
+    const stdout = child.stdout.pipe(
+      new Transform({
+        transform(chunk: Buffer, _encoding, done) {
+          if (reached) return done(null, chunk);
+          const at = chunk.indexOf(SENTINEL);
+          if (at === -1) return done();
+          reached = true;
+          done(null, chunk.subarray(at + 1));
+        },
+      }),
+    );
     const exited = new Promise<{ readonly exitCode: number | null }>((resolve) => {
       child.once("close", (code) => resolve({ exitCode: code }));
       child.once("error", () => resolve({ exitCode: null }));
@@ -549,7 +571,7 @@ export class ServerConnection {
     return {
       status: "open",
       stdin: child.stdin,
-      stdout: child.stdout,
+      stdout,
       stderr: child.stderr,
       pid: child.pid,
       stop: () => {
@@ -560,7 +582,19 @@ export class ServerConnection {
         child.stdin.end();
         const force = setTimeout(() => child.kill("SIGTERM"), STREAM_STOP_GRACE_MS);
         force.unref();
-        void exited.then(() => clearTimeout(force));
+        // `close` waits for the output pipes, and output nobody reads pauses
+        // them: a caller that stops without reading would wait on `exited`
+        // forever, even after SSH has gone. A second grace releases the pipes.
+        const release = setTimeout(() => {
+          child.stdout.destroy();
+          child.stderr.destroy();
+          stdout.destroy();
+        }, 2 * STREAM_STOP_GRACE_MS);
+        release.unref();
+        void exited.then(() => {
+          clearTimeout(force);
+          clearTimeout(release);
+        });
       },
       exited,
     };
