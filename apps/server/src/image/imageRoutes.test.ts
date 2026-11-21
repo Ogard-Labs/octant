@@ -117,7 +117,7 @@ function setup(
     jobs: {
       enqueue,
       cancel,
-      get: (id: string) => (String(id) === jobId ? queuedJob() : undefined),
+      get: (id: string) => (options.jobs ?? [queuedJob()]).find((job) => String(job.id) === id),
       listByScope: () => options.jobs ?? [queuedJob()],
       readArtifact: async () => ({
         bytes: Uint8Array.from([1, 2, 3]),
@@ -200,6 +200,61 @@ describe("image routes", () => {
     expect(response?.status).toBe(200);
     const body = decodeImageGenerationJobsResponse(await response!.json());
     expect(body.jobs[0]?.id).toBe(jobId);
+  });
+
+  it("lets a person-paired thread read its finished image, but never the library or an inaccessible result", async () => {
+    const job = decodeImageJob({
+      ...queuedJob(),
+      status: "completed",
+      artifacts: [
+        {
+          attachmentId,
+          size: 3,
+          mime: "image/png",
+          hash: "b".repeat(64),
+          evidence: {
+            jobId,
+            profileInstanceId: profileId,
+            modelId: "gpt-image-2",
+            promptHash: "a".repeat(64),
+          },
+        },
+      ],
+    });
+    const { handler, authorizeScope } = setup({ jobs: [job] });
+    const dispatch = createAuthenticatedProductDispatch({ dispatch: handler });
+    const principal = createRemoteDevicePrincipal({
+      hostId: crypto.randomUUID() as StableHostId,
+      deviceId: crypto.randomUUID() as DeviceId,
+      sessionId: crypto.randomUUID() as RemoteSessionId,
+      origin: "https://octant.example",
+      credentialGeneration: 1,
+      protocolVersion: 1,
+      capabilityDigest: "b".repeat(64),
+      admittedBy: "host-person",
+    });
+    const get = (path: string) =>
+      dispatch({
+        principal,
+        request: new Request(principal.origin + path),
+        abortSignal: new AbortController().signal,
+      });
+    const path = `/api/image/thread-artifact?jobId=${jobId}&attachmentId=${attachmentId}`;
+    const list = await get(`/api/image/jobs?threadKind=chat-thread&scopeId=${scopeId}`);
+    expect(decodeImageGenerationJobsResponse(await list?.json()).jobs).toEqual([job]);
+    const image = await get(path);
+    expect(image?.status).toBe(206);
+    expect(image?.headers.get("content-range")).toBe("bytes 0-2/3");
+    expect(image?.headers.get("content-type")).toBe("image/png");
+    expect(Array.from(new Uint8Array(await (image ?? Response.error()).arrayBuffer()))).toEqual([
+      1, 2, 3,
+    ]);
+    expect((await get(`/api/image/jobs?threadKind=image-library&scopeId=${scopeId}`))?.status).toBe(
+      404,
+    );
+    authorizeScope.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    expect((await get(path))?.status).toBe(404);
+    expect((await get(path + "&offset=3"))?.status).toBe(416);
   });
 
   it("enqueues a job for an authorized thread", async () => {

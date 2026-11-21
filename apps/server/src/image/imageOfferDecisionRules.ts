@@ -16,8 +16,8 @@ export function unavailableImageModel(
 ): string | undefined {
   return profiles.some(
     (profile) =>
-      profile.instanceId === decision.profileInstanceId &&
-      profile.modelAllowlist.includes(decision.modelId),
+      String(profile.instanceId) === String(decision.profileInstanceId) &&
+      profile.modelAllowlist.some((id) => String(id) === String(decision.modelId)),
   )
     ? undefined
     : "That image model is not available. Choose another one.";

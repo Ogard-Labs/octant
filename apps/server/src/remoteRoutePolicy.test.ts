@@ -43,6 +43,20 @@ function handler(overrides: Partial<Parameters<typeof createRemoteRouteHandler>[
 }
 
 describe("remote route policy", () => {
+  it("admits paired image-result reads without admitting image job changes or the library controls", () => {
+    const remote = createRemoteRoutePolicy({ origin });
+    for (const path of [
+      "/api/image/jobs?threadKind=chat-thread",
+      "/api/image/thread-artifact?offset=0",
+    ]) {
+      expect(remote.inspect(request(path))).toMatchObject({
+        kind: "allow",
+        surface: "authenticated-product",
+      });
+      expect(remote.inspect(request(path, { method: "POST" }))).toMatchObject({ kind: "reject" });
+    }
+    expect(remote.inspect(request("/api/image/profiles"))).toMatchObject({ kind: "reject" });
+  });
   it("accepts canonical HTTPS default port 443 while rejecting wrong authority", () => {
     const defaultOrigin = "https://octant.example";
     const requestFor = (url: string, host: string, requestOrigin: string) =>

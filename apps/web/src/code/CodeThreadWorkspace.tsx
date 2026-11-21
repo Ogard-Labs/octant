@@ -65,7 +65,10 @@ import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
-import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type {
+  ImageGenerationClient,
+  ThreadImageResults,
+} from "@octant/client-runtime/image-generation-client";
 import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
@@ -266,6 +269,7 @@ export interface CodeThreadWorkspaceProps {
   readonly threadId: CodeThreadId;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly imageResults?: ThreadImageResults;
   readonly serviceOfferClient?: ServiceOfferClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   /** Lists and reads the thread's kept Browser screenshots. */
@@ -811,7 +815,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // The transcript draws each image after the reply that made it; the list
   // below the transcript shows the rest.
   const threadImages = useGeneratedImageJobs({
-    client: view === undefined ? undefined : props.imageGenerationClient,
+    client: view === undefined ? undefined : (props.imageGenerationClient ?? props.imageResults),
     threadKind: "code-thread",
     scopeId: decodeImageGenerationScopeId(String(props.threadId)),
   });
@@ -1118,7 +1122,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     (job) => String(job.createdAt),
     (job) => String(job.id),
   );
-  const imageClient = props.imageGenerationClient;
+  const imageClient = props.imageGenerationClient ?? props.imageResults;
   const imageProfiles = props.imageGenerationProfiles;
   const saveGeneratedImage = (job: ImageJob, artifact: ImageArtifactRecord) => {
     setImageSaveMessage(undefined);
@@ -2545,11 +2549,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
         <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
         {!displayReady ||
-        props.imageGenerationClient === undefined ||
+        imageClient === undefined ||
         props.imageGenerationProfiles === undefined ? null : (
           <GeneratedImageJobs
             canSaveToProject
-            client={props.imageGenerationClient}
+            client={imageClient}
             jobs={threadImages.jobs.filter((job) => !imagePlacement.placed.has(String(job.id)))}
             onAttach={(file) => attachments.attach([file])}
             onEnqueued={threadImages.refresh}

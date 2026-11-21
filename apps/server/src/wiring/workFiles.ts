@@ -190,20 +190,20 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
         imageProfiles.listInstances(),
         imageProfiles.readImageGenerationSettings().customSources,
       ),
-    authorizeScope: (windowId, threadKind, scopeId) =>
-      windowCanOpenThread(windowId, threadKind, String(scopeId)),
+    authorizeScope: (windowId, threadKind, scopeId, principal) =>
+      windowCanOpenThread(windowId, threadKind, String(scopeId), principal),
     windowAuthorityStore,
     now: Date.now,
   });
   const imageRoutes = createImageRouteHandler({
     jobs: imageJobService,
     ...imageProfiles,
-    authorizeScope: async (windowId, threadKind, scopeId) => {
+    authorizeScope: async (windowId, threadKind, scopeId, principal) => {
       const threadId = String(scopeId);
       // The library is host-wide: window capability already proved the
       // caller is a registered window, and the scope id is fixed.
       if (threadKind === "image-library") return threadId === String(IMAGE_LIBRARY_SCOPE_ID);
-      return windowCanOpenThread(windowId, threadKind, threadId);
+      return windowCanOpenThread(windowId, threadKind, threadId, principal);
     },
     saveToProject: async (input) => {
       if (input.threadKind === "chat-thread") {

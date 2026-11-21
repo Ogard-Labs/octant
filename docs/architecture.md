@@ -7713,7 +7713,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   asked. It pairs each kind of offer with its own card and decision rule. A
   local window or a device paired by the host's person sees only its own
   offers, and the host checks that it can still open the thread before
-  accepting one answer that fits the offer's kind. Waiting offers are held
+  accepting one answer that fits the offer's kind. A person-paired browser
+  can view and download finished images in threads it can open, not the
+  host's image library. The host checks access again for each part of an
+  image; reading it grants no authority to revise it or save a host file.
+  Waiting offers are held
   only in host memory and are never replayed after a restart. The image card
   is where the person picks the profile and model,
   lets the agent draw the visual itself, or cancels. Generate runs only a

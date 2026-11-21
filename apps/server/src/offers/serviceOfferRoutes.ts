@@ -14,7 +14,7 @@ import {
   type ServiceOfferDecision,
   type WindowId,
 } from "@octant/contracts";
-import { principalActsAsHostPerson } from "../clientPrincipal";
+import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
 import { unavailableImageModel } from "../image/imageOfferDecisionRules";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "../principalRouteContext";
@@ -34,6 +34,7 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
     windowId: WindowId,
     threadKind: ServiceOffer["threadKind"],
     scopeId: ServiceOffer["scopeId"],
+    principal: ClientPrincipal,
   ) => Promise<boolean>;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now: () => number;
@@ -92,7 +93,10 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
         } catch {
           return fail("Offers require a thread.", 400);
         }
-        if (!(await input.authorizeScope(windowId, kind, scopeId)) || !current()) {
+        if (
+          !(await input.authorizeScope(windowId, kind, scopeId, context.principal)) ||
+          !current()
+        ) {
           return fail("Offers are unavailable.", 404);
         }
         const waiting = offers.list(windowId, { threadKind: kind, scopeId });
@@ -138,8 +142,12 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
                 decision,
                 actor: eventActorForPrincipal(context.principal),
                 authorize: async (offer) =>
-                  (await input.authorizeScope(windowId, offer.threadKind, offer.scopeId)) &&
-                  current(),
+                  (await input.authorizeScope(
+                    windowId,
+                    offer.threadKind,
+                    offer.scopeId,
+                    context.principal,
+                  )) && current(),
                 rules: input.rules,
               });
         if (result.kind === "offer-inaccessible") return fail("Offers are unavailable.", 404);

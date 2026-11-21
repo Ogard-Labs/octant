@@ -8,6 +8,7 @@ import {
   HUB_WAKE_MAX_SPOKES,
   HUB_WAKE_MAX_TIMES_PER_SPOKE,
   MAX_CODE_ATTACHMENT_BYTES,
+  THREAD_IMAGE_CHUNK_BYTES,
   MAX_WORK_ATTACHMENT_BYTES,
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_SESSION_HEADER,
@@ -902,6 +903,14 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
 ];
 
 const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
+  { kind: "exact" as const, path: "/api/image/jobs", methods: ["GET"] as const, allowQuery: true },
+  {
+    kind: "exact" as const,
+    path: "/api/image/thread-artifact",
+    methods: ["GET"] as const,
+    allowQuery: true,
+    maxResponseBytes: THREAD_IMAGE_CHUNK_BYTES,
+  },
   {
     kind: "exact" as const,
     path: SERVICE_OFFERS_PATH,

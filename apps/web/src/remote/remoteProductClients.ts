@@ -17,6 +17,10 @@ import {
   type ExtensionClient,
 } from "@octant/client-runtime/extension-client";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
+import {
+  createThreadImageResults,
+  type ThreadImageResults,
+} from "@octant/client-runtime/image-generation-client";
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
@@ -75,6 +79,7 @@ import type { ProviderOAuthCommand } from "../providers/ProviderOAuthSignIn";
 export interface RemoteProductClients {
   readonly conversationInputs?: ConversationInputClient;
   readonly serviceOffers?: ServiceOfferClient;
+  readonly imageResults?: ThreadImageResults;
   readonly chat: ChatClient;
   readonly canvas: CanvasClient;
   readonly code: CodeClient;
@@ -189,6 +194,7 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
   return {
     conversationInputs: createConversationInputClient(port),
     serviceOffers: createServiceOfferClient(port),
+    imageResults: createThreadImageResults(port),
     chat: createChatClient(port),
     // Reading a Canvas never grants a paired browser the host's export,
     // credential, editing or share-management authority.

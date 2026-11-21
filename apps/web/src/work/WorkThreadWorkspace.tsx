@@ -122,7 +122,10 @@ import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
-import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type {
+  ImageGenerationClient,
+  ThreadImageResults,
+} from "@octant/client-runtime/image-generation-client";
 import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
@@ -604,6 +607,7 @@ export interface WorkThreadWorkspaceProps {
   readonly fileMentionClient?: FileMentionClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly imageResults?: ThreadImageResults;
   readonly serviceOfferClient?: ServiceOfferClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly onOpenSettings?: () => void;
@@ -2560,7 +2564,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   // The transcript draws each image after the turn that made it; the trail
   // below the transcript shows the rest.
   const threadImages = useGeneratedImageJobs({
-    client: props.imageGenerationClient,
+    client: props.imageGenerationClient ?? props.imageResults,
     threadKind: "work-thread",
     scopeId: decodeImageGenerationScopeId(String(props.threadId)),
   });
@@ -2584,7 +2588,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     (job) => String(job.createdAt),
     (job) => String(job.id),
   );
-  const imageClient = props.imageGenerationClient;
+  const imageClient = props.imageGenerationClient ?? props.imageResults;
   const imageProfiles = props.imageGenerationProfiles;
   const saveGeneratedImage = (job: ImageJob, artifact: ImageArtifactRecord) => {
     void props.imageGenerationClient
@@ -3050,15 +3054,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             restoreKey={`work:${String(props.threadId)}`}
             role="log"
             trail={
-              (props.imageGenerationClient === undefined ||
-                props.imageGenerationProfiles === undefined) &&
+              (imageClient === undefined || props.imageGenerationProfiles === undefined) &&
               props.browserAutomationClient === undefined ? null : (
                 <div className="work-thread-workspace__transcript-trail">
-                  {props.imageGenerationClient === undefined ||
+                  {imageClient === undefined ||
                   props.imageGenerationProfiles === undefined ? null : (
                     <GeneratedImageJobs
                       canSaveToProject
-                      client={props.imageGenerationClient}
+                      client={imageClient}
                       jobs={threadImages.jobs.filter(
                         (job) => !imagePlacement.placed.has(String(job.id)),
                       )}

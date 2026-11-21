@@ -87,7 +87,10 @@ import { LinkedThreadParallelReviewFlow } from "../linkedThread/LinkedThreadPara
 import { useLinkedThreadParallelReview } from "../linkedThread/useLinkedThreadParallelReview";
 import { isReviewInParallelReference } from "../linkedThread/parseReviewInParallelDraft";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
-import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type {
+  ImageGenerationClient,
+  ThreadImageResults,
+} from "@octant/client-runtime/image-generation-client";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ServiceOfferPrompt } from "../offers/ServiceOfferPrompt";
@@ -149,6 +152,7 @@ export interface ChatWorkspaceProps {
   readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly imageResults?: ThreadImageResults;
   readonly serviceOfferClient?: ServiceOfferClient;
   /** Every image profile, custom image sources included, computed once by the shell. */
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
@@ -514,7 +518,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // Read before the early return too: the transcript draws each image after
   // the turn that made it, and the list below the transcript shows the rest.
   const threadImages = useGeneratedImageJobs({
-    client: props.imageGenerationClient,
+    client: props.imageGenerationClient ?? props.imageResults,
     threadKind: "chat-thread",
     scopeId: view === undefined ? undefined : decodeImageGenerationScopeId(String(view.thread.id)),
   });
@@ -586,7 +590,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const thread = view.thread;
   const connectionLost = props.controller.status === "disconnected";
   const canvasClient = props.canvasClient;
-  const imageClient = props.imageGenerationClient;
+  const imageClient = props.imageGenerationClient ?? props.imageResults;
   // A Canvas sits inline after the turn that wrote it, in whichever run the
   // transcript shows: the newest turns, or a run the reader jumped to.
   const shownRun = transcriptWindow?.detached;
@@ -1273,9 +1277,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 />
               </section>
             )}
-            {props.imageGenerationClient === undefined ? null : (
+            {imageClient === undefined ? null : (
               <GeneratedImageJobs
-                client={props.imageGenerationClient}
+                client={imageClient}
                 jobs={threadImages.jobs.filter((job) => !imagePlacement.placed.has(String(job.id)))}
                 onAttach={attachGeneratedImage}
                 onEnqueued={threadImages.refresh}

@@ -1,4 +1,5 @@
 import {
+  THREAD_IMAGE_CHUNK_BYTES,
   decodeImageArtifactId,
   decodeImageGenerationEnqueueRequest,
   decodeImageGenerationJobsResponse,
@@ -17,7 +18,8 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { listEligibleImageProfiles } from "@octant/domain";
-import { authenticateRouteWindowId } from "../principalRouteContext";
+import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "../principalRouteContext";
+import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ImageJobService, ImageJobServiceError } from "./imageJobService";
@@ -36,6 +38,7 @@ export interface ImageRouteDependencies {
     windowId: WindowId,
     threadKind: ImageJobThreadKind,
     scopeId: ImageGenerationScopeId,
+    principal?: ClientPrincipal,
   ) => Promise<boolean>;
   readonly saveToProject: (input: {
     readonly windowId: WindowId;
@@ -74,9 +77,9 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
-    let windowId: WindowId;
+    let context;
     try {
-      windowId = authenticateRouteWindowId({
+      context = authenticateRoutePrincipal({
         request,
         store: dependencies.windowAuthorityStore,
         now: now(),
@@ -88,6 +91,21 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
       return failure("Image request is invalid.", 400, origin);
     }
 
+    const windowId = context.scopeId;
+    const remote = context.principal.kind !== "local-window";
+    if (
+      remote &&
+      (!principalActsAsHostPerson(context.principal) ||
+        request.method !== "GET" ||
+        (route !== "jobs" && route !== "thread-artifact"))
+    )
+      return failure("Image jobs are unavailable.", 404, origin);
+    const current = retainRouteAdmissionCurrent({
+      request,
+      context,
+      store: dependencies.windowAuthorityStore,
+      now,
+    });
     try {
       if (route === "profiles" && request.method === "GET") {
         const instances = dependencies.listInstances();
@@ -106,11 +124,17 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
         if (threadKind === undefined || scopeId === undefined) {
           return failure("Image job list requires a thread.", 400, origin);
         }
-        if (!(await dependencies.authorizeScope(windowId, threadKind, scopeId))) {
+        if (
+          (remote && threadKind === "image-library") ||
+          !(await dependencies.authorizeScope(windowId, threadKind, scopeId, context.principal)) ||
+          !current()
+        ) {
           return failure("Image jobs are unavailable.", 404, origin);
         }
         const body = decodeImageGenerationJobsResponse({
-          jobs: dependencies.jobs.listByScope(scopeId),
+          jobs: dependencies.jobs
+            .listByScope(scopeId)
+            .filter((job) => !remote || job.threadKind === threadKind),
         });
         return json(body, 200, origin);
       }
@@ -153,6 +177,46 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
         return json(decodeImageJob(job), 200, origin);
       }
 
+      if (route === "thread-artifact" && request.method === "GET") {
+        const jobId = parseJobId(url.searchParams.get("jobId") ?? "");
+        const job = jobId === undefined ? undefined : dependencies.jobs.get(jobId);
+        const attachment = job?.artifacts.find(
+          (item) => String(item.attachmentId) === url.searchParams.get("attachmentId"),
+        );
+        if (!job || !attachment || job.threadKind === "image-library")
+          return failure("The generated image is unavailable.", 404, origin);
+        const canRead = async () =>
+          (await dependencies.authorizeScope(
+            windowId,
+            job.threadKind,
+            job.scopeId,
+            context.principal,
+          )) && current();
+        if (!(await canRead())) return failure("The generated image is unavailable.", 404, origin);
+        const offset = Number(url.searchParams.get("offset") ?? 0);
+        if (
+          !Number.isSafeInteger(offset) ||
+          offset < 0 ||
+          offset >= attachment.size ||
+          offset % THREAD_IMAGE_CHUNK_BYTES !== 0
+        )
+          return failure("Image offset is invalid.", 416, origin);
+        const artifact = await dependencies.jobs.readArtifact(job.id, attachment.attachmentId);
+        if (!artifact || !(await canRead()))
+          return failure("The generated image is unavailable.", 404, origin);
+        if (artifact.bytes.byteLength !== attachment.size)
+          return failure("The generated image is unavailable.", 404, origin);
+        const end = Math.min(offset + THREAD_IMAGE_CHUNK_BYTES, attachment.size);
+        return new Response(artifact.bytes.slice(offset, end), {
+          status: 206,
+          headers: {
+            ...corsHeaders(origin),
+            "content-type": artifact.mime,
+            "content-range": `bytes ${offset}-${end - 1}/${attachment.size}`,
+            "cache-control": "no-store",
+          },
+        });
+      }
       const artifactMatch = ARTIFACT_PATH.exec(route);
       if (artifactMatch !== undefined && artifactMatch !== null) {
         const jobId = decodeImageJobId(artifactMatch[1]);

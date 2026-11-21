@@ -533,7 +533,14 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
 
 function serviceOfferProps({ actsAsHostPerson, clients }: RemoteSurfaceProps) {
   const client = clients.serviceOffers;
-  return actsAsHostPerson && client !== undefined ? { serviceOfferClient: client } : {};
+  return !actsAsHostPerson
+    ? {}
+    : {
+        ...(client === undefined ? {} : { serviceOfferClient: client }),
+        ...(clients.imageResults === undefined
+          ? {}
+          : { imageResults: clients.imageResults, imageGenerationProfiles: [] }),
+      };
 }
 
 type RemoteThread = ChatThread | WorkThread | CodeThread;
