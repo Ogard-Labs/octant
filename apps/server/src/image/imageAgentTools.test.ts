@@ -105,7 +105,9 @@ function tools(
   options: {
     readonly answer?: (
       offer: Parameters<ImageAgentToolPort["ask"]>[0]["offer"],
-    ) => ImageGenerationOfferOutcome;
+    ) => ImageGenerationOfferOutcome | Promise<ImageGenerationOfferOutcome>;
+    readonly imageSources?: ImageAgentToolPort["imageSources"];
+    readonly readArtifact?: NonNullable<ImageAgentToolPort["readArtifact"]>;
     readonly remembered?: ImageGenerationChoice;
     readonly fullAccess?: boolean;
     readonly defaultProfileInstanceId?: string;
@@ -130,7 +132,7 @@ function tools(
     };
   } = {},
 ) {
-  const enqueue = vi.fn(async () => job());
+  const enqueue = vi.fn<ImageAgentToolPort["enqueue"]>(async () => job());
   let remembered = options.remembered;
   const ask = vi.fn(
     async ({ offer }: Parameters<ImageAgentToolPort["ask"]>[0]) =>
@@ -153,6 +155,7 @@ function tools(
       ask,
       remembered: () => remembered,
       forget,
+      ...(options.imageSources === undefined ? {} : { imageSources: options.imageSources }),
       ...(options.fullAccess === undefined
         ? {}
         : { fullAccess: () => options.fullAccess === true }),
@@ -184,6 +187,7 @@ function tools(
             readsImages: () => options.readsImages === true,
             ...(options.waitMs === undefined ? {} : { waitMs: options.waitMs }),
           }),
+      ...(options.readArtifact === undefined ? {} : { readArtifact: options.readArtifact }),
     },
   });
   return { ask, enqueue, forget, set };
@@ -195,6 +199,116 @@ function call(set: ReturnType<typeof tools>["set"], input: Record<string, unknow
 }
 
 describe("createImageAgentTools", () => {
+  it("names the attached image and reads no bytes until the person chooses Generate", async () => {
+    const bytes = Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10);
+    const read = vi.fn(async () => bytes);
+    let approve: (value: ImageGenerationOfferOutcome) => void = () => undefined;
+    const answer = new Promise<ImageGenerationOfferOutcome>((resolve) => {
+      approve = resolve;
+    });
+    const { ask, enqueue, set } = tools([imageProfile()], [], [], {
+      answer: () => answer,
+      fullAccess: true,
+      imageSources: {
+        latestAttachments: () => [
+          { label: "your attached photo cat.png", size: bytes.length, read },
+        ],
+      },
+    });
+    const result = call(set, { prompt: "Restyle the photo", references: [{ kind: "attachment" }] });
+    await vi.waitFor(() => expect(ask).toHaveBeenCalledOnce());
+    expect(ask.mock.calls[0]?.[0].offer).toMatchObject({
+      references: [{ kind: "attachment", label: "your attached photo cat.png" }],
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    approve({
+      status: "generate",
+      profileInstanceId: profileId,
+      modelId: "gpt-image-2" as never,
+    });
+    await result;
+    expect(read).toHaveBeenCalledOnce();
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ references: [{ mediaType: "image/png", bytes }] }),
+    );
+  });
+
+  it("includes the parent among explicit references and never forwards both forms", async () => {
+    const bytes = Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4);
+    const read = vi.fn(async () => bytes);
+    const readArtifact = vi.fn(async () => ({ bytes, mime: "image/png" as const }));
+    const { ask, enqueue, set } = tools([imageProfile()], [job("completed")], [], {
+      imageSources: { latestAttachments: () => [{ label: "cat.png", size: bytes.length, read }] },
+      readArtifact,
+    });
+    await call(set, {
+      prompt: "Combine the images",
+      parentAttachmentId,
+      references: [{ kind: "attachment" }],
+    });
+    expect(ask.mock.calls[0]?.[0].offer).toMatchObject({
+      references: [
+        { kind: "generated-image", label: "generated image" },
+        { kind: "attachment", label: "cat.png" },
+      ],
+    });
+    expect(readArtifact).toHaveBeenCalledOnce();
+    expect(enqueue.mock.calls).toHaveLength(1);
+    expect(enqueue.mock.calls[0]).toEqual([
+      expect.objectContaining({
+        references: Array.from({ length: 2 }, () => ({ mediaType: "image/png", bytes })),
+      }),
+    ]);
+    expect(enqueue.mock.calls[0]?.[0]).not.toHaveProperty("parentArtifactRef");
+  });
+
+  it("refuses when no reference-capable profile is ready, even if another image profile is enabled", async () => {
+    const bfl = {
+      ...imageProfile(),
+      driverKind: "bfl-image",
+      configuration: {
+        kind: "bfl-image-http",
+        modelAllowlist: ["flux-pro" as never],
+        defaultModel: "flux-pro" as never,
+      },
+    } satisfies ProviderInstance;
+    const { ask, enqueue, set } = tools([bfl]);
+    await expect(
+      call(set, { prompt: "Restyle the photo", references: [{ kind: "attachment" }] }),
+    ).resolves.toMatchObject({
+      result: { error: "No enabled image model can use reference images." },
+    });
+    expect(ask).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("does not send images if the chosen profile stops supporting references before they are read", async () => {
+    const instances = [imageProfile()];
+    const read = vi.fn(async () => Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10));
+    const { enqueue, set } = tools(instances, [], [], {
+      imageSources: { latestAttachments: () => [{ label: "cat.png", size: 8, read }] },
+      answer: (offer) => {
+        if (offer.kind !== "generate") throw new Error("Expected a generation request.");
+        instances[0] = {
+          ...imageProfile(),
+          driverKind: "bfl-image",
+          configuration: {
+            kind: "bfl-image-http",
+            modelAllowlist: [offer.suggested.modelId],
+            defaultModel: offer.suggested.modelId,
+          },
+        };
+        return { status: "generate", ...offer.suggested };
+      },
+    });
+    await expect(
+      call(set, { prompt: "Restyle the photo", references: [{ kind: "attachment" }] }),
+    ).resolves.toMatchObject({ isError: true });
+    expect(read).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
   it("is absent when no enabled image profile exists", () => {
     expect(tools([]).set).toBeUndefined();
     expect(tools([imageProfile(false)]).set).toBeUndefined();

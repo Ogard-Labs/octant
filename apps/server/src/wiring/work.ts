@@ -22,6 +22,7 @@ import {
   decodeImageGenerationScopeId,
   decodeProviderSessionId,
   decodeThreadMessageQueueScope,
+  decodeThreadWorkingDirectory,
   decodeWindowId,
   decodeWorkThreadId,
   decodeWorkTurnId,
@@ -129,6 +130,8 @@ import {
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
 import { lookToolForThread } from "../image/lookTool";
 import { providerTakesFileNatively, supportsConversationInput } from "./conversationInputs";
@@ -896,6 +899,37 @@ export function wireWork(deps: WorkDependencies) {
               fullAccess: () =>
                 runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
               jobs: imageJobService,
+              imageSources: {
+                latestAttachments: () =>
+                  attachedImageSources(
+                    workTurnProjection
+                      .listForThread(input.thread.id)
+                      .findLast((turn) => turn.delivery === undefined)?.attachments ?? [],
+                    (attachment) => workAttachments.read(input.thread.id, attachment),
+                  ),
+                ...workspaceImageSources({
+                  threadId: decodeBrowserThreadId(String(input.thread.id)),
+                  browserCaptures,
+                  root: async () => {
+                    const thread = workThreadProjection.read(input.thread.id);
+                    if (thread?.lifecycle !== "active") return undefined;
+                    const project = persistence.readProject(thread.projectId);
+                    if (
+                      project?.type !== "work" ||
+                      project.lifecycle !== "active" ||
+                      project.bindingHistory.at(-1)?.revisionId !== thread.bindingRevisionId
+                    )
+                      return undefined;
+                    const selected = approvedWorkingFolderRoot(project, thread.workingFolderId);
+                    if (selected === undefined) return undefined;
+                    const root = await resolveThreadWorkingDirectory(
+                      selected,
+                      thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+                    ).catch(() => undefined);
+                    return root === input.projectRoot ? root : undefined;
+                  },
+                }),
+              },
               listInstances: () => persistence.readProviderInstances(),
               readImageGenerationCustomSources: () =>
                 (persistence.readShellSettings()?.settings ?? defaultShellSettings())

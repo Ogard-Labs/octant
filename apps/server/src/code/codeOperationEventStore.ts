@@ -876,6 +876,30 @@ export class CodeOperationEventStore {
     return undefined;
   }
 
+  latestPersonTurnAttachments(threadId: CodeThreadId): ReadonlyArray<CodeAttachmentReference> {
+    try {
+      for (const envelope of this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "conversation-turn-started",
+        limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+      })) {
+        if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1)
+          continue;
+        const frame = decodeCodeOperationEventFrame(envelope.payload);
+        if (
+          frame.threadId === threadId &&
+          frame.event.kind === "conversation-turn-started" &&
+          frame.event.delivery === undefined
+        )
+          return frame.event.attachments ?? [];
+      }
+    } catch {
+      return [];
+    }
+    return [];
+  }
+
   /**
    * The prompts of the thread's latest turns, oldest first, at most `limit`:
    * what the person wrote, never what the agent read. A turn the host started

@@ -38,7 +38,7 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
     "Ask the language server about a saved file with octant_code: its errors, where a name is defined, and where it is used.",
   octant_computer: COMPUTER_TOOL_HOST_LINE,
   octant_create_image:
-    "Call octant_create_image when the person asks for a picture (photo, illustration, rendered scene) instead of drawing it as SVG or HTML. Keep SVG for logos, icons, and diagrams.",
+    "Call octant_create_image when the person asks for a picture instead of drawing it as SVG or HTML. To restyle photos or screenshots, use references, which always need confirmation. Keep SVG for logos, icons, and diagrams.",
   octant_credential:
     "When a registered operation or a saved command needs a credential the person holds, use octant_credential; you never see the value, and it is not a command runner.",
   octant_debug:

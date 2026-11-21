@@ -119,6 +119,43 @@ describe("ServiceOfferPrompt", () => {
     );
   });
 
+  it("discloses signed-in screenshots and offers only models that can use references", async () => {
+    const user = userEvent.setup();
+    const bfl = "cc000000-0000-4000-8000-000000000030";
+    const fake = client([
+      offer({
+        references: [
+          { kind: "browser-capture", label: "Browser screenshot of example.com", signedIn: true },
+        ],
+      }),
+    ]);
+    render(
+      <ServiceOfferPrompt
+        client={fake}
+        keptIn="project"
+        profiles={[...profiles, { ...profile(bfl, "BFL", ["flux-pro"]), driverKind: "bfl-image" }]}
+        scopeId={scopeId}
+        threadKind="code-thread"
+        turnActive={false}
+      />,
+    );
+    const card = await screen.findByRole("article", { name: "Image generation request" });
+    expect(card).toHaveTextContent("These images will be sent to the selected image provider");
+    expect(card).toHaveTextContent("Browser screenshot of example.com (signed-in page)");
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("combobox", { name: "Image model" }));
+    const geminiOption = await screen.findByRole("option", { name: "Gemini · gemini-3-pro-image" });
+    expect(screen.queryByRole("option", { name: "BFL · flux-pro" })).not.toBeInTheDocument();
+    await user.click(geminiOption);
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    expect(fake.decide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referenceImagesConfirmed: true,
+        rememberForThread: false,
+      }),
+    );
+  });
+
   it("generates with the model the person picks and keeps it for the Project when they ask", async () => {
     const user = userEvent.setup();
     const fake = client([offer()]);

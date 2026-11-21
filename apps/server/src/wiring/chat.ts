@@ -43,6 +43,7 @@ import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
 import { JournalNavigatorAssistantBindingStore } from "../navigatorAssistant/navigatorAssistantBindingStore";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "../chat/chatAttachmentStore";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import { attachedImageSources } from "../image/threadImageSourcePorts";
 import { createLinkedThreadRouteHandler } from "../linkedThread/linkedThreadRoutes";
 import { createLinkedThreadRuntime } from "../linkedThread/linkedThreadRuntime";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -600,6 +601,31 @@ export function wireChat(deps: ChatDependencies) {
                       offers: imageGenerationOffers,
                       kept: keptImageChoices,
                       jobs: imageJobService,
+                      imageSources: {
+                        latestAttachments: () => {
+                          const view = persistence.readChatThreadView(thread.id);
+                          const latest = view?.turns.findLast(
+                            (turn) => turn.delivery === undefined,
+                          );
+                          if (view === undefined || latest === undefined) return [];
+                          return attachedImageSources(
+                            view.attachments.filter(
+                              (attachment) =>
+                                attachment.status === "finalized" &&
+                                latest.attachmentIds.includes(attachment.id),
+                            ),
+                            (attachment) =>
+                              chatAttachmentStore.read({
+                                chatThreadId: thread.id,
+                                chatAttachmentId: attachment.id,
+                                displayName: attachment.displayName,
+                                size: attachment.byteLength,
+                                hash: attachment.digest,
+                                finalizedAt: attachment.createdAt,
+                              }),
+                          );
+                        },
+                      },
                       listInstances: () => persistence.readProviderInstances(),
                       readImageGenerationCustomSources: () =>
                         (persistence.readShellSettings()?.settings ?? defaultShellSettings())

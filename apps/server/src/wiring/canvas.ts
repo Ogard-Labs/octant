@@ -389,6 +389,25 @@ export function wireCanvas(deps: CanvasDependencies) {
     return receipt.canonicalWorktreePath;
   };
 
+  const threadProjectAssetRoot = async (input: {
+    readonly mode: "work" | "code";
+    readonly projectId: string;
+    readonly threadId: string;
+  }): Promise<string | undefined> => {
+    const { mode, projectId, threadId } = input;
+    const workspace = resolveCanvasWorkspace({ mode, threadId });
+    if (workspace?.kind === "code-worktree" && String(workspace.projectId) === projectId) {
+      return codeThreadCheckoutRoot(threadId, projectId);
+    }
+    if (workspace?.kind === "work-root" && String(workspace.projectId) === projectId) {
+      const project = persistence.readProject(workspace.projectId);
+      if (project?.type === "work" && project.lifecycle === "active") {
+        return project.binding.canonicalRoot;
+      }
+    }
+    return undefined;
+  };
+
   /**
    * Where a Canvas design's declared images are read from. Every call
    * re-derives authority from the Canvas version's provenance and durable
@@ -451,26 +470,7 @@ export function wireCanvas(deps: CanvasDependencies) {
       return { status: "read", bytes: kept.bytes };
     },
     projectFile: async ({ mode, projectId, threadId, path, maximumBytes }) => {
-      let root: string | undefined;
-      if (mode === "code") {
-        // The same binding-revision and checkout-availability checks as any
-        // Canvas scope, so a rebound Project or a waiting checkout refuses.
-        const workspace = resolveCanvasWorkspace({ mode: "code", threadId });
-        root =
-          workspace?.kind === "code-worktree" && String(workspace.projectId) === projectId
-            ? await codeThreadCheckoutRoot(threadId, projectId)
-            : undefined;
-      } else {
-        const workspace = resolveCanvasWorkspace({ mode: "work", threadId });
-        const project = persistence.readProject(projectId as never);
-        root =
-          workspace?.kind === "work-root" &&
-          String(workspace.projectId) === projectId &&
-          project?.type === "work" &&
-          project.lifecycle === "active"
-            ? project.binding.canonicalRoot
-            : undefined;
-      }
+      const root = await threadProjectAssetRoot({ mode, projectId, threadId });
       if (root === undefined) return { status: "unavailable", reason: "refused" };
       return await readCanvasDesignAssetFile({
         filesystem: liveWorkFilesystem,
@@ -1349,6 +1349,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     canvasService,
     replicaArtifactSync,
     resolveCanvasWorkspace,
+    threadProjectAssetRoot,
     snapshotCanvas,
   };
 }

@@ -154,6 +154,7 @@ describe("appToolHostLines", () => {
     expect(text).not.toMatch(/confirm first|confirms first/);
     const [image] = appToolHostLines(offered("octant_create_image"));
     expect(image?.text).toMatch(/instead of drawing it as SVG/);
+    expect(image?.text).toMatch(/restyle photos or screenshots, use references/);
     expect(image?.text).toMatch(/logos, icons, and diagrams/);
   });
 

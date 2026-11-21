@@ -18,81 +18,123 @@ vi.mock("../../design-system", async () => ({
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
-it("opens the phone's own image offer, and sends no paid answer until confirmation", async () => {
-  const threadId = "00000000-0000-4000-8000-000000000020";
-  const offerId = "00000000-0000-4000-8000-000000000021";
-  const profileInstanceId = "00000000-0000-4000-8000-000000000022";
-  const modelId = "host-model";
-  const suggested = { profileInstanceId, modelId };
-  const offer = {
-    kind: "generate",
-    offerId,
-    threadKind: "chat-thread",
-    scopeId: threadId,
-    prompt: "A blue sailboat",
-    revision: false,
-    variantCount: 1,
-    suggested,
-    requestedAt: "2026-10-15T06:00:00.000Z",
-  };
-  let answered = false;
-  const authenticatedFetch = vi.fn<MobileRemoteTransport["authenticatedFetch"]>(async (request) => {
-    if (request.method === "GET") return Response.json({ offers: answered ? [] : [offer] });
-    answered = true;
-    return Response.json({ kind: "offer-answered" });
-  });
-  const authenticate = vi.fn().mockResolvedValueOnce("denied").mockResolvedValueOnce("confirmed");
-  const transport = { hostId: "studio", authenticatedFetch };
-  const authenticator = { hasDeviceCredential: async () => true, authenticate };
-  const node = document.createElement("div");
-  document.body.append(node);
-  const root = createRoot(node);
-  try {
-    await act(async () =>
-      root.render(
-        createElement(ThemeProvider, {
-          preference: "light",
-          children: createElement(ServiceOfferCard, {
-            transport,
-            authenticator,
-            threadId,
-            threadKind: "chat-thread",
-            inProject: false,
-          }),
-        }),
-      ),
+it.each([false, true])(
+  "requires confirmation on the phone, with reference images: %s",
+  async (references) => {
+    const threadId = "00000000-0000-4000-8000-000000000020";
+    const offerId = "00000000-0000-4000-8000-000000000021";
+    const profileInstanceId = "00000000-0000-4000-8000-000000000022";
+    const modelId = "host-model";
+    const suggested = { profileInstanceId, modelId };
+    const offer = {
+      kind: "generate",
+      offerId,
+      threadKind: "chat-thread",
+      scopeId: threadId,
+      prompt: "A blue sailboat",
+      revision: false,
+      variantCount: 1,
+      suggested,
+      requestedAt: "2026-10-15T06:00:00.000Z",
+      ...(references
+        ? {
+            references: [
+              {
+                kind: "browser-capture",
+                label: "Browser screenshot of example.com",
+                signedIn: true,
+              },
+            ],
+          }
+        : {}),
+    };
+    let answered = false;
+    const authenticatedFetch = vi.fn<MobileRemoteTransport["authenticatedFetch"]>(
+      async (request) => {
+        if (request.method === "GET")
+          return Response.json({
+            offers: answered ? [] : [offer],
+            ...(references
+              ? {
+                  imageProfiles: [
+                    {
+                      instanceId: profileInstanceId,
+                      displayName: "Reference model",
+                      driverKind: "openai-image",
+                      modelAllowlist: [modelId],
+                      defaultModel: modelId,
+                    },
+                  ],
+                }
+              : {}),
+          });
+        answered = true;
+        return Response.json({ kind: "offer-answered" });
+      },
     );
-    expect(authenticatedFetch.mock.calls[0]?.[0]).toMatchObject({
-      method: "GET",
-      path: "/api/offers",
-      query: `?threadKind=chat-thread&scopeId=${threadId}`,
-    });
-    const generate = node.querySelector<HTMLElement>('[aria-label="Generate"]');
-    expect(generate).not.toBeNull();
-    await act(async () => generate?.click());
-    expect(authenticatedFetch.mock.calls.filter(([request]) => request.method === "POST")).toEqual(
-      [],
-    );
-    await act(async () => generate?.click());
-    expect(authenticatedFetch.mock.calls.filter(([request]) => request.method === "POST")).toEqual([
-      [
-        {
-          method: "POST",
-          path: "/api/offers/decide",
-          contentType: "application/json",
-          body: JSON.stringify({
-            offerId,
-            decision: "generate",
-            profileInstanceId,
-            modelId,
-            rememberForThread: false,
+    const authenticate = vi.fn().mockResolvedValueOnce("denied").mockResolvedValueOnce("confirmed");
+    const transport = { hostId: "studio", authenticatedFetch };
+    const authenticator = { hasDeviceCredential: async () => true, authenticate };
+    const node = document.createElement("div");
+    document.body.append(node);
+    const root = createRoot(node);
+    try {
+      await act(async () =>
+        root.render(
+          createElement(ThemeProvider, {
+            preference: "light",
+            children: createElement(ServiceOfferCard, {
+              transport,
+              authenticator,
+              threadId,
+              threadKind: "chat-thread",
+              inProject: false,
+            }),
           }),
-        },
-      ],
-    ]);
-    expect(node.textContent).not.toContain(offer.prompt);
-  } finally {
-    act(() => root.unmount());
-    node.remove();
-  }
-});
+        ),
+      );
+      expect(authenticatedFetch.mock.calls[0]?.[0]).toMatchObject({
+        method: "GET",
+        path: "/api/offers",
+        query: `?threadKind=chat-thread&scopeId=${threadId}&referenceImages=1`,
+      });
+      if (references) {
+        expect(node.textContent).toContain(
+          "These images will be sent to the selected image provider:",
+        );
+        expect(node.textContent).toContain("Browser screenshot of example.com (signed-in page)");
+        expect(node.textContent).not.toContain("Don't ask again");
+      }
+      const generate = node.querySelector<HTMLElement>('[aria-label="Generate"]');
+      expect(generate).not.toBeNull();
+      await act(async () => generate?.click());
+      expect(
+        authenticatedFetch.mock.calls.filter(([request]) => request.method === "POST"),
+      ).toEqual([]);
+      await act(async () => generate?.click());
+      expect(
+        authenticatedFetch.mock.calls.filter(([request]) => request.method === "POST"),
+      ).toEqual([
+        [
+          {
+            method: "POST",
+            path: "/api/offers/decide",
+            contentType: "application/json",
+            body: JSON.stringify({
+              offerId,
+              decision: "generate",
+              profileInstanceId,
+              modelId,
+              rememberForThread: false,
+              ...(references ? { referenceImagesConfirmed: true } : {}),
+            }),
+          },
+        ],
+      ]);
+      expect(node.textContent).not.toContain(offer.prompt);
+    } finally {
+      act(() => root.unmount());
+      node.remove();
+    }
+  },
+);
