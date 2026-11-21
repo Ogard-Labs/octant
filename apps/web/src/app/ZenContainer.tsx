@@ -294,6 +294,19 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
                     }}
                     projectId={element.projectId}
                     terminalId={element.terminalId}
+                    {...(element.program === "provider"
+                      ? {
+                          // The card records only that it runs the program;
+                          // the window's Work task names it when it is the
+                          // same Project's.
+                          providerProgramName:
+                            props.workProviderTerminal !== undefined &&
+                            String(props.workProviderTerminal.projectId) ===
+                              String(element.projectId)
+                              ? props.workProviderTerminal.name
+                              : "The task's provider",
+                        }
+                      : {})}
                     {...(props.workProviderTerminal === undefined ||
                     String(props.workProviderTerminal.projectId) !== String(element.projectId)
                       ? {}

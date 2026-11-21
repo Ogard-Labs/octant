@@ -1664,7 +1664,11 @@ the thread kept its sandbox or a turn holds a chosen sandbox policy, it is
 confined exactly as an Octant terminal at the thread's level, not widened for
 the program: an account folder outside the thread's folders stays outside its
 writable roots, so a program that must write there can fail to sign in or save
-its session. A Work task's runs by the same rule at the task's own level.
+its session; on Linux such a folder is not mounted at all. On Windows, which
+has no Octant terminal sandbox, a provider terminal that would be confined is
+refused instead: under Strict (Codex at Full access included, though its turns
+run there) and for a thread that kept its sandbox. A Work task's runs by the
+same rule at the task's own level.
 An ACP agent's program keeps every guard its turns set except the ones that
 only keep the piped ACP stream clean (`NO_COLOR`), since the terminal is a TTY:
 its self-update, telemetry and configuration guards hold, and a person's own

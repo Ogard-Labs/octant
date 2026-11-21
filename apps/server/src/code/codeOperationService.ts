@@ -4238,7 +4238,16 @@ export class CodeOperationService {
             : {}),
           ...(serverLogin === undefined ? {} : { server: serverLogin }),
           executionPolicy: thread.executionPolicy,
-          ...(providerProgramUnconfined ? { strict: false } : this.#windowsStrict(thread)),
+          // A provider terminal that does not run as the turns do passes no
+          // Strict value, which the terminal reads as Strict: confined where
+          // Octant has a sandbox, refused on Windows, where it has none. The
+          // thread's own Strict value there would open a thread that kept its
+          // sandbox unconfined, though its turns are refused.
+          ...(providerProgram === undefined
+            ? this.#windowsStrict(thread)
+            : providerProgramUnconfined
+              ? { strict: false }
+              : {}),
         });
         owner.starting = starting;
         this.#terminalOwners.set(command.terminalId, owner);

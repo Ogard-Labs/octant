@@ -5878,6 +5878,29 @@ describe("CodeOperationService provider terminal", () => {
     expect(kept.terminals.launch.mock.calls[0]?.[0]).not.toHaveProperty("strict", false);
   });
 
+  it("never opens a Windows provider terminal unconfined for a thread that kept its sandbox", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      // Its turns are refused on Windows, which has no Octant sandbox to keep;
+      // the terminal reads the missing Strict value as Strict and refuses too.
+      const kept = providerFixture({
+        strict: false,
+        thread: { executionPolicy: "full-access", fullAccessSandbox: true },
+      });
+      await kept.service.execute(ids.window, start, { initiator: "user" });
+      expect(kept.terminals.launch.mock.calls[0]?.[0]).not.toHaveProperty("strict");
+
+      const open = providerFixture({ strict: false });
+      await open.service.execute(ids.window, start, { initiator: "user" });
+      expect(open.terminals.launch).toHaveBeenCalledWith(
+        expect.objectContaining({ strict: false }),
+      );
+    } finally {
+      if (platform !== undefined) Object.defineProperty(process, "platform", platform);
+    }
+  });
+
   it("refuses to open a provider terminal for an agent even when an approval would pass", async () => {
     const { providerTerminal, service, terminals } = providerFixture();
     await expect(service.execute(ids.window, start, { initiator: "agent" })).resolves.toMatchObject(

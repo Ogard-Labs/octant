@@ -37,6 +37,11 @@ export interface ZenProjectTerminalCardProps {
    * decides, and refuses anyone but the person.
    */
   readonly onOpenProviderTerminal?: { readonly name: string; readonly open: () => void };
+  /**
+   * Set when this card's terminal runs the Work task's provider program rather
+   * than a shell, as its pinned element records.
+   */
+  readonly providerProgramName?: string;
 }
 
 /**
@@ -239,6 +244,12 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
   return (
     <section aria-label="Project terminal" className="code-delivery-pane code-terminal-pane">
       {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
+      {props.providerProgramName === undefined ? null : (
+        <OctantAlert layout="row" className="code-terminal-pane__provider" tone="neutral">
+          {props.providerProgramName} runs here on its own, with its own approvals. What you do in
+          it stays outside this task's record and usage.
+        </OctantAlert>
+      )}
       {terminal.state === "running" ? (
         <div className="code-terminal-pane__actions-menu">
           <OctantMenu

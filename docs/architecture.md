@@ -17499,7 +17499,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   under the thread terminal's confinement, unwidened: an account folder
   outside the thread's folders stays unwritable there, so a program that must
   write it can fail to sign in, and the person opens it outside Strict
-  instead. The command names no program, path or variable. The host refuses the start, and any write to such a
+  instead. On Linux the confined shell's `HOME` is its own state folder and an
+  account folder outside the thread's folders is not mounted at all, so a
+  program there starts as on a fresh machine. Windows has no Octant terminal
+  sandbox, so a provider terminal that would start confined is refused there
+  rather than opened unconfined: under Strict, including verified Codex at Full
+  access, whose turns the Windows AppContainer sandbox runs, and for a thread
+  that kept its sandbox, whose turns Windows refuses. The command names no
+  program, path or variable. The host refuses the start, and any write to such a
   terminal, for every caller but the person (their local window or a device
   they paired), before any approval is consulted, since keystrokes there
   reach the provider past Octant's approvals (a Work task's is a Project

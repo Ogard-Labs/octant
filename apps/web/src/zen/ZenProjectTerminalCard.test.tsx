@@ -234,4 +234,33 @@ describe("ZenProjectTerminalCard", () => {
       expect.anything(),
     );
   });
+
+  it("says a Work task's provider program runs outside the task's record, and a shell's card does not", async () => {
+    const { unmount } = render(
+      <ZenProjectTerminalCard
+        client={client(() => running(""))}
+        live
+        loadRuntime={xtermRuntime().loadRuntime}
+        projectId={projectId}
+        providerProgramName="Gemini CLI"
+        terminalId={terminalId}
+      />,
+    );
+    expect(
+      await screen.findByText(/Gemini CLI runs here on its own, with its own approvals/),
+    ).toHaveTextContent("outside this task's record and usage");
+    unmount();
+
+    render(
+      <ZenProjectTerminalCard
+        client={client(() => running(""))}
+        live
+        loadRuntime={xtermRuntime().loadRuntime}
+        projectId={projectId}
+        terminalId={terminalId}
+      />,
+    );
+    await screen.findByRole("button", { name: "More terminal actions" });
+    expect(screen.queryByText(/runs here on its own/)).toBeNull();
+  });
 });
