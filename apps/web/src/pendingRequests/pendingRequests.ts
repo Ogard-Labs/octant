@@ -115,17 +115,37 @@ export function isLeadQuestionPendingRequest(
 }
 
 /**
+ * A Code provider question asking for a secret. Its answer is typed only into
+ * the thread's masked field, which sends it without putting it as evidence,
+ * so a list never answers it.
+ */
+export type SecretQuestionPendingRequest = Extract<
+  PendingRequest,
+  { readonly mode: "code"; readonly kind: "question" }
+> & { readonly secret: true };
+
+export function isSecretQuestionPendingRequest(
+  request: PendingRequest,
+): request is SecretQuestionPendingRequest {
+  return request.mode === "code" && request.kind === "question" && request.secret === true;
+}
+
+/**
  * A row that finds a request and leaves the answer to the thread: a waiting
- * subagent, or the agent's own approval or Work question. None carries an
- * answer handle.
+ * subagent, the agent's own approval or Work question, or a secret question.
  */
 export function isFindOnlyPendingRequest(
   request: PendingRequest,
-): request is ChildPendingRequest | LeadApprovalPendingRequest | LeadQuestionPendingRequest {
+): request is
+  | ChildPendingRequest
+  | LeadApprovalPendingRequest
+  | LeadQuestionPendingRequest
+  | SecretQuestionPendingRequest {
   return (
     isChildPendingRequest(request) ||
     isLeadApprovalPendingRequest(request) ||
-    isLeadQuestionPendingRequest(request)
+    isLeadQuestionPendingRequest(request) ||
+    isSecretQuestionPendingRequest(request)
   );
 }
 

@@ -185,7 +185,13 @@ export type CodeProviderAnswer =
       readonly approvalId: CodeApprovalId;
       readonly decision: "approved" | "denied";
     }
-  | { readonly kind: "input"; readonly requestId: string; readonly response: string };
+  | {
+      readonly kind: "input";
+      readonly requestId: string;
+      readonly response: string;
+      /** A secret question's answer, sent in the command and never put as evidence. */
+      readonly secret?: true;
+    };
 
 export interface CodeThreadNavigationItem {
   readonly checkoutChip?: {
@@ -3470,12 +3476,19 @@ export function useCodeController(options: CodeControllerOptions) {
                 approvalId: answer.approvalId,
                 decision: answer.decision,
               })
-            : await client.executeOperation({
-                kind: "answer-provider-input",
-                ...scope,
-                requestId: answer.requestId,
-                response: await client.putEvidence(view.thread.id, answer.response),
-              });
+            : answer.secret === true
+              ? await client.executeOperation({
+                  kind: "answer-provider-input",
+                  ...scope,
+                  requestId: answer.requestId,
+                  secretAnswer: answer.response,
+                })
+              : await client.executeOperation({
+                  kind: "answer-provider-input",
+                  ...scope,
+                  requestId: answer.requestId,
+                  response: await client.putEvidence(view.thread.id, answer.response),
+                });
         if (!mounted.current) return false;
         // A refusal can arrive as a failed or interrupted turn state rather
         // than `operation-failed`; the request stays so the person sees why.

@@ -759,6 +759,12 @@ interface SessionState {
   readonly autoApprove: boolean | undefined;
   readonly fullAccessSandbox: boolean | undefined;
   readonly strict: boolean | undefined;
+  /**
+   * Whether a secret question Codex asks is shown to the person: only a Code
+   * thread outside Strict, the one surface whose answer path keeps the typed
+   * value out of every record. Every other session refuses it unseen.
+   */
+  readonly asksSecretQuestions: boolean;
   /** The sandbox this session's commands run in; see {@link CodexSessionSandbox}. */
   readonly sandbox: CodexSessionSandbox;
   /** Whether Codex's own sandbox runs under Octant's permissions profile. */
@@ -3646,6 +3652,7 @@ function makeConnection(
         autoApprove: input.autoApprove,
         fullAccessSandbox: input.fullAccessSandbox,
         strict: input.strict,
+        asksSecretQuestions: input.strict === false && (mode ?? "code") === "code",
         sandbox: sessionSandbox(input),
         permissionProfile: nativeProfile(input) !== undefined,
         threadId: thread.thread.id,
@@ -4406,6 +4413,7 @@ function makeEventContext(state: SessionState, factories: ConnectionFactories): 
     sequence: state.context?.sequence ?? 1,
     terminal: false,
     ...(state.compaction === undefined ? {} : { compactionRequested: true }),
+    ...(state.asksSecretQuestions ? { asksSecretQuestions: true } : {}),
     requestIds: new Map(),
     agentMessages: new Map(),
     taskIds: new Map(),

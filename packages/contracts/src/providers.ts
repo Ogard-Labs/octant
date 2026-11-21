@@ -3516,6 +3516,13 @@ export const ProviderRuntimeEvent = Schema.Union(
      */
     questionIndex: Schema.optional(PositiveInt),
     questionCount: Schema.optional(PositiveInt),
+    /**
+     * The answer is a secret (a password or key): it is typed into a masked
+     * field and goes to the provider in memory only, never into a journal,
+     * evidence, log or transcript. A surface that cannot keep it out of its
+     * record never receives such a question; the driver refuses it instead.
+     */
+    secret: Schema.optional(Schema.Literal(true)),
   })
     .annotations(strict)
     .pipe(

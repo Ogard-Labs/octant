@@ -59,6 +59,8 @@ export type CodeProviderRequest =
       readonly requestId: string;
       readonly prompt: string;
       readonly options: ReadonlyArray<string>;
+      /** The provider asks for a secret: answered masked, never put as evidence. */
+      readonly secret?: true;
     };
 
 export interface CodeConversationMessage {
@@ -148,6 +150,7 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
       requestId: event.requestId,
       prompt: event.prompt,
       options: event.options,
+      ...(event.secret === true ? { secret: true } : {}),
     };
   }
   return undefined;

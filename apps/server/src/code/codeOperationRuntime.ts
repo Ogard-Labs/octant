@@ -3375,6 +3375,8 @@ interface ActiveTurn {
   readonly browserGrantKeys: Set<string>;
   readonly browserProfileContexts: Set<string>;
   readonly questions: Set<string>;
+  /** The provider questions on this turn that ask for a secret; see `answerInput`. */
+  readonly secretQuestions: Set<string>;
   readonly providerQuestionnaires: Map<string, Questionnaire>;
   /** Questions the native harness asked on this turn; answered by the host, not the provider. */
   readonly harnessQuestions: Set<string>;
@@ -4448,6 +4450,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       browserGrantKeys: new Set(),
       browserProfileContexts: new Set(),
       questions: new Set(),
+      secretQuestions: new Set(),
       harnessQuestions: new Set(),
       providerQuestionnaires: new Map(),
       cursor: 0,
@@ -4867,6 +4870,20 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       active.harnessQuestions.delete(input.requestId);
       return answeredTurnState(active.state);
     }
+    // A secret answer reaches the provider only for the question that asked
+    // for one, and a secret question takes no answer that was put as
+    // evidence, so the value is never stored either way.
+    if ((input.secret === true) !== active.secretQuestions.has(input.requestId))
+      return {
+        state: active.state,
+        failure: {
+          category: "invalid",
+          message:
+            input.secret === true
+              ? "That question does not ask for a secret."
+              : "That question asks for a secret. Answer it in its thread.",
+        },
+      };
     if (active.connection === undefined) {
       return turnState("failed", { category: "failed", message: APPROVAL_SESSION_GONE_MESSAGE });
     }
@@ -4884,6 +4901,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       };
     }
     active.questions.delete(input.requestId);
+    active.secretQuestions.delete(input.requestId);
     active.providerQuestionnaires.delete(input.requestId);
     await Effect.runPromise(
       active.connection.answerUserInput({
@@ -5120,6 +5138,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             requestId: event.requestId,
             prompt: event.prompt,
             options: event.options,
+            ...(event.secret === true ? { secret: true } : {}),
           });
         }
       }
@@ -7903,6 +7922,7 @@ function normalizedOperationEvent(
   }
   if (event.category === "question" && event.requestId !== undefined) {
     active.questions.add(event.requestId);
+    if (event.secret === true) active.secretQuestions.add(event.requestId);
     if (event.questionnaire !== undefined)
       active.providerQuestionnaires.set(event.requestId, event.questionnaire);
     return {
@@ -7916,6 +7936,7 @@ function normalizedOperationEvent(
         ) ?? "Provider input requested.",
       options: boundProviderInputOptions(event.options ?? []),
       ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
+      ...(event.secret === true ? { secret: true } : {}),
     };
   }
   if (
