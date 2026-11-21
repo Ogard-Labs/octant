@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { appToolHostLines } from "../providers/appToolHostLines";
 import {
   nativeHarnessInstructions,
   nativeHarnessToolGuide,
   windowsShellInstruction,
 } from "./nativeHarnessInstructions";
+
+const guide = (...names: ReadonlyArray<string>) =>
+  nativeHarnessToolGuide(names.map((name) => ({ name })));
 
 const chatText = () =>
   nativeHarnessInstructions("chat")
@@ -48,8 +52,8 @@ describe("native harness instructions", () => {
 
   it("does not promise helper agents in a Chat thread that was not offered the tool", () => {
     expect(nativeHarnessInstructions("chat").at(-1)?.text).not.toMatch(/child|helper agent/i);
-    expect(nativeHarnessToolGuide(["octant_canvas"])).not.toContain("octant_agents");
-    expect(nativeHarnessToolGuide([])).toBeUndefined();
+    expect(guide("octant_canvas")).not.toContain("octant_agents");
+    expect(guide()).toBeUndefined();
   });
 
   it("tells a lead to run helpers with the octant_agents operations, not a tool it is never offered", () => {
@@ -80,10 +84,19 @@ describe("native harness instructions", () => {
     expect(text).toContain("below Full access the person approves each change");
   });
 
-  it("names the helper-agent tool when the thread is offered it", () => {
-    expect(nativeHarnessToolGuide(["octant_agents", "octant_canvas"])).toContain(
-      "octant_agents: start, watch, and stop helper agents",
-    );
+  it("names each offered Octant tool in the words every other runtime gets", () => {
+    const offered = [{ name: "octant_agents" }, { name: "octant_canvas" }];
+    const text = nativeHarnessToolGuide(offered) ?? "";
+    for (const line of appToolHostLines(offered)) expect(text).toContain(`- ${line.text}`);
+  });
+
+  it("leaves out a tool's line the turn already sent as an instruction, and keeps the harness's own", () => {
+    const offered = [{ name: "octant_agents" }, { name: "octant_canvas" }, { name: "skill" }];
+    const sent = appToolHostLines(offered).map((line) => line.text);
+    const text = nativeHarnessToolGuide(offered, sent) ?? "";
+    for (const line of sent) expect(text).not.toContain(line);
+    expect(text).toMatch(/^- .*\bskill\b/m);
+    expect(nativeHarnessToolGuide(offered.slice(0, 2), sent)).toBeUndefined();
   });
 
   it.each([
@@ -95,18 +108,18 @@ describe("native harness instructions", () => {
     "octant_zen",
     "skill",
   ])("says what %s is for only in a turn that offers it", (name) => {
-    expect(nativeHarnessToolGuide([name])).toMatch(new RegExp(`^- ${name}: \\S`, "m"));
-    expect(nativeHarnessToolGuide(["octant_canvas"])).not.toContain(name);
+    expect(guide(name)).toMatch(new RegExp(`^- .*\\b${name}\\b`, "m"));
+    expect(guide("octant_canvas")).not.toContain(name);
   });
 
   it("has no line for a tool name that is no longer offered", () => {
     expect(
-      nativeHarnessToolGuide([
+      guide(
         "octant_web_research",
         "octant_zen_search_threads",
         "octant_zen_list_widgets",
         "octant_zen_create_widget",
-      ]),
+      ),
     ).toBeUndefined();
   });
 });

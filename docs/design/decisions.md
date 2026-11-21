@@ -720,6 +720,7 @@ App-owned tools are capability families: one tool per object with an operation e
 - Late, duplicate or cancelled tool answers are refused, and per-request cancellation reaches the executor even while it waits for approval. _Here only._
 - Browser read-page accepts an optional CSS selector or snapshot ref. Screenshots reach the provider through its image-result channel, not as encoded bytes in text, and origin approval and task authority apply before capture. _Here only._
 - A missing, malformed or oversized capture is refused.
+- Every runtime, Octant Harness and child runs included, is told in one line per offered first-party tool when to use it, from one shared source. A line says when, not how, promises no approval that differs by access level, and stays the same while its tool is offered (a coordinator's `octant_threads` has its own line). A tool not offered gets no line, plugin and MCP tools get none, Octant Harness describes each tool once, and a first-party tool without a line or a stated reason fails the build (maintainer request, 2026-11-17; built). Detail: [Agent tools](agent-tools.md#how-tools-reach-a-model).
 
 Status: Built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
 

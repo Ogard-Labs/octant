@@ -69,6 +69,7 @@ import {
   type AgentRunSessionRuntimeOptions,
 } from "./agentRunSessionRuntime";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
+import { appToolHostLines } from "../providers/appToolHostLines";
 
 const testDirectories: string[] = [];
 afterEach(() => {
@@ -1110,6 +1111,34 @@ describe("createAgentRunSessionRuntime", () => {
     await settled(handle);
 
     expect(provider.turns[0]?.context).toEqual(admitted);
+  });
+
+  it("tells a child when to use each Octant tool it is offered, once, after its admitted context", async () => {
+    const provider = fakeProvider({
+      onSend: (emit) => {
+        void emit({ kind: "text-delta", sessionId, text: "Done." }).then(() =>
+          emit({ kind: "completed", sessionId }),
+        );
+      },
+    });
+    const definitions = [
+      { name: "octant_canvas", description: "Canvas", inputSchema: {} },
+      { name: "read_notes", description: "Read notes", inputSchema: {} },
+    ];
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        appManagedTools: () => ({ definitions, execute: async () => ({ result: {} }) }),
+      }),
+    );
+
+    await settled(runtime.start(agentRun()));
+
+    const [line] = appToolHostLines(definitions);
+    expect(line?.tool).toBe("octant_canvas");
+    expect(provider.turns[0]?.context).toEqual([
+      ...context,
+      { kind: "instructions", text: line?.text, tool: "octant_canvas" },
+    ]);
   });
 
   it("delivers admitted original inputs and refuses provider startup after their source is revoked", async () => {
