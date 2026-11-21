@@ -297,6 +297,22 @@ describe("image routes", () => {
       return decodeImageGenerationOffersResponse(await response!.json()).offers;
     }
 
+    it("preserves the legacy model refusal even after the offer is gone", async () => {
+      const { handler } = setup();
+      const body = {
+        offerId: jobId,
+        decision: "generate",
+        profileInstanceId: profileId,
+        modelId: "unavailable",
+        rememberForThread: false,
+      };
+      const answer = await handler(request("/api/image/offers/decide", { method: "POST", body }));
+      expect(await answer?.json()).toEqual({
+        kind: "image-offer-refused",
+        reason: "That image model is not available. Choose another one.",
+      });
+    });
+
     it("shows a waiting image request through the shared offers endpoint and claims it only once across endpoints", async () => {
       const { handler, offers } = setup();
       const outcome = offers.offer({ windowId: windowId as never, offer });

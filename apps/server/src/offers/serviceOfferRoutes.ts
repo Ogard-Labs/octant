@@ -15,6 +15,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { principalActsAsHostPerson } from "../clientPrincipal";
+import { unavailableImageModel } from "../image/imageOfferDecisionRules";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -119,6 +120,13 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
             : decodeServiceOfferDecision(body.value);
         } catch {
           return fail("Offer decision is invalid.", 400);
+        }
+        if (legacy && decision.decision === "generate") {
+          const reason = unavailableImageModel(input.listImageProfiles(), decision);
+          if (reason !== undefined)
+            return reply(
+              decodeImageGenerationOfferDecisionResult({ kind: "image-offer-refused", reason }),
+            );
         }
         const waiting = legacy ? offers.find(windowId, decision.offerId) : undefined;
         const result =
