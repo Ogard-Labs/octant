@@ -91,6 +91,8 @@ export function nativeHarnessInstructions(
  * for the first time cannot infer from a parameter list.
  */
 const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
+  octant_transcribe:
+    "transcribe a recording from this thread's folder with the configured Voice endpoint; page long transcripts with nextOffset",
   diagnostics:
     "run the checkout's typecheck and lint and get the problems back as a short list of file, line, and message; use it after edits instead of reading raw command output",
   octant_agents: "start, watch, and stop helper agents that work beside you",

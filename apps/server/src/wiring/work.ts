@@ -129,6 +129,7 @@ import {
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import type { TranscriptionForTurn } from "../speech/transcriptionTool";
 import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
@@ -168,6 +169,7 @@ import { workTurnToolLevel } from "../work/workTurnToolLevel";
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
+  readonly transcriptionForTurn: TranscriptionForTurn;
 } & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
@@ -881,8 +883,56 @@ export function wireWork(deps: WorkDependencies) {
               },
               port: canvasAgentToolPort,
             });
-        // A routine's turn has nobody at a window to answer the card, so it
-        // is offered the tool only where its Project keeps a choice.
+        const currentRoot = async () => {
+          const thread = workThreadProjection.read(input.thread.id);
+          if (thread?.lifecycle !== "active") return undefined;
+          const project = persistence.readProject(thread.projectId);
+          if (
+            project?.type !== "work" ||
+            project.lifecycle !== "active" ||
+            project.bindingHistory.at(-1)?.revisionId !== thread.bindingRevisionId
+          )
+            return undefined;
+          const selected = approvedWorkingFolderRoot(project, thread.workingFolderId);
+          if (selected === undefined) return undefined;
+          const root = await resolveThreadWorkingDirectory(
+            selected,
+            thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+          ).catch(() => undefined);
+          return root === input.projectRoot ? root : undefined;
+        };
+        const transcription =
+          !browserSupported ||
+          input.routineRun !== undefined ||
+          isRoutineHostScope(input.windowId) ||
+          isRestrictedDeviceScope(input.windowId)
+            ? undefined
+            : deps.transcriptionForTurn({
+                windowId: input.windowId,
+                threadKind: "work-thread",
+                scopeId: decodeImageGenerationScopeId(String(input.thread.id)),
+                inPlan: () =>
+                  composedPolicy === "plan" ||
+                  runningWorkTurns.get(String(input.thread.id))?.access === "plan" ||
+                  workThreadProjection.read(input.thread.id)?.access === "plan",
+                root: currentRoot,
+                allowed: () => {
+                  const active = runningWorkTurns.get(String(input.thread.id));
+                  const thread = workThreadProjection.read(input.thread.id);
+                  return (
+                    active !== undefined &&
+                    thread?.lifecycle === "active" &&
+                    (isPairedDeviceScope(input.windowId)
+                      ? !isRestrictedDeviceScope(input.windowId)
+                      : windowAuthorityStore.listWindowIds().includes(input.windowId) &&
+                        authorizeWorkThreadForWindow({
+                          windowId: input.windowId,
+                          threadId: String(input.thread.id),
+                        }))
+                  );
+                },
+              });
+        // A routine can generate an image only where its Project keeps a choice.
         const imageTools = !browserSupported
           ? undefined
           : createThreadImageAgentTools({
@@ -907,24 +957,7 @@ export function wireWork(deps: WorkDependencies) {
                 ...workspaceImageSources({
                   threadId: decodeBrowserThreadId(String(input.thread.id)),
                   browserCaptures,
-                  root: async () => {
-                    const thread = workThreadProjection.read(input.thread.id);
-                    if (thread?.lifecycle !== "active") return undefined;
-                    const project = persistence.readProject(thread.projectId);
-                    if (
-                      project?.type !== "work" ||
-                      project.lifecycle !== "active" ||
-                      project.bindingHistory.at(-1)?.revisionId !== thread.bindingRevisionId
-                    )
-                      return undefined;
-                    const selected = approvedWorkingFolderRoot(project, thread.workingFolderId);
-                    if (selected === undefined) return undefined;
-                    const root = await resolveThreadWorkingDirectory(
-                      selected,
-                      thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
-                    ).catch(() => undefined);
-                    return root === input.projectRoot ? root : undefined;
-                  },
+                  root: currentRoot,
                 }),
               },
               listInstances: () => persistence.readProviderInstances(),
@@ -1087,6 +1120,7 @@ export function wireWork(deps: WorkDependencies) {
           computer === undefined &&
           canvasTools === undefined &&
           imageTools === undefined &&
+          transcription === undefined &&
           lookTools === undefined
         )
           return undefined;
@@ -1100,6 +1134,7 @@ export function wireWork(deps: WorkDependencies) {
           agentsTools,
           canvasTools,
           imageTools,
+          transcription,
           lookTools,
           pastThreads,
           projectMemoryTools,

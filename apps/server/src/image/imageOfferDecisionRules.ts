@@ -1,6 +1,6 @@
 import type {
   ImageGenerationOffer,
-  ImageGenerationOfferDecision,
+  ServiceOfferDecision,
   ImageGenerationSettings,
   ProviderInstance,
 } from "@octant/contracts";
@@ -15,7 +15,7 @@ export function imageOfferDecisionRules(input: {
   readonly kept?: Pick<KeptImageGenerationChoices, "remember">;
 }): ServiceOfferRules<
   ImageGenerationOffer,
-  ImageGenerationOfferDecision,
+  ServiceOfferDecision,
   Exclude<ImageGenerationOfferOutcome, { status: "too-many-waiting" }>
 > {
   const wrongKind = { reason: "That answer does not fit this request." };

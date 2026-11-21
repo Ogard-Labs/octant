@@ -419,11 +419,12 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     offerHostRun: randomUUID(),
     // Each list is the holding service's own for this reader, so who may
     // answer an ask is decided where it always was.
-    asks: async (reader) => {
+    asks: async (reader, imageOffersOnly) => {
       const windowId = reader.scopeId;
       const checkedOffers = await Promise.all(
         serviceOffers
           .listForWindow(windowId)
+          .filter((offer) => !imageOffersOnly || offer.kind === "generate" || offer.kind === "save")
           .map(async (offer) =>
             (await windowCanOpenThread(windowId, offer.threadKind, String(offer.scopeId)))
               ? offer

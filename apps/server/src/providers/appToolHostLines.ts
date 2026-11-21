@@ -15,6 +15,7 @@ export interface AppToolHostLine {
  * without these lines nothing told them when Octant's tool is the one to use.
  */
 const ROUTING_LINES: ReadonlyArray<AppToolHostLine> = [
+  { tool: "octant_transcribe", text: "Use octant_transcribe instead of installing speech models." },
   {
     tool: "octant_apple",
     text: "Build, test, run, and look at Apple apps with octant_apple, which shows the iOS Simulator in Octant's pane; never open Simulator.app or run open -a Simulator.",

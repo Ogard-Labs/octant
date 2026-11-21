@@ -44,10 +44,11 @@ describe("appToolHostLines", () => {
         "octant_pull_request",
         "octant_github",
         "octant_create_image",
+        "octant_transcribe",
         "octant_agents",
       ),
     );
-    expect(all).toHaveLength(9);
+    expect(all).toHaveLength(10);
     for (const line of all) expect(line.text.length).toBeLessThanOrEqual(240);
     expect(all.reduce((total, line) => total + line.text.length, 0)).toBeLessThanOrEqual(1_500);
   });

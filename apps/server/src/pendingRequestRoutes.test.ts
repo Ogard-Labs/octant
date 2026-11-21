@@ -273,10 +273,13 @@ describe("pending request route", () => {
     // Each source is asked as the device, never as a window of the host.
     expect(sources.work).toHaveBeenCalledWith(deviceScope);
     expect(sources.code).toHaveBeenCalledWith(deviceScope);
-    expect(sources.asks).toHaveBeenCalledWith({
-      kind: "person-paired-device",
-      scopeId: deviceScope,
-    });
+    expect(sources.asks).toHaveBeenCalledWith(
+      {
+        kind: "person-paired-device",
+        scopeId: deviceScope,
+      },
+      true,
+    );
     expect(sources.children).toHaveBeenCalledWith({
       kind: "person-paired-device",
       scopeId: deviceScope,
@@ -287,7 +290,7 @@ describe("pending request route", () => {
     const { route, sources } = fixture({ asks: [toolAsk, chatSignIn] });
     const body = await (await route(request()))?.json();
     expect(body.asks).toEqual([chatSignIn, toolAsk]);
-    expect(sources.asks).toHaveBeenCalledWith({ kind: "local-window", scopeId: windowId });
+    expect(sources.asks).toHaveBeenCalledWith({ kind: "local-window", scopeId: windowId }, true);
     const workOff = fixture({
       asks: [toolAsk, chatSignIn],
       settings: { ...defaultShellSettings(), workEnabled: false },

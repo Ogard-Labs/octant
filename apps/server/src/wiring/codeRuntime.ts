@@ -67,6 +67,7 @@ import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import type { TranscriptionForTurn } from "../speech/transcriptionTool";
 import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
 import { INHERITED_MARK_REFUSAL } from "../context/inheritedExternalContentMark";
 import {
@@ -345,6 +346,7 @@ import { serverPullRequestRepository } from "../serverProjects/serverWorktrees";
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
+  readonly transcriptionForTurn: TranscriptionForTurn;
 } & Pick<
     HarnessStateWiring,
     "serverAttachmentCleanup" | "serverConnection" | "serverProjectStore"
@@ -703,7 +705,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     };
     // A routine's turn has nobody at a window to answer the image card, so it
     // is offered the tool only where its Project keeps a choice.
-    contributeCodeTools(({ windowId, thread, readThread, folders }) => {
+    contributeCodeTools(({ windowId, thread, readThread, folders, routineRun }) => {
       const checkoutRoot = folders[0];
       // The journaled level and the running one are both read and the
       // stricter wins, as for the save below.
@@ -712,7 +714,45 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           requested: readThread()?.executionPolicy ?? thread.executionPolicy,
           thread: persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
         });
-      return createThreadImageAgentTools({
+      const currentRoot = async () => {
+        const current = persistence.readCodeThread(thread.id);
+        const checkout = await threadProjectAssetRoot({
+          mode: "code",
+          threadId: String(thread.id),
+          projectId: String(thread.projectId),
+        });
+        const project = persistence.readProject(thread.projectId);
+        if (checkout === undefined || current === undefined || project?.type !== "code")
+          return undefined;
+        const selected = approvedWorkingFolderRoot(project, current.workingFolderId, checkout);
+        if (selected === undefined) return undefined;
+        const root = await resolveThreadWorkingDirectory(
+          selected,
+          current.workingDirectory ?? decodeThreadWorkingDirectory("."),
+        ).catch(() => undefined);
+        return root === checkoutRoot ? root : undefined;
+      };
+      const transcription =
+        routineRun !== undefined ||
+        isRoutineHostScope(windowId) ||
+        deps.isRestrictedDeviceScope(windowId) ||
+        checkoutRoot === undefined
+          ? undefined
+          : deps.transcriptionForTurn({
+              windowId,
+              threadKind: "code-thread",
+              scopeId: decodeImageGenerationScopeId(String(thread.id)),
+              inPlan: () => thread.executionPolicy === "plan" || level() === "plan",
+              root: currentRoot,
+              allowed: () =>
+                readThread()?.lifecycle === "active" &&
+                (deps.isPairedDeviceScope(windowId)
+                  ? !deps.isRestrictedDeviceScope(windowId) &&
+                    codeProjectAccess.hasActiveCodeProject(thread.projectId)
+                  : deps.windowAuthorityStore.listWindowIds().includes(windowId) &&
+                    canAccessCodeProject(windowId, thread.projectId)),
+            });
+      const images = createThreadImageAgentTools({
         windowId,
         unattended: isRoutineHostScope(windowId),
         threadKind: "code-thread",
@@ -732,29 +772,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           ...workspaceImageSources({
             threadId: decodeBrowserThreadId(String(thread.id)),
             browserCaptures,
-            root: async () => {
-              const current = persistence.readCodeThread(thread.id);
-              const checkout = await threadProjectAssetRoot({
-                mode: "code",
-                threadId: String(thread.id),
-                projectId: String(thread.projectId),
-              });
-              const project = persistence.readProject(thread.projectId);
-              if (checkout === undefined || current === undefined || project?.type !== "code") {
-                return undefined;
-              }
-              const selected = approvedWorkingFolderRoot(
-                project,
-                current.workingFolderId,
-                checkout,
-              );
-              if (selected === undefined) return undefined;
-              const root = await resolveThreadWorkingDirectory(
-                selected,
-                current.workingDirectory ?? decodeThreadWorkingDirectory("."),
-              ).catch(() => undefined);
-              return root === checkoutRoot ? root : undefined;
-            },
+            root: currentRoot,
           }),
         },
         listInstances: () => persistence.readProviderInstances(),
@@ -796,6 +814,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             ? "Plan mode cannot generate images. Leave Plan mode to generate one."
             : undefined,
       });
+      return transcription === undefined
+        ? images
+        : combineAppManagedToolSets(images, transcription);
     });
     // Sees images: a thread whose model cannot read images may ask for one
     // to be described, from its own attachments or its own folder.
