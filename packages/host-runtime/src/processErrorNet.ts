@@ -110,6 +110,7 @@ export interface ProcessErrorNetHandle {
 const MESSAGE_LIMIT = 300;
 const STACK_FRAME_LIMIT = 3;
 const STACK_LINE_LIMIT = 180;
+const STACK_FRAME_LINE = /^\s*at\s+/;
 
 function withoutTrailingSlashes(path: string): string {
   let end = path.length;
@@ -123,16 +124,24 @@ function errorCodeOf(error: unknown): string | undefined {
   return typeof code === "string" && code.length > 0 ? code : undefined;
 }
 
+function redactUnbounded(
+  text: string,
+  homeDirectory: string | undefined,
+  redact: ((text: string) => string) | undefined,
+): string {
+  const custom = redact === undefined ? text : redact(text);
+  const home = homeDirectory === undefined ? undefined : withoutTrailingSlashes(homeDirectory);
+  const local = home === undefined || home.length < 2 ? custom : custom.split(home).join("~");
+  return redactHostRuntimeText(local);
+}
+
 function sweepText(
   text: string,
   homeDirectory: string | undefined,
   redact: ((text: string) => string) | undefined,
   limit: number,
 ): string {
-  const custom = redact === undefined ? text : redact(text);
-  const home = homeDirectory === undefined ? undefined : withoutTrailingSlashes(homeDirectory);
-  const local = home === undefined || home.length < 2 ? custom : custom.split(home).join("~");
-  return redactHostRuntimeText(local).slice(0, limit);
+  return redactUnbounded(text, homeDirectory, redact).slice(0, limit);
 }
 
 function safeWriteStderrSync(text: string): void {
@@ -164,15 +173,16 @@ function formatEvent(
     redact,
     MESSAGE_LIMIT,
   );
+  // Redact the complete stack before splitting so a multiline secret repeated
+  // in `error.stack` is scrubbed as one unit, then keep only real stack frames.
   const stackLines =
     error instanceof Error && typeof error.stack === "string"
-      ? error.stack
+      ? redactUnbounded(error.stack, homeDirectory, redact)
           .split("\n")
           .slice(1)
-          .map((line) => line.trim())
-          .filter((line) => line.length > 0)
+          .filter((line) => STACK_FRAME_LINE.test(line))
+          .map((line) => line.trim().slice(0, STACK_LINE_LIMIT))
           .slice(0, STACK_FRAME_LIMIT)
-          .map((line) => sweepText(line, homeDirectory, redact, STACK_LINE_LIMIT))
       : [];
   const codeSuffix =
     code === undefined ? "" : ` (code=${sweepText(code, homeDirectory, redact, 64)})`;

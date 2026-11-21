@@ -53,6 +53,40 @@ describe("process error net", () => {
     net.uninstall();
   });
 
+  it("redacts a multiline secret across the complete error stack before selecting stack frames", () => {
+    const target = new FakeProcessTarget();
+    const lines: string[] = [];
+    const fatalEvents: ProcessErrorNetEvent[] = [];
+    const exit = vi.fn();
+
+    const net = installProcessErrorNet({
+      processName: "host",
+      target,
+      stdioStreams: [],
+      homeDirectory: "/Users/ada",
+      writeLine: (line) => lines.push(line),
+      onFatal: (event) => fatalEvents.push(event),
+      exit,
+    });
+
+    const failure = new Error('password="first-secret-line\nsecond-secret-line\nat third-secret"');
+    target.emit("uncaughtException", failure);
+
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(lines).toHaveLength(1);
+    const logged = lines[0] ?? "";
+    expect(logged).not.toContain("first-secret-line");
+    expect(logged).not.toContain("second-secret-line");
+    expect(logged).not.toContain("third-secret");
+    expect(fatalEvents[0]?.stack ?? "").not.toContain("second-secret-line");
+    expect(fatalEvents[0]?.stack ?? "").not.toContain("third-secret");
+    expect(fatalEvents[0]?.line ?? "").not.toContain("second-secret-line");
+    // Real stack frames below the multiline message are still preserved.
+    expect(logged).toContain("\nat ");
+
+    net.uninstall();
+  });
+
   it("ends a real child process non-zero with a redacted cause on an unhandled error event", () => {
     const script = [
       `import { installProcessErrorNet } from ${JSON.stringify(MODULE_PATH)};`,
