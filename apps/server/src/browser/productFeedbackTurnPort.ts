@@ -1,6 +1,16 @@
 import type { ProviderAttachmentInput, ProductFeedbackNote, WindowId } from "@octant/contracts";
 import { planProductFeedbackDelivery } from "@octant/domain";
-import type { ProductFeedbackService } from "./productFeedbackService";
+import type {
+  ProductFeedbackClaimDecision,
+  ProductFeedbackService,
+} from "./productFeedbackService";
+
+export type { ProductFeedbackClaimDecision };
+
+export type ProductFeedbackTakeResult =
+  | { readonly status: "taken"; readonly delivery: ProductFeedbackTurnDelivery }
+  | { readonly status: "claim-refused" }
+  | { readonly status: "feedback-changed" };
 
 const MAX_CROP_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 
@@ -35,7 +45,15 @@ export interface ProductFeedbackTurnDelivery {
 
 export interface PreparedProductFeedbackTurn extends ProductFeedbackTurnDelivery {
   /** Claims only this exact prepared version; never a later edited note. */
-  readonly take: (maxAttachments?: number, onClaimed?: () => void) => ProductFeedbackTurnDelivery;
+  readonly take: (maxAttachments?: number) => ProductFeedbackTurnDelivery;
+  /**
+   * Value-returning claim path that coordinates an in-transaction decision
+   * without throwing expected refusals across the port boundary.
+   */
+  readonly takeWithClaim?: (
+    maxAttachments: number | undefined,
+    onClaimed?: () => ProductFeedbackClaimDecision,
+  ) => ProductFeedbackTakeResult;
 }
 
 export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps) {
@@ -110,14 +128,22 @@ export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps)
       const delivery = format(notes, input.supportsImages);
       if (!current()) throw new Error("Feedback turn admission is no longer current.");
       let taken = false;
-      return {
-        ...delivery,
-        take: (maxAttachments, onClaimed) => {
-          if (maxAttachments !== undefined && delivery.attachments.length > maxAttachments)
-            throw new Error("Selected product notes exceed the remaining attachment budget.");
-          if (taken || !current()) throw new Error("Prepared feedback is no longer current.");
-          taken = true;
-          const carried = deps.service.deliver({
+      const takeWithClaim = (
+        maxAttachments: number | undefined,
+        onClaimed?: () => ProductFeedbackClaimDecision,
+      ): ProductFeedbackTakeResult => {
+        if (maxAttachments !== undefined && delivery.attachments.length > maxAttachments)
+          return { status: "feedback-changed" };
+        if (taken || !current()) return { status: "feedback-changed" };
+        taken = true;
+        let claimDecision: ProductFeedbackClaimDecision | undefined;
+        let carried: ReadonlyArray<ProductFeedbackNote>;
+        try {
+          // Both feedback delivery and `onClaimed` join the journal's single
+          // SQLite transaction so a refused claim rolls back the delivery and a
+          // feedback version conflict skips `onClaimed`. Journal publication
+          // runs only after that shared transaction commits.
+          carried = deps.service.deliver({
             threadId: input.threadId,
             operationId: input.operationId,
             selected,
@@ -125,24 +151,32 @@ export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps)
               ? {}
               : {
                   onClaimed: () => {
-                    // If publication retired the window during delivery, the
-                    // post-claim check below will refuse the turn without
-                    // starting it — skip callers' side effects like tainting.
-                    if (!current()) return;
-                    onClaimed();
+                    const decision = onClaimed();
+                    claimDecision = decision;
+                    return decision;
                   },
                 }),
           });
-          if (carried.length !== selected.length)
-            throw new Error("Selected feedback changed before delivery.");
-          // Publication can synchronously retire the original task/window.
-          // Preserve its durable claim, but expose no fresh evidence afterward.
-          if (!current())
-            throw new Error(
-              "Product-note delivery changed after its durable claim. Refresh notes before retrying.",
-            );
-          return delivery;
+        } catch {
+          return { status: "feedback-changed" };
+        }
+        if (claimDecision?.status === "refused") return { status: "claim-refused" };
+        if (carried.length !== selected.length) return { status: "feedback-changed" };
+        // Publication can synchronously retire the original task/window after
+        // the shared transaction commits. Preserve the durable commit, but
+        // refuse the turn so no fresh evidence is exposed afterward.
+        if (!current()) return { status: "feedback-changed" };
+        return { status: "taken", delivery };
+      };
+      return {
+        ...delivery,
+        take: (maxAttachments) => {
+          const result = takeWithClaim(maxAttachments);
+          if (result.status !== "taken")
+            throw new Error("Product-note delivery changed before delivery.");
+          return result.delivery;
         },
+        takeWithClaim,
       };
     },
   });

@@ -5,7 +5,11 @@ import {
   SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
   type AttachedFileByPath,
 } from "../attachments/attachedFiles";
-import type { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
+import type {
+  createProductFeedbackTurnPort,
+  ProductFeedbackClaimDecision,
+  ProductFeedbackTakeResult,
+} from "../browser/productFeedbackTurnPort";
 import { requiresLiveCodeReviewAuthority } from "./codeReviewAuthority";
 import {
   retainedReviewTarget,
@@ -1129,11 +1133,8 @@ export interface CodeOperationTurnPort {
     /** Consume feedback synchronously only after the runtime's final admission check. */
     readonly takeProductFeedback?: (
       maxAttachments?: number,
-      onClaimed?: () => void,
-    ) => {
-      readonly context?: string;
-      readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
-    };
+      onClaimed?: () => ProductFeedbackClaimDecision,
+    ) => ProductFeedbackTakeResult;
     /**
      * Records outside-content provenance synchronously only after every busy,
      * move, driver, session, and admission check has passed, before owning the
@@ -6993,7 +6994,7 @@ export class CodeOperationService {
           const recorded = recordReviewContent({
             threadId: thread.id,
             provenance: { origin: "external-content", sourceLabel: "pull-request-line-notes" },
-            contentReference: `pull-request-line-notes:${source.repositoryOwner}/${source.repositoryName}#${source.number}:${command.operationId}`,
+            contentReference: `pull-request-line-notes:${source.repositoryOwner}:${source.repositoryName}:${String(source.number)}:${String(command.operationId)}`,
             correlationId: command.operationId,
             authorized: true,
           });
@@ -7063,7 +7064,22 @@ export class CodeOperationService {
                 .catch(() => undefined);
             },
           }),
-      ...(preparedFeedback === undefined ? {} : { takeProductFeedback: preparedFeedback.take }),
+      ...(preparedFeedback === undefined
+        ? {}
+        : {
+            takeProductFeedback:
+              preparedFeedback.takeWithClaim ??
+              ((maxAttachments) => {
+                try {
+                  return {
+                    status: "taken" as const,
+                    delivery: preparedFeedback.take(maxAttachments),
+                  };
+                } catch {
+                  return { status: "feedback-changed" as const };
+                }
+              }),
+          }),
       ...(recordPullRequestLineNotesOutsideContent === undefined
         ? {}
         : { recordOutsideContent: recordPullRequestLineNotesOutsideContent }),

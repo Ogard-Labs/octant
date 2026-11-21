@@ -4256,27 +4256,31 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     }
     // Feedback stays pending through every preparation refusal. Consuming it
     // here does not yield between the final admission check and owning the turn;
-    // any pull-request outside-content mark runs inside the same delivery claim
-    // so a feedback refusal never taints the thread and a provenance refusal
-    // rolls back pending feedback notes instead of losing them.
+    // any pull-request outside-content mark returns a value inside the same
+    // delivery transaction so a feedback refusal never taints the thread and a
+    // provenance refusal rolls back pending feedback notes without throwing.
     const recordOutsideContent = input.recordOutsideContent;
     let outsideContentRecorded = false;
-    class OutsideContentRefusedError extends Error {}
-    let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
-    try {
-      feedback = input.takeProductFeedback?.(
+    let feedback:
+      | Extract<
+          ReturnType<NonNullable<typeof input.takeProductFeedback>>,
+          { readonly status: "taken" }
+        >["delivery"]
+      | undefined;
+    if (input.takeProductFeedback !== undefined) {
+      const taken = input.takeProductFeedback(
         MAX_PROVIDER_ATTACHMENTS - originalInputCount,
         recordOutsideContent === undefined
           ? undefined
           : () => {
-              if (!recordOutsideContent()) throw new OutsideContentRefusedError();
+              if (!recordOutsideContent()) return { status: "refused" };
               outsideContentRecorded = true;
+              return { status: "accepted" };
             },
       );
-    } catch (error) {
-      await serverTools?.close?.().catch(() => undefined);
-      await input.extensionTools?.close?.().catch(() => undefined);
-      if (error instanceof OutsideContentRefusedError) {
+      if (taken.status === "claim-refused") {
+        await serverTools?.close?.().catch(() => undefined);
+        await input.extensionTools?.close?.().catch(() => undefined);
         return {
           ...failStart(
             "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
@@ -4284,12 +4288,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           admission: "refused" as const,
         };
       }
-      return {
-        ...failStart(
-          "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
-        ),
-        admission: "refused" as const,
-      };
+      if (taken.status === "feedback-changed") {
+        await serverTools?.close?.().catch(() => undefined);
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return {
+          ...failStart(
+            "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+          ),
+          admission: "refused" as const,
+        };
+      }
+      feedback = taken.delivery;
     }
     if (recordOutsideContent !== undefined && !outsideContentRecorded && !recordOutsideContent()) {
       await serverTools?.close?.().catch(() => undefined);

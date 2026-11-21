@@ -38,6 +38,10 @@ export interface ProductFeedbackExecutionContext {
   readonly signal?: AbortSignal;
 }
 
+export type ProductFeedbackClaimDecision =
+  | { readonly status: "accepted" }
+  | { readonly status: "refused" };
+
 class FeedbackCommitRetired extends Error {}
 
 interface FeedbackThreadScope {
@@ -669,8 +673,8 @@ export class ProductFeedbackService {
     readonly operationId: string;
     readonly maxImages?: number;
     readonly selected?: ReadonlyArray<{ readonly noteId: string; readonly version: number }>;
-    /** Runs inside the delivery transaction after notes are claimed; throwing rolls back the claim. */
-    readonly onClaimed?: () => void;
+    /** Runs inside the delivery transaction after notes are claimed; returning refused rolls back the claim. */
+    readonly onClaimed?: () => ProductFeedbackClaimDecision;
   }): ReadonlyArray<ProductFeedbackNote> {
     const all = this.pendingForTurn(input.threadId);
     const selected = input.selected;
@@ -720,12 +724,18 @@ export class ProductFeedbackService {
         }
         delivered.push(next);
       }
-      input.onClaimed?.();
+      if (input.onClaimed?.().status === "refused") throw rollback;
       return delivered;
     };
-    return selected !== undefined && this.#options.transaction !== undefined
-      ? this.#options.transaction(claim)
-      : claim();
+    const rollback = Symbol("product-feedback-deliver-rollback");
+    try {
+      return selected !== undefined && this.#options.transaction !== undefined
+        ? this.#options.transaction(claim)
+        : claim();
+    } catch (error) {
+      if (error === rollback) return [];
+      throw error;
+    }
   }
 
   /** Host-only preparation; reading does not claim or mark a note delivered. */
