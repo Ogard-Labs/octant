@@ -2009,13 +2009,9 @@ describe("ACP probe confinement", () => {
   });
 });
 
-it("ships every ACP profile through deny-default confinement, Google Antigravity's Work and Code outside Strict excepted", () => {
+it("ships every ACP profile through deny-default confinement where Octant's sandbox applies", () => {
   for (const profile of Object.values(acpProviderProfiles)) {
-    expect(profile.process.confinement.kind).toBe(
-      profile.kind === "antigravity"
-        ? "provider-approvals-outside-strict"
-        : "deny-default-seatbelt",
-    );
+    expect(profile.process.confinement.kind).toBe("deny-default-seatbelt");
     expect(profile.authentication.kind).toBe("provider-owned");
   }
 });
@@ -2329,7 +2325,7 @@ describe("login keychain read for Google Antigravity", () => {
   );
 });
 
-describe("Google Antigravity launches without Octant's sandbox outside Strict", () => {
+describe("ACP agents launch without Octant's sandbox in Work and Code outside Strict", () => {
   async function launchFor(input: {
     readonly mode: "chat" | "work" | "code";
     readonly executionPolicy: ProviderExecutionPolicy;
@@ -2392,8 +2388,8 @@ describe("Google Antigravity launches without Octant's sandbox outside Strict", 
     expect(seatbeltProfile(launch)).toContain("login.keychain-db");
   });
 
-  it("gives every other profile its sandbox below Full access outside Strict", async () => {
-    for (const profile of profiles.filter((candidate) => candidate.kind !== "antigravity")) {
+  it("runs every profile without Octant's sandbox in Code outside Strict, unless its shell never asks", async () => {
+    for (const profile of [...profiles, { ...kilo, shellWithoutRequest: true as const }]) {
       if (profile.refuses?.("code", "approval-gated") !== undefined) continue;
       const target = fixture(profile);
       const launch = await Effect.runPromise(
@@ -2413,7 +2409,9 @@ describe("Google Antigravity launches without Octant's sandbox outside Strict", 
           environment: { PATH: "/usr/bin" },
         }),
       );
-      expect(launch.command, profile.displayName).not.toBe(target.binaryPath);
+      expect(launch.command === target.binaryPath, profile.displayName).toBe(
+        profile.shellWithoutRequest !== true,
+      );
     }
   });
 });
@@ -2819,7 +2817,7 @@ describe("ACP agents running as themselves", () => {
   });
 });
 
-describe("ACP agents whose own sandbox cannot refuse other providers' sign-ins", () => {
+describe("ACP agents whose own sandbox cannot refuse other providers' sign-ins, under Strict", () => {
   const trustedProject = {
     subagents: false,
     webTools: false,
@@ -2833,7 +2831,7 @@ describe("ACP agents whose own sandbox cannot refuse other providers' sign-ins",
     ["Gemini CLI", gemini],
     ["Qwen Code", qwen],
   ] as const)(
-    "keeps %s inside Octant's profile outside Strict, so another provider's sign-in stays unreadable",
+    "keeps %s inside Octant's profile under Strict, so another provider's sign-in stays unreadable",
     async (_name, profile) => {
       const target = fixture(profile);
       const managedHome = join(target.canonicalRoot, "managed-home");
@@ -2851,7 +2849,6 @@ describe("ACP agents whose own sandbox cannot refuse other providers' sign-ins",
           managedHome,
           mode: "code",
           executionPolicy: "approval-gated",
-          strict: false,
           nativeSetup: trustedProject,
           environment: { PATH: "/usr/bin" },
         }),
