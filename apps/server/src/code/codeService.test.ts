@@ -2999,6 +2999,172 @@ describe("CodeService commands", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("journals a coordinator's done-when condition, preserves it across bounds changes, clears it, and drops it when stopping", async () => {
+    const workerId = "00000000-0000-4000-8000-000000000099" as never;
+    const current = thread({ coordinator: true, messageWake: true });
+    const worker = thread({ id: workerId, coordinatorThreadId: ids.thread });
+    const fixture = serviceFixture({ threads: [current, worker] });
+    const doneWhen = {
+      items: [
+        {
+          kind: "pull-request-merged" as const,
+          repositoryOwner: "Ogard-Labs",
+          repositoryName: "octant",
+          number: 42,
+        },
+        { kind: "thread-done" as const, threadId: workerId },
+      ],
+    };
+    const set = await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator-done-when",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      doneWhen,
+    });
+    expect(set).toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({
+        coordinatorDoneWhen: doneWhen,
+        version: 2,
+      }),
+    });
+    const stored =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect(stored.coordinatorDoneWhen).toEqual(doneWhen);
+    fixture.persistence.readCodeThread.mockImplementation((id) =>
+      String(id) === String(ids.thread) ? stored : worker,
+    );
+
+    // Preserved across coordinator bounds changes.
+    await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator-bounds",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      bounds: { rounds: 5 },
+    });
+    const afterBounds =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect(afterBounds.coordinatorDoneWhen).toEqual(doneWhen);
+    fixture.persistence.readCodeThread.mockImplementation((id) =>
+      String(id) === String(ids.thread) ? afterBounds : worker,
+    );
+
+    // Clearing omits the field from the journaled thread record.
+    await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator-done-when",
+      threadId: ids.thread,
+      expectedVersion: 3,
+    });
+    const cleared =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect("coordinatorDoneWhen" in cleared).toBe(false);
+
+    // Re-setting and then stopping coordinating drops the condition with the role.
+    fixture.persistence.readCodeThread.mockImplementation((id) =>
+      String(id) === String(ids.thread) ? { ...cleared, coordinatorDoneWhen: doneWhen } : worker,
+    );
+    await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator",
+      threadId: ids.thread,
+      expectedVersion: 4,
+      coordinator: false,
+    });
+    const stopped =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect("coordinatorDoneWhen" in stopped).toBe(false);
+  });
+
+  it("refuses setting or clearing a coordinator done-when condition from a routine scope, on a non-coordinator, or for invalid thread targets", async () => {
+    const otherProjectThreadId = "00000000-0000-4000-8000-000000000098" as never;
+    const coordinatorThread = thread({ coordinator: true, messageWake: true });
+    const otherProjectThread = thread({
+      id: otherProjectThreadId,
+      projectId: "00000000-0000-4000-8000-000000000088" as never,
+    });
+    const fixture = serviceFixture({ threads: [coordinatorThread, otherProjectThread] });
+    fixture.persistence.readCodeThread.mockImplementation((id) =>
+      String(id) === String(ids.thread)
+        ? coordinatorThread
+        : String(id) === String(otherProjectThreadId)
+          ? otherProjectThread
+          : undefined,
+    );
+
+    // Routine host scope and system actors are refused.
+    await expect(
+      fixture.service.execute(ROUTINE_HOST_SCOPE_ID, {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    await expect(
+      fixture.service.execute(
+        ids.window,
+        {
+          kind: "set-code-thread-coordinator-done-when",
+          threadId: ids.thread,
+          expectedVersion: 1,
+        },
+        undefined,
+        { actor: { kind: "system", actorId: "octant-local" as never } },
+      ),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+
+    // Waiting on itself, a designated planner, or a thread in another Project is refused.
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        doneWhen: { items: [{ kind: "thread-done", threadId: ids.thread }] },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    const plannerThreadId = "00000000-0000-4000-8000-000000000097" as never;
+    const plannerThread = thread({ id: plannerThreadId });
+    const plannerFixture = serviceFixture({
+      threads: [coordinatorThread, plannerThread],
+    });
+    Object.assign(plannerFixture.persistence, {
+      readCodePlannerThreadId: (projectId: unknown) =>
+        String(projectId) === String(ids.project) ? plannerThreadId : undefined,
+    });
+    plannerFixture.persistence.readCodeThread.mockImplementation((id) =>
+      String(id) === String(ids.thread)
+        ? coordinatorThread
+        : String(id) === String(plannerThreadId)
+          ? plannerThread
+          : undefined,
+    );
+    await expect(
+      plannerFixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        doneWhen: { items: [{ kind: "thread-done", threadId: plannerThreadId }] },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        doneWhen: { items: [{ kind: "thread-done", threadId: otherProjectThreadId }] },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+
+    // Non-coordinator thread is refused.
+    const ordinary = serviceFixture({ threads: [thread({})] });
+    await expect(
+      ordinary.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("turns a thread's Continue after restart off and back on, keeping its other switches", async () => {
     const fixture = serviceFixture({ project: rememberedFullAccessProject });
     fixture.persistence.readCodeThread.mockReturnValue({ ...thread(), messageWake: true });

@@ -4,6 +4,7 @@ import {
   type CodeProjectPullRequestMergeMethod,
   type CodeProjectPullRequestMergeWait,
 } from "@octant/contracts";
+import type { CoordinatorDoneWhenPullRequestFact } from "@octant/domain";
 import {
   sanitizeGhEnvironment,
   validRepository,
@@ -361,6 +362,363 @@ export class GhPullRequestSwitchPort {
       waitingOn,
       failures: failures.slice(0, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES),
     };
+  }
+
+  /**
+   * Closed-set read for a coordinator's done-when condition: only merge state
+   * and (when requested) required checks status, never PR titles, comments, or
+   * check logs.
+   */
+  async observePullRequestCondition(
+    request: GhPullRequestSwitchRequest,
+    options: { readonly requiredChecks: boolean },
+    signal: AbortSignal,
+  ): Promise<CoordinatorDoneWhenPullRequestFact> {
+    const repository = `${request.owner}/${request.name}`;
+    if (!validRepository(repository) || !validNumber(request.number)) {
+      return { status: "unavailable" };
+    }
+    const view = await this.#run(
+      [
+        "pr",
+        "view",
+        String(request.number),
+        "--repo",
+        repository,
+        "--json",
+        options.requiredChecks ? "state,baseRefName,mergeStateStatus" : "state",
+      ],
+      signal,
+    );
+    if (view === undefined || view.exitCode !== 0) return { status: "unavailable" };
+    const pullRequest = parseJson(view.stdout);
+    if (!isRecord(pullRequest)) return { status: "unavailable" };
+    const state = normalizeState(pullRequest.state);
+    if (state === undefined) return { status: "unavailable" };
+    if (!options.requiredChecks) return { status: "observed", state };
+    const mergeStateStatus =
+      typeof pullRequest.mergeStateStatus === "string"
+        ? pullRequest.mergeStateStatus.toUpperCase()
+        : undefined;
+    const baseBranch =
+      typeof pullRequest.baseRefName === "string" && pullRequest.baseRefName.trim() !== ""
+        ? pullRequest.baseRefName.trim()
+        : undefined;
+    const requiredChecks = await this.#requiredChecksForCondition(
+      request,
+      repository,
+      baseBranch,
+      mergeStateStatus,
+      signal,
+    );
+    return { status: "observed", state, requiredChecks };
+  }
+
+  /**
+   * Distinguishes passing required checks from unreported checks independently
+   * of review or other merge gates. Because `gh pr checks --required` only
+   * lists checks that have reported on the PR head (and omits GitHub App ids),
+   * whenever `mergeStateStatus` is not `CLEAN` and required checks exist we
+   * load the base branch's required status checks (preserving pinned GitHub
+   * App ids) and inspect the GraphQL commit rollups cohesively: when
+   * `potentialMergeCommit` has reported statuses it is authoritative, falling
+   * back to the head commit only when the test-merge commit has none.
+   */
+  async #requiredChecksForCondition(
+    request: GhPullRequestSwitchRequest,
+    repository: string,
+    baseBranch: string | undefined,
+    mergeStateStatus: string | undefined,
+    signal: AbortSignal,
+  ): Promise<"green" | "pending" | "failing" | "unavailable"> {
+    const result = await this.#run(
+      [
+        "pr",
+        "checks",
+        String(request.number),
+        "--repo",
+        repository,
+        "--required",
+        "--json",
+        "name,bucket",
+      ],
+      signal,
+    );
+    if (result === undefined) return "unavailable";
+    const value = parseJson(result.stdout);
+    const noChecksReported = !Array.isArray(value)
+      ? /no required checks|no checks reported/i.test(`${result.stderr ?? ""}\n${result.stdout}`)
+      : value.length === 0;
+    if (!noChecksReported) {
+      if (!Array.isArray(value)) return "unavailable";
+      let pending = false;
+      for (const entry of value) {
+        if (!isRecord(entry)) return "unavailable";
+        if (entry.bucket === "fail" || entry.bucket === "cancel") return "failing";
+        if (entry.bucket === "pending") {
+          pending = true;
+        } else if (entry.bucket !== "pass" && entry.bucket !== "skipping") {
+          return "unavailable";
+        }
+      }
+      if (pending) return "pending";
+    }
+    if (mergeStateStatus === "CLEAN") return "green";
+    const required = await this.#baseBranchRequiredChecks(repository, baseBranch, signal);
+    if (required.status !== "ready") return "unavailable";
+    if (required.checks.length === 0) return "green";
+
+    const rollups = await this.#pullRequestCommitRollups(
+      request.owner,
+      request.name,
+      request.number,
+      signal,
+    );
+    if (rollups.status !== "ready") return "unavailable";
+    if (rollups.testMergeChecks !== undefined && rollups.testMergeChecks.length > 0) {
+      return evaluateCommitRequiredChecks(required.checks, rollups.testMergeChecks);
+    }
+    return evaluateCommitRequiredChecks(required.checks, rollups.headChecks);
+  }
+
+  /**
+   * Read-only lookup of every required status check configured on `baseBranch`
+   * via classic branch protection or paginated repository rulesets, preserving
+   * pinned GitHub App ids (`app_id` / `integration_id`) so same-name checks
+   * from distinct apps are tracked separately. Fails closed as `unknown` when
+   * either endpoint cannot be read or any page/entry cannot be decoded.
+   */
+  async #baseBranchRequiredChecks(
+    repository: string,
+    baseBranch: string | undefined,
+    signal: AbortSignal,
+  ): Promise<
+    | { readonly status: "ready"; readonly checks: ReadonlyArray<RequiredStatusCheck> }
+    | { readonly status: "unknown" }
+  > {
+    if (
+      baseBranch === undefined ||
+      baseBranch.length > 255 ||
+      /[\s\\?#:[\]^~*@{}\0]/.test(baseBranch) ||
+      baseBranch.includes("..")
+    ) {
+      return { status: "unknown" };
+    }
+    const encodedBranch = encodeURIComponent(baseBranch);
+    const checksByKey = new Map<string, RequiredStatusCheck>();
+    const addRequiredCheck = (context: string, appId?: number) => {
+      const key = `${context}\0${appId === undefined ? "*" : String(appId)}`;
+      if (!checksByKey.has(key)) {
+        checksByKey.set(key, appId === undefined ? { context } : { context, appId });
+      }
+    };
+
+    const branchResult = await this.#run(
+      ["api", `repos/${repository}/branches/${encodedBranch}`],
+      signal,
+    );
+    if (branchResult === undefined || branchResult.exitCode !== 0) return { status: "unknown" };
+    const branchJson = parseJson(branchResult.stdout);
+    if (!isRecord(branchJson)) return { status: "unknown" };
+    const protection = isRecord(branchJson.protection) ? branchJson.protection : undefined;
+    const protectionChecks =
+      protection?.enabled === true && isRecord(protection.required_status_checks)
+        ? protection.required_status_checks
+        : undefined;
+    if (protectionChecks !== undefined) {
+      const hasStructuredChecks =
+        Array.isArray(protectionChecks.checks) && protectionChecks.checks.length > 0;
+      if (hasStructuredChecks && Array.isArray(protectionChecks.checks)) {
+        for (const check of protectionChecks.checks) {
+          if (
+            !isRecord(check) ||
+            typeof check.context !== "string" ||
+            check.context.trim().length === 0
+          ) {
+            return { status: "unknown" };
+          }
+          const appId = parseRequiredCheckAppId(check.app_id);
+          if (appId === "invalid") return { status: "unknown" };
+          addRequiredCheck(check.context, appId);
+        }
+      } else if (Array.isArray(protectionChecks.contexts)) {
+        for (const context of protectionChecks.contexts) {
+          if (typeof context !== "string" || context.trim().length === 0) {
+            return { status: "unknown" };
+          }
+          addRequiredCheck(context);
+        }
+      }
+    }
+
+    const rulesResult = await this.#run(
+      ["api", "--paginate", "--slurp", `repos/${repository}/rules/branches/${encodedBranch}`],
+      signal,
+    );
+    if (rulesResult === undefined || rulesResult.exitCode !== 0) return { status: "unknown" };
+    const rulesPages = parseJson(rulesResult.stdout);
+    if (!Array.isArray(rulesPages)) return { status: "unknown" };
+    for (const page of rulesPages) {
+      if (!Array.isArray(page)) return { status: "unknown" };
+      for (const rule of page) {
+        if (!isRecord(rule)) return { status: "unknown" };
+        if (rule.type !== "required_status_checks") continue;
+        const params = isRecord(rule.parameters) ? rule.parameters : undefined;
+        if (!Array.isArray(params?.required_status_checks)) return { status: "unknown" };
+        for (const check of params.required_status_checks) {
+          if (
+            !isRecord(check) ||
+            typeof check.context !== "string" ||
+            check.context.trim().length === 0
+          ) {
+            return { status: "unknown" };
+          }
+          const appId = parseRequiredCheckAppId(check.integration_id);
+          if (appId === "invalid") return { status: "unknown" };
+          addRequiredCheck(check.context, appId);
+        }
+      }
+    }
+    return { status: "ready", checks: [...checksByKey.values()] };
+  }
+
+  /**
+   * Reads the check rollups for the PR head commit and optional test merge
+   * commit (`potentialMergeCommit`) so each commit can be evaluated cohesively
+   * with full GitHub App identity (`checkSuite.app.databaseId`).
+   */
+  async #pullRequestCommitRollups(
+    owner: string,
+    name: string,
+    number: number,
+    signal: AbortSignal,
+  ): Promise<
+    | {
+        readonly status: "ready";
+        readonly headChecks: ReadonlyArray<ObservedCommitCheck>;
+        readonly testMergeChecks?: ReadonlyArray<ObservedCommitCheck>;
+      }
+    | { readonly status: "unavailable" }
+  > {
+    const result = await this.#run(
+      [
+        "api",
+        "graphql",
+        "-f",
+        `owner=${owner}`,
+        "-f",
+        `name=${name}`,
+        "-F",
+        `number=${String(number)}`,
+        "-f",
+        `query=${PR_COMMIT_ROLLUPS_QUERY}`,
+      ],
+      signal,
+    );
+    if (result === undefined || result.exitCode !== 0) return { status: "unavailable" };
+    const parsed = parseJson(result.stdout);
+    const data = isRecord(parsed) && isRecord(parsed.data) ? parsed.data : undefined;
+    const repo = data !== undefined && isRecord(data.repository) ? data.repository : undefined;
+    const pr = repo !== undefined && isRecord(repo.pullRequest) ? repo.pullRequest : undefined;
+    const commits = pr !== undefined && isRecord(pr.commits) ? pr.commits : undefined;
+    const commitNodes = Array.isArray(commits?.nodes) ? commits.nodes : undefined;
+    const firstNode =
+      commitNodes !== undefined && isRecord(commitNodes[0]) ? commitNodes[0] : undefined;
+    const headCommit =
+      firstNode !== undefined && isRecord(firstNode.commit) ? firstNode.commit : undefined;
+    if (headCommit === undefined) return { status: "unavailable" };
+
+    const headChecks = await this.#collectCommitRollupChecks(
+      owner,
+      name,
+      number,
+      "head",
+      headCommit,
+      signal,
+    );
+    if (headChecks === undefined) return { status: "unavailable" };
+
+    if (pr?.potentialMergeCommit === null || pr?.potentialMergeCommit === undefined) {
+      return { status: "ready", headChecks };
+    }
+    if (!isRecord(pr.potentialMergeCommit)) return { status: "unavailable" };
+    const testMergeChecks = await this.#collectCommitRollupChecks(
+      owner,
+      name,
+      number,
+      "merge",
+      pr.potentialMergeCommit,
+      signal,
+    );
+    if (testMergeChecks === undefined) return { status: "unavailable" };
+    return { status: "ready", headChecks, testMergeChecks };
+  }
+
+  async #collectCommitRollupChecks(
+    owner: string,
+    name: string,
+    number: number,
+    target: "head" | "merge",
+    commit: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<ReadonlyArray<ObservedCommitCheck> | undefined> {
+    const collected: ObservedCommitCheck[] = [];
+    const firstPage = parseCommitRollupPage(commit.statusCheckRollup);
+    if (firstPage === "invalid") return undefined;
+    if (firstPage === "empty") return collected;
+    collected.push(...firstPage.checks);
+    let hasNextPage = firstPage.hasNextPage;
+    let cursor = firstPage.endCursor;
+    const expectedOid =
+      typeof commit.oid === "string" && commit.oid.length > 0 ? commit.oid : undefined;
+    let pagesRead = 1;
+    while (hasNextPage) {
+      if (expectedOid === undefined || cursor === undefined || pagesRead >= MAX_ROLLUP_PAGES) {
+        return undefined;
+      }
+      const nextResult = await this.#run(
+        [
+          "api",
+          "graphql",
+          "-f",
+          `owner=${owner}`,
+          "-f",
+          `name=${name}`,
+          "-F",
+          `number=${String(number)}`,
+          "-f",
+          `cursor=${cursor}`,
+          "-f",
+          `query=${target === "head" ? PR_HEAD_ROLLUP_PAGE_QUERY : PR_MERGE_ROLLUP_PAGE_QUERY}`,
+        ],
+        signal,
+      );
+      if (nextResult === undefined || nextResult.exitCode !== 0) return undefined;
+      const nextParsed = parseJson(nextResult.stdout);
+      const data = isRecord(nextParsed) && isRecord(nextParsed.data) ? nextParsed.data : undefined;
+      const repo = data !== undefined && isRecord(data.repository) ? data.repository : undefined;
+      const pr = repo !== undefined && isRecord(repo.pullRequest) ? repo.pullRequest : undefined;
+      let nextCommit: Record<string, unknown> | undefined;
+      if (target === "head") {
+        const commits = pr !== undefined && isRecord(pr.commits) ? pr.commits : undefined;
+        const nodes = Array.isArray(commits?.nodes) ? commits.nodes : undefined;
+        const first = nodes !== undefined && isRecord(nodes[0]) ? nodes[0] : undefined;
+        nextCommit = first !== undefined && isRecord(first.commit) ? first.commit : undefined;
+      } else {
+        nextCommit =
+          pr !== undefined && isRecord(pr.potentialMergeCommit)
+            ? pr.potentialMergeCommit
+            : undefined;
+      }
+      if (nextCommit === undefined || nextCommit.oid !== expectedOid) return undefined;
+      const page = parseCommitRollupPage(nextCommit.statusCheckRollup);
+      if (page === "invalid" || page === "empty") return undefined;
+      collected.push(...page.checks);
+      hasNextPage = page.hasNextPage;
+      cursor = page.endCursor;
+      pagesRead += 1;
+    }
+    return collected;
   }
 
   async #requiredChecks(
@@ -735,4 +1093,392 @@ function repositoryFromPullRequestUrl(url: string): string | undefined {
   if (match === null) return undefined;
   const full = `${match[1]}/${match[2]}`;
   return validRepository(full) ? full : undefined;
+}
+
+interface RequiredStatusCheck {
+  readonly context: string;
+  readonly appId?: number;
+}
+
+interface ObservedCommitCheck {
+  readonly kind: "check-run" | "status-context";
+  readonly databaseId?: number;
+  readonly context: string;
+  readonly appId?: number;
+  readonly checkSuiteId?: string;
+  readonly workflowId?: string;
+  readonly isRequired?: boolean;
+  readonly timestampMs?: number;
+  readonly bucket: "pass" | "pending" | "failing";
+}
+
+const MAX_ROLLUP_PAGES = 20;
+
+const ROLLUP_CONTEXT_NODES_SELECTION = `
+  nodes {
+    __typename
+    ... on CheckRun {
+      databaseId
+      name
+      status
+      conclusion
+      startedAt
+      completedAt
+      isRequired(pullRequestNumber: $number)
+      checkSuite {
+        id
+        app { databaseId }
+        workflowRun { workflow { id } }
+      }
+    }
+    ... on StatusContext {
+      context
+      state
+      createdAt
+      isRequired(pullRequestNumber: $number)
+    }
+  }
+  pageInfo { hasNextPage endCursor }
+`;
+
+const PR_COMMIT_ROLLUPS_QUERY = `
+  query($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        commits(last: 1) {
+          nodes {
+            commit {
+              oid
+              statusCheckRollup {
+                contexts(first: 100) {
+                  ${ROLLUP_CONTEXT_NODES_SELECTION}
+                }
+              }
+            }
+          }
+        }
+        potentialMergeCommit {
+          oid
+          statusCheckRollup {
+            contexts(first: 100) {
+              ${ROLLUP_CONTEXT_NODES_SELECTION}
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+const PR_HEAD_ROLLUP_PAGE_QUERY = `
+  query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        commits(last: 1) {
+          nodes {
+            commit {
+              oid
+              statusCheckRollup {
+                contexts(first: 100, after: $cursor) {
+                  ${ROLLUP_CONTEXT_NODES_SELECTION}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+const PR_MERGE_ROLLUP_PAGE_QUERY = `
+  query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        potentialMergeCommit {
+          oid
+          statusCheckRollup {
+            contexts(first: 100, after: $cursor) {
+              ${ROLLUP_CONTEXT_NODES_SELECTION}
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+function parseRequiredCheckAppId(value: unknown): number | undefined | "invalid" {
+  if (value === undefined || value === null || value === -1) return undefined;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+  return "invalid";
+}
+
+function parseTimestampMs(value: unknown): number | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseCommitRollupPage(rollup: unknown):
+  | "empty"
+  | "invalid"
+  | {
+      readonly checks: ReadonlyArray<ObservedCommitCheck>;
+      readonly hasNextPage: boolean;
+      readonly endCursor?: string;
+    } {
+  if (rollup === null || rollup === undefined) return "empty";
+  if (!isRecord(rollup) || !isRecord(rollup.contexts)) return "invalid";
+  const nodes = rollup.contexts.nodes;
+  const pageInfo = rollup.contexts.pageInfo;
+  if (!Array.isArray(nodes) || !isRecord(pageInfo) || typeof pageInfo.hasNextPage !== "boolean") {
+    return "invalid";
+  }
+  const checks: ObservedCommitCheck[] = [];
+  for (const node of nodes) {
+    if (!isRecord(node)) return "invalid";
+    if (node.__typename === "CheckRun") {
+      if (typeof node.name !== "string" || node.name.length === 0) return "invalid";
+      const bucket = classifyCheckRun(node.status, node.conclusion);
+      if (bucket === undefined) return "invalid";
+      const databaseId =
+        typeof node.databaseId === "number" &&
+        Number.isSafeInteger(node.databaseId) &&
+        node.databaseId > 0
+          ? node.databaseId
+          : undefined;
+      const suite = isRecord(node.checkSuite) ? node.checkSuite : undefined;
+      const checkSuiteId =
+        typeof suite?.id === "string" && suite.id.length > 0 ? suite.id : undefined;
+      const app = suite !== undefined && isRecord(suite.app) ? suite.app : undefined;
+      const appId =
+        typeof app?.databaseId === "number" &&
+        Number.isSafeInteger(app.databaseId) &&
+        app.databaseId > 0
+          ? app.databaseId
+          : undefined;
+      const workflowRun =
+        suite !== undefined && isRecord(suite.workflowRun) ? suite.workflowRun : undefined;
+      const workflow =
+        workflowRun !== undefined && isRecord(workflowRun.workflow)
+          ? workflowRun.workflow
+          : undefined;
+      const workflowId =
+        typeof workflow?.id === "string" && workflow.id.length > 0 ? workflow.id : undefined;
+      const isRequired = typeof node.isRequired === "boolean" ? node.isRequired : undefined;
+      const timestampMs = parseTimestampMs(node.completedAt) ?? parseTimestampMs(node.startedAt);
+      checks.push({
+        kind: "check-run",
+        context: node.name,
+        bucket,
+        ...(databaseId === undefined ? {} : { databaseId }),
+        ...(appId === undefined ? {} : { appId }),
+        ...(checkSuiteId === undefined ? {} : { checkSuiteId }),
+        ...(workflowId === undefined ? {} : { workflowId }),
+        ...(isRequired === undefined ? {} : { isRequired }),
+        ...(timestampMs === undefined ? {} : { timestampMs }),
+      });
+      continue;
+    }
+    if (node.__typename === "StatusContext") {
+      if (typeof node.context !== "string" || node.context.length === 0) return "invalid";
+      const bucket = classifyStatusContext(node.state);
+      if (bucket === undefined) return "invalid";
+      const isRequired = typeof node.isRequired === "boolean" ? node.isRequired : undefined;
+      const timestampMs = parseTimestampMs(node.createdAt);
+      checks.push({
+        kind: "status-context",
+        context: node.context,
+        bucket,
+        ...(isRequired === undefined ? {} : { isRequired }),
+        ...(timestampMs === undefined ? {} : { timestampMs }),
+      });
+      continue;
+    }
+    return "invalid";
+  }
+  const endCursor =
+    typeof pageInfo.endCursor === "string" && pageInfo.endCursor.length > 0
+      ? pageInfo.endCursor
+      : undefined;
+  return endCursor === undefined
+    ? { checks, hasNextPage: pageInfo.hasNextPage }
+    : { checks, hasNextPage: pageInfo.hasNextPage, endCursor };
+}
+
+function classifyCheckRun(
+  status: unknown,
+  conclusion: unknown,
+): "pass" | "pending" | "failing" | undefined {
+  if (typeof status !== "string") return undefined;
+  const normalizedStatus = status.toUpperCase();
+  if (normalizedStatus !== "COMPLETED") {
+    return normalizedStatus === "QUEUED" ||
+      normalizedStatus === "IN_PROGRESS" ||
+      normalizedStatus === "WAITING" ||
+      normalizedStatus === "PENDING" ||
+      normalizedStatus === "REQUESTED"
+      ? "pending"
+      : undefined;
+  }
+  if (typeof conclusion !== "string") return undefined;
+  const normalizedConclusion = conclusion.toUpperCase();
+  if (
+    normalizedConclusion === "SUCCESS" ||
+    normalizedConclusion === "SKIPPED" ||
+    normalizedConclusion === "NEUTRAL"
+  ) {
+    return "pass";
+  }
+  if (
+    normalizedConclusion === "FAILURE" ||
+    normalizedConclusion === "TIMED_OUT" ||
+    normalizedConclusion === "CANCELLED" ||
+    normalizedConclusion === "ACTION_REQUIRED" ||
+    normalizedConclusion === "STALE" ||
+    normalizedConclusion === "STARTUP_FAILURE"
+  ) {
+    return "failing";
+  }
+  return undefined;
+}
+
+function classifyStatusContext(state: unknown): "pass" | "pending" | "failing" | undefined {
+  if (typeof state !== "string") return undefined;
+  const normalized = state.toUpperCase();
+  if (normalized === "SUCCESS") return "pass";
+  if (normalized === "PENDING" || normalized === "EXPECTED") return "pending";
+  if (normalized === "FAILURE" || normalized === "ERROR") return "failing";
+  return undefined;
+}
+
+function commitCheckRecencyKey(entry: ObservedCommitCheck): number {
+  if (entry.timestampMs !== undefined) return entry.timestampMs;
+  // Undated pending or failing runs fail-closed and outrank any dated run
+  // regardless of input order; an undated pass cannot claim to supersede a
+  // dated run.
+  return entry.bucket === "pass" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+}
+
+function commitCheckBucketRank(bucket: ObservedCommitCheck["bucket"]): number {
+  if (bucket === "pending") return 2;
+  if (bucket === "failing") return 1;
+  return 0;
+}
+
+function compareNumberKey(left: number, right: number): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function pickNewerCommitCheckById(
+  existing: ObservedCommitCheck,
+  candidate: ObservedCommitCheck,
+): ObservedCommitCheck {
+  const compare =
+    compareNumberKey(existing.databaseId ?? -1, candidate.databaseId ?? -1) ||
+    compareNumberKey(commitCheckRecencyKey(existing), commitCheckRecencyKey(candidate)) ||
+    compareNumberKey(
+      commitCheckBucketRank(existing.bucket),
+      commitCheckBucketRank(candidate.bucket),
+    );
+  return compare < 0 ? candidate : existing;
+}
+
+function pickNewerCommitCheckByRecency(
+  existing: ObservedCommitCheck,
+  candidate: ObservedCommitCheck,
+): ObservedCommitCheck {
+  const compare =
+    compareNumberKey(commitCheckRecencyKey(existing), commitCheckRecencyKey(candidate)) ||
+    compareNumberKey(
+      commitCheckBucketRank(existing.bucket),
+      commitCheckBucketRank(candidate.bucket),
+    );
+  return compare < 0 ? candidate : existing;
+}
+
+function selectLatestCommitChecks(
+  observed: ReadonlyArray<ObservedCommitCheck>,
+): ReadonlyArray<ObservedCommitCheck> {
+  const groupsByIdentity = new Map<string, ObservedCommitCheck[]>();
+  for (let index = 0; index < observed.length; index += 1) {
+    const entry = observed[index];
+    if (entry === undefined) continue;
+    let key: string;
+    if (entry.kind === "status-context") {
+      key = `status-context\0${entry.context}`;
+    } else if (entry.workflowId !== undefined) {
+      key = `check-run-workflow\0${entry.context}\0${entry.appId === undefined ? "*" : String(entry.appId)}\0${entry.workflowId}`;
+    } else if (entry.checkSuiteId !== undefined) {
+      key = `check-run-suite\0${entry.context}\0${entry.appId === undefined ? "*" : String(entry.appId)}\0${entry.checkSuiteId}`;
+    } else {
+      // Without a workflow id or check-suite id, keep runs distinct so
+      // unrelated failing checks cannot be collapsed by another run.
+      key = `check-run-unkeyed\0${String(index)}`;
+    }
+    const group = groupsByIdentity.get(key);
+    if (group === undefined) {
+      groupsByIdentity.set(key, [entry]);
+    } else {
+      group.push(entry);
+    }
+  }
+  const latest: ObservedCommitCheck[] = [];
+  for (const group of groupsByIdentity.values()) {
+    let bestWithId: ObservedCommitCheck | undefined;
+    let bestWithoutId: ObservedCommitCheck | undefined;
+    for (const entry of group) {
+      if (entry.databaseId !== undefined) {
+        bestWithId = bestWithId === undefined ? entry : pickNewerCommitCheckById(bestWithId, entry);
+      } else {
+        bestWithoutId =
+          bestWithoutId === undefined ? entry : pickNewerCommitCheckByRecency(bestWithoutId, entry);
+      }
+    }
+    if (bestWithId !== undefined && bestWithoutId !== undefined) {
+      latest.push(pickNewerCommitCheckByRecency(bestWithId, bestWithoutId));
+    } else if (bestWithId !== undefined) {
+      latest.push(bestWithId);
+    } else if (bestWithoutId !== undefined) {
+      latest.push(bestWithoutId);
+    }
+  }
+  return latest;
+}
+
+function evaluateCommitRequiredChecks(
+  required: ReadonlyArray<RequiredStatusCheck>,
+  observed: ReadonlyArray<ObservedCommitCheck>,
+): "green" | "pending" | "failing" {
+  const latest = selectLatestCommitChecks(observed);
+  const ruleCountByContext = new Map<string, number>();
+  for (const requirement of required) {
+    ruleCountByContext.set(
+      requirement.context,
+      (ruleCountByContext.get(requirement.context) ?? 0) + 1,
+    );
+  }
+  let pending = false;
+  for (const requirement of required) {
+    // Only allow StatusContext.isRequired to satisfy an app-pinned rule when
+    // no other rule (any-source or another app pin) shares the same context
+    // name, so isRequired unambiguously attributes to this pinned app.
+    const allowsRequiredStatusContext =
+      requirement.appId !== undefined && (ruleCountByContext.get(requirement.context) ?? 0) === 1;
+    const matches = latest.filter((entry) => {
+      if (entry.context !== requirement.context) return false;
+      if (requirement.appId === undefined) return true;
+      if (entry.kind === "check-run") return entry.appId === requirement.appId;
+      return allowsRequiredStatusContext && entry.isRequired === true;
+    });
+    if (matches.length === 0) {
+      pending = true;
+      continue;
+    }
+    if (matches.some((entry) => entry.bucket === "failing")) return "failing";
+    if (matches.some((entry) => entry.bucket === "pending")) pending = true;
+  }
+  return pending ? "pending" : "green";
 }

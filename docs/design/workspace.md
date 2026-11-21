@@ -483,9 +483,10 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   most people keep the defaults, and the box for the work came after them. A thread's row menu keeps its everyday actions on top (Pin in pane, Pin, Rename; Mark as read or unread, Mark done, Put away, Snooze; the pull-request destinations) and files the rest under **More**, with Archive last and alone (maintainer request, 2026-11-16). A Code thread's row menu has **Make coordinator**, a submenu
   with the same worker-level choice, or **Stop
   coordinating** on a coordinator (never on a worker); on a coordinator
-  **Coordinator limits…**, which opens the same dialog with the three bounds
-  and Save, without the workers' level, since the host refuses a later change
-  to it; the **Wake when a message
+  **Coordinator limits…**, which opens the same dialog with the three bounds,
+  the coordinator's host-checked **Done when** conditions (view, add, remove,
+  clear), and Save, without the workers' level, since the host refuses a later
+  change to it; the **Wake when a message
   arrives** checkbox, on a worker the **Wake for coordinator** checkbox, and
   the **Continue after restart** checkbox, on until a person turns it off for
   that thread ([Architecture: Persistence](../architecture.md#persistence)).
@@ -513,7 +514,9 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   `coordinatorWorkerListingByProject`). It carries no authority: it never
   changes what a worker may do or who sees its requests, and only a person,
   at a local window, changes it.
-- **Workers panel.** A coordinator's pane header has a **Workers** button
+- **Workers panel.** A coordinator's pane header has a **Done when** button
+  (showing the configured condition count and opening **Coordinator limits**)
+  beside its **Workers** button
   (with the worker count, and a screen-reader note of how many need you) that
   opens a panel beside the transcript, and a sheet over it on a narrow window.
   Sections, in order: **Needs you**, **Working**, **In review** (delivered

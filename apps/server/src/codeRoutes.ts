@@ -890,9 +890,10 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           // agent-gated caller may watch, never set.
           if (
             command !== undefined &&
-            callerAuthority !== "local-window" &&
+            (callerAuthority !== "local-window" || agentGrantSession) &&
             (command.kind === "set-code-thread-coordinator" ||
               command.kind === "set-code-thread-coordinator-bounds" ||
+              command.kind === "set-code-thread-coordinator-done-when" ||
               command.kind === "set-code-thread-message-wake" ||
               command.kind === "set-code-thread-coordinator-wake" ||
               (command.kind === "update-code-settings" &&
