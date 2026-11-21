@@ -353,7 +353,14 @@ describe("forge switch port", () => {
             exitCode: 0,
             stdout: JSON.stringify([{ name: "test", bucket: "pass", link: "" }]),
           }
-        : { exitCode: 0, stdout: JSON.stringify({ state: "MERGED" }) },
+        : {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              state: "MERGED",
+              baseRefName: "main",
+              mergeStateStatus: "CLEAN",
+            }),
+          },
     );
 
     const stateOnly = await forge.observePullRequestCondition(
@@ -385,6 +392,9 @@ describe("forge switch port", () => {
           stderr: "no required checks reported on the 'feature/x' branch",
         };
       }
+      if (args[0] === "api" && args.some((arg) => arg.includes("/rules/branches/main"))) {
+        return { exitCode: 0, stdout: JSON.stringify([[]]) };
+      }
       if (args[0] === "api" && args[1]?.includes("/branches/main")) {
         return {
           exitCode: 0,
@@ -410,16 +420,76 @@ describe("forge switch port", () => {
       await unreported.observePullRequestCondition(request, { requiredChecks: true }, signal),
     ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
 
+    // Partially reported required checks stay pending until every required context has passed.
+    const partialChecks = (
+      reported: ReadonlyArray<{ readonly name: string; readonly bucket: string }>,
+    ) =>
+      port((args) => {
+        if (args[1] === "checks") {
+          return { exitCode: 0, stdout: JSON.stringify(reported) };
+        }
+        if (
+          args[0] === "api" &&
+          args.includes("--paginate") &&
+          args.includes("--slurp") &&
+          args.some((arg) => arg.includes("/rules/branches/main"))
+        ) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([
+              [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }],
+              [
+                {
+                  type: "required_status_checks",
+                  parameters: {
+                    required_status_checks: [{ context: "lint" }, { context: "test" }],
+                  },
+                },
+              ],
+            ]),
+          };
+        }
+        if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+          return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+        }
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            baseRefName: "main",
+            mergeStateStatus: "BLOCKED",
+          }),
+        };
+      }).port;
+    expect(
+      await partialChecks([{ name: "lint", bucket: "pass" }]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    expect(
+      await partialChecks([
+        { name: "lint", bucket: "pass" },
+        { name: "test", bucket: "pass" },
+      ]).observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+
     // A branch requiring only review approval (BLOCKED) with zero required checks reports green.
     const reviewOnlyBlocked = port((args) => {
       if (args[1] === "checks") {
         return { exitCode: 0, stdout: "[]" };
       }
-      if (args[0] === "api" && args[1]?.includes("/rules/branches/main")) {
+      if (
+        args[0] === "api" &&
+        args.includes("--paginate") &&
+        args.includes("--slurp") &&
+        args.some((arg) => arg.includes("/rules/branches/main"))
+      ) {
         return {
           exitCode: 0,
           stdout: JSON.stringify([
-            { type: "pull_request", parameters: { required_approving_review_count: 1 } },
+            [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }],
           ]),
         };
       }
@@ -452,17 +522,25 @@ describe("forge switch port", () => {
       ),
     ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
 
-    // Ruleset-required check that has not reported yet stays pending even with classic protection off.
+    // Ruleset-required check on a later rules page still keeps unreported checks pending.
     const rulesetUnreported = port((args) => {
       if (args[1] === "checks") return { exitCode: 0, stdout: "[]" };
-      if (args[0] === "api" && args[1]?.includes("/rules/branches/main")) {
+      if (
+        args[0] === "api" &&
+        args.includes("--paginate") &&
+        args.includes("--slurp") &&
+        args.some((arg) => arg.includes("/rules/branches/main"))
+      ) {
         return {
           exitCode: 0,
           stdout: JSON.stringify([
-            {
-              type: "required_status_checks",
-              parameters: { required_status_checks: [{ context: "ci" }] },
-            },
+            [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }],
+            [
+              {
+                type: "required_status_checks",
+                parameters: { required_status_checks: [{ context: "ci" }] },
+              },
+            ],
           ]),
         };
       }
@@ -485,6 +563,43 @@ describe("forge switch port", () => {
         signal,
       ),
     ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+
+    // A malformed rules page fails closed as unavailable rather than reporting green.
+    const malformedRulesPage = port((args) => {
+      if (args[1] === "checks") return { exitCode: 0, stdout: "[]" };
+      if (
+        args[0] === "api" &&
+        args.includes("--paginate") &&
+        args.includes("--slurp") &&
+        args.some((arg) => arg.includes("/rules/branches/main"))
+      ) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }],
+            { unexpected: true },
+          ]),
+        };
+      }
+      if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+        return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          baseRefName: "main",
+          mergeStateStatus: "BLOCKED",
+        }),
+      };
+    }).port;
+    expect(
+      await malformedRulesPage.observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "unavailable" });
 
     // Empty check array with CLEAN merge state confirms no required checks are missing.
     const noRequiredClean = port((args) =>

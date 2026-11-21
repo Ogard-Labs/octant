@@ -188,8 +188,10 @@ export function createCoordinatorThreadDoneEvaluator(
             ...(link.url === undefined ? {} : { url: link.url }),
           });
         }
-        const history = await ports.history.read(threadId);
-        if (targetRepo !== undefined) {
+        // Only fall back to bare historical PR numbers when the thread has no
+        // active links carrying full repository identity.
+        if (candidates.length === 0 && targetRepo !== undefined) {
+          const history = await ports.history.read(threadId);
           for (const historical of pullRequestIdentitiesFromHistory(history)) {
             pushCandidate({
               owner: targetRepo.owner,

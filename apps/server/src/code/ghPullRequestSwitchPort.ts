@@ -416,10 +416,11 @@ export class GhPullRequestSwitchPort {
 
   /**
    * Distinguishes passing required checks from unreported checks independently
-   * of review or other merge gates. When `gh pr checks --required` returns no
-   * entries and `mergeStateStatus` is not `CLEAN`, inspects the base branch's
-   * effective classic protection and rulesets so a branch requiring only review
-   * approvals reports green while unreported required checks stay pending.
+   * of review or other merge gates. Because `gh pr checks --required` only
+   * lists checks that have reported on the head, whenever `mergeStateStatus`
+   * is not `CLEAN` we compare the passing reported checks against the full set
+   * of required status check contexts configured on the base branch via classic
+   * protection and paginated repository rulesets.
    */
   async #requiredChecksForCondition(
     repository: string,
@@ -437,85 +438,121 @@ export class GhPullRequestSwitchPort {
     const noChecksReported = !Array.isArray(value)
       ? /no required checks|no checks reported/i.test(`${result.stderr ?? ""}\n${result.stdout}`)
       : value.length === 0;
-    if (noChecksReported) {
-      if (mergeStateStatus === "CLEAN") return "green";
-      const requirement = await this.#baseBranchRequiresStatusChecks(
-        repository,
-        baseBranch,
-        signal,
-      );
-      if (requirement === "none") return "green";
-      if (requirement === "required") return "pending";
-      return "unavailable";
+    const reportedPassedNames = new Set<string>();
+    if (!noChecksReported) {
+      if (!Array.isArray(value)) return "unavailable";
+      let pending = false;
+      for (const entry of value) {
+        if (!isRecord(entry)) return "unavailable";
+        if (entry.bucket === "fail" || entry.bucket === "cancel") return "failing";
+        if (entry.bucket === "pending") {
+          pending = true;
+        } else if (entry.bucket === "pass" || entry.bucket === "skipping") {
+          if (typeof entry.name === "string" && entry.name.length > 0) {
+            reportedPassedNames.add(entry.name);
+          }
+        } else {
+          return "unavailable";
+        }
+      }
+      if (pending) return "pending";
     }
-    if (!Array.isArray(value)) return "unavailable";
-    let pending = false;
-    for (const entry of value) {
-      if (!isRecord(entry)) return "unavailable";
-      if (entry.bucket === "fail" || entry.bucket === "cancel") return "failing";
-      if (entry.bucket === "pending") pending = true;
-      else if (entry.bucket !== "pass" && entry.bucket !== "skipping") return "unavailable";
+    if (mergeStateStatus === "CLEAN") return "green";
+    const required = await this.#baseBranchRequiredCheckContexts(repository, baseBranch, signal);
+    if (required.status !== "ready") return "unavailable";
+    for (const context of required.contexts) {
+      if (!reportedPassedNames.has(context)) return "pending";
     }
-    return pending ? "pending" : "green";
+    return "green";
   }
 
   /**
-   * Read-only check of whether `baseBranch` configures any required status
-   * checks via classic branch protection or repository rulesets. Fails closed
-   * as `unknown` when either endpoint cannot be read or decoded.
+   * Read-only lookup of every required status-check context configured on
+   * `baseBranch` via classic branch protection or paginated repository
+   * rulesets. Fails closed as `unknown` when either endpoint cannot be read or
+   * any page/entry cannot be decoded.
    */
-  async #baseBranchRequiresStatusChecks(
+  async #baseBranchRequiredCheckContexts(
     repository: string,
     baseBranch: string | undefined,
     signal: AbortSignal,
-  ): Promise<"required" | "none" | "unknown"> {
+  ): Promise<
+    | { readonly status: "ready"; readonly contexts: ReadonlySet<string> }
+    | { readonly status: "unknown" }
+  > {
     if (
       baseBranch === undefined ||
       baseBranch.length > 255 ||
       /[\s\\?#:[\]^~*@{}\0]/.test(baseBranch) ||
       baseBranch.includes("..")
     ) {
-      return "unknown";
+      return { status: "unknown" };
     }
     const encodedBranch = encodeURIComponent(baseBranch);
+    const contexts = new Set<string>();
+
     const branchResult = await this.#run(
       ["api", `repos/${repository}/branches/${encodedBranch}`],
       signal,
     );
-    if (branchResult === undefined || branchResult.exitCode !== 0) return "unknown";
+    if (branchResult === undefined || branchResult.exitCode !== 0) return { status: "unknown" };
     const branchJson = parseJson(branchResult.stdout);
-    if (!isRecord(branchJson)) return "unknown";
+    if (!isRecord(branchJson)) return { status: "unknown" };
     const protection = isRecord(branchJson.protection) ? branchJson.protection : undefined;
     const protectionChecks =
       protection?.enabled === true && isRecord(protection.required_status_checks)
         ? protection.required_status_checks
         : undefined;
-    const classicContexts = Array.isArray(protectionChecks?.contexts)
-      ? protectionChecks.contexts.length
-      : 0;
-    const classicChecks = Array.isArray(protectionChecks?.checks)
-      ? protectionChecks.checks.length
-      : 0;
-    if (classicContexts > 0 || classicChecks > 0) return "required";
-
-    const rulesResult = await this.#run(
-      ["api", `repos/${repository}/rules/branches/${encodedBranch}`],
-      signal,
-    );
-    if (rulesResult === undefined || rulesResult.exitCode !== 0) return "unknown";
-    const rulesJson = parseJson(rulesResult.stdout);
-    if (!Array.isArray(rulesJson)) return "unknown";
-    for (const rule of rulesJson) {
-      if (!isRecord(rule) || rule.type !== "required_status_checks") continue;
-      const params = isRecord(rule.parameters) ? rule.parameters : undefined;
-      if (
-        Array.isArray(params?.required_status_checks) &&
-        params.required_status_checks.length > 0
-      ) {
-        return "required";
+    if (protectionChecks !== undefined) {
+      if (Array.isArray(protectionChecks.contexts)) {
+        for (const context of protectionChecks.contexts) {
+          if (typeof context !== "string" || context.trim().length === 0) {
+            return { status: "unknown" };
+          }
+          contexts.add(context);
+        }
+      }
+      if (Array.isArray(protectionChecks.checks)) {
+        for (const check of protectionChecks.checks) {
+          if (
+            !isRecord(check) ||
+            typeof check.context !== "string" ||
+            check.context.trim().length === 0
+          ) {
+            return { status: "unknown" };
+          }
+          contexts.add(check.context);
+        }
       }
     }
-    return "none";
+
+    const rulesResult = await this.#run(
+      ["api", "--paginate", "--slurp", `repos/${repository}/rules/branches/${encodedBranch}`],
+      signal,
+    );
+    if (rulesResult === undefined || rulesResult.exitCode !== 0) return { status: "unknown" };
+    const rulesPages = parseJson(rulesResult.stdout);
+    if (!Array.isArray(rulesPages)) return { status: "unknown" };
+    for (const page of rulesPages) {
+      if (!Array.isArray(page)) return { status: "unknown" };
+      for (const rule of page) {
+        if (!isRecord(rule)) return { status: "unknown" };
+        if (rule.type !== "required_status_checks") continue;
+        const params = isRecord(rule.parameters) ? rule.parameters : undefined;
+        if (!Array.isArray(params?.required_status_checks)) return { status: "unknown" };
+        for (const check of params.required_status_checks) {
+          if (
+            !isRecord(check) ||
+            typeof check.context !== "string" ||
+            check.context.trim().length === 0
+          ) {
+            return { status: "unknown" };
+          }
+          contexts.add(check.context);
+        }
+      }
+    }
+    return { status: "ready", contexts };
   }
 
   async #requiredChecks(

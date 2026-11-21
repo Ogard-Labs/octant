@@ -261,4 +261,70 @@ describe("objective thread Done evaluation for coordinator done-when checks", ()
       expect.anything(),
     );
   });
+
+  it("uses active link repositories without probing bare historical pull request numbers when active links exist", async () => {
+    const prThread = threadWith("merged-pr");
+    const activeLink = {
+      linkId: "80000000-0000-4000-8000-000000000021" as never,
+      projectId: prThread.projectId,
+      status: "active" as const,
+      host: "github.com" as const,
+      repositoryOwner: "fork-owner",
+      repositoryName: "octant-fork",
+      number: 7,
+      url: "https://github.com/fork-owner/octant-fork/pull/7",
+      headBranch: "feature/work",
+      baseBranch: "main",
+      threadIds: [prThread.id],
+      linkedAt: now,
+      createdOrder: 1,
+      displayOrder: 1,
+      updatedAt: now,
+    };
+    const observePullRequest = vi.fn(async () => ({
+      status: "observed" as const,
+      state: "open" as const,
+      headSha: "b".repeat(40),
+      headBranch: "feature/work",
+      baseBranch: "main",
+      autoMergeEnabled: false,
+      waitingOn: [],
+      failures: [],
+      baseRepository: "fork-owner/octant-fork",
+    }));
+    const readHistory = vi.fn(() => ({
+      status: "ok" as const,
+      frames: [
+        {
+          occurredAt: now,
+          event: {
+            kind: "operation-result" as const,
+            result: {
+              kind: "pull-request-state" as const,
+              state: "merged" as const,
+              number: 99,
+            },
+          },
+        },
+      ],
+    }));
+    const evaluator = createCoordinatorThreadDoneEvaluator(
+      basePorts(prThread, {
+        history: { read: readHistory as never },
+        pullRequestLinks: {
+          listForThread: () => [activeLink],
+          resolveLink: () => activeLink,
+          areSameRepository: () => false,
+        },
+        observePullRequest,
+      }),
+    );
+
+    expect(await evaluator(prThread)).toBe(false);
+    expect(observePullRequest).toHaveBeenCalledTimes(1);
+    expect(observePullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "fork-owner", name: "octant-fork", number: 7 }),
+      expect.anything(),
+    );
+  });
 });
