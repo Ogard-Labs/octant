@@ -285,6 +285,12 @@ describe("the agent grant guard", () => {
     };
     expect(guard(request)).toBe("refused");
     expect(guard({ ...request, body: { ...request.body, access: "ask-first" } })).toBe("allowed");
+    expect(
+      guard({
+        ...request,
+        body: { ...request.body, access: "ask-first", fullAccessRunFlag: true },
+      }),
+    ).toBe("refused");
   });
 
   it("refuses a mode, a tool, a model, or a route the grant does not name", () => {

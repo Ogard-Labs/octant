@@ -239,6 +239,8 @@ export const CreateWorkThreadCommand = Schema.Struct({
   fullAccessSandbox: Schema.optional(Schema.Boolean),
   /** Strict for this thread; absent follows its Project and Settings. */
   strict: Schema.optional(Schema.Boolean),
+  /** The person passed the per-run `octant agent --full-access` flag. */
+  fullAccessRunFlag: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type CreateWorkThreadCommand = typeof CreateWorkThreadCommand.Type;
 

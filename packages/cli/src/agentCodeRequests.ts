@@ -19,7 +19,10 @@ export async function readCodeRequests(
 ): Promise<readonly AgentCodeRequest[]> {
   const response = await session.send({ path: "/api/pending-requests", method: "GET" });
   if (response.status !== 200) throw new Error("Provider requests are unavailable.");
-  const rows = (response.body as { requests?: unknown }).requests;
+  const rows =
+    typeof response.body === "object" && response.body !== null && "requests" in response.body
+      ? response.body.requests
+      : undefined;
   if (!Array.isArray(rows)) throw new Error("Invalid provider request list.");
   return rows.flatMap((row: unknown) => {
     const request = decodeHostAnswer(PendingRequest)(row);
@@ -70,13 +73,32 @@ export async function answerCodeRequest(
     };
   }
   const response = await session.send({ path: "/api/code/commands", method: "POST", body });
-  const result = response.body as { kind?: string; state?: string; failure?: { message?: string } };
+  const result =
+    typeof response.body === "object" && response.body !== null ? response.body : undefined;
+  const kind =
+    result !== undefined && "kind" in result && typeof result.kind === "string"
+      ? result.kind
+      : undefined;
+  const state =
+    result !== undefined && "state" in result && typeof result.state === "string"
+      ? result.state
+      : undefined;
+  const failureMessage =
+    result !== undefined &&
+    "failure" in result &&
+    typeof result.failure === "object" &&
+    result.failure !== null &&
+    "message" in result.failure &&
+    typeof result.failure.message === "string"
+      ? result.failure.message
+      : undefined;
   if (
     response.status !== 200 ||
-    result.kind === "operation-failed" ||
-    result.state === "failed" ||
-    (result.state === "interrupted" && result.failure !== undefined)
+    kind === undefined ||
+    kind === "operation-failed" ||
+    state === "failed" ||
+    (state === "interrupted" && failureMessage !== undefined)
   )
-    return refusalMessage(response, result.failure?.message ?? "The answer was refused.");
+    return refusalMessage(response, failureMessage ?? "The answer was refused.");
   return undefined;
 }

@@ -41,6 +41,24 @@ it("reads ordinary provider approvals and questions, and answers approvals once 
                   options: [{ label: "Yes" }],
                   answer: { threadId, checkoutId, requestId },
                 },
+                {
+                  ...common,
+                  kind: "approval",
+                  browserOrigin: "https://example.test",
+                  answer: { threadId, checkoutId, approvalId: requestId },
+                },
+                { ...common, kind: "lead-approval", text: "Wait for the person." },
+                {
+                  ...common,
+                  threadId: "00000000-0000-4000-8000-000000000004",
+                  kind: "question",
+                  options: [{ label: "No" }],
+                  answer: {
+                    threadId: "00000000-0000-4000-8000-000000000004",
+                    checkoutId,
+                    requestId,
+                  },
+                },
               ],
             },
           }
@@ -71,4 +89,63 @@ it("reads ordinary provider approvals and questions, and answers approvals once 
   expect(seen[3]).toMatchObject({
     body: { kind: "answer-provider-input", requestId, threadId, checkoutId },
   });
+});
+
+it("returns an empty Code request list and refuses unavailable or malformed responses", async () => {
+  const empty: OpenedLocalControlSession = {
+    kind: "opened",
+    windowId: "test",
+    close: async () => {},
+    send: async () => ({ status: 200, body: { requests: [] } }),
+  };
+  const unavailable: OpenedLocalControlSession = {
+    kind: "opened",
+    windowId: "test",
+    close: async () => {},
+    send: async () => ({ status: 503, body: {} }),
+  };
+  const malformed: OpenedLocalControlSession = {
+    kind: "opened",
+    windowId: "test",
+    close: async () => {},
+    send: async () => ({ status: 200, body: null }),
+  };
+
+  expect(await readCodeRequests(empty, threadId)).toEqual([]);
+  await expect(readCodeRequests(unavailable, threadId)).rejects.toThrow(
+    "Provider requests are unavailable.",
+  );
+  await expect(readCodeRequests(malformed, threadId)).rejects.toThrow(
+    "Invalid provider request list.",
+  );
+});
+
+it("reports a missing Code answer response instead of treating it as success", async () => {
+  const listing: OpenedLocalControlSession = {
+    kind: "opened",
+    windowId: "test",
+    close: async () => {},
+    send: async () => ({
+      status: 200,
+      body: {
+        requests: [
+          {
+            ...common,
+            kind: "approval",
+            answer: { threadId, checkoutId, approvalId: requestId },
+          },
+        ],
+      },
+    }),
+  };
+  const approval = (await readCodeRequests(listing, threadId))[0];
+  if (approval?.kind !== "approval") throw new Error("Missing Code approval");
+  const session: OpenedLocalControlSession = {
+    kind: "opened",
+    windowId: "test",
+    close: async () => {},
+    send: async () => ({ status: 200, body: null }),
+  };
+
+  expect(await answerCodeRequest(session, approval, "yes")).toContain("refused");
 });

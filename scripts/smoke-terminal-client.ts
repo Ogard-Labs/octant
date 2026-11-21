@@ -4,6 +4,7 @@ import { mountAgentScreen } from "../packages/cli/src/agentTui";
 import { paletteFor } from "../packages/cli/src/agentTuiModel";
 const now = "2026-11-16T12:00:00.000Z";
 const threadId = "60000000-0000-4000-8000-000000000001";
+const waitingThreadId = "60000000-0000-4000-8000-000000000002";
 const providerId = "50000000-0000-4000-8000-000000000001";
 const thread = {
   id: threadId,
@@ -34,6 +35,10 @@ const session = {
   windowId: "test",
   close: async () => {},
   send: async ({ path, body }: { path: string; body?: unknown }) => {
+    if (path === "/api/projects/bootstrap")
+      return { status: 200, body: { active: [], archived: [], availability: [], memory: [] } };
+    if (path === "/api/shell/bootstrap") return { status: 200, body: { workspaceVersion: 1 } };
+    if (path === "/api/shell/commands") return { status: 200, body: {} };
     if (path.endsWith("/approvals")) {
       if ((body as { decision?: string })?.decision !== "approve")
         throw new Error("Unexpected approval decision");
@@ -78,11 +83,16 @@ const session = {
             : null,
         },
       };
-    if (path.startsWith("/api/chat/threads/"))
+    if (path.startsWith("/api/chat/threads/")) {
+      const openedId = path.slice("/api/chat/threads/".length);
       return {
         status: 200,
         body: {
-          thread,
+          thread: {
+            ...thread,
+            id: openedId,
+            title: openedId === waitingThreadId ? "Waiting task" : thread.title,
+          },
           turns: [],
           lastSequence: 1,
           contents: [],
@@ -93,8 +103,32 @@ const session = {
           followUpVersion: 0,
         },
       };
+    }
     if (path === "/api/chat/navigation")
-      return { status: 200, body: { threads: [], lastSequence: 0 } };
+      return {
+        status: 200,
+        body: {
+          threads: [
+            {
+              id: threadId,
+              title: thread.title,
+              providerInstanceId: providerId,
+              updatedAt: now,
+              lastSequence: 1,
+              followUpOpen: false,
+            },
+            {
+              id: waitingThreadId,
+              title: "Waiting task",
+              providerInstanceId: providerId,
+              updatedAt: "2026-11-16T12:01:00.000Z",
+              lastSequence: 1,
+              followUpOpen: false,
+              awaitingInput: true,
+            },
+          ],
+        },
+      };
     return { status: 404, body: { message: "Unavailable" } };
   },
 };
@@ -160,6 +194,13 @@ for (const width of [70, 80, 100, 160]) {
       );
       if (decisions !== 1) throw new Error("A stale approval answer was submitted");
     }
+    if (width === 160) {
+      await test.mockInput.typeText("unsent text stays here");
+      test.mockInput.pressKey("j", { ctrl: true });
+      await test.waitForFrame((next) => next.split("\n", 1)[0]?.includes("Waiting task") === true);
+      if (!test.captureCharFrame().includes("unsent text stays here"))
+        throw new Error("Ctrl+J replaced the unsent composer text");
+    }
     test.mockInput.pressCtrlC();
     await running;
     console.log(`Rendered ${width}x24`);
@@ -168,7 +209,7 @@ for (const width of [70, 80, 100, 160]) {
   }
 }
 
-// Measure a growing 2,000-line reply with the actual native renderer.
+// Measure a growing 2,000-line reply across ordinary, block, newline, and table boundaries.
 let reply = Array.from(
   { length: 2000 },
   (_, index) => `Line ${index}: **terminal** streaming acceptance`,
@@ -240,8 +281,14 @@ try {
     quiet: true,
   });
   const samples: number[] = [];
+  const deltas = [
+    " delta",
+    "\n\n## Streaming section\n\nA new paragraph follows.\n",
+    "\n- Streaming item\n- Another item\n",
+    "\n| State | Change |\n| --- | --- |\n| ready | updated |\n",
+  ];
   for (let i = 0; i < 25; i++) {
-    reply += " delta";
+    reply += deltas[i % deltas.length] ?? " delta";
     const start = performance.now();
     await screen.refresh();
     await perf.renderOnce();

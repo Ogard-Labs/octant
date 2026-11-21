@@ -1255,9 +1255,13 @@ function LaunchedShell(
   const [draftModelId, setDraftModelId] = useState<
     import("@octant/contracts/providers").ProviderModelId | undefined
   >(() => readLastModelChoice()?.modelId);
-  // A model picked in the Work composer itself. The shared draft choice above
-  // also follows Chat and Code picks through the remembered choice, and it
-  // must not outrank the Work default from Settings.
+  const [codeDraftProviderInstanceId, setCodeDraftProviderInstanceId] = useState<
+    import("@octant/contracts/providers").ProviderInstanceId | undefined
+  >();
+  const [codeDraftModelId, setCodeDraftModelId] = useState<
+    import("@octant/contracts/providers").ProviderModelId | undefined
+  >();
+  // A model picked in each non-Chat composer must not replace Chat's choice.
   const [workComposerSelection, setWorkComposerSelection] = useState<{
     readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
     readonly modelId: import("@octant/contracts/providers").ProviderModelId;
@@ -3972,28 +3976,14 @@ function LaunchedShell(
       hostPlatform,
     ],
   );
-  const codeDefaultProviderId = codeController.bootstrap?.settings.defaultModel?.providerInstanceId;
-  const codeDefaultModelId = codeController.bootstrap?.settings.defaultModel?.modelId;
-  useEffect(() => {
-    if (
-      activeMode !== "code" ||
-      codeDefaultProviderId === undefined ||
-      codeDefaultModelId === undefined
-    )
-      return;
-    setDraftProviderInstanceId(codeDefaultProviderId);
-    setDraftModelId(codeDefaultModelId);
-  }, [activeMode, codeDefaultProviderId, codeDefaultModelId]);
   const firstRunDiscoveryNotice = describeDiscoveryNotice(firstRunDiscovery, hostPlatform);
   const recordFirstRunOutcome = useCallback(
     (outcome: FirstRunOnboardingOutcome) =>
       controller.updateSettings({ firstRunOnboarding: outcome }),
     [controller],
   );
-  // First run's model step writes to whatever a new task in that mode already
-  // starts from: Work's own default in Work settings, and the composer's
-  // remembered choice for Code (and for Work on a host without Work settings).
-  // First run keeps no copy of either.
+  // First run's model step writes to the selected mode's own default; it keeps
+  // no copy of the choice.
   const selectFirstRunModel = useCallback(
     async (mode: "work" | "code", selection: ModelPickerSelection) => {
       if (mode === "work" && workSettings.status === "ready") {
@@ -4009,7 +3999,10 @@ function LaunchedShell(
         defaultPermissionPersistence: settings.defaultPermissionPersistence,
         defaultModel: selection,
       });
-      if (saved) rememberModelChoice(selection);
+      if (saved) {
+        setCodeDraftProviderInstanceId(selection.providerInstanceId);
+        setCodeDraftModelId(selection.modelId);
+      }
       return saved;
     },
     [workSettings, codeController],
@@ -4255,14 +4248,18 @@ function LaunchedShell(
       : activeMode === "work"
         ? workProviderGroups
         : codeProviderGroups;
-  const rawDraftSelection =
+  const sharedDraftSelection =
     draftProviderInstanceId !== undefined && draftModelId !== undefined
       ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-      : activeMode === "code"
-        ? codeController.bootstrap?.settings.defaultModel
-        : undefined;
+      : undefined;
+  const codeDraftPreferredSelection =
+    codeDraftProviderInstanceId !== undefined && codeDraftModelId !== undefined
+      ? { providerInstanceId: codeDraftProviderInstanceId, modelId: codeDraftModelId }
+      : codeController.bootstrap?.settings.defaultModel;
+  const rawDraftSelection =
+    activeMode === "code" ? codeDraftPreferredSelection : sharedDraftSelection;
   const preferredChatSelection =
-    resolveDraftProviderSelection(chatProviderGroups, rawDraftSelection) ??
+    resolveDraftProviderSelection(chatProviderGroups, sharedDraftSelection) ??
     resolveDraftProviderSelection(chatProviderGroups, firstRunChatDefault) ??
     firstSelectableProviderSelection(chatProviderGroups);
   const visibleDraftSelection =
@@ -4276,6 +4273,14 @@ function LaunchedShell(
       : visibleDraftSelection?.providerInstanceId;
   const effectiveDraftModelId =
     activeMode === "work" ? workProviderChoice?.modelId : visibleDraftSelection?.modelId;
+  const setDraftProviderInstanceIdForMode: typeof setDraftProviderInstanceId = (selection) => {
+    if (activeMode === "code") setCodeDraftProviderInstanceId(selection);
+    else setDraftProviderInstanceId(selection);
+  };
+  const setDraftModelIdForMode: typeof setDraftModelId = (selection) => {
+    if (activeMode === "code") setCodeDraftModelId(selection);
+    else setDraftModelId(selection);
+  };
   const localHost = hosts.find((host) => String(host.hostId) === String(LOCAL_HOST_ID));
   const activeCodeProject =
     projectController.activeProject?.type === "code" ? projectController.activeProject : undefined;
@@ -5965,11 +5970,11 @@ function LaunchedShell(
       setDockStatesByThread,
       setDraftError,
       setDraftPermissionMode,
-      setDraftModelId,
+      setDraftModelId: setDraftModelIdForMode,
       setDraftPendingMessage,
       setDraftPermissionPersistence,
       setDraftProjectSelection,
-      setDraftProviderInstanceId,
+      setDraftProviderInstanceId: setDraftProviderInstanceIdForMode,
       setEnvironmentSelection,
       setFallbackDockState,
       setGithubIssuesOpen,
@@ -7626,10 +7631,8 @@ function LaunchedShell(
         return false;
       }
       const codeSelection = resolveDraftProviderSelection(
-        draftProviderGroups,
-        draftProviderInstanceId !== undefined && draftModelId !== undefined
-          ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-          : codeController.bootstrap?.settings.defaultModel,
+        codeProviderGroups,
+        codeDraftPreferredSelection,
       );
       const providerInstanceId =
         codeSelection?.providerInstanceId ?? codeProviderChoices[0]?.instanceId;
@@ -8032,10 +8035,8 @@ function LaunchedShell(
           return;
         }
         const codeDraftSelection = resolveDraftProviderSelection(
-          draftProviderGroups,
-          draftProviderInstanceId !== undefined && draftModelId !== undefined
-            ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-            : codeController.bootstrap?.settings.defaultModel,
+          codeProviderGroups,
+          codeDraftPreferredSelection,
         );
         const providerInstanceId =
           codeDraftSelection?.providerInstanceId ?? codeProviderChoices[0]?.instanceId;

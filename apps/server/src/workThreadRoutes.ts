@@ -284,7 +284,7 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
       // The per-run Full access flag is typed by the person on `octant agent`
       // at this host; no device and no agent grant sets it.
       if (
-        command.kind === "change-work-thread-access" &&
+        (command.kind === "change-work-thread-access" || command.kind === "create-work-thread") &&
         command.fullAccessRunFlag === true &&
         readPrincipalRouteContext(request)?.principal.kind === "remote-device"
       ) {

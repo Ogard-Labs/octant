@@ -852,6 +852,22 @@ export class WorkThreadService {
           authenticatedWindowId,
           command.projectId,
         );
+        const settings = this.#currentSettings();
+        const access =
+          command.access ??
+          (project.defaultPermissionMode === undefined
+            ? undefined
+            : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
+          settings.defaultAccess;
+        this.#requireFullAccessRunFlag({
+          authenticatedWindowId,
+          actor,
+          enabled: command.fullAccessRunFlag === true,
+          access,
+          strict: command.strict,
+          project,
+          settings,
+        });
         await this.#requireProviderModel(
           command.providerInstanceId,
           command.modelId,
@@ -959,24 +975,16 @@ export class WorkThreadService {
             : { workingFolderId: command.workingFolderId }),
           // Explicit access uses the same route admission as a later change.
           // Otherwise keep the Project and Settings defaults.
-          access:
-            command.access ??
-            (project.defaultPermissionMode === undefined
-              ? undefined
-              : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
-            this.#currentSettings().defaultAccess,
+          access,
           // The opt-in sandbox only rides along when the resolved access is
           // Full access: the request's choice, else the Project's, else Settings'.
-          ...((command.access ??
-            (project.defaultPermissionMode === undefined
-              ? undefined
-              : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
-            this.#currentSettings().defaultAccess) === "full-access" &&
+          ...(access === "full-access" &&
           (command.strict ??
             command.fullAccessSandbox ??
-            defaultFullAccessSandboxFor({ project, settings: this.#currentSettings() }))
+            defaultFullAccessSandboxFor({ project, settings }))
             ? { fullAccessSandbox: true }
             : {}),
+          ...(command.fullAccessRunFlag === true ? { fullAccessRunFlag: true } : {}),
           // Strict is stored only when the request chose; otherwise the
           // thread follows its Project and Settings at each launch.
           ...(command.strict === undefined ? {} : { strict: command.strict }),
@@ -1405,32 +1413,15 @@ export class WorkThreadService {
         // The sandbox choice only means something at Full access: kept from the
         // command, else from the thread, and dropped at any other level so a
         // later raise to Full access never inherits a stale choice.
-        if (command.fullAccessRunFlag === true) {
-          // The per-run flag is the person's own, typed on `octant agent`
-          // here; a routine never carries it, and it means Full access only.
-          if (isRoutineHostScope(authenticatedWindowId))
-            throw this.#failure(
-              "unauthorized",
-              "Only the person starts a thread with the per-run Full access flag.",
-            );
-          if (command.access !== "full-access")
-            throw this.#failure(
-              "invalid",
-              "The per-run Full access flag puts a thread at Full access only.",
-            );
-          // The flag is a lift Octant made; Strict refuses it, read as the
-          // thread would resolve it once this change applies.
-          const chosen = command.strict === undefined ? current.strict : command.strict;
-          const project = this.#persistence.readProject(current.projectId);
-          if (
-            resolveStrict({
-              thread: { strict: chosen ?? undefined },
-              project: project?.type === "work" ? project : undefined,
-              settings: this.#projection.settings(),
-            })
-          )
-            throw this.#failure("invalid", STRICT_REFUSES_FULL_ACCESS_RUN_FLAG);
-        }
+        this.#requireFullAccessRunFlag({
+          authenticatedWindowId,
+          actor,
+          enabled: command.fullAccessRunFlag === true,
+          access: command.access,
+          strict: command.strict === undefined ? current.strict : command.strict,
+          project: project?.type === "work" ? project : undefined,
+          settings: this.#currentSettings(),
+        });
         const {
           fullAccessSandbox: currentSandbox,
           fullAccessRunFlag: currentRunFlag,
@@ -1825,6 +1816,16 @@ export class WorkThreadService {
   ): Promise<WorkThreadCommandResult> {
     // The window must be one this host serves; the Project is the person's.
     await this.#projects.bootstrap(authenticatedWindowId);
+    const settings = this.#currentSettings();
+    const access = command.access ?? settings.defaultAccess;
+    this.#requireFullAccessRunFlag({
+      authenticatedWindowId,
+      actor: executionContext?.actor ?? localPerson(),
+      enabled: command.fullAccessRunFlag === true,
+      access,
+      strict: command.strict,
+      settings,
+    });
     if (String(command.bindingRevisionId) !== String(bindingRevisionId)) {
       throw this.#failure("stale", "Work Project binding changed; reload and retry.");
     }
@@ -1863,13 +1864,12 @@ export class WorkThreadService {
       bindingRevisionId,
       workingDirectory: ".",
       ...(command.strict === undefined ? {} : { strict: command.strict }),
-      access: command.access ?? this.#currentSettings().defaultAccess,
-      ...((command.access ?? this.#currentSettings().defaultAccess) === "full-access" &&
-      (command.strict ??
-        command.fullAccessSandbox ??
-        defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
+      access,
+      ...(access === "full-access" &&
+      (command.strict ?? command.fullAccessSandbox ?? defaultFullAccessSandboxFor({ settings }))
         ? { fullAccessSandbox: true }
         : {}),
+      ...(command.fullAccessRunFlag === true ? { fullAccessRunFlag: true } : {}),
       ...(command.strict === undefined ? {} : { strict: command.strict }),
       version: 1,
       createdAt: decodeTimestamp(this.#clock()),
@@ -1906,6 +1906,39 @@ export class WorkThreadService {
     const provider = this.#persistence.readProviderInstance(thread.providerInstanceId);
     if (provider === undefined || !fullAccessSandboxSupported(provider.driverKind)) {
       throw this.#failure("unsupported", "This provider cannot keep the sandbox at Full access.");
+    }
+  }
+
+  #requireFullAccessRunFlag(input: {
+    readonly authenticatedWindowId: WindowId;
+    readonly actor: EventActor;
+    readonly enabled: boolean;
+    readonly access: WorkAccess;
+    readonly strict: boolean | null | undefined;
+    readonly project?: Project | undefined;
+    readonly settings: WorkSettings;
+  }): void {
+    if (!input.enabled) return;
+    if (isRoutineHostScope(input.authenticatedWindowId) || input.actor.kind !== "local-user") {
+      throw this.#failure(
+        "unauthorized",
+        "Only the person starts a thread with the per-run Full access flag.",
+      );
+    }
+    if (input.access !== "full-access") {
+      throw this.#failure(
+        "invalid",
+        "The per-run Full access flag starts a thread at Full access only.",
+      );
+    }
+    if (
+      resolveStrict({
+        thread: { strict: input.strict ?? undefined },
+        project: input.project?.type === "work" ? input.project : undefined,
+        settings: input.settings,
+      })
+    ) {
+      throw this.#failure("invalid", STRICT_REFUSES_FULL_ACCESS_RUN_FLAG);
     }
   }
 

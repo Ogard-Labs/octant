@@ -50,6 +50,7 @@ import {
   writeUtilityDockPresentation,
 } from "./shell/rightUtilityDockSelection";
 import { writeBottomPanelPresentation } from "./shell/useShellPresentation";
+import { writePreferredWorkKind } from "./shell/workKind";
 import {
   archivedChatThread,
   bindingReceipt,
@@ -801,6 +802,96 @@ describe("App", () => {
         expect.objectContaining({
           kind: "create-code-thread",
           thread: expect.objectContaining({ providerInstanceId: observed.instanceId, modelId }),
+        }),
+      ),
+    );
+  });
+
+  it("keeps Chat's model choice when switching from a Code draft with its own default", async () => {
+    const user = userEvent.setup();
+    writePreferredWorkKind("chat", globalThis.localStorage);
+    const providerApi = providersWithToolModel();
+    const catalog = await providerApi.bootstrap();
+    const observed = catalog.observedStates[0];
+    const first = observed?.models[0];
+    if (observed === undefined || first === undefined) throw new Error("Missing provider fixture");
+    const chatModelId = decodeProviderModelId("chat-draft-model");
+    const codeModelId = decodeProviderModelId("code-draft-model");
+    const providerClient = {
+      ...providerApi,
+      bootstrap: async () => ({
+        ...catalog,
+        observedStates: [
+          {
+            ...observed,
+            models: [
+              first,
+              { ...first, id: chatModelId, displayName: "Chat draft model" },
+              { ...first, id: codeModelId, displayName: "Code draft model" },
+            ],
+          },
+        ],
+      }),
+    };
+    const codeApi = codesRecordingCreates();
+    const codeBootstrap = await codeApi.bootstrap();
+    const codeClient = {
+      ...codeApi,
+      bootstrap: async () => ({
+        ...codeBootstrap,
+        settings: {
+          ...codeBootstrap.settings,
+          defaultModel: { providerInstanceId: observed.instanceId, modelId: codeModelId },
+        },
+      }),
+    };
+    const chatApi = chats();
+    const chatBootstrap = await chatApi.bootstrap();
+    const chatClient = {
+      ...chatApi,
+      bootstrap: async () => ({
+        ...chatBootstrap,
+        settings: {
+          ...chatBootstrap.settings,
+          defaultProviderInstanceId: observed.instanceId,
+          defaultModelId: chatModelId,
+        },
+      }),
+    };
+    render(
+      <App
+        chatClient={chatClient}
+        codeClient={codeClient}
+        contextClient={contextClient()}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providerClient}
+        shellClient={client(codeDraftShellBootstrap(projectId))}
+      />,
+    );
+
+    await screen.findByRole("textbox", { name: "First message" });
+    await user.click(
+      within(screen.getByRole("group", { name: "Workspace mode" })).getByRole("button", {
+        name: "Work",
+      }),
+    );
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(
+      within(welcome).getByRole("textbox", { name: "First message" }),
+      "Keep Chat's choice",
+    );
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+
+    await waitFor(() =>
+      expect(chatApi.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "change-chat-provider",
+          providerInstanceId: observed.instanceId,
+          modelId: chatModelId,
         }),
       ),
     );

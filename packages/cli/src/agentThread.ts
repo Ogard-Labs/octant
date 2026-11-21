@@ -332,6 +332,9 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
           turnId: randomUUID(),
           prompt,
           ...(extras?.attachmentIds?.length ? { attachmentIds: extras.attachmentIds } : {}),
+          ...(extras?.threadMentionIds?.length
+            ? { threadMentionIds: extras.threadMentionIds }
+            : {}),
           authority: {
             hostId: "local",
             projectId: String(current.projectId),
@@ -552,6 +555,9 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
           sessionId: randomUUID(),
           prompt: decodeHostAnswer(CodeEvidenceReference)(staged.body),
           ...(extras?.attachmentIds?.length ? { attachmentIds: extras.attachmentIds } : {}),
+          ...(extras?.threadMentionIds?.length
+            ? { threadMentionIds: extras.threadMentionIds }
+            : {}),
         },
       });
       if (response.status !== 200) {
@@ -612,8 +618,8 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
 /**
  * A new thread in the asked-for mode, through the same commands the app's
  * composer sends. Work and Code need a Project; a Code thread lands in the
- * current checkout, approval-gated unless the Project remembers Full access,
- * on the first harness model the host offers unless the caller names one.
+ * current checkout, approval-gated unless the Project remembers Full access;
+ * model selection uses a usable configured default or an explicit unique choice.
  */
 export async function createAgentThread(
   session: OpenedLocalControlSession,
@@ -755,7 +761,7 @@ export async function createAgentThread(
   if (project === undefined || project.type !== mode) {
     return { kind: "refused", message: "The Project for this thread is unavailable." };
   }
-  const models = await listAgentModels(session);
+  const models = await listAgentModels(session, mode === "work" ? "work" : "coding");
   let model = input.model === undefined ? undefined : pickAgentModel(models, input.model);
   if (input.model === undefined && mode === "code") {
     const bootstrap = await session.send({ path: "/api/code/bootstrap", method: "GET" });
@@ -807,6 +813,7 @@ export async function createAgentThread(
     // A Work thread takes every level a Code thread does, Plan included.
     const workAccess =
       input.access === undefined ? undefined : workThreadAccessOfMode(input.access);
+    const runFlag = input.fullAccessScope === "run" && workAccess === "full-access";
     const threadId = randomUUID();
     const response = await session.send({
       path: "/api/work/threads/commands",
@@ -822,6 +829,7 @@ export async function createAgentThread(
         hostId: "local",
         bindingRevisionId: String(project.bindingRevisionId),
         ...(input.sandbox === true ? { fullAccessSandbox: true } : {}),
+        ...(runFlag ? { fullAccessRunFlag: true } : {}),
       },
     });
     if (response.status !== 200) {
@@ -834,11 +842,8 @@ export async function createAgentThread(
     if (!("kind" in created) || created.kind !== "thread-created") {
       return { kind: "refused", message: "The host did not create the Work thread." };
     }
-    // The create command sets every other level in its first event. Plan is
-    // entered by a change, which records the level it returns to, and the
-    // per-run Full access flag exists only on the change command.
-    const runFlag = input.fullAccessScope === "run" && workAccess === "full-access";
-    if (workAccess === "plan" || runFlag) {
+    // Plan is entered by a change, which records the level it returns to.
+    if (workAccess === "plan") {
       const changed = await session.send({
         path: "/api/work/threads/commands",
         method: "POST",
@@ -848,7 +853,6 @@ export async function createAgentThread(
           expectedVersion: 1,
           access: workAccess,
           ...(input.sandbox === true ? { fullAccessSandbox: true } : {}),
-          ...(runFlag ? { fullAccessRunFlag: true } : {}),
         },
       });
       if (changed.status !== 200) {

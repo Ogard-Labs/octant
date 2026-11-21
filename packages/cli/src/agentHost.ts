@@ -1,4 +1,4 @@
-import { approvalOutsideContentLines } from "@octant/domain";
+import { approvalOutsideContentLines, hasWorkToolAuthority } from "@octant/domain";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
@@ -613,7 +613,7 @@ export interface AgentModelChoice {
 /** Models offered by enabled providers, including native coding runtimes. */
 export async function listAgentModels(
   session: OpenedLocalControlSession,
-  scope: "harness" | "chat" | "coding" = "coding",
+  scope: "harness" | "chat" | "coding" | "work" = "coding",
 ): Promise<ReadonlyArray<AgentModelChoice>> {
   const response = await session.send({ path: "/api/providers/bootstrap", method: "GET" });
   if (response.status !== 200) return [];
@@ -649,6 +649,11 @@ export async function listAgentModels(
   for (const instance of instances) {
     const observed = observations.find((state) => String(state.instanceId) === String(instance.id));
     for (const model of observed?.models ?? []) {
+      if (
+        scope === "work" &&
+        !hasWorkToolAuthority(instance.driverKind, model, observed?.verifiedToolModelIds ?? [])
+      )
+        continue;
       choices.push({
         instanceId: String(instance.id),
         driverKind: instance.driverKind,

@@ -184,6 +184,19 @@ describe("Work thread routes", () => {
     const runFlag = { ...raiseThread, fullAccessRunFlag: true };
     expect((await route(from(runFlag, paired)))?.status).toBe(403);
     expect((await route(from(runFlag, { origin: AGENT_ACCESS_ORIGIN })))?.status).toBe(403);
+    const createRunFlag = {
+      kind: "create-work-thread",
+      threadId,
+      projectId,
+      title: "Draft brief",
+      providerInstanceId: "73000000-0000-4000-8000-000000000004",
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: "72000000-0000-4000-8000-000000000008",
+      access: "full-access",
+      fullAccessRunFlag: true,
+    };
+    expect((await route(from(createRunFlag, paired)))?.status).toBe(403);
     expect(execute).toHaveBeenCalledTimes(3);
     const local = await route(
       request("/api/work/threads/commands", {
@@ -193,6 +206,19 @@ describe("Work thread routes", () => {
       }),
     );
     expect(local?.status).toBe(200);
+    const localCreate = await route(
+      request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createRunFlag),
+      }),
+    );
+    expect(localCreate?.status).toBe(200);
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ kind: "create-work-thread", fullAccessRunFlag: true }),
+      { actor: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" } },
+    );
   });
 
   it("refuses a hub-introduced device raising a Work thread or the Work default to Full access, and lets it lower one", async () => {

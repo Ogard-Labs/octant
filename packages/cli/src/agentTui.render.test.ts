@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
+
 it.skipIf(process.platform === "win32")(
-  "renders terminal breakpoints and dispatches a palette command through keyboard input",
+  "renders terminal breakpoints and dispatches palette and waiting-thread shortcuts",
   () => {
     const output = execFileSync("bun", ["scripts/smoke-terminal-client.ts"], {
       cwd: fileURLToPath(new URL("../../../", import.meta.url)),

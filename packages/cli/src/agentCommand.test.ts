@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
+import * as agentStart from "./agentStart";
 import * as agentThreads from "./agentThread";
 import * as siteApprovals from "./agentSiteApprovals";
 import type { LocalControlRequest, OpenedLocalControlSession } from "./localControl";
@@ -78,6 +79,42 @@ function sink() {
 }
 
 describe("octant agent command line", () => {
+  it("reports a pending request in JSON status instead of claiming completion", async () => {
+    const state = {
+      threadId: "00000000-0000-4000-8000-000000000001",
+      mode: "work" as const,
+      title: "Task",
+      status: "waiting-for-person" as const,
+      turns: [],
+      questions: [],
+      waitingInOctant: [{ kind: "approval" as const, text: "Run the command?" }],
+    };
+    const read = vi.spyOn(agentStart, "openAndReadAgentThread").mockResolvedValue({
+      kind: "read",
+      state,
+    });
+    const stdout = sink();
+    const stderr = sink();
+
+    const code = await runAgentCliCommand({
+      command: { action: "agent-status", threadId: state.threadId, json: true },
+      session: session(() => ({ status: 404, body: {} })),
+      stdin: Readable.from([]),
+      stdout,
+      stderr,
+    });
+
+    expect(code).toBe(0);
+    expect(stdout.text()).toContain('"kind":"thread-state"');
+    expect(stdout.text()).toContain('"status":"waiting-for-person"');
+    expect(stdout.text()).toContain(
+      '"waitingInOctant":[{"kind":"approval","text":"Run the command?"}]',
+    );
+    expect(stdout.text()).not.toContain('"status":"completed"');
+    expect(stderr.text()).toBe("");
+    read.mockRestore();
+  });
+
   it.each([{ threadId: "existing" }, { last: true }])(
     "refuses an access level while attaching to an existing thread, rather than running at another one",
     async (attachment) => {

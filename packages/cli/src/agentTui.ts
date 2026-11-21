@@ -4,6 +4,12 @@ import {
   codeRequestId,
   type AgentCodeRequest,
 } from "./agentCodeRequests";
+import {
+  answerWorkRequest,
+  readWorkRequests,
+  workRequestId,
+  type AgentWorkRequest,
+} from "./agentWorkRequests";
 import type {
   NativeHarnessApproval,
   NativeHarnessSessionView,
@@ -95,6 +101,7 @@ import {
 } from "./agentTuiModel";
 import { ProjectBootstrap, McpServerConnectionListing, decodeHostAnswer } from "@octant/contracts";
 import { agentTuiMark } from "./agentTuiMark";
+import { agentFileMentions, completeAgentFileMention } from "./agentTuiMentions";
 import { compactTextChunks, terminalMarkdownTables } from "./agentTuiMarkdown";
 import { agentTuiLayout } from "./agentTuiLayout";
 import type { OpenedLocalControlSession } from "./localControl";
@@ -201,6 +208,7 @@ class AgentScreen {
     | { readonly approvalId: string; readonly ticked: ReadonlySet<number>; readonly page: number }
     | undefined;
   #codeRequest: AgentCodeRequest | undefined;
+  #workRequest: AgentWorkRequest | undefined;
   #destroyed = false;
   #refreshSequence = 0;
   #lastAskId: string | undefined;
@@ -237,8 +245,7 @@ class AgentScreen {
   #goalLines: ReadonlyArray<string> = [];
   #diff: Extract<AgentDiff, { kind: "ready" }> | undefined;
   #checkoutChanges: AgentDiff | undefined;
-  #lastDiffRead = 0;
-  #readingDiff = false;
+  #checkoutChangesReadAt: number | undefined;
   #mcpLines = ["MCP: unreported"];
   #lastMcpRead = 0;
   #showSidebar: boolean | undefined;
@@ -426,17 +433,25 @@ class AgentScreen {
         } else if (key.ctrl && key.name === "g") {
           this.#showInfo = !(this.#showInfo ?? agentTuiLayout(this.#renderer.width).info);
           this.#draw();
-        } else if (key.ctrl && key.name === "j") {
-          this.#composer.setText("/next-waiting");
-          void this.#submit();
+        } else if ((key.ctrl && key.name === "j") || key.sequence === "\n") {
+          // Ctrl+J is a raw line feed on terminals without modified-key support.
+          void this.#openNextWaiting();
         } else if (key.ctrl && key.name === "p") {
           this.#listing = this.#listing === "palette" ? undefined : "palette";
           this.#draw();
         } else if (key.ctrl && key.name === "o") {
           void this.#pauseOrResume();
         } else if (key.name === "tab" && this.#suggestions?.items[0] !== undefined) {
+          const suggestion = this.#suggestions.items[0];
+          const completed =
+            this.#suggestions.kind === "file"
+              ? completeAgentFileMention(suggestion.slice(1))
+              : suggestion;
           this.#composer.setText(
-            this.#composer.plainText.replace(/(?:@|#)[^\s@#]*$/, this.#suggestions.items[0] + " "),
+            this.#composer.plainText.replace(
+              /(^|\s)([@#])(?:"(?:\\.|[^"\\])*"?|[^\s@#]*)$/,
+              (_match, leading: string) => leading + completed + " ",
+            ),
           );
           this.#suggestions = undefined;
           this.#draw();
@@ -458,7 +473,10 @@ class AgentScreen {
           setTimeout(() => void this.#suggest(), 0);
         }
       });
-      void listAgentModels(this.#input.session).then((models) => {
+      void listAgentModels(
+        this.#input.session,
+        this.#port.mode === "code" ? "coding" : this.#port.mode,
+      ).then((models) => {
         this.#models = models;
         this.#draw();
       });
@@ -508,12 +526,15 @@ class AgentScreen {
     const refreshSequence = ++this.#refreshSequence;
     const readingThreadId = this.#threadId;
     const readingMode = this.#mode;
-    const [thread, session, sites, codeRequests] = await Promise.all([
+    const [thread, session, sites, codeRequests, workRequests] = await Promise.all([
       this.#port.read(),
       readAgentSession(this.#input.session, this.#threadId),
       listAgentSiteApprovals(this.#input.session, this.#port.mode, this.#threadId).catch(() => []),
       readingMode === "code"
         ? readCodeRequests(this.#input.session, readingThreadId)
+        : Promise.resolve([]),
+      readingMode === "work"
+        ? readWorkRequests(this.#input.session, readingThreadId)
         : Promise.resolve([]),
     ]);
     let navigationFailed = false;
@@ -562,6 +583,7 @@ class AgentScreen {
     this.#session = session === "unavailable" ? undefined : session;
     this.#siteApproval = sites[0];
     this.#codeRequest = codeRequests[0];
+    this.#workRequest = workRequests[0];
     const running = isAgentSnapshotRunning(thread);
     if (this.#wasRunning && !running && this.#input.quiet !== true) {
       const outcome = thread?.turns.at(-1)?.outcome ?? "ended";
@@ -589,25 +611,6 @@ class AgentScreen {
           this.#mcpLines = ["MCP: unavailable"];
         });
     }
-    if (
-      thread?.mode === "code" &&
-      thread.checkoutId !== undefined &&
-      !this.#readingDiff &&
-      Date.now() - this.#lastDiffRead >= 5000
-    ) {
-      this.#readingDiff = true;
-      this.#lastDiffRead = Date.now();
-      void readAgentDiff(this.#input.session, thread.id, thread.checkoutId)
-        .then((diff) => {
-          if (readingThreadId === this.#threadId) {
-            this.#checkoutChanges = diff;
-            this.#draw();
-          }
-        })
-        .finally(() => {
-          this.#readingDiff = false;
-        });
-    }
     this.#draw();
     // Not awaited: a Chat send answers only when its turn ends, and the
     // redraws that show the reply arriving are this same loop.
@@ -618,7 +621,7 @@ class AgentScreen {
   async #suggest(): Promise<void> {
     if (this.#destroyed) return;
     const text = this.#composer.plainText;
-    const token = /(?:^|\s)([@#])([^\s@#]*)$/.exec(text);
+    const token = /(?:^|\s)([@#])(?:"((?:\\.|[^"\\])*)"?|([^\s@#]*))$/.exec(text);
     if (token === null) {
       if (this.#suggestions !== undefined) {
         this.#suggestions = undefined;
@@ -626,7 +629,7 @@ class AgentScreen {
       }
       return;
     }
-    const needle = (token[2] ?? "").toLowerCase();
+    const needle = (token[2] ?? token[3] ?? "").toLowerCase();
     if (token[1] === "#") {
       if (this.#threads.length === 0)
         this.#threads = await listAgentNavigation(this.#input.session, this.#mode);
@@ -644,7 +647,7 @@ class AgentScreen {
               this.#input.session,
               thread.id,
               thread.checkoutId,
-              token[2] ?? "",
+              token[2] ?? token[3] ?? "",
             )
           : (this.#files ??= this.#filesRoot === undefined ? [] : await scanFiles(this.#filesRoot));
       if (this.#destroyed) return;
@@ -667,8 +670,9 @@ class AgentScreen {
     const attachmentIds: string[] = [];
     const threadMentionIds: string[] = [];
     const refused: string[] = [];
-    for (const match of text.matchAll(/(?:^|\s)@([^\s@#]+)/g)) {
-      const path = match[1] ?? "";
+    const fileMentions = agentFileMentions(text);
+    for (const mention of fileMentions) {
+      const path = mention.path;
       if (attachmentMediaType(path) === undefined) continue;
       // Coding runtimes read source paths inside the bound Project. Images use
       // the mode's staged attachment route, as in the app composer.
@@ -692,6 +696,9 @@ class AgentScreen {
       else refused.push(uploaded.message);
     }
     let prompt = text;
+    for (const mention of [...fileMentions].reverse()) {
+      prompt = prompt.slice(0, mention.start) + mention.path + prompt.slice(mention.end);
+    }
     for (const match of text.matchAll(/(?:^|\s)#([^\s@#]+)/g)) {
       const fragment = (match[1] ?? "").toLowerCase();
       if (this.#threads.length === 0)
@@ -708,7 +715,7 @@ class AgentScreen {
       prompt = prompt.replace(match[0], `${match[0].startsWith(" ") ? " " : ""}${thread.title}`);
     }
     return {
-      prompt: prompt.replace(/(^|\s)@([^\s@#]+)/g, "$1$2"),
+      prompt,
       attachmentIds,
       threadMentionIds,
       refused,
@@ -718,7 +725,7 @@ class AgentScreen {
   async #switchThread(threadId: string, mode: OctantMode = "chat"): Promise<void> {
     this.#diff = undefined;
     this.#checkoutChanges = undefined;
-    this.#lastDiffRead = 0;
+    this.#checkoutChangesReadAt = undefined;
     const opened = await openAgentThreadById(this.#input.session, threadId);
     if (opened.kind === "refused") {
       this.#note = opened.message;
@@ -744,6 +751,15 @@ class AgentScreen {
     }
     await this.refresh();
     if (!this.#destroyed) this.#transcript.scrollTo(this.#transcript.scrollHeight);
+  }
+
+  async #openNextWaiting(): Promise<void> {
+    const next = this.#threads.find(
+      (thread) => thread.awaitingInput && thread.id !== this.#threadId,
+    );
+    if (next === undefined) this.#note = "No other waiting thread is currently reported.";
+    else await this.#switchThread(next.id, next.mode);
+    this.#draw();
   }
 
   /**
@@ -887,6 +903,11 @@ class AgentScreen {
       ...this.#mcpLines,
       "",
       "Current checkout changes",
+      this.#checkoutChangesReadAt === undefined
+        ? "No cached snapshot; run /diff to refresh."
+        : "Cached snapshot from /diff · " +
+          Math.floor((Date.now() - this.#checkoutChangesReadAt) / 1000) +
+          "s ago",
       ...(this.#checkoutChanges?.kind === "ready"
         ? [
             ...this.#checkoutChanges.files.map(
@@ -895,7 +916,7 @@ class AgentScreen {
             ...this.#checkoutChanges.missingPaths.map((path) => `${path} (no diff text)`),
             ...(this.#checkoutChanges.truncated ? ["Truncated"] : []),
           ]
-        : [this.#checkoutChanges?.kind === "refused" ? this.#checkoutChanges.message : "Reading…"]),
+        : [this.#checkoutChanges?.kind === "refused" ? this.#checkoutChanges.message : ""]),
       "/files lists files · /diff reviews",
       "",
       "/model changes model",
@@ -937,13 +958,15 @@ class AgentScreen {
       pending !== undefined ||
       session?.approvals?.some((entry) => entry.status === "pending") ||
       this.#siteApproval !== undefined ||
-      this.#codeRequest !== undefined
+      this.#codeRequest !== undefined ||
+      this.#workRequest !== undefined
     ) {
       this.#listing = undefined;
       this.#suggestions = undefined;
       this.#showHelp = false;
     }
     const nextAskId =
+      (this.#workRequest === undefined ? undefined : workRequestId(this.#workRequest)) ??
       (this.#codeRequest === undefined ? undefined : codeRequestId(this.#codeRequest)) ??
       pending?.id ??
       session?.approvals?.find((entry) => entry.status === "pending")?.id ??
@@ -960,7 +983,8 @@ class AgentScreen {
       pending !== undefined ||
       session?.approvals?.some((entry) => entry.status === "pending") ||
       this.#siteApproval !== undefined ||
-      this.#codeRequest !== undefined
+      this.#codeRequest !== undefined ||
+      this.#workRequest !== undefined
     )
       this.#diff = undefined;
     const digest = JSON.stringify(
@@ -981,7 +1005,6 @@ class AgentScreen {
       this.#diff === undefined &&
       lastEntry?.kind === "lead" &&
       lastEntry.outcome === "streaming" &&
-      !lastEntry.text.includes("|") &&
       !lastEntry.text.includes("<think>");
     const structure = plainLive
       ? JSON.stringify([
@@ -1070,7 +1093,19 @@ class AgentScreen {
 
     const approval = session?.approvals?.find((entry) => entry.status === "pending");
     const site = this.#siteApproval;
-    if (this.#codeRequest !== undefined) {
+    if (this.#workRequest !== undefined) {
+      const request = this.#workRequest;
+      this.#panel.title = request.kind === "approval" ? " Work approval " : " Work question ";
+      this.#panelText.content =
+        request.text +
+        "\n" +
+        (request.kind === "approval"
+          ? "y allow · n deny — then Enter"
+          : request.options
+              .map((option, index) => String(index + 1) + ". " + option.label)
+              .join("\n") + "\nType an answer, then Enter.");
+      this.#panel.visible = true;
+    } else if (this.#codeRequest !== undefined) {
       const request = this.#codeRequest;
       this.#panel.title =
         request.kind === "approval" ? " Provider approval " : " Provider question ";
@@ -1466,7 +1501,7 @@ class AgentScreen {
       );
     }
     if (visible.length === 0) return box;
-    if (streaming && reasoning.length === 0 && !visible.includes("|")) {
+    if (streaming && reasoning.length === 0) {
       const blocks: {
         source: string;
         fence: boolean;
@@ -1640,7 +1675,8 @@ class AgentScreen {
         this.#session?.approvals?.some((entry) => entry.status === "pending") ||
         this.#session?.questions.some((entry) => entry.status === "pending") ||
         this.#siteApproval !== undefined ||
-        this.#codeRequest !== undefined
+        this.#codeRequest !== undefined ||
+        this.#workRequest !== undefined
       )
         this.#note = "Answer the pending request before opening checkout review.";
       else {
@@ -1654,7 +1690,16 @@ class AgentScreen {
               ]
             : [];
         const path = /^\d+$/.test(argument) ? listed[Number(argument) - 1] : argument;
-        let diff = await readAgentDiff(this.#input.session, threadId, this.#thread.checkoutId);
+        const observed = await readAgentDiff(
+          this.#input.session,
+          threadId,
+          this.#thread.checkoutId,
+        );
+        if (threadId === this.#threadId && observed.kind === "ready") {
+          this.#checkoutChanges = observed;
+          this.#checkoutChangesReadAt = Date.now();
+        }
+        let diff = observed;
         if (argument.length > 0 && diff.kind === "ready")
           diff =
             path === undefined
@@ -1720,12 +1765,7 @@ class AgentScreen {
       return;
     }
     if (text === "/next-waiting") {
-      const next = this.#threads.find(
-        (thread) => thread.awaitingInput && thread.id !== this.#threadId,
-      );
-      if (next === undefined) this.#note = "No other waiting thread is currently reported.";
-      else await this.#switchThread(next.id, next.mode);
-      this.#draw();
+      await this.#openNextWaiting();
       return;
     }
     if (text === "/threads") {
@@ -1788,7 +1828,10 @@ class AgentScreen {
     if (text === "/model" || text.startsWith("/model ")) {
       const argument = text.slice("/model".length).trim();
       if (argument.length === 0) {
-        this.#models = await listAgentModels(this.#input.session);
+        this.#models = await listAgentModels(
+          this.#input.session,
+          this.#port.mode === "code" ? "coding" : this.#port.mode,
+        );
         this.#listing = this.#listing === "models" ? undefined : "models";
         this.#draw();
         return;
@@ -1852,6 +1895,11 @@ class AgentScreen {
     }
     if (text.startsWith("/steer ")) {
       await this.#steer(text.slice("/steer".length).trim());
+      return;
+    }
+    if (this.#workRequest !== undefined) {
+      this.#note = (await answerWorkRequest(this.#input.session, this.#workRequest, text)) ?? "";
+      await this.refresh();
       return;
     }
     if (this.#codeRequest !== undefined) {

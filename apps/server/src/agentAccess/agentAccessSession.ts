@@ -374,6 +374,8 @@ export function guardAgentRequest(input: {
   }
   if (path === "/api/work/threads/commands") {
     if (kind === "create-work-thread") {
+      if (body["fullAccessRunFlag"] !== undefined)
+        return refused("The per-run Full access flag stays with the person.");
       if (body["access"] !== undefined && !workAccessAllowed(scope.highestLevel, body["access"]))
         return refused(`This agent's grant allows at most ${scope.highestLevel}.`);
       if (!scope.modes.includes("work")) return refused("This agent's grant has no Work.");
