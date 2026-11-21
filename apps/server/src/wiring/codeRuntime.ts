@@ -1064,6 +1064,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             platform: process.platform,
             shell,
             strict,
+            mode: "code",
+            executionPolicy: thread.executionPolicy,
+            fullAccessSandbox: thread.fullAccessSandbox,
+            ...(configuredDriverOptions.acpHome === undefined
+              ? {}
+              : { acpHome: configuredDriverOptions.acpHome }),
           }),
         onPendingRequestWithdrawn: () => machineChangeFeed.publish(["code-navigation"]),
         gitMutationPort,

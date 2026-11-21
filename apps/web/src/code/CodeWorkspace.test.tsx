@@ -4,7 +4,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { appendTerminalSelection, CodeWorkspace, providerTerminalOffer } from "./CodeWorkspace";
+import { appendTerminalSelection, CodeWorkspace } from "./CodeWorkspace";
+import { providerTerminalOffer } from "./providerTerminalOffer";
 import { codeClient, gitObservation, ids, terminalResult } from "./CodeDeliveryPane.test-fixtures";
 import { ServerCodeProjectsContext } from "../projects/serverProjectEntries";
 import { createTabActivationRegistry, TabActivationProvider } from "../shell/TabActivation";
@@ -1053,6 +1054,13 @@ describe("providerTerminalOffer", () => {
     expect(providerTerminalOffer([group("codex")], thread)).toEqual({
       providerProgramName: "Codex",
     });
+    expect(providerTerminalOffer([group("antigravity")], thread)).toEqual({
+      providerProgramName: "Google Antigravity",
+    });
+  });
+
+  it("offers nothing for an ACP agent whose CLI has no interactive mode Octant knows", () => {
+    expect(providerTerminalOffer([group("kilo")], thread)).toEqual({});
   });
 
   it("offers nothing for a provider without one, a switched-off one, or a Plan thread", () => {

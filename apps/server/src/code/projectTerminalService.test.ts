@@ -40,6 +40,7 @@ import { rebuildProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { ProjectTerminalService } from "./projectTerminalService";
+import type { ProviderTerminalLaunch } from "../providers/providerTerminal";
 import { TerminalService } from "./terminalService";
 import { TerminalProcessPort } from "./terminalProcessPort";
 import { makeProcessConfinementLive } from "../process/seatbeltProfile";
@@ -225,6 +226,9 @@ function harness(
     readonly strict?: boolean;
     readonly shell?: string;
     readonly launchThrows?: boolean;
+    readonly providerTerminal?: ConstructorParameters<
+      typeof ProjectTerminalService
+    >[0]["providerTerminal"];
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-project-terminal-"));
@@ -284,6 +288,9 @@ function harness(
     ...(options.deviceQuietMs === undefined ? {} : { deviceQuietMs: options.deviceQuietMs }),
     ...(options.strict === undefined ? {} : { strict: () => options.strict === true }),
     ...(options.shell === undefined ? {} : { shell: () => options.shell ?? "" }),
+    ...(options.providerTerminal === undefined
+      ? {}
+      : { providerTerminal: options.providerTerminal }),
   });
   const events = () =>
     journal
@@ -2202,4 +2209,142 @@ it("starts a Work terminal in its task folder and refuses a withdrawn task witho
   } finally {
     f.connection.close();
   }
+});
+
+describe("Work task provider terminal", () => {
+  const workThreadId = "94000000-0000-4000-8000-000000000001";
+  function providerHarness(
+    options: {
+      readonly strict?: boolean;
+      readonly executionPolicy?: "approval-gated" | "full-access" | "plan";
+      readonly fullAccessSandbox?: boolean;
+    } = {},
+  ) {
+    const providerTerminal = vi.fn(
+      (_input: {
+        readonly workThreadId: string;
+        readonly shell: string;
+        readonly strict: boolean;
+      }): ProviderTerminalLaunch => ({
+        status: "resolved",
+        name: "Google Antigravity",
+        command: "exec '/opt/tools/agy'",
+        environment: { GEMINI_HOME: "/Users/person/.gemini" },
+      }),
+    );
+    const f = harness({
+      projects: new Map([[ids.project, project({ type: "work" })]]),
+      access: () => true,
+      shell: "/bin/zsh",
+      ...(options.strict === undefined ? {} : { strict: options.strict }),
+      providerTerminal,
+      resolveActionWorkThread: async () => ({
+        root: "/approved/notes",
+        executionPolicy: options.executionPolicy ?? "approval-gated",
+        ...(options.fullAccessSandbox === undefined
+          ? {}
+          : { fullAccessSandbox: options.fullAccessSandbox }),
+        current: () => true,
+        active: () => true,
+      }),
+    });
+    return { ...f, providerTerminal };
+  }
+  const providerStart = (overrides: Readonly<Record<string, unknown>> = {}) =>
+    decodeProjectTerminalCommand({ ...start(), workThreadId, program: "provider", ...overrides });
+
+  it("opens the Work task's provider program with its account environment in the task's folder", async () => {
+    const f = providerHarness();
+    try {
+      expect(await f.service.execute(windowId, "local-window", providerStart())).toMatchObject({
+        kind: "project-terminal",
+        terminal: { state: "running" },
+      });
+      // No Strict value reads as Strict, so the program gets the guarded environment.
+      expect(f.providerTerminal).toHaveBeenCalledWith({
+        workThreadId,
+        shell: "/bin/zsh",
+        strict: true,
+      });
+      expect(f.terminals.launches[0]).toMatchObject({
+        command: "exec '/opt/tools/agy'",
+        environment: { GEMINI_HOME: "/Users/person/.gemini" },
+        cwd: "/approved/notes",
+        executionPolicy: "approval-gated",
+      });
+      // Under Strict it stays confined as the task's terminals are.
+      expect(f.terminals.launches[0]).not.toHaveProperty("strict", false);
+    } finally {
+      f.connection.close();
+    }
+  });
+
+  it("runs the Work provider terminal unconfined outside Strict, as the task's turns run, and confined where the task keeps its sandbox", async () => {
+    const outside = providerHarness({ strict: false });
+    const kept = providerHarness({
+      strict: false,
+      executionPolicy: "full-access",
+      fullAccessSandbox: true,
+    });
+    try {
+      await outside.service.execute(windowId, "local-window", providerStart());
+      expect(outside.terminals.launches[0]).toMatchObject({
+        command: "exec '/opt/tools/agy'",
+        strict: false,
+        // The task's own level, not the Full access a plain terminal takes outside Strict.
+        executionPolicy: "approval-gated",
+      });
+      await kept.service.execute(windowId, "local-window", providerStart());
+      expect(kept.terminals.launches[0]).toMatchObject({ command: "exec '/opt/tools/agy'" });
+      expect(kept.terminals.launches[0]).not.toHaveProperty("strict", false);
+    } finally {
+      outside.connection.close();
+      kept.connection.close();
+    }
+  });
+
+  it("refuses a provider terminal for a remote session, a Plan task, and a Project terminal with no task", async () => {
+    const f = providerHarness();
+    const plan = providerHarness({ executionPolicy: "plan" });
+    try {
+      expect(await f.service.execute(windowId, "remote-device", providerStart())).toMatchObject({
+        kind: "project-terminal-refused",
+        reason: "unauthorized",
+      });
+      expect(
+        await f.service.execute(
+          windowId,
+          "local-window",
+          decodeProjectTerminalCommand({ ...start(), program: "provider" }),
+        ),
+      ).toMatchObject({ kind: "project-terminal-refused" });
+      expect(await plan.service.execute(windowId, "local-window", providerStart())).toMatchObject({
+        kind: "project-terminal-refused",
+      });
+      expect(f.providerTerminal).not.toHaveBeenCalled();
+      expect(plan.providerTerminal).not.toHaveBeenCalled();
+      expect(f.terminals.launches).toHaveLength(0);
+      expect(plan.terminals.launches).toHaveLength(0);
+    } finally {
+      f.connection.close();
+      plan.connection.close();
+    }
+  });
+
+  it("starts nothing when the task's provider has no program to open", async () => {
+    const f = providerHarness();
+    f.providerTerminal.mockReturnValueOnce({
+      status: "refused",
+      message: "This thread's provider has no command-line program Octant can open.",
+    });
+    try {
+      expect(await f.service.execute(windowId, "local-window", providerStart())).toMatchObject({
+        kind: "project-terminal-refused",
+        reason: "unavailable",
+      });
+      expect(f.terminals.launches).toHaveLength(0);
+    } finally {
+      f.connection.close();
+    }
+  });
 });

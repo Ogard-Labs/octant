@@ -14,6 +14,7 @@
  */
 
 import type { ProviderToolingProvider, ProviderToolingRequest } from "@octant/contracts";
+import { acpAgentProfile, isAcpAgentKind } from "@octant/contracts/acp-agent-profiles";
 import { redactSecrets } from "./secretGuardPolicy";
 
 export type ProviderToolingCommandKind = ProviderToolingRequest["kind"];
@@ -70,11 +71,15 @@ const PROVIDER_NAME: Readonly<Record<ProviderToolingProvider, string>> = {
 /**
  * The name of the provider command-line program a person can open in a
  * thread's terminal tab, or undefined for a driver Octant cannot open one
- * for. It is the same pair whose account folder Octant resolves for its
- * tooling commands, so the terminal starts against the account a turn uses.
+ * for: Claude Code and Codex, whose account folder Octant resolves for its
+ * tooling commands, and an ACP agent whose profile names the arguments that
+ * open its own interactive CLI.
  */
 export function providerTerminalName(driverKind: string): string | undefined {
-  return driverKind === "claude" || driverKind === "codex" ? PROVIDER_NAME[driverKind] : undefined;
+  if (driverKind === "claude" || driverKind === "codex") return PROVIDER_NAME[driverKind];
+  if (!isAcpAgentKind(driverKind)) return undefined;
+  const profile = acpAgentProfile(driverKind);
+  return profile.interactiveArgs === undefined ? undefined : profile.name;
 }
 
 function refuse(

@@ -92,7 +92,12 @@ export type ShellActions = {
   readonly activatePane: ShellController["activatePane"];
   readonly addDockTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly addZenBrowser: (sourceContext: ZenSourceContext) => void;
-  readonly addZenProjectTerminal: (projectId: ProjectId) => Promise<CodeTerminalId | undefined>;
+  readonly addZenProjectTerminal: (
+    projectId: ProjectId,
+    folder?: string,
+    /** Opens the window's Work task's provider program rather than a shell. */
+    program?: "provider",
+  ) => Promise<CodeTerminalId | undefined>;
   readonly addZenTerminal: (sourceContext: ZenSourceContext) => Promise<void>;
   readonly archiveCodeThread: CodeController["archiveThread"];
   readonly clearFocus: ShellController["clearFocus"];
