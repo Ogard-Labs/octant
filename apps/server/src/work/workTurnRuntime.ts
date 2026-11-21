@@ -1174,6 +1174,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             .pipe(Effect.tap(() => Effect.sync(() => input.onPromptSent?.())));
         }),
       });
+      input.liveTurn?.promptSent();
       const stoppedByLoop = yield* Effect.raceFirst(
         Fiber.join(events).pipe(Effect.as(false)),
         Deferred.await(loopStopped).pipe(Effect.as(true)),

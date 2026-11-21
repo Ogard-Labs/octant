@@ -88,12 +88,14 @@ function fixture(
     projections: runtime.projections,
     clock: () => now,
   });
+  const steeringChanged = vi.fn();
   const service = new ThreadMessageQueueService({
     connection,
     journal,
     port: p,
     actor,
     clock: () => now,
+    onSteeringChanged: steeringChanged,
   });
   return {
     connection,
@@ -102,6 +104,7 @@ function fixture(
     p,
     database,
     runtime,
+    steeringChanged,
     close() {
       service.dispose();
       connection.close();
@@ -955,6 +958,11 @@ describe("durable ordinary thread queue", () => {
     await f.service.execute(windowId, offered);
     await f.service.tick();
     await vi.waitFor(() => expect(steer).toHaveBeenCalledOnce());
+    // Readers are told, and see which message is waiting on the runtime.
+    expect(f.steeringChanged).toHaveBeenCalledOnce();
+    expect((await snapshot(f.service)).items).toEqual([
+      expect.objectContaining({ messageId: offered.messageId, status: "queued", steering: true }),
+    ]);
     // A tool approval can keep the runtime from answering for as long as the
     // person takes; queuing and pausing go on meanwhile.
     const later = enqueue(1, randomUUID(), "and summarize it");

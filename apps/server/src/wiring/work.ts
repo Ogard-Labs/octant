@@ -1942,6 +1942,7 @@ export function wireWork(deps: WorkDependencies) {
       // A device the host's own person paired manages the queue as a window
       // does; any other device keeps to its own messages.
       isRestrictedDevice: isRestrictedDeviceScope,
+      onSteeringChanged: () => machineChangeFeed.publish(["thread-message-queue"]),
       deviceActor: (scopeId) =>
         isPairedDeviceScope(scopeId)
           ? eventActorForPrincipal({ kind: "remote-device", deviceId: String(scopeId) })

@@ -1064,6 +1064,7 @@ export class CodeTurnRunner {
           }
         }),
       });
+      input.liveTurn?.promptSent();
 
       const awaitCollection = Fiber.join(collected).pipe(
         Effect.catchAll((error) =>

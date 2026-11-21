@@ -20,6 +20,7 @@ import {
   type ThreadMessageQueueRefusalReason,
   type ThreadMessageQueueResult,
   type ThreadMessageQueueScope,
+  type ThreadMessageQueueSnapshot,
   type ThreadQueueMessageId,
   type WindowId,
 } from "@octant/contracts";
@@ -63,6 +64,12 @@ export interface ThreadMessageQueueServiceOptions {
    * is journaled with `actor`.
    */
   readonly deviceActor?: (scopeId: WindowId) => EventActor | undefined;
+  /**
+   * Told that a message started or stopped waiting on a running turn's
+   * runtime. That is host memory, not a journaled change, so without this a
+   * reader would keep offering edit and remove on it until its next read.
+   */
+  readonly onSteeringChanged?: () => void;
 }
 /**
  * Whether a thread owes a turn. `active` is a turn its mode is running or has
@@ -82,6 +89,7 @@ export class ThreadMessageQueueService {
   readonly #clock: () => string;
   readonly #isRestrictedDevice: (scopeId: WindowId) => boolean;
   readonly #deviceActor: (scopeId: WindowId) => EventActor | undefined;
+  readonly #onSteeringChanged: () => void;
   readonly #locks = new Map<string, Promise<void>>();
   readonly #pendingTicks = new Set<string>();
   #allScopesTick: Promise<void> | undefined;
@@ -108,6 +116,18 @@ export class ThreadMessageQueueService {
     this.#port = options.port;
     this.#isRestrictedDevice = options.isRestrictedDevice ?? (() => false);
     this.#deviceActor = options.deviceActor ?? (() => undefined);
+    this.#onSteeringChanged = options.onSteeringChanged ?? (() => undefined);
+  }
+  /** The queue as stored, with each message a running turn's runtime is still considering marked. */
+  #snapshot(scope: ThreadMessageQueueScope): ThreadMessageQueueSnapshot {
+    const stored = this.#store.snapshot(scope);
+    if (!stored.items.some((item) => this.#steering.has(item.messageId))) return stored;
+    return {
+      ...stored,
+      items: stored.items.map((item) =>
+        this.#steering.has(item.messageId) ? { ...item, steering: true as const } : item,
+      ),
+    };
   }
   async read(
     windowId: WindowId,
@@ -116,7 +136,7 @@ export class ThreadMessageQueueService {
     const inspected = await this.#inspect({ scope, windowId, intent: "read" });
     if (inspected.status === "held") return { status: "refused", reason: inspected.reason };
     if (this.#store.purged(scope)) return { status: "refused", reason: "thread-unavailable" };
-    return { status: "ready", snapshot: this.#store.snapshot(scope) };
+    return { status: "ready", snapshot: this.#snapshot(scope) };
   }
   /**
    * Tells a caller that must act only on an idle thread where the thread
@@ -168,7 +188,7 @@ export class ThreadMessageQueueService {
       const result = (status: "applied" | "duplicate" | "conflict"): ThreadMessageQueueResult => ({
         status,
         requestId: command.requestId,
-        snapshot: this.#store.snapshot(command.scope),
+        snapshot: this.#snapshot(command.scope),
       });
       if (this.#disposed) return refused("authority-revoked");
       const deviceActor = this.#deviceActor(windowId);
@@ -771,6 +791,7 @@ export class ThreadMessageQueueService {
     if (steer === undefined || this.#unsteerable.has(messageId) || this.#steering.has(messageId))
       return;
     this.#steering.add(messageId);
+    this.#steeringChanged();
     void (async () => {
       let outcome: "steered" | "refused" | "unavailable";
       try {
@@ -780,8 +801,15 @@ export class ThreadMessageQueueService {
       }
       await this.#serial(scope, () => this.#settleSteer(scope, messageId, content, outcome));
     })().catch(() => {
-      this.#steering.delete(messageId);
+      if (this.#steering.delete(messageId)) this.#steeringChanged();
     });
+  }
+  #steeringChanged(): void {
+    try {
+      this.#onSteeringChanged();
+    } catch {
+      // A reader that missed the notice catches up at its next read.
+    }
   }
   async #settleSteer(
     scope: ThreadMessageQueueScope,
@@ -790,6 +818,9 @@ export class ThreadMessageQueueService {
     outcome: "steered" | "refused" | "unavailable",
   ): Promise<void> {
     this.#steering.delete(messageId);
+    // A steered message's removal is journaled and notifies by itself; one
+    // that waits again changes nothing durable.
+    if (outcome !== "steered") this.#steeringChanged();
     if (this.#disposed) return;
     // Nothing was tried (the turn is still starting, say), so a later pass
     // asks again; asking now would only repeat the same answer.

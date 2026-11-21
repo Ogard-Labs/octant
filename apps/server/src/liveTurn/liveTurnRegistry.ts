@@ -51,6 +51,11 @@ export interface LiveTurnTracker {
   observe(event: ProviderRuntimeEvent): void;
   /** Records the connection the turn acquired; it is forgotten at `end`. */
   connect(connection: LiveTurnConnection): void;
+  /**
+   * The runtime accepted the turn's prompt: the connection's `send` returned.
+   * A runtime takes a person's note from here on, even before it says anything.
+   */
+  promptSent(): void;
   end(): void;
 }
 
@@ -73,7 +78,7 @@ interface LiveTurn {
   readonly startedAt: UtcTimestamp;
   state: LiveTurnState;
   connection?: LiveTurnConnection;
-  /** Whether the runtime has answered the turn's prompt with any event yet. */
+  /** Whether the runtime has the turn's prompt: it was sent, or it answered. */
   answering?: true;
 }
 
@@ -154,6 +159,10 @@ export class LiveTurnRegistry {
         const turn = own();
         if (turn !== undefined) turn.connection = connection;
       },
+      promptSent: () => {
+        const turn = own();
+        if (turn?.connection !== undefined) turn.answering = true;
+      },
       end: () => {
         if (own() === undefined) return;
         this.#turns.delete(threadId);
@@ -168,11 +177,14 @@ export class LiveTurnRegistry {
   }
 
   /**
-   * The connection of the thread's running turn once its runtime is answering
-   * the prompt. A runner records the connection before it opens the session
-   * and sends the prompt, and a runtime refuses a person's note until the
-   * prompt is open, so a note offered sooner is not refused for good, just
-   * offered again later. Every event a runner observes follows the send.
+   * The connection of the thread's running turn once its runtime has its
+   * prompt: `send` returned, or the runtime answered with an event (every
+   * event a runner observes follows the send). A runner records the
+   * connection before it opens the session and sends the prompt, and a
+   * runtime refuses a person's note until the prompt is open, so a note
+   * offered sooner is not refused for good, just offered again later. A
+   * runtime that stays silent through its first request (the Octant Harness
+   * waiting on the model) still takes a note once the prompt is sent.
    */
   answeringConnection(threadId: string): LiveTurnConnection | undefined {
     const turn = this.#turns.get(threadId);

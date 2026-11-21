@@ -58,6 +58,21 @@ describe("a thread's live turn", () => {
     expect(registry.answeringConnection("t1")).toBeUndefined();
   });
 
+  it("offers a person's note once the prompt is sent, though the runtime has said nothing yet", () => {
+    const registry = new LiveTurnRegistry();
+    const tracker = registry.tracker("t1", "work-navigation");
+    const held = { sessionId: "session-a" } as unknown as LiveTurnConnection;
+    tracker.begin(START);
+    // A prompt sent before any connection is no prompt this turn's runtime holds.
+    tracker.promptSent();
+    tracker.connect(held);
+    expect(registry.answeringConnection("t1")).toBeUndefined();
+    // The Octant Harness waits on its first model request silently, and
+    // queues a note for the end of that request.
+    tracker.promptSent();
+    expect(registry.answeringConnection("t1")).toBe(held);
+  });
+
   it("carries the start time from the moment the turn begins", () => {
     const registry = new LiveTurnRegistry();
     registry.tracker("t1", "code-navigation").begin(START);

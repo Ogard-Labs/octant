@@ -7064,16 +7064,23 @@ ls-remote` against the thread's remote and the GitHub reads they already
   that turn under the same checks, one at a time, in order. A message
   the runtime refuses, or a steer that
   fails, leaves it queued for the next turn, and the queue does not offer that
-  message again; a connection with no `steer`, or a turn whose runtime has
-  not yet answered its prompt with any event (it is still opening the
-  session), offers nothing and changes nothing, so the message is offered
-  again on a later pass rather than refused for good. The runtime is asked
+  message again; a connection with no `steer`, or a turn whose runtime does
+  not have its prompt yet (the connection's `send` has not returned and the
+  runtime has sent no event: it is still opening the session), offers
+  nothing and changes nothing, so the message is offered again on a later
+  pass rather than refused for good. A runtime silent through its first
+  request, such as the Octant Harness waiting on the model, is offered the
+  message once `send` returned. The runtime is asked
   outside the queue's per-thread lock, since the Octant Harness answers only
   once the note is in the conversation, which a pending tool approval can
   delay indefinitely: meanwhile the person can still queue, pause and edit
   or remove other messages, and the offered message alone can be neither
   edited, removed, moved nor dispatched until the runtime answers, so it
-  never reaches two turns. A provider-switch handoff, a child's parent
+  never reaches two turns. The queue read marks that message `steering`
+  (host memory, never journaled), and the host publishes a
+  `thread-message-queue` change when it starts or stops waiting, so a client
+  disables its edit, move and remove controls and says it is being sent into
+  the running turn. A provider-switch handoff, a child's parent
   context and a thread export carry each steered message as a user message
   of its turn, after that turn's prompt, with the time it was sent, under the
   same limits and redaction as the turn's other messages. The message is not marked as dispatching

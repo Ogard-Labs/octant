@@ -739,7 +739,8 @@ its reply, as the person's message headed "Sent while the turn ran", with its
 time. The phone's Work and Code transcripts show it the same way, in the
 person's message bubble under the same heading. The queue shows no separate
 steered state, since its read lists only messages still waiting. While the
-runtime has not yet taken it, that one message cannot be edited, removed or
+runtime has not yet taken it, that one message shows "Sending into the
+running turn" and cannot be edited, removed or
 moved; the rest of the queue stays usable. A transcript read afresh shows it
 at once; a desktop transcript already open shows it when the turn settles or
 is read again. A message the runtime does not take stays in the queue for
