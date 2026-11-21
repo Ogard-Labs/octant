@@ -104,6 +104,11 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
           .list(windowId, { threadKind: kind, scopeId })
           .filter(
             (offer) =>
+              offer.kind !== "transcribe" ||
+              (!legacy && url.searchParams.get("transcription") === "1"),
+          )
+          .filter(
+            (offer) =>
               supportsReferences || offer.kind !== "generate" || offer.references === undefined,
           );
         const response = { offers: legacy ? waiting.filter(isImageOffer) : waiting };

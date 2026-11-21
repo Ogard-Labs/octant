@@ -15,6 +15,7 @@ import {
 import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { TranscriptionOfferCard } from "./TranscriptionOfferCard";
 
 const ACTIVE_OFFER_POLL_MS = 500;
 const IDLE_OFFER_POLL_MS = 5_000;
@@ -30,6 +31,7 @@ interface OfferCardProps {
 const CARD_RENDERERS: Record<ServiceOffer["kind"], ComponentType<OfferCardProps>> = {
   generate: ImageGenerateOfferCard,
   save: ImageSaveOfferCard,
+  transcribe: TranscriptionOfferCard,
 };
 
 export function ServiceOfferPrompt(props: {

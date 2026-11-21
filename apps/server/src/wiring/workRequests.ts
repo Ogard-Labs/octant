@@ -400,8 +400,11 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
   const serviceOffersForWindow = async (
     windowId: WindowId,
     principal?: ClientPrincipal,
+    imageOffersOnly = false,
   ): Promise<ReadonlyArray<ServiceOffer>> => {
-    const waiting = serviceOffers.listForWindow(windowId);
+    const waiting = serviceOffers
+      .listForWindow(windowId)
+      .filter((offer) => !imageOffersOnly || offer.kind === "generate" || offer.kind === "save");
     if (waiting.length === 0) return [];
     const checked = await Promise.all(
       waiting.map(async (offer) =>
@@ -440,14 +443,18 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     offerHostRun: randomUUID(),
     // Each list is the holding service's own for this reader, so who may
     // answer an ask is decided where it always was.
-    asks: async (reader) =>
+    asks: async (reader, imageOffersOnly) =>
       waitingAsksFrom(
         {
           toolApprovals: extensionToolApprovalService.list(reader),
           browserApprovals: browserToolApprovalService.list(reader.scopeId),
           memoryProposals: projectMemoryAccess.proposals.list(reader.scopeId),
           routineProposals: routineProposalService.list(reader.scopeId),
-          serviceOffers: await serviceOffersForWindow(reader.scopeId, reader.principal),
+          serviceOffers: await serviceOffersForWindow(
+            reader.scopeId,
+            reader.principal,
+            imageOffersOnly,
+          ),
         },
         readWaitingAskThread,
       ),

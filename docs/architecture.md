@@ -7846,6 +7846,21 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and `/api/speech/synthesis` behind window authority, sniffs and bounds the
   audio, persists nothing, and reports each direction `ready`, `unconfigured`,
   or `unavailable` with the Settings link that fixes it.
+  An attended Work or Code agent outside Plan can use `octant_transcribe`
+  only when its provider carries Octant tools and transcription is ready.
+  The host checks that a file under the turn's current folder contains supported
+  audio (WAV, WebM, Ogg, MPEG, MP4 or FLAC, at most 10 MiB). Before sending
+  it, the thread's offer names its relative path, byte count, Voice endpoint
+  and model. A person-paired device can confirm its own turn's offer.
+  A remembered answer lives only in host memory for this thread, provider
+  instance, endpoint address and model. A changed file, destination or lost
+  authority while the card waits sends nothing. Agents and paired microphone
+  clips share at most one transcription slot, leaving one for local dictation.
+  Unlike dictation, the agent's returned text is a tool result in the thread,
+  marked as outside content and checked by Shield. Up to eight transcripts
+  are cached in host memory by thread, content, destination and language.
+  Pages carry at most 32,000 characters; a missing continuation refuses
+  rather than silently making another paid call.
   Every desktop composer (Chat, Work, Code, the welcome and draft composers) and
   Navigator show a microphone beside the attach control only while
   transcription is `ready`; the clip is recorded by the browser's own encoder,
