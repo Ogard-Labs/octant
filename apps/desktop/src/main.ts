@@ -406,6 +406,7 @@ import {
 import { CANVAS_PROTOTYPE_HOST_SWITCH } from "./canvasPrototypeProtocol";
 import {
   createRemoteServerPages,
+  validateRemotePortForwardOpenRequest,
   pageAccessHeader,
   pageNavigation,
   readRecordedForwarderPort,
@@ -4368,15 +4369,15 @@ function installIpcHandlers(): void {
     ownedTopLevelWindowContext(event);
     const request = validateRemoteServerPageOpenRequest(value);
     const signer = event.sender;
-    if (!remoteServerPageSigners.has(signer.id)) {
-      remoteServerPageSigners.set(signer.id, signer);
-      const signerId = signer.id;
-      signer.once("destroyed", () => {
-        remoteServerPageSigners.delete(signerId);
-        remoteServerPages().windowClosed(signerId);
-      });
-    }
+    registerRemoteServerPageSigner(signer);
     return await remoteServerPages().open(signer.id, request);
+  });
+  ipcMain.handle(IPC_CHANNELS.remotePortForwardOpen, async (event, value: unknown) => {
+    ownedTopLevelWindowContext(event);
+    const request = validateRemotePortForwardOpenRequest(value);
+    const signer = event.sender;
+    registerRemoteServerPageSigner(signer);
+    return await remoteServerPages().openForward(signer.id, request);
   });
   ipcMain.handle(IPC_CHANNELS.remoteServerPageForgetHost, async (event, hostId: unknown) => {
     ownedTopLevelWindowContext(event);
@@ -4784,6 +4785,17 @@ const remoteServerPageSigners = new Map<number, Electron.WebContents>();
 const remoteServerPageWindows = new Map<string, BrowserWindow>();
 const remoteServerPageOrigins = new Map<string, string>();
 let remoteServerPagesInstance: RemoteServerPages | undefined;
+
+/** Makes a window the signer for what it opens, until it is destroyed. */
+function registerRemoteServerPageSigner(signer: Electron.WebContents): void {
+  if (remoteServerPageSigners.has(signer.id)) return;
+  remoteServerPageSigners.set(signer.id, signer);
+  const signerId = signer.id;
+  signer.once("destroyed", () => {
+    remoteServerPageSigners.delete(signerId);
+    remoteServerPages().windowClosed(signerId);
+  });
+}
 
 function remoteServerPages(): RemoteServerPages {
   remoteServerPagesInstance ??= createRemoteServerPages({

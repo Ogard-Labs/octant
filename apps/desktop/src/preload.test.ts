@@ -825,6 +825,7 @@ describe("desktop preload bridge", () => {
       "openInNewWindow",
       "openMovedThreadThere",
       "openNightly",
+      "openRemotePortForward",
       "openRemoteServerPage",
       "ownerUnlockForgetKey",
       "ownerUnlockMakeKey",

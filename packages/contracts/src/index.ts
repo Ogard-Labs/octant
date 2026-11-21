@@ -112,6 +112,7 @@ export * from "./launchSession";
 export * from "./machineChanges";
 export * from "./localServers";
 export * from "./remoteServerGrants";
+export * from "./remotePortForwards";
 export * from "./modes";
 export * from "./multiModelPool";
 export * from "./nativeHarnessRouting";

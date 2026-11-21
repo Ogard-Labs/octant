@@ -593,7 +593,11 @@ import {
   disconnectedRunningServicesClient,
   useRemoteServerLiveOpener,
 } from "./home/remoteServerLiveOpener";
-import type { RemoteOpenMode, RemoteOpenOutcome } from "./home/runningServices";
+import type {
+  RemoteForwardOutcome,
+  RemoteOpenMode,
+  RemoteOpenOutcome,
+} from "./home/runningServices";
 import { buildReviewEntries } from "./review/reviewModel";
 import { createReviewSource } from "./review/reviewSource";
 import type { ReviewActionOutcome } from "./review/ReviewPage";
@@ -2427,6 +2431,39 @@ function LaunchedShell(
         },
         service,
         mode,
+      );
+    };
+  }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
+  const forwardRunningServicePort = useMemo(() => {
+    const host = runningServicesRemoteHost;
+    const openForward = remoteServerLiveOpener?.openForward;
+    const registry = federation?.registry;
+    const deviceKeyStore = federation?.deviceKeyStore;
+    if (host === undefined || host.status !== "ready" || openForward === undefined)
+      return undefined;
+    if (registry === undefined || deviceKeyStore === undefined) return undefined;
+    return async (service: RunningService): Promise<RemoteForwardOutcome> => {
+      const credential = (await registry.get(host.hostId))?.credential;
+      const connection = host.bridge.connection();
+      if (credential === undefined || connection === undefined) {
+        return {
+          kind: "refused",
+          message: `Can't reach ${host.hostName}. Check that it's on and on the same network.`,
+        };
+      }
+      const deviceKey = createPairingDeviceKeyAdapter(deviceKeyStore, credential.keyId);
+      return openForward(
+        {
+          hostId: host.hostId,
+          hostName: host.hostName,
+          origin: host.origin,
+          issueSession: () => connection.issueServerProxySession(),
+          sign: (payload) => deviceKey.sign(payload),
+          ...(pairedComputerFetch === undefined || !isRemotePairingOrigin(host.origin)
+            ? {}
+            : { fetch: pairedComputerFetch }),
+        },
+        Number(service.port),
       );
     };
   }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
@@ -6044,6 +6081,7 @@ function LaunchedShell(
     now: snoozeClockNow.getTime(),
     onOpenExternal: rootLinkActions.openExternal,
     openRunningServiceLive,
+    forwardRunningServicePort,
     pendingRequestClient,
     remoteRunningServicesClient,
     runningServicesClient,

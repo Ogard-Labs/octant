@@ -15,7 +15,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import type { AddressInfo, Socket } from "node:net";
+import { createServer as createNetServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -23,6 +23,7 @@ import {
   REMOTE_SERVER_GRANT_CLOSED,
   decodeCodeThreadId,
   decodeEventActor,
+  decodeRemotePortForwardResult,
   decodeRemoteServerGrantResult,
   decodeWindowId,
   type CodeThread,
@@ -55,6 +56,7 @@ import {
 } from "../privateListener.test-certs";
 import type { RequestTransportFacts, Serve } from "../server";
 import { createRemoteGateway, type RemoteGateway } from "./remoteGateway";
+import { RemotePortForwardService } from "./remotePortForwardService";
 import {
   RemoteServerGrantService,
   type RemoteServerSocketLimits,
@@ -126,6 +128,7 @@ interface Harness {
   readonly lifecycle: PairingDeviceLifecycleService;
   readonly fetch: (req: Request, facts?: RequestTransportFacts) => Promise<Response>;
   readonly grants: RemoteServerGrantService;
+  readonly forwards: RemotePortForwardService;
   readonly targets: Map<string, RemoteServerGrantTarget | (() => Promise<RemoteServerGrantTarget>)>;
   readonly readable: Set<string>;
   readonly dispatched: string[];
@@ -212,6 +215,17 @@ async function setup(
     ...(options.socketLimits === undefined ? {} : { socketLimits: options.socketLimits }),
   });
 
+  const forwards = new RemotePortForwardService({
+    journal,
+    hostActor: decodeEventActor({
+      kind: "system",
+      actorId: "33333333-3333-4333-8333-333333333333",
+    }),
+    uuid: randomUUID,
+    clock: () => nowIso,
+    now: () => nowMs,
+  });
+
   const { serve, getFetch } = createCapturingServe();
   let uuidCounter = 0;
   const before = capturedLifecycles.length;
@@ -280,6 +294,7 @@ async function setup(
       closeSession: (digest, reason) => grants.closeSession(digest, reason),
       holdsOpenSockets: (digest) => grants.holdsOpenSockets(digest),
     },
+    remotePortForwards: forwards,
     serve,
     now: () => nowMs,
     uuid: () => `22222222-2222-4222-8222-${String(++uuidCounter).padStart(12, "0")}`,
@@ -306,6 +321,7 @@ async function setup(
     lifecycle,
     fetch,
     grants,
+    forwards,
     targets,
     readable,
     dispatched,
@@ -1933,3 +1949,68 @@ describe("WebSocket upgrade on the proxy route", () => {
 function digestOf(proxy: Session): string {
   return digestRemoteServerProxySessionId(proxy.sessionId);
 }
+
+describe("port forward on the proxy route", () => {
+  it("opens a forward for the person's own device and carries a connection's bytes to its loopback port", async () => {
+    const harness = await setup();
+    const echo = createNetServer((socket) => socket.pipe(socket));
+    const port = await new Promise<number>((resolve) =>
+      echo.listen(0, "127.0.0.1", () => {
+        const address = echo.address();
+        resolve(typeof address === "object" && address !== null ? address.port : 0);
+      }),
+    );
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const answer = await call(
+      harness,
+      signed(proxy, {
+        path: "/api/server-proxy/forwards",
+        body: JSON.stringify({ kind: "open-remote-port-forward", requestId: randomUUID(), port }),
+      }),
+    );
+    expect(answer.status).toBe(200);
+    const opened = decodeRemotePortForwardResult(answer.json());
+    if (opened.kind !== "remote-port-forward-opened") throw new Error(opened.message);
+    expect(harness.dispatched).toEqual([]);
+
+    const response = await send(
+      harness,
+      upgradeRequest(proxy, String(opened.forward.forwardId), { path: "" }),
+    );
+    const acceptance = takeWebSocketUpgrade(response);
+    if (acceptance === undefined) throw new Error(`upgrade answered ${response.status}`);
+    const page = pageSocket();
+    const events = acceptance.open(page.peer);
+    events.message({ text: false, data: Uint8Array.from([7, 8, 9]) });
+    await vi.waitFor(() => expect(page.received).toHaveLength(1));
+    expect(Array.from(page.received[0]?.data ?? [])).toEqual([7, 8, 9]);
+
+    events.closed(1000, "done");
+    echo.close();
+  });
+
+  it("refuses a forward's connection from another device's proxy session", async () => {
+    const harness = await setup();
+    const owner = await session(harness, await pair(harness, "source-owner"), "server-proxy");
+    const other = await session(harness, await pair(harness, "source-other"), "server-proxy");
+    const answer = await call(
+      harness,
+      signed(owner, {
+        path: "/api/server-proxy/forwards",
+        body: JSON.stringify({
+          kind: "open-remote-port-forward",
+          requestId: randomUUID(),
+          port: 9,
+        }),
+      }),
+    );
+    const opened = decodeRemotePortForwardResult(answer.json());
+    if (opened.kind !== "remote-port-forward-opened") throw new Error(opened.message);
+    const refused = await send(
+      harness,
+      upgradeRequest(other, String(opened.forward.forwardId), { path: "" }),
+    );
+    expect(takeWebSocketUpgrade(refused)).toBeUndefined();
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+  });
+});

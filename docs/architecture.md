@@ -18274,10 +18274,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
       `/api/remote/auth/server-proxy-session`, `/api/remote/auth/sign-out`,
       `/api/remote/auth/rotate-key`, `/api/remote/auth/revoke-self`;
       `GET /api/remote/auth/device`; `POST /api/server-proxy/grants`;
+      `POST /api/server-proxy/forwards`;
       `GET /api/host/resources`; `POST /api/code/local-servers/commands`.
       Anything else, including the relay under
-      `/api/server-proxy/<grant>/`, which the desktop's forwarder drives with
-      its own signing, is refused. A request carries only the headers a signed
+      `/api/server-proxy/<grant>/` and a forward's connections at
+      `/api/server-proxy/<forward>`, which the desktop's forwarder and forward
+      listener drive with their own signing, is refused. A request carries only the headers a signed
       request has (`accept`, `content-type`, `cookie` naming only the
       computer's Octant session cookies, `origin` equal to the computer's
       origin, `sec-fetch-site: same-origin`, `x-octant-device-proof`,
@@ -19295,6 +19297,38 @@ approval-gated` command that undoes it. The terminal shows no one-time
     session's end closes it from the host, and closing the host's pages or
     stopping the forwarder closes it here. Any other answer reaches the page as
     the request's failure status, and no frame is sent.
+  - **Port forwards.** A device the host's own person paired may forward one
+    port on the host's loopback to its own computer as raw TCP, for tools that
+    are not a browser (a database client, a debugger), under the same proxy
+    session. `POST /api/server-proxy/forwards` names only the port; the host
+    reads whether the device's pairing was approved by its person from its own
+    record, never from the session, and refuses `not-the-person` for a
+    hub-introduced device, a restricted device, and an agent grant (the Act
+    item names Projects, not ports, so no item grants a forward yet). A forward
+    `rpf_<64 hex>` lasts an hour; a device holds four and a host sixteen
+    (`forward-limit`). Each connection is a signed `GET` WebSocket upgrade at
+    `/api/server-proxy/<forward id>`, carrying binary messages only (a text
+    message closes it with 1003), at most eight per forward (503 past that), and
+    the host bridges it to `127.0.0.1:<port>`; an open connection counts as use
+    of its proxy session, as a relayed socket does. A forward closes when it expires,
+    when its proxy session ends (a revoke, rotation, sign-out, or disabled
+    listener ends that), and when the host stops; closing it ends its
+    connections with 1008. Opening (actor: the device) and closing (actor: the
+    host) are journaled as `remote-server.forward-opened@1` and
+    `remote-server.forward-closed@1` with the forward, device, and port, never
+    an address or what travels, and a starting host records closed
+    (`host-stopped`) every forward the journal still shows open. On the device
+    only the desktop app forwards: its main process listens on `127.0.0.1`
+    alone, on the host's port number when it is free and another free port
+    otherwise, asks the window that opened the forward to sign each
+    connection's upgrade (that window signs only a `GET` at the forward's exact
+    path), and reaches the host through the listener trust rule. The listener
+    closes when the forward expires, when that window closes, and when the
+    computer is forgotten. Anything on the device that can open a loopback
+    connection reaches the forward, including a guarded tool command with a
+    `localServices` grant, a Full access turn, and any process outside
+    Octant's sandbox; the row that forwarded it says so (maintainer decision,
+    2026-11-20).
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and

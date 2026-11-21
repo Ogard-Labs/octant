@@ -42,6 +42,7 @@ function input(computerSnapshots: HomeStartInput["computerSnapshots"]): HomeStar
     needsYouAskClients: noAskClients,
     now: 0,
     openRunningServiceLive: undefined,
+    forwardRunningServicePort: undefined,
     pendingRequestClient: undefined,
     remoteRunningServicesClient: undefined,
     runningServicesClient: undefined,

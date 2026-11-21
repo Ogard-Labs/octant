@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import type { RemotePortForwardService } from "./remotePortForwardService";
+import { decodeRemotePortForwardRequest, encodeRemotePortForwardResult } from "@octant/contracts";
 import type { RemoteClientPrincipal, StableHostId } from "@octant/contracts/remote-access";
 import {
   decodeRemoteChallengeRequestV1,
@@ -62,8 +64,12 @@ export const REMOTE_AUTH_ROUTE_IDS = {
 /** Routes a proxy session reaches, and nothing else does. */
 export const REMOTE_SERVER_PROXY_ROUTE_IDS = {
   grants: "server-proxy-grants",
+  forwards: "server-proxy-forwards",
   relay: "server-proxy-relay",
 } as const;
+
+/** `/api/server-proxy/<forward id>`: one connection of a port forward, as a WebSocket of bytes. */
+const FORWARD_PATH_PATTERN = new RegExp(`^${REMOTE_SERVER_PROXY_PATH}(rpf_[a-f0-9]{64})$`);
 
 /** `/api/server-proxy/<grant id>` and the dev server's own path after it. */
 const RELAY_PATH_PATTERN = new RegExp(`^${REMOTE_SERVER_PROXY_PATH}(rsg_[a-f0-9]{64})(/.*)?$`);
@@ -263,6 +269,8 @@ export interface RemoteServerProxyGrantPort {
 export interface RemoteServerProxyAuthentication {
   readonly sessions: RemoteServerProxySessions;
   readonly grants: RemoteServerProxyGrantPort;
+  /** Ports a device its own person paired reaches as raw TCP; absent, both forward routes refuse. */
+  readonly forwards?: RemotePortForwardService;
 }
 
 interface RemoteRequestVerifier {
@@ -679,6 +687,52 @@ export function createRemoteHttpAuthentication(
         admittedBy === undefined
           ? verified
           : { ...verified, principal: Object.freeze({ ...verified.principal, admittedBy }) };
+      if (route.id === REMOTE_SERVER_PROXY_ROUTE_IDS.forwards) {
+        if (proxy.forwards === undefined) throw new RemoteHttpAuthFailure(503, "unavailable");
+        const forwardRequest = decodeBounded(
+          decodeRemotePortForwardRequest,
+          await readJsonObject(handoff.request),
+        );
+        return jsonResponse(
+          200,
+          encodeRemotePortForwardResult(
+            proxy.forwards.open({
+              deviceId: String(verified.principal.deviceId),
+              // A forward reaches this computer's own ports, which is the
+              // person's own act: a device they paired, never an agent grant.
+              actsAsHostPerson:
+                principalActsAsHostPerson(handoff.principal) &&
+                !isAgentGrantSession(handoff.principal),
+              sessionIdDigest: digestRemoteServerProxySessionId(sessionId),
+              request: forwardRequest,
+            }),
+          ),
+        );
+      }
+      const forwardId = FORWARD_PATH_PATTERN.exec(new URL(request.url).pathname)?.[1];
+      if (route.id === REMOTE_SERVER_PROXY_ROUTE_IDS.relay && forwardId !== undefined) {
+        if (
+          proxy.forwards === undefined ||
+          handoff.requestFacts.method !== "GET" ||
+          request.headers.get("upgrade")?.toLowerCase() !== "websocket"
+        ) {
+          return refusedRelay("upgrade-refused").response;
+        }
+        const accepted = proxy.forwards.accept({
+          deviceId: String(verified.principal.deviceId),
+          sessionIdDigest: digestRemoteServerProxySessionId(sessionId),
+          forwardId,
+        });
+        if (accepted.kind === "refused") {
+          if (accepted.reason === "busy") throw new RemoteHttpAuthFailure(503, "rate-limited");
+          return refusedRelay("grant-closed").response;
+        }
+        const held = release;
+        release = undefined;
+        return held === undefined
+          ? accepted.response
+          : withAdmissionRelease(accepted.response, held);
+      }
       if (route.id === REMOTE_SERVER_PROXY_ROUTE_IDS.relay) {
         const relayed = await relayToGrant(request, handoff, sessionId, proxy);
         if (relayed.kind !== "relayed") return relayed.response;

@@ -49,6 +49,43 @@ const granted = () =>
     grant: { grantId: GRANT_ID, threadId: THREAD_ID, port: 5173 },
   });
 
+describe("forwarding another computer's port from this window", () => {
+  it("asks the host for the forward, then has the desktop listen, and signs each connection's upgrade", async () => {
+    const forwardId = `rpf_${"cd".repeat(32)}`;
+    const forward = { forwardId, port: 5432, expiresAt: 3_600_000 };
+    const desktop = bridge();
+    const openRemotePortForward = vi.fn(async (_request: unknown) => ({
+      kind: "listening" as const,
+      port: 5432,
+    }));
+    const opener = createRemoteServerLiveOpener({ ...desktop, openRemotePortForward }, async () =>
+      Response.json({
+        kind: "remote-port-forward-opened",
+        requestId: "33333333-3333-4333-8333-333333333333",
+        forward,
+      }),
+    );
+    expect(await opener.openForward?.(HOST, 5432)).toEqual({ kind: "forwarded", localPort: 5432 });
+    expect(openRemotePortForward).toHaveBeenCalledWith({
+      hostId: HOST.hostId,
+      listenerOrigin: HOST.origin,
+      forward,
+    });
+    const signing = (await desktop.sign({
+      hostId: HOST.hostId,
+      grantId: forwardId,
+      method: "GET",
+      pathQuery: `/api/server-proxy/${forwardId}`,
+      bodyDigest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    })) as { status: string };
+    expect(signing.status).toBe("signed");
+  });
+
+  it("offers no forward where the desktop cannot listen for one", () => {
+    expect(createRemoteServerLiveOpener(bridge()).openForward).toBeUndefined();
+  });
+});
+
 describe("opening another computer's server live from this window", () => {
   it("asks the host for the grant, then has the desktop show it, and signs the page's requests", async () => {
     const desktop = bridge();
