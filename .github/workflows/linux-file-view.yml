@@ -2,6 +2,8 @@ name: Linux mediated file-view feasibility
 
 on:
   pull_request:
+    # A draft runs nothing; marking it ready for review starts the run.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - .github/workflows/linux-file-view.yml
       - scripts/linux-file-view/**
@@ -30,7 +32,7 @@ concurrency:
 jobs:
   strict-performance:
     name: Measure reconciled Strict warm overhead
-    if: github.event_name != 'workflow_dispatch'
+    if: github.event.pull_request.draft != true && (github.event_name != 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -59,7 +61,7 @@ jobs:
 
   kernel-admission:
     name: Compile and boot owned kernel admission core
-    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'kernel-admission'
+    if: github.event.pull_request.draft != true && (github.event_name != 'workflow_dispatch' || inputs.experiment == 'kernel-admission')
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -86,7 +88,7 @@ jobs:
           retention-days: 7
   pre-access:
     name: Measure stock pre-access admissions and group loss
-    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'pre-access'
+    if: github.event.pull_request.draft != true && (github.event_name != 'workflow_dispatch' || inputs.experiment == 'pre-access')
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -106,7 +108,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   native:
-    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'file-view'
+    if: github.event.pull_request.draft != true && (github.event_name != 'workflow_dispatch' || inputs.experiment == 'file-view')
     name: Measure native file-view behavior
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -159,7 +161,7 @@ jobs:
 
   syscall-admission:
     name: Measure syscall-entry admission counterexample
-    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'syscall-admission'
+    if: github.event.pull_request.draft != true && (github.event_name != 'workflow_dispatch' || inputs.experiment == 'syscall-admission')
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -199,7 +201,7 @@ jobs:
 
   async-compatibility:
     name: Measure runtime compatibility with refused asynchronous I/O
-    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'async-compatibility'
+    if: github.event.pull_request.draft != true && (github.event_name != 'workflow_dispatch' || inputs.experiment == 'async-compatibility')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -243,7 +245,7 @@ jobs:
 
   concurrent-admission:
     name: Measure owned concurrent descriptor admission
-    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'concurrent-admission'
+    if: github.event.pull_request.draft != true && (github.event_name != 'workflow_dispatch' || inputs.experiment == 'concurrent-admission')
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:

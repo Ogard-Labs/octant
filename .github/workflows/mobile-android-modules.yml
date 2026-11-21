@@ -2,6 +2,8 @@ name: Mobile (Android native modules)
 
 on:
   pull_request:
+    # A draft runs nothing; marking it ready for review starts the run.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - apps/mobile/modules/**
       - apps/mobile/plugins/**
@@ -20,6 +22,7 @@ concurrency:
 
 jobs:
   compile:
+    if: github.event.pull_request.draft != true
     name: Compile the Android modules
     runs-on: ubuntu-24.04
     timeout-minutes: 30

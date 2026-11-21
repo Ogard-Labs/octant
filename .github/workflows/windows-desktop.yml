@@ -2,6 +2,8 @@ name: Windows desktop package
 
 on:
   pull_request:
+    # A draft runs nothing; marking it ready for review starts the run.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - .github/workflows/windows-desktop.yml
       - apps/desktop/**
@@ -22,6 +24,7 @@ concurrency:
 
 jobs:
   package:
+    if: github.event.pull_request.draft != true
     name: Native Windows QA package
     runs-on: windows-2025
     timeout-minutes: 40

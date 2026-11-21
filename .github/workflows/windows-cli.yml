@@ -2,6 +2,8 @@ name: Windows CLI service lifecycle
 
 on:
   pull_request:
+    # A draft runs nothing; marking it ready for review starts the run.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - .github/workflows/windows-cli.yml
       - packages/cli/src/cli.ts
@@ -25,6 +27,7 @@ concurrency:
 
 jobs:
   lifecycle:
+    if: github.event.pull_request.draft != true
     name: Run the octant CLI's per-user service on Windows
     runs-on: windows-2025
     timeout-minutes: 20
