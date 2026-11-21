@@ -672,8 +672,9 @@ export function mapAcpPermissionRequest(
   const allow = request.params.options.find((option) => option.kind === "allow_once");
   const allowAlways = request.params.options.find((option) => option.kind === "allow_always");
   const reject = request.params.options.find((option) => option.kind.startsWith("reject"));
-  // A request with neither allow nor reject options is a question the agent
-  // asks through its permission channel: each option is an answer. An allow
+  // A request with no allow option is a question the agent asks through its
+  // permission channel: each other option is an answer, and a reject option
+  // is what skipping the question sends. An allow
   // option is never an answer: offered `allow_always` and a reject, the
   // chosen allow went back through the question path, so Plan and one-call
   // approvals never saw it.
