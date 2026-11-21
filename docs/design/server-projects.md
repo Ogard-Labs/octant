@@ -271,14 +271,19 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     Octant's sandbox at Full access is refused the same way.
   - Claude Code there reads nothing of this host's Claude account: not its
     environment or account folder, not its instruction files (Claude Code
-    reads the server's own), not its stored task list (the panel starts empty
+    reads the server's own; where a setting source is off, such as a Project
+    whose code is not trusted, Octant reads that source's `CLAUDE.md` and
+    rules files on the server as text, skipping links and leaving imports as
+    written, and trusts nothing by reading them), not its stored task list (the panel starts empty
     and follows the task tools), not its Git identity, sign-in check or egress
     proxy, and it gets no Artifact tool, since a publish snapshots a file on
     this host.
   - Claude Code resumes its own session on the server: before each turn the
     host asks the server whether the session's transcript is in the login's
     `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/<folder>/`, where `<folder>` comes
-    from the folder's canonical path there. A missing transcript ends the
+    from the folder's canonical path there. A folder that does not open
+    there leaves the session as it was, like a server that does not answer.
+    A missing transcript ends the
     resume as a stale one, so the thread carries on with the text handoff a
     missing session gets on this host; a server that does not answer leaves
     the session as it was. A rewind sends the text handoff, as for any server

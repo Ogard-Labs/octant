@@ -79,6 +79,46 @@ export async function readClaudeVersionOnServer(
     : { status: "found", version };
 }
 
+const INSTRUCTIONS_TIMEOUT_MS = 20_000;
+/** The most instruction text read from a server, as for this host's reader. */
+const INSTRUCTIONS_MAX_BYTES = 64 * 1024;
+const INSTRUCTION_MARK = "\u001e";
+
+/**
+ * The instruction files Claude Code would load from the server when its own
+ * setting source for them is off, read there as text: the Project's
+ * `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md` and
+ * `CLAUDE.local.md`, and the login's `~/.claude/CLAUDE.md`. Reading them
+ * trusts nothing: settings, hooks and tool servers stay off. A symbolic link
+ * is skipped so no file outside those folders is read through one, and
+ * `@path` imports are left as written.
+ */
+export async function readClaudeInstructionsOnServer(
+  placement: ProviderServerPlacement,
+  sources: { readonly project: boolean; readonly account: boolean },
+): Promise<string | undefined> {
+  if (!sources.project && !sources.account) return undefined;
+  const files = [
+    ...(sources.account ? ['"$HOME/.claude/CLAUDE.md"'] : []),
+    ...(sources.project
+      ? ["CLAUDE.md", ".claude/CLAUDE.md", ".claude/rules/*.md", "CLAUDE.local.md"]
+      : []),
+  ];
+  const script = `for f in ${files.join(" ")}; do [ -f "$f" ] && [ ! -L "$f" ] || continue; printf '\\036%s\\n' "$f"; head -c ${INSTRUCTIONS_MAX_BYTES} "$f"; printf '\\n'; done | head -c ${INSTRUCTIONS_MAX_BYTES}`;
+  const ran = await placement.run(["sh", "-c", script], { timeoutMs: INSTRUCTIONS_TIMEOUT_MS });
+  if (ran.status !== "ran" || ran.exitCode !== 0) return undefined;
+  const parts = ran.output
+    .split(INSTRUCTION_MARK)
+    .map((part) => {
+      const newline = part.indexOf("\n");
+      if (newline === -1) return undefined;
+      const body = part.slice(newline + 1).trim();
+      return body === "" ? undefined : `${part.slice(0, newline)}:\n${body}`;
+    })
+    .filter((part): part is string => part !== undefined);
+  return parts.length === 0 ? undefined : parts.join("\n\n");
+}
+
 /**
  * Whether the server holds the transcript of a Claude Code session started in
  * the Project's folder, read there: this host's account directory names
@@ -107,7 +147,14 @@ export async function claudeSessionOnServer(
     { timeoutMs: SESSION_LOOKUP_TIMEOUT_MS },
   );
   if (ran.status === "unreachable") return { status: "unreachable", message: ran.message };
-  if (ran.exitCode !== 0) return { status: "missing" };
+  // The lookup itself always exits 0, so a failure is the Project's folder not
+  // opening there; the session may still exist, and its identity is kept.
+  if (ran.exitCode !== 0) {
+    return {
+      status: "unreachable",
+      message: `Octant could not open the Project's folder on ${placement.serverName}.`,
+    };
+  }
   const [folder, ...transcripts] = ran.output.split("\n").filter((line) => line !== "");
   if (folder === undefined) return { status: "missing" };
   const expected = `/projects/${claudeProjectFolderName(folder.normalize("NFC"))}/${sessionId}.jsonl`;

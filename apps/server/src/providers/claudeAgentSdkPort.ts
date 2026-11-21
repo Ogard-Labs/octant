@@ -1244,6 +1244,15 @@ function isValidSandboxNetwork(network: unknown, blocked = false): boolean {
 }
 
 function hasValidSandbox(input: ClaudeOpenQueryInput, platform: NodeJS.Platform): boolean {
+  // On a server no Octant sandbox can run, so a placed launch carries none at
+  // any level, and one that asks for Octant's boundary is refused.
+  if (input.serverPlacement !== undefined)
+    return (
+      input.sandbox === undefined &&
+      input.strict !== true &&
+      input.fullAccessSandbox !== true &&
+      input.sandboxPolicy === undefined
+    );
   // Claude Code has no command sandbox on Windows, so a launch there carries
   // none: one asking for it with `failIfUnavailable` would leave every
   // command unable to run. Its permission modes hold the turn instead.
