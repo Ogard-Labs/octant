@@ -434,7 +434,8 @@ export function updateElement(
     element.kind === "project-terminal" &&
     (String(existing.hostId) !== String(element.hostId) ||
       String(existing.projectId) !== String(element.projectId) ||
-      String(existing.terminalId) !== String(element.terminalId))
+      String(existing.terminalId) !== String(element.terminalId) ||
+      existing.program !== element.program)
   ) {
     reject("unsupported-kind", "Terminal authority cannot change during an update");
   }

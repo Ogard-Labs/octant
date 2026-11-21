@@ -114,7 +114,7 @@ export interface ZenProjectTerminalPort {
     windowId: WindowId,
     projectId: ProjectId,
     terminalId: CodeTerminalId,
-  ) => { readonly title: string } | undefined;
+  ) => { readonly title: string; readonly program?: "provider" } | undefined;
 }
 
 /**
@@ -566,6 +566,7 @@ export class ZenService {
       minimized: false,
       locked: false,
       title: request.title ?? owned.title,
+      ...(owned.program === undefined ? {} : { program: owned.program }),
     };
     try {
       const updated = processZenCommand(

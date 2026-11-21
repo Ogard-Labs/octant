@@ -17376,8 +17376,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   interactive shell, in the thread's folder: Claude Code and Codex through
   their tooling account, and an ACP agent whose profile names `interactiveArgs`
   (Google Antigravity's `agy`, Gemini CLI's `gemini`, both bare) with the
-  environment `sanitizeAcpEnvironment` builds for its launch, its managed home
-  and its host sign-in folder's variables, and no API key. A Work task's runs
+  environment `sanitizeAcpEnvironment` builds for its launch, less the guards
+  that only keep the piped ACP stream clean (`PROTOCOL_STREAM_GUARDS`:
+  `NO_COLOR`), its managed home and its host sign-in folder's variables, and
+  no API key. A Work task's start journals `program: "provider"` on
+  `code.project-terminal-started@1` (optional; absent is a shell), and a Zen
+  card pinned for it records the same from the host's answer. A Work task's runs
   by the same rule below in mode `work`, at the task's own level rather than
   the Full access a plain Project terminal takes outside Strict. It runs the
   way the thread's turns do (maintainer decision, 2026-11-21): where a turn

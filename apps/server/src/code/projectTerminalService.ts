@@ -245,6 +245,8 @@ interface Owner {
   readonly action?: ActionReceipt;
   readonly authorized?: () => boolean;
   readonly serverWorkShell?: true;
+  /** Set for a terminal that runs its Work task's provider program. */
+  readonly program?: "provider";
   uncertainty?: "server-transport-lost" | "server-stop-unconfirmed";
   /** Who the journal names for this shell's start and end: the device that opened it, if one did. */
   readonly actor?: EventActorValue;
@@ -594,6 +596,15 @@ export class ProjectTerminalService {
       owner.authorized?.() !== false &&
       this.#authority(windowId, projectId).kind !== "refused"
     );
+  }
+
+  /**
+   * What a running Project terminal runs, as its start recorded it: its Work
+   * task's provider program, or undefined for a shell or a terminal this host
+   * does not hold. A Zen card records it, so its restart asks for the same.
+   */
+  program(terminalId: CodeTerminalId): "provider" | undefined {
+    return this.#owners.get(String(terminalId))?.program;
   }
 
   /**
@@ -1146,6 +1157,7 @@ export class ProjectTerminalService {
       workThread?.active,
       false,
       device,
+      providerProgram === undefined ? undefined : "provider",
     );
   }
 
@@ -1343,6 +1355,7 @@ export class ProjectTerminalService {
     authorized?: () => boolean,
     serverWorkShell = false,
     device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
+    program?: "provider",
   ): Promise<ProjectTerminalResult> {
     const personPairedDevice = this.#options.personPairedDevice;
     // A device's shell holds only while that device still acts as the person.
@@ -1361,6 +1374,7 @@ export class ProjectTerminalService {
       ...(action === undefined ? {} : { action }),
       ...(held === undefined ? {} : { authorized: held }),
       ...(serverWorkShell ? { serverWorkShell: true } : {}),
+      ...(program === undefined ? {} : { program }),
       ...(device === undefined
         ? {}
         : {
@@ -1385,6 +1399,7 @@ export class ProjectTerminalService {
             bindingRevisionId,
             posture,
             startedAt: this.#options.clock(),
+            ...(program === undefined ? {} : { program }),
           },
           owner.actor,
         );

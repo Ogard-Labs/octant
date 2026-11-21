@@ -1856,13 +1856,22 @@ describe("ZenService terminal cards", () => {
     expect(current.elements).toEqual([]);
   });
 
-  function projectTerminalFixture(options: { readonly owned?: boolean } = {}) {
+  function projectTerminalFixture(
+    options: { readonly owned?: boolean; readonly program?: "provider" } = {},
+  ) {
     let current = space();
     const append = vi.fn((next: ZenSpace, expectedVersion: number) => {
       current = { ...next, version: (expectedVersion + 1) as AggregateVersion };
       return current;
     });
-    const read = vi.fn(() => (options.owned === false ? undefined : { title: "Octant" }));
+    const read = vi.fn(() =>
+      options.owned === false
+        ? undefined
+        : {
+            title: "Octant",
+            ...(options.program === undefined ? {} : { program: options.program }),
+          },
+    );
     const service = new ZenService({
       focusZone: memoryFocusZone(),
       loadSpace: () => current,
@@ -1897,6 +1906,20 @@ describe("ZenService terminal cards", () => {
       title: "Octant",
     });
     expect(card).not.toHaveProperty("sourceContext");
+  });
+
+  it("records on the card that its terminal runs the task's provider program, as the terminal's owner says", async () => {
+    const provider = projectTerminalFixture({ program: "provider" });
+    const plain = projectTerminalFixture();
+
+    await provider.service.pinProjectTerminal(ids.window, projectRequest);
+    await plain.service.pinProjectTerminal(ids.window, projectRequest);
+
+    expect(provider.append.mock.calls[0]?.[0].elements[0]).toMatchObject({
+      kind: "project-terminal",
+      program: "provider",
+    });
+    expect(plain.append.mock.calls[0]?.[0].elements[0]).not.toHaveProperty("program");
   });
 
   it("refuses to pin a Project terminal this window did not open", async () => {
