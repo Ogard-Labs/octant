@@ -383,6 +383,48 @@ describe("forge switch port", () => {
     });
     expect(run).toHaveBeenCalledTimes(3);
 
+    const rollupResponse = (
+      headNodes: ReadonlyArray<unknown>,
+      mergeNodes?: ReadonlyArray<unknown>,
+    ) => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              commits: {
+                nodes: [
+                  {
+                    commit: {
+                      oid: "1".repeat(40),
+                      statusCheckRollup: {
+                        contexts: {
+                          nodes: headNodes,
+                          pageInfo: { hasNextPage: false, endCursor: null },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+              potentialMergeCommit:
+                mergeNodes === undefined
+                  ? null
+                  : {
+                      oid: "2".repeat(40),
+                      statusCheckRollup: {
+                        contexts: {
+                          nodes: mergeNodes,
+                          pageInfo: { hasNextPage: false, endCursor: null },
+                        },
+                      },
+                    },
+            },
+          },
+        },
+      }),
+    });
+
     // Unreported required checks stay pending when the base branch requires checks.
     const unreported = port((args) => {
       if (args[1] === "checks") {
@@ -391,6 +433,9 @@ describe("forge switch port", () => {
           stdout: "",
           stderr: "no required checks reported on the 'feature/x' branch",
         };
+      }
+      if (args[0] === "api" && args[1] === "graphql") {
+        return rollupResponse([]);
       }
       if (args[0] === "api" && args.some((arg) => arg.includes("/rules/branches/main"))) {
         return { exitCode: 0, stdout: JSON.stringify([[]]) };
@@ -427,6 +472,17 @@ describe("forge switch port", () => {
       port((args) => {
         if (args[1] === "checks") {
           return { exitCode: 0, stdout: JSON.stringify(reported) };
+        }
+        if (args[0] === "api" && args[1] === "graphql") {
+          return rollupResponse(
+            reported.map((entry) => ({
+              __typename: "CheckRun",
+              name: entry.name,
+              status: "COMPLETED",
+              conclusion: "SUCCESS",
+              checkSuite: { app: { databaseId: 15368 } },
+            })),
+          );
         }
         if (
           args[0] === "api" &&
@@ -473,6 +529,141 @@ describe("forge switch port", () => {
         { name: "lint", bucket: "pass" },
         { name: "test", bucket: "pass" },
       ]).observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+
+    // A review-blocked PR whose required checks all pass on the test merge commit reports green,
+    // while passing checks split across head and test-merge commits are never mixed.
+    const testMergePort = (headNodes: ReadonlyArray<unknown>, mergeNodes: ReadonlyArray<unknown>) =>
+      port((args) => {
+        if (args[1] === "checks") {
+          return { exitCode: 0, stdout: JSON.stringify([{ name: "lint", bucket: "pass" }]) };
+        }
+        if (args[0] === "api" && args[1] === "graphql") {
+          return rollupResponse(headNodes, mergeNodes);
+        }
+        if (
+          args[0] === "api" &&
+          args.includes("--paginate") &&
+          args.includes("--slurp") &&
+          args.some((arg) => arg.includes("/rules/branches/main"))
+        ) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([
+              [
+                {
+                  type: "required_status_checks",
+                  parameters: {
+                    required_status_checks: [{ context: "lint" }, { context: "integration" }],
+                  },
+                },
+              ],
+            ]),
+          };
+        }
+        if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+          return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+        }
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            baseRefName: "main",
+            mergeStateStatus: "BLOCKED",
+          }),
+        };
+      }).port;
+    const passRun = (name: string, appId = 15368) => ({
+      __typename: "CheckRun",
+      name,
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      checkSuite: { app: { databaseId: appId } },
+    });
+    const failRun = (name: string, appId = 15368) => ({
+      __typename: "CheckRun",
+      name,
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      checkSuite: { app: { databaseId: appId } },
+    });
+    expect(
+      await testMergePort(
+        [passRun("lint")],
+        [passRun("lint"), passRun("integration")],
+      ).observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+    expect(
+      await testMergePort([passRun("lint")], [passRun("integration")]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    expect(
+      await testMergePort(
+        [passRun("lint")],
+        [passRun("lint"), failRun("integration")],
+      ).observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "failing" });
+
+    // Same-name required checks from distinct GitHub Apps must each pass under their pinned app.
+    const multiAppPort = (headNodes: ReadonlyArray<unknown>) =>
+      port((args) => {
+        if (args[1] === "checks") {
+          return { exitCode: 0, stdout: JSON.stringify([{ name: "ci", bucket: "pass" }]) };
+        }
+        if (args[0] === "api" && args[1] === "graphql") {
+          return rollupResponse(headNodes);
+        }
+        if (
+          args[0] === "api" &&
+          args.includes("--paginate") &&
+          args.includes("--slurp") &&
+          args.some((arg) => arg.includes("/rules/branches/main"))
+        ) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([
+              [
+                {
+                  type: "required_status_checks",
+                  parameters: {
+                    required_status_checks: [
+                      { context: "ci", integration_id: 100 },
+                      { context: "ci", integration_id: 200 },
+                    ],
+                  },
+                },
+              ],
+            ]),
+          };
+        }
+        if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+          return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+        }
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            baseRefName: "main",
+            mergeStateStatus: "BLOCKED",
+          }),
+        };
+      }).port;
+    expect(
+      await multiAppPort([passRun("ci", 100)]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    expect(
+      await multiAppPort([passRun("ci", 100), passRun("ci", 200)]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
     ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
 
     // A branch requiring only review approval (BLOCKED) with zero required checks reports green.
@@ -525,6 +716,7 @@ describe("forge switch port", () => {
     // Ruleset-required check on a later rules page still keeps unreported checks pending.
     const rulesetUnreported = port((args) => {
       if (args[1] === "checks") return { exitCode: 0, stdout: "[]" };
+      if (args[0] === "api" && args[1] === "graphql") return rollupResponse([]);
       if (
         args[0] === "api" &&
         args.includes("--paginate") &&
