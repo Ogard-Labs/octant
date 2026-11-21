@@ -15,9 +15,29 @@ import {
   recordProviderChatConformanceEvidence,
   recordProviderConformanceEvidence,
 } from "./chatProviderMatrixEvidence.test-support";
-import type { CodexAppServerConnection } from "./codexProcess";
+import type { CodexAppServerConnection, CodexProcessPort } from "./codexProcess";
 import type { CodexServerMessage } from "./codexProtocol";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+
+// A runtime that claims server placement must start through the placement it
+// is given; these stand-in ports count each start that carried one.
+let placedStarts = 0;
+function recordsPlacement(port: CodexProcessPort): CodexProcessPort {
+  return {
+    start: (input) => {
+      if (input.server !== undefined) placedStarts += 1;
+      return port.start(input);
+    },
+  };
+}
+const conformancePlacement = {
+  placement: {
+    serverName: "devbox",
+    start: () => ({ status: "unreachable" as const, message: "Not reached in this check." }),
+    run: async () => ({ status: "unreachable" as const, message: "Not reached in this check." }),
+  },
+  used: () => placedStarts > 0,
+};
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000211");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000212");
@@ -65,7 +85,7 @@ describe("Codex provider conformance", () => {
     const driver = makeCodexDriver({
       instanceId,
       binaryPath: "/usr/local/bin/codex",
-      process: {
+      process: recordsPlacement({
         start: () =>
           Effect.acquireRelease(
             Effect.succeed({
@@ -79,7 +99,7 @@ describe("Codex provider conformance", () => {
                 released = true;
               }),
           ),
-      },
+      }),
       runtimeRegistry: new ProviderRuntimeRegistry(),
       clientFactory: () => client,
       idleLeaseMs: 0,
@@ -135,6 +155,7 @@ describe("Codex provider conformance", () => {
         unknownUserInput: "protocol",
       },
       isReleased: () => released,
+      serverPlacement: conformancePlacement,
     });
     recordProviderConformanceEvidence("codex", evidence);
 
@@ -233,7 +254,7 @@ describe("Codex provider conformance", () => {
       const driver = makeCodexDriver({
         instanceId,
         binaryPath: "/usr/local/bin/codex",
-        process: {
+        process: recordsPlacement({
           start: () =>
             Effect.acquireRelease(
               Effect.succeed({
@@ -247,7 +268,7 @@ describe("Codex provider conformance", () => {
                   released = true;
                 }),
             ),
-        },
+        }),
         runtimeRegistry: new ProviderRuntimeRegistry(),
         clientFactory: () => client,
         idleLeaseMs: 0,
@@ -394,7 +415,7 @@ function createCodexConformanceFixture(input: { readonly appTool?: boolean } = {
     driver: makeCodexDriver({
       instanceId,
       binaryPath: "/usr/local/bin/codex",
-      process: {
+      process: recordsPlacement({
         start: () =>
           Effect.acquireRelease(
             Effect.succeed({
@@ -408,7 +429,7 @@ function createCodexConformanceFixture(input: { readonly appTool?: boolean } = {
                 released = true;
               }),
           ),
-      },
+      }),
       runtimeRegistry: new ProviderRuntimeRegistry(),
       clientFactory: () => client,
       idleLeaseMs: 0,
@@ -425,6 +446,7 @@ function createCodexConformanceFixture(input: { readonly appTool?: boolean } = {
       })(),
     }),
     isReleased: () => released,
+    serverPlacement: conformancePlacement,
   };
 }
 

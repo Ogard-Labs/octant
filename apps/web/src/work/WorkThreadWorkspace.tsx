@@ -898,7 +898,10 @@ function withoutHostTools(props: WorkThreadWorkspaceProps): WorkThreadWorkspaceP
     mutationClient: _mutations,
     ...rest
   } = props;
-  return { ...rest, providerGroups: serverCodeThreadProviderGroups(props.providerGroups ?? []) };
+  return {
+    ...rest,
+    providerGroups: serverCodeThreadProviderGroups(props.providerGroups ?? [], "work"),
+  };
 }
 
 export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {

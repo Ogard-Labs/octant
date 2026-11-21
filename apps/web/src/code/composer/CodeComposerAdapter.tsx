@@ -53,7 +53,14 @@ import {
 import { suggestCodeDeliveryOutcome } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
 import { FolderOpen, Network, type IconComponent } from "../../ui/icons";
-import { serverCodeSelectionRefusal, serverCodeThreadProviderGroups } from "./serverCodeComposer";
+import {
+  readSeenPlacementNotices,
+  rememberPlacementNotice,
+  serverCodeSelectionRefusal,
+  serverCodeThreadProviderGroups,
+  serverPlacementNotice,
+  serverPlacementNoticeKey,
+} from "./serverCodeComposer";
 import {
   useCallback,
   useContext,
@@ -580,6 +587,24 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             },
       )
     : undefined;
+  // A provider that runs on the server itself says once what that means,
+  // per server and provider, then keeps it behind Details.
+  const placedGroup =
+    isServer && serverRefusal === undefined
+      ? providerGroups.find(
+          (group) =>
+            group.serverPlacement === "supported" &&
+            group.runtime !== "octant-harness" &&
+            String(group.instance.id) === String(props.selectedProviderInstanceId),
+        )
+      : undefined;
+  const placementServer = server?.location.split(":", 1)[0] ?? "the server";
+  const placementKey =
+    placedGroup === undefined
+      ? undefined
+      : serverPlacementNoticeKey(placementServer, String(placedGroup.instance.id));
+  const [placementSeen, setPlacementSeen] = useState<ReadonlySet<string>>(readSeenPlacementNotices);
+  const [placementOpen, setPlacementOpen] = useState(false);
   const canSubmit =
     trimmed.length > 0 &&
     props.createDisabledReason === undefined &&
@@ -977,6 +1002,47 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               ...(serverRefusal !== undefined && props.errorMessage === undefined
                 ? [{ key: "server-refusal", tone: "warning" as const, text: serverRefusal }]
                 : []),
+              ...(placedGroup === undefined || placementKey === undefined
+                ? []
+                : placementOpen || !placementSeen.has(placementKey)
+                  ? [
+                      {
+                        key: "server-placement",
+                        tone: "neutral" as const,
+                        text: serverPlacementNotice(placedGroup.driverLabel, placementServer),
+                        action: (
+                          <OctantButton
+                            onClick={() => {
+                              setPlacementOpen(false);
+                              setPlacementSeen(rememberPlacementNotice(placementKey));
+                            }}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            Got it
+                          </OctantButton>
+                        ),
+                      },
+                    ]
+                  : [
+                      {
+                        key: "server-placement",
+                        tone: "neutral" as const,
+                        transient: true as const,
+                        text: `${placedGroup.driverLabel} runs on ${placementServer} as itself.`,
+                        action: (
+                          <OctantButton
+                            onClick={() => setPlacementOpen(true)}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            Details
+                          </OctantButton>
+                        ),
+                      },
+                    ]),
               ...(props.creating
                 ? [
                     {

@@ -248,6 +248,11 @@ export interface PickerGroup {
    */
   readonly appManagedTools?: ProviderCapabilitySupport;
   /**
+   * Whether the runtime runs a server Project's turn on the server itself.
+   * Absent when it was never probed or does not say, which reads as no.
+   */
+  readonly serverPlacement?: ProviderCapabilitySupport;
+  /**
    * Models individually verified for Octant-managed tools on a provider that
    * leaves the flag unset per deployment (Foundry). Same rule the server
    * applies when a turn ships tools.
@@ -450,6 +455,9 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       executionHost: input.hostId ?? localExecutionHost,
       sections,
       appManagedTools: observed.capabilities.appManagedTools,
+      ...(observed.capabilities.serverPlacement === undefined
+        ? {}
+        : { serverPlacement: observed.capabilities.serverPlacement }),
       ...(observed.commands === undefined ? {} : { providerCommands: observed.commands }),
       ...(observed.mentions === undefined ? {} : { providerMentions: observed.mentions }),
       ...(observed.capabilities.forceStop === undefined

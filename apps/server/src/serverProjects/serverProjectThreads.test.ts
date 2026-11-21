@@ -176,7 +176,7 @@ describe.skipIf(!canRunThrowawaySshd)("a server Project's turn", () => {
       { thread, windowId, secrets: [] },
     );
     const call = async (name: string, input: unknown) => {
-      if (bound.status !== "bound") throw new Error(bound.message);
+      if (bound.status !== "bound") throw new Error("The harness tools were not bound.");
       return bound.tools.execute({
         name,
         inputJson: JSON.stringify(input),

@@ -43,6 +43,7 @@ import {
 import { reportedChildUsage } from "@octant/provider-sdk/child-observations";
 import type {
   ProviderAcquireInput,
+  ProviderServerPlacement,
   ProviderCompactionPoint,
   ProviderConnection,
   ProviderDriver,
@@ -843,6 +844,9 @@ const capabilities = {
   modelSwitch: "supported",
   // One app-server process serves every thread, so killing it ends them all.
   forceStop: "unsupported",
+  // Its app-server speaks over standard streams and carries Octant's tools in
+  // its own protocol, so it runs on a server Project's server over SSH.
+  serverPlacement: "supported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
   nativeSetup: {
@@ -2025,6 +2029,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       extraFolders = [],
       attachmentsFolder,
       sandboxPolicy,
+      serverPlacement,
     }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
@@ -2074,6 +2079,8 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
         strict,
       }: CodexLeasePosture) =>
         JSON.stringify([
+          // A folder on a server is not the folder of the same path here.
+          ...(serverPlacement === undefined ? [] : [`server:${serverPlacement.serverName}`]),
           projectRoot,
           // The read-only folders ride with the extra folders, so a lease's
           // shape (root, folders, mode, posture) stays what idle-lease
@@ -2107,6 +2114,8 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               ...(strict ? {} : { strict: false as const }),
             },
             leaseKey(posture),
+            undefined,
+            serverPlacement,
           );
           // Turn starts probe first, but not every caller does (compaction,
           // summaries, agent runs), so the session itself refuses too. Only
@@ -2151,6 +2160,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           projectRoot,
           extraFolders,
           mode,
+          serverPlacement,
           {
             instanceId: options.instanceId,
             clock,
@@ -2236,6 +2246,7 @@ function acquireRuntime(
   authority: CodexLaunchAuthority,
   lease?: string,
   idleMs?: number,
+  server?: ProviderServerPlacement,
 ) {
   return options.runtimeRegistry.acquireRuntime<CodexLeasedRuntime>(options.instanceId, {
     idleMs:
@@ -2248,15 +2259,21 @@ function acquireRuntime(
       const scope = await Effect.runPromise(Scope.make());
       let receipt: Awaited<ReturnType<ProviderRuntimeRegistry["trackProcess"]>> | undefined;
       try {
-        const environment = await resolveCodexLaunchEnvironment(
-          options,
-          !(authority.kind === "thread" && authority.strict === false),
-        );
+        // Codex on a server signs in as that server's login; no environment
+        // or credential of this host goes there.
+        const environment =
+          server === undefined
+            ? await resolveCodexLaunchEnvironment(
+                options,
+                !(authority.kind === "thread" && authority.strict === false),
+              )
+            : undefined;
         const processExit = await Effect.runPromiseExit(
           options.process
             .start({
               binaryPath: options.binaryPath,
               authority,
+              ...(server === undefined ? {} : { server }),
               ...(environment === undefined ? {} : { environment }),
               onProcessStarted: async (process) => {
                 receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
@@ -2588,6 +2605,7 @@ function makeConnection(
   projectRoot: string,
   extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
+  serverPlacement: ProviderServerPlacement | undefined,
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
@@ -2713,9 +2731,12 @@ function makeConnection(
         input.strict === false
           ? (options.openEnvironment ?? options.environment)
           : options.environment;
+      // This host's sign-in paths name nothing on a server.
       const signIns = codexProtectedSignIns(
-        options.protectedSignIns?.() ?? [],
-        launchEnvironment?.CODEX_HOME ?? join(homedir(), ".codex"),
+        serverPlacement === undefined ? (options.protectedSignIns?.() ?? []) : [],
+        serverPlacement === undefined
+          ? (launchEnvironment?.CODEX_HOME ?? join(homedir(), ".codex"))
+          : "",
       );
       return codexNativePermissionProfile({
         sessionSandbox: sessionSandbox(input),

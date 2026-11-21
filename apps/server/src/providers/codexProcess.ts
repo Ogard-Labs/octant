@@ -55,7 +55,9 @@ import {
   type ProviderServerAccess,
   type ProviderServerAccessPort,
 } from "../network/providerRuntimeNetwork";
+import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import { decodeInitializeResult } from "./codexProtocol";
+import { startCodexOnServer } from "./codexServerProcess";
 import {
   CodexRpcClientFailure,
   makeCodexRpcClient,
@@ -64,6 +66,10 @@ import {
 } from "./codexRpcClient";
 import { providerHostEnvironment } from "./providerHostEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
+
+/** Said when Strict is on for a thread whose provider would run on its server. */
+export const SERVER_STRICT_REFUSAL =
+  "Strict needs Octant's own sandbox, which can't run on a server. Turn Strict off for this thread to run Codex there.";
 
 export interface CodexBinaryProbe {
   readonly binaryPath: string;
@@ -159,6 +165,12 @@ export interface CodexProcessPort {
   readonly start: (input: {
     readonly binaryPath: string;
     readonly authority: CodexLaunchAuthority;
+    /**
+     * The server a server Project's thread runs on. The app-server then
+     * starts there through the host's connection, and nothing of this host's
+     * launch (binary, sandbox, egress, account home) applies.
+     */
+    readonly server?: ProviderServerPlacement;
     readonly environment?: NodeJS.ProcessEnv;
     readonly onProcessStarted?: ProviderProcessStartedListener;
   }) => Effect.Effect<CodexAppServerConnection, ProviderFailure, Scope.Scope>;
@@ -1325,8 +1337,24 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
   const confinement = options.confinement ?? makeProcessConfinementLive({ platform });
 
   return {
-    start: ({ binaryPath, authority: requested, environment, onProcessStarted }) =>
+    start: ({ binaryPath, authority: requested, environment, onProcessStarted, server }) =>
       Effect.suspend(() => {
+        if (server !== undefined) {
+          // Octant's own sandbox cannot run on a server, so a Strict launch
+          // there is refused rather than run without the sandbox it promises.
+          if (requested.kind !== "thread" || requested.strict !== false) {
+            return Effect.fail(failure("unsupported", SERVER_STRICT_REFUSAL));
+          }
+          return startCodexOnServer({
+            placement: server,
+            octantVersion: resolved.octantVersion,
+            args: (version) =>
+              codexAppServerArgs(version, {
+                ...(requested.ownSubagents === true ? { ownSubagents: true } : {}),
+                ...(requested.ownMemory === true ? { ownMemory: true } : {}),
+              }),
+          });
+        }
         let terminate: (() => Promise<void>) | undefined;
         const authority: CodexLaunchAuthority =
           requested.kind === "catalog" &&
