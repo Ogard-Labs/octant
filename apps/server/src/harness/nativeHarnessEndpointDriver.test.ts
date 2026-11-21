@@ -331,7 +331,7 @@ describe("native harness endpoint port", () => {
         },
         providerSearch: {
           now: (id) =>
-            id === liveSessionId
+            String(id) === String(liveSessionId)
               ? { status: "decided", grant, webSearchTool: webSearch }
               : { status: "untracked" },
           release: () => undefined,
