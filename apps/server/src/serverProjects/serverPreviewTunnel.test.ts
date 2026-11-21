@@ -264,6 +264,54 @@ describe("server port forwards", () => {
     }
   });
 
+  it("still opens a forward for an unused Project after many Projects opened and stopped theirs", async () => {
+    const { tunnels } = fixture();
+    for (let index = 0; index < 64; index += 1) {
+      const project = `project-${String(index)}`;
+      const opened = await tunnels.startForward(project, "window", 5432);
+      if (opened.kind !== "forward") throw new Error(`Expected a forward, got ${opened.reason}`);
+      expect((await tunnels.stopForward(project, "window")).kind).toBe("forward");
+    }
+    expect((await tunnels.startForward("unused", "window", 5432)).kind).toBe("forward");
+  });
+
+  it("still delivers the reply of a service that answers only after the client finishes sending", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "octant-forward-half-close-"));
+    const service = createServer({ allowHalfOpen: true }, (socket) => {
+      const received: Buffer[] = [];
+      socket.on("data", (chunk: Buffer) => received.push(chunk));
+      socket.on("end", () => socket.end(`reply:${Buffer.concat(received).toString()}`));
+    });
+    await new Promise<void>((resolve) => service.listen(0, "127.0.0.1", resolve));
+    const address = service.address();
+    if (address === null || typeof address === "string") throw new Error("missing address");
+    const { tunnels } = fixture(undefined, { sshPath: standInSsh(scratch) });
+    try {
+      const opened = await tunnels.startForward("project", "window", address.port);
+      if (opened.kind !== "forward") throw new Error(`Expected a forward, got ${opened.reason}`);
+      const answer = await new Promise<string>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        const client = connect({
+          port: opened.view.localPort,
+          host: "127.0.0.1",
+          allowHalfOpen: true,
+        });
+        client.on("connect", () => client.end("request"));
+        client.on("data", (chunk: Buffer) => chunks.push(chunk));
+        client.on("end", () => {
+          resolve(Buffer.concat(chunks).toString());
+          client.destroy();
+        });
+        client.on("error", reject);
+      });
+      expect(answer).toBe("reply:request");
+    } finally {
+      await tunnels.close();
+      await new Promise<void>((resolve) => service.close(() => resolve()));
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
   it("a forward ends after its hour and at stop, journaled with the port alone", async () => {
     let now = 1_000;
     const { tunnels, forwards } = fixture(() => now);

@@ -98,6 +98,8 @@ interface Preview {
   readonly ownerCurrent: () => boolean;
   status: ServerPreviewView["status"];
   cleanup?: Promise<void>;
+  /** Its listener and streams are confirmed closed; only its last status is kept. */
+  released?: true;
   recordedStatus?: ServerPreviewView["status"];
 }
 
@@ -312,7 +314,7 @@ export class ServerPreviewTunnels {
     ) {
       return refused("already-owned");
     }
-    if (this.#previews.size >= 64 && existing === undefined) return refused("too-many-tunnels");
+    if (this.#unreleased() >= 64 && existing === undefined) return refused("too-many-tunnels");
     return this.#previewResult(
       await this.#queueStart({
         kind: "preview",
@@ -401,7 +403,7 @@ export class ServerPreviewTunnels {
       (existing !== undefined && existing.status !== "stopped" && existing.status !== "revoked")
     )
       return refused("already-owned");
-    if (this.#previews.size >= 64 && existing === undefined) return refused("too-many-tunnels");
+    if (this.#unreleased() >= 64 && existing === undefined) return refused("too-many-tunnels");
     return this.#queueStart({
       kind,
       projectId,
@@ -551,12 +553,19 @@ export class ServerPreviewTunnels {
       this.#previews.set(key, preview);
       return { kind: "held", preview };
     }
-    let listener = createServer((socket) => this.#accept(key, socket));
+    // A forward carries any TCP protocol, and some clients end their request
+    // with a write-side FIN and then wait for the answer; Node's default
+    // closes the reply side on that FIN, and the client received nothing.
+    const listen = () =>
+      createServer({ allowHalfOpen: input.kind === "forward" }, (socket) =>
+        this.#accept(key, socket),
+      );
+    let listener = listen();
     let port = await listenOnLoopback(listener, input.localPort);
     if (port === undefined && input.kind === "forward") {
       // A forward takes the server's port number when this computer has it
       // free, as a forward from another Octant computer does, else any free one.
-      listener = createServer((socket) => this.#accept(key, socket));
+      listener = listen();
       port = await listenOnLoopback(listener, 0);
     }
     if (port === undefined) return refused("port-unavailable");
@@ -691,11 +700,26 @@ export class ServerPreviewTunnels {
     socket.pipe(child.stdin);
     child.stdout.pipe(socket);
   }
+  /**
+   * Tunnels still holding resources. A stopped entry is kept for its status
+   * and receipt, and once a Project's preview and forward were separate
+   * entries, counting kept ones refused every start after 32 Projects had
+   * opened and stopped both.
+   */
+  #unreleased(): number {
+    let count = 0;
+    for (const preview of this.#previews.values()) if (preview.released !== true) count += 1;
+    return count;
+  }
   async #end(preview: Preview, status: ServerPreviewView["status"]): Promise<ServerPreviewCleanup> {
     preview.status = status;
     // A status change is not a cleanup receipt. Retain actual settlement even
     // when a caller times out, so another stop, restart or shutdown must await it.
-    preview.cleanup ??= Promise.resolve().then(() => this.#cleanup(preview));
+    preview.cleanup ??= Promise.resolve()
+      .then(() => this.#cleanup(preview))
+      .then(() => {
+        preview.released = true;
+      });
     const cleanup = await cleanupWithin(preview.cleanup);
     if (preview.kind === "forward") {
       // A forward is journaled closed once, however its status changes after.
