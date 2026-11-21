@@ -78,23 +78,6 @@ export function contributeGithubActivity(
     return { status: "connected", account: login };
   };
 
-  const viewerLogin = async (signal: AbortSignal): Promise<string | undefined> => {
-    // The switch precedes every credential observation.
-    if (!ports.effective() || signal.aborted) return undefined;
-    let snapshot: GithubAuthenticationSnapshot;
-    try {
-      snapshot = await ports.capabilitySnapshot(signal);
-    } catch {
-      return undefined;
-    }
-    if (!ports.effective() || signal.aborted) return undefined;
-    // Activity probes may be scope-limited without changing who is signed in;
-    // unauthenticated, insecure, rate-limited, and unavailable states fail closed.
-    if (snapshot.state !== "ready" && snapshot.state !== "scope-limited") return undefined;
-    const login = snapshot.account?.login.trim().toLowerCase();
-    return login !== undefined && login.length > 0 ? login : undefined;
-  };
-
   const readRepository: IntegrationActivitySource["readRepository"] = async (input) => {
     if (!ports.effective() || input.signal.aborted) {
       return { status: "unavailable", reason: "not-connected" };
@@ -143,7 +126,7 @@ export function contributeGithubActivity(
     };
   };
 
-  return host.registerActivitySource?.({ account, readRepository, viewerLogin });
+  return host.registerActivitySource?.({ account, readRepository });
 }
 
 /**

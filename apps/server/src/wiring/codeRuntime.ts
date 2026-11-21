@@ -391,7 +391,6 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "githubExtensionSnapshot"
     | "githubReadToolService"
     | "peekCreateFromIssueFramed"
-    | "repositoryActivitySource"
     | "siblingThreadsService"
     | "threadOutsideContentMarks"
   > &
@@ -540,7 +539,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     fileMentionService,
     githubExtensionSnapshot,
     githubReadToolService,
-    repositoryActivitySource,
     isCodeProviderModelAllowed,
     liveTurns,
     machineChangeFeed,
@@ -1884,13 +1882,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           if (pullRequestAuthor === undefined) {
             return { pullRequestAuthor: undefined, viewerLogin: undefined };
           }
-          // Read the signed-in GitHub login through the integration's
-          // registered port so disabling the GitHub integration fails closed
-          // without wiring concrete GitHub host services into Code runtime,
-          // and without gating viewer identity on activity-history probes.
-          const viewerLogin = await repositoryActivitySource()
-            ?.viewerLogin?.(signal)
-            .catch(() => undefined);
+          const viewerLogin = await projectPullRequestService.observeViewerLogin(signal);
           return { pullRequestAuthor, viewerLogin };
         },
         outsideContentMarks: runtimeOutsideContentMarks,

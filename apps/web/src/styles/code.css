@@ -1029,6 +1029,19 @@ html:not([data-octant-reduced-transparency="true"])
   color: var(--oct-danger-fg);
 }
 
+.unified-diff__meta {
+  color: var(--oct-meta);
+  font-style: italic;
+}
+
+.unified-diff__meta[data-kind="added"] {
+  background: var(--oct-success-soft);
+}
+
+.unified-diff__meta[data-kind="removed"] {
+  background: var(--oct-danger-soft);
+}
+
 .unified-diff__gap td {
   padding: var(--oct-space-1) var(--oct-space-3);
   color: var(--oct-meta);

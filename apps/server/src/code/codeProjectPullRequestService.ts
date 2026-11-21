@@ -159,6 +159,7 @@ export interface CodeProjectPullRequestDetailPort {
     },
     signal: AbortSignal,
   ): Promise<{ readonly closedAt: string; readonly title: string } | undefined>;
+  observeViewerLogin?(signal: AbortSignal): Promise<string | undefined>;
 }
 
 export interface CodeProjectPullRequestMergePort {
@@ -621,6 +622,31 @@ export class CodeProjectPullRequestService {
       return rowAuthor;
     }
     return undefined;
+  }
+
+  /**
+   * Reads the signed-in GitHub viewer login through the pull-request port,
+   * failing closed to `undefined` when GitHub is revoked, aborted, or unreadable.
+   */
+  async observeViewerLogin(signal: AbortSignal): Promise<string | undefined> {
+    if (this.#githubRevoked || this.#detail.observeViewerLogin === undefined || signal.aborted) {
+      return undefined;
+    }
+    const revocationGeneration = this.#revocationGeneration;
+    try {
+      const login = await this.#detail.observeViewerLogin(signal);
+      if (
+        this.#githubRevoked ||
+        this.#revocationGeneration !== revocationGeneration ||
+        signal.aborted
+      ) {
+        return undefined;
+      }
+      const trimmed = login?.trim();
+      return trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

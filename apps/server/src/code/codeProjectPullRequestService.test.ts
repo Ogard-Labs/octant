@@ -116,6 +116,7 @@ function serviceFixture(options: {
     },
     signal: AbortSignal,
   ) => Promise<{ readonly closedAt: string; readonly title: string } | undefined>;
+  readonly observeViewerLogin?: (signal: AbortSignal) => Promise<string | undefined>;
   readonly merge?: CodeProjectPullRequestMergePort;
   readonly mergeJournal?: Journal;
   readonly recordMerge?: (record: CodeProjectPullRequestMergeRecorded) => void;
@@ -187,6 +188,9 @@ function serviceFixture(options: {
       ...(options.observeIssueClosure === undefined
         ? {}
         : { observeIssueClosure: options.observeIssueClosure }),
+      ...(options.observeViewerLogin === undefined
+        ? {}
+        : { observeViewerLogin: options.observeViewerLogin }),
     },
     ...(options.merge === undefined ? {} : { merge: options.merge }),
     ...(options.recordMerge === undefined ? {} : { recordMerge: options.recordMerge }),
@@ -2236,5 +2240,29 @@ describe("CodeProjectPullRequestService", () => {
 
     service.revokeGithub();
     expect(service.observedAuthor(detailQuery)).toBeUndefined();
+  });
+
+  it("reads the signed-in viewer login from the pull request detail port and fails closed when unavailable", async () => {
+    const observeViewerLogin = vi.fn(async () => "  henrik  ");
+    const { service } = serviceFixture({ observeViewerLogin });
+    expect(await service.observeViewerLogin(new AbortController().signal)).toBe("henrik");
+
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(await service.observeViewerLogin(aborted.signal)).toBeUndefined();
+
+    service.revokeGithub();
+    expect(await service.observeViewerLogin(new AbortController().signal)).toBeUndefined();
+    expect(observeViewerLogin).toHaveBeenCalledTimes(1);
+
+    const absent = serviceFixture({});
+    expect(await absent.service.observeViewerLogin(new AbortController().signal)).toBeUndefined();
+
+    const throwing = serviceFixture({
+      observeViewerLogin: async () => {
+        throw new Error("gh failed");
+      },
+    });
+    expect(await throwing.service.observeViewerLogin(new AbortController().signal)).toBeUndefined();
   });
 });

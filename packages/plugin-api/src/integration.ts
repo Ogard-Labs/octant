@@ -128,11 +128,6 @@ export interface IntegrationActivitySource {
     card: IntegrationActivityCard,
     signal: AbortSignal,
   ) => Promise<IntegrationActivityAccount>;
-  /**
-   * Signed-in forge login while the integration is effective and securely
-   * authenticated, independent of per-card activity-history capability probes.
-   */
-  readonly viewerLogin?: (signal: AbortSignal) => Promise<string | undefined>;
   readonly readRepository: (input: {
     readonly owner: string;
     readonly name: string;

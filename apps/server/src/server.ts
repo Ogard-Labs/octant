@@ -1018,7 +1018,6 @@ export function startOctantServer(
       fileMentionService: (): FileMentionService => fileMentionService,
       githubExtensionSnapshot,
       githubReadToolService,
-      repositoryActivitySource,
       isCodeProviderModelAllowed,
       liveTurns,
       machineChangeFeed,

@@ -85,6 +85,15 @@ type DiffVirtualRow =
       readonly lineIndex: number;
       readonly line: DiffHunk["lines"][number];
       readonly estimate: number;
+    }
+  | {
+      readonly kind: "no-newline";
+      readonly index: number;
+      readonly fileIndex: number;
+      readonly hunkIndex: number;
+      readonly lineIndex: number;
+      readonly lineKind: DiffHunk["lines"][number]["kind"];
+      readonly estimate: number;
     };
 
 interface DiffFileRange {
@@ -402,6 +411,17 @@ function buildDiffVirtualModel(files: ReadonlyArray<ParsedDiffFile>): DiffVirtua
           line,
           estimate: DIFF_LINE_ESTIMATE_PX,
         });
+        if (line.noNewlineAtEndOfFile === true) {
+          rows.push({
+            kind: "no-newline",
+            index: rows.length,
+            fileIndex,
+            hunkIndex,
+            lineIndex,
+            lineKind: line.kind,
+            estimate: DIFF_LINE_ESTIMATE_PX,
+          });
+        }
       });
       previousEnd = hunk.oldStart + hunk.oldLines;
     });
@@ -572,6 +592,24 @@ function renderBodyRow(input: {
       </tr>
     );
   }
+  if (row.kind === "no-newline") {
+    return (
+      <tr
+        className="unified-diff__meta"
+        data-index={virtualIndex}
+        data-kind={row.lineKind}
+        key={`${String(row.hunkIndex)}-${String(row.lineIndex)}-no-newline`}
+        ref={measureRef}
+      >
+        <td className="unified-diff__number" aria-hidden="true" />
+        <td className="unified-diff__number" aria-hidden="true" />
+        <td className="unified-diff__marker" aria-hidden="true">
+          \
+        </td>
+        <td className="unified-diff__code">No newline at end of file</td>
+      </tr>
+    );
+  }
   if (row.kind !== "line") return null;
 
   const { line } = row;
@@ -642,6 +680,9 @@ function diffRowKey(
   if (row.kind === "header") return `${fileKey}:header`;
   if (row.kind === "binary") return `${fileKey}:binary`;
   if (row.kind === "gap") return `${fileKey}:gap:${String(row.hunkIndex)}`;
+  if (row.kind === "no-newline") {
+    return `${fileKey}:${String(row.hunkIndex)}-${String(row.lineIndex)}:no-newline`;
+  }
   return `${fileKey}:${String(row.hunkIndex)}-${String(row.lineIndex)}`;
 }
 

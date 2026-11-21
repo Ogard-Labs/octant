@@ -23,6 +23,8 @@ export interface DiffLine {
   readonly oldNumber?: number;
   /** Line number on the modified side; absent for a removed line. */
   readonly newNumber?: number;
+  /** True when git emitted `\ No newline at end of file` immediately after this line. */
+  readonly noNewlineAtEndOfFile?: true;
 }
 
 /** String offsets into the exact supplied patch, never a reconstructed file. */
@@ -307,7 +309,16 @@ export function parseUnifiedDiff(
       }
       continue;
     }
-    // `\ No newline at end of file` and any trailing blank line carry no content.
+    if (line.trimEnd() === "\\ No newline at end of file") {
+      if (hunk !== undefined) {
+        const last = hunk.lines.at(-1);
+        if (last !== undefined) {
+          hunk.lines[hunk.lines.length - 1] = { ...last, noNewlineAtEndOfFile: true };
+        }
+      }
+      continue;
+    }
+    // Any trailing blank line carries no content.
   }
   flush(diff.length);
   return files;

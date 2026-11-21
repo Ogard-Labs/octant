@@ -95,3 +95,45 @@ it("preserves old and new file modes for mode-only, binary-plus-mode, and mixed 
   expect(files[2]?.modeOnly).toBeUndefined();
   expect(files[2]?.modeChange).toEqual({ oldMode: "100755", newMode: "100644" });
 });
+
+it("preserves end-of-file no-newline markers on the lines they follow", () => {
+  const patch = [
+    "diff --git a/added-newline.txt b/added-newline.txt",
+    "--- a/added-newline.txt",
+    "+++ b/added-newline.txt",
+    "@@ -1 +1 @@",
+    "-hello",
+    "\\ No newline at end of file",
+    "+hello",
+    "diff --git a/removed-newline.txt b/removed-newline.txt",
+    "--- a/removed-newline.txt",
+    "+++ b/removed-newline.txt",
+    "@@ -1 +1 @@",
+    "-hello",
+    "+hello",
+    "\\ No newline at end of file",
+    "diff --git a/context-no-newline.txt b/context-no-newline.txt",
+    "--- a/context-no-newline.txt",
+    "+++ b/context-no-newline.txt",
+    "@@ -1,2 +1,2 @@",
+    "-old",
+    "+new",
+    " tail",
+    "\\ No newline at end of file",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]?.hunks[0]?.lines).toEqual([
+    { kind: "removed", text: "hello", oldNumber: 1, noNewlineAtEndOfFile: true },
+    { kind: "added", text: "hello", newNumber: 1 },
+  ]);
+  expect(files[1]?.hunks[0]?.lines).toEqual([
+    { kind: "removed", text: "hello", oldNumber: 1 },
+    { kind: "added", text: "hello", newNumber: 1, noNewlineAtEndOfFile: true },
+  ]);
+  expect(files[2]?.hunks[0]?.lines).toEqual([
+    { kind: "removed", text: "old", oldNumber: 1 },
+    { kind: "added", text: "new", newNumber: 1 },
+    { kind: "context", text: "tail", oldNumber: 2, newNumber: 2, noNewlineAtEndOfFile: true },
+  ]);
+});
