@@ -2709,7 +2709,11 @@ with the person's token. The CLI talks to Google itself.
   the CLI, so no approval is recorded that the CLI never got: the request
   stays pending, and Code keeps the ask open for a denial, which sends the
   reject; Work keeps the request pending and shows the person the agent's
-  reason.
+  reason. A helper run's answers hold for one call (its sessions start with
+  `answersOncePerCall`), so no answer could approve such a request there: it
+  is denied on arrival, the agent gets the reject and carries on, no one is
+  asked and nothing is recorded approved, and the call shows "<agent> only
+  offers Always allow, which a helper run can't grant; denied."
 - **Turns that do not fail on stray updates** (`toleratesStrayUpdates`).
   Updates after the prompt answered (usage, background-command replies,
   scheduled wakes), a subagent's updates under its own session id, a repeated

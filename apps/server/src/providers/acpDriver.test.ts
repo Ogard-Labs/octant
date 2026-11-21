@@ -4641,6 +4641,7 @@ describe("Google Antigravity's allow-always offer without allow-once", () => {
         ReturnType<ReturnType<typeof fixture>["driver"]["acquire"]>
       >,
     ) => Effect.Effect<unknown, unknown>,
+    answersOncePerCall?: true,
   ) => {
     const f = fixture(acpProviderProfiles.antigravity, {
       runtimeVersion: "1.5.12",
@@ -4651,12 +4652,31 @@ describe("Google Antigravity's allow-always offer without allow-once", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
-          yield* connection.start({ sessionId, modelId, executionPolicy });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy,
+            ...(answersOncePerCall === undefined ? {} : { answersOncePerCall }),
+          });
           const events = yield* connection.subscribe;
           yield* Effect.fork(
             Stream.runForEach(events, (event) => Effect.sync(() => offered.push(event))),
           );
           yield* Effect.sleep("1 millis");
+          f.client.emit({
+            kind: "notification",
+            method: "session/update",
+            params: {
+              sessionId: "agent-session-1",
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "edit-always",
+                title: "Edit file",
+                kind: "edit",
+                status: "pending",
+              },
+            },
+          });
           f.client.request(allowAlwaysRequest);
           yield* Effect.sleep("1 millis");
           yield* answer(connection);
@@ -4682,6 +4702,26 @@ describe("Google Antigravity's allow-always offer without allow-once", () => {
     );
     expect(offered.some((event) => event.kind === "approval-request")).toBe(true);
     expect(client.respondPermission).toHaveBeenCalledWith("always-provider", "always");
+  });
+
+  it("denies it on arrival in a helper run, whose answers hold for one call, and says why", async () => {
+    const { client, offered } = await run(
+      "approval-gated",
+      "current-session",
+      () => Effect.void,
+      true,
+    );
+    expect(client.respondPermission).toHaveBeenCalledTimes(1);
+    expect(client.respondPermission).toHaveBeenCalledWith("always-provider", "no");
+    expect(offered.some((event) => event.kind === "approval-request")).toBe(false);
+    expect(offered.some((event) => event.kind === "failed")).toBe(false);
+    expect(offered).toContainEqual(
+      expect.objectContaining({
+        kind: "tool-progress",
+        message:
+          "Google Antigravity only offers Always allow, which a helper run can't grant; denied.",
+      }),
+    );
   });
 
   it("sends nothing for an approval that holds for one call only, and keeps the request for a denial", async () => {

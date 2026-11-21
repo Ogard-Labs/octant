@@ -595,6 +595,17 @@ describe("createAgentRunSessionRuntime", () => {
     await expect(outcome).resolves.toMatchObject({ kind: "completed" });
   });
 
+  it("tells the provider a child's approvals each hold for one call", async () => {
+    const provider = fakeProvider();
+    const runtime = createAgentRunSessionRuntime(runtimeOptions(provider));
+    const outcome = settled(runtime.start(agentRun()));
+    await vi.waitFor(() => expect(provider.turns.length).toBe(1));
+    expect(provider.starts[0]?.answersOncePerCall).toBe(true);
+    await provider.emit({ kind: "text-delta", sessionId, text: "Done." });
+    await provider.emit({ kind: "completed", sessionId });
+    await expect(outcome).resolves.toMatchObject({ kind: "completed" });
+  });
+
   it("does not report running for a child whose workspace cannot be verified", async () => {
     const running: string[] = [];
     const runtime = createAgentRunSessionRuntime(
@@ -2577,6 +2588,7 @@ describe("durable child provider identity", () => {
           sessionId,
           resumeCursor: recorded?.resumeCursor,
           modelOptionValues,
+          answersOncePerCall: true,
         }),
       ]);
       expect(provider.turns[1]?.prompt).toBe("Add the regression evidence");

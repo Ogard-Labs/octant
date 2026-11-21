@@ -227,6 +227,8 @@ interface SessionState {
   readonly sourceSessionId: string;
   readonly modelId: string;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /** The host answers every approval for one call, as for a helper run. */
+  readonly answersOncePerCall: boolean;
   readonly scope: Scope.CloseableScope;
   readonly client: AcpClientPort;
   readonly context: AcpEventContext;
@@ -1521,6 +1523,28 @@ function makeConnection(
           .catch(() => undefined);
         return;
       }
+      // Offered only allow-always, an approval needs an answer that holds for
+      // the session, and a helper run's answers hold for one call. Asking the
+      // person would end in a refusal the run cannot get past, so the request
+      // is denied on arrival and the reason shown on the call.
+      if (
+        mapped.kind === "approval" &&
+        mapped.allowOptionId === undefined &&
+        state.answersOncePerCall
+      ) {
+        void state.client
+          .respondPermission(mapped.providerRequestId, mapped.rejectOptionId)
+          .catch(() => undefined);
+        if (mapped.event.kind === "approval-request" && mapped.event.toolCallId !== undefined)
+          offer(
+            eventFor(state, factories.clock, {
+              kind: "tool-progress",
+              toolCallId: mapped.event.toolCallId,
+              message: `${name} only offers Always allow, which a helper run can't grant; denied.`,
+            }),
+          );
+        return;
+      }
       if (mapped.kind === "question" && profile.userQuestions === "unsupported") {
         void state.client
           .respondPermission(mapped.providerRequestId, mapped.skipOptionId)
@@ -1547,6 +1571,7 @@ function makeConnection(
         readonly sessionId: ProviderSessionId;
         readonly modelId: string;
         readonly executionPolicy: ProviderExecutionPolicy;
+        readonly answersOncePerCall?: boolean;
         readonly tools: ReadonlyArray<ProviderToolDefinition>;
         readonly nativeSetup?: ProviderNativeSetup;
       },
@@ -1596,6 +1621,7 @@ function makeConnection(
         sourceSessionId: source.sessionId,
         modelId: input.modelId,
         executionPolicy: input.executionPolicy,
+        answersOncePerCall: input.answersOncePerCall === true,
         scope,
         client,
         context,
@@ -1728,6 +1754,7 @@ function makeConnection(
       readonly sessionId: ProviderSessionId;
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
+      readonly answersOncePerCall?: boolean;
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
       readonly modelOptionValues?: ProviderModelOptionValues;
@@ -2407,6 +2434,7 @@ function makeConnection(
           sessionId: input.sessionId,
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
+          ...(input.answersOncePerCall === true ? { answersOncePerCall: true } : {}),
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
           ...(input.strict === false ? { strict: false } : {}),
           sourceSessionId: input.resumeCursor.value,
