@@ -54,6 +54,12 @@ export interface ServerCallInput {
   readonly timeoutMs: number;
   readonly maxOutputBytes: number;
   readonly signal?: AbortSignal;
+  /**
+   * An agent socket offering only the key Octant keeps for this server, used
+   * in place of the person's agent. Such a call opens its own login and never
+   * shares a connection made with the person's keys.
+   */
+  readonly identityAgent?: string;
 }
 
 export interface ServerConnectionOptions {
@@ -375,7 +381,9 @@ export class ServerConnection {
     const pinned = this.#options.pinnedHostKeys?.(server) ?? [];
     let controlSocket: string | undefined;
     try {
-      if (input.freshConnection !== true) controlSocket = this.#controlSocket(server, pinned);
+      if (input.freshConnection !== true && input.identityAgent === undefined) {
+        controlSocket = this.#controlSocket(server, pinned);
+      }
     } catch {
       return Promise.resolve({
         status: "unreachable",
@@ -394,7 +402,11 @@ export class ServerConnection {
         return;
       }
       const child = spawn(this.#options.sshPath ?? "ssh", [...args], {
-        env: { ...this.#environment(), ...(input.freshConnection === true ? { LC_ALL: "C" } : {}) },
+        env: {
+          ...this.#environment(),
+          ...(input.identityAgent === undefined ? {} : { SSH_AUTH_SOCK: input.identityAgent }),
+          ...(input.freshConnection === true ? { LC_ALL: "C" } : {}),
+        },
         detached: input.freshConnection === true,
         stdio: ["pipe", "pipe", "pipe"],
       });

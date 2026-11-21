@@ -1,6 +1,7 @@
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveHostRuntimePaths } from "@octant/host-runtime";
 import { readDiskEncryption } from "./diskEncryption";
@@ -117,9 +118,10 @@ async function fixture(
   const installLogin = vi.fn(async () => undefined);
   const enableLogin = vi.fn(async () => undefined);
   let clock = 0;
-  const run = (command: HubCliCommand) =>
+  const run = (command: HubCliCommand, stdin?: NodeJS.ReadableStream) =>
     runHubCliCommand({
       command,
+      ...(stdin === undefined ? {} : { stdin }),
       session: {
         kind: "opened",
         windowId: "w",
@@ -415,6 +417,28 @@ describe("octant hub join codes and joining", () => {
     expect(host.text()).toContain("[ ] wake");
     expect(host.text()).toContain("The defaults stay.");
     expect(host.sent.some((request) => request.path === "/api/desktop/hub/grant")).toBe(false);
+  });
+
+  it("reads the join code from standard input when given as a dash, so it stays out of the process list", async () => {
+    const host = await fixture((request) =>
+      request.path === "/api/desktop/hub/join"
+        ? ok({
+            status: "awaiting-approval",
+            hubName: "Mac mini",
+            hubKeyFingerprint: "ab".repeat(32),
+            comparisonCode: "482913",
+          })
+        : ok({ status: "joined", rosterSequence: 2, grant: DEFAULT_GRANT }),
+    );
+    expect(
+      await host.run({ action: "join", code: "-" }, Readable.from(["octant-join-abc\n"])),
+    ).toBe(0);
+    expect(host.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/join",
+      body: { code: "octant-join-abc" },
+    });
+    expect(await host.run({ action: "join", code: "-" }, Readable.from([]))).toBe(1);
+    expect(host.errors()).toContain("No join code arrived on standard input.");
   });
 
   it("changes the grant from the items flag and drops Act's Projects when Act is not ticked", async () => {

@@ -5,6 +5,15 @@ import type { WorkRequestStateWiring } from "./workRequestState";
 import { CodeService } from "../code/codeService";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
+import { join } from "node:path";
+import { readPrivateListener } from "../hub/privateListenerReading";
+import { createHeadlessBuilds } from "../shield/headlessBuilds";
+import { MemberInstallService, MemberServerWork } from "../shield/memberInstall";
+import { createMemberInstallRouteHandler } from "../shield/memberInstallRoutes";
+import { MemberUpkeepService } from "../shield/memberUpkeep";
+import { hubMemberAt, readMemberHello, rosterListsListener } from "../hub/memberHello";
+import { keptKeyServerConnection } from "../shield/keptKeyServerConnection";
+import { makeServerSshKeysBrokerClient } from "../shield/sshKeyBrokerClient";
 import {
   type AgentRunId,
   AgentRunParentThreadId,
@@ -33,6 +42,7 @@ import {
   decodeBrowserCaptureId,
   decodeBrowserThreadId,
 } from "@octant/contracts/browser-automation";
+import { REMOTE_ACCESS_PROTOCOL_VERSION } from "@octant/contracts/remote-access";
 import { canvasOutsideContentWriters } from "../canvas/canvasOutsideContentMark";
 import { conversationInputSource } from "./conversationInputs";
 import type { ThreadPartsDestination, ThreadPartsSource } from "../hub/movedThreadParts";
@@ -70,6 +80,7 @@ import {
   defaultShellSettings,
   enabledModes,
   isAgentRunActiveStatus,
+  readPairingCode,
   rosterMemberWebOrigin,
 } from "@octant/domain";
 import {
@@ -241,7 +252,7 @@ export type RemoteDependencies = {
     readonly bind: (routes: ReadonlyArray<PairedDeviceRoutes>) => void;
   };
 } & Pick<ServerStart, "options" | "persistence" | "serve" | "startedAt" | "version"> &
-  Pick<HarnessWiring, "beginGoogleCliChange" | "webSearchSettings"> &
+  Pick<HarnessWiring, "beginGoogleCliChange" | "shieldServerStore" | "webSearchSettings"> &
   Pick<
     AuthorityWiring,
     | "browserCaptureStore"
@@ -260,7 +271,10 @@ export type RemoteDependencies = {
     | "remoteDelegationHolder"
     | "threadStandingAnswers"
   > &
-  Pick<HarnessStateWiring, "nativeHarnessSessions" | "serverAttachmentCleanup"> &
+  Pick<
+    HarnessStateWiring,
+    "nativeHarnessSessions" | "serverAttachmentCleanup" | "serverConnection"
+  > &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
   Pick<CodeWiring, "codeAttachments" | "codeProjectAccess" | "workAttachments"> &
@@ -670,6 +684,157 @@ export function wireRemote(deps: RemoteDependencies) {
     transport: hubTransport,
     record: recordHubMembership,
     now: Date.now,
+  });
+  // Making a registered server an Octant computer: installed over its SSH
+  // connection and joined to this hub, whose pairing decides the one claim
+  // whose comparison code the server printed.
+  const headlessBuilds = createHeadlessBuilds({
+    folder: join(providerDataDirectory, "headless-builds"),
+  });
+  const memberServerWork = new MemberServerWork();
+  // A server that signs in with a key Octant keeps is reached with that key
+  // alone, as the harness's own SSH access does, never the person's agent.
+  const memberServerConnection = keptKeyServerConnection({
+    connection: deps.serverConnection,
+    servers: () => deps.shieldServerStore.servers(),
+    keys:
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeServerSshKeysBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          }),
+  });
+  const memberInstalls = new MemberInstallService({
+    servers: () => deps.shieldServerStore.servers(),
+    connection: memberServerConnection,
+    builds: headlessBuilds,
+    work: memberServerWork,
+    hub: {
+      readiness: () => {
+        if (hubService.status().enabled) {
+          return readPrivateListener(privateListenerController.status()).status === "private"
+            ? { status: "ready", hubName: resolveHubIdentity().displayName }
+            : {
+                status: "refused",
+                reason: "hub-unavailable",
+                message:
+                  "This computer's listener is not running on a Tailscale or private network address, so its hub cannot make a join code. Turn it on in Settings › Remote access.",
+              };
+        }
+        return hubStateStore.load().link === undefined
+          ? {
+              status: "refused",
+              reason: "no-hub",
+              message:
+                "This computer is not a hub. Turn on the hub role in Settings › Remote access, then try again. Pairing a server with this computer without a hub is not built yet.",
+            }
+          : {
+              status: "refused",
+              reason: "not-the-hub",
+              message:
+                "This computer is a member of a hub, not the hub. Make the server an Octant computer from the hub's own window, where its join is approved.",
+            };
+      },
+      mintJoinCode: () => {
+        const minted = hubService.mintJoinCode({ owner: false });
+        const reading = minted.status === "minted" ? readPairingCode(minted.code) : undefined;
+        if (minted.status === "refused" || reading?.status !== "read") {
+          return {
+            status: "refused",
+            message:
+              "This computer's hub could not make a join code. Check its listener in Settings › Remote access, then try again.",
+          };
+        }
+        return { status: "minted", code: minted.code, ticketId: reading.contents.ticketId };
+      },
+      pendingComparisonCode: (ticketId) =>
+        currentRemoteGateway
+          ?.localDeviceAdministration()
+          ?.listPendingPairings()
+          .find((claim) => String(claim.ticketId) === ticketId)?.comparisonCode,
+      approve: (ticketId, actor) => {
+        const administration = currentRemoteGateway?.localDeviceAdministration();
+        if (administration === undefined) return false;
+        try {
+          // A window's approval is the host's own record, as the pairing
+          // route writes it; a paired device's names that device.
+          administration.approvePairing({
+            ticketId,
+            ...(actor.kind === "remote-device" ? { actor } : {}),
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      memberAt: (listener) => {
+        const member = hubMemberAt(hubStateStore, listener);
+        return member === undefined
+          ? undefined
+          : Schema.decodeUnknownSync(HubMemberId)(member.memberId);
+      },
+      deny: (ticketId, actor) => {
+        try {
+          currentRemoteGateway?.localDeviceAdministration()?.denyPairing({
+            ticketId,
+            reasonCode: "comparison-mismatch",
+            ...(actor.kind === "remote-device" ? { actor } : {}),
+          });
+        } catch {
+          // A claim already decided or gone is not approved either way.
+        }
+      },
+    },
+    journal: deps.shieldServerStore,
+    uuid: randomUUID,
+    now: Date.now,
+  });
+  // Updating such a member and removing Octant from it, over the same
+  // connection; this hub reads the updated member's signed hello and removes
+  // a member that could not leave by itself.
+  const rosterLists = (memberId: HubMemberId): boolean =>
+    hubStateStore
+      .load()
+      .hub?.roster?.roster.members.some(
+        (member) => String(member.memberId) === String(memberId),
+      ) === true;
+  const memberUpkeep = new MemberUpkeepService({
+    servers: () => deps.shieldServerStore.servers(),
+    connection: memberServerConnection,
+    builds: headlessBuilds,
+    hub: {
+      listed: (listener) => rosterListsListener(hubStateStore, listener),
+      hellosFrom: (listener) => hubMemberAt(hubStateStore, listener) !== undefined,
+      readHello: async (listener) => {
+        const member = hubMemberAt(hubStateStore, listener);
+        return member === undefined
+          ? { status: "unreachable" }
+          : await readMemberHello({ member, transport: hubTransport, now: Date.now });
+      },
+      roleOn: () => hubStateStore.load().hub?.enabled === true,
+      listsMember: (memberId) => rosterLists(memberId),
+      removeMember: async (memberId, actor) => {
+        if (!rosterLists(memberId)) return "not-listed";
+        const removed = await hubService.removeMember(
+          { memberId: String(memberId) },
+          actor.kind === "remote-device"
+            ? { kind: "remote-device", deviceId: actor.deviceId }
+            : { kind: "local-window" },
+        );
+        return removed.status === "removed" ? "removed" : "refused";
+      },
+    },
+    journal: deps.shieldServerStore,
+    work: memberServerWork,
+    protocolVersion: REMOTE_ACCESS_PROTOCOL_VERSION,
+    uuid: randomUUID,
+    now: Date.now,
+  });
+  const memberInstallRoutes = createMemberInstallRouteHandler({
+    windowAuthorityStore,
+    service: memberInstalls,
+    upkeep: memberUpkeep,
   });
   const spokeLinkService = new SpokeLinkService({
     state: hubStateStore,
@@ -2540,6 +2705,7 @@ export function wireRemote(deps: RemoteDependencies) {
     localDeviceAdministrationRoutes,
     hostControlRoutes,
     externalContentRoutes,
+    memberInstallRoutes,
   ]);
   return {
     composeHostDiagnostics,
@@ -2550,6 +2716,7 @@ export function wireRemote(deps: RemoteDependencies) {
     supportBundleRoutes,
     hubAdministrationRoutes,
     localDeviceAdministrationRoutes,
+    memberInstallRoutes,
     agentAccessAdministrationRoutes,
     agentAccessLoopbackRoutes,
     privateListenerAdministrationRoutes,
