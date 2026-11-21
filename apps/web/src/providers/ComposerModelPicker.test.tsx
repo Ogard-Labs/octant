@@ -71,13 +71,37 @@ describe("ComposerModelPicker", () => {
         >[0],
       ) => ("kind" in request && request.kind === "code" ? ranked : { suites: [] }),
     );
+    const modelTwoWithEffort = groups().map((group) => ({
+      ...group,
+      sections: group.sections.map((section) => ({
+        ...section,
+        models: section.models.map((entry) =>
+          String(entry.model.id) === String(modelTwo)
+            ? {
+                ...entry,
+                model: {
+                  ...entry.model,
+                  options: [
+                    {
+                      id: "effort",
+                      displayName: "Effort",
+                      kind: "selection" as const,
+                      values: ["low", "high"] as const,
+                    },
+                  ],
+                },
+              }
+            : entry,
+        ),
+      })),
+    }));
     const context = { client: { listSuites: vi.fn(), advice }, projects: [] };
     const onSelect = vi.fn();
     const tree = (projectId: typeof first, kind: "work" | "code", modelId = modelOne) => (
       <BenchmarkAdviceContext.Provider value={context}>
         <ComposerModelPicker
           ariaLabel="Thread model"
-          groups={groups()}
+          groups={modelTwoWithEffort}
           selectedProviderInstanceId={providerA}
           selectedModelId={modelId}
           onSelect={onSelect}
@@ -107,6 +131,98 @@ describe("ComposerModelPicker", () => {
     expect(await screen.findByRole("button", { name: "Use model" })).toBeVisible();
     view.rerender(tree(first, "code"));
     expect(screen.queryByRole("button", { name: "Use model" })).not.toBeInTheDocument();
+  });
+
+  it("uses the model's declared reasoning option id and clears unsupported or default benchmark effort", async () => {
+    const user = userEvent.setup();
+    const projectId = decodeProjectId("80000000-0000-4000-8000-0000000000d3");
+    const baseModel = {
+      providerInstanceId: providerA,
+      passRate: 1,
+      runAt: "2026-01-01T12:00:00.000Z",
+      stale: false,
+    };
+    const pickerGroupsWithModelTwoOptions = (options: ProviderModel["options"]) =>
+      groups().map((group) => ({
+        ...group,
+        sections: group.sections.map((section) => ({
+          ...section,
+          models: section.models.map((entry) =>
+            String(entry.model.id) === String(modelTwo)
+              ? { ...entry, model: { ...entry.model, options } }
+              : entry,
+          ),
+        })),
+      }));
+
+    const reasoningGroups = pickerGroupsWithModelTwoOptions([
+      {
+        id: "reasoning",
+        displayName: "Reasoning",
+        kind: "selection",
+        values: ["low", "high"],
+      },
+    ]);
+
+    const cases = [
+      {
+        effort: "high" as const,
+        expected: { reasoning: "high" },
+      },
+      {
+        effort: "max" as const,
+        expected: {},
+      },
+      {
+        effort: undefined,
+        expected: {},
+      },
+    ];
+
+    for (const scenario of cases) {
+      const advice = vi.fn(async () =>
+        decodeBenchmarkAdviceResponse({
+          suites: [
+            {
+              suiteId: "80000000-0000-4000-8000-0000000000ab",
+              name: "Reasoning suite",
+              models: [
+                {
+                  ...baseModel,
+                  modelId: modelTwo,
+                  costPerPass: 0.01,
+                  ...(scenario.effort === undefined ? {} : { effort: scenario.effort }),
+                },
+                { ...baseModel, modelId: modelOne, costPerPass: 0.03 },
+              ],
+            },
+          ],
+        }),
+      );
+      const onSelect = vi.fn();
+      const view = render(
+        <BenchmarkAdviceContext.Provider
+          value={{ client: { listSuites: vi.fn(), advice }, projects: [] }}
+        >
+          <ComposerModelPicker
+            ariaLabel="Thread model"
+            groups={reasoningGroups}
+            selectedProviderInstanceId={providerA}
+            selectedModelId={modelOne}
+            onSelect={onSelect}
+            benchmarkScope={{ projectId, kind: "chat" }}
+          />
+        </BenchmarkAdviceContext.Provider>,
+      );
+      await user.click(screen.getByRole("button", { name: "Thread model" }));
+      await user.click(await screen.findByRole("button", { name: "Use model" }));
+      expect(onSelect).toHaveBeenCalledWith({
+        providerInstanceId: providerA,
+        modelId: modelTwo,
+        modelOptionValues: scenario.expected,
+      });
+      view.unmount();
+    }
   });
 
   it("marks only a picker whose model cannot change as locked, so its name keeps its ink", () => {

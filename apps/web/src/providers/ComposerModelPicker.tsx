@@ -30,6 +30,9 @@ import { useProviderRooms } from "../usage/useProviderRooms";
 import { ProviderGlyph } from "./ProviderGlyph";
 import { useModelToolVerifier } from "./ModelToolVerificationContext";
 import { ComposerBenchmarkHint, type ComposerBenchmarkScope } from "./ComposerBenchmarkHint";
+import { findSupportedReasoningOption, isComposerReasoningOption } from "./composerReasoningOption";
+
+export { findSupportedReasoningOption, isComposerReasoningOption };
 
 /**
  * One selectable option the selected model declares (effort, reasoning, speed
@@ -40,17 +43,6 @@ export interface ComposerModelPickerModelOption {
   readonly displayName: string;
   readonly values: ReadonlyArray<string>;
   readonly value?: string;
-}
-
-/**
- * Whether an option names how hard the model should think. The picker keeps
- * that one on a segmented level control beside the other declared settings.
- */
-export function isComposerReasoningOption(option: {
-  readonly id: string;
-  readonly displayName: string;
-}): boolean {
-  return /(reasoning|effort|thinking|thought)/i.test(`${option.id} ${option.displayName}`);
 }
 
 /** Whether an option is the speed or service tier: Standard beside Fast. */
