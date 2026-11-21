@@ -108,4 +108,25 @@ describe("headless install smoke on a downloaded build", () => {
     });
     expect(await verifyDownloadedBuild(built.artifactRoot, trust)).toEqual({ status: "verified" });
   });
+
+  it("refuses a signed build that carries files its manifest does not list", async () => {
+    const built = await builtArtifact();
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const trust = {
+      stable: [],
+      preview: [publicKey.export({ format: "der", type: "spki" }).toString("base64")],
+      candidate: [],
+    };
+    await signHeadlessArtifactDirectory({
+      artifactRoot: built.artifactRoot,
+      ring: "preview",
+      privateKeyBase64: privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
+      trustedKeys: trust,
+    });
+    mkdirSync(join(built.artifactRoot, "lib", "server", "node_modules"), { recursive: true });
+    writeFileSync(join(built.artifactRoot, "lib", "server", "node_modules", "planted.js"), "x");
+    expect(await verifyDownloadedBuild(built.artifactRoot, trust)).toMatchObject({
+      status: "refused",
+    });
+  });
 });

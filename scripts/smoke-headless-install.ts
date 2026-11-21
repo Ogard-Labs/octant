@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -201,6 +201,20 @@ export async function verifyDownloadedBuild(
       reason: `the build does not match its manifest (${inspection.rejection.code})`,
     };
   }
+  const unlisted = await firstUnlistedEntry(
+    artifactRoot,
+    new Set([
+      HEADLESS_ARTIFACT_MANIFEST_FILENAME,
+      HEADLESS_ARTIFACT_SIGNATURE_FILENAME,
+      ...inspection.manifest.components.map((component) => component.path),
+    ]),
+  );
+  if (unlisted !== undefined) {
+    return {
+      status: "refused",
+      reason: `the build carries ${unlisted}, which its manifest does not list`,
+    };
+  }
   let signatureText: string | undefined;
   try {
     signatureText = await readFile(
@@ -218,6 +232,31 @@ export async function verifyDownloadedBuild(
   return check.status === "refused"
     ? { status: "refused", reason: `the signature is ${check.reason}` }
     : { status: "verified" };
+}
+
+/**
+ * The first entry under `root` that is neither a listed file nor a directory
+ * holding one. The signature covers listed files only, and the launcher runs
+ * from this tree, so an unlisted module beside them could be loaded unsigned.
+ */
+async function firstUnlistedEntry(
+  root: string,
+  listed: ReadonlySet<string>,
+  prefix = "",
+): Promise<string | undefined> {
+  for (const name of await readdir(join(root, prefix))) {
+    const path = prefix === "" ? name : `${prefix}/${name}`;
+    const entry = await lstat(join(root, path));
+    if (entry.isDirectory()) {
+      const holdsListed = [...listed].some((listedPath) => listedPath.startsWith(`${path}/`));
+      if (!holdsListed) return path;
+      const nested = await firstUnlistedEntry(root, listed, path);
+      if (nested !== undefined) return nested;
+    } else if (!listed.has(path)) {
+      return path;
+    }
+  }
+  return undefined;
 }
 
 async function smokeHeadlessInstall(argv: readonly string[]): Promise<void> {
