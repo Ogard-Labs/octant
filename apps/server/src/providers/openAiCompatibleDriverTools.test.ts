@@ -36,13 +36,13 @@ const echoTool: ProviderToolDefinition = {
   },
 };
 
-function makeDriver(fetch: CompatibleFetch) {
+function makeDriver(fetch: CompatibleFetch, baseUrl = configuration.baseUrl) {
   const runtimeRegistry = new ProviderRuntimeRegistry();
   return {
     driver: runOnNativeHarness(
       makeOpenAiCompatibleDriver({
         instanceId,
-        configuration,
+        configuration: { ...configuration, baseUrl },
         runtimeRegistry,
         fetch,
       }),
@@ -57,8 +57,8 @@ function makeDriver(fetch: CompatibleFetch) {
  * hands Octant's tools, the capability echo included, only to a verified
  * model.
  */
-async function verifiedToolDriver(fetch: CompatibleFetch) {
-  const fixture = makeDriver(fetch);
+async function verifiedToolDriver(fetch: CompatibleFetch, baseUrl = configuration.baseUrl) {
+  const fixture = makeDriver(fetch, baseUrl);
   await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
   if (fixture.runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]) === undefined) {
     throw new Error("The probe recorded no observation.");
@@ -276,15 +276,19 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
     expect(waiting).toBeUndefined();
   });
 
-  it("completes the turn after answerTool provides the tool result", async () => {
-    let callCount = 0;
-    const fetch = routeFetch(() => {
-      callCount += 1;
-      return callCount === 1
+  it("completes a Go tool call with the same conversation ID when sending its result", async () => {
+    const ids: Array<string | null> = [];
+    const fetch: CompatibleFetch = async (url, init) => {
+      if (String(url).endsWith("/models")) return modelsResponse();
+      ids.push(new Headers(init?.headers).get("x-opencode-session"));
+      return ids.length === 1
         ? responsesToolCallStream("call_abc", "octant_capability_echo", '{"echo":"hi"}')
         : responsesTextStream("done");
-    });
-    const { driver } = await verifiedToolDriver(fetch as CompatibleFetch);
+    };
+    const { driver } = await verifiedToolDriver(
+      fetch,
+      "https://opencode.ai/inference/go/openai/v1/",
+    );
 
     await Effect.runPromise(
       Effect.scoped(
@@ -319,7 +323,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         }),
       ),
     );
-    expect(callCount).toBe(2);
+    expect(ids).toEqual([sessionId, sessionId]);
   });
 
   it("rejects answerTool for an unknown tool call id", async () => {
