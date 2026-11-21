@@ -215,7 +215,13 @@ describe("ComposerModelPicker", () => {
         </BenchmarkAdviceContext.Provider>,
       );
       await user.click(screen.getByRole("button", { name: "Thread model" }));
-      await user.click(await screen.findByRole("button", { name: "Use model" }));
+      const useModel = await screen.findByRole("button", { name: "Use model" });
+      if (scenario.effort === "high") {
+        expect(screen.getByText(/Effort: high\./)).toBeVisible();
+      } else {
+        expect(screen.queryByText(/Effort:/)).not.toBeInTheDocument();
+      }
+      await user.click(useModel);
       expect(onSelect).toHaveBeenCalledWith({
         providerInstanceId: providerA,
         modelId: modelTwo,
@@ -223,6 +229,140 @@ describe("ComposerModelPicker", () => {
       });
       view.unmount();
     }
+  });
+
+  it("preserves supported non-reasoning options such as Fast while clearing prior reasoning on benchmark switch", async () => {
+    const user = userEvent.setup();
+    const projectId = decodeProjectId("80000000-0000-4000-8000-0000000000d4");
+    const sharedOptions: ProviderModel["options"] = [
+      {
+        id: "reasoning",
+        displayName: "Reasoning",
+        kind: "selection",
+        values: ["low", "high"],
+      },
+      {
+        id: "service_tier",
+        displayName: "Service tier",
+        kind: "selection",
+        values: ["standard", "fast"],
+      },
+    ];
+    const groupsWithFast = groups().map((group) => ({
+      ...group,
+      sections: group.sections.map((section) => ({
+        ...section,
+        models: section.models.map((entry) =>
+          String(entry.model.id) === String(modelOne)
+            ? {
+                ...entry,
+                model: {
+                  ...entry.model,
+                  options: [
+                    ...sharedOptions,
+                    {
+                      id: "only_model_one",
+                      displayName: "Extra",
+                      kind: "selection" as const,
+                      values: ["a", "b"] as const,
+                    },
+                  ],
+                },
+              }
+            : String(entry.model.id) === String(modelTwo)
+              ? { ...entry, model: { ...entry.model, options: sharedOptions } }
+              : entry,
+        ),
+      })),
+    }));
+    const advice = vi.fn(async () =>
+      decodeBenchmarkAdviceResponse({
+        suites: [
+          {
+            suiteId: "80000000-0000-4000-8000-0000000000ac",
+            name: "Fast chat suite",
+            models: [
+              {
+                providerInstanceId: providerA,
+                modelId: modelTwo,
+                passRate: 1,
+                costPerPass: 0.01,
+                runAt: "2026-01-01T12:00:00.000Z",
+                stale: false,
+              },
+              {
+                providerInstanceId: providerA,
+                modelId: modelOne,
+                passRate: 1,
+                costPerPass: 0.03,
+                runAt: "2026-01-01T12:00:00.000Z",
+                stale: false,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    // Chat passes current selections via `modelOptions` rather than `modelOptionValues`.
+    const chatSelect = vi.fn();
+    const chatView = render(
+      <BenchmarkAdviceContext.Provider
+        value={{ client: { listSuites: vi.fn(), advice }, projects: [] }}
+      >
+        <ComposerModelPicker
+          ariaLabel="Chat thread model"
+          groups={groupsWithFast}
+          selectedProviderInstanceId={providerA}
+          selectedModelId={modelOne}
+          modelOptions={[
+            { id: "reasoning", displayName: "Reasoning", values: ["low", "high"], value: "high" },
+            {
+              id: "service_tier",
+              displayName: "Service tier",
+              values: ["standard", "fast"],
+              value: "fast",
+            },
+            { id: "only_model_one", displayName: "Extra", values: ["a", "b"], value: "a" },
+          ]}
+          onSelect={chatSelect}
+          benchmarkScope={{ projectId, kind: "chat" }}
+        />
+      </BenchmarkAdviceContext.Provider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Chat thread model" }));
+    await user.click(await screen.findByRole("button", { name: "Use model" }));
+    expect(chatSelect).toHaveBeenCalledWith({
+      providerInstanceId: providerA,
+      modelId: modelTwo,
+      modelOptionValues: { service_tier: "fast" },
+    });
+    chatView.unmount();
+
+    // Work and Code pass current selections via `modelOptionValues`.
+    const codeSelect = vi.fn();
+    render(
+      <BenchmarkAdviceContext.Provider
+        value={{ client: { listSuites: vi.fn(), advice }, projects: [] }}
+      >
+        <ComposerModelPicker
+          ariaLabel="Code thread model"
+          groups={groupsWithFast}
+          selectedProviderInstanceId={providerA}
+          selectedModelId={modelOne}
+          modelOptionValues={{ reasoning: "high", service_tier: "fast", only_model_one: "a" }}
+          onSelect={codeSelect}
+          benchmarkScope={{ projectId, kind: "code" }}
+        />
+      </BenchmarkAdviceContext.Provider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Code thread model" }));
+    await user.click(await screen.findByRole("button", { name: "Use model" }));
+    expect(codeSelect).toHaveBeenCalledWith({
+      providerInstanceId: providerA,
+      modelId: modelTwo,
+      modelOptionValues: { service_tier: "fast" },
+    });
   });
 
   it("marks only a picker whose model cannot change as locked, so its name keeps its ink", () => {

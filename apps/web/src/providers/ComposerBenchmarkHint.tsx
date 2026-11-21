@@ -12,7 +12,10 @@ import {
 } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { BenchmarkAdviceContext } from "../usage/benchmarks/BenchmarkAdviceContext";
-import { findSupportedReasoningOption } from "./composerReasoningOption";
+import {
+  findSupportedReasoningOption,
+  preservedNonReasoningModelOptions,
+} from "./composerReasoningOption";
 
 type Scope = Extract<BenchmarkAdviceRequest, { readonly projectId: unknown }>;
 
@@ -72,18 +75,22 @@ export function ComposerBenchmarkHint(props: {
     if (best === undefined || selectedRank < 1) continue;
     const { model, picker } = best;
     const supportedReasoning = findSupportedReasoningOption(picker.model.options, model.effort);
-    // Always pass an explicit option map so switching to a default-effort or
-    // unsupported-effort suggestion clears any reasoning effort carried over
-    // from the previous model instead of inheriting it.
-    const modelOptionValues: ProviderModelOptionValues =
-      supportedReasoning === undefined ? {} : { [supportedReasoning.id]: supportedReasoning.value };
+    // Pass an explicit option map so switching to a default-effort or
+    // unsupported-effort suggestion clears prior reasoning effort instead of
+    // inheriting it, while keeping still-supported non-reasoning choices (e.g. Fast).
+    const modelOptionValues: ProviderModelOptionValues = {
+      ...preservedNonReasoningModelOptions(picker.model.options, props.selected.modelOptionValues),
+      ...(supportedReasoning === undefined
+        ? {}
+        : { [supportedReasoning.id]: supportedReasoning.value }),
+    };
     return (
       <div className="composer-model-picker__benchmark-hint">
         <span className="oct-meta">
           {model.costPerPass === undefined
             ? `Passed your ${suite.name} suite: ${picker.model.displayName} (cost not reported).`
             : `Passed your ${suite.name} suite at the lowest cost: ${picker.model.displayName}.`}{" "}
-          {model.effort === undefined ? "" : `Effort: ${model.effort}. `}
+          {supportedReasoning === undefined ? "" : `Effort: ${supportedReasoning.value}. `}
           {model.runAt.slice(0, 10)}
           {model.stale ? " · Stale" : ""}
         </span>

@@ -1,4 +1,4 @@
-import type { ProviderModelOption } from "@octant/contracts";
+import type { ProviderModelOption, ProviderModelOptionValues } from "@octant/contracts";
 
 /**
  * Whether an option names how hard the model should think. The picker keeps
@@ -27,4 +27,26 @@ export function findSupportedReasoningOption(
     return undefined;
   }
   return { id: option.id, value: effort };
+}
+
+/**
+ * Keeps currently selected non-reasoning options (such as Fast / service tier)
+ * that the target model still declares with the same value, dropping reasoning
+ * options so the caller can explicitly set or clear effort.
+ */
+export function preservedNonReasoningModelOptions(
+  targetOptions: ReadonlyArray<ProviderModelOption>,
+  currentValues: ProviderModelOptionValues | undefined,
+): ProviderModelOptionValues {
+  return Object.fromEntries(
+    Object.entries(currentValues ?? {}).filter(([optionId, value]) => {
+      const option = targetOptions.find((entry) => entry.id === optionId);
+      return (
+        option !== undefined &&
+        option.kind === "selection" &&
+        !isComposerReasoningOption(option) &&
+        option.values.includes(value)
+      );
+    }),
+  );
 }

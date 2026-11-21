@@ -370,6 +370,13 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         : [],
     );
   const levelOption = modelOptions.find(isComposerReasoningOption);
+  const selectedModelOptionValues: ProviderModelOptionValues =
+    props.modelOptionValues ??
+    Object.fromEntries(
+      modelOptions.flatMap((option) =>
+        option.value === undefined ? [] : ([[option.id, option.value]] as const),
+      ),
+    );
   const tierOption = modelOptions.find(
     (option) => !isComposerReasoningOption(option) && isComposerServiceTierOption(option),
   );
@@ -833,6 +840,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             selected={{
               providerInstanceId: props.selectedProviderInstanceId,
               modelId: props.selectedModelId,
+              modelOptionValues: selectedModelOptionValues,
             }}
             onSelect={chooseModel}
           />
