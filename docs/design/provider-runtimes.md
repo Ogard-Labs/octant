@@ -2726,7 +2726,10 @@ with the person's token. The CLI talks to Google itself.
   launch unpacks the CLI again before it answers. A thread may start from
   one of the CLI's own sessions for its folder, listed through `session/list`
   when `initialize` advertises it, leaving out any an Octant thread holds
-  (`importsSessions`).
+  (`importsSessions`). Octant follows the list's `nextCursor` through its
+  pages, up to 20 pages and 2,000 sessions and stopping at a cursor it has
+  already followed, before it filters by folder and held sessions and offers
+  the newest 50.
 - **Usage and limits.** The `session/prompt` reply's `usage` is that turn's
   own; its `inputTokens` leaves out cached reads, so Octant's input is input
   plus `cachedReadTokens`, kept also as cache reads (`reportsTurnUsage`). The

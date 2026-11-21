@@ -1,7 +1,7 @@
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { compactAcpConversation } from "./acpCompaction";
 import {
-  acpListedSessions,
+  readAcpSessionPages,
   makeAcpNativeSessions,
   type AcpSessionLister,
 } from "./acpNativeSessions";
@@ -967,8 +967,12 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
                   connection.initialized.agentCapabilities.sessionCapabilities?.list === undefined
                 )
                   return "unsupported" as const;
-                const reply = await client.call("session/list", { cwd: projectRoot });
-                const listed = acpListedSessions(reply);
+                const listed = await readAcpSessionPages((cursor) =>
+                  client.call(
+                    "session/list",
+                    cursor === undefined ? { cwd: projectRoot } : { cwd: projectRoot, cursor },
+                  ),
+                );
                 if (listed === undefined)
                   throw failure(
                     "protocol",

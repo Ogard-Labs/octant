@@ -4520,6 +4520,35 @@ describe("an added ACP agent's model selection", () => {
   });
 });
 
+it("asks Google Antigravity for each following session/list page with the cursor it returned", async () => {
+  const f = fixture(acpProviderProfiles.antigravity, { runtimeVersion: "1.5.12" });
+  const driver = makeAcpDriver({
+    profile: acpProviderProfiles.antigravity,
+    instanceId,
+    binaryPath,
+    managedHome,
+    process: {
+      start: () => Effect.succeed(f.connection),
+    },
+    runtimeRegistry: new ProviderRuntimeRegistry(),
+    clientFactory: () => f.client,
+    sessionOwnership: { held: () => new Set(["held"]) },
+  });
+  vi.mocked(f.client.call).mockImplementation(async (_method, params) =>
+    params.cursor === "page-2"
+      ? { sessions: [{ sessionId: "later", cwd: projectRoot }] }
+      : { sessions: [{ sessionId: "held", cwd: projectRoot }], nextCursor: "page-2" },
+  );
+  const listed = await Effect.runPromise(
+    driver.nativeSessions?.list({ instanceId, projectRoot }) ?? Effect.die("no native sessions"),
+  );
+  expect(listed.map((session) => session.nativeSessionId)).toEqual(["later"]);
+  expect(f.client.call).toHaveBeenCalledWith("session/list", {
+    cwd: projectRoot,
+    cursor: "page-2",
+  });
+});
+
 it("offers Google Antigravity no client file writes, while still offering reads and the terminal", async () => {
   const nativeTools = Object.values(ACP_CLIENT_TOOL_NAMES).map((name) => ({
     name,

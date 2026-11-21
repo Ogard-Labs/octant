@@ -19,6 +19,13 @@ import { providerResumeBinding } from "./resumeBinding";
 
 const MAX_OFFERED_NATIVE_SESSIONS = 50;
 const MAX_SESSION_ID_CHARACTERS = 256;
+// `session/list` pages through `nextCursor`; the folder filter and the held
+// sessions apply only after collecting, so the first page alone hid every
+// later session from the list and from adoption. The bounds stop an agent
+// that pages without end from holding the request open.
+const MAX_LISTED_PAGES = 20;
+const MAX_LISTED_SESSIONS = 2000;
+const MAX_CURSOR_CHARACTERS = 4096;
 
 /** One session as the agent's `session/list` names it. */
 export interface AcpListedSession {
@@ -67,6 +74,38 @@ export function acpListedSessions(reply: unknown): ReadonlyArray<AcpListedSessio
       ...(typeof entry?.title === "string" ? { title: entry.title } : {}),
       ...(typeof entry?.updatedAt === "string" ? { updatedAt: entry.updatedAt } : {}),
     });
+  }
+  return listed;
+}
+
+/**
+ * Every session the agent's `session/list` names across its pages, asking
+ * for each following page with the `cursor` the previous one returned. It
+ * stops at a cursor it has already followed and at the page and session
+ * bounds; `undefined` when any page cannot be read.
+ */
+export async function readAcpSessionPages(
+  listPage: (cursor: string | undefined) => Promise<unknown>,
+): Promise<ReadonlyArray<AcpListedSession> | undefined> {
+  const listed: AcpListedSession[] = [];
+  const followed = new Set<string>();
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_LISTED_PAGES; page += 1) {
+    const reply = await listPage(cursor);
+    const sessions = acpListedSessions(reply);
+    if (sessions === undefined) return undefined;
+    listed.push(...sessions.slice(0, MAX_LISTED_SESSIONS - listed.length));
+    const next = record(reply)?.nextCursor;
+    if (
+      listed.length >= MAX_LISTED_SESSIONS ||
+      typeof next !== "string" ||
+      next.length === 0 ||
+      next.length > MAX_CURSOR_CHARACTERS ||
+      followed.has(next)
+    )
+      break;
+    followed.add(next);
+    cursor = next;
   }
   return listed;
 }

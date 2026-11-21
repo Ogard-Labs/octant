@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   acpListedSessions,
   makeAcpNativeSessions,
+  readAcpSessionPages,
   type AcpListedSession,
 } from "./acpNativeSessions";
 
@@ -89,5 +90,66 @@ describe("an ACP agent's own sessions", () => {
       }),
     ).toEqual([{ sessionId: "a", title: "A", cwd: "/x" }]);
     expect(acpListedSessions({})).toBeUndefined();
+  });
+
+  it("offers and adopts a session the agent lists only on a later page", async () => {
+    const pages: Record<string, unknown> = {
+      first: { sessions: [{ sessionId: "held", cwd: "/work/app" }], nextCursor: "page-2" },
+      "page-2": { sessions: [{ sessionId: "later", cwd: "/work/app" }] },
+    };
+    const requested: Array<string | undefined> = [];
+    const native = makeAcpNativeSessions({
+      instanceId,
+      driverKind: "antigravity",
+      displayName: "Google Antigravity",
+      heldSessions: () => new Set(["held"]),
+      listSessions: async () => {
+        const listed = await readAcpSessionPages(async (cursor) => {
+          requested.push(cursor);
+          return pages[cursor ?? "first"];
+        });
+        if (listed === undefined) throw new Error("Expected readable pages");
+        return listed;
+      },
+    });
+    const listed = await Effect.runPromise(native.list({ instanceId, projectRoot: "/work/app" }));
+    expect(listed.map((session) => session.nativeSessionId)).toEqual(["later"]);
+    const adopted = await Effect.runPromise(
+      native.adopt({
+        instanceId,
+        projectRoot: "/work/app",
+        mode: "code",
+        sessionId,
+        nativeSessionId: "later",
+        modelId,
+      }),
+    );
+    expect(adopted.value).toBe("later");
+    expect(requested).toEqual([undefined, "page-2", undefined, "page-2"]);
+  });
+
+  it("stops reading pages when the agent repeats a cursor or never stops paging", async () => {
+    const repeating: Array<string | undefined> = [];
+    const listed = await readAcpSessionPages(async (cursor) => {
+      repeating.push(cursor);
+      return { sessions: [{ sessionId: `s-${repeating.length}` }], nextCursor: "again" };
+    });
+    expect(repeating).toEqual([undefined, "again"]);
+    expect(listed?.map((session) => session.sessionId)).toEqual(["s-1", "s-2"]);
+
+    let calls = 0;
+    const endless = await readAcpSessionPages(async () => {
+      calls += 1;
+      return { sessions: [{ sessionId: `e-${calls}` }], nextCursor: `next-${calls}` };
+    });
+    expect(calls).toBeLessThanOrEqual(20);
+    expect(endless?.length).toBe(calls);
+  });
+
+  it("refuses a later page it cannot read rather than offering a partial list", async () => {
+    const listed = await readAcpSessionPages(async (cursor) =>
+      cursor === undefined ? { sessions: [{ sessionId: "a" }], nextCursor: "b" } : { nope: true },
+    );
+    expect(listed).toBeUndefined();
   });
 });
