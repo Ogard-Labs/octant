@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  computerUseAppRemembered,
+  decideComputerUseApproval,
   evaluateComputerUseAction,
-  isSessionExpired,
-  canRecordComputerUseObservation,
   isSensitiveFieldProtectionEnabled,
-  requiresVisibleStop,
-  requiresProcessOwnership,
 } from "./computerUsePolicy";
-import type {
-  ComputerUseActionRequest,
-  ComputerUseObservation,
-  ComputerUseSessionRecord,
-  ToolActionAuthority,
+import {
+  decodeEventActor,
+  decodeProjectId,
+  type ComputerUseActionRequest,
+  type ComputerUseSessionRecord,
+  type RememberedComputerUseApp,
+  type ToolActionAuthority,
+  type UtcTimestamp,
 } from "@octant/contracts";
 
 const authority: ToolActionAuthority = {
@@ -145,50 +146,6 @@ describe("evaluateComputerUseAction", () => {
   });
 });
 
-describe("isSessionExpired", () => {
-  it("returns false within timeout", () => {
-    const createdAt = new Date("2026-07-24T12:00:00.000Z").getTime();
-    expect(isSessionExpired(activeSession, createdAt + 60_000)).toBe(false);
-  });
-
-  it("returns true after timeout", () => {
-    const createdAt = new Date("2026-07-24T12:00:00.000Z").getTime();
-    expect(isSessionExpired(activeSession, createdAt + 300_001)).toBe(true);
-  });
-
-  it("returns false for stopped session", () => {
-    expect(isSessionExpired({ ...activeSession, state: "stopped" as const }, Date.now())).toBe(
-      false,
-    );
-  });
-});
-
-describe("canRecordComputerUseObservation", () => {
-  it("returns true for matching observation", () => {
-    const obs: ComputerUseObservation = {
-      sessionId: activeSession.sessionId,
-      actionId: activeSession.actionId,
-      correlationId: activeSession.correlationId,
-      authority,
-      observedAt: "2026-07-24T12:01:00.000Z" as any,
-      stale: false,
-    };
-    expect(canRecordComputerUseObservation(obs, activeSession)).toBe(true);
-  });
-
-  it("returns false for mismatched session", () => {
-    const obs: ComputerUseObservation = {
-      sessionId: "00000000-0000-4000-8000-000000000099" as any,
-      actionId: activeSession.actionId,
-      correlationId: activeSession.correlationId,
-      authority,
-      observedAt: "2026-07-24T12:01:00.000Z" as any,
-      stale: false,
-    };
-    expect(canRecordComputerUseObservation(obs, activeSession)).toBe(false);
-  });
-});
-
 describe("isSensitiveFieldProtectionEnabled", () => {
   it("returns true when policy enables protection", () => {
     expect(isSensitiveFieldProtectionEnabled(activeSession, "password")).toBe(true);
@@ -203,14 +160,124 @@ describe("isSensitiveFieldProtectionEnabled", () => {
   });
 });
 
-describe("requiresVisibleStop", () => {
-  it("returns true when policy requires it", () => {
-    expect(requiresVisibleStop(activeSession)).toBe(true);
-  });
-});
+describe("first-action approval policy", () => {
+  const base = {
+    plan: false,
+    fullAccess: false,
+    strict: false,
+    externalContentIngested: false,
+    hasThreadGrant: false,
+    hasProjectGrant: false,
+    hasProjectScope: true,
+  } as const;
 
-describe("requiresProcessOwnership", () => {
-  it("returns true when policy requires it", () => {
-    expect(requiresProcessOwnership(activeSession)).toBe(true);
+  it("proceeds without first-action approval at Full access outside Strict", () => {
+    expect(decideComputerUseApproval({ ...base, fullAccess: true, strict: false })).toEqual({
+      kind: "not-required",
+      reason: "full-access",
+    });
+    expect(
+      decideComputerUseApproval({
+        ...base,
+        fullAccess: true,
+        strict: false,
+        externalContentIngested: true,
+      }),
+    ).toEqual({
+      kind: "not-required",
+      reason: "full-access",
+    });
+  });
+
+  it("keeps asking for first-action approval at Full access when Strict is on", () => {
+    expect(decideComputerUseApproval({ ...base, fullAccess: true, strict: true })).toEqual({
+      kind: "required",
+      scope: "application-session",
+      canRememberForProject: true,
+    });
+  });
+
+  it("requires first-action approval below Full access without a grant and offers remembering for the Project", () => {
+    expect(decideComputerUseApproval(base)).toEqual({
+      kind: "required",
+      scope: "application-session",
+      canRememberForProject: true,
+    });
+    expect(decideComputerUseApproval({ ...base, hasProjectScope: false })).toEqual({
+      kind: "required",
+      scope: "application-session",
+      canRememberForProject: false,
+    });
+  });
+
+  it("honours a remembered Project grant below Full access and keeps other Projects gated", () => {
+    const projectA = decodeProjectId("00000000-0000-4000-8000-000000000011");
+    const projectB = decodeProjectId("00000000-0000-4000-8000-000000000012");
+    const remembered: ReadonlyArray<RememberedComputerUseApp> = [
+      {
+        projectId: projectA,
+        appId: "com.apple.Preview",
+        grantedBy: decodeEventActor({
+          kind: "local-user",
+          actorId: "00000000-0000-4000-8000-000000000002",
+        }),
+        grantedAt: "2026-11-19T12:00:00.000Z" as UtcTimestamp,
+      },
+    ];
+
+    expect(computerUseAppRemembered(remembered, projectA, "com.apple.Preview")).toBe(true);
+    expect(computerUseAppRemembered(remembered, projectB, "com.apple.Preview")).toBe(false);
+    expect(computerUseAppRemembered(remembered, projectA, "com.apple.Mail")).toBe(false);
+
+    expect(
+      decideComputerUseApproval({
+        ...base,
+        hasProjectGrant: computerUseAppRemembered(remembered, projectA, "com.apple.Preview"),
+      }),
+    ).toEqual({
+      kind: "not-required",
+      reason: "project-grant",
+    });
+    expect(
+      decideComputerUseApproval({
+        ...base,
+        hasProjectGrant: computerUseAppRemembered(remembered, projectB, "com.apple.Preview"),
+      }),
+    ).toEqual({
+      kind: "required",
+      scope: "application-session",
+      canRememberForProject: true,
+    });
+  });
+
+  it("always refuses Plan mode even at Full access or with a remembered Project grant", () => {
+    expect(
+      decideComputerUseApproval({
+        ...base,
+        plan: true,
+        fullAccess: true,
+        hasThreadGrant: true,
+        hasProjectGrant: true,
+      }),
+    ).toEqual({
+      kind: "refused",
+      reason: "plan-read-only",
+    });
+  });
+
+  it("forces one-time approval without Project remembering below Full access under Strict once outside content entered", () => {
+    expect(
+      decideComputerUseApproval({
+        ...base,
+        strict: true,
+        externalContentIngested: true,
+        hasThreadGrant: true,
+        hasProjectGrant: true,
+      }),
+    ).toEqual({
+      kind: "required",
+      scope: "one-time",
+      canRememberForProject: false,
+    });
   });
 });

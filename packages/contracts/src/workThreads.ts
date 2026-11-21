@@ -23,6 +23,7 @@ import { UsageResumeThreadState } from "./usageResume";
 import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
+import { FinishedReceiptId } from "./finishedReceipt";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -123,6 +124,8 @@ export const WorkThread = Schema.Struct({
   lifecycle: Schema.Literal("active", "archived", "deleting", "deleted"),
   completionConfirmed: Schema.optional(Schema.Boolean),
   completionEvidence: Schema.optional(WorkThreadCompletionEvidence),
+  /** Fresh finished receipt recorded as completion evidence when a person marked the thread Done. */
+  completionReceiptId: Schema.optional(FinishedReceiptId),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   modelOptionValues: Schema.optional(ProviderModelOptionValues),
@@ -664,13 +667,6 @@ export const WorkThreadNavigation = Schema.Struct({
 }).annotations(strict);
 export type WorkThreadNavigation = typeof WorkThreadNavigation.Type;
 
-export const WORK_THREAD_EVENT_NAMES = [
-  "work.thread-created@1",
-  "work.thread-updated@1",
-  "work.thread-completion-confirmed@1",
-] as const;
-
-export const WORK_SETTINGS_EVENT_NAME = "work.settings-updated@1";
 export const decodeWorkSettingsUpdated = Schema.decodeUnknownSync(WorkSettingsUpdated);
 
 export const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadId);

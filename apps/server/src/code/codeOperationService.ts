@@ -5,7 +5,11 @@ import {
   SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
   type AttachedFileByPath,
 } from "../attachments/attachedFiles";
-import type { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
+import type {
+  createProductFeedbackTurnPort,
+  ProductFeedbackClaimDecision,
+  ProductFeedbackTakeResult,
+} from "../browser/productFeedbackTurnPort";
 import { requiresLiveCodeReviewAuthority } from "./codeReviewAuthority";
 import {
   retainedReviewTarget,
@@ -20,7 +24,10 @@ import type {
 } from "../context/externalContentIngestionStore";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import {
+  MAX_CODE_OPERATION_PATHS,
   type AutomationRunReference,
+  type CodeGitOperationId,
+  type CodeRelativePath,
   type CodeReviewTarget,
   type CodeReviewRevision,
   type CodeReviewFindingAssessment,
@@ -45,6 +52,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import {
+  decodeCodeCheckoutHead,
   decodeCodeOperationCommand,
   decodeCodeOperationResult,
   decodeCodeRepositoryTestStatus,
@@ -66,6 +74,7 @@ import {
   type CodeOperationCommand,
   type CodeOperationId,
   type CodeOperationResult,
+  type CodePullRequestLineNotesSource,
   type CodeTerminalId,
   type CodeTerminalLiveFrame,
   type CodeTerminalLiveRequest,
@@ -82,6 +91,7 @@ import {
   type AgentRunId,
   type MentionableThreadId,
   type PendingRequest,
+  type ProjectId,
   type ScaffoldEntry,
   type ScaffoldRun,
   type ProviderAttachmentInput,
@@ -130,6 +140,11 @@ import type {
 } from "./ghPullRequestActionPort";
 import { pullRequestCommentDigest } from "./codeRuntimeWorkRecorder";
 import type { GhPullRequestMergeResult } from "./ghPullRequestPort";
+import {
+  splitRepositoryName,
+  type PullRequestLinkReader,
+  type PullRequestLinkRecorder,
+} from "./pullRequestLinkService";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
 import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
@@ -630,6 +645,7 @@ export interface CodeOperationGitPort {
     readonly checkoutRoot: string;
     readonly maxDiffBytes: number;
     readonly ignoreWhitespace?: boolean;
+    readonly untrackedFiles?: "all";
   }) => Promise<{
     readonly status: "ready" | "unavailable" | "failed";
     readonly head?: {
@@ -706,6 +722,19 @@ export interface CodeOperationGitPort {
       readonly worktree: string;
     }[];
     readonly executionPolicy: CodeThread["executionPolicy"];
+  }) => Promise<GitMutationOutcome>;
+  /**
+   * Point the checkout at another local branch. Optional so a host without
+   * it refuses the switch rather than pretending the branch moved.
+   */
+  readonly switchBranch?: (input: {
+    readonly checkoutId: string;
+    readonly checkoutRoot: string;
+    readonly branch: string;
+    readonly dirty: "refuse" | "stash";
+    readonly expectedStateToken: string;
+    readonly executionPolicy: CodeThread["executionPolicy"];
+    readonly current?: () => boolean;
   }) => Promise<GitMutationOutcome>;
   readonly push: (input: {
     readonly checkoutId: string;
@@ -818,7 +847,7 @@ export interface CodeOperationGitPort {
 }
 
 type GitMutationOutcome =
-  | { readonly status: "applied"; readonly oid?: string }
+  | { readonly status: "applied"; readonly oid?: string; readonly branch?: string }
   | {
       readonly status: "rejected";
       readonly reason?:
@@ -837,7 +866,12 @@ type GitMutationOutcome =
         | "untracked-path"
         | "invalid-hunks"
         | "hunk-offset"
-        | "read-only";
+        | "read-only"
+        | "invalid-branch"
+        | "branch-in-use"
+        | "dirty-checkout"
+        | "status-oversized"
+        | "unsupported-git";
     }
   | { readonly status: "unavailable" }
   | { readonly status: "failed"; readonly detail?: string; readonly unconfirmed?: true };
@@ -846,9 +880,12 @@ interface CodeOperationPullRequestIdentity {
   readonly number: number;
   readonly url: string;
   readonly baseRepository: string;
+  readonly canonicalBaseRepository?: string;
   readonly baseBranch: string;
   readonly headOwner: string;
   readonly headBranch: string;
+  readonly pullRequestNodeId?: string;
+  readonly baseRepositoryNodeId?: string;
 }
 
 export interface CodeOperationPullRequestPort {
@@ -975,11 +1012,14 @@ export type CodeOperationPullRequestReview =
         readonly title: string;
         readonly state: "open" | "merged" | "closed" | "draft";
         readonly baseRepository: string;
+        readonly canonicalBaseRepository?: string;
         readonly baseBranch: string;
         readonly headRepository: string;
         readonly headBranch: string;
         readonly author: string;
         readonly matchesDeliveryBranch: boolean;
+        readonly pullRequestNodeId?: string;
+        readonly baseRepositoryNodeId?: string;
       };
       readonly description: string;
       readonly diff: string;
@@ -1091,10 +1131,16 @@ export interface CodeOperationTurnPort {
      */
     readonly onContextDelivered?: () => void;
     /** Consume feedback synchronously only after the runtime's final admission check. */
-    readonly takeProductFeedback?: (maxAttachments?: number) => {
-      readonly context?: string;
-      readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
-    };
+    readonly takeProductFeedback?: (
+      maxAttachments?: number,
+      onClaimed?: () => ProductFeedbackClaimDecision,
+    ) => ProductFeedbackTakeResult;
+    /**
+     * Records outside-content provenance synchronously only after every busy,
+     * move, driver, session, and admission check has passed, before owning the
+     * turn or launching the provider. Returning `false` refuses fail-closed.
+     */
+    readonly recordOutsideContent?: () => boolean;
   }) => Promise<{
     readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
     readonly evidence?: string;
@@ -1249,6 +1295,18 @@ export interface CodeOperationServiceOptions {
    * Absent reads as Strict.
    */
   readonly threadStrict?: (thread: CodeThread) => boolean;
+  /**
+   * Journal the head an operation established on the checkout it scoped: a
+   * branch switch changes it without an observation event, and thread reads
+   * show the journaled head until one lands. Given the exact checkout, not a
+   * Project — re-observing the Project's folder could name another checkout
+   * entirely where a managed worktree is what moved. Best effort by callers;
+   * absent, nothing is refreshed.
+   */
+  readonly checkoutObserved?: (
+    checkoutId: CodeCheckoutId,
+    head: CodeCheckoutIdentity["head"],
+  ) => Awaitable<void>;
   readonly prepareWorktree?: (
     thread: CodeThread,
     root: string,
@@ -1336,6 +1394,11 @@ export interface CodeOperationServiceOptions {
   >;
   readonly pullRequests: CodeOperationPullRequestPort;
   /**
+   * Authoritative pull-request link identity registry. Records every created
+   * or observed PR and resolves canonical identity across repository renames.
+   */
+  readonly pullRequestLinks?: PullRequestLinkRecorder & Partial<PullRequestLinkReader>;
+  /**
    * The thread's push and pull request steps whose outcome the host never
    * learned (`ambiguous`), and how to settle one. Observing the checkout or the
    * pull request looks at the remote and settles them, so reopening a thread
@@ -1385,6 +1448,20 @@ export interface CodeOperationServiceOptions {
   readonly recordReviewContent?: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
+  /**
+   * Resolves the observed pull request's author and the signed-in `gh` viewer
+   * login for line notes composed on a pull request's diff. When they differ or
+   * either cannot be read, the host marks the thread as having read outside
+   * content before starting the turn.
+   */
+  readonly resolvePullRequestLineNotesAuthorship?: (input: {
+    readonly projectId: ProjectId;
+    readonly source: CodePullRequestLineNotesSource;
+    readonly signal: AbortSignal;
+  }) => Promise<{
+    readonly pullRequestAuthor: string | undefined;
+    readonly viewerLogin: string | undefined;
+  }>;
   readonly turns: CodeOperationTurnPort;
   readonly evidence: CodeOperationEvidencePort;
   /**
@@ -1427,6 +1504,7 @@ export interface CodeOperationServiceOptions {
   readonly supportsSessionRollback?: (
     thread: CodeThread,
     lastKeptTurn: CodeOperationId | undefined,
+    providerRoot?: string,
   ) => Awaitable<boolean>;
   readonly events: CodeOperationEventPort;
   /**
@@ -3074,6 +3152,68 @@ export class CodeOperationService {
     return selected.target;
   }
 
+  /**
+   * Stores a host-observed pull request diff through the same retained evidence
+   * and `run-reviewed` frame path that `resolveReviewTarget` and
+   * `ReviewFindingService.create` validate against.
+   */
+  async retainPullRequestDiff(
+    windowId: WindowId,
+    input: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly operationId: CodeOperationId;
+      readonly gitOperationId: CodeGitOperationId;
+      readonly baseRef: string;
+      readonly head: string;
+      readonly base?: string | undefined;
+      readonly diff: string;
+      readonly diffTruncated: boolean;
+      readonly changedPaths: ReadonlyArray<CodeRelativePath>;
+    },
+  ): Promise<Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>> {
+    const scope = await this.#scope(windowId, {
+      threadId: input.threadId,
+      checkoutId: input.checkoutId,
+    });
+    if ("failure" in scope) {
+      throw new CodeOperationServiceError(
+        scope.failure === "waiting" ? "unavailable" : scope.failure,
+      );
+    }
+    const evidence = this.#options.evidence.put(input.diff, {
+      truncated: input.diffTruncated,
+    });
+    const result = decodeCodeOperationResult({
+      kind: "run-reviewed",
+      reviewScope: { threadId: input.threadId, checkoutId: input.checkoutId },
+      operationId: input.operationId,
+      gitOperationId: input.gitOperationId,
+      outcome: {
+        branch: scope.thread.deliveryTarget.branchIntent,
+        baseRef: input.baseRef,
+        head: input.head,
+        ...(input.base === undefined ? {} : { base: input.base }),
+        ahead: 0,
+        behind: 0,
+        changedPaths: input.changedPaths.slice(0, MAX_CODE_OPERATION_PATHS),
+        diff: evidence,
+        uncommittedPaths: [],
+        mergeability: "unknown",
+      },
+    });
+    if (result.kind !== "run-reviewed") {
+      throw new CodeOperationServiceError("unavailable");
+    }
+    this.#options.events.append({
+      threadId: input.threadId,
+      operationId: input.operationId,
+      expectedCursor: 0,
+      event: { kind: "operation-result", result },
+    });
+    return result;
+  }
+
   #latestTurnCapture(
     threadId: CodeThreadId,
     operationId: CodeOperationId,
@@ -3193,11 +3333,27 @@ export class CodeOperationService {
         "oid" in observed.head &&
         observed.head.oid === revision.head
       ) {
-        const compared = await git.compareBranch({
+        let compared = await git.compareBranch({
           checkoutRoot,
           baseRef: revision.baseRef,
           headRef: "HEAD",
         });
+        if (
+          compared.status === "ready" &&
+          compared.base === undefined &&
+          !revision.baseRef.includes("/") &&
+          threadId !== undefined
+        ) {
+          const remoteName =
+            this.#options.authority.readThread(threadId)?.deliveryTarget.remoteName;
+          if (remoteName !== undefined) {
+            compared = await git.compareBranch({
+              checkoutRoot,
+              baseRef: `${remoteName}/${revision.baseRef}`,
+              headRef: "HEAD",
+            });
+          }
+        }
         current =
           compared.status === "ready" &&
           compared.head === revision.head &&
@@ -4416,22 +4572,102 @@ export class CodeOperationService {
           await this.#restoreInPlace(thread, checkout, root.checkoutRoot, command.checkpoint),
         );
       }
+      case "switch-git-branch": {
+        if (git === undefined || git.switchBranch === undefined)
+          return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
+        // Which branch the checkout points at is the person's choice to
+        // make; an agent's route never carries this command.
+        if (initiator !== "user")
+          return this.#failed(
+            command.operationId,
+            "unauthorized",
+            "Only the person at an Octant window can switch this thread's branch.",
+          );
+        if (
+          this.#options.turns.holdsTurn?.(String(thread.id)) === true ||
+          [...this.#startingTurns].some((turn) => String(turn.thread.id) === String(thread.id))
+        )
+          return this.#failed(
+            command.operationId,
+            "conflict",
+            "A turn is running in this thread. Wait for it to finish or stop it, then switch branches.",
+          );
+        // A branch switch rewrites the working tree like an overwrite: it
+        // shares the overwrite exclusion with restores and discards, and a
+        // turn starting after this check waits behind the registered write.
+        const refusal = this.#checkoutOverwriteRefusal(thread, root.checkoutRoot, "switch");
+        if (refusal !== undefined) return this.#failed(command.operationId, ...refusal);
+        const switched = this.#gitMutation(
+          command.operationId,
+          command.gitOperationId,
+          "switch-branch",
+          await this.#overwriteCheckout(
+            root.checkoutRoot,
+            git.switchBranch({
+              checkoutId: checkout.id,
+              checkoutRoot: root.checkoutRoot,
+              branch: command.branch,
+              dirty: command.dirty,
+              expectedStateToken: command.expectedStateToken,
+              executionPolicy: thread.executionPolicy,
+              // Asked again inside Git's per-checkout queue, just before the
+              // switch runs: the wait behind another mutation may have
+              // outlived this request's admission.
+              ...(admissionCurrent === undefined ? {} : { current: admissionCurrent }),
+            }),
+          ),
+        );
+        // The branch the checkout holds is journaled as part of its identity,
+        // so the next thread read or Environment shows it rather than the
+        // branch the thread was created on. Best effort: the switch is
+        // applied either way, and the next observe-git still answers truth.
+        if (
+          switched.kind === "git-mutation-state" &&
+          switched.state === "completed" &&
+          switched.headBranch !== undefined &&
+          switched.headOid !== undefined &&
+          this.#options.checkoutObserved !== undefined
+        ) {
+          try {
+            // The refresh is awaited inside the case, so a rejected write
+            // lands here rather than surfacing as an unhandled rejection.
+            await this.#options.checkoutObserved(
+              checkout.id,
+              decodeCodeCheckoutHead({
+                kind: "branch",
+                name: switched.headBranch,
+                oid: switched.headOid,
+              }),
+            );
+          } catch {
+            // A stale answer is refreshed by the next observation; the
+            // journaled switch result is what the person acts on.
+          }
+        }
+        return switched;
+      }
       case "preview-code-rewind":
-        return await this.#previewRewind(command, thread, checkout, root.checkoutRoot);
+        return await this.#previewRewind(
+          command,
+          thread,
+          checkout,
+          root.checkoutRoot,
+          thread.workingFolderId === undefined ? undefined : root.workingDirectory,
+        );
       case "rewind-code-thread":
         return await this.#rewind(command, thread, checkout, root.checkoutRoot);
       case "create-pull-request":
-        return this.#pullRequest(command, root.checkoutRoot, git);
+        return this.#pullRequest(command, thread, root.checkoutRoot, git);
       case "update-pull-request":
-        return this.#updatePullRequest(command, root.checkoutRoot, git);
+        return this.#updatePullRequest(command, thread, root.checkoutRoot, git);
       case "comment-pull-request":
         return this.#commentPullRequest(command, thread, root.checkoutRoot, git);
       case "merge-pull-request":
-        return this.#mergePullRequest(command, root.checkoutRoot, git);
+        return this.#mergePullRequest(command, thread, root.checkoutRoot, git);
       case "observe-pull-request":
         await this.#settlementsInFlight.get(String(thread.id));
         await this.#settleLostPullRequestSteps(thread);
-        return this.#pullRequestReview(command, root.checkoutRoot, git);
+        return this.#pullRequestReview(command, thread, root.checkoutRoot, git);
       case "observe-turn-review": {
         const preview = await this.#options.turns.reviewPreview?.({
           windowId,
@@ -5257,6 +5493,7 @@ export class CodeOperationService {
       checkoutRoot,
       maxDiffBytes: command.maxDiffBytes,
       ...(command.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
+      ...(command.untrackedFiles === "all" ? { untrackedFiles: "all" as const } : {}),
     });
     if (
       result.status !== "ready" ||
@@ -5506,6 +5743,7 @@ export class CodeOperationService {
       | "unstage"
       | "discard"
       | "commit"
+      | "switch-branch"
       | "push"
       | "restore-checkpoint"
       | "merge-run",
@@ -5535,6 +5773,11 @@ export class CodeOperationService {
         ? { reason: result.reason }
         : {}),
       ...(result.status === "applied" && result.oid !== undefined ? { headOid: result.oid } : {}),
+      // The branch the checkout actually holds after a switch, read back by
+      // the port rather than echoed from the request.
+      ...(result.status === "applied" && result.branch !== undefined
+        ? { headBranch: result.branch }
+        : {}),
       // A failed restore may have moved files before it stopped, so its undo
       // point travels with it too; only a rejection is certainly untouched.
       ...(result.status !== "rejected" && result.undo !== undefined ? { undo: result.undo } : {}),
@@ -5598,7 +5841,7 @@ export class CodeOperationService {
   #checkoutOverwriteRefusal(
     thread: CodeThread,
     checkoutRoot: string,
-    action: "restore" | "discard" = "restore",
+    action: "restore" | "discard" | "switch" = "restore",
   ): readonly ["unavailable" | "conflict", string] | undefined {
     if (action === "restore" && this.#options.git.restoreCheckpoint === undefined)
       return ["unavailable", "Restoring a checkpoint is unavailable."];
@@ -5719,6 +5962,7 @@ export class CodeOperationService {
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
     checkoutRoot: string,
+    providerRoot?: string,
   ): Promise<CodeOperationResult> {
     const turns = this.#rewindTurns(command.operationId, thread, command.fromOperationId);
     if (turns.status === "refused") return turns.result;
@@ -5726,7 +5970,11 @@ export class CodeOperationService {
     const native =
       checkout.kind !== "remote-root" &&
       (await Promise.resolve(
-        this.#options.supportsSessionRollback?.(thread, turns.kept.at(-1)?.operationId),
+        this.#options.supportsSessionRollback?.(
+          thread,
+          turns.kept.at(-1)?.operationId,
+          providerRoot ?? checkoutRoot,
+        ),
       ).catch(() => false)) === true;
     const point = this.#rewindFilePoint(thread, checkout, turns.all, command.fromOperationId);
     let files: Extract<CodeOperationResult, { kind: "rewind-preview" }>["files"];
@@ -5874,6 +6122,7 @@ export class CodeOperationService {
 
   async #pullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "create-pull-request" }>,
+    thread: CodeThread,
     checkoutRoot: string,
     git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
@@ -5901,11 +6150,13 @@ export class CodeOperationService {
         state: "unavailable",
         ...(result.code === "invalid-base" ? { failureCode: "invalid-base" } : {}),
       });
+    await this.#recordPullRequestLink(thread, result.pullRequest);
     return pullRequestState(command.operationId, result.status, result.pullRequest, result.draft);
   }
 
   async #updatePullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "update-pull-request" }>,
+    thread: CodeThread,
     checkoutRoot: string,
     git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
@@ -5930,6 +6181,7 @@ export class CodeOperationService {
         command.state === "closed" ? "open" : "closed",
       );
       if (located.status !== "found") return located.result(command.operationId);
+      await this.#recordPullRequestLink(thread, located.pullRequest);
       const done = await pullRequests.actions?.setState(
         { ...located.target, state: command.state },
         new AbortController().signal,
@@ -5955,10 +6207,12 @@ export class CodeOperationService {
         return unavailable(result.status === "none" ? "not-found" : undefined);
       draft = result.draft;
       identity = result.pullRequest;
+      await this.#recordPullRequestLink(thread, identity);
     }
     if (changesLabels) {
       const located = await this.#locatePullRequest(command.threadId, "open");
       if (located.status !== "found") return located.result(command.operationId);
+      await this.#recordPullRequestLink(thread, located.pullRequest);
       const done = await pullRequests.actions?.editLabels(
         {
           ...located.target,
@@ -6008,7 +6262,8 @@ export class CodeOperationService {
       return this.#pullRequestUnavailable(command.operationId, "no-remote");
     const located = await this.#locatePullRequest(command.threadId, "open");
     if (located.status !== "found") return located.result(command.operationId);
-    const already = await this.#settleEarlierComment(command, located.target);
+    await this.#recordPullRequestLink(thread, located.pullRequest);
+    const already = await this.#settleEarlierComment(command, thread, located.target);
     if (already.status === "posted")
       return pullRequestState(command.operationId, "existing", located.pullRequest, undefined);
     if (already.status === "unknown")
@@ -6059,6 +6314,7 @@ export class CodeOperationService {
    */
   async #settleEarlierComment(
     command: Extract<CodeOperationCommand, { readonly kind: "comment-pull-request" }>,
+    thread: CodeThread,
     target: GhPullRequestIdentityRequest,
   ): Promise<
     | { readonly status: "posted" }
@@ -6076,7 +6332,7 @@ export class CodeOperationService {
         step.commentDigest === digest &&
         step.reviewThreadId === command.reviewThreadId &&
         step.pullRequest !== undefined &&
-        samePullRequest(step.pullRequest, target) &&
+        this.#samePullRequest(thread.projectId, step.pullRequest, target) &&
         step.priorMatches !== undefined
         ? [{ work, priorMatches: step.priorMatches }]
         : [];
@@ -6094,6 +6350,7 @@ export class CodeOperationService {
 
   async #mergePullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "merge-pull-request" }>,
+    thread: CodeThread,
     checkoutRoot: string,
     git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
@@ -6109,10 +6366,10 @@ export class CodeOperationService {
       );
     }
     if (command.authorization.kind === "standing") {
-      const thread = this.#options.authority.readThread(command.threadId);
+      const current = this.#options.authority.readThread(command.threadId);
       if (
-        thread === undefined ||
-        !this.#standingMergeBacked(command.authorization.allowedBy, thread)
+        current === undefined ||
+        !this.#standingMergeBacked(command.authorization.allowedBy, current)
       ) {
         return this.#failed(
           command.operationId,
@@ -6126,6 +6383,20 @@ export class CodeOperationService {
     const actions = this.#options.pullRequests.actions;
     const located = await this.#locatePullRequest(command.threadId, "open");
     if (located.status !== "found") return located.result(command.operationId);
+    const knownLink = this.#options.pullRequestLinks?.resolveLink?.({
+      projectId: thread.projectId,
+      repositoryOwner: located.target.owner,
+      repositoryName: located.target.name,
+      number: located.target.number,
+    });
+    if (
+      knownLink?.pullRequestNodeId !== undefined &&
+      located.pullRequest.pullRequestNodeId !== undefined &&
+      knownLink.pullRequestNodeId !== located.pullRequest.pullRequestNodeId
+    ) {
+      return this.#pullRequestUnavailable(command.operationId, "sha-mismatch");
+    }
+    await this.#recordPullRequestLink(thread, located.pullRequest);
     if (actions === undefined) return this.#pullRequestUnavailable(command.operationId);
     const signal = new AbortController().signal;
     const summary = await actions.summary(located.target, signal);
@@ -6161,6 +6432,12 @@ export class CodeOperationService {
         headBranch: located.pullRequest.headBranch,
         baseRepository: located.pullRequest.baseRepository,
         baseBranch: located.pullRequest.baseBranch,
+        ...(located.pullRequest.pullRequestNodeId === undefined
+          ? {}
+          : { pullRequestNodeId: located.pullRequest.pullRequestNodeId }),
+        ...(located.pullRequest.baseRepositoryNodeId === undefined
+          ? {}
+          : { baseRepositoryNodeId: located.pullRequest.baseRepositoryNodeId }),
       });
     }
     if (merged.status === "unavailable")
@@ -6258,6 +6535,7 @@ export class CodeOperationService {
 
   async #pullRequestReview(
     command: Extract<CodeOperationCommand, { readonly kind: "observe-pull-request" }>,
+    thread: CodeThread,
     checkoutRoot: string,
     git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
@@ -6288,6 +6566,21 @@ export class CodeOperationService {
         freshness: "fresh",
       });
     const pr = result.pullRequest;
+    await this.#recordPullRequestLink(thread, {
+      number: pr.number,
+      url: pr.url,
+      baseRepository: pr.baseRepository,
+      ...(pr.canonicalBaseRepository === undefined
+        ? {}
+        : { canonicalBaseRepository: pr.canonicalBaseRepository }),
+      baseBranch: pr.baseBranch,
+      headOwner: pr.headRepository,
+      headBranch: pr.headBranch,
+      ...(pr.pullRequestNodeId === undefined ? {} : { pullRequestNodeId: pr.pullRequestNodeId }),
+      ...(pr.baseRepositoryNodeId === undefined
+        ? {}
+        : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
+    });
     return decodeCodeOperationResult({
       kind: "pull-request-review",
       operationId: command.operationId,
@@ -6312,7 +6605,72 @@ export class CodeOperationService {
       checks: result.checks,
       reviews: result.reviews,
       comments: result.comments,
+      ...(pr.pullRequestNodeId === undefined ? {} : { pullRequestNodeId: pr.pullRequestNodeId }),
+      ...(pr.baseRepositoryNodeId === undefined
+        ? {}
+        : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
     });
+  }
+
+  #samePullRequest(
+    projectId: CodeThread["projectId"],
+    left: GhPullRequestIdentityRequest,
+    right: GhPullRequestIdentityRequest,
+  ): boolean {
+    if (samePullRequest(left, right)) return true;
+    const links = this.#options.pullRequestLinks;
+    if (links?.resolveLink === undefined) return false;
+    const leftLink = links.resolveLink({
+      projectId,
+      repositoryOwner: left.owner,
+      repositoryName: left.name,
+      number: left.number,
+    });
+    const rightLink = links.resolveLink({
+      projectId,
+      repositoryOwner: right.owner,
+      repositoryName: right.name,
+      number: right.number,
+    });
+    return (
+      leftLink !== undefined &&
+      rightLink !== undefined &&
+      String(leftLink.linkId) === String(rightLink.linkId)
+    );
+  }
+
+  async #recordPullRequestLink(
+    thread: CodeThread,
+    pr: CodeOperationPullRequestIdentity,
+  ): Promise<void> {
+    if (this.#options.pullRequestLinks === undefined) return;
+    const repo = splitRepositoryName(pr.canonicalBaseRepository ?? pr.baseRepository);
+    if (repo === undefined) return;
+    const lookup =
+      splitRepositoryName(pr.baseRepository) ??
+      splitRepositoryName(thread.deliveryTarget.proposedBaseRepository);
+    await this.#options.pullRequestLinks
+      .recordObservation({
+        projectId: thread.projectId,
+        repositoryOwner: repo.owner,
+        repositoryName: repo.name,
+        ...(lookup !== undefined &&
+        (lookup.owner.toLowerCase() !== repo.owner.toLowerCase() ||
+          lookup.name.toLowerCase() !== repo.name.toLowerCase())
+          ? { lookupRepositoryOwner: lookup.owner, lookupRepositoryName: lookup.name }
+          : {}),
+        number: pr.number,
+        url: pr.url,
+        baseBranch: pr.baseBranch,
+        headOwner: pr.headOwner,
+        headBranch: pr.headBranch,
+        ...(pr.pullRequestNodeId === undefined ? {} : { pullRequestNodeId: pr.pullRequestNodeId }),
+        ...(pr.baseRepositoryNodeId === undefined
+          ? {}
+          : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
+        threadIds: [thread.id],
+      })
+      .catch(() => undefined);
   }
 
   /** Read with the checkout's own Git: a server thread's runs on its server. */
@@ -6591,6 +6949,59 @@ export class CodeOperationService {
         );
       }
     }
+    let recordPullRequestLineNotesOutsideContent: (() => boolean) | undefined;
+    if (command.pullRequestLineNotesSource !== undefined) {
+      const source = command.pullRequestLineNotesSource;
+      const authorship = await this.#options
+        .resolvePullRequestLineNotesAuthorship?.({
+          projectId: thread.projectId,
+          source,
+          signal: AbortSignal.timeout(5_000),
+        })
+        .catch(() => undefined);
+      if (admissionCurrent?.() === false) {
+        await extensionTools?.close?.().catch(() => undefined);
+        return this.#failed(
+          command.operationId,
+          "unauthorized",
+          "Code turn admission is no longer current.",
+          "refused",
+        );
+      }
+      const author = authorship?.pullRequestAuthor?.trim();
+      const viewer = authorship?.viewerLogin?.trim();
+      const authoredBySignedInUser =
+        author !== undefined &&
+        author.length > 0 &&
+        author !== "Unknown author" &&
+        viewer !== undefined &&
+        viewer.length > 0 &&
+        author.toLowerCase() === viewer.toLowerCase();
+      if (!authoredBySignedInUser) {
+        const recordReviewContent = this.#options.recordReviewContent;
+        if (recordReviewContent === undefined) {
+          await extensionTools?.close?.().catch(() => undefined);
+          return this.#failed(
+            command.operationId,
+            "unavailable",
+            "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
+            "refused",
+          );
+        }
+        // Deferred to the runtime's atomic admission boundary so a refused
+        // start (such as a busy thread) never leaves a permanent taint mark.
+        recordPullRequestLineNotesOutsideContent = () => {
+          const recorded = recordReviewContent({
+            threadId: thread.id,
+            provenance: { origin: "external-content", sourceLabel: "pull-request-line-notes" },
+            contentReference: `pull-request-line-notes:${source.repositoryOwner}:${source.repositoryName}:${String(source.number)}:${String(command.operationId)}`,
+            correlationId: command.operationId,
+            authorized: true,
+          });
+          return recorded.kind === "recorded" || recorded.kind === "already-recorded";
+        };
+      }
+    }
     // Read last, after every refusal above: carrying a message marks this
     // thread as having ingested external content, and a turn that was never
     // going to start should not do that. A failed read costs the turn its
@@ -6653,7 +7064,25 @@ export class CodeOperationService {
                 .catch(() => undefined);
             },
           }),
-      ...(preparedFeedback === undefined ? {} : { takeProductFeedback: preparedFeedback.take }),
+      ...(preparedFeedback === undefined
+        ? {}
+        : {
+            takeProductFeedback:
+              preparedFeedback.takeWithClaim ??
+              ((maxAttachments) => {
+                try {
+                  return {
+                    status: "taken" as const,
+                    delivery: preparedFeedback.take(maxAttachments),
+                  };
+                } catch {
+                  return { status: "feedback-changed" as const };
+                }
+              }),
+          }),
+      ...(recordPullRequestLineNotesOutsideContent === undefined
+        ? {}
+        : { recordOutsideContent: recordPullRequestLineNotesOutsideContent }),
     });
     if (turn.admission !== "refused") {
       this.#options.consumeIssueContextFramed?.(String(thread.id));
@@ -7402,6 +7831,11 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
       return "merge-run";
     case "commit-git":
       return "commit";
+    // Switching branches rewrites the checkout like a commit writes to the
+    // repository: a Git effect that Plan never performs and every gated
+    // posture prompts on.
+    case "switch-git-branch":
+      return "commit";
     case "push-git":
       return "push";
     case "create-pull-request":
@@ -7447,6 +7881,10 @@ function pullRequestState(
     baseRepository: pr.baseRepository,
     baseBranch: pr.baseBranch,
     ...(draft === undefined ? {} : { draft }),
+    ...(pr.pullRequestNodeId === undefined ? {} : { pullRequestNodeId: pr.pullRequestNodeId }),
+    ...(pr.baseRepositoryNodeId === undefined
+      ? {}
+      : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
   });
 }
 

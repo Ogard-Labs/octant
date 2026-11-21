@@ -4,9 +4,9 @@ import {
   type PersistentBrowserLeaseId,
 } from "@octant/contracts/persistent-browser-owner";
 import {
-  decodeOwnerBrowserNativeResult,
-  type OwnerBrowserNativeCommand,
-} from "@octant/contracts/owner-browser";
+  decodePairedBrowserNativeResult,
+  type PairedBrowserNativeCommand,
+} from "@octant/contracts/paired-browser-control";
 import {
   decodeBrowserPageScriptPreparation,
   type BrowserPageScriptNativeCommand,
@@ -171,6 +171,8 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
   #eventPoll: ReturnType<typeof setInterval> | undefined;
   readonly #personInputListeners = new Set<(contextId: BrowserContextId) => void>();
   #personInputPoll: ReturnType<typeof setInterval> | undefined;
+  readonly #pairedReclaimedListeners = new Set<(contextId: BrowserContextId) => void>();
+  #pairedReclaimedPoll: ReturnType<typeof setInterval> | undefined;
 
   constructor(options: DesktopBrowserRuntimeOptions) {
     const url = new URL(options.brokerUrl);
@@ -351,10 +353,10 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     );
   }
 
-  async ownerControl(command: OwnerBrowserNativeCommand, signal: AbortSignal) {
-    return decodeOwnerBrowserNativeResult(
+  async pairedControl(command: PairedBrowserNativeCommand, signal: AbortSignal) {
+    return decodePairedBrowserNativeResult(
       await this.#request<unknown>(
-        "/v1/contexts/owner-control",
+        "/v1/contexts/paired-control",
         command,
         AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
       ),
@@ -511,6 +513,43 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
         this.#personInputPoll = undefined;
       }
     };
+  }
+
+  onPairedControlReclaimed(listener: (contextId: BrowserContextId) => void): () => void {
+    this.#pairedReclaimedListeners.add(listener);
+    this.#pairedReclaimedPoll ??= setInterval(
+      () => void this.#pollPairedReclaimed(),
+      this.#eventPollIntervalMs,
+    );
+    this.#pairedReclaimedPoll.unref?.();
+    return () => {
+      this.#pairedReclaimedListeners.delete(listener);
+      if (this.#pairedReclaimedListeners.size === 0 && this.#pairedReclaimedPoll !== undefined) {
+        clearInterval(this.#pairedReclaimedPoll);
+        this.#pairedReclaimedPoll = undefined;
+      }
+    };
+  }
+
+  async #pollPairedReclaimed(): Promise<void> {
+    try {
+      const payload = await this.#request<unknown>("/v1/contexts/paired-control-reclaimed", {});
+      if (
+        typeof payload !== "object" ||
+        payload === null ||
+        !("contextIds" in payload) ||
+        !Array.isArray(payload.contextIds)
+      ) {
+        return;
+      }
+      for (const contextId of payload.contextIds) {
+        if (typeof contextId !== "string" || !CONTEXT_ID_PATTERN.test(contextId)) continue;
+        for (const listener of this.#pairedReclaimedListeners)
+          listener(contextId as BrowserContextId);
+      }
+    } catch {
+      // The broker may be stopping. Ordinary availability checks own recovery.
+    }
   }
 
   async #pollPersonInput(): Promise<void> {

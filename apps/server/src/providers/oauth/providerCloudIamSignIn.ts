@@ -244,6 +244,8 @@ export async function answerCloudIamSettingsCommand(input: {
   /** The window that asked, as the broker's actor for a connect. */
   readonly actorId?: string;
   readonly awsProfile?: string;
+  /** One-time 6-digit MFA code for a profile role declaring `mfa_serial`; never persisted. */
+  readonly mfaCode?: string;
   readonly accessKeys?: { readonly accessKeyId: string; readonly secretAccessKey: string };
 }): Promise<ProviderOAuthView> {
   const { dependencies } = input;
@@ -305,10 +307,10 @@ export async function answerCloudIamSettingsCommand(input: {
 
 /**
  * Connect the person's own AWS profile, or a long-lived key pair they entered,
- * in place of the portal sign-in. Only a window on this host connects one, as
- * only the host begins a portal sign-in; the profile is read and the keys are
- * kept by the broker alone, so the server stores only the pointer and the
- * journal names only the reference.
+ * in place of the portal sign-in. A local window or a device the host's own
+ * person paired connects one (hub-introduced and restricted remote devices are
+ * refused); the profile is read and the keys are kept by the broker alone, so
+ * the server stores only the pointer and the journal names only the reference.
  */
 async function connectPersonCloudSource(input: {
   readonly dependencies: CloudIamSignInDependencies | undefined;
@@ -318,11 +320,11 @@ async function connectPersonCloudSource(input: {
   readonly actor?: EventActor | undefined;
   readonly actorId?: string;
   readonly awsProfile?: string;
+  readonly mfaCode?: string;
   readonly accessKeys?: { readonly accessKeyId: string; readonly secretAccessKey: string };
 }): Promise<ProviderOAuthView> {
   const { dependencies } = input;
   if (
-    input.principal !== "local-window" ||
     authorizePrincipalAction({ principalKind: input.principal, action: "provider.oauth.begin" })
       .kind === "deny"
   ) {
@@ -356,6 +358,7 @@ async function connectPersonCloudSource(input: {
       scope: target.descriptor.scope,
       actorId: input.actorId,
       termsAcknowledgedAt: new Date().toISOString(),
+      ...(input.mfaCode === undefined ? {} : { mfaCode: input.mfaCode }),
     });
   } catch {
     return { kind: "refused", reason: "unavailable" };
@@ -371,6 +374,9 @@ async function connectPersonCloudSource(input: {
         reason === "unsupported" ||
         reason === "not-authorized" ||
         reason === "mfa-required" ||
+        reason === "mfa-invalid" ||
+        reason === "mfa-refused" ||
+        reason === "metadata-unreachable" ||
         reason === "role-refused"
           ? `aws-${reason}`
           : "invalid",

@@ -1,5 +1,5 @@
 import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
-import { decodeOwnerBrowserNativeCommand } from "@octant/contracts/owner-browser";
+import { decodePairedBrowserNativeCommand } from "@octant/contracts/paired-browser-control";
 import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { describe, expect, it, vi } from "vitest";
 import { DesktopBrowserOwnerUnavailable } from "./desktopBrowserRuntime";
@@ -26,7 +26,7 @@ function runtime(presentation: "native-live" | "headless" = "native-live") {
   let exit: (() => void) | undefined;
   return {
     available: vi.fn(async () => true),
-    ownerControl: vi.fn(async () => ({ status: "refused" as const })),
+    pairedControl: vi.fn(async () => ({ status: "refused" as const })),
     runPageScript: vi.fn(async () => ({
       status: "completed" as const,
       effect: "possible" as const,
@@ -118,13 +118,13 @@ describe("RoutingBrowserRuntime", () => {
     expect(native.runPageScript).not.toHaveBeenCalled();
     expect(headless.runPageScript).not.toHaveBeenCalled();
     expect(
-      await router.ownerControl(
-        decodeOwnerBrowserNativeCommand({ operation: "inspect", contextId, owner }),
+      await router.pairedControl(
+        decodePairedBrowserNativeCommand({ operation: "inspect", contextId, owner }),
         new AbortController().signal,
       ),
     ).toEqual({ status: "refused" });
-    expect(native.ownerControl).not.toHaveBeenCalled();
-    expect(headless.ownerControl).not.toHaveBeenCalled();
+    expect(native.pairedControl).not.toHaveBeenCalled();
+    expect(headless.pairedControl).not.toHaveBeenCalled();
     await router.closeAll();
   });
 

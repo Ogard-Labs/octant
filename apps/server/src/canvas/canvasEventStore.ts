@@ -117,6 +117,12 @@ export interface AppendCanvasVersionInput {
   readonly next: CanvasVersion;
   readonly occurredAt: UtcTimestamp;
   readonly refreshReceipt?: CanvasRefreshReceipt;
+  /**
+   * Who the journal names for the version append, when not the store's own
+   * actor: a device the host's own person paired, which acts as that person
+   * while the version keeps a valid CanvasActor as its author.
+   */
+  readonly actor?: typeof EventActor.Type;
 }
 
 export interface AppendCanvasRefreshReceiptInput {
@@ -277,7 +283,7 @@ export class CanvasEventStore {
               eventName: CANVAS_VERSION_APPENDED,
               eventVersion: 1,
               correlationId,
-              actor: this.#actor,
+              actor: input.actor ?? this.#actor,
               occurredAt: input.occurredAt,
               payload,
             },

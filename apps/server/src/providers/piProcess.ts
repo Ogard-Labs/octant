@@ -2,7 +2,7 @@ import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { createHash } from "node:crypto";
 import { stopWindowsProcessTree } from "../process/windowsProcessTree";
-import { providerHostEnvironment } from "./providerHostEnvironment";
+import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   accessSync,
@@ -195,10 +195,6 @@ function piWindowsLaunch(input: {
     executionPolicy: input.executionPolicy,
     fullAccessSandbox: input.fullAccessSandbox,
     strict: input.sandboxPolicy === undefined ? input.strict : true,
-    // A Chat launch starts Pi with no built-in tool, no extension and none of
-    // the person's resources (`piArguments`), so it has no folder or shell
-    // without Octant's sandbox.
-    chatWithoutFolderOrShell: true,
   });
 }
 
@@ -1014,6 +1010,11 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 temporaryDirectoryPath,
                 ...credentialPaths,
                 ...ownSetupPaths,
+                ...(input.strict === false &&
+                input.fullAccessSandbox !== true &&
+                input.sandboxPolicy === undefined
+                  ? awsProfileReadPaths(input.environment ?? {})
+                  : []),
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
                 ...(input.readOnlyFolders ?? []),
               ],
@@ -1025,6 +1026,11 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 ...(packageRoot === undefined ? [] : [packageRoot]),
                 ...credentialPaths,
                 ...ownSetupPaths,
+                ...(input.strict === false &&
+                input.fullAccessSandbox !== true &&
+                input.sandboxPolicy === undefined
+                  ? awsProfileReadPaths(input.environment ?? {})
+                  : []),
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
                 ...(input.readOnlyFolders ?? []),
               ],

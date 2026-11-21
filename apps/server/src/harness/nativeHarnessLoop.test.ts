@@ -17,6 +17,7 @@ import { deriveTurnMetrics, ledgerUsageCost } from "@octant/domain";
 import { Effect, Exit, Fiber, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
+import { appToolHostLines } from "../providers/appToolHostLines";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { buildUsageDashboard } from "../usageDashboardModel";
@@ -838,8 +839,45 @@ describe("native harness loop", () => {
       ),
     );
     expect(requests[0]?.system).toContain("Be brief.");
-    expect(requests[0]?.system).toContain("octant_browser:");
+    expect(requests[0]?.system).toContain(
+      appToolHostLines([tool("octant_browser")])[0]?.text ?? "missing line",
+    );
     expect(requests[0]?.history).toEqual([{ role: "user", text: "hello" }]);
+  });
+
+  it("describes each offered Octant tool once when its line already came as an instruction", async () => {
+    const { transport, requests } = scriptedTransport([{ text: "ok", toolCalls: [] }]);
+    const offered = [tool("read"), tool("octant_browser"), tool("octant_canvas"), tool("skill")];
+    const lines = appToolHostLines(offered);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const events = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.send({
+            sessionId,
+            prompt: "hello",
+            context: lines.map((line) => ({
+              kind: "instructions" as const,
+              text: line.text,
+              tool: line.tool,
+            })),
+            attachments: [],
+            tools: offered,
+          });
+          yield* Fiber.join(events);
+        }),
+      ),
+    );
+    const system = requests[0]?.system ?? "";
+    expect(lines.map((line) => line.tool)).toEqual(["octant_browser", "octant_canvas"]);
+    for (const line of lines) expect(system.split(line.text)).toHaveLength(2);
+    for (const name of ["octant_browser", "octant_canvas"])
+      expect(system.match(new RegExp(`\\b${name}\\b`, "g"))).toHaveLength(1);
+    expect(system).toMatch(/^- .*\bskill\b/m);
   });
 
   it("puts your, the Project's, and orchestration instructions in the system prompt after Octant's own, and person memory in the message", async () => {

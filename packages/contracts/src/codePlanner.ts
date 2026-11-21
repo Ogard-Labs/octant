@@ -299,11 +299,6 @@ export const CodePlannerProposalUpdated = Schema.Struct({
 }).annotations(strict);
 export type CodePlannerProposalUpdated = typeof CodePlannerProposalUpdated.Type;
 
-export const CODE_PLANNER_EVENT_NAMES = [
-  "code.planner-designation-updated@1",
-  "code.planner-proposal-updated@1",
-] as const;
-
 export const decodeCodePlannerProposalId = Schema.decodeUnknownSync(CodePlannerProposalId);
 export const decodeCodePlannerDesignation = Schema.decodeUnknownSync(CodePlannerDesignation);
 export const decodeCodePlannerWorkProposal = Schema.decodeUnknownSync(CodePlannerWorkProposal);

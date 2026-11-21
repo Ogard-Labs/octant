@@ -11,9 +11,9 @@ import {
 } from "./browserSurfaceHost";
 import { createBrowserSurfaceHost } from "./browserSurfaceHost";
 import type {
-  OwnerBrowserNativeCommand,
-  OwnerBrowserNativeResult,
-} from "@octant/contracts/owner-browser";
+  PairedBrowserNativeCommand,
+  PairedBrowserNativeResult,
+} from "@octant/contracts/paired-browser-control";
 
 const contextId = "10000000-0000-4000-8000-000000000001";
 
@@ -47,6 +47,7 @@ function host() {
       personInput.push(listener);
       return () => undefined;
     }),
+    onPairedControlReclaimed: vi.fn(() => () => undefined),
     available: () => true,
     act: vi.fn(async () => ({ url: "https://example.com/" })),
     peek: vi.fn(async () => ({
@@ -157,7 +158,7 @@ describe("BrowserRuntimeBroker", () => {
     }
   });
 
-  it("cancels queued owner input on a complete POST disconnect and refuses untyped or unauthenticated native requests", async () => {
+  it("cancels queued paired input on a complete POST disconnect and refuses untyped or unauthenticated native requests", async () => {
     const base = createBrowserSurfaceHost({
       createView: () => {
         throw new Error("This transport fixture opens no native page");
@@ -169,11 +170,11 @@ describe("BrowserRuntimeBroker", () => {
     const settled = Promise.withResolvers<void>();
     const surface = {
       ...base,
-      ownerControl: vi.fn(
+      pairedControl: vi.fn(
         async (
-          _command: OwnerBrowserNativeCommand,
+          _command: PairedBrowserNativeCommand,
           signal?: AbortSignal,
-        ): Promise<OwnerBrowserNativeResult> => {
+        ): Promise<PairedBrowserNativeResult> => {
           entered.resolve(signal);
           await waiting.promise;
           if (!signal?.aborted) starts += 1;
@@ -187,13 +188,11 @@ describe("BrowserRuntimeBroker", () => {
       operation: "input",
       contextId,
       owner: { windowId: contextId, threadId: contextId },
-      controlId: contextId,
-      sequence: 2,
-      expectedFrame: 1,
-      input: { kind: "type", text: "synthetic-only" },
+      leaseId: contextId,
+      events: [{ kind: "text", text: "synthetic-only" }],
     };
     const abort = new AbortController();
-    const pending = fetch(request(broker.url, broker.token, body, "v1/contexts/owner-control"), {
+    const pending = fetch(request(broker.url, broker.token, body, "v1/contexts/paired-control"), {
       signal: abort.signal,
     }).catch(() => undefined);
     try {
@@ -207,7 +206,7 @@ describe("BrowserRuntimeBroker", () => {
       expect(
         (
           await broker.fetchForTest(
-            request(broker.url, "wrong-token", body, "v1/contexts/owner-control"),
+            request(broker.url, "wrong-token", body, "v1/contexts/paired-control"),
           )
         ).status,
       ).toBe(401);
@@ -217,13 +216,13 @@ describe("BrowserRuntimeBroker", () => {
             request(
               broker.url,
               broker.token,
-              { ...body, input: { kind: "evaluate", source: "1+1" } },
-              "v1/contexts/owner-control",
+              { ...body, events: [{ kind: "evaluate", source: "1+1" }] },
+              "v1/contexts/paired-control",
             ),
           )
         ).status,
       ).toBe(400);
-      expect(surface.ownerControl).toHaveBeenCalledOnce();
+      expect(surface.pairedControl).toHaveBeenCalledOnce();
     } finally {
       waiting.resolve();
       await pending;

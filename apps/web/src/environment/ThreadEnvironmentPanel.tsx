@@ -44,6 +44,16 @@ export interface ThreadEnvironmentPanelProps {
    * section, because where a thread runs is what a move changes.
    */
   readonly computer?: ReactNode;
+  /**
+   * The Project row's own action — the move dialog, when another Project
+   * could take this thread. Absent, the row states the Project as a fact.
+   */
+  readonly projectAction?: (() => void) | undefined;
+  /**
+   * What the branch row becomes when it has actions of its own (the branch
+   * menu's trigger row). Absent, the branch is drawn as a fact row.
+   */
+  readonly branchRow?: ReactNode;
   readonly children?: ReactNode;
 }
 
@@ -118,17 +128,20 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
           <EnvironmentRow
             icon={Folder}
             label={props.summary.identity.label}
+            {...(props.projectAction === undefined ? {} : { onClick: props.projectAction })}
             path={headline.place}
             title={sentence}
           />
-          {headline.branch === undefined ? null : (
-            <EnvironmentRow
-              detail={props.summary.checkout}
-              icon={GitBranch}
-              label={headline.branch}
-              title={headline.branch}
-            />
-          )}
+          {headline.branch === undefined
+            ? null
+            : (props.branchRow ?? (
+                <EnvironmentRow
+                  detail={props.summary.checkout}
+                  icon={GitBranch}
+                  label={headline.branch}
+                  title={headline.branch}
+                />
+              ))}
         </EnvironmentCard>
         <EnvironmentContextSection />
         {props.headerContent}

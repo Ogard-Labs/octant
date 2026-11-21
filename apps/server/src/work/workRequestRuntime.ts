@@ -26,7 +26,11 @@ import type {
 } from "@octant/provider-sdk/driver";
 import { Effect, Stream } from "effect";
 import type { ShieldReviewPort } from "../shield/octantShield";
-import type { WorkRequestService, WorkRequestServiceResult } from "./workRequestService";
+import type {
+  WorkApprovalNotDeliverable,
+  WorkRequestService,
+  WorkRequestServiceResult,
+} from "./workRequestService";
 
 type RequestConnection = Pick<
   ProviderConnection,
@@ -312,7 +316,7 @@ export class WorkRequestRuntime {
     readonly requestId: string;
     readonly approved: boolean;
     readonly ownerCurrent?: () => boolean;
-  }): Promise<void> {
+  }): Promise<void | WorkApprovalNotDeliverable> {
     const connection = this.#connection(input.sessionId);
     const answer = () =>
       connection.answerApproval({
@@ -321,14 +325,24 @@ export class WorkRequestRuntime {
         approved: input.approved,
         ...(input.ownerCurrent === undefined ? {} : { scope: "once" as const }),
       });
-    await this.#run(
-      input.ownerCurrent === undefined
+    return Effect.runPromise(
+      (input.ownerCurrent === undefined
         ? answer()
         : Effect.suspend(() => {
             if (!input.ownerCurrent?.())
               return Effect.die(new Error("Owner approval target changed before delivery."));
             return answer();
-          }),
+          })
+      ).pipe(
+        Effect.as(undefined),
+        // The runtime refused the answer as asked and sent nothing; its
+        // reason goes to the person. Anything else rejects as before.
+        Effect.catchIf(
+          (failure) => failure.category === "unsupported",
+          (failure): Effect.Effect<WorkApprovalNotDeliverable> =>
+            Effect.succeed({ status: "not-deliverable", message: failure.message }),
+        ),
+      ),
     );
   }
 

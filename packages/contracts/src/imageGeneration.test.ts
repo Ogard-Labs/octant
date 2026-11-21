@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   IMAGE_GENERATION_REQUEST_SHAPE,
   IMAGE_JOB_AGGREGATE_TYPE,
-  IMAGE_JOB_EVENT_NAMES,
   IMAGE_JOB_QUEUED,
   IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE,
   IMAGE_JOB_STATUS_CHANGED,
@@ -133,7 +132,8 @@ describe("ImageJob", () => {
 describe("image job events", () => {
   it("publishes the versioned job vocabulary", () => {
     expect(IMAGE_JOB_AGGREGATE_TYPE).toBe("image-job");
-    expect(IMAGE_JOB_EVENT_NAMES).toEqual([IMAGE_JOB_QUEUED, IMAGE_JOB_STATUS_CHANGED]);
+    expect(IMAGE_JOB_QUEUED).toBe("image.job-queued@1");
+    expect(IMAGE_JOB_STATUS_CHANGED).toBe("image.job-status-changed@1");
     expect(IMAGE_GENERATION_REQUEST_SHAPE).toBe("image-generation");
     expect(IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE).toBe("interrupted by restart");
   });

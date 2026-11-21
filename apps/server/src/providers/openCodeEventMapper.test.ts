@@ -215,6 +215,29 @@ describe("mapOpenCodeEvent", () => {
       },
     },
     {
+      name: "permission question carries its tool call's identity",
+      event: official({
+        id: "event-permission-tool",
+        type: "permission.asked",
+        properties: {
+          id: "permission-3",
+          sessionID: "provider-session",
+          permission: "bash",
+          patterns: [],
+          metadata: {},
+          always: [],
+          tool: { messageID: "message-1", callID: "call-42" },
+        },
+      }),
+      expected: {
+        kind: "approval-request",
+        requestId: "permission-3",
+        action: "bash",
+        description: "Approval is required for this action.",
+        toolCallId: "call-42",
+      },
+    },
+    {
       name: "v2 permission question",
       event: official({
         id: "event-permission-v2",
@@ -659,6 +682,21 @@ describe("mapOpenCodeEvent", () => {
         }),
       ),
     ).toEqual([]);
+  });
+
+  it("marks text unfolded from stored parts synthesized and live deltas live", () => {
+    const messageParts = new OpenCodeMessageParts();
+    const ctx = { ...context(), messageParts };
+    expect(mapOpenCodeEvent(ctx, answers("message-1"))).toEqual([]);
+    const buffered = mapOpenCodeEvent(
+      ctx,
+      part("message-1", "part-1", "reasoning", "whole thought"),
+    );
+    // An accumulated snapshot emits as one batch, never at a written instant.
+    expect(buffered).toMatchObject([{ kind: "reasoning-delta", synthesized: true }]);
+    const live = mapOpenCodeEvent(ctx, partDelta("message-1", "part-1", " more"));
+    expect(live).toMatchObject([{ kind: "reasoning-delta" }]);
+    expect(live[0]).not.toHaveProperty("synthesized");
   });
 
   it("clears the task panel when OpenCode empties its todo list", () => {

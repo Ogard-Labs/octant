@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { FLEET_OFFER_WINDOWS_MEDIA_TYPE } from "@octant/contracts/fleet-activity";
 import { createMenuBarFleetReader } from "./menuBarFleetRead";
 
 const roster = {
@@ -43,7 +44,10 @@ describe("menu-bar fleet read", () => {
     expect(register).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenLastCalledWith("http://127.0.0.1:4100/api/fleet-activity", {
       method: "GET",
-      headers: { "x-octant-window-capability": "capability-1" },
+      headers: {
+        accept: FLEET_OFFER_WINDOWS_MEDIA_TYPE,
+        "x-octant-window-capability": "capability-1",
+      },
     });
     await reader.read({ ...host, instanceId: "two" });
     expect(revoked).toEqual(["capability-1"]);
@@ -87,7 +91,7 @@ describe("menu-bar fleet read", () => {
     expect(await second).toEqual({ threads: [], truncated: false });
     expect(fetch).toHaveBeenLastCalledWith("http://127.0.0.1:4200/api/fleet-activity", {
       method: "GET",
-      headers: { "x-octant-window-capability": "c" },
+      headers: { accept: FLEET_OFFER_WINDOWS_MEDIA_TYPE, "x-octant-window-capability": "c" },
     });
   });
 });

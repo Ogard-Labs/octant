@@ -16,7 +16,7 @@ import {
   ShieldQuestionMark,
   type IconComponent,
 } from "../ui/icons";
-import { useContext, useEffect, useId, useState } from "react";
+import { useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 import { ComposerOutsideContentMark } from "../composer/OutsideContentNotice";
 import { TaskAccessContext } from "./TaskAccessContext";
 import { useHostPlatform } from "../platform";
@@ -161,6 +161,11 @@ export interface PermissionModePickerProps {
    * than leave a running turn's asks reading as a broken Full access.
    */
   readonly appliesFromNextMessage?: boolean;
+  /**
+   * Registers an imperative opener for this mode menu so a read-only Plan-mode
+   * pane can open the composer's mode menu without changing the mode itself.
+   */
+  readonly onRegisterOpener?: (open: (() => void) | undefined) => void;
 }
 
 /**
@@ -193,7 +198,30 @@ const SANDBOX_UNSUPPORTED_DETAIL =
  */
 export function PermissionModePicker(props: PermissionModePickerProps) {
   const idPrefix = useId();
-  const popupSide = useSideWithRoom<HTMLButtonElement>("top");
+  const {
+    side: popupMenuSide,
+    trigger: popupTrigger,
+    settle: settlePopupSide,
+  } = useSideWithRoom<HTMLButtonElement>("top");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const disabledRef = useRef(props.disabled === true);
+  disabledRef.current = props.disabled === true;
+  const openMenu = useCallback(() => {
+    if (disabledRef.current) return;
+    const trigger = popupTrigger.current;
+    if (trigger !== null) {
+      trigger.scrollIntoView?.({ block: "nearest" });
+      trigger.focus();
+    }
+    settlePopupSide(true);
+    setMenuOpen(true);
+  }, [popupTrigger, settlePopupSide]);
+  const registerOpener = props.onRegisterOpener;
+  useEffect(() => {
+    if (registerOpener === undefined) return;
+    registerOpener(openMenu);
+    return () => registerOpener(undefined);
+  }, [openMenu, registerOpener]);
   const taskAccess = useContext(TaskAccessContext);
   const [policySelected, setPolicySelected] = useState(false);
   const [inheritedStrict, setInheritedStrict] = useState<{
@@ -310,11 +338,17 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
       <ComposerOutsideContentMark fullAccess={props.value === "full-access"} />
       {/* A composer popup is Octant's float, never the system's menu: each mode
           carries a line of detail that a system menu cannot show. */}
-      <OctantMenuRoot onOpenChange={popupSide.settle}>
+      <OctantMenuRoot
+        open={menuOpen}
+        onOpenChange={(next) => {
+          settlePopupSide(next);
+          setMenuOpen(next);
+        }}
+      >
         {/* An icon per mode in the composer's row; its name and tooltip state the
             mode. Only Full access adds its words, in the warning ink. */}
         <OctantMenuTrigger
-          ref={popupSide.trigger}
+          ref={popupTrigger}
           aria-label={`Mode: ${triggerLabel}`}
           aria-description={triggerDetail}
           className="code-composer-choice__trigger"
@@ -344,7 +378,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
           <OctantMenuPositioner
             align="start"
             collisionAvoidance={{ side: "flip", align: "shift", fallbackAxisSide: "none" }}
-            side={popupSide.side}
+            side={popupMenuSide}
           >
             <OctantMenuPopup>
               <OctantMenuRadioGroup

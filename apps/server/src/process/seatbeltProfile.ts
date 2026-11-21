@@ -987,7 +987,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
       ownAccountPaths: ownAccountRoots(input, readRoots, additionalWriteRoots),
       ownWriteRoots: additionalWriteRoots,
       readableRoots: [
-        input.boundRoot,
+        ...boundRoots,
         input.temporaryDirectory,
         ...readRoots,
         ...additionalWriteRoots,

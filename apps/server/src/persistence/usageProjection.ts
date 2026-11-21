@@ -7,6 +7,8 @@ import {
   DECISION_REVIEW_USAGE_AGGREGATE_TYPE,
   PERSON_MEMORY_REQUEST_SHAPE,
   PERSON_MEMORY_USAGE_AGGREGATE_TYPE,
+  PULL_REQUEST_REVIEW_REQUEST_SHAPE,
+  PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE,
   SHIELD_REVIEW_REQUEST_SHAPE,
   SHIELD_REVIEW_USAGE_AGGREGATE_TYPE,
   PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE,
@@ -67,7 +69,8 @@ export class UsageProjection implements Projection {
       event.aggregateType !== SHIELD_REVIEW_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== PERSON_MEMORY_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== DECISION_REVIEW_USAGE_AGGREGATE_TYPE &&
-      event.aggregateType !== IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE
+      event.aggregateType !== IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE &&
+      event.aggregateType !== PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE
     )
       return;
     this.#applyUsageReconciled(connection, event);
@@ -94,7 +97,8 @@ export class UsageProjection implements Projection {
     // person-memory distillation is the distilled thread's.
     const subject = manifest?.subject ?? {
       aggregateType:
-        event.aggregateType === PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE
+        event.aggregateType === PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE ||
+        event.aggregateType === PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE
           ? "code-thread"
           : event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE
             ? "agent-run"
@@ -223,7 +227,8 @@ export class UsageProjection implements Projection {
           reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
           reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE ||
           reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE ||
-          reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE
+          reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE ||
+          reconciliation.requestShape === PULL_REQUEST_REVIEW_REQUEST_SHAPE
           ? 0
           : 1,
       );
@@ -457,10 +462,17 @@ const PROJECT_THREADS = [
     mode: "work",
     subjectType: "work-thread",
     threads: (match: (projectColumn: string) => string) => `
-      SELECT aggregate_id FROM event_journal
-      WHERE aggregate_type = 'work-thread'
-        AND event_name = 'work.thread-created@1'
-        AND ${match("json_extract(payload_json, '$.thread.projectId')")}`,
+      SELECT w.aggregate_id FROM event_journal w
+      WHERE w.aggregate_type = 'work-thread'
+        AND w.event_name IN ('work.thread-created@1', 'work.thread-updated@1')
+        AND w.aggregate_version = (
+          SELECT MAX(w2.aggregate_version)
+          FROM event_journal w2
+          WHERE w2.aggregate_type = 'work-thread'
+            AND w2.aggregate_id = w.aggregate_id
+            AND w2.event_name IN ('work.thread-created@1', 'work.thread-updated@1')
+        )
+        AND ${match("json_extract(w.payload_json, '$.thread.projectId')")}`,
   },
 ] as const;
 
@@ -500,8 +512,9 @@ function projectBearingSubjectTerms(
     ),
     // An image job made in a thread is that thread's spend: its queued event
     // names the thread kind and the thread. A library job names no thread.
-    // Only the dashboard attributes them: a spend ceiling selects its rows
-    // through the same predicate and must keep counting what it always has.
+    // The dashboard and monetary spend ceilings pass `includeImageJobs: true`;
+    // token ceilings leave it false so image providers that report no tokens
+    // do not trip token ceilings as unavailable.
     ...(includeImageJobs ? PROJECT_THREADS : []).map(
       ({ subjectType, threads }) => `(subject_type = 'image-job'
     AND subject_id IN (
@@ -515,7 +528,7 @@ function projectBearingSubjectTerms(
   ];
 }
 
-/** `includeImageJobs` places an image job under its thread's Project; only the dashboard asks. */
+/** `includeImageJobs` places an image job under its thread's Project (used by Usage and monetary ceilings). */
 export interface UsageScopeOptions {
   readonly includeImageJobs?: boolean;
 }

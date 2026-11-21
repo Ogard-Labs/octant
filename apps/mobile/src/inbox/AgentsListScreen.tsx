@@ -478,7 +478,9 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
             {section.rows.map((row, index) => (
               <ListRow
                 accessory="none"
-                detail={`${hostLabel(row.hostId)} · ${modeLabel(row.mode)}`}
+                detail={`${hostLabel(row.hostId)} · ${modeLabel(row.mode)}${
+                  row.waitingOfferText === undefined ? "" : ` · ${row.waitingOfferText}`
+                }`}
                 icon={modeIcon(row.mode)}
                 key={`${row.hostId}:${row.mode}:${row.threadId}`}
                 label={formatScreenshotSafeLabel(row.title)}

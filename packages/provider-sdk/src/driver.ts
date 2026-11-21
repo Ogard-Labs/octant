@@ -8,6 +8,7 @@ import type {
   ProviderInstanceId,
   ProjectId,
   ProviderAuthenticationAttempt,
+  ProviderMention,
   ProviderModelId,
   ProviderModelOptionValues,
   ProviderNativeSetup,
@@ -25,6 +26,7 @@ import type {
 import type { Effect, Scope, Stream } from "effect";
 import type { ProviderContextFactsSource, ProviderLocalUsageHistorySource } from "./contextFacts";
 import type { CloudSessionDriver } from "./cloudSessions";
+import type { ProviderProjectFolderDiscoveryPort } from "./projectFolderDiscovery";
 
 export type {
   ProviderAttachmentInput,
@@ -193,6 +195,15 @@ export interface ProviderSessionStart {
    * never lets the runtime switch its own mode.
    */
   readonly levelChanges?: boolean;
+  /**
+   * Every approval this session's host answers holds for that one call only,
+   * as a helper run's do. A driver refuses on arrival a request it could only
+   * approve for longer (an agent offering `allow_always` with no
+   * `allow_once`), answering the runtime's reject and asking no one, since no
+   * answer the host can give would approve it. Absent, such a request is
+   * asked as usual.
+   */
+  readonly answersOncePerCall?: boolean;
 }
 
 /** One background task a session's runtime still runs, as the person may see it. */
@@ -330,6 +341,8 @@ export interface ProviderSessionResume {
   readonly outlivesTurn?: boolean;
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly levelChanges?: boolean;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly answersOncePerCall?: boolean;
 }
 
 /**
@@ -496,6 +509,8 @@ export interface ProviderDriver {
   readonly contextFacts?: ProviderContextFactsSource;
   /** Optional read-only local history reader owned by the configured driver. */
   readonly localUsageHistory?: ProviderLocalUsageHistorySource;
+  /** Optional read-only first-run folder discovery owned by the provider adapter. */
+  readonly projectFolderDiscovery?: ProviderProjectFolderDiscoveryPort;
   /**
    * The name of the runtime's own tool that publishes a document to the
    * person's account with the model's provider, when a thread in this mode
@@ -512,6 +527,18 @@ export interface ProviderDriver {
   readonly probe: (
     input: ProviderProbeInput,
   ) => Effect.Effect<ProviderProbeResult, ProviderFailure, Scope.Scope>;
+  /**
+   * The provider's own skills and plugins available for a thread in one
+   * folder, for the composer's `@` menu. `nativeSetup` is what the thread's
+   * launch actually loads: a driver lists a Project's skills only when
+   * `nativeSetup?.skills === true` and omits them otherwise. Absent, the menu
+   * offers only the account-level `mentions` the driver's `probe` reported.
+   */
+  readonly listMentions?: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly projectRoot?: string;
+    readonly nativeSetup?: ProviderNativeSetup;
+  }) => Effect.Effect<ReadonlyArray<ProviderMention>, ProviderFailure>;
   /**
    * Optional per-model tool-capability verification. Used by drivers whose
    * Connection Check is non-generating (the direct-endpoint profiles) so a

@@ -1156,9 +1156,12 @@ async function mutateLiveRun(
   }
   const result =
     action === "retry"
-      ? dependencies.orchestration.retry(runId, expectedVersion, parent.liveAuthority)
+      ? dependencies.orchestration.retry(runId, expectedVersion, parent.liveAuthority, {
+          ownerWindowId: windowId,
+        })
       : await dependencies.orchestration.resume(runId, expectedVersion, parent.liveAuthority, {
           ...(message === undefined ? {} : { message }),
+          ownerWindowId: windowId,
           resolveLiveAuthority: () => {
             const currentParent = dependencies.authorizeCreation({
               parentThreadId: run.parentThreadId,

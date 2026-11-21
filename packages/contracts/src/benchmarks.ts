@@ -148,7 +148,12 @@ const SuiteCases = Schema.Array(BenchmarkCase).pipe(
   ),
 );
 
-export const BenchmarkSuite = Schema.Struct({
+export const DEFAULT_BENCHMARK_PASS_THRESHOLD = 0.8;
+export const BenchmarkSuiteKind = Schema.Literal("chat", "work", "code");
+export type BenchmarkSuiteKind = typeof BenchmarkSuiteKind.Type;
+const BenchmarkPassThreshold = Schema.Number.pipe(Schema.finite(), Schema.between(0, 1));
+
+const BenchmarkSuiteV1 = Schema.Struct({
   suiteId: BenchmarkSuiteId,
   revision: PositiveInt,
   name: boundedText(80),
@@ -157,6 +162,15 @@ export const BenchmarkSuite = Schema.Struct({
   judge: Schema.optional(BenchmarkJudge),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
+}).annotations(strict);
+
+export const BenchmarkSuite = Schema.Struct({
+  ...BenchmarkSuiteV1.fields,
+  passThreshold: Schema.optionalWith(BenchmarkPassThreshold, {
+    default: () => DEFAULT_BENCHMARK_PASS_THRESHOLD,
+  }),
+  kind: Schema.optionalWith(BenchmarkSuiteKind, { default: () => "chat" }),
+  projectId: Schema.optional(ProjectId),
 }).annotations(strict);
 export type BenchmarkSuite = typeof BenchmarkSuite.Type;
 
@@ -405,6 +419,7 @@ export type BenchmarkRunSummary = typeof BenchmarkRunSummary.Type;
 // ── Routes ─────────────────────────────────────────────────────────────────
 
 export const BENCHMARK_ROUTE_PATHS = {
+  advice: "/api/benchmarks/advice",
   suitesList: "/api/benchmarks/suites/list",
   suitesSave: "/api/benchmarks/suites/save",
   suitesDelete: "/api/benchmarks/suites/delete",
@@ -417,6 +432,37 @@ export const BENCHMARK_ROUTE_PATHS = {
   suitesHistory: "/api/benchmarks/suites/history",
   runsExport: "/api/benchmarks/runs/export",
 } as const;
+
+export const BenchmarkAdviceRequest = Schema.Union(
+  Schema.Struct({ suiteId: BenchmarkSuiteId }).annotations(strict),
+  Schema.Struct({ projectId: ProjectId, kind: BenchmarkSuiteKind }).annotations(strict),
+);
+export type BenchmarkAdviceRequest = typeof BenchmarkAdviceRequest.Type;
+
+export const BenchmarkModelAdvice = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  effort: Schema.optional(boundedText(40)),
+  passRate: BenchmarkPassThreshold,
+  costPerPass: Schema.optional(NonNegativeNumber),
+  medianMs: Schema.optional(NonNegativeNumber),
+  runAt: UtcTimestamp,
+  stale: Schema.Boolean,
+}).annotations(strict);
+export type BenchmarkModelAdvice = typeof BenchmarkModelAdvice.Type;
+
+export const BenchmarkAdviceResponse = Schema.Struct({
+  suites: Schema.Array(
+    Schema.Struct({
+      suiteId: BenchmarkSuiteId,
+      name: boundedText(80),
+      models: Schema.Array(BenchmarkModelAdvice),
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type BenchmarkAdviceResponse = typeof BenchmarkAdviceResponse.Type;
+export const decodeBenchmarkAdviceRequest = Schema.decodeUnknownSync(BenchmarkAdviceRequest);
+export const decodeBenchmarkAdviceResponse = Schema.decodeUnknownSync(BenchmarkAdviceResponse);
 
 /** The most runs one history read returns, newest first. */
 export const MAX_BENCHMARK_HISTORY_RUNS = 50;
@@ -440,6 +486,9 @@ export const BenchmarkSuiteSaveRequest = Schema.Struct({
   description: Schema.optional(Schema.String.pipe(Schema.maxLength(500))),
   cases: SuiteCases,
   judge: Schema.optional(BenchmarkJudge),
+  passThreshold: Schema.optional(BenchmarkPassThreshold),
+  kind: Schema.optional(BenchmarkSuiteKind),
+  projectId: Schema.optional(Schema.NullOr(ProjectId)),
 }).annotations(strict);
 export type BenchmarkSuiteSaveRequest = typeof BenchmarkSuiteSaveRequest.Type;
 export const BenchmarkSuiteSaveResponse = Schema.Struct({ suite: BenchmarkSuite }).annotations(
@@ -615,6 +664,15 @@ export const BENCHMARK_EVENT_NAMES = {
  */
 export const BenchmarkSuiteSaved = Schema.Struct({ suite: BenchmarkSuite }).annotations(strict);
 export type BenchmarkSuiteSaved = typeof BenchmarkSuiteSaved.Type;
+export const BenchmarkSuiteSavedV1 = Schema.Struct({ suite: BenchmarkSuiteV1 }).annotations(strict);
+export const BenchmarkSuiteSavedV2 = Schema.Struct({
+  suite: Schema.Struct({
+    ...BenchmarkSuiteV1.fields,
+    passThreshold: BenchmarkPassThreshold,
+    kind: BenchmarkSuiteKind,
+    projectId: Schema.optional(ProjectId),
+  }).annotations(strict),
+}).annotations(strict);
 export const BenchmarkSuiteDeleted = Schema.Struct({ suiteId: BenchmarkSuiteId }).annotations(
   strict,
 );

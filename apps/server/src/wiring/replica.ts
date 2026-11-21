@@ -44,6 +44,7 @@ export type ReplicaDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     CanvasWiring,
     | "artifactLibraryService"
+    | "canvasChoiceAnswerService"
     | "canvasCommentService"
     | "canvasService"
     | "replicaArtifactSync"
@@ -58,6 +59,7 @@ export type ReplicaDependencies = Pick<ServerStart, "options" | "persistence"> &
 export function wireReplica(deps: ReplicaDependencies) {
   const {
     artifactLibraryService,
+    canvasChoiceAnswerService,
     canvasCommentService,
     canvasService,
     externalContentIngestionStore,
@@ -153,6 +155,13 @@ export function wireReplica(deps: ReplicaDependencies) {
             change,
             writer: { instanceId: String(writer.instanceId), displayName: writer.displayName },
           });
+        },
+      },
+      // A decision-form answer or clear another computer wrote joins the
+      // Canvas's saved answers here.
+      choiceAnswers: {
+        adopt: ({ canvasId, change }) => {
+          canvasChoiceAnswerService.adoptReplicaChange({ canvasId, change });
         },
       },
     }),

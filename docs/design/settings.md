@@ -39,13 +39,16 @@ feel (Appearance, Sidebar, Keybindings), AI (Providers & Models, Octant Harness,
 Voice & images, then Chat, Work and Code: which provider or model answers each
 job, and how each mode starts), Tools (Skills & Extensions, Web search, Computer use,
 Device tools, GitHub, Linear: what a running agent may reach; Web search's
-rules are in [Web search backends](web-search-backends.md#settings)), Safety (Permissions,
+rules are in [Web search backends](web-search-backends.md#settings), and Computer use holds the plugin switch, guided setup, driver updates, and **Remembered applications** listing each Project and application remembered from a below-Full-access approval with **Forget**), Safety (Permissions,
 Secret stores, Memory: what an agent may touch, reach and remember), and
 Data & devices (Data & storage, Sync, Remote access, Host, Usage: what this
 computer stores and the other machines it talks to). An earlier Privacy & data
 group had grown to seven pages answering three different questions, Modes stood
-apart from the models its pages choose, and Advanced held two pages. General
-opens on Your identity (the profile), followed by Your instructions (a
+apart from the models its pages choose, and Advanced held two pages. General opens on Computer resources (automatic or manual local-work limits,
+Pause new work, and **Keep the computer awake while agents work** — `While on
+power` by default, `Always`, or `Never`, with a quiet counts-only live status
+line on the desktop app that reports held, idle, or unavailable and never shows
+thread titles) and Your identity (the profile), followed by Your instructions (a
 multi-line field with its count, limit, a likely-secret warning, and Save,
 read-only where the window cannot change it) and Orchestration, the same field
 for coordinator threads ([Octant instructions](octant-instructions.md#settings)),
@@ -99,11 +102,14 @@ switches, each row naming its default in its description
 ([Octant's own limits become settings](../architecture.md#security-and-authority)):
 **Wake-ups and messages** (Wake-ups waiting per thread, 8, up to 64; Message
 wakes per hour, 30; Rounds of replies that wake, 10; Thread messages per turn,
-3, up to 20; and the switch **Run missed wake-ups on return**, off),
+3, up to 20, under Strict only; Sibling thread reads per turn, 8, up to 64,
+under Strict only; Sibling thread waits per turn, 4, up to 32, under Strict
+only; and the switch **Run missed wake-ups on return**, off),
 **Coordinators** (Coordinators per Project, 4, up to 32), **Pull requests**
 (Wakes per pull-request watch, 10, up to 100; Days a pull-request watch lasts,
 3, up to 30; Auto-fix tries per failure, 3, up to 20), **Waiting** (Longest
-Browser wait, in minutes, 10, up to 60, whose description says a Claude Code
+Browser wait, in minutes, 10, up to 60, under Strict only, whose description
+says outside Strict there is no wait limit and a Claude Code
 thread still ends one tool call at eleven minutes; Longest wait for a helper,
 in seconds, 120, up to 3,600), then **Routines** with the switch **Start
 agent-created routines active at Full access**, off. Each change is the
@@ -337,7 +343,10 @@ Saving a policy does not enable Strict. With Strict off the saved configuration
 is inactive. Project can inherit Settings; an explicit Off overrides an inherited
 On. Existing Full-access-only sandbox choices remain visibly marked as previous
 choices until the person chooses Strict or Off; no silent broadening is described
-as migration. There is no second Keep the sandbox switch.
+as migration. There is no second Keep the sandbox switch, on Windows either: the
+previous Full-access-only choice never returns as a Windows control, and Windows
+gets the same Strict control as it becomes accepted there
+([Windows Strict, phase 1](../architecture.md#windows-strict-phase-1)).
 
 The panel shows effective Strict state and source, full folder paths, supported
 read/write grants and recorded Safe networks settings. Private caches, scratch,
@@ -384,8 +393,8 @@ the branch and its commits stay. A refusal (uncommitted changes, or a turn
 still running in the thread) is said in the
 section's feedback line and the row stays. With none kept it says so in one
 line; a paired device uses the section as a local window does (maintainer
-decision, 2026-11-12; not built yet: today a paired device sees the section
-as managed on the host machine)
+decision, 2026-11-12; server policy admits a person-paired device and refuses
+hub-introduced devices; paired UI follow-up remains)
 ([rules](../architecture.md#modes-chat-work-and-code)).
 **Worktrees on this computer** follows it: a first row says when the host last
 scanned ("Not scanned since Octant started" until then) and how many it found,

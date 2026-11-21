@@ -354,7 +354,18 @@ export const McpServerSignInView = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("awaiting-consent"),
     attemptId: Schema.UUID,
+    flow: Schema.optional(Schema.Literal("authorization-code-pkce", "relay")),
+    relayable: Schema.optional(Schema.Boolean),
     authorizationUrl: boundedText(4096),
+    expiresAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("awaiting-device-code"),
+    attemptId: Schema.UUID,
+    issuerHost: boundedText(256),
+    verificationUri: boundedText(2048),
+    verificationUriComplete: Schema.optional(boundedText(2048)),
+    userCode: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9-]{1,64}$/)),
     expiresAt: UtcTimestamp,
   }).annotations(strict),
   Schema.Struct({
@@ -385,6 +396,7 @@ export const McpServerSignInView = Schema.Union(
       "timeout",
       "unavailable",
       "local-host-required",
+      "sign-in-settled",
       "invalid",
     ),
     message: boundedText(512),
@@ -392,6 +404,61 @@ export const McpServerSignInView = Schema.Union(
 );
 export type McpServerSignInView = typeof McpServerSignInView.Type;
 export const decodeMcpServerSignInView = Schema.decodeUnknownSync(McpServerSignInView);
+
+/**
+ * One-time callback relay sent by the paired device that began a PKCE attempt.
+ * The callback address travels once inside the signed session and is never
+ * logged, journaled, or returned.
+ */
+export const McpServerSignInRelayRequest = Schema.Struct({
+  attemptId: Schema.UUID,
+  callbackUrl: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4352)),
+}).annotations(strict);
+export type McpServerSignInRelayRequest = typeof McpServerSignInRelayRequest.Type;
+export const decodeMcpServerSignInRelayRequest = Schema.decodeUnknownSync(
+  McpServerSignInRelayRequest,
+);
+
+export const McpServerSignInRelayResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("signed-in"),
+    issuer: boundedText(256),
+    account: Schema.optional(McpReportedAccount),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("sign-in-again"),
+    reason: Schema.Literal(
+      "revoked",
+      "expired",
+      "refresh-reused",
+      "account-changed",
+      "permission-missing",
+      "permission-mismatch",
+      "identity-unavailable",
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("retry"),
+    remainingAttempts: Schema.Literal(1, 2),
+    message: boundedText(512),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    reason: Schema.Literal(
+      "sign-in-settled",
+      "denied",
+      "timeout",
+      "unavailable",
+      "local-host-required",
+      "invalid",
+    ),
+    message: boundedText(512),
+  }).annotations(strict),
+);
+export type McpServerSignInRelayResult = typeof McpServerSignInRelayResult.Type;
+export const decodeMcpServerSignInRelayResult = Schema.decodeUnknownSync(
+  McpServerSignInRelayResult,
+);
 
 /**
  * How each installed MCP server is connecting, as the host last saw it. The

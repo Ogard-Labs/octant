@@ -14,6 +14,7 @@ import type { AndroidToolchainClient } from "@octant/client-runtime/android-tool
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
+import type { PullRequestReviewClient } from "@octant/client-runtime/pull-request-review-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
 import type { WorkFileListingClient } from "@octant/client-runtime/work-file-listing-client";
 import type {
@@ -22,6 +23,8 @@ import type {
   CodeRelativePath,
   CodeThreadView,
 } from "@octant/contracts/code";
+import type { ProjectSummary } from "@octant/contracts";
+import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ChatThreadId } from "@octant/contracts/chat";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -35,6 +38,8 @@ import type { SideChatSidecar } from "@octant/contracts";
 
 export interface ThreadUtilityDockSubject {
   readonly checkoutId?: CodeCheckoutId;
+  /** Where the thread runs, as workspace Code thread tabs carry it; absent means this computer. */
+  readonly hostId?: string;
   readonly mode: OctantMode;
   readonly projectId?: ProjectId;
   readonly threadId: string;
@@ -90,6 +95,7 @@ export interface ThreadUtilityDockContentProps {
   readonly onSelectProjectPullRequest?: (row: CodeProjectPullRequestRow) => void;
   readonly onSidecarOpened: (sidecar: SideChatSidecar) => void;
   readonly planClient?: PlanClient;
+  readonly pullRequestReviewClient?: PullRequestReviewClient;
   readonly providerController?: ProviderController;
   /** Marks the row the shell currently shows in Review, wherever it was chosen. */
   readonly selectedProjectPullRequestKey?: string;
@@ -99,6 +105,11 @@ export interface ThreadUtilityDockContentProps {
   /** Opens one listed Work file in the preview surface. */
   readonly onOpenWorkFile?: (request: WorkFileOpenRequest) => void;
   readonly sidecarThreadId?: ChatThreadId;
+  // A docked Code tool names the reason a checkout is unreadable with the same
+  // Project summary and project client the workspace tab uses; resolved by the
+  // module against the thread's own Project, never assumed to be the active one.
+  readonly projects?: ReadonlyArray<ProjectSummary>;
+  readonly projectClient?: ProjectClient;
   readonly subject: ThreadUtilityDockSubject;
   readonly surface: RightUtilityDockSurfaceId;
   readonly utilityTabId?: string;

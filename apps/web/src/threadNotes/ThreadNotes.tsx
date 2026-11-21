@@ -7,6 +7,8 @@ import {
 import type { ThreadNotesClient } from "@octant/client-runtime/thread-notes-client";
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
+import { formatDateTime, type TimestampFormatPreference } from "../theme/timestampFormat";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import "./thread-notes.css";
@@ -112,6 +114,7 @@ function RecapRow(props: { readonly services: ThreadNotesServices; readonly thre
 }
 
 function RecapFacts(props: { readonly recap: ThreadRecap }) {
+  const timestampFormat = useTimestampFormat();
   const { recap } = props;
   if (recap.asks === 0 && recap.replies === 0) return <p>Nothing has been asked here yet.</p>;
   return (
@@ -148,7 +151,7 @@ function RecapFacts(props: { readonly recap: ThreadRecap }) {
         {recap.throughAt === undefined ? null : (
           <>
             {", through "}
-            <time dateTime={recap.throughAt}>{formatTime(recap.throughAt)}</time>
+            <time dateTime={recap.throughAt}>{formatTime(recap.throughAt, timestampFormat)}</time>
           </>
         )}
       </dd>
@@ -156,11 +159,8 @@ function RecapFacts(props: { readonly recap: ThreadRecap }) {
   );
 }
 
-function formatTime(iso: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime())
-    ? iso
-    : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+function formatTime(iso: string, timestampFormat?: TimestampFormatPreference): string {
+  return formatDateTime(iso, { dateStyle: "medium", timeStyle: "short" }, timestampFormat);
 }
 
 function NotesRow(props: {

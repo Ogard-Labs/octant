@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   decodeCodeThreadId,
+  decodeEventActor,
   decodeProjectId,
   decodeProviderInstance,
+  decodeProviderModelId,
   decodeWindowId,
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
@@ -348,5 +350,159 @@ describe("provider cloud tasks", () => {
       ),
     ).toEqual({ status: "refused", reason: "review-required" });
     expect(f.starts()).toBe(2);
+  });
+
+  it("admits a person-paired device with device principal recording, refuses restricted devices, and reports locked credential store before dispatch", async () => {
+    const writtenPrincipals: Array<unknown> = [];
+    const deviceId = id(99);
+    const deviceActor = decodeEventActor({
+      kind: "remote-device",
+      actorId: deviceId,
+      deviceId,
+    });
+    const devicePrincipal = {
+      kind: "person-paired-device" as const,
+      scopeId: decodeWindowId(deviceId),
+      deviceId,
+      sessionId: "sess-1",
+      credentialGeneration: 3,
+      actor: deviceActor,
+    };
+    const jobs = new Map<string, ProviderCloudJob>();
+    let enabled = false;
+    let triggerLocked = false;
+    const service = new ProviderCloudSessionService({
+      now: () => now,
+      instances: () => [instance],
+      supports: () => true,
+      models: () => [decodeProviderModelId("fixture-model")],
+      canManageProvider: () => true,
+      context: () => ({
+        threadId,
+        projectId: decodeProjectId(id(1)),
+        executionPolicy: "full-access",
+        current: () => true,
+        canSubmit: () => true,
+        requiresUnsupportedBound: () => false,
+      }),
+      store: {
+        get: (jobId) => jobs.get(jobId),
+        put: (job, person) => {
+          writtenPrincipals.push({ state: job.state, person });
+          const next = decodeProviderCloudJob({
+            ...job,
+            version: (jobs.get(job.id)?.version ?? 0) + 1,
+          });
+          jobs.set(job.id, next);
+          return next;
+        },
+        list: () => [...jobs.values()],
+        active: () => [...jobs.values()],
+        enabled: () => enabled,
+        setEnabled: (_instanceId, value, person) => {
+          writtenPrincipals.push({ optIn: value, person });
+          enabled = value;
+        },
+        hasCreateDispatch: () => false,
+      },
+      adapter: (_instance, _intent, _admission, onCreated, options) => ({
+        create: async () => {
+          if (triggerLocked) {
+            options?.onCredentialUnlockRequired?.();
+            return { status: "uncertain" as const };
+          }
+          const remoteId = decodeProviderCloudRemoteId("sess_paired_dev");
+          onCreated?.(remoteId);
+          return {
+            status: "observed" as const,
+            remoteId,
+            state: "running" as const,
+            output: "",
+            truncated: false,
+          };
+        },
+        read: async (remoteId) => ({
+          status: "observed" as const,
+          remoteId,
+          state: "running" as const,
+          output: "",
+          truncated: false,
+        }),
+        cancel: async () => ({ status: "requested" as const }),
+      }),
+    });
+
+    // Restricted remote-device is refused before journaling.
+    expect(
+      await service.execute(
+        { kind: "remote-device", scopeId: decodeWindowId(deviceId) },
+        { kind: "opt-in", instanceId: instance.id, enabled: true },
+      ),
+    ).toEqual({ status: "refused", reason: "unauthorized" });
+    expect(writtenPrincipals).toEqual([]);
+
+    // Person-paired device opts in and submits a cloud job; person acts carry the device principal, system observations do not.
+    expect(
+      await service.execute(devicePrincipal, {
+        kind: "opt-in",
+        instanceId: instance.id,
+        enabled: true,
+      }),
+    ).toMatchObject({ status: "ready" });
+    const startReq = decodeProviderCloudRequest({
+      kind: "start",
+      jobId: id(12),
+      threadId,
+      instanceId: instance.id,
+      modelId: "fixture-model",
+      input: text,
+      reviewedInputDigest: digest,
+      cloudExecutionConsent: true,
+    });
+    expect(await service.execute(devicePrincipal, startReq)).toMatchObject({ status: "ready" });
+    expect(writtenPrincipals[0]).toEqual({
+      optIn: true,
+      person: {
+        kind: "person-paired-device",
+        credentialGeneration: 3,
+        actor: deviceActor,
+      },
+    });
+    expect(writtenPrincipals[1]).toEqual({
+      state: "submitting",
+      person: {
+        kind: "person-paired-device",
+        credentialGeneration: 3,
+        actor: deviceActor,
+      },
+    });
+    expect(writtenPrincipals[2]).toEqual({ state: "running", person: undefined });
+
+    // Cancel from person-paired device records the device principal.
+    expect(
+      await service.execute(devicePrincipal, {
+        kind: "cancel",
+        jobId: decodeProviderCloudJobId(id(12)),
+      }),
+    ).toMatchObject({ status: "ready" });
+
+    // Locked credential store refuses with credential-unlock-needs-this-computer before dispatch.
+    jobs.clear();
+    triggerLocked = true;
+    const secondStart = decodeProviderCloudRequest({
+      kind: "start",
+      jobId: id(13),
+      threadId,
+      instanceId: instance.id,
+      modelId: "fixture-model",
+      input: text,
+      reviewedInputDigest: digest,
+      cloudExecutionConsent: true,
+    });
+    expect(await service.execute(devicePrincipal, secondStart)).toEqual({
+      status: "refused",
+      reason: "credential-unlock-needs-this-computer",
+    });
+    await service.close();
   });
 });

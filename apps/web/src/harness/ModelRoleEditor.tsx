@@ -12,6 +12,8 @@ import { findPickerModel, type PickerGroup } from "@octant/domain";
 import { ComposerModelPicker, isComposerReasoningOption } from "../providers/ComposerModelPicker";
 import { isConstrained, roomOf } from "../usage/providerRoom";
 import { useProviderRooms } from "../usage/useProviderRooms";
+import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
+import { formatClockTime, type TimestampFormatPreference } from "../theme/timestampFormat";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -61,12 +63,15 @@ export interface ModelRoleEditorProps {
   readonly onSuggest?: () => void;
 }
 
-function when(isoTime: string | undefined): string | undefined {
+function when(
+  isoTime: string | undefined,
+  timestampFormat?: TimestampFormatPreference,
+): string | undefined {
   if (isoTime === undefined) return undefined;
   const at = new Date(isoTime);
   return Number.isNaN(at.getTime())
     ? undefined
-    : at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    : formatClockTime(at, { hour: "2-digit", minute: "2-digit" }, timestampFormat);
 }
 
 /**
@@ -75,6 +80,7 @@ function when(isoTime: string | undefined): string | undefined {
  */
 export function ModelRoleEditor(props: ModelRoleEditorProps) {
   const rooms = useProviderRooms();
+  const timestampFormat = useTimestampFormat();
   const [adding, setAdding] = useState(false);
   // The model to replace is held by identity, not position: the list stays
   // editable while the person decides, and a position taken before a reorder
@@ -254,7 +260,7 @@ export function ModelRoleEditor(props: ModelRoleEditorProps) {
     if (unready !== undefined) out.push({ key: "unready", text: unready });
     const room = roomOf(rooms, String(candidate.providerInstanceId));
     if (room.standing === "limited") {
-      const until = when(room.resetsAt);
+      const until = when(room.resetsAt, timestampFormat);
       out.push({
         key: "limit",
         text: until === undefined ? "At usage limit" : `At usage limit until ${until}`,

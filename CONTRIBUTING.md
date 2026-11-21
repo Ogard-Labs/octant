@@ -102,11 +102,17 @@ Once applicable checks pass, proceed to delivery under the
 - Before opening a branch or PR, search the open PRs and branch ancestry for the
   same task or user-visible outcome. Continue an existing PR for follow-up work
   that belongs to it instead of creating a sibling PR.
-- Keep PRs small and focused on one outcome. Split unrelated changes.
-- Prefer one PR when the work is one outcome and not independently reviewable.
-  Use a native GitHub stack for independently reviewable dependent slices: link
-  the parent and child PRs, record their order, keep the stack linear, and queue
-  it from the lowest eligible PR. Use separate `main` PRs for independent work.
+- Keep PRs focused on one outcome. Split unrelated changes.
+- One issue gets one branch and one PR; slices are commits, not PRs. Push work
+  in progress without opening a PR and open it once it is ready. Draft PRs run
+  no CI; marking one ready for review starts the run. Use a native GitHub stack
+  only when a maintainer asks for one or one PR would exceed about 1,500 changed
+  lines outside tests and generated files: link the parent and child PRs, record
+  their order, keep the stack linear with at most one child per layer, and
+  queue it from the lowest eligible PR. Stack layers whose base is not `main`
+  skip the advisory macOS and Windows jobs in the `CI` workflow. Use separate `main` PRs for
+  independent work. The full rules are in
+  [AGENTS.md](AGENTS.md#delivery-and-completion).
 - CI must be green on the exact head being merged. If `main` has moved, a
   standalone PR may rebase or merge `main`. A native stacked PR must
   cascading-rebase onto the new `main` (`Rebase stack`, or `gh stack rebase`

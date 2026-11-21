@@ -8,7 +8,6 @@ import {
   admitCanvasRevise,
   applyPromptRefinement,
   buildRevisionVersion,
-  canvasReviseDenialReason,
   clampRevisionProvenance,
   CanvasRevisionPolicyRejected,
   listCanvasVersionHistory,
@@ -155,18 +154,6 @@ describe("canvasRevisionPolicy", () => {
         message: expect.stringContaining("frame home uses a <script> element"),
       }),
     );
-  });
-
-  it("rejects implicit authority widening before admission", () => {
-    expect(
-      canvasReviseDenialReason({
-        ...reviseRequest(),
-        requestedAuthority: {
-          ...reviseRequest().requestedAuthority,
-          filesystem: true,
-        },
-      }),
-    ).toBe("chat-implicit-authority");
   });
 
   it("rejects stale expected sequence during admission", () => {

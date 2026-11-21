@@ -30,6 +30,8 @@ import {
   DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
   DEFAULT_COORDINATOR_ROUNDS,
   DEFAULT_COORDINATOR_WAKES_PER_HOUR,
+  DEFAULT_SIBLING_THREAD_READS_PER_TURN,
+  DEFAULT_SIBLING_THREAD_WAITS_PER_TURN,
   DEFAULT_THREAD_MESSAGES_PER_TURN,
   DEFAULT_THREAD_WAKEUPS_WAITING,
   MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
@@ -40,6 +42,8 @@ import {
   MAX_COORDINATOR_WAKES_PER_HOUR,
   MAX_COORDINATORS_PER_PROJECT,
   MAX_COORDINATORS_PER_PROJECT_SETTING,
+  MAX_SIBLING_THREAD_READS_PER_TURN_SETTING,
+  MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING,
   MAX_THREAD_MESSAGES_PER_TURN_SETTING,
   MAX_THREAD_WAKEUPS_WAITING_SETTING,
 } from "./octantLimits";
@@ -49,7 +53,7 @@ import {
   MAX_RUNTIME_TURNS_PER_TURN_SETTING,
   MAX_THREAD_TOOL_STEPS_SETTING,
 } from "./threadToolSteps";
-import { AggregateVersion, UtcTimestamp } from "./events";
+import { AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { DEFAULT_PAIRED_DEVICE_LIFETIME, PairedDeviceLifetime } from "./remoteAccess";
 import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
@@ -621,8 +625,12 @@ export const DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES: BackgroundSessionIdl
 export const DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT: AutoCompactWindowPercent = 85;
 export {
   DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
+  DEFAULT_SIBLING_THREAD_READS_PER_TURN,
+  DEFAULT_SIBLING_THREAD_WAITS_PER_TURN,
   DEFAULT_THREAD_MESSAGES_PER_TURN,
   MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
+  MAX_SIBLING_THREAD_READS_PER_TURN_SETTING,
+  MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING,
   MAX_THREAD_MESSAGES_PER_TURN_SETTING,
 };
 
@@ -686,6 +694,21 @@ export const SkillFolderSettings = Schema.Struct({
   folders: Schema.Array(SkillFolderPath).pipe(Schema.maxItems(MAX_ADDED_SKILL_FOLDERS)),
 });
 export type SkillFolderSettings = typeof SkillFolderSettings.Type;
+
+/**
+ * One "Remember for this Project" answer to a Computer use first-action
+ * approval below Full access: later threads in that Project control that
+ * application without asking again until the person forgets it in Settings.
+ * Grows only through the approval decision path; a settings replacement may
+ * only forget entries.
+ */
+export const RememberedComputerUseApp = Schema.Struct({
+  projectId: ProjectId,
+  appId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  grantedBy: EventActor,
+  grantedAt: UtcTimestamp,
+}).annotations(strict);
+export type RememberedComputerUseApp = typeof RememberedComputerUseApp.Type;
 
 /** One site remembered for one stored Browser profile; see `rememberedBrowserProfileSites`. */
 export const RememberedBrowserProfileSite = Schema.Struct({
@@ -995,12 +1018,22 @@ export const ShellSettings = Schema.Struct({
     Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING)),
     { default: () => CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS },
   ),
-  /** Thread messages one turn may send to other threads. */
+  /** Thread messages one turn may send to other threads under Strict. */
   threadMessagesPerTurn: Schema.optionalWith(
     Schema.Int.pipe(Schema.between(1, MAX_THREAD_MESSAGES_PER_TURN_SETTING)),
     { default: () => DEFAULT_THREAD_MESSAGES_PER_TURN },
   ),
-  /** The longest one Browser wait may last, in minutes. */
+  /** Sibling-thread `read` calls one turn may make under Strict. */
+  siblingThreadReadsPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_SIBLING_THREAD_READS_PER_TURN_SETTING)),
+    { default: () => DEFAULT_SIBLING_THREAD_READS_PER_TURN },
+  ),
+  /** Sibling-thread `wait` calls one turn may make under Strict. */
+  siblingThreadWaitsPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING)),
+    { default: () => DEFAULT_SIBLING_THREAD_WAITS_PER_TURN },
+  ),
+  /** The longest one Browser wait may last under Strict, in minutes. */
   browserWaitLimitMinutes: Schema.optionalWith(
     Schema.Int.pipe(Schema.between(1, MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING)),
     { default: () => DEFAULT_BROWSER_WAIT_LIMIT_MINUTES },
@@ -1239,6 +1272,15 @@ export const ShellSettings = Schema.Struct({
    */
   rememberedBrowserTransfers: Schema.optionalWith(
     Schema.Array(RememberedBrowserTransfer).pipe(Schema.maxItems(1_024)),
+    { default: () => [] },
+  ),
+  /**
+   * Applications the person approved with "Remember for this Project" for the
+   * bundled Computer use tool below Full access. Grows only through the
+   * approval decision path; a settings replacement may only forget entries.
+   */
+  rememberedComputerUseApps: Schema.optionalWith(
+    Schema.Array(RememberedComputerUseApp).pipe(Schema.maxItems(1_024)),
     { default: () => [] },
   ),
   /** Local opt-in; old grants never inherit a newly enabled native owner. */

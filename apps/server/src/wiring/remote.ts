@@ -4,8 +4,6 @@ import { createOwnerApprovalJournal } from "../hub/ownerApprovalJournal";
 import type { WorkRequestStateWiring } from "./workRequestState";
 import { CodeService } from "../code/codeService";
 import { randomUUID } from "node:crypto";
-import { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
-import { createOwnerBrowserJournal } from "../browser/ownerBrowserJournal";
 import { homedir } from "node:os";
 import {
   type AgentRunId,
@@ -97,7 +95,6 @@ import { HostMemoryLimitsService } from "../hostMemoryLimitsService";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
 import { createAgentRemoteDelegation } from "../hub/agentRemoteDelegation";
-import { createDelegationAdministrationRouteHandler } from "../hub/delegationAdministrationRoutes";
 import { createDelegationJournal } from "../hub/delegationJournal";
 import { createDelegationStateStore } from "../hub/delegationStateStore";
 import { DelegatingSpokeService } from "../hub/delegatingSpokeService";
@@ -250,6 +247,7 @@ export type RemoteDependencies = {
     | "browserCaptureStore"
     | "browserCaptures"
     | "personMemory"
+    | "withholdThreadFromPersonMemory"
     | "octantInstructions"
     | "windowAuthorityStore"
   > &
@@ -262,7 +260,7 @@ export type RemoteDependencies = {
     | "remoteDelegationHolder"
     | "threadStandingAnswers"
   > &
-  Pick<HarnessStateWiring, "nativeHarnessSessions"> &
+  Pick<HarnessStateWiring, "nativeHarnessSessions" | "serverAttachmentCleanup"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
   Pick<CodeWiring, "codeAttachments" | "codeProjectAccess" | "workAttachments"> &
@@ -364,10 +362,12 @@ export function wireRemote(deps: RemoteDependencies) {
     automationScheduler,
     browserCaptureStore,
     personMemory,
+    withholdThreadFromPersonMemory,
     octantInstructions,
     hubPushHandoffSlot,
     pairedMergeUnlockSlot,
     nativeHarnessSessions,
+    serverAttachmentCleanup,
     remoteDelegationHolder,
     threadStandingAnswers,
     canvasNetworkAccess,
@@ -448,6 +448,9 @@ export function wireRemote(deps: RemoteDependencies) {
             credentialGeneration: input.principal.credentialGeneration,
             sessionIdDigest: input.sessionIdDigest,
             origin: input.principal.origin,
+            ...(input.principal.admittedBy === undefined
+              ? {}
+              : { admittedBy: input.principal.admittedBy }),
           },
           scopeId: context.scopeId,
           grantId: input.grantId,
@@ -473,6 +476,9 @@ export function wireRemote(deps: RemoteDependencies) {
             credentialGeneration: input.principal.credentialGeneration,
             sessionIdDigest: input.sessionIdDigest,
             origin: input.principal.origin,
+            ...(input.principal.admittedBy === undefined
+              ? {}
+              : { admittedBy: input.principal.admittedBy }),
           },
           scopeId: context.scopeId,
           grantId: input.grantId,
@@ -623,7 +629,6 @@ export function wireRemote(deps: RemoteDependencies) {
     options.authorityStateFiles?.hub,
   );
   const hubTransport = createPinnedHubTransport();
-  let ownerBrowserAuthorityChanged: (() => void) | undefined;
   const writeHubMembership = createHubMembershipJournal({
     journal: persistence.journal,
     connection: persistence.connection,
@@ -633,11 +638,7 @@ export function wireRemote(deps: RemoteDependencies) {
     clock: () => new Date().toISOString(),
   });
   const recordHubMembership = (change: Parameters<typeof writeHubMembership>[0]): void => {
-    try {
-      writeHubMembership(change);
-    } finally {
-      ownerBrowserAuthorityChanged?.();
-    }
+    writeHubMembership(change);
   };
   const hubPairing = (): HubPairingPort | undefined => {
     const gateway = currentRemoteGateway;
@@ -989,6 +990,7 @@ export function wireRemote(deps: RemoteDependencies) {
             workTurnService.cancelFirstTurn(scope, command),
         },
         scope: ROUTINE_HOST_SCOPE_ID,
+        onDelegatedThreadCreated: withholdThreadFromPersonMemory,
       }),
       state: delegationState,
       record: recordDelegation,
@@ -1054,18 +1056,6 @@ export function wireRemote(deps: RemoteDependencies) {
   // a Code request is refused by the target.
   onWorkTurnCancelled((threadId) => {
     void delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
-  });
-  const delegationAdministrationRoutes = createDelegationAdministrationRouteHandler({
-    desktopBridgeSecret: options.desktopBridgeSecret,
-    windowAuthorityStore,
-    delegation: delegatingSpoke,
-    authorizeParent: ({ threadId, windowId }) =>
-      authorizeAgentRunParentThread({
-        persistence,
-        workThreadProjection,
-        parentThreadId: decodeAgentRunParentThreadId(threadId),
-        windowId,
-      }),
   });
   // A host with no credential broker has no sign-in to copy from or to.
   const ownerCredentialCopy = new OwnerCredentialCopyService({
@@ -1890,34 +1880,6 @@ export function wireRemote(deps: RemoteDependencies) {
     () => void handoverExchange.deliverPendingReports().catch(() => undefined),
     HANDOVER_REPORT_RETRY_MS,
   ).unref();
-  const ownerBrowserControlService = new OwnerBrowserControlService({
-    host: browserAutomationService.ownerBrowserHost({
-      hostMemberId: () => Schema.decodeUnknownSync(HubMemberId)(hubService.hubMemberId()),
-      threadTitle: (threadId) => {
-        const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-        return thread?.lifecycle === "active" ? thread.title : undefined;
-      },
-    }),
-    now: Date.now,
-    timestamp: () => new Date().toISOString(),
-    uuid: randomUUID,
-    onReclaim: (listener) => browserAutomationService.onOwnerControlReclaimed(listener),
-    onAuthorityChange: (listener) => {
-      ownerBrowserAuthorityChanged = listener;
-      const removeCommitted = persistence.journal.subscribeCommitted(listener);
-      return () => {
-        if (ownerBrowserAuthorityChanged === listener) ownerBrowserAuthorityChanged = undefined;
-        removeCommitted();
-      };
-    },
-    audit: createOwnerBrowserJournal({
-      journal: persistence.journal,
-      connection: persistence.connection,
-      localActorId: OCTANT_LOCAL_ACTOR_ID,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-    }),
-  });
   const ownerApprovals = createOwnerApprovalHost({
     hostMemberId: String(hubService.hubMemberId()),
     pending: () => [
@@ -2002,7 +1964,6 @@ export function wireRemote(deps: RemoteDependencies) {
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     approvals: ownerApprovals,
     approvalAnswerNeedsOwnUnlock: () => ownerApprovalAnswerUnlock.required(),
-    browser: ownerBrowserControlService,
     hub: hubService,
     spoke: spokeLinkService,
     unlock: ownerUnlock,
@@ -2387,6 +2348,9 @@ export function wireRemote(deps: RemoteDependencies) {
         purgeChatAttachments: (id) => chatAttachmentStore.purgeThread(decodeChatThreadId(id)),
         purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),
         purgeCodeAttachments: (id) => codeAttachments.purgeThread(decodeCodeThreadId(id)),
+        purgeServerAttachments: async (scope) => {
+          await serverAttachmentCleanup.removeForThreadScope(scope);
+        },
         purgeGeneratedImages: async (id) => {
           try {
             await generatedImageStore.purgeScope(decodeImageGenerationScopeId(id));
@@ -2578,9 +2542,7 @@ export function wireRemote(deps: RemoteDependencies) {
     externalContentRoutes,
   ]);
   return {
-    ownerBrowserControlService,
     composeHostDiagnostics,
-    delegationAdministrationRoutes,
     threadMoveAdministrationRoutes,
     externalContentRoutes,
     hostControlRoutes,

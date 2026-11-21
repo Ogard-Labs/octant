@@ -26,7 +26,14 @@ describe("provider cloud routes", () => {
     const windowId = decodeWindowId("a7550000-0000-4000-8000-000000000001");
     const capability = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop0";
     store.register({ windowId, capability, now: Date.now() });
-    const execute = vi.fn(async () => ({ status: "ready" as const, profiles: [], jobs: [] }));
+    const execute = vi.fn<
+      (
+        caller: unknown,
+        command: unknown,
+        signal?: AbortSignal,
+        callerIsCurrent?: () => boolean,
+      ) => Promise<{ readonly status: "ready"; readonly profiles: []; readonly jobs: [] }>
+    >(async () => ({ status: "ready" as const, profiles: [], jobs: [] }));
     const body = Promise.withResolvers<ReadableStreamDefaultController<Uint8Array>>();
     const init = {
       method: "POST",
@@ -179,7 +186,14 @@ describe("provider cloud routes", () => {
     const windowId = decodeWindowId("a7550000-0000-4000-8000-000000000001");
     const capability = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop0";
     store.register({ windowId, capability, now: Date.now() });
-    const execute = vi.fn(async () => ({ status: "ready" as const, profiles: [], jobs: [] }));
+    const execute = vi.fn<
+      (
+        caller: unknown,
+        command: unknown,
+        signal?: AbortSignal,
+        callerIsCurrent?: () => boolean,
+      ) => Promise<{ readonly status: "ready"; readonly profiles: []; readonly jobs: [] }>
+    >(async () => ({ status: "ready" as const, profiles: [], jobs: [] }));
     const route = createProviderCloudSessionRoutes({
       service: { execute },
       windowAuthorityStore: store,
@@ -216,5 +230,64 @@ describe("provider cloud routes", () => {
     expect(execute).not.toHaveBeenCalled();
     expect((await route(request()))?.status).toBe(200);
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("admits a person-paired device with its device actor and credential generation and refuses hub-introduced devices", async () => {
+    const store = new WindowAuthorityStore();
+    const deviceUuid = "a7550000-0000-4000-8000-000000000009";
+    const execute = vi.fn<
+      (
+        caller: unknown,
+        command: unknown,
+        signal?: AbortSignal,
+        callerIsCurrent?: () => boolean,
+      ) => Promise<{ readonly status: "ready"; readonly profiles: []; readonly jobs: [] }>
+    >(async () => ({ status: "ready" as const, profiles: [], jobs: [] }));
+    let deviceLive = true;
+    const route = createProviderCloudSessionRoutes({
+      service: { execute },
+      windowAuthorityStore: store,
+      isPersonPairedDeviceCurrent: () => deviceLive,
+    });
+    const makeDeviceRequest = (admittedBy: "host-person" | "hub-roster") => {
+      const req = new Request("http://127.0.0.1:3100/api/provider-cloud", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "profiles" }),
+      });
+      const lifetime = new AbortController();
+      bindPrincipalRouteContext(req, {
+        scopeId: decodeWindowId(deviceUuid),
+        abortSignal: lifetime.signal,
+        principal: {
+          kind: "remote-device",
+          deviceId: Schema.decodeUnknownSync(DeviceId)(deviceUuid),
+          hostId: Schema.decodeUnknownSync(StableHostId)(deviceUuid),
+          credentialGeneration: 7,
+          origin: "https://fixture.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: Schema.decodeUnknownSync(RemoteSessionId)(deviceUuid),
+          admittedBy,
+        },
+      });
+      return req;
+    };
+
+    expect((await route(makeDeviceRequest("hub-roster")))?.status).toBe(403);
+    expect(execute).not.toHaveBeenCalled();
+
+    expect((await route(makeDeviceRequest("host-person")))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({
+      kind: "person-paired-device",
+      deviceId: deviceUuid,
+      credentialGeneration: 7,
+      actor: { kind: "remote-device", actorId: deviceUuid, deviceId: deviceUuid },
+    });
+
+    // Once revoked/rotated, the same paired device request is refused.
+    deviceLive = false;
+    expect((await route(makeDeviceRequest("host-person")))?.status).toBe(403);
   });
 });

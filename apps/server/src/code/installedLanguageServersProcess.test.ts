@@ -834,6 +834,44 @@ describe("a language server that runs the repository's tooling", () => {
       reason: "approval-required",
     });
   });
+
+  it("starts without approval at Full access, refuses another device, and stops once the thread leaves Full access", async () => {
+    const test = await host(passthrough, { executionPolicy: "full-access" });
+    await test.install(toolingFolder(test.root, benign));
+    await test.trust(true);
+    await test.enablePlugin(true);
+    await test.enableComponent(true);
+
+    expect(await test.open({ principal: "remote-device" })).toEqual({
+      status: "refused",
+      reason: "local-host-required",
+    });
+    expect(test.launches()).toBe(0);
+
+    const opened = await test.open();
+    if (opened.status !== "synced") throw new Error(`not synced: ${JSON.stringify(opened)}`);
+    expect(await test.diagnostics(opened.fileId)).toMatchObject({
+      status: "diagnostics",
+      diagnostics: [{ message: "served: yes" }],
+    });
+    expect(test.journal.approvals()).toEqual([]);
+    expect(test.launches()).toBe(1);
+
+    // Sweeping while the thread still holds Full access keeps the server running.
+    await test.service.sweep();
+    expect((await test.diagnostics(opened.fileId)).status).toBe("diagnostics");
+
+    // Lowering the thread below Full access stops the unapproved server on sweep
+    // and asks for approval on the next start.
+    test.threads[0] = decodeCodeThread({ ...test.thread, executionPolicy: "approval-gated" });
+    await test.service.sweep();
+    expect(await test.diagnostics(opened.fileId)).toEqual({
+      status: "refused",
+      reason: "file-outside-thread",
+    });
+    expect(await test.open()).toEqual({ status: "refused", reason: "approval-required" });
+    expect(test.launches()).toBe(1);
+  });
 });
 
 /**

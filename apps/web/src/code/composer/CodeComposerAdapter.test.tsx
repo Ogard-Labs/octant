@@ -1047,6 +1047,45 @@ describe("CodeComposerAdapter interactions", () => {
     );
   });
 
+  it("opens the Start from picker on a draft asked for another branch even when the default is this checkout", async () => {
+    const projectId = "00000000-0000-0000-0000-000000000009";
+    const execute = vi.fn(async (command: { kind: string; projectId?: string }) => {
+      if (command.kind !== "list-code-worktree-refs") return undefined;
+      return {
+        kind: "worktree-refs-listed",
+        projectId: command.projectId,
+        refs: [
+          { name: "development", kind: "local", isCurrent: true },
+          { name: "fix/parser", kind: "local" },
+        ],
+      };
+    });
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        execute={execute as never}
+        projectId={projectId as never}
+        startFromOpen
+      />,
+    );
+
+    // The intent lands the person in the picker itself — the Where menu and
+    // the Start from list are open, the refs it lists were just read, and the
+    // worktree choice it implies is already made.
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "list-code-worktree-refs" }),
+      ),
+    );
+    expect(await screen.findByRole("listbox", { name: "Refs" })).toBeVisible();
+    expect(await screen.findByRole("option", { name: /fix\/parser/ })).toBeVisible();
+    expect(screen.getByRole("radio", { name: /New worktree/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /^Start from/ })).toBeVisible();
+  });
+
   it("clears stale worktree refs when the selected project changes", async () => {
     const firstProject = "00000000-0000-0000-0000-000000000001";
     const secondProject = "00000000-0000-0000-0000-000000000002";

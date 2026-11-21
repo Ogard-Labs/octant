@@ -1,5 +1,7 @@
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
+import { filesCloseTabScope } from "./filesCloseGuard";
 import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryProposalPrompt";
 import { CodeLocalReview } from "./CodeLocalReview";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
@@ -38,6 +40,7 @@ import { CodePullRequestPane } from "./CodePullRequestPane";
 import { CodeReviewPane, type CodeReviewTarget } from "./CodeReviewPane";
 import { CodeTestPane } from "./CodeTestPane";
 import { CodeThreadWorkspace, type CodeThreadWorkspaceProps } from "./CodeThreadWorkspace";
+import { composerModeMenu, useHasComposerModeMenu } from "./composerModeMenu";
 import type { CoordinatorWorkersSource } from "./CoordinatorWorkersPanel";
 import type { CodeThreadControllers } from "./codeThreadControllers";
 import type { CodeController } from "./useCodeController";
@@ -91,6 +94,8 @@ type TestResult = Extract<CodeOperationResult, { readonly kind: "repository-test
 
 export interface CodeWorkspaceProjections {
   readonly file?: CodeEditorFileProjection;
+  /** Why the host refused or failed the file's last open, when it answered. */
+  readonly fileOpenError?: string;
   readonly findings?: ReadonlyArray<CodeReviewFinding>;
   readonly reviewTarget?: CodeReviewTarget;
   readonly terminal?: TerminalResult;
@@ -171,6 +176,7 @@ export interface CodeWorkspaceProps {
   readonly tab: CodeTab;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly serviceOfferClient?: ServiceOfferClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
@@ -195,6 +201,13 @@ export interface CodeWorkspaceProps {
    * Starts a new Code thread in the same Project — the recovery when the
    * provider refuses to resume this thread's session.
    */
+  /**
+   * Why the host says this checkout cannot be read — the environment
+   * observation's own `reason` (or its refused-read sentence), so a surface
+   * shows the real cause rather than a generic line. Undefined when the cause
+   * is not yet known; never invented.
+   */
+  readonly checkoutUnavailableReason?: string;
   /** A coordinator thread's proposed workers, shown above its composer. */
   readonly coordinatorProposals?: ReactNode;
   /** A coordinator thread's workers' pending requests, as rows at the end of its transcript. */
@@ -218,6 +231,22 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
   const view =
     props.controller.activeView?.thread.id === props.tab.threadId
       ? props.controller.activeView
+      : undefined;
+  const hasComposerModeMenu = useHasComposerModeMenu(String(props.tab.threadId));
+  const threadForModeMenu = view?.thread;
+  const onOpenCodeThread = props.onOpenCodeThread;
+  const openModeMenu = useCallback(() => {
+    if (!composerModeMenu.open(String(props.tab.threadId)) && threadForModeMenu !== undefined) {
+      onOpenCodeThread?.(
+        threadForModeMenu.id,
+        threadForModeMenu.title,
+        threadForModeMenu.projectId,
+      );
+    }
+  }, [onOpenCodeThread, props.tab.threadId, threadForModeMenu]);
+  const onOpenModeMenu =
+    hasComposerModeMenu || (onOpenCodeThread !== undefined && threadForModeMenu !== undefined)
+      ? openModeMenu
       : undefined;
 
   if (view === undefined) {
@@ -260,6 +289,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.imageGenerationClient === undefined
           ? {}
           : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.serviceOfferClient === undefined
+          ? {}
+          : { serviceOfferClient: props.serviceOfferClient })}
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}
@@ -347,11 +379,21 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
   }
   const scope = { checkoutId: view.checkout.id, threadId: view.thread.id } as const;
   switch (props.tab.kind) {
-    case "code-file":
-      return props.projections?.file?.path === props.tab.relativePath ? (
+    case "code-file": {
+      const openExternal = props.hostBridge?.openCodeExternalEditor;
+      const file =
+        props.projections?.file?.path === props.tab.relativePath
+          ? props.projections.file
+          : undefined;
+      return file !== undefined ? (
         <MonacoEditorPane
           debugProjectId={view.thread.projectId}
           client={props.client}
+          filesCloseScope={filesCloseTabScope(
+            props.tab.hostId === undefined ? undefined : String(props.tab.hostId),
+            String(props.tab.threadId),
+            String(props.tab.id),
+          )}
           checkoutLabel={
             view.checkout.head.kind === "branch"
               ? view.checkout.head.name
@@ -378,30 +420,46 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
             );
             return response === undefined ? {} : { agentResponse: response.text };
           })()}
-          file={props.projections.file}
+          file={file}
+          {...(props.projections?.fileOpenError === undefined
+            ? {}
+            : { openError: props.projections.fileOpenError })}
           {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
           {...(props.onRequestFileRefresh === undefined
             ? {}
             : { onRequestRefresh: props.onRequestFileRefresh })}
-          {...(props.hostBridge?.openCodeExternalEditor === undefined || serverThread
+          {...(openExternal === undefined || serverThread
             ? {}
             : {
                 onOpenExternalEditor: () =>
-                  props.hostBridge!.openCodeExternalEditor!({
-                    threadId: props.projections!.file!.threadId,
-                    checkoutId: props.projections!.file!.checkoutId,
-                    fileId: props.projections!.file!.fileId,
+                  openExternal({
+                    threadId: file.threadId,
+                    checkoutId: file.checkoutId,
+                    fileId: file.fileId,
                     line: 1,
                     column: 1,
+                  }),
+                onOpenInDefaultApp: () =>
+                  openExternal({
+                    threadId: file.threadId,
+                    checkoutId: file.checkoutId,
+                    fileId: file.fileId,
+                    line: 1,
+                    column: 1,
+                    defaultApplication: true,
                   }),
               })}
         />
       ) : (
         <UnavailableProjection
-          message="Reload this tab when the authoritative file projection is available. Your workspace layout remains preserved."
+          message={
+            props.projections?.fileOpenError ??
+            "Reload this tab when the authoritative file projection is available. Your workspace layout remains preserved."
+          }
           title={`${props.tab.relativePath} is unavailable`}
         />
       );
+    }
     case "code-git":
       return (
         <GitWorkspaceSurface
@@ -409,6 +467,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           // Pull requests are not offered for a server Project yet.
           offersPullRequest={!serverThread}
           nextUuid={nextUuid}
+          {...(onOpenModeMenu === undefined ? {} : { onOpenModeMenu })}
           scope={scope}
           tab={props.tab}
         />
@@ -418,6 +477,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         <TerminalWorkspaceSurface
           {...props}
           nextUuid={nextUuid}
+          {...(onOpenModeMenu === undefined ? {} : { onOpenModeMenu })}
           scope={scope}
           // A tab journaled before terminals carried identities of their own
           // stays bound to the thread's original terminal, so an existing
@@ -453,6 +513,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           createTestRunId={() => nextUuid() as never}
           definitions={tests.definitions}
           executionPolicy={view.thread.executionPolicy}
+          {...(onOpenModeMenu === undefined ? {} : { onOpenModeMenu })}
           {...(props.approvals?.test === undefined
             ? {}
             : { requestApproval: props.approvals.test })}
@@ -463,7 +524,13 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     }
     case "code-pr":
       return (
-        <PullRequestWorkspaceSurface {...props} nextUuid={nextUuid} scope={scope} tab={props.tab} />
+        <PullRequestWorkspaceSurface
+          {...props}
+          nextUuid={nextUuid}
+          {...(onOpenModeMenu === undefined ? {} : { onOpenModeMenu })}
+          scope={scope}
+          tab={props.tab}
+        />
       );
     case "code-local-review":
       return (
@@ -1058,6 +1125,7 @@ function localUserActor(): { readonly kind: "local-user"; readonly actorId: neve
 function GitWorkspaceSurface(
   props: CodeWorkspaceProps & {
     readonly nextUuid: () => string;
+    readonly onOpenModeMenu?: () => void;
     readonly scope: {
       readonly checkoutId: NonNullable<CodeController["activeView"]>["checkout"]["id"];
       readonly threadId: NonNullable<CodeController["activeView"]>["thread"]["id"];
@@ -1133,6 +1201,7 @@ function GitWorkspaceSurface(
       createOperationId={() => props.nextUuid() as never}
       executionPolicy={policy}
       observation={observation}
+      {...(props.onOpenModeMenu === undefined ? {} : { onOpenModeMenu: props.onOpenModeMenu })}
       {...(props.onOpenSurface === undefined || !props.offersPullRequest
         ? {}
         : { onReviewPullRequest: () => props.onOpenSurface!("code-pr") })}
@@ -1145,6 +1214,7 @@ function GitWorkspaceSurface(
 function PullRequestWorkspaceSurface(
   props: CodeWorkspaceProps & {
     readonly nextUuid: () => string;
+    readonly onOpenModeMenu?: () => void;
     readonly scope: {
       readonly checkoutId: NonNullable<CodeController["activeView"]>["checkout"]["id"];
       readonly threadId: NonNullable<CodeController["activeView"]>["thread"]["id"];
@@ -1200,6 +1270,7 @@ function PullRequestWorkspaceSurface(
       client={props.client}
       createOperationId={() => props.nextUuid() as never}
       executionPolicy={policy}
+      {...(props.onOpenModeMenu === undefined ? {} : { onOpenModeMenu: props.onOpenModeMenu })}
       onRefresh={() => void observe()}
       {...(props.browserAutomationClient === undefined
         ? {}
@@ -1264,6 +1335,7 @@ function checkoutRebindRefusal(reason: CodeThreadCheckoutRebindRefusal): string 
 function TerminalWorkspaceSurface(
   props: CodeWorkspaceProps & {
     readonly nextUuid: () => string;
+    readonly onOpenModeMenu?: () => void;
     readonly scope: {
       readonly checkoutId: NonNullable<CodeController["activeView"]>["checkout"]["id"];
       readonly threadId: NonNullable<CodeController["activeView"]>["thread"]["id"];
@@ -1490,7 +1562,9 @@ function TerminalWorkspaceSurface(
         // The same state, in the same words, as Files draws for this checkout:
         // the paragraph that used to stand here ran past the bottom panel's
         // short height and was cut off. The action says what the way back is.
-        message={rebindRefusal ?? "Code checkout is unavailable."}
+        message={
+          rebindRefusal ?? props.checkoutUnavailableReason ?? "Code checkout is unavailable."
+        }
         role="alert"
         state="warning"
         title="This checkout can't be read"
@@ -1517,6 +1591,7 @@ function TerminalWorkspaceSurface(
             appendTerminalSelection(props.controller.pendingDraft, selection),
           )
         }
+        {...(props.onOpenModeMenu === undefined ? {} : { onOpenModeMenu: props.onOpenModeMenu })}
         {...(props.onOpenSurface === undefined
           ? {}
           : {
@@ -1552,7 +1627,9 @@ function TerminalWorkspaceSurface(
   return (
     <OctantEmpty
       {...(props.threadPolicy === "plan"
-        ? {}
+        ? props.onOpenModeMenu === undefined
+          ? {}
+          : { action: { label: "Change mode", onClick: props.onOpenModeMenu } }
         : { action: { label: "Start terminal", onClick: () => void start() } })}
       // A pane's state: one line and one reason. The eyebrow "Code terminal"
       // named the pane a third time, under its own bar.

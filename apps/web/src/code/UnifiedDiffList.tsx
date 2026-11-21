@@ -85,6 +85,15 @@ type DiffVirtualRow =
       readonly lineIndex: number;
       readonly line: DiffHunk["lines"][number];
       readonly estimate: number;
+    }
+  | {
+      readonly kind: "no-newline";
+      readonly index: number;
+      readonly fileIndex: number;
+      readonly hunkIndex: number;
+      readonly lineIndex: number;
+      readonly lineKind: DiffHunk["lines"][number]["kind"];
+      readonly estimate: number;
     };
 
 interface DiffFileRange {
@@ -402,6 +411,17 @@ function buildDiffVirtualModel(files: ReadonlyArray<ParsedDiffFile>): DiffVirtua
           line,
           estimate: DIFF_LINE_ESTIMATE_PX,
         });
+        if (line.noNewlineAtEndOfFile === true) {
+          rows.push({
+            kind: "no-newline",
+            index: rows.length,
+            fileIndex,
+            hunkIndex,
+            lineIndex,
+            lineKind: line.kind,
+            estimate: DIFF_LINE_ESTIMATE_PX,
+          });
+        }
       });
       previousEnd = hunk.oldStart + hunk.oldLines;
     });
@@ -470,8 +490,17 @@ function renderFileSection(input: {
         {file.previousPath === undefined ? null : (
           <span className="unified-diff__renamed">from {file.previousPath}</span>
         )}
+        {file.modeChange !== undefined ? (
+          <span className="unified-diff__mode">
+            mode {file.modeChange.oldMode} → {file.modeChange.newMode}
+          </span>
+        ) : file.fileMode !== undefined && file.change === "deleted" ? (
+          <span className="unified-diff__mode">deleted mode {file.fileMode}</span>
+        ) : file.fileMode !== undefined && file.change === "created" ? (
+          <span className="unified-diff__mode">new mode {file.fileMode}</span>
+        ) : null}
         <span className="unified-diff__change">{CHANGE_LABELS[file.change]}</span>
-        {input.onReadProviderFile === undefined ? null : (
+        {input.onReadProviderFile === undefined || file.nonUtf8Path === true ? null : (
           <OctantButton
             type="button"
             size="sm"
@@ -487,7 +516,9 @@ function renderFileSection(input: {
             <span className="unified-diff__deletions">−{file.deletions.toLocaleString("en")}</span>
           </span>
         )}
-        {input.onOpenFile === undefined || file.change === "deleted" ? null : (
+        {input.onOpenFile === undefined ||
+        file.change === "deleted" ||
+        file.nonUtf8Path === true ? null : (
           <OctantButton
             onClick={() => input.onOpenFile?.(file.path)}
             size="sm"
@@ -504,7 +535,13 @@ function renderFileSection(input: {
           data-index={input.binaryVirtualIndex}
           ref={input.binaryVirtualIndex === undefined ? undefined : input.measureRef}
         >
-          This file changed without a textual diff, so there is nothing to compare.
+          {file.modeOnly === true && file.modeChange !== undefined
+            ? `File mode changed from ${file.modeChange.oldMode} to ${file.modeChange.newMode} with no content changes.`
+            : file.emptyFile === true && file.change === "created"
+              ? "Empty file added."
+              : file.emptyFile === true && file.change === "deleted"
+                ? "Empty file deleted."
+                : "This file changed without a textual diff, so there is nothing to compare."}
         </p>
       ) : (
         <table aria-label={`Diff for ${file.path}`} className="unified-diff__table">
@@ -562,6 +599,24 @@ function renderBodyRow(input: {
         <td colSpan={4}>
           {row.unchanged.toLocaleString("en")} unchanged {row.unchanged === 1 ? "line" : "lines"}
         </td>
+      </tr>
+    );
+  }
+  if (row.kind === "no-newline") {
+    return (
+      <tr
+        className="unified-diff__meta"
+        data-index={virtualIndex}
+        data-kind={row.lineKind}
+        key={`${String(row.hunkIndex)}-${String(row.lineIndex)}-no-newline`}
+        ref={measureRef}
+      >
+        <td className="unified-diff__number" aria-hidden="true" />
+        <td className="unified-diff__number" aria-hidden="true" />
+        <td className="unified-diff__marker" aria-hidden="true">
+          \
+        </td>
+        <td className="unified-diff__code">No newline at end of file</td>
       </tr>
     );
   }
@@ -635,6 +690,9 @@ function diffRowKey(
   if (row.kind === "header") return `${fileKey}:header`;
   if (row.kind === "binary") return `${fileKey}:binary`;
   if (row.kind === "gap") return `${fileKey}:gap:${String(row.hunkIndex)}`;
+  if (row.kind === "no-newline") {
+    return `${fileKey}:${String(row.hunkIndex)}-${String(row.lineIndex)}:no-newline`;
+  }
   return `${fileKey}:${String(row.hunkIndex)}-${String(row.lineIndex)}`;
 }
 

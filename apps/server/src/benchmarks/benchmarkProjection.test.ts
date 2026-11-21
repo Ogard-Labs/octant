@@ -1,6 +1,7 @@
 import { BENCHMARK_EVENT_NAMES, type EventEnvelope } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { rebuildProjection } from "../persistence/projection";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import {
   BENCHMARK_TEST_NOW,
   benchmarkIds,
@@ -27,6 +28,22 @@ function journalEnvelopes(journal: ReturnType<typeof openBenchmarkTestStore>["jo
 }
 
 describe("benchmark projection", () => {
+  it("replays a legacy suite with a default threshold and no Project attribution", () => {
+    const { events } = createPhase1RuntimeRegistries();
+    const { kind, passThreshold, ...legacy } = sampleSuite();
+    expect(kind).toBe("chat");
+    expect(passThreshold).toBe(0.8);
+    expect(events.decodePersisted(BENCHMARK_EVENT_NAMES.suiteSaved, 1, { suite: legacy })).toEqual({
+      suite: { ...legacy, kind: "chat", passThreshold: 0.8 },
+    });
+    expect(() => events.decode(BENCHMARK_EVENT_NAMES.suiteSaved, 2, { suite: legacy })).toThrow();
+    const { store, journal } = openBenchmarkTestStore();
+    store.suiteSaved({ suite: sampleSuite({ kind: "work", passThreshold: 0.9 }) });
+    expect(journalEnvelopes(journal)[0]).toMatchObject({
+      eventVersion: 2,
+      payload: { suite: { kind: "work", passThreshold: 0.9 } },
+    });
+  });
   it("holds a run's cells as the journal settled them and survives a rebuild unchanged", () => {
     const { store, projection, journal, connection } = openBenchmarkTestStore();
     const suite = sampleSuite();

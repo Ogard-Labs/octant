@@ -1,3 +1,4 @@
+import { createServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import {
   createSandboxRestrictionsClient,
   type SandboxRestrictionsClient,
@@ -8,6 +9,7 @@ import {
   createBenchmarksClient,
   createAutomationClient,
   createUsageDashboardClient,
+  createPullRequestReviewClient,
   createSpendCeilingClient,
   createLocalUsageHistoryClient,
   createRequestCoordinator,
@@ -119,6 +121,7 @@ import { createProjectBrowserClient } from "@octant/client-runtime/project-brows
 import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import { createFollowUpSuggestionClient } from "@octant/client-runtime/follow-up-suggestion-client";
 import { createSideTaskClient } from "@octant/client-runtime/side-task-client";
+import { createFinishedReceiptClient } from "@octant/client-runtime/finished-receipt-client";
 import { createThreadNotesClient } from "@octant/client-runtime/thread-notes-client";
 import { createGoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import {
@@ -221,6 +224,7 @@ export interface LaunchedShellClients {
   readonly projectTerminalClient: ReturnType<typeof createProjectTerminalClient>;
   readonly followUpSuggestionClient: ReturnType<typeof createFollowUpSuggestionClient>;
   readonly sideTaskClient: ReturnType<typeof createSideTaskClient>;
+  readonly finishedReceiptClient: ReturnType<typeof createFinishedReceiptClient>;
   readonly threadNotesClient: ReturnType<typeof createThreadNotesClient>;
   readonly goalLoopClient: ReturnType<typeof createGoalLoopClient>;
   readonly hostClient: HostClient;
@@ -228,6 +232,7 @@ export interface LaunchedShellClients {
   readonly threadSearchClient: ThreadSearchClient;
   readonly hostControlClient: ReturnType<typeof createHostControlClient>;
   readonly safeNetworksClient: ReturnType<typeof createSafeNetworksClient>;
+  readonly serviceOfferClient: ReturnType<typeof createServiceOfferClient>;
   readonly imageGenerationClient: ReturnType<typeof createImageGenerationClient>;
   readonly speechClient: ReturnType<typeof createSpeechClient>;
   readonly linearTransport: ReturnType<typeof createIntegrationClient>;
@@ -260,6 +265,7 @@ export interface LaunchedShellClients {
   readonly localUsageHistoryClient: ReturnType<typeof createLocalUsageHistoryClient> | undefined;
   readonly usageDashboardClient: ReturnType<typeof createUsageDashboardClient>;
   readonly spendCeilingClient: ReturnType<typeof createSpendCeilingClient>;
+  readonly pullRequestReviewClient: ReturnType<typeof createPullRequestReviewClient>;
   readonly agentGrantClient: ReturnType<typeof createAgentGrantClient>;
   readonly protectedFilesClient: ProtectedFilesClient;
   readonly blockedToolsClient: BlockedToolsClient;
@@ -407,6 +413,7 @@ export function createLaunchedShellClients(
     projectTerminalClient: createProjectTerminalClient(port),
     followUpSuggestionClient: createFollowUpSuggestionClient(port),
     sideTaskClient: createSideTaskClient(port),
+    finishedReceiptClient: createFinishedReceiptClient(port),
     threadNotesClient: createThreadNotesClient(port),
     goalLoopClient: createGoalLoopClient(port),
     hostClient: options.hostClient ?? createHostClient({ baseUrl: options.serverUrl, fetch }),
@@ -419,6 +426,7 @@ export function createLaunchedShellClients(
     hostControlClient: createHostControlClient(port),
     safeNetworksClient: createSafeNetworksClient(port),
     imageGenerationClient: createImageGenerationClient(port),
+    serviceOfferClient: createServiceOfferClient(port),
     speechClient: createSpeechClient(port),
     linearTransport: createIntegrationClient({ ...port, slug: "linear" }),
     machineChangeClient: createMachineChangeClient(port),
@@ -440,6 +448,7 @@ export function createLaunchedShellClients(
     benchmarksClient: createBenchmarksClient(port),
     usageDashboardClient: createUsageDashboardClient(port),
     spendCeilingClient: createSpendCeilingClient(port),
+    pullRequestReviewClient: createPullRequestReviewClient(port),
     agentGrantClient: createAgentGrantClient(port),
     protectedFilesClient: createProtectedFilesClient(port),
     blockedToolsClient: createBlockedToolsClient(port),

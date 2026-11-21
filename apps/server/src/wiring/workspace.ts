@@ -65,6 +65,7 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
     | "bindingReceiptStore"
     | "imageGenerationOffers"
     | "isPairedDeviceScope"
+    | "isRestrictedDeviceScope"
     | "machineChangeFeed"
     | "onThreadArchived"
     | "onWaitingAsk"
@@ -96,6 +97,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     githubIntegrationIsEffective,
     imageGenerationOffers,
     isPairedDeviceScope,
+    isRestrictedDeviceScope,
     machineChangeFeed,
     offeredDesktopProviders,
     onThreadArchived,
@@ -420,7 +422,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       agentsWriteWithoutAsking: (projectId) =>
         persistence.readProject(projectId)?.agentMemoryWrites === "enabled",
       isHostScope: isRoutineHostScope,
-      isPairedDeviceScope,
+      isPairedDeviceScope: isRestrictedDeviceScope,
       outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
       uuid: randomUUID,
       now: Date.now,
@@ -429,9 +431,8 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     });
     onWindowRevoked((windowId) => projectMemoryAccess.proposals.revokeWindow(windowId));
     onThreadArchived((threadId) => projectMemoryAccess.proposals.withdrawThread(threadId));
-    // "Don't ask again" on the image card. The host journals it on the
-    // thread's Project as itself: the answer route has already checked that
-    // the answering window may open the thread that asked.
+    // The answer route checks thread access before the host's command path
+    // journals the choice on the Project with the answering person's actor.
     const keptImageChoices = createKeptImageGenerationChoices({
       threadChoices: imageGenerationOffers,
       projectOf: ({ threadKind, scopeId }) => {
@@ -445,8 +446,8 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
         return persistence.readCodeThread(decodeCodeThreadId(threadId))?.projectId;
       },
       readProject: (projectId) => persistence.readProject(projectId),
-      changeProject: async (command) => {
-        await projectService.executeProject(ROUTINE_HOST_SCOPE_ID, command);
+      changeProject: async (command, actor) => {
+        await projectService.executeProject(ROUTINE_HOST_SCOPE_ID, command, actor);
       },
     });
     return {

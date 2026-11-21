@@ -98,6 +98,19 @@
   padding: var(--oct-space-2) var(--oct-space-4);
 }
 
+.code-delivery-pane__notice--row,
+.code-test-pane__plan-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.code-delivery-pane__notice--row > p,
+.code-test-pane__plan-notice > p {
+  margin: 0;
+}
+
 .code-terminal-pane__ended {
   display: flex;
   flex-wrap: wrap;
@@ -369,6 +382,16 @@ html:not([data-octant-reduced-transparency="true"])
 
 .code-line-notes > button {
   justify-self: start;
+}
+
+.code-line-notes__thread-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.code-line-notes__thread-select {
+  max-width: 100%;
 }
 
 /* ─── repository file tree ─────────────────────────────────────────────
@@ -671,6 +694,26 @@ html:not([data-octant-reduced-transparency="true"])
   background: var(--oct-bg);
 }
 
+.code-editor-pane__readonly {
+  display: grid;
+  justify-items: start;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-4);
+}
+
+.code-editor-pane__readonly > h1,
+.code-editor-pane__readonly > p {
+  margin: 0;
+}
+
+.code-editor-pane__readonly > p {
+  color: var(--oct-muted);
+}
+
+.code-editor-pane__readonly-actions {
+  margin-top: var(--oct-space-1);
+}
+
 .code-provider-file-review {
   flex: 0 1 45%;
   min-height: 0;
@@ -905,9 +948,14 @@ html:not([data-octant-reduced-transparency="true"])
 }
 
 .unified-diff__renamed,
+.unified-diff__mode,
 .unified-diff__change {
   flex: none;
   color: var(--oct-muted);
+}
+
+.unified-diff__mode {
+  font-family: var(--oct-font-mono);
 }
 
 .unified-diff__counts {
@@ -979,6 +1027,19 @@ html:not([data-octant-reduced-transparency="true"])
 
 .unified-diff__line[data-kind="removed"] .unified-diff__marker {
   color: var(--oct-danger-fg);
+}
+
+.unified-diff__meta {
+  color: var(--oct-meta);
+  font-style: italic;
+}
+
+.unified-diff__meta[data-kind="added"] {
+  background: var(--oct-success-soft);
+}
+
+.unified-diff__meta[data-kind="removed"] {
+  background: var(--oct-danger-soft);
 }
 
 .unified-diff__gap td {

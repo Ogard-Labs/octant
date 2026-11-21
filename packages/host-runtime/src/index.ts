@@ -194,9 +194,23 @@ export {
   keepUncleanStopCrashRecord,
   readHostCrashRecords,
   recordHostCrash,
+  recordHostCrashSync,
+  type HostCrashProcess,
   type HostCrashRecord,
   type HostCrashRecordOutcome,
 } from "./crashRecords";
+export {
+  installProcessErrorNet,
+  REVIEWED_BENIGN_TEARDOWN_ERRORS,
+  type ProcessErrorNetEvent,
+  type ProcessErrorNetHandle,
+  type ProcessErrorNetKind,
+  type ProcessErrorNetOptions,
+  type ProcessErrorNetProcess,
+  type ProcessErrorNetStdioStream,
+  type ProcessErrorNetTarget,
+  type ReviewedBenignTeardownError,
+} from "./processErrorNet";
 export { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "./diagnostics";
 export { acceptedReportedHostVersion, resolveReportedHostVersion } from "./reportedHostVersion";
 export { writeBridgeSecretProjection } from "./bridgeSecret";
@@ -318,6 +332,13 @@ export {
 } from "./githubActionsSource";
 
 export * from "./browserPointCapture";
+export {
+  isPrivateAddress,
+  navigationOriginAllowed,
+  normalizeNavigationUrl,
+  onThisComputerOrNetwork,
+  refusesPageNavigation,
+} from "./browserNavigation";
 export {
   createWindowsListenerTlsFiles,
   type WindowsListenerTlsFiles,

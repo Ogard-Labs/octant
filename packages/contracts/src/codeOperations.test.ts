@@ -362,6 +362,14 @@ describe("Code operation contracts", () => {
         expectedStateToken: "a".repeat(64),
       },
       {
+        kind: "switch-git-branch",
+        ...scope,
+        gitOperationId: ids.git,
+        branch: "feature/another-branch",
+        expectedStateToken: "a".repeat(64),
+        dirty: "refuse",
+      },
+      {
         kind: "push-git",
         ...scope,
         gitOperationId: ids.git,
@@ -1760,4 +1768,45 @@ it("decodes bounded live capture identity and refuses an apparently ready previe
     event: { kind: "conversation-turn-review-preview", preview: ready },
   };
   expect(decodeCodeOperationEventFrame(frame)).toEqual(frame);
+});
+
+it("decodes optional pullRequestLineNotesSource on start-provider-turn and rejects invalid or unknown fields", () => {
+  const base = {
+    kind: "start-provider-turn",
+    operationId: ids.operation,
+    threadId: ids.thread,
+    checkoutId: ids.checkout,
+    sessionId: ids.providerSession,
+    prompt: { contentId: ids.content, digest: "a".repeat(64), byteLength: 18 },
+  };
+  const withSource = {
+    ...base,
+    pullRequestLineNotesSource: {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 42,
+    },
+  };
+  expect(decodeCodeOperationCommand(withSource)).toEqual(withSource);
+  expect(() =>
+    decodeCodeOperationCommand({
+      ...base,
+      pullRequestLineNotesSource: {
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 0,
+      },
+    }),
+  ).toThrow();
+  expect(() =>
+    decodeCodeOperationCommand({
+      ...base,
+      pullRequestLineNotesSource: {
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 42,
+        author: "forged-by-client",
+      },
+    }),
+  ).toThrow();
 });

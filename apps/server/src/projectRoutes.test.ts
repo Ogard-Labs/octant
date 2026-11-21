@@ -416,6 +416,21 @@ describe("Project routes", () => {
       expect.objectContaining({ kind: "change-code-project-own-toolchain" }),
       localUser,
     );
+
+    const paired = new Request("http://127.0.0.1/api/projects/commands", {
+      method: "POST",
+      headers,
+      body,
+    });
+    bindPrincipalRouteContext(paired, {
+      principal: {
+        kind: "remote-device",
+        deviceId: "90000000-0000-4000-8000-000000000001",
+        admittedBy: "host-person",
+      } as never,
+      scopeId: windowId,
+    });
+    expect((await route(paired))?.status).toBe(200);
   });
   it.each([
     {
@@ -432,7 +447,7 @@ describe("Project routes", () => {
       },
     },
   ] as const)(
-    "refuses a paired device turning on $kind while a local window keeps the route",
+    "admits a person-paired device and local window on $kind while refusing hub-introduced and restricted devices",
     async (setting) => {
       const executeProject = vi.fn(() => ({ kind: "code-project-agent-merge-changed" }));
       const route = routeFixture({ executeProject });
@@ -441,17 +456,37 @@ describe("Project routes", () => {
         "x-octant-window-capability": capability,
       };
       const body = JSON.stringify({ ...setting, projectId, expectedVersion: 1 });
-      const remote = new Request("http://127.0.0.1/api/projects/commands", {
+      for (const admittedBy of [undefined, "hub-roster"] as const) {
+        const remote = new Request("http://127.0.0.1/api/projects/commands", {
+          method: "POST",
+          headers,
+          body,
+        });
+        bindPrincipalRouteContext(remote, {
+          principal: {
+            kind: "remote-device",
+            ...(admittedBy === undefined ? {} : { admittedBy }),
+          } as never,
+          scopeId: windowId,
+        });
+        expect((await route(remote))?.status).toBe(403);
+      }
+      expect(executeProject).not.toHaveBeenCalled();
+
+      const paired = new Request("http://127.0.0.1/api/projects/commands", {
         method: "POST",
         headers,
         body,
       });
-      bindPrincipalRouteContext(remote, {
-        principal: { kind: "remote-device" } as never,
+      bindPrincipalRouteContext(paired, {
+        principal: {
+          kind: "remote-device",
+          deviceId: "90000000-0000-4000-8000-000000000001",
+          admittedBy: "host-person",
+        } as never,
         scopeId: windowId,
       });
-      expect((await route(remote))?.status).toBe(403);
-      expect(executeProject).not.toHaveBeenCalled();
+      expect((await route(paired))?.status).toBe(200);
 
       const local = new Request("http://127.0.0.1/api/projects/commands", {
         method: "POST",
@@ -1095,6 +1130,86 @@ describe("Project icon change route", () => {
 
     expect(response?.headers.get("x-octant-project-icon-source")).toBe("custom");
     expect(response?.headers.get("x-octant-project-icon-found")).toBe("0");
+  });
+
+  it("scans and imports provider folders only for a local window and refuses invalid requests", async () => {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const folderId = "11111111-1111-4111-8111-111111111111";
+    const scan = vi.fn(async () => ({
+      status: "ready" as const,
+      groups: [],
+      requireGitRepository: true,
+      stoppedEarly: false,
+      scannedAt: "2026-11-21T10:00:00.000Z" as never,
+    }));
+    const importFolders = vi.fn(async () => ({
+      status: "completed" as const,
+      results: [
+        {
+          folderId: folderId as never,
+          status: "created" as const,
+          projectId,
+          name: "widget",
+        },
+      ],
+    }));
+    const route = createProjectRouteHandler({
+      service: {} as never,
+      environmentService: {} as never,
+      windowAuthorityStore: store,
+      providerFolderScan: { scan, importFolders },
+      now: () => 1,
+    });
+
+    const scanResponse = await route(
+      new Request("http://127.0.0.1:43120/api/projects/provider-folders/scan", {
+        method: "POST",
+        headers: authed,
+      }),
+    );
+    expect(scanResponse?.status).toBe(200);
+    expect(scan).toHaveBeenCalledWith(windowId, expect.any(AbortSignal));
+
+    const invalidImport = await route(
+      new Request("http://127.0.0.1:43120/api/projects/provider-folders/import", {
+        method: "POST",
+        headers: { ...authed, "content-type": "application/json" },
+        body: JSON.stringify({ folderIds: [] }),
+      }),
+    );
+    expect(invalidImport?.status).toBe(400);
+
+    const validImport = await route(
+      new Request("http://127.0.0.1:43120/api/projects/provider-folders/import", {
+        method: "POST",
+        headers: { ...authed, "content-type": "application/json" },
+        body: JSON.stringify({ folderIds: [folderId] }),
+      }),
+    );
+    expect(validImport?.status).toBe(200);
+    expect(importFolders).toHaveBeenCalledWith(
+      windowId,
+      { folderIds: [folderId] },
+      expect.objectContaining({ kind: "local-user" }),
+    );
+
+    const remoteRequest = new Request("http://127.0.0.1:43120/api/projects/provider-folders/scan", {
+      method: "POST",
+      headers: authed,
+    });
+    bindPrincipalRouteContext(remoteRequest, {
+      principal: {
+        kind: "remote-device",
+        deviceId: "99999999-9999-4999-8999-999999999999" as never,
+        sessionId: "remote-session",
+        trust: "paired",
+        scopes: ["control"],
+      } as never,
+      scopeId: windowId,
+    });
+    const remoteResponse = await route(remoteRequest);
+    expect(remoteResponse?.status).toBe(403);
   });
 });
 

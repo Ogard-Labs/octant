@@ -482,7 +482,7 @@ const executeKeychainHelper: KeychainHelperExecutor = async (spec, limits) =>
       }
       resolve({ exitCode, stdout: consumeBuffers(stdout), stderr: consumeBuffers(stderr) });
     });
-    child.stdin.once("error", requestTermination);
+    child.stdin.on("error", requestTermination);
     child.stdin.end(input, () => input.fill(0));
   });
 

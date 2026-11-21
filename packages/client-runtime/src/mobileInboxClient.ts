@@ -14,6 +14,10 @@ import {
   decodeHostAnswer,
 } from "@octant/contracts";
 import { ParseResult } from "effect";
+import {
+  PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
+  PendingRequestList,
+} from "@octant/contracts/pending-requests";
 import { ChatNdjsonFailure, iterateChatEventNdjson } from "./chatNdjsonStream";
 
 export type MobileInboxMode = "chat" | "work" | "code";
@@ -44,6 +48,7 @@ export interface MobileInboxRow {
   readonly projectId?: string;
   readonly pinned?: boolean;
   readonly live?: MobileThreadLiveState;
+  readonly waitingOfferText?: string;
   /** The thread's aggregate version, which a row action sends as its expected version. */
   readonly version?: number;
   /** Put away (completed) at this time; absent while the thread is on the active list. */
@@ -337,6 +342,29 @@ export interface AllHostsMobileInbox {
   readonly failures: ReadonlyArray<MobileInboxHostFailure>;
 }
 
+async function readMobileOfferLines(
+  transport: MobileRemoteTransport,
+): Promise<ReadonlyMap<string, string>> {
+  const lines = new Map<string, string>();
+  try {
+    const response = await transport.authenticatedFetch({
+      method: "GET",
+      path: "/api/pending-requests",
+      headers: { accept: PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE },
+    });
+    if (!response.ok) return lines;
+    const list = decodeHostAnswer(PendingRequestList)(await response.json());
+    for (const ask of list.asks ?? []) {
+      if (ask.kind !== "service-offer") continue;
+      const key = `${ask.mode}:${ask.threadId}`;
+      if (!lines.has(key)) lines.set(key, ask.text);
+    }
+  } catch {
+    // An older or restricted host may not offer this read at all.
+  }
+  return lines;
+}
+
 /**
  * Client-side All Hosts fan-out. One host's failure never clears another host's
  * rows; failures are returned for honest partial-availability UI.
@@ -348,12 +376,22 @@ export async function listAllHostsMobileInbox(
 
   const settled = await Promise.allSettled(
     transports.map(async (transport) => {
-      const inboxInput = await fetchMobileInboxBootstrapRows(transport);
+      const [inboxInput, offerLines] = await Promise.all([
+        fetchMobileInboxBootstrapRows(transport),
+        readMobileOfferLines(transport),
+      ]);
+      const rowsWithOffers = (board?: CodeBoardView) =>
+        rowsFromMobileInboxBootstrap(inboxInput, board).map((row) => {
+          const text = offerLines.get(`${row.mode}:${row.threadId}`);
+          return text === undefined
+            ? row
+            : { ...row, live: "needs-input" as const, waitingOfferText: text };
+        });
       try {
         const board = await fetchMobileCodeBoard(transport);
         return {
           hostId: transport.hostId,
-          rows: rowsFromMobileInboxBootstrap(inboxInput, board),
+          rows: rowsWithOffers(board),
           ...(inboxInput.failure === undefined
             ? {}
             : {
@@ -368,7 +406,7 @@ export async function listAllHostsMobileInbox(
         if (!(reason instanceof MobileInboxFailure)) throw reason;
         return {
           hostId: transport.hostId,
-          rows: rowsFromMobileInboxBootstrap(inboxInput),
+          rows: rowsWithOffers(),
           failure: {
             hostId: transport.hostId,
             category: reason.category,

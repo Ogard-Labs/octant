@@ -2,14 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   authorizePrincipalAction,
   classifyRemoteAction,
-  listRemoteActionCatalog,
   classifyRemoteListenerAddress,
   remoteListenerOrigin,
   deviceRegistrationDeadline,
   evaluateDeviceRegistration,
   NEVER_EXPIRES_AT_MS,
   retimeDeviceRegistration,
-  evaluatePairingAttempt,
   evaluatePairingClaim,
   evaluateSession,
   normalizeDeviceLabel,
@@ -257,10 +255,18 @@ describe("remote access policy", () => {
   });
 
   it("lets a device the host's own person paired do what a local window does", () => {
-    for (const action of listRemoteActionCatalog().localHostRequired) {
-      // Minting a local receipt and calling the desktop bridge need the bridge
-      // secret, which only a window on the host holds.
-      if (action === "desktop.issue-local-approval" || action === "desktop.bridge.invoke") continue;
+    for (const action of [
+      "desktop.enable-listener",
+      "desktop.approve-device",
+      "desktop.rotate-host-key",
+      "provider.credentials.write",
+      "extension.trust",
+      "project.root.bind",
+      "code.remember-full-access",
+      "code.open-external-editor",
+      "host-key.rotate",
+      "diagnostics.export",
+    ]) {
       expect(authorizePrincipalAction({ principalKind: "person-paired-device", action })).toEqual({
         kind: "allow",
       });
@@ -296,60 +302,6 @@ describe("remote access policy", () => {
         action: "invented.action",
       }),
     ).toEqual({ kind: "deny", reason: "unknown-action" });
-  });
-
-  it("exports a stable least-authority catalog covering required surfaces", () => {
-    const catalog = listRemoteActionCatalog();
-    expect(catalog.localHostRequired).toEqual(
-      expect.arrayContaining([
-        "desktop.enable-listener",
-        "desktop.approve-device",
-        "desktop.rotate-host-key",
-        "provider.credentials.write",
-        "extension.trust",
-        "project.root.bind",
-        "code.remember-full-access",
-        "code.open-external-editor",
-        "host-key.rotate",
-        "diagnostics.export",
-      ]),
-    );
-    expect(catalog.remoteApprovable).toEqual(
-      expect.arrayContaining([
-        "chat.send-turn",
-        "code.create-thread",
-        "project.overview.read",
-        "extension.tool-call.answer-once",
-        "usage.spend-ceiling.read",
-      ]),
-    );
-  });
-
-  it("limits pairing failures and invalidates used or expired tickets", () => {
-    expect(
-      evaluatePairingAttempt({ state: "pending", attempts: 0, now: 10, expiresAt: 20 }),
-    ).toEqual({
-      kind: "accepted",
-      attempts: 1,
-    });
-    expect(
-      evaluatePairingAttempt({ state: "pending", attempts: 5, now: 10, expiresAt: 20 }),
-    ).toEqual({
-      kind: "rejected",
-      reason: "attempt-limit",
-    });
-    expect(
-      evaluatePairingAttempt({ state: "pending", attempts: 0, now: 21, expiresAt: 20 }),
-    ).toEqual({
-      kind: "rejected",
-      reason: "expired",
-    });
-    expect(
-      evaluatePairingAttempt({ state: "approved", attempts: 0, now: 10, expiresAt: 20 }),
-    ).toEqual({
-      kind: "rejected",
-      reason: "already-consumed",
-    });
   });
 
   it("accepts only the first concurrent claim and fails closed for stolen or used tickets", () => {

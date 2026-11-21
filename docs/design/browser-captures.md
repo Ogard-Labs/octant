@@ -148,9 +148,8 @@ the Browser pane
   thread with no captures exports unchanged.
 - No new route. The export route already requires that the caller can open the
   thread, and a local window's or a paired device's export carries captures
-  (maintainer decision, 2026-11-12; not built yet: today only a local window's
-  does, because a paired device never reads them, so its export leaves them
-  out).
+  (maintainer decision, 2026-11-12; server policy admits a person-paired device
+  and refuses hub-introduced devices; paired UI follow-up remains).
 - Implemented by `browserCaptureExportAttachments` in the domain package and the
   `browserCaptures` option of the server's thread export service.
 
@@ -515,7 +514,8 @@ request, and only by choosing to.
   Code commands; this adds nothing to what it may do there.
 - **Signed-in pages.** A capture or step of a page in a Project or Personal
   profile follows the capture rules: it is kept, names its profile, and is read
-  by a local window or, not built yet, a paired device. Attaching it to a pull
+  by a local window or a person-paired device (hub-introduced devices stay
+  refused; paired UI follow-up remains). Attaching it to a pull
   request is the person's
   choice like any other proof.
 
@@ -635,8 +635,8 @@ attached the same way.
   of kilobytes, so the bound holds a few dozen distinct frames, and a waiting
   page costs none.
 - **Privacy.** A recording follows every capture rule: it stays on this
-  computer, under the data directory; a local window or, not built yet, a paired
-  device that can open the thread reads it; it is in no telemetry, Canvas share,
+  computer, under the data directory; a local window or a person-paired device
+  that can open the thread reads it (hub-introduced devices stay refused); it is in no telemetry, Canvas share,
   replica sync, or diagnostics export; and it leaves the host only in the local
   owner's thread or data export and in the folder the person saves it to.
 

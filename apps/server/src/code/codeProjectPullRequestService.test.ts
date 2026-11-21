@@ -116,6 +116,7 @@ function serviceFixture(options: {
     },
     signal: AbortSignal,
   ) => Promise<{ readonly closedAt: string; readonly title: string } | undefined>;
+  readonly observeViewerLogin?: (signal: AbortSignal) => Promise<string | undefined>;
   readonly merge?: CodeProjectPullRequestMergePort;
   readonly mergeJournal?: Journal;
   readonly recordMerge?: (record: CodeProjectPullRequestMergeRecorded) => void;
@@ -187,6 +188,9 @@ function serviceFixture(options: {
       ...(options.observeIssueClosure === undefined
         ? {}
         : { observeIssueClosure: options.observeIssueClosure }),
+      ...(options.observeViewerLogin === undefined
+        ? {}
+        : { observeViewerLogin: options.observeViewerLogin }),
     },
     ...(options.merge === undefined ? {} : { merge: options.merge }),
     ...(options.recordMerge === undefined ? {} : { recordMerge: options.recordMerge }),
@@ -1789,6 +1793,21 @@ describe("CodeProjectPullRequestService", () => {
     expect(listActive.mock.calls.length).toBe(callsAfterRefresh);
   });
 
+  it("carries when each pull request was opened into the snapshot the page reads", async () => {
+    const { service } = serviceFixture({
+      list: async () => ({
+        status: "ok",
+        rows: [ghRow({ createdAt: "2026-08-01T09:30:00Z" }), ghRow({ number: 13 })],
+      }),
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const view = await service.query(windowId, { version: 1 });
+
+    expect(view.rows.find((row) => row.number === 12)?.createdAt).toBe("2026-08-01T09:30:00Z");
+    expect(view.rows.find((row) => row.number === 13)).not.toHaveProperty("createdAt");
+  });
+
   it("says which pull request comes from a fork and leaves a same-repository row as it was", async () => {
     const { service } = serviceFixture({
       list: async () => ({
@@ -2223,5 +2242,42 @@ describe("CodeProjectPullRequestService", () => {
     expect(view.detail).toEqual({ state: "unavailable" });
     expect(JSON.stringify(view)).not.toContain("Verified implementation.");
     expect(view.freshness).toEqual({ status: "stale", staleReason: "disconnected" });
+  });
+
+  it("reports the observed pull request author and returns undefined when unobserved or revoked", async () => {
+    const { service } = serviceFixture({
+      detail: async () => observedDetail,
+    });
+    expect(service.observedAuthor(detailQuery)).toBeUndefined();
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+    expect(service.observedAuthor(detailQuery)).toBe("octocat");
+
+    service.revokeGithub();
+    expect(service.observedAuthor(detailQuery)).toBeUndefined();
+  });
+
+  it("reads the signed-in viewer login from the pull request detail port and fails closed when unavailable", async () => {
+    const observeViewerLogin = vi.fn(async () => "  henrik  ");
+    const { service } = serviceFixture({ observeViewerLogin });
+    expect(await service.observeViewerLogin(new AbortController().signal)).toBe("henrik");
+
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(await service.observeViewerLogin(aborted.signal)).toBeUndefined();
+
+    service.revokeGithub();
+    expect(await service.observeViewerLogin(new AbortController().signal)).toBeUndefined();
+    expect(observeViewerLogin).toHaveBeenCalledTimes(1);
+
+    const absent = serviceFixture({});
+    expect(await absent.service.observeViewerLogin(new AbortController().signal)).toBeUndefined();
+
+    const throwing = serviceFixture({
+      observeViewerLogin: async () => {
+        throw new Error("gh failed");
+      },
+    });
+    expect(await throwing.service.observeViewerLogin(new AbortController().signal)).toBeUndefined();
   });
 });

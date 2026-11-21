@@ -2,10 +2,12 @@ import {
   decodeThreadWorkingDirectory,
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   type CodeTranscriptSearch,
+  type ThreadFinishedReceipt,
 } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
+  coordinatorDoneWhenEqual,
   decideCoordinatorRole,
   decideProviderAccountMove,
   decideUsageLimitHandoff,
@@ -23,6 +25,7 @@ import {
   guardrailLowered,
   permissionModeOf,
 } from "@octant/domain/guardrail-policy";
+import { selectCompletionReceiptId } from "@octant/domain/finished-receipt-policy";
 import {
   decodeGuardrailLevelLowered,
   GUARDRAIL_LEVEL_LOWERED,
@@ -732,6 +735,8 @@ export interface CodeServiceOptions {
    * the thread needs the person.
    */
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
+  /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
+  readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
   readonly gitHistory?: Pick<GitHistoryPort, "read">;
   /**
    * The history of a thread in a server Project, read by Git on its server,
@@ -903,6 +908,7 @@ const CODE_LISTING_ROOT_PROBE_PATH = decodeCodeRelativePath("package.json");
  */
 export const MAXIMUM_OPENED_CODE_FILE_ENTRIES = 16;
 export const MAXIMUM_OPENED_CODE_FILE_BYTES = 8 * 1024 * 1024;
+export const MAXIMUM_BROWSED_CODE_FILE_PATHS = 512;
 
 export interface CodeListFilesInput {
   readonly threadId: CodeThreadId;
@@ -970,10 +976,14 @@ function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
 }
 
 /** The thread without a person's Done mark, as if it had never been marked. */
-function withoutDoneMark<T extends Pick<CodeThread, "markedDoneAt">>(
+function withoutDoneMark<T extends Pick<CodeThread, "markedDoneAt" | "completionReceiptId">>(
   thread: T,
-): Omit<T, "markedDoneAt"> {
-  const { markedDoneAt: _markedDoneAt, ...unmarked } = thread;
+): Omit<T, "markedDoneAt" | "completionReceiptId"> {
+  const {
+    markedDoneAt: _markedDoneAt,
+    completionReceiptId: _completionReceiptId,
+    ...unmarked
+  } = thread;
   return unmarked;
 }
 
@@ -1091,6 +1101,9 @@ export class CodeService {
   readonly #onThreadArchived: CodeServiceOptions["onThreadArchived"];
   readonly #waitForThreadChange: CodeServiceOptions["waitForThreadChange"];
   readonly #pullRequests: CodeNavigationPullRequestSource | undefined;
+  readonly #readLatestFinishedReceipt:
+    | ((threadId: string) => ThreadFinishedReceipt | undefined)
+    | undefined;
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #issueContext?: GithubIssueContextPort;
@@ -1112,6 +1125,15 @@ export class CodeService {
     { readonly threadId: CodeThreadId; readonly content: CodeContentReference }
   >();
   #openedFileBytes = 0;
+  /**
+   * Process-local map of opaque file ids opened through `openFile` to the path
+   * named when they were opened, in least-recently-opened order. Browsing an
+   * untouched file (including binary or oversized read-only files) appends no
+   * journaled `CodeFileReference`, so desktop handoff uses this table and still
+   * re-runs full window, thread, checkout, and root confinement checks on every
+   * request.
+   */
+  readonly #browsedFiles = new Map<string, CodeRelativePath>();
 
   constructor(options: CodeServiceOptions) {
     this.#persistence = options.persistence;
@@ -1149,6 +1171,7 @@ export class CodeService {
     this.#pullRequests = options.pullRequests;
     this.#liveTurns = options.liveTurns;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
+    this.#readLatestFinishedReceipt = options.readLatestFinishedReceipt;
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
     }
@@ -2230,6 +2253,7 @@ export class CodeService {
           command.thread.coordinatorThreadId !== undefined ||
           command.thread.coordinatorChoice !== undefined ||
           command.thread.coordinatorBounds !== undefined ||
+          command.thread.coordinatorDoneWhen !== undefined ||
           command.thread.coordinatorWorkerLevel !== undefined ||
           command.thread.messageWake !== undefined ||
           command.thread.coordinatorWakeOff !== undefined ||
@@ -2374,6 +2398,15 @@ export class CodeService {
       if (command.kind === "mark-code-thread-done" && isRoutineHostScope(authenticatedWindowId)) {
         throw this.#failure("unauthorized", "Only a person can mark a Code thread Done.");
       }
+      if (
+        command.kind === "set-code-thread-coordinator-done-when" &&
+        (isRoutineHostScope(authenticatedWindowId) || actor?.kind === "system")
+      ) {
+        throw this.#failure(
+          "unauthorized",
+          "Only a person can set or clear a coordinator's done-when condition.",
+        );
+      }
       const current = this.#persistence.readCodeThread(command.threadId);
       if (current === undefined) throw this.#failure("invalid", "Code thread was not found.");
       await this.#authorizeThread(authenticatedWindowId, current);
@@ -2508,6 +2541,7 @@ export class CodeService {
       if (
         command.kind === "set-code-thread-coordinator" ||
         command.kind === "set-code-thread-coordinator-bounds" ||
+        command.kind === "set-code-thread-coordinator-done-when" ||
         command.kind === "set-code-thread-message-wake" ||
         command.kind === "set-code-thread-coordinator-wake"
       ) {
@@ -3054,12 +3088,20 @@ export class CodeService {
                                     updatedAt,
                                   }
                                 : command.kind === "mark-code-thread-done"
-                                  ? {
-                                      ...current,
-                                      markedDoneAt: updatedAt,
-                                      version: command.expectedVersion + 1,
-                                      updatedAt,
-                                    }
+                                  ? (() => {
+                                      const completionReceiptId = selectCompletionReceiptId(
+                                        this.#readLatestFinishedReceipt?.(String(current.id)),
+                                      );
+                                      return {
+                                        ...current,
+                                        markedDoneAt: updatedAt,
+                                        ...(completionReceiptId === undefined
+                                          ? {}
+                                          : { completionReceiptId }),
+                                        version: command.expectedVersion + 1,
+                                        updatedAt,
+                                      };
+                                    })()
                                   : {
                                       ...current,
                                       ...(command.workingFolderId === undefined
@@ -3172,6 +3214,32 @@ export class CodeService {
         if (!(error instanceof ConcurrencyConflict) || attempt > 0) throw error;
       }
     }
+  }
+
+  /**
+   * Journal a checkout's head the host just established itself: a branch
+   * switch changes it without any observation event of its own, and thread
+   * reads show the journaled head until one lands. The checkout's own
+   * identity — kind, availability and, for a managed worktree, its ownership
+   * receipt — is kept from the journaled record, never re-derived from the
+   * Project's folder, which may point at a different checkout entirely.
+   */
+  noteCheckoutHead(checkoutId: CodeCheckoutId, head: CodeCheckoutIdentity["head"]): void {
+    const held = this.#persistence.readCodeCheckout(checkoutId);
+    if (held === undefined || held.availability !== "available") return;
+    const observed = decodeCodeCheckoutIdentity({
+      ...held,
+      head,
+      observedAt: decodeTimestamp(this.#clock()),
+    });
+    if (repeatsJournaledCheckout(held, observed)) return;
+    this.#append(
+      "code-checkout",
+      observed.id,
+      this.#persistence.readCodeCheckoutAggregateVersion(observed.id),
+      "code.checkout-observed@1",
+      { kind: "checkout-observed", checkout: observed },
+    );
   }
 
   /**
@@ -3870,10 +3938,109 @@ export class CodeService {
       // server cannot tell a stale tab from one still fetching.
       this.#stageOpenedFile(authorized.thread.id, opened.content);
     }
+    if (
+      authorized.checkout.kind !== "remote-root" &&
+      (opened.status === "editable" || opened.status === "read-only")
+    ) {
+      this.#rememberBrowsedFile(
+        authorized.thread.id,
+        authorized.checkout.id,
+        fileId,
+        input.relativePath,
+      );
+    }
     return decodeCodeFileOpenResultEnvelope({
       kind: "code-file-open-result",
       result: publicOpenResult(fileId, opened),
     });
+  }
+
+  /**
+   * Resolve a Code file identity — either a current journaled file reference or
+   * an untouched file opened via `openFile` — to its authorized root and path
+   * inside that root for desktop external-editor or default-app handoff.
+   *
+   * Re-checks window/Project/thread/checkout authority and root resolution on
+   * every call; refuses archived threads, unavailable or remote-root checkouts,
+   * stale journaled references, and files outside approved roots.
+   */
+  async resolveDesktopFileTarget(
+    authenticatedWindowId: WindowId,
+    input: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly fileId: CodeFileId;
+    },
+  ): Promise<{ readonly rootPath: string; readonly relativePath: CodeRelativePath } | undefined> {
+    let authorized: {
+      readonly thread: CodeThread;
+      readonly effectiveThread: CodeThread;
+      readonly checkout: CodeCheckoutIdentity;
+    };
+    try {
+      authorized = await this.#authorizeCheckoutRead(
+        authenticatedWindowId,
+        input.threadId,
+        input.checkoutId,
+        "Code desktop file handoff is unauthorized.",
+      );
+    } catch {
+      return undefined;
+    }
+    if (
+      authorized.effectiveThread.lifecycle !== "active" ||
+      authorized.checkout.kind === "remote-root"
+    ) {
+      return undefined;
+    }
+    const reference = this.#persistence.readCodeFileReference(input.fileId);
+    let namedPath: CodeRelativePath | undefined;
+    if (reference !== undefined) {
+      if (
+        String(reference.threadId) !== String(authorized.thread.id) ||
+        String(reference.checkoutId) !== String(authorized.checkout.id) ||
+        reference.relativePath === undefined ||
+        (reference.state !== "available" &&
+          reference.state !== "read-only" &&
+          reference.state !== "completed")
+      ) {
+        return undefined;
+      }
+      namedPath = reference.relativePath;
+    } else {
+      namedPath = this.#browsedFiles.get(
+        browsedFileKey(authorized.thread.id, authorized.checkout.id, input.fileId),
+      );
+    }
+    if (namedPath === undefined) return undefined;
+    const root = await this.#roots.resolve(
+      authenticatedWindowId,
+      authorized.effectiveThread,
+      authorized.checkout,
+      namedPath,
+    );
+    if (root === undefined || String(root.fileId) !== String(input.fileId)) {
+      return undefined;
+    }
+    return {
+      rootPath: root.rootPath,
+      relativePath: pathInResolvedRoot(root, namedPath),
+    };
+  }
+
+  #rememberBrowsedFile(
+    threadId: CodeThreadId,
+    checkoutId: CodeCheckoutId,
+    fileId: CodeFileId,
+    relativePath: CodeRelativePath,
+  ): void {
+    const key = browsedFileKey(threadId, checkoutId, fileId);
+    this.#browsedFiles.delete(key);
+    this.#browsedFiles.set(key, relativePath);
+    for (const oldest of this.#browsedFiles.keys()) {
+      if (this.#browsedFiles.size <= MAXIMUM_BROWSED_CODE_FILE_PATHS) break;
+      this.#browsedFiles.delete(oldest);
+    }
   }
 
   /**
@@ -4339,6 +4506,7 @@ export class CodeService {
         readonly kind:
           | "set-code-thread-coordinator"
           | "set-code-thread-coordinator-bounds"
+          | "set-code-thread-coordinator-done-when"
           | "set-code-thread-message-wake"
           | "set-code-thread-coordinator-wake";
       }
@@ -4348,18 +4516,22 @@ export class CodeService {
     const {
       coordinator: _coordinator,
       coordinatorBounds: _bounds,
+      coordinatorDoneWhen: _doneWhen,
       coordinatorWorkerLevel: _workerLevel,
       messageWake: _messageWake,
       coordinatorWakeOff: _wakeOff,
       ...withoutRole
     } = current;
-    // The bounds and the workers' level stay with the role through every
-    // change here but Stop coordinating and a bounds change itself.
+    // The bounds, done-when condition, and workers' level stay with the role
+    // through every change here except Stop coordinating or their own command.
     const rest = {
       ...withoutRole,
       ...(current.coordinatorBounds === undefined
         ? {}
         : { coordinatorBounds: current.coordinatorBounds }),
+      ...(current.coordinatorDoneWhen === undefined
+        ? {}
+        : { coordinatorDoneWhen: current.coordinatorDoneWhen }),
       ...(current.coordinatorWorkerLevel === undefined
         ? {}
         : { coordinatorWorkerLevel: current.coordinatorWorkerLevel }),
@@ -4378,6 +4550,60 @@ export class CodeService {
         ...withoutRole,
         coordinator: true,
         ...(Object.keys(command.bounds).length === 0 ? {} : { coordinatorBounds: command.bounds }),
+        ...(current.coordinatorDoneWhen === undefined
+          ? {}
+          : { coordinatorDoneWhen: current.coordinatorDoneWhen }),
+        ...(current.coordinatorWorkerLevel === undefined
+          ? {}
+          : { coordinatorWorkerLevel: current.coordinatorWorkerLevel }),
+        ...(current.messageWake === true ? { messageWake: true } : {}),
+        ...(current.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
+        ...stamp,
+      });
+    }
+    if (command.kind === "set-code-thread-coordinator-done-when") {
+      if (current.coordinator !== true) {
+        throw this.#failure(
+          "invalid",
+          "Only a coordinator thread has a done-when condition to set.",
+        );
+      }
+      if (command.doneWhen !== undefined) {
+        for (const item of command.doneWhen.items) {
+          if (item.kind !== "thread-done") continue;
+          if (String(item.threadId) === String(current.id)) {
+            throw this.#failure("invalid", "A coordinator cannot wait for itself to be Done.");
+          }
+          const target = this.#persistence.readCodeThread(item.threadId);
+          if (target === undefined) {
+            throw this.#failure("invalid", "A thread named in done-when was not found.");
+          }
+          if (String(target.projectId) !== String(current.projectId)) {
+            throw this.#failure(
+              "unauthorized",
+              "A coordinator's done-when condition may only name threads in its own Project.",
+            );
+          }
+          if (
+            readsAsCoordinator({
+              lifecycle: target.lifecycle,
+              coordinator: target.coordinator === true,
+              startedByCoordinator: target.coordinatorThreadId !== undefined,
+              designatedPlanner: this.#isDesignatedPlanner(target),
+            })
+          ) {
+            throw this.#failure("invalid", "A coordinator thread cannot be named as Done.");
+          }
+        }
+      }
+      if (coordinatorDoneWhenEqual(current.coordinatorDoneWhen, command.doneWhen)) return current;
+      return decodeCodeThread({
+        ...withoutRole,
+        coordinator: true,
+        ...(current.coordinatorBounds === undefined
+          ? {}
+          : { coordinatorBounds: current.coordinatorBounds }),
+        ...(command.doneWhen === undefined ? {} : { coordinatorDoneWhen: command.doneWhen }),
         ...(current.coordinatorWorkerLevel === undefined
           ? {}
           : { coordinatorWorkerLevel: current.coordinatorWorkerLevel }),
@@ -5281,6 +5507,14 @@ export type { CodeFileSaveResult };
 function withoutModelOptionValues(thread: CodeThread): CodeThread {
   const { modelOptionValues: _dropped, ...rest } = thread;
   return rest;
+}
+
+function browsedFileKey(
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  fileId: CodeFileId,
+): string {
+  return `${String(threadId)}:${String(checkoutId)}:${String(fileId)}`;
 }
 
 function nextModelOptionValues(

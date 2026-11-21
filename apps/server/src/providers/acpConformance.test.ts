@@ -106,6 +106,7 @@ describe.each(Object.values(acpProviderProfiles))(
           "task-list",
           "approval-request",
           ...(profile.userQuestions === "supported" ? (["user-input-request"] as const) : []),
+          ...(profile.reportsTurnUsage === true ? (["usage"] as const) : []),
           "interrupted",
         ],
         expectedFailureCategories: {
@@ -363,7 +364,14 @@ class ConformanceClient implements AcpClientPort {
       ]);
     }
     return new Promise<{ stopReason: string }>((resolve) => {
-      this.#cancel = () => resolve({ stopReason: "cancelled" });
+      // An agent that reports each turn's usage in its reply reports it here.
+      this.#cancel = () =>
+        resolve({
+          stopReason: "cancelled",
+          ...(this.profile.reportsTurnUsage === true
+            ? { usage: { inputTokens: 12, outputTokens: 3, cachedReadTokens: 4 } }
+            : {}),
+        });
     });
   };
   notify = async () => {

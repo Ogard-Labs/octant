@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  CANVAS_COMMAND_IDS,
-  CANVAS_SCHEMA_VERSION,
-  decodeCanvasActionCommand,
-} from "@octant/contracts";
+import { CANVAS_COMMAND_IDS, decodeCanvasActionCommand } from "@octant/contracts";
 import {
   CANVAS_COMMAND_ALLOWLIST,
-  admitCanvasActionBlock,
   classifyCanvasActionCommand,
   isAllowlistedCanvasCommand,
 } from "./canvasActionPolicy";
@@ -14,15 +9,6 @@ import {
 const ids = {
   source: "11111111-1111-4111-8111-111111111111",
 } as const;
-
-const block = (command: unknown, overrides: Record<string, unknown> = {}) => ({
-  blockId: "action-1",
-  schemaVersion: CANVAS_SCHEMA_VERSION,
-  kind: "action",
-  label: "Do a thing",
-  command,
-  ...overrides,
-});
 
 describe("Canvas command allowlist", () => {
   it("mirrors the contract allowlist exactly", () => {
@@ -37,59 +23,6 @@ describe("Canvas command allowlist", () => {
     expect(isAllowlistedCanvasCommand("shell.exec")).toBe(false);
     expect(isAllowlistedCanvasCommand("")).toBe(false);
     expect(isAllowlistedCanvasCommand("canvas.open-source ")).toBe(false);
-  });
-});
-
-describe("admitCanvasActionBlock", () => {
-  it("admits a well-formed, allowlisted action block with a capability report", () => {
-    const admission = admitCanvasActionBlock(
-      block({ command: "canvas.open-source", sourceId: ids.source }),
-    );
-    expect(admission.kind).toBe("admitted");
-    if (admission.kind !== "admitted") throw new Error("expected admitted");
-    expect(admission.block.command.command).toBe("canvas.open-source");
-    expect(admission.capability).toEqual({
-      command: "canvas.open-source",
-      effect: "read",
-      requiresApproval: false,
-    });
-  });
-
-  it("denies an unknown command by identifier (fail closed)", () => {
-    const admission = admitCanvasActionBlock(
-      block({ command: "canvas.run-script", script: "rm -rf /" }),
-    );
-    expect(admission).toMatchObject({ kind: "denied", denialCode: "unknown-command" });
-  });
-
-  it("denies excess fields as malformed (no executable Canvas code)", () => {
-    expect(
-      admitCanvasActionBlock(block({ command: "canvas.request-refresh" }, { onClick: "alert(1)" })),
-    ).toMatchObject({ kind: "denied", denialCode: "malformed" });
-    expect(
-      admitCanvasActionBlock({
-        command: "canvas.open-source",
-        sourceId: ids.source,
-        handler: "() => {}",
-      }),
-    ).toMatchObject({ kind: "denied" });
-  });
-
-  it("denies an unsupported block schema version", () => {
-    expect(
-      admitCanvasActionBlock(
-        block({ command: "canvas.request-refresh" }, { schemaVersion: CANVAS_SCHEMA_VERSION + 1 }),
-      ),
-    ).toMatchObject({ kind: "denied", denialCode: "unsupported-schema" });
-  });
-
-  it("denies non-object and shapeless input", () => {
-    expect(admitCanvasActionBlock(null)).toMatchObject({ kind: "denied", denialCode: "malformed" });
-    expect(admitCanvasActionBlock("open-source")).toMatchObject({
-      kind: "denied",
-      denialCode: "malformed",
-    });
-    expect(admitCanvasActionBlock({})).toMatchObject({ kind: "denied" });
   });
 });
 

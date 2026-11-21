@@ -143,3 +143,24 @@ export function finishAcpUsageTurn(state: AcpUsageState, receipt: unknown): Usag
       : { contextTokens: context.contextTokens, contextWindow: context.contextWindow }),
   };
 }
+
+/**
+ * Usage an agent reports for one turn in its `session/prompt` reply, as
+ * Google Antigravity does: `inputTokens` there leaves out cached reads (other
+ * ACP clients of it add them back) and `outputTokens` already counts thinking,
+ * so Octant's input is the two together. A reply without whole counts reports
+ * nothing rather than a guess.
+ */
+export function acpTurnUsage(receipt: unknown): Usage | undefined {
+  const reported = record(receipt);
+  const input = reported?.inputTokens;
+  const output = reported?.outputTokens;
+  const cached = reported?.cachedReadTokens ?? undefined;
+  if (!count(input) || !count(output) || (cached !== undefined && !count(cached))) return;
+  return {
+    kind: "usage",
+    inputTokens: input + (cached ?? 0),
+    outputTokens: output,
+    ...(cached === undefined ? {} : { cacheReadInputTokens: cached }),
+  };
+}

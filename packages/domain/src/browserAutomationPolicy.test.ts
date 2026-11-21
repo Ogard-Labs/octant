@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   evaluateBrowserAction,
-  canRecordBrowserObservation,
+  decideBrowserWaitLimit,
   isContextExpired,
   browserContextExpiresAt,
-  shouldProtectCredentialField,
   originAllowed,
   parseBrowserKeyChord,
   remoteBrowserActionReach,
@@ -12,7 +11,6 @@ import {
 import type {
   BrowserActionRequest,
   BrowserContextRecord,
-  BrowserObservation,
   ToolActionAuthority,
 } from "@octant/contracts";
 
@@ -204,32 +202,6 @@ describe("evaluateBrowserAction", () => {
   });
 });
 
-describe("canRecordBrowserObservation", () => {
-  it("returns true for matching observation", () => {
-    const obs: BrowserObservation = {
-      contextId: activeContext.contextId,
-      actionId: activeContext.actionId,
-      correlationId: activeContext.correlationId,
-      authority,
-      observedAt: "2026-07-24T12:01:00.000Z" as any,
-      stale: false,
-    };
-    expect(canRecordBrowserObservation(obs, activeContext)).toBe(true);
-  });
-
-  it("returns false for mismatched context", () => {
-    const obs: BrowserObservation = {
-      contextId: "00000000-0000-4000-8000-000000000099" as any,
-      actionId: activeContext.actionId,
-      correlationId: activeContext.correlationId,
-      authority,
-      observedAt: "2026-07-24T12:01:00.000Z" as any,
-      stale: false,
-    };
-    expect(canRecordBrowserObservation(obs, activeContext)).toBe(false);
-  });
-});
-
 describe("isContextExpired", () => {
   it("uses host-observed activity and the current handoff deadline without an absolute active cap", () => {
     const created = Date.parse(activeContext.createdAt);
@@ -264,20 +236,6 @@ describe("isContextExpired", () => {
   it("returns false for stopped context", () => {
     const stopped = { ...activeContext, state: "stopped" as const };
     expect(isContextExpired(stopped, Date.now())).toBe(false);
-  });
-});
-
-describe("shouldProtectCredentialField", () => {
-  it("returns true when policy enables protection", () => {
-    expect(shouldProtectCredentialField(activeContext, "password")).toBe(true);
-  });
-
-  it("returns false when policy disables protection", () => {
-    const noProtection = {
-      ...activeContext,
-      policy: { ...activeContext.policy, credentialFieldProtection: false },
-    };
-    expect(shouldProtectCredentialField(noProtection, "password")).toBe(false);
   });
 });
 
@@ -371,5 +329,39 @@ describe("originAllowed", () => {
     expect(originAllowed("https://evil-vg.no/", ["https://vg.no"])).toBe(false);
     expect(originAllowed("http://127.0.0.1:4321/", ["http://127.0.0.1:5173"])).toBe(false);
     expect(originAllowed("about:blank", ["https://vg.no"])).toBe(false);
+  });
+});
+
+describe("browser wait duration limit", () => {
+  it("imposes no wait cap outside Strict even past ten or sixty minutes", () => {
+    expect(decideBrowserWaitLimit({ timeoutMs: 600_001, strict: false })).toEqual({
+      status: "admitted",
+    });
+    expect(
+      decideBrowserWaitLimit({ timeoutMs: 5_400_000, strict: false, limitMs: 120_000 }),
+    ).toEqual({
+      status: "admitted",
+    });
+  });
+
+  it("enforces the default ten-minute limit and custom limits under Strict", () => {
+    expect(decideBrowserWaitLimit({ timeoutMs: 600_000, strict: true })).toEqual({
+      status: "admitted",
+    });
+    expect(decideBrowserWaitLimit({ timeoutMs: 600_001, strict: true })).toEqual({
+      status: "refused",
+      message: "A wait may last at most 10 minutes, the limit set in Settings.",
+    });
+    expect(
+      decideBrowserWaitLimit({ timeoutMs: 1_200_000, strict: true, limitMs: 1_200_000 }),
+    ).toEqual({
+      status: "admitted",
+    });
+    expect(
+      decideBrowserWaitLimit({ timeoutMs: 1_200_001, strict: true, limitMs: 1_200_000 }),
+    ).toEqual({
+      status: "refused",
+      message: "A wait may last at most 20 minutes, the limit set in Settings.",
+    });
   });
 });

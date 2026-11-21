@@ -31,7 +31,11 @@ function integritySentence(agent: AddedAcpAgentProviderInstance): string | undef
       return "The download matched the checksum the ACP registry lists for this release.";
     case "package-manager":
       return source.kind === "registry"
-        ? `The package manager installed exactly release ${source.version}, checked against its registry's own integrity data, with install scripts off.`
+        ? install.installScriptsCompleted === true
+          ? `The package manager installed exactly release ${source.version}, checked against its registry's own integrity data; its install scripts ran when you trusted it.`
+          : install.hasInstallScripts === true
+            ? `The package manager installed exactly release ${source.version}, checked against its registry's own integrity data, with install scripts off. Trusting it runs its install script.`
+            : `The package manager installed exactly release ${source.version}, checked against its registry's own integrity data, with install scripts off.`
         : undefined;
     case "local-command":
       return `Your own command at ${install.executable}. Octant did not fetch it.`;

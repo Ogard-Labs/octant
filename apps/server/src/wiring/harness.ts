@@ -73,6 +73,7 @@ import {
   type FollowUpSuggestionActionDependencies,
 } from "../followUps/followUpSuggestionRoutes";
 import { createSideTaskRouteHandler } from "../sideTasks/sideTaskRoutes";
+import { createFinishedReceiptRouteHandler } from "../finishedReceipts/finishedReceiptRoutes";
 import type { SideTaskStartDependencies } from "../sideTasks/sideTaskStart";
 import {
   createNativeHarnessSessionRouteHandler,
@@ -139,6 +140,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "processAuthorityTime"
     | "toolEffectLedger"
     | "windowAuthorityStore"
+    | "isPersonPairedDeviceCurrent"
   > &
   Pick<
     AgentRunsWiring,
@@ -148,6 +150,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "contributeChildTools"
     | "externalContentIngestionStore"
     | "sideTasks"
+    | "finishedReceipts"
     | "threadFollowUpSuggestions"
     | "turnMetrics"
   > &
@@ -168,6 +171,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     HarnessStateWiring,
     | "agentRunInteractions"
     | "cloudMachineServers"
+    | "serverAttachmentCleanup"
     | "serverConnection"
     | "serverProjectStore"
     | "serverRegistry"
@@ -196,6 +200,7 @@ export function wireHarness(deps: HarnessDependencies) {
     safeNetworkStore,
     agentRunInteractions,
     cloudMachineServers,
+    serverAttachmentCleanup,
     serverConnection,
     serverProjectStore,
     serverRegistry,
@@ -227,10 +232,12 @@ export function wireHarness(deps: HarnessDependencies) {
     runningWorkTurnAccess,
     runningWorkTurnSandbox,
     sideTasks,
+    finishedReceipts,
     threadFollowUpSuggestions,
     toolEgressRules,
     turnMetrics,
     windowAuthorityStore,
+    isPersonPairedDeviceCurrent,
     workThreadProjection,
     workTurnProjection,
     personMemory,
@@ -309,11 +316,12 @@ export function wireHarness(deps: HarnessDependencies) {
     agentSocket: sshAgentSocket,
     pinnedKnownHosts: (server) => serverConnection.pinnedKnownHostsFile(server),
     refuses: (server) => serverConnection.refusal(server),
-    record: (record) => serverProjectStore.recordPreview(record),
+    record: (record, principal) => serverProjectStore.recordPreview(record, principal),
   });
   const previewRoutes = createServerPreviewTunnelRoutes({
     windows: windowAuthorityStore,
     tunnels: serverPreviewTunnels,
+    isPersonPairedDeviceCurrent,
   });
   // Machines in the person's own cloud account, each bound as a server
   // Project. Targets arrive only from cloud machine target plugins the person
@@ -342,6 +350,8 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: serverProjectStore,
     cloudMachineOf: (projectId) => cloudMachines.machineForProject(projectId),
+    stageProjectRemoval: (input) => serverAttachmentCleanup.stageProjectRemoval(input),
+    removeProjectAttachments: (input) => serverAttachmentCleanup.removeForProject(input),
   });
   const serverResourceReaders = new Map<string, () => Promise<ServerResourceRead>>();
   const resourceRoutes = createServerResourceRoutes({
@@ -367,6 +377,7 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   const setupCheckRoutes = createRemoteSetupCheckRoutes({
     windows: windowAuthorityStore,
+    isPersonPairedDeviceCurrent,
     checks: new RemoteSetupChecks({
       servers: () => shieldServerStore.servers(),
       agentAvailable: () => sshAgentSocket() !== undefined,
@@ -666,6 +677,11 @@ export function wireHarness(deps: HarnessDependencies) {
       sideTaskHost.current?.continueHere(input) ??
       Promise.resolve({ kind: "refused", message: "This thread cannot take a message now." }),
     clock: () => new Date().toISOString(),
+  });
+  const finishedReceiptRoutes = createFinishedReceiptRouteHandler({
+    store: finishedReceipts,
+    windowAuthorityStore,
+    authorizeThread: authorizeFollowUpThread,
   });
   const nativeHarnessEgressRoutes = createNativeHarnessEgressRouteHandler({
     windowAuthorityStore,
@@ -1344,6 +1360,7 @@ export function wireHarness(deps: HarnessDependencies) {
     webSearchSettings,
     sideTaskHost,
     sideTaskRoutes,
+    finishedReceiptRoutes,
     hostShield,
     threadWork,
   };

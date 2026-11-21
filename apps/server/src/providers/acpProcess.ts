@@ -15,6 +15,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type {
   ProviderExecutionPolicy,
@@ -29,7 +30,7 @@ import {
   type AcpProviderProfile,
   type AcpSessionMode,
 } from "./acpProfiles";
-import { providerHostEnvironment } from "./providerHostEnvironment";
+import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
@@ -47,6 +48,7 @@ import {
   ProcessConfinementError,
   seatbeltAllowLiteralReadRule,
   seatbeltDenyRule,
+  seatbeltExecRule,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import {
@@ -71,6 +73,32 @@ export type { AcpSessionMode } from "./acpProfiles";
 
 /** See {@link AcpProviderProfile} `process.readsSystemKeychain`. */
 const SYSTEM_KEYCHAIN_PATH = "/Library/Keychains/System.keychain";
+
+/**
+ * See {@link AcpProviderProfile} `process.readsLoginKeychain`. The same grant
+ * Claude Code's runtime measured as the least that reads a keychain sign-in
+ * (exec of `security`, the two security-server lookups, and the one file);
+ * caller rules follow the secret-file denials, so a path the person protects
+ * in Settings still wins, and nothing grants a write.
+ */
+function loginKeychainSeatbeltRules(): ReadonlyArray<string> {
+  return [
+    seatbeltExecRule("/usr/bin/security"),
+    '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+    '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+    seatbeltAllowLiteralReadRule(loginKeychainPath()),
+  ];
+}
+
+function loginKeychainPath(): string {
+  let home = homedir();
+  try {
+    home = realpathSync(home);
+  } catch {
+    // A home that cannot be resolved names no file the profile could open.
+  }
+  return join(home, "Library", "Keychains", "login.keychain-db");
+}
 
 export interface AcpLaunchSpec {
   readonly command: string;
@@ -510,6 +538,32 @@ function acpWallPolicy(input: {
     : input.executionPolicy;
 }
 
+/**
+ * A profile that keeps no sandbox outside Strict starts Work and Code as Full
+ * access does, at every level: its own mode asks Octant before each side
+ * effect. A readiness check, Chat, Plan, Strict, an explicit sandbox and a
+ * Full access thread that keeps the sandbox stay confined.
+ */
+function acpStartsUnconfinedBelowFullAccess(input: {
+  readonly profile: AcpProviderProfile;
+  readonly mode: AcpSessionMode;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly strict?: boolean;
+  readonly purpose?: "probe" | "session";
+  readonly fullAccessSandbox?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
+}): boolean {
+  return (
+    input.profile.process.confinement.kind === "provider-approvals-outside-strict" &&
+    input.strict === false &&
+    input.sandboxPolicy === undefined &&
+    input.fullAccessSandbox !== true &&
+    input.purpose !== "probe" &&
+    (input.mode === "work" || input.mode === "code") &&
+    input.executionPolicy !== "plan"
+  );
+}
+
 export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): AcpConfinementPort {
   const platform = options.platform ?? process.platform;
   const sandboxPath =
@@ -582,11 +636,12 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // A thread that keeps the sandbox takes the Accept edits wall instead.
         const wall = acpWallPolicy(input);
         if (platform === "win32") {
-          // Windows has no Octant sandbox: Full access, or a level below it
-          // outside Strict, where the agent's own mode asks Octant before each
-          // side effect and Plan keeps the agent's read-only mode, starts
-          // unconfined; anything else is refused by name. The process port
-          // admitted a readiness check already.
+          // Windows has no Octant sandbox: Full access, a level below it
+          // outside Strict (where the agent's own mode asks Octant before each
+          // side effect and Plan keeps the agent's read-only mode), or Chat
+          // outside Strict (on the agent's own permission handling) starts
+          // unconfined; Strict and a kept sandbox are refused by name. The
+          // process port admitted a readiness check already.
           const form =
             input.purpose === "probe"
               ? ({ status: "unconfined", approvals: "none" } as const)
@@ -607,9 +662,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           return { command: program.command, args: [...program.args], cwd: root, environment };
         }
         if (
-          wall === "full-access" &&
           input.sandboxPolicy === undefined &&
-          input.fullAccessSandbox !== true
+          input.fullAccessSandbox !== true &&
+          (wall === "full-access" || acpStartsUnconfinedBelowFullAccess(input))
         ) {
           return {
             command: input.binaryPath,
@@ -657,6 +712,8 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // callers deny paths that must stay hidden even if created later.
         const confinedDenyPaths =
           platform === "linux" ? denyPaths.filter((path) => pathExists(path)) : denyPaths;
+        const readsLoginKeychain =
+          platform === "darwin" && profile.process.readsLoginKeychain === true;
         const extraRules = [
           ...loopbackRules,
           ...(platform === "darwin" ? serverAccessSeatbeltRules(input.servers) : []),
@@ -672,6 +729,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           ...(platform === "darwin" && profile.process.readsSystemKeychain === true
             ? [seatbeltAllowLiteralReadRule(SYSTEM_KEYCHAIN_PATH)]
             : []),
+          ...(readsLoginKeychain ? loginKeychainSeatbeltRules() : []),
         ];
         const launch = yield* Effect.try({
           try: () =>
@@ -712,9 +770,12 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               // exec literals and binds already permit, and fork without a
               // second exec target cannot reach a shell. Chat and Plan never
               // get here — such profiles are refused above.
+              // Reading the keychain sign-in forks `/usr/bin/security`, the
+              // one program the keychain rules let it exec in Chat and Plan.
               allowProcessFork:
                 !(input.executionPolicy === "plan" || input.mode === "chat") ||
-                profile.process.requiresChildServer === true,
+                profile.process.requiresChildServer === true ||
+                readsLoginKeychain,
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
               additionalDenyReadPaths: confinedDenyPaths,
               additionalDenyWritePaths: confinedDenyPaths,
@@ -724,6 +785,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 managedHome,
                 ...hostAuthentication.readPaths,
                 ...hostReadPaths,
+                ...(input.strict === false &&
+                input.fullAccessSandbox !== true &&
+                input.sandboxPolicy === undefined
+                  ? awsProfileReadPaths(input.environment)
+                  : []),
                 binaryDirectory,
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
@@ -736,6 +802,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 managedHome,
                 ...hostAuthentication.readPaths,
                 ...hostReadPaths,
+                ...(input.strict === false &&
+                input.fullAccessSandbox !== true &&
+                input.sandboxPolicy === undefined
+                  ? awsProfileReadPaths(input.environment)
+                  : []),
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
@@ -889,7 +960,8 @@ export function acpNegotiationAccepted(
   const identityMatches = profile.process.verifyAgentInfo
     ? profile.process.verifyAgentInfo(initialized)
     : initialized.agentInfo?.name === profile.process.agentName;
-  return initialized.protocolVersion === 1 && identityMatches;
+  const protocolVersions = profile.process.protocolVersions ?? [1];
+  return protocolVersions.includes(initialized.protocolVersion) && identityMatches;
 }
 
 function resolveNpmPackageVersion(
@@ -1268,13 +1340,14 @@ function acquireConnection(
     const cleanup = () => {
       cleanupPromise ??= (async () => {
         const suppressStdinError = () => undefined;
+        const removeStdinErrorSuppression = () => child.stdin.off("error", suppressStdinError);
         child.stdin.on("error", suppressStdinError);
+        child.stdin.once("close", removeStdinErrorSuppression);
         try {
           await acp.close().catch(() => undefined);
           await Promise.race([childExited, wait(25)]);
           await terminateGroup();
         } finally {
-          child.stdin.off("error", suppressStdinError);
           child.stdin.destroy();
         }
       })();
@@ -1463,7 +1536,9 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
         });
         const wall = acpWallPolicy(input);
         const network =
-          wall === "full-access" || windows !== undefined
+          wall === "full-access" ||
+          windows !== undefined ||
+          acpStartsUnconfinedBelowFullAccess({ ...input, profile })
             ? undefined
             : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                 ...(input.sandboxPolicy === undefined
