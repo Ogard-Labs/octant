@@ -669,6 +669,8 @@ export class ProductFeedbackService {
     readonly operationId: string;
     readonly maxImages?: number;
     readonly selected?: ReadonlyArray<{ readonly noteId: string; readonly version: number }>;
+    /** Runs inside the delivery transaction after notes are claimed; throwing rolls back the claim. */
+    readonly onClaimed?: () => void;
   }): ReadonlyArray<ProductFeedbackNote> {
     const all = this.pendingForTurn(input.threadId);
     const selected = input.selected;
@@ -718,6 +720,7 @@ export class ProductFeedbackService {
         }
         delivered.push(next);
       }
+      input.onClaimed?.();
       return delivered;
     };
     return selected !== undefined && this.#options.transaction !== undefined

@@ -4254,30 +4254,49 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await serverTools?.close?.().catch(() => undefined);
       return refuseRevokedAdmission();
     }
-    // Outside-content provenance for pull-request line notes is recorded only
-    // after every busy, move, driver, session, and admission check passes, and
-    // synchronously before owning the turn or launching the provider.
-    if (input.recordOutsideContent !== undefined && !input.recordOutsideContent()) {
+    // Feedback stays pending through every preparation refusal. Consuming it
+    // here does not yield between the final admission check and owning the turn;
+    // any pull-request outside-content mark runs inside the same delivery claim
+    // so a feedback refusal never taints the thread and a provenance refusal
+    // rolls back pending feedback notes instead of losing them.
+    const recordOutsideContent = input.recordOutsideContent;
+    let outsideContentRecorded = false;
+    class OutsideContentRefusedError extends Error {}
+    let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
+    try {
+      feedback = input.takeProductFeedback?.(
+        MAX_PROVIDER_ATTACHMENTS - originalInputCount,
+        recordOutsideContent === undefined
+          ? undefined
+          : () => {
+              if (!recordOutsideContent()) throw new OutsideContentRefusedError();
+              outsideContentRecorded = true;
+            },
+      );
+    } catch (error) {
+      await serverTools?.close?.().catch(() => undefined);
+      await input.extensionTools?.close?.().catch(() => undefined);
+      if (error instanceof OutsideContentRefusedError) {
+        return {
+          ...failStart(
+            "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
+          ),
+          admission: "refused" as const,
+        };
+      }
+      return {
+        ...failStart(
+          "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+        ),
+        admission: "refused" as const,
+      };
+    }
+    if (recordOutsideContent !== undefined && !outsideContentRecorded && !recordOutsideContent()) {
       await serverTools?.close?.().catch(() => undefined);
       await input.extensionTools?.close?.().catch(() => undefined);
       return {
         ...failStart(
           "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
-        ),
-        admission: "refused" as const,
-      };
-    }
-    // Feedback stays pending through every preparation refusal. Consuming it
-    // here does not yield between the final admission check and owning the turn.
-    let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
-    try {
-      feedback = input.takeProductFeedback?.(MAX_PROVIDER_ATTACHMENTS - originalInputCount);
-    } catch {
-      await serverTools?.close?.().catch(() => undefined);
-      await input.extensionTools?.close?.().catch(() => undefined);
-      return {
-        ...failStart(
-          "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
         ),
         admission: "refused" as const,
       };

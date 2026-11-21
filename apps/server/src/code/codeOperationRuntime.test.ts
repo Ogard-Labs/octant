@@ -19361,4 +19361,140 @@ describe("pull request line notes runtime admission", () => {
       host.close();
     }
   });
+
+  it("does not record outside-content provenance when product feedback changes before delivery", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const entered = Promise.withResolvers<void>();
+    const credential = Promise.withResolvers<string>();
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["pull-request-line-notes"] },
+    }));
+    const host = runtimeFixture({
+      provider: providerDriver(connection),
+      recordExternalContentIngestion,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+      credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
+      credentialResolver: {
+        resolve: () => {
+          entered.resolve();
+          return credential.promise;
+        },
+      },
+    });
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    try {
+      const captured = await host.feedback.execute(windowId, {
+        kind: "capture-product-feedback",
+        threadId,
+        mode: "code",
+        contextId: operationId(40),
+        point: { x: 0.3, y: 0.5 },
+        comment: "Original product note",
+      });
+      if (captured.kind !== "feedback-captured") throw Error("Fixture capture refused");
+
+      const pending = host.runtime.execute(
+        windowId,
+        {
+          kind: "start-provider-turn",
+          operationId: operationId(75),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: evidence(40),
+          pullRequestLineNotesSource: source,
+        },
+        { initiator: "user" },
+      );
+      await entered.promise;
+      expect(
+        await host.feedback.execute(
+          windowId,
+          {
+            kind: "update-product-feedback",
+            noteId: captured.note.id,
+            expectedVersion: captured.note.version,
+            comment: "Edited while turn prepared",
+          },
+          { admissionCurrent: () => true },
+        ),
+      ).toMatchObject({ kind: "feedback-updated" });
+
+      credential.resolve("credential-value");
+      await expect(pending).resolves.toMatchObject({ admission: "refused", state: "failed" });
+      expect(connection.send).not.toHaveBeenCalled();
+      expect(recordExternalContentIngestion).not.toHaveBeenCalled();
+      expect(host.feedback.pendingForTurn(threadId)).toMatchObject([
+        { comment: "Edited while turn prepared", version: 2 },
+      ]);
+    } finally {
+      credential.resolve("credential-value");
+      host.close();
+    }
+  });
+
+  it("refuses fail-closed and keeps pending product feedback intact when outside-content provenance recording fails", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "refused" as const,
+      reason: "malformed" as const,
+    }));
+    const host = runtimeFixture({
+      provider: providerDriver(connection),
+      recordExternalContentIngestion,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+    });
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    try {
+      const captured = await host.feedback.execute(windowId, {
+        kind: "capture-product-feedback",
+        threadId,
+        mode: "code",
+        contextId: operationId(40),
+        point: { x: 0.3, y: 0.5 },
+        comment: "Must survive provenance failure",
+      });
+      if (captured.kind !== "feedback-captured") throw Error("Fixture capture refused");
+
+      await expect(
+        host.runtime.execute(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: operationId(76),
+            threadId,
+            checkoutId,
+            sessionId,
+            prompt: evidence(40),
+            pullRequestLineNotesSource: source,
+          },
+          { initiator: "user" },
+        ),
+      ).resolves.toMatchObject({ admission: "refused", state: "failed" });
+      expect(connection.send).not.toHaveBeenCalled();
+      expect(recordExternalContentIngestion).toHaveBeenCalledTimes(1);
+      expect(host.feedback.pendingForTurn(threadId)).toMatchObject([
+        { comment: "Must survive provenance failure", version: 1 },
+      ]);
+    } finally {
+      host.close();
+    }
+  });
 });

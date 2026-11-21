@@ -1127,7 +1127,10 @@ export interface CodeOperationTurnPort {
      */
     readonly onContextDelivered?: () => void;
     /** Consume feedback synchronously only after the runtime's final admission check. */
-    readonly takeProductFeedback?: (maxAttachments?: number) => {
+    readonly takeProductFeedback?: (
+      maxAttachments?: number,
+      onClaimed?: () => void,
+    ) => {
       readonly context?: string;
       readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     };

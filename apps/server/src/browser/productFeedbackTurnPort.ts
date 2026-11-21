@@ -35,7 +35,7 @@ export interface ProductFeedbackTurnDelivery {
 
 export interface PreparedProductFeedbackTurn extends ProductFeedbackTurnDelivery {
   /** Claims only this exact prepared version; never a later edited note. */
-  readonly take: (maxAttachments?: number) => ProductFeedbackTurnDelivery;
+  readonly take: (maxAttachments?: number, onClaimed?: () => void) => ProductFeedbackTurnDelivery;
 }
 
 export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps) {
@@ -112,7 +112,7 @@ export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps)
       let taken = false;
       return {
         ...delivery,
-        take: (maxAttachments) => {
+        take: (maxAttachments, onClaimed) => {
           if (maxAttachments !== undefined && delivery.attachments.length > maxAttachments)
             throw new Error("Selected product notes exceed the remaining attachment budget.");
           if (taken || !current()) throw new Error("Prepared feedback is no longer current.");
@@ -121,6 +121,17 @@ export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps)
             threadId: input.threadId,
             operationId: input.operationId,
             selected,
+            ...(onClaimed === undefined
+              ? {}
+              : {
+                  onClaimed: () => {
+                    // If publication retired the window during delivery, the
+                    // post-claim check below will refuse the turn without
+                    // starting it — skip callers' side effects like tainting.
+                    if (!current()) return;
+                    onClaimed();
+                  },
+                }),
           });
           if (carried.length !== selected.length)
             throw new Error("Selected feedback changed before delivery.");
