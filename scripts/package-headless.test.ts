@@ -203,6 +203,14 @@ describe("buildHeadlessArtifact", () => {
     const linked = await execFileAsync(join(root, "path", "octant"), ["web"], { env: environment });
     expect(linked.stdout.trim()).toBe(`${join(install, "bin")}/octant.mjs web`);
     expect(linked.stderr.trim()).toBe(join(install, "bin", "octant"));
+    // Started by a relative path through a `current`-style link, the launcher
+    // still reports an absolute path that keeps the link.
+    symlinkSync(install, join(root, "current"));
+    const relative = await execFileAsync("./current/bin/octant", ["web"], {
+      cwd: root,
+      env: environment,
+    });
+    expect(relative.stderr.trim()).toBe(join(root, "current", "bin", "octant"));
   });
 
   it("carries the Bun the repository pins and nothing else", () => {

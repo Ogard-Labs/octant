@@ -69,7 +69,9 @@ while [ -L "$self" ]; do
     *) self=$(dirname -- "$self")/$target ;;
   esac
 done
-dir=$(dirname -- "$self")
+# Made absolute without resolving links (pwd -L), so a relative start through
+# the current link still reports a path the service can keep.
+dir=$(cd -- "$(dirname -- "$self")" && pwd -L)
 OCTANT_CLI_LAUNCHER="$dir/octant"
 export OCTANT_CLI_LAUNCHER
 exec "$dir/../lib/runtime/bun" "$dir/octant.mjs" "$@"
