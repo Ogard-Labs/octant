@@ -144,6 +144,9 @@ const PERSON_PAIRED_DEVICE_ROUTES = [
   "/api/benchmarks/runs/start",
   "/api/benchmarks/runs/cancel",
   "/api/benchmarks/runs/purge",
+  // Making a registered server an Octant computer over SSH; the route
+  // refuses any principal that does not act as the host's person.
+  "/api/shield/servers/member-install",
 ] as const;
 
 /**

@@ -7,6 +7,11 @@ import { randomUUID } from "node:crypto";
 import { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
 import { createOwnerBrowserJournal } from "../browser/ownerBrowserJournal";
 import { homedir } from "node:os";
+import { join } from "node:path";
+import { readPrivateListener } from "../hub/privateListenerReading";
+import { createHeadlessBuilds } from "../shield/headlessBuilds";
+import { MemberInstallService } from "../shield/memberInstall";
+import { createMemberInstallRouteHandler } from "../shield/memberInstallRoutes";
 import {
   type AgentRunId,
   AgentRunParentThreadId,
@@ -72,6 +77,7 @@ import {
   defaultShellSettings,
   enabledModes,
   isAgentRunActiveStatus,
+  readPairingCode,
   rosterMemberWebOrigin,
 } from "@octant/domain";
 import {
@@ -244,7 +250,7 @@ export type RemoteDependencies = {
     readonly bind: (routes: ReadonlyArray<PairedDeviceRoutes>) => void;
   };
 } & Pick<ServerStart, "options" | "persistence" | "serve" | "startedAt" | "version"> &
-  Pick<HarnessWiring, "beginGoogleCliChange" | "webSearchSettings"> &
+  Pick<HarnessWiring, "beginGoogleCliChange" | "shieldServerStore" | "webSearchSettings"> &
   Pick<
     AuthorityWiring,
     | "browserCaptureStore"
@@ -262,7 +268,7 @@ export type RemoteDependencies = {
     | "remoteDelegationHolder"
     | "threadStandingAnswers"
   > &
-  Pick<HarnessStateWiring, "nativeHarnessSessions"> &
+  Pick<HarnessStateWiring, "nativeHarnessSessions" | "serverConnection"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
   Pick<CodeWiring, "codeAttachments" | "codeProjectAccess" | "workAttachments"> &
@@ -669,6 +675,91 @@ export function wireRemote(deps: RemoteDependencies) {
     transport: hubTransport,
     record: recordHubMembership,
     now: Date.now,
+  });
+  // Making a registered server an Octant computer: installed over its SSH
+  // connection and joined to this hub, whose pairing decides the one claim
+  // whose comparison code the server printed.
+  const memberInstalls = new MemberInstallService({
+    servers: () => deps.shieldServerStore.servers(),
+    connection: deps.serverConnection,
+    builds: createHeadlessBuilds({ folder: join(providerDataDirectory, "headless-builds") }),
+    hub: {
+      readiness: () => {
+        if (hubService.status().enabled) {
+          return readPrivateListener(privateListenerController.status()).status === "private"
+            ? { status: "ready", hubName: resolveHubIdentity().displayName }
+            : {
+                status: "refused",
+                reason: "hub-unavailable",
+                message:
+                  "This computer's listener is not running on a Tailscale or private network address, so its hub cannot make a join code. Turn it on in Settings › Remote access.",
+              };
+        }
+        return hubStateStore.load().link === undefined
+          ? {
+              status: "refused",
+              reason: "no-hub",
+              message:
+                "This computer is not a hub. Turn on the hub role in Settings › Remote access, then try again. Pairing a server with this computer without a hub is not built yet.",
+            }
+          : {
+              status: "refused",
+              reason: "not-the-hub",
+              message:
+                "This computer is a member of a hub, not the hub. Make the server an Octant computer from the hub's own window, where its join is approved.",
+            };
+      },
+      mintJoinCode: () => {
+        const minted = hubService.mintJoinCode({ owner: false });
+        const reading = minted.status === "minted" ? readPairingCode(minted.code) : undefined;
+        if (minted.status === "refused" || reading?.status !== "read") {
+          return {
+            status: "refused",
+            message:
+              "This computer's hub could not make a join code. Check its listener in Settings › Remote access, then try again.",
+          };
+        }
+        return { status: "minted", code: minted.code, ticketId: reading.contents.ticketId };
+      },
+      pendingComparisonCode: (ticketId) =>
+        currentRemoteGateway
+          ?.localDeviceAdministration()
+          ?.listPendingPairings()
+          .find((claim) => String(claim.ticketId) === ticketId)?.comparisonCode,
+      approve: (ticketId, actor) => {
+        const administration = currentRemoteGateway?.localDeviceAdministration();
+        if (administration === undefined) return false;
+        try {
+          // A window's approval is the host's own record, as the pairing
+          // route writes it; a paired device's names that device.
+          administration.approvePairing({
+            ticketId,
+            ...(actor.kind === "remote-device" ? { actor } : {}),
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      deny: (ticketId, actor) => {
+        try {
+          currentRemoteGateway?.localDeviceAdministration()?.denyPairing({
+            ticketId,
+            reasonCode: "comparison-mismatch",
+            ...(actor.kind === "remote-device" ? { actor } : {}),
+          });
+        } catch {
+          // A claim already decided or gone is not approved either way.
+        }
+      },
+    },
+    journal: deps.shieldServerStore,
+    uuid: randomUUID,
+    now: Date.now,
+  });
+  const memberInstallRoutes = createMemberInstallRouteHandler({
+    windowAuthorityStore,
+    service: memberInstalls,
   });
   const spokeLinkService = new SpokeLinkService({
     state: hubStateStore,
@@ -2576,6 +2667,7 @@ export function wireRemote(deps: RemoteDependencies) {
     localDeviceAdministrationRoutes,
     hostControlRoutes,
     externalContentRoutes,
+    memberInstallRoutes,
   ]);
   return {
     ownerBrowserControlService,
@@ -2588,6 +2680,7 @@ export function wireRemote(deps: RemoteDependencies) {
     supportBundleRoutes,
     hubAdministrationRoutes,
     localDeviceAdministrationRoutes,
+    memberInstallRoutes,
     agentAccessAdministrationRoutes,
     agentAccessLoopbackRoutes,
     privateListenerAdministrationRoutes,

@@ -31,6 +31,8 @@ import {
   SHIELD_SERVERS_AGGREGATE,
   SHIELD_SERVERS_AGGREGATE_ID,
   SHIELD_SERVERS_EVENT_NAMES,
+  type MemberInstallRequestedPayload,
+  type MemberInstallStepRecordedPayload,
   type ShieldRemoteCommandStatus,
   type ShieldServer,
   type ShieldServerFields,
@@ -64,7 +66,9 @@ import { redactSecretShaped } from "@octant/domain/secret-shaped-text-policy";
  * (`shield-servers.project-servers-set@1`, under the Project's id), which
  * replaces the account list for that Project's threads until
  * `shield-servers.project-override-cleared@1`. Only a person at a local
- * window changes either.
+ * window changes either. Making a server an Octant computer journals its
+ * request and each step's outcome under the server's own id; those records
+ * change nothing in the registry.
  */
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
@@ -309,6 +313,29 @@ export class ShieldServerStore {
     }
     this.#apply(SHIELD_SERVERS_EVENT_NAMES.serverRemoved, payload);
     return { kind: "changed" };
+  }
+
+  /**
+   * Journals a request to make a registered server an Octant computer, or how
+   * one of its steps ended, on that server's own stream of the registry so a
+   * server's installs read in order. The actor is the person or the device
+   * they paired that confirmed it. Nothing replays these into the registry.
+   */
+  recordMemberInstall(
+    record:
+      | { readonly event: "requested"; readonly payload: MemberInstallRequestedPayload }
+      | { readonly event: "step"; readonly payload: MemberInstallStepRecordedPayload },
+    actor: EventActorValue,
+  ): boolean {
+    return this.#append(
+      SHIELD_SERVERS_AGGREGATE,
+      String(record.payload.serverId),
+      record.event === "requested"
+        ? SHIELD_SERVERS_EVENT_NAMES.memberInstallRequested
+        : SHIELD_SERVERS_EVENT_NAMES.memberInstallStepRecorded,
+      record.payload,
+      actor,
+    );
   }
 
   /**

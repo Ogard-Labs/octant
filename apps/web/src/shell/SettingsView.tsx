@@ -1595,6 +1595,12 @@ function ActiveSectionContent({
               ? {}
               : { actionStoragePrefix: props.projectActionStoragePrefix })}
             focusedSetting={focusedSetting}
+            onOpenPrivateNetworkGuide={() =>
+              onApplyDeepLink({
+                section: "remote-access",
+                setting: settingId("remote-setup-checks"),
+              })
+            }
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             projects={props.serverProjectsClient}
             servers={props.shieldServersClient}

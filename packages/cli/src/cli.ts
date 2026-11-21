@@ -801,6 +801,7 @@ async function runHubFlow(context: CliContext, command: HubCliCommand): Promise<
       runHubCliCommand({
         command,
         session,
+        stdin: process.stdin,
         stdout: process.stdout,
         stderr: process.stderr,
         platform: process.platform,
