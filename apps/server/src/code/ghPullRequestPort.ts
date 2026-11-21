@@ -194,6 +194,8 @@ export interface GhActivePullRequestRow {
   readonly author: string;
   readonly baseBranch: string;
   readonly headBranch: string;
+  /** When the pull request was opened, when the list read carried it. */
+  readonly createdAt?: string;
   readonly updatedAt: string;
   readonly url: string;
   readonly checks: "unknown" | "pending" | "passing" | "failing";
@@ -247,6 +249,7 @@ const ACTIVE_PR_LIST_FIELDS = [
   "state",
   "mergeable",
   "author",
+  "createdAt",
   "updatedAt",
   "url",
   "baseRefName",
@@ -1492,6 +1495,11 @@ function decodeActivePullRequests(
     const author = loginOf(item.author).trim();
     const baseBranch = typeof item.baseRefName === "string" ? item.baseRefName : "";
     const headBranch = typeof item.headRefName === "string" ? item.headRefName : "";
+    const createdAt =
+      typeof item.createdAt === "string" &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(item.createdAt)
+        ? item.createdAt
+        : undefined;
     const updatedAt = typeof item.updatedAt === "string" ? item.updatedAt : "";
     const url = typeof item.url === "string" ? item.url : "";
     const state = normalizePullRequestState(item.state);
@@ -1517,6 +1525,7 @@ function decodeActivePullRequests(
       author,
       baseBranch,
       headBranch,
+      ...(createdAt === undefined ? {} : { createdAt }),
       updatedAt,
       url,
       checks: summarizeChecks(item.statusCheckRollup),
