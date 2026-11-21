@@ -255,9 +255,12 @@ app-server --listen stdio://` after `codex --version` there), and speaks its
   - It uses the server login's own sign-in; no credential of this host goes
     there. It keeps the thread's level, which maps to its own sandbox and
     approval policy as on this host; at Full access Codex runs on that server
-    with no sandbox, as it would there on its own.
+    with no sandbox, as it would there on its own. Plan runs in Codex's own
+    read-only sandbox there, and the guarded levels in its workspace sandbox
+    with the server's network open, since no egress proxy runs there.
   - Strict refuses it, naming why: Octant's own sandbox cannot run on a
-    server, and Octant claims no sandbox there.
+    server, and Octant claims no sandbox there. Full access with its opt-in
+    sandbox is refused for the same reason rather than run unconfined.
   - The thread gets none of this host's checkout tools, extensions,
     attachments folder, Browser, Computer or forks; only the routine tools,
     which act on this host's records, join its own. Checkpoints and change

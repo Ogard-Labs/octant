@@ -71,6 +71,9 @@ import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 export const SERVER_STRICT_REFUSAL =
   "Strict needs Octant's own sandbox, which can't run on a server. Turn Strict off for this thread to run Codex there.";
 
+export const SERVER_FULL_ACCESS_SANDBOX_REFUSAL =
+  "Full access with a sandbox needs Octant's own sandbox, which can't run on a server. Turn the sandbox off or choose another level to run Codex there.";
+
 export interface CodexBinaryProbe {
   readonly binaryPath: string;
   readonly version: string;
@@ -1344,6 +1347,11 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
           // there is refused rather than run without the sandbox it promises.
           if (requested.kind !== "thread" || requested.strict !== false) {
             return Effect.fail(failure("unsupported", SERVER_STRICT_REFUSAL));
+          }
+          // Full access's opt-in sandbox is Octant's profile too, so it is
+          // refused there rather than run unconfined and unprompted.
+          if (requested.fullAccessSandbox === true) {
+            return Effect.fail(failure("unsupported", SERVER_FULL_ACCESS_SANDBOX_REFUSAL));
           }
           return startCodexOnServer({
             placement: server,

@@ -11,7 +11,11 @@ import {
   SERVER_PLACEMENT_STRICT_REFUSAL,
   serverCodeCheckout,
 } from "../serverProjects/serverProjectThreads";
-import { makeCodexProcessLive, SERVER_STRICT_REFUSAL } from "./codexProcess";
+import {
+  makeCodexProcessLive,
+  SERVER_FULL_ACCESS_SANDBOX_REFUSAL,
+  SERVER_STRICT_REFUSAL,
+} from "./codexProcess";
 
 const scratches: string[] = [];
 afterEach(() => {
@@ -134,11 +138,16 @@ describe.skipIf(process.platform === "win32")("Codex on a server Project's serve
           const agent = yield* Effect.promise(() =>
             codex.rpc.request("initialize", {}, (value) => value as { userAgent: string }),
           );
-          return { version: codex.version, agent: agent.userAgent };
+          return {
+            version: codex.version,
+            networkOpen: codex.networkOpen,
+            agent: agent.userAgent,
+          };
         }),
       ),
     );
     expect(started.version).toBe("0.170.0");
+    expect(started.networkOpen).toBe(true);
     expect(started.agent).toContain(`cwd=${folder}`);
     expect(started.agent).toContain("args=app-server --listen stdio://");
   });
@@ -166,6 +175,29 @@ describe.skipIf(process.platform === "win32")("Codex on a server Project's serve
       ),
     );
     expect(JSON.stringify(exit)).toContain(SERVER_STRICT_REFUSAL);
+  });
+
+  it("refuses Full access with its sandbox on a server rather than running unconfined", async () => {
+    const { connection, folder } = standInServer();
+    const bound = bind(connection, folder, { placesOnServer: true, strict: false });
+    if (bound.status !== "placed") throw new Error("not placed");
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        makeCodexProcessLive().start({
+          binaryPath: "/nonexistent/codex",
+          authority: {
+            kind: "thread",
+            root: folder,
+            mode: "code",
+            executionPolicy: "full-access",
+            fullAccessSandbox: true,
+            strict: false,
+          },
+          server: bound.placement,
+        }),
+      ),
+    );
+    expect(JSON.stringify(exit)).toContain(SERVER_FULL_ACCESS_SANDBOX_REFUSAL);
   });
 
   it("refuses a runtime that does not report server placement, with a reason", () => {
