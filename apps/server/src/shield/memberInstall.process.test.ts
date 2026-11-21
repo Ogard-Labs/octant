@@ -497,6 +497,10 @@ describe("making a registered server an Octant computer over SSH", () => {
     const calls = setup.server.calls().slice(before);
     expect(calls).not.toContain("listener enable");
     expect(calls).not.toContain("server start");
+    // The refused attempt leaves no copy of the build behind.
+    const attempt = join(setup.server.state, "member-install", String(progress.installId));
+    expect(existsSync(join(attempt, "unpacked"))).toBe(false);
+    expect(existsSync(join(attempt, "build.tar.gz"))).toBe(false);
   });
 
   it("refuses an archive that unpacks past its limit, or is not one, without failing the host", async () => {

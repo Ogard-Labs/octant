@@ -140,21 +140,25 @@ printf '%s\\n%s\\n%s' "$r" "$(digest "$r/octant-artifact.json")" "$(digest "$r/o
 /**
  * `$1` the unpacked build, `$2` the install root, `$3` the work folder. The
  * build's own CLI installs it and checks its signature first; there is no
- * \`--self-built\` here, ever. \`$4\` is \`resume\` only when this hub's own
- * earlier attempt on this server installed this build and then failed at a
- * later step: the CLI refuses to install a version twice, so that retry goes
- * on past it when \`current\` holds this exact signed build (the same
- * manifest and signature). Otherwise the CLI's refusal stands, so a server
- * that already runs Octant is never taken over by a first attempt.
+ * \`--self-built\` here, ever. The CLI refuses only a version whose folder
+ * already exists; it does not stop a different version from being made
+ * current. \`$4\` is \`resume\` only when this hub's own earlier attempt on
+ * this server installed this build and then failed at a later step: that
+ * retry goes on past the CLI's refusal when \`current\` holds this exact
+ * signed build (the same manifest and signature). Otherwise the CLI decides.
+ * The attempt's uploaded archive and unpacked build are removed whether the
+ * CLI installed or refused, keeping its exit status.
  */
 const INSTALL_SCRIPT = `if [ "$4" = resume ] && cmp -s -- "$1/octant-artifact.json" "$2/current/octant-artifact.json" &&
   cmp -s -- "$1/octant-artifact.sig" "$2/current/octant-artifact.sig"; then
   echo "This build is already installed."
+  code=0
 else
-  "$1/bin/octant" server install --artifact "$1" --install-root "$2" || exit $?
+  "$1/bin/octant" server install --artifact "$1" --install-root "$2"
+  code=$?
 fi
 rm -rf -- "$3/unpacked" "$3/build.tar.gz"
-exit 0`;
+exit $code`;
 
 /** `$1` the installed CLI: writes and enables the login's user service, then starts it. */
 const START_SCRIPT = `"$1" server enable >/dev/null && "$1" server start`;
