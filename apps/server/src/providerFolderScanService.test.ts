@@ -1238,4 +1238,116 @@ describe("ProviderFolderScanService", () => {
     }
     expect(fakeProjects.created.map((entry) => entry.canonicalRoot)).toEqual([pluginRepo]);
   });
+
+  it("reports stoppedEarly when exact file budget is met before another date directory or provider has sessions", async () => {
+    // 1. Two Codex date directories with a 1-file budget must report file-limit.
+    const codexOnlyHome = makeTempDir("octant-codex-boundary-");
+    const repoOne = join(codexOnlyHome, "code", "one");
+    const repoTwo = join(codexOnlyHome, "code", "two");
+    createGitRepo(repoOne, "https://github.com/acme/one.git");
+    createGitRepo(repoTwo, "https://github.com/acme/two.git");
+    writeCodexSession(
+      join(codexOnlyHome, ".codex"),
+      repoOne,
+      "11111111-1111-4111-8111-111111111111",
+      ["2026", "11", "21"],
+      "2026-11-21T10:00:00.000Z",
+    );
+    writeCodexSession(
+      join(codexOnlyHome, ".codex"),
+      repoTwo,
+      "22222222-2222-4222-8222-222222222222",
+      ["2026", "11", "20"],
+      "2026-11-20T10:00:00.000Z",
+    );
+
+    const receipts = new BindingReceiptStore();
+    const fakeProjects = createFakeProjectService(receipts);
+    const makeScanner = (homeDir: string) =>
+      new ProviderFolderScanService({
+        homeDirectory: homeDir,
+        discoveryPorts: BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
+        env: {},
+        readProviderInstances: () => [],
+        readActiveCodeProjects: () => [],
+        isHostStrict: () => false,
+        bindingReceiptStore: receipts,
+        projectRootPort: new ProjectRootPort(),
+        projectService: fakeProjects.service,
+        limits: { maxFiles: 1, maxEntries: 50, maxTimeMs: 10_000 },
+      });
+
+    const codexResult = await makeScanner(codexOnlyHome).scan(decodeWindowId(randomUUID()));
+    expect(codexResult.status).toBe("ready");
+    if (codexResult.status === "ready") {
+      expect(codexResult.stoppedEarly).toBe(true);
+      expect(codexResult.stoppedEarlyReason).toBe("file-limit");
+      expect(codexResult.groups).toHaveLength(1);
+    }
+
+    // 2. Claude consumes the exact 1/1 budget and no other provider has sessions -> not stopped early.
+    const exactFitHome = makeTempDir("octant-exact-fit-");
+    const exactRepo = join(exactFitHome, "code", "only-one");
+    createGitRepo(exactRepo, "https://github.com/acme/only-one.git");
+    writeClaudeSession(
+      join(exactFitHome, ".claude"),
+      exactRepo,
+      "33333333-3333-4333-8333-333333333333",
+      "2026-11-21T10:00:00.000Z",
+    );
+
+    const exactResult = await makeScanner(exactFitHome).scan(decodeWindowId(randomUUID()));
+    expect(exactResult.status).toBe("ready");
+    if (exactResult.status === "ready") {
+      expect(exactResult.stoppedEarly).toBe(false);
+      expect(exactResult.stoppedEarlyReason).toBeUndefined();
+      expect(exactResult.groups).toHaveLength(1);
+    }
+
+    // 3. Adding an OpenCode SQLite session after Claude's 1/1 budget flips stoppedEarly to true.
+    const opencodeRepo = join(exactFitHome, "code", "opencode-extra");
+    createGitRepo(opencodeRepo, "https://github.com/acme/opencode-extra.git");
+    writeOpenCodeDatabase(join(exactFitHome, ".local", "share", "opencode"), [
+      {
+        id: "oc-extra",
+        directory: opencodeRepo,
+        updatedMs: Date.parse("2026-11-21T09:00:00.000Z"),
+      },
+    ]);
+
+    const sqliteBoundaryResult = await makeScanner(exactFitHome).scan(decodeWindowId(randomUUID()));
+    expect(sqliteBoundaryResult.status).toBe("ready");
+    if (sqliteBoundaryResult.status === "ready") {
+      expect(sqliteBoundaryResult.stoppedEarly).toBe(true);
+      expect(sqliteBoundaryResult.stoppedEarlyReason).toBe("file-limit");
+      expect(sqliteBoundaryResult.groups).toHaveLength(1);
+    }
+
+    // 4. Adding a file-backed Pi session after Claude's 1/1 budget also flips stoppedEarly to true.
+    const piHome = makeTempDir("octant-pi-boundary-");
+    const piClaudeRepo = join(piHome, "code", "claude-first");
+    const piExtraRepo = join(piHome, "code", "pi-second");
+    createGitRepo(piClaudeRepo, "https://github.com/acme/claude-first.git");
+    createGitRepo(piExtraRepo, "https://github.com/acme/pi-second.git");
+    writeClaudeSession(
+      join(piHome, ".claude"),
+      piClaudeRepo,
+      "44444444-4444-4444-8444-444444444444",
+      "2026-11-21T10:00:00.000Z",
+    );
+    writePiSession(
+      join(piHome, ".pi", "agent", "sessions"),
+      piExtraRepo,
+      "pi-session-boundary",
+      "2026-11-21T09:00:00.000Z",
+    );
+
+    const piBoundaryResult = await makeScanner(piHome).scan(decodeWindowId(randomUUID()));
+    expect(piBoundaryResult.status).toBe("ready");
+    if (piBoundaryResult.status === "ready") {
+      expect(piBoundaryResult.stoppedEarly).toBe(true);
+      expect(piBoundaryResult.stoppedEarlyReason).toBe("file-limit");
+      expect(piBoundaryResult.groups).toHaveLength(1);
+    }
+  });
 });

@@ -38,7 +38,6 @@ export const claudeProjectFolderDiscoveryPort: ProviderProjectFolderDiscoveryPor
     const homes = await uniqueExistingDirectories(rawHomes);
     for (const claudeHome of homes) {
       if (context.isCancelled()) return { status: "cancelled" };
-      if (context.remainingItemBudget() <= 0) return { status: "completed" };
       const projectsDir = join(claudeHome, "projects");
       const folders = await safeReaddirWithTypes(projectsDir);
       for (const folder of folders) {
@@ -50,7 +49,7 @@ export const claudeProjectFolderDiscoveryPort: ProviderProjectFolderDiscoveryPor
           if (context.isCancelled()) return { status: "cancelled" };
           if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".jsonl")) continue;
           if (!context.consumeItemBudget()) {
-            return context.isCancelled() ? { status: "cancelled" } : { status: "completed" };
+            return { status: "stopped", reason: "file-limit" };
           }
           const filePath = join(folderPath, entry.name);
           const read = await readFileHead(filePath, SESSION_HEAD_BYTES);
@@ -65,7 +64,7 @@ export const claudeProjectFolderDiscoveryPort: ProviderProjectFolderDiscoveryPor
               lastActivityMs: read.mtimeMs,
             })
           ) {
-            return context.isCancelled() ? { status: "cancelled" } : { status: "completed" };
+            return { status: "stopped", reason: "entry-limit" };
           }
         }
       }
@@ -93,29 +92,53 @@ export const codexProjectFolderDiscoveryPort: ProviderProjectFolderDiscoveryPort
       }
     }
 
+    let stoppedReason: "file-limit" | "entry-limit" | undefined;
     const visitRollout = async (filePath: string, fileName: string): Promise<boolean> => {
       if (context.isCancelled()) return false;
-      if (!context.consumeItemBudget()) return false;
+      if (!context.consumeItemBudget()) {
+        stoppedReason = "file-limit";
+        return false;
+      }
       const read = await readFileHead(filePath, SESSION_HEAD_BYTES);
       if (read === undefined) return true;
       const meta = extractCodexMeta(read.text);
       if (meta === undefined) return true;
       const lastActivityMs = Math.max(read.mtimeMs, meta.timestampMs ?? 0);
-      return context.observe({
+      const keepGoing = context.observe({
         workingDirectory: meta.cwd,
         sessionKey: meta.sessionId ?? fileName,
         lastActivityMs,
       });
+      if (!keepGoing) stoppedReason = "entry-limit";
+      return keepGoing;
     };
 
     const homes = await uniqueExistingDirectories(rawHomes);
     for (const codexHome of homes) {
       if (context.isCancelled()) return { status: "cancelled" };
-      if (context.remainingItemBudget() <= 0) return { status: "completed" };
-      await walkCodexDateTree(join(codexHome, "sessions"), 0, context, visitRollout);
+      const keepGoingSessions = await walkCodexDateTree(
+        join(codexHome, "sessions"),
+        0,
+        context,
+        visitRollout,
+      );
+      if (!keepGoingSessions) {
+        return stoppedReason === undefined
+          ? { status: "cancelled" }
+          : { status: "stopped", reason: stoppedReason };
+      }
       if (context.isCancelled()) return { status: "cancelled" };
-      if (context.remainingItemBudget() <= 0) return { status: "completed" };
-      await walkCodexArchiveTree(join(codexHome, "archived_sessions"), 0, context, visitRollout);
+      const keepGoingArchive = await walkCodexArchiveTree(
+        join(codexHome, "archived_sessions"),
+        0,
+        context,
+        visitRollout,
+      );
+      if (!keepGoingArchive) {
+        return stoppedReason === undefined
+          ? { status: "cancelled" }
+          : { status: "stopped", reason: stoppedReason };
+      }
     }
     return context.isCancelled() ? { status: "cancelled" } : { status: "completed" };
   },
@@ -144,7 +167,6 @@ export const opencodeProjectFolderDiscoveryPort: ProviderProjectFolderDiscoveryP
     const homes = await uniqueExistingDirectories(rawHomes);
     for (const dataDir of homes) {
       if (context.isCancelled()) return { status: "cancelled" };
-      if (context.remainingItemBudget() <= 0) return { status: "completed" };
       const names = await safeReaddir(dataDir);
       const channelDbs = names
         .filter(
@@ -154,15 +176,18 @@ export const opencodeProjectFolderDiscoveryPort: ProviderProjectFolderDiscoveryP
       const dbNames = [...(names.includes("opencode.db") ? ["opencode.db"] : []), ...channelDbs];
       for (const dbName of dbNames) {
         if (context.isCancelled()) return { status: "cancelled" };
-        if (context.remainingItemBudget() <= 0) return { status: "completed" };
         const dbPath = join(dataDir, dbName);
         if (!(await isRegularFile(dbPath))) continue;
-        scanOpenCodeSqlite(dbPath, context);
+        const sqliteResult = scanOpenCodeSqlite(dbPath, context);
+        if (sqliteResult.status !== "completed") return sqliteResult;
       }
 
       if (context.isCancelled()) return { status: "cancelled" };
-      if (context.remainingItemBudget() <= 0) return { status: "completed" };
-      await scanOpenCodeLegacyJson(join(dataDir, "storage", "session"), context);
+      const legacyResult = await scanOpenCodeLegacyJson(
+        join(dataDir, "storage", "session"),
+        context,
+      );
+      if (legacyResult.status !== "completed") return legacyResult;
     }
     return context.isCancelled() ? { status: "cancelled" } : { status: "completed" };
   },
@@ -188,7 +213,6 @@ export const piProjectFolderDiscoveryPort: ProviderProjectFolderDiscoveryPort = 
     const sessionDirs = await uniqueExistingDirectories(rawDirs);
     for (const sessionsDir of sessionDirs) {
       if (context.isCancelled()) return { status: "cancelled" };
-      if (context.remainingItemBudget() <= 0) return { status: "completed" };
       const folders = await safeReaddirWithTypes(sessionsDir);
       for (const folder of folders) {
         if (context.isCancelled()) return { status: "cancelled" };
@@ -199,7 +223,7 @@ export const piProjectFolderDiscoveryPort: ProviderProjectFolderDiscoveryPort = 
           if (context.isCancelled()) return { status: "cancelled" };
           if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".jsonl")) continue;
           if (!context.consumeItemBudget()) {
-            return context.isCancelled() ? { status: "cancelled" } : { status: "completed" };
+            return { status: "stopped", reason: "file-limit" };
           }
           const filePath = join(folderPath, entry.name);
           const read = await readFileHead(filePath, SESSION_HEAD_BYTES);
@@ -214,7 +238,7 @@ export const piProjectFolderDiscoveryPort: ProviderProjectFolderDiscoveryPort = 
               lastActivityMs,
             })
           ) {
-            return context.isCancelled() ? { status: "cancelled" } : { status: "completed" };
+            return { status: "stopped", reason: "entry-limit" };
           }
         }
       }
@@ -236,8 +260,8 @@ async function walkCodexDateTree(
   depth: number,
   context: ProviderProjectFolderDiscoveryContext,
   visit: (filePath: string, fileName: string) => Promise<boolean>,
-): Promise<void> {
-  if (context.isCancelled() || context.remainingItemBudget() <= 0) return;
+): Promise<boolean> {
+  if (context.isCancelled()) return false;
   const entries = await safeReaddirWithTypes(directory);
   if (depth < 3) {
     const dirs = entries
@@ -246,10 +270,16 @@ async function walkCodexDateTree(
       )
       .sort((left, right) => right.name.localeCompare(left.name));
     for (const dir of dirs) {
-      if (context.isCancelled() || context.remainingItemBudget() <= 0) return;
-      await walkCodexDateTree(join(directory, dir.name), depth + 1, context, visit);
+      if (context.isCancelled()) return false;
+      const keepGoing = await walkCodexDateTree(
+        join(directory, dir.name),
+        depth + 1,
+        context,
+        visit,
+      );
+      if (!keepGoing) return false;
     }
-    return;
+    return true;
   }
   const files = entries
     .filter(
@@ -257,10 +287,11 @@ async function walkCodexDateTree(
     )
     .sort((left, right) => right.name.localeCompare(left.name));
   for (const file of files) {
-    if (context.isCancelled()) return;
+    if (context.isCancelled()) return false;
     const keepGoing = await visit(join(directory, file.name), file.name);
-    if (!keepGoing) return;
+    if (!keepGoing) return false;
   }
+  return true;
 }
 
 /**
@@ -272,8 +303,8 @@ async function walkCodexArchiveTree(
   depth: number,
   context: ProviderProjectFolderDiscoveryContext,
   visit: (filePath: string, fileName: string) => Promise<boolean>,
-): Promise<void> {
-  if (context.isCancelled() || context.remainingItemBudget() <= 0) return;
+): Promise<boolean> {
+  if (context.isCancelled()) return false;
   const entries = await safeReaddirWithTypes(directory);
   const files = entries
     .filter(
@@ -281,37 +312,49 @@ async function walkCodexArchiveTree(
     )
     .sort((left, right) => right.name.localeCompare(left.name));
   for (const file of files) {
-    if (context.isCancelled()) return;
+    if (context.isCancelled()) return false;
     const keepGoing = await visit(join(directory, file.name), file.name);
-    if (!keepGoing) return;
+    if (!keepGoing) return false;
   }
-  if (depth >= 3) return;
+  if (depth >= 3) return true;
   const dirs = entries
     .filter(
       (entry) => entry.isDirectory() && !entry.isSymbolicLink() && DATE_SEGMENT.test(entry.name),
     )
     .sort((left, right) => right.name.localeCompare(left.name));
   for (const dir of dirs) {
-    if (context.isCancelled() || context.remainingItemBudget() <= 0) return;
-    await walkCodexArchiveTree(join(directory, dir.name), depth + 1, context, visit);
+    if (context.isCancelled()) return false;
+    const keepGoing = await walkCodexArchiveTree(
+      join(directory, dir.name),
+      depth + 1,
+      context,
+      visit,
+    );
+    if (!keepGoing) return false;
   }
+  return true;
 }
 
-function scanOpenCodeSqlite(dbPath: string, context: ProviderProjectFolderDiscoveryContext): void {
-  if (context.isCancelled()) return;
-  const remaining = context.remainingItemBudget();
-  if (remaining <= 0) return;
+function scanOpenCodeSqlite(
+  dbPath: string,
+  context: ProviderProjectFolderDiscoveryContext,
+): ProviderProjectFolderDiscoveryResult {
+  if (context.isCancelled()) return { status: "cancelled" };
+  // Use `remaining + 1` even when `remaining === 0` (`LIMIT 1`) so an unread
+  // session row triggers `consumeItemBudget()` and records `file-limit` rather
+  // than silently reporting a complete scan.
+  const limit = Math.max(0, context.remainingItemBudget()) + 1;
   let db;
   try {
     db = openReadOnlySqlite(dbPath);
   } catch {
-    return;
+    return { status: "completed" };
   }
   try {
     const tableRow = db.all(
       "SELECT count(*) AS present FROM sqlite_master WHERE type = 'table' AND name = 'session'",
     )[0];
-    if (!isRecord(tableRow) || tableRow.present !== 1) return;
+    if (!isRecord(tableRow) || tableRow.present !== 1) return { status: "completed" };
 
     const columns = new Set(
       db
@@ -319,7 +362,7 @@ function scanOpenCodeSqlite(dbPath: string, context: ProviderProjectFolderDiscov
         .filter(isRecord)
         .map((row) => (typeof row.name === "string" ? row.name : "")),
     );
-    if (!columns.has("directory")) return;
+    if (!columns.has("directory")) return { status: "completed" };
 
     const selectCols = [
       columns.has("id") ? "id" : "rowid AS id",
@@ -332,7 +375,6 @@ function scanOpenCodeSqlite(dbPath: string, context: ProviderProjectFolderDiscov
       whereClauses.push("(parent_id IS NULL OR parent_id = '')");
     }
     const orderClause = columns.has("time_updated") ? "ORDER BY time_updated DESC" : "";
-    const limit = remaining + 1;
     const rows = db.all(
       `SELECT ${selectCols.join(", ")} FROM session WHERE ${whereClauses.join(" AND ")} ${orderClause} LIMIT ${String(limit)}`,
     );
@@ -340,9 +382,11 @@ function scanOpenCodeSqlite(dbPath: string, context: ProviderProjectFolderDiscov
     let rowIndex = 0;
     for (const row of rows) {
       rowIndex += 1;
-      if (context.isCancelled()) return;
+      if (context.isCancelled()) return { status: "cancelled" };
       if (!isRecord(row) || typeof row.directory !== "string") continue;
-      if (!context.consumeItemBudget()) return;
+      if (!context.consumeItemBudget()) {
+        return { status: "stopped", reason: "file-limit" };
+      }
       const id =
         typeof row.id === "string" || typeof row.id === "number"
           ? String(row.id)
@@ -356,11 +400,13 @@ function scanOpenCodeSqlite(dbPath: string, context: ProviderProjectFolderDiscov
           lastActivityMs: updatedMs,
         })
       ) {
-        return;
+        return { status: "stopped", reason: "entry-limit" };
       }
     }
+    return { status: "completed" };
   } catch {
     // An unreadable or locked third-party database is skipped read-only.
+    return { status: "completed" };
   } finally {
     db.close();
   }
@@ -369,14 +415,16 @@ function scanOpenCodeSqlite(dbPath: string, context: ProviderProjectFolderDiscov
 async function scanOpenCodeLegacyJson(
   sessionsRoot: string,
   context: ProviderProjectFolderDiscoveryContext,
-): Promise<void> {
+): Promise<ProviderProjectFolderDiscoveryResult> {
   const top = await safeReaddirWithTypes(sessionsRoot);
   for (const entry of top) {
-    if (context.isCancelled() || context.remainingItemBudget() <= 0) return;
+    if (context.isCancelled()) return { status: "cancelled" };
     if (entry.isSymbolicLink()) continue;
     const entryPath = join(sessionsRoot, entry.name);
     if (entry.isFile() && entry.name.endsWith(".json")) {
-      if (!context.consumeItemBudget()) return;
+      if (!context.consumeItemBudget()) {
+        return { status: "stopped", reason: "file-limit" };
+      }
       const parsed = await readOpenCodeJsonSession(entryPath);
       if (
         parsed !== undefined &&
@@ -386,16 +434,18 @@ async function scanOpenCodeLegacyJson(
           lastActivityMs: parsed.activityMs,
         })
       ) {
-        return;
+        return { status: "stopped", reason: "entry-limit" };
       }
       continue;
     }
     if (!entry.isDirectory()) continue;
     const nested = await safeReaddirWithTypes(entryPath);
     for (const file of nested) {
-      if (context.isCancelled()) return;
+      if (context.isCancelled()) return { status: "cancelled" };
       if (!file.isFile() || file.isSymbolicLink() || !file.name.endsWith(".json")) continue;
-      if (!context.consumeItemBudget()) return;
+      if (!context.consumeItemBudget()) {
+        return { status: "stopped", reason: "file-limit" };
+      }
       const parsed = await readOpenCodeJsonSession(join(entryPath, file.name));
       if (
         parsed !== undefined &&
@@ -405,10 +455,11 @@ async function scanOpenCodeLegacyJson(
           lastActivityMs: parsed.activityMs,
         })
       ) {
-        return;
+        return { status: "stopped", reason: "entry-limit" };
       }
     }
   }
+  return { status: "completed" };
 }
 
 async function readOpenCodeJsonSession(

@@ -279,7 +279,7 @@ export class ProviderFolderScanService implements ProviderFolderScanApi {
           homeDirectory: canonicalHome,
           env: this.#env,
           providerInstances,
-          isCancelled: shouldStopDiscovery,
+          isCancelled: () => shouldStopDiscovery() || isDiscoveryStopped(budget),
           remainingItemBudget: () =>
             shouldStopDiscovery() || isDiscoveryStopped(budget)
               ? 0
