@@ -69,6 +69,7 @@ describe("headless install smoke on a downloaded build", () => {
       ["migrations", "share/migrations.json"],
       ["notices", "share/NOTICES.txt"],
       ["service-template", "share/service/octant.service.template"],
+      ["runtime", "lib/runtime/bun"],
     ];
     const components = files.map(([role, path]) => {
       const source = join(base, "sources", path.replaceAll("/", "_"));

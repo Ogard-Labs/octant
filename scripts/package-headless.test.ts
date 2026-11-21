@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -179,7 +180,9 @@ describe("buildHeadlessArtifact", () => {
   });
 
   it("starts the octant command under the runtime the build carries, also through a link", async () => {
-    const root = temporaryRoot("octant-headless-launcher-");
+    // macOS temporary folders sit behind a /var -> /private/var link, and a
+    // started process sees the resolved path, so compare from the resolved root.
+    const root = realpathSync(temporaryRoot("octant-headless-launcher-"));
     const install = join(root, "install");
     mkdirSync(join(install, "bin"), { recursive: true });
     mkdirSync(join(install, "lib", "runtime"), { recursive: true });
