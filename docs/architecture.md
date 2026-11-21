@@ -8148,6 +8148,14 @@ read, and the host's model routing and data rules, and the public Code-tool
 port in `@octant/plugin-api` carries none of those; giving a plugin an image
 description port would be a seam extension of its own.
 
+Rationale for registering `transcribe` in the host (maintainer decision,
+2026-11-21): it is host-owned for the same reason. It reads a confined file
+under the turn's folder behind the host's secret guard, asks through the
+host's consent and offer service, and sends audio only to the Voice endpoint
+the host routes to; the public Code-tool port carries none of those. A public
+media-tool port is a seam extension of its own, deferred to a follow-up
+([Plugin boundaries](#plugin-boundaries-and-remaining-extraction)).
+
 - **Spend.** Each describe is admitted under the thread's and its Project's
   spend ceilings before the image is sent (it is spend, not a turn of its
   own), and over a ceiling it is refused with the ceiling's own reason and
