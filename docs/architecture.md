@@ -10121,12 +10121,16 @@ conservative upper bound for `auto` or omitted OpenAI quality/size; separate
 prompt/reference input-token surcharges are not quoted before dispatch) and
 reserves those exact micro-dollars in `SpendCeilingService`, comparing settled
 micro-dollars plus live reservations plus the new estimate against the ceiling
-in integer micro-dollars so fractional cents cannot slip past the budget. If the
+in integer micro-dollars so fractional cents cannot slip past the budget, and
+flooring remaining cents from exact remaining micro-dollars so readouts never
+overstate available budget. If the
 model, option, or custom source has no known rate, admission fails closed with
 `unknown-spend` without calling the provider. Live monetary reservations track
-the thread's current Project dynamically (and a queued job whose thread moved
-Projects before dispatch is re-admitted against the destination Project before
-calling the provider). Whenever the provider returns generated images — even if
+the thread's current Project dynamically (including Work threads moved via
+`work.thread-updated@1`), and queued jobs whose thread moved Projects before
+dispatch are reconciled and re-admitted in FIFO order against the destination
+Project before calling the provider so a later oversized job cannot block an
+affordable earlier one. Whenever the provider returns generated images — even if
 local artifact storage fails or cancellation arrives after the provider already
 responded — the job journals its estimated `api-estimate` cost in micro-dollars
 on `context.usage-reconciled@1` before settling the reservation, and monetary

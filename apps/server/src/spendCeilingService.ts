@@ -510,14 +510,21 @@ export class SpendCeilingService {
     const money =
       costBudgetUsdCents === undefined
         ? {}
-        : facts.usedCostUsdCents === undefined
+        : facts.usedCostUsdMicros === undefined || facts.usedCostUsdCents === undefined
           ? { ceilingUsdCents: costBudgetUsdCents }
           : {
               ceilingUsdCents: costBudgetUsdCents,
               usedUsdCents: facts.usedCostUsdCents,
-              remainingUsdCents: Math.max(
-                0,
-                costBudgetUsdCents - facts.usedCostUsdCents - (facts.reservedCostUsdCents ?? 0),
+              // Compute remaining cents from exact micro-dollars so a partial
+              // cent of settled or reserved spend never overstates what
+              // admission will actually allow.
+              remainingUsdCents: Math.floor(
+                Math.max(
+                  0,
+                  costBudgetUsdCents * 10_000 -
+                    facts.usedCostUsdMicros -
+                    (facts.reservedCostUsdMicros ?? 0),
+                ) / 10_000,
               ),
             };
     const notMeasured =
@@ -1087,7 +1094,9 @@ function currentThreadProjectId(
            FROM event_journal
            WHERE aggregate_type = 'work-thread'
              AND aggregate_id = ?
-             AND event_name = 'work.thread-created@1'`;
+             AND event_name IN ('work.thread-created@1', 'work.thread-updated@1')
+           ORDER BY aggregate_version DESC
+           LIMIT 1`;
   try {
     const row = connection.prepare(sql).get(threadId) as
       | { readonly project_id: string | null }
