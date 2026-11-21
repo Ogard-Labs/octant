@@ -1,4 +1,8 @@
-import { decodeFleetActivity, type FleetActivity } from "@octant/contracts/fleet-activity";
+import {
+  FLEET_OFFER_WINDOWS_MEDIA_TYPE,
+  decodeFleetActivity,
+  type FleetActivity,
+} from "@octant/contracts/fleet-activity";
 
 export const FLEET_ACTIVITY_PATH = "/api/fleet-activity";
 
@@ -56,7 +60,10 @@ export function createMenuBarFleetReader(options: MenuBarFleetReaderOptions) {
     try {
       response = await options.fetch(new URL(FLEET_ACTIVITY_PATH, host.url).toString(), {
         method: "GET",
-        headers: { "x-octant-window-capability": authority.capability },
+        headers: {
+          accept: FLEET_OFFER_WINDOWS_MEDIA_TYPE,
+          "x-octant-window-capability": authority.capability,
+        },
       });
     } catch {
       return undefined;

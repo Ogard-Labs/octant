@@ -1,4 +1,5 @@
 import {
+  FLEET_OFFER_WINDOWS_MEDIA_TYPE,
   decodePendingRequest,
   decodeProjectId,
   decodeWindowId,
@@ -271,7 +272,11 @@ describe("fleet activity route", () => {
       offerWindows: [boundWindow],
       offerPending: async (scope) => (String(scope) === String(boundWindow) ? [boundOffer] : []),
     });
-    const localBody = await (await route(request()))?.json();
+    const legacy = await (await route(request()))?.json();
+    expect(legacy.threads[0]).not.toHaveProperty("offerWindowId");
+    const menu = request();
+    menu.headers.set("accept", FLEET_OFFER_WINDOWS_MEDIA_TYPE);
+    const localBody = await (await route(menu))?.json();
     expect(localBody.threads).toEqual([
       {
         mode: "code",
@@ -281,13 +286,15 @@ describe("fleet activity route", () => {
         state: "needs-you",
         activitySource: "session",
         since: boundOffer.requestedAt,
+        offerWindowId: boundWindow,
       },
     ]);
-    expect(sources.offerPending).toHaveBeenCalledExactlyOnceWith(boundWindow);
+    expect(sources.offerPending).toHaveBeenCalledWith(boundWindow);
 
     sources.offerPending.mockClear();
     const deviceId = "22222222-2222-4222-8222-222222222222" as DeviceId;
     const remote = new Request("http://127.0.0.1/api/fleet-activity");
+    remote.headers.set("accept", FLEET_OFFER_WINDOWS_MEDIA_TYPE);
     bindPrincipalRouteContext(remote, {
       principal: createRemoteDevicePrincipal({
         hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,

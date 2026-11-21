@@ -90,6 +90,7 @@ interface FleetRow {
   readonly projectName?: string;
   readonly state: "needs-you" | "working";
   readonly activitySource: FleetActivitySource;
+  readonly offerWindowId?: WindowId;
   readonly since?: string;
 }
 
@@ -155,6 +156,7 @@ export class FleetActivityService {
     windowId: WindowId,
     reader: PrincipalKind = "local-window",
     principal?: ClientPrincipal,
+    includeOfferWindows = false,
   ): Promise<FleetActivity> {
     const modes = enabledModes(this.#sources.readSettings());
     const [pending, boundCode, boundChildren, boundOffers, work, code] = await Promise.all([
@@ -171,7 +173,11 @@ export class FleetActivityService {
         : [],
       reader === "local-window"
         ? Promise.all(
-            this.#sources.offerWindows().map((bound) => this.#sources.offerPending(bound)),
+            this.#sources
+              .offerWindows()
+              .map(async (bound) =>
+                (await this.#sources.offerPending(bound)).map((offer) => ({ offer, owner: bound })),
+              ),
           )
         : [],
       modes.includes("work") ? this.#sources.work(windowId) : [],
@@ -200,19 +206,29 @@ export class FleetActivityService {
         }),
       );
     }
-    const offers = [...(pending.asks ?? []), ...boundOffers.flat()]
-      .filter((offer) => offer.kind === "service-offer" && modes.includes(offer.mode))
+    const offers = [
+      ...(pending.asks ?? []).map((offer) => ({ offer, owner: windowId })),
+      ...boundOffers.flat(),
+    ]
+      .filter(({ offer }) => offer.kind === "service-offer" && modes.includes(offer.mode))
       .toSorted(
-        (left, right) =>
+        ({ offer: left }, { offer: right }) =>
           left.requestedAt.localeCompare(right.requestedAt) ||
           left.askId.localeCompare(right.askId),
       );
-    for (const offer of offers) {
+    for (const { offer, owner } of offers) {
       const key = `${offer.mode}:${String(offer.threadId)}`;
-      if (rows.has(key)) continue;
+      const destination = includeOfferWindows ? { offerWindowId: owner } : {};
+      const existing = rows.get(key);
+      if (existing !== undefined) {
+        if (existing.offerWindowId === undefined && includeOfferWindows)
+          rows.set(key, { ...existing, ...destination });
+        continue;
+      }
       rows.set(
         key,
         this.#row({
+          ...destination,
           mode: offer.mode,
           threadId: String(offer.threadId),
           title: offer.threadTitle,
@@ -261,6 +277,7 @@ export class FleetActivityService {
       input.projectId === undefined ? undefined : this.#sources.projectName(input.projectId),
     );
     return {
+      ...(input.offerWindowId === undefined ? {} : { offerWindowId: input.offerWindowId }),
       mode: input.mode,
       threadId: input.threadId,
       title: bounded(input.title) ?? "Untitled",

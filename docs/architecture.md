@@ -16008,7 +16008,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   raised it while that scope can still open the thread. The desktop Needs you
   card and Inbox show a notice when a previously observed offer in one of
   their listed modes disappears across a host restart. No offer or answer
-  can be recovered from the notice.
+  can be recovered from the notice. Selecting a waiting service offer in the
+  desktop menu bar opens its originating local window. If it is gone, no
+  other window receives the request or the authority to answer.
   The phone Inbox shows the action line on its thread; the phone's in-thread
   card requires device confirmation before sending image generation or save.
   A memory or routine proposal and an image offer are still not raised by a

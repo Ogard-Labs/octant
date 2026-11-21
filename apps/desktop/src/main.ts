@@ -302,6 +302,7 @@ import {
   decodeMenuBarShutdownProgress,
   MenuBarFleet,
   menuBarTitle,
+  menuBarOfferWindow,
   type MenuBarOpenThread,
   type MenuBarShutdownProgress,
 } from "./menuBar";
@@ -3264,7 +3265,14 @@ function sendMenuBarOpen(window: BrowserWindow, thread: MenuBarOpenThread): void
   window.webContents.send(IPC_CHANNELS.menuBarTask, thread);
 }
 
-async function openMenuBarThread(thread: MenuBarOpenThread): Promise<void> {
+async function openMenuBarThread(thread: MenuBarOpenThread, offerWindowId?: string): Promise<void> {
+  if (offerWindowId !== undefined) {
+    const owner = menuBarOfferWindow(offerWindowId, desktopWindows.active());
+    if (owner === undefined || !menuBarOpenThreads.has(owner.id))
+      throw new Error("The offer window is no longer available.");
+    sendMenuBarOpen(owner, thread);
+    return;
+  }
   menuBarFleet.looked(thread);
   updateHostTray();
   const ready =
@@ -3301,11 +3309,16 @@ function updateHostTray(): void {
         enabled: item.enabled,
         ...(item.toolTip === undefined ? {} : { toolTip: item.toolTip }),
         click: () => {
-          void openMenuBarThread({ mode: thread.mode, threadId: thread.threadId }).catch(() => {
+          void openMenuBarThread(
+            { mode: thread.mode, threadId: thread.threadId },
+            thread.offerWindowId,
+          ).catch(() => {
             showNoticeWithoutBlocking(
               mainWindow,
               "Octant could not open that thread",
-              "Open Octant and choose the thread from the sidebar.",
+              thread.offerWindowId === undefined
+                ? "Open Octant and choose the thread from the sidebar."
+                : "The window that raised this offer is no longer available.",
             );
           });
         },

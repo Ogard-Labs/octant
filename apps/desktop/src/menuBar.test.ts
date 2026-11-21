@@ -1,13 +1,34 @@
 import { describe, expect, it } from "vitest";
+import { decodeWindowId } from "@octant/contracts/shell";
 import type { FleetActivity, FleetActivityThread } from "@octant/contracts/fleet-activity";
 import {
   buildMenuBarItems,
+  menuBarOfferWindow,
   decodeMenuBarOpenThread,
   decodeMenuBarShutdownProgress,
   formatRedactedHostDiagnostics,
   MenuBarFleet,
   menuBarTitle,
 } from "./menuBar";
+
+it("opens an offer in its own Project window, never the main window as a fallback", () => {
+  const main = { windowId: "main", window: { id: 1 } };
+  const secondary = {
+    windowId: decodeWindowId("00000000-0000-4000-8000-000000000802"),
+    window: { id: 2 },
+  };
+  const fleet = new MenuBarFleet();
+  fleet.observe(
+    activity([{ ...needsYou("thread", "Generate an image?"), offerWindowId: secondary.windowId }]),
+  );
+  const owner = fleet.threads()[0]?.offerWindowId;
+  expect(owner).toBe(secondary.windowId);
+  if (owner === undefined) throw new Error("Missing offer window");
+  expect(menuBarOfferWindow(owner, [main, secondary])).toBe(secondary.window);
+  expect(menuBarOfferWindow(owner, [main])).toBeUndefined();
+  fleet.observe(activity([]));
+  expect(fleet.threads()[0]).not.toHaveProperty("offerWindowId");
+});
 
 function working(
   threadId: string,

@@ -1,4 +1,5 @@
 import {
+  FLEET_OFFER_WINDOWS_MEDIA_TYPE,
   decodeFleetActivity,
   decodeFleetActivityFailure,
   type FleetActivity,
@@ -17,6 +18,7 @@ export interface FleetActivityRouteDependencies {
       windowId: WindowId,
       reader: PrincipalKind,
       principal?: ClientPrincipal,
+      includeOfferWindows?: boolean,
     ) => Promise<FleetActivity>;
   };
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -32,8 +34,16 @@ export function createFleetActivityRouteHandler(dependencies: FleetActivityRoute
     path: FLEET_ACTIVITY_PATH,
     noun: "Fleet activity",
     plural: "Fleet states",
-    read: async (windowId, reader, _request, principal) =>
-      decodeFleetActivity(await dependencies.service.list(windowId, reader, principal)),
+    read: async (windowId, reader, request, principal) =>
+      decodeFleetActivity(
+        await dependencies.service.list(
+          windowId,
+          reader,
+          principal,
+          reader === "local-window" &&
+            request.headers.get("accept") === FLEET_OFFER_WINDOWS_MEDIA_TYPE,
+        ),
+      ),
     decodeFailure: decodeFleetActivityFailure,
     windowAuthorityStore: dependencies.windowAuthorityStore,
     ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
