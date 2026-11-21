@@ -1312,7 +1312,7 @@ function ActiveSectionContent({
             <SettingsSection title="Provider channels">
               <div className="setgroup">
                 <SettingRow
-                  description="Leaves each provider's own usage metrics, error reports and feedback uploads to its own settings. Off, Octant turns them off at launch. Strict turns them off whatever this says. Applies from the next turn."
+                  description="Leaves each provider's own usage metrics, error reports and feedback uploads to its own settings. Off by default: Octant turns them off at launch. Strict turns them off whatever this says. Applies from the next turn."
                   focused={focusedSetting === settingId("provider-own-telemetry")}
                   label="Let providers send their own telemetry"
                   scope="host"

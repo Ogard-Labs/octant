@@ -228,7 +228,7 @@ export function defaultShellSettings(): ShellSettings {
     fullAccessStalledTurnLimitMinutes: null,
     providerToolCallPauseLimitMinutes: DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
     backgroundSessionIdleLimitMinutes: DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES,
-    providerTelemetry: true,
+    providerTelemetry: false,
     providerSelfUpdate: false,
     threadWakeupsWaitingLimit: DEFAULT_THREAD_WAKEUPS_WAITING,
     threadWakeupsRunMissedOnReturn: false,

@@ -974,11 +974,12 @@ export const ShellSettings = Schema.Struct({
    * Whether a provider launch outside Strict leaves the provider's own
    * telemetry (usage metrics, error reports, trace and feedback uploads) to
    * the provider's own settings. Off, Octant sets the provider's telemetry
-   * guards as Strict does. Strict sets them whatever this says. On by default,
-   * including for a store persisted before the setting existed: outside
-   * Strict the provider's own settings already decided its telemetry.
+   * guards as Strict does. Strict sets them whatever this says. Off by
+   * default, including for a store persisted before the setting existed:
+   * before it, every launch set the telemetry guards, and Octant sends
+   * nothing to a vendor the person did not turn on.
    */
-  providerTelemetry: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  providerTelemetry: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   /**
    * Whether a provider launch outside Strict lets the provider check for and
    * install a newer version of itself. Off, the default, keeps every

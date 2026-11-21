@@ -64,7 +64,7 @@ describe("isolatedClaudeAccountEnvironment", () => {
     );
   });
 
-  it("outside Strict passes the host's environment less Octant's variables, other providers' keys and host Claude credentials, and leaves channels to the person", () => {
+  it("outside Strict passes the host's environment less Octant's variables, other providers' keys and host Claude credentials, and keeps provider telemetry off until the person turns it on", () => {
     const environment = isolatedClaudeAccountEnvironment({
       hostEnvironment: {
         ...hostileHostEnvironment,
@@ -91,10 +91,13 @@ describe("isolatedClaudeAccountEnvironment", () => {
       CLAUDE_CODE_USE_BEDROCK: "1",
       GH_TOKEN: "gh-token-sentinel",
       UNRELATED_TEST_SECRET: "unrelated-secret-sentinel",
-      DISABLE_ERROR_REPORTING: "0",
+      // The person chose nothing, so Octant's telemetry guards win over the
+      // host's own value, as they did before the switch existed.
+      DISABLE_TELEMETRY: "1",
+      DISABLE_ERROR_REPORTING: "1",
+      DISABLE_BUG_COMMAND: "1",
+      DISABLE_AUTOUPDATER: "1",
     });
-    expect(environment).not.toHaveProperty("DISABLE_TELEMETRY");
-    expect(environment).not.toHaveProperty("DISABLE_BUG_COMMAND");
     expect(environment).not.toHaveProperty("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL");
     expect(JSON.stringify(environment)).not.toMatch(
       /ambient-|other-account|other-secure|other-provider-key|octant-secret/,
@@ -421,7 +424,7 @@ describe("claudeArtifactLaunchEnvironment", () => {
     },
   );
 
-  it("outside Strict lifts nothing, and the person's own telemetry opt-out keeps the tool off", () => {
+  it("outside Strict with provider telemetry on lifts nothing, and the person's own telemetry opt-out keeps the tool off", () => {
     const open = (hostEnvironment: NodeJS.ProcessEnv) =>
       claudeArtifactLaunchEnvironment(
         isolatedClaudeAccountEnvironment({
@@ -429,6 +432,7 @@ describe("claudeArtifactLaunchEnvironment", () => {
           configDirectory: "/Users/provider-user/.claude-accounts/personal",
           authentication: "subscription",
           strict: false,
+          ownChannels: { telemetry: true, selfUpdate: false },
         }),
         false,
       );

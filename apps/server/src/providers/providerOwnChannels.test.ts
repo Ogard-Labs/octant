@@ -51,7 +51,7 @@ describe("provider own channels", () => {
     });
   });
 
-  it("outside Strict leaves telemetry to the provider and keeps self-update off when the person chose nothing", () => {
-    expect(launchOwnChannels(false, undefined)).toEqual({ telemetry: true, selfUpdate: false });
+  it("outside Strict keeps the provider's own telemetry and self-update off when the person chose nothing", () => {
+    expect(launchOwnChannels(false, undefined)).toEqual({ telemetry: false, selfUpdate: false });
   });
 });

@@ -242,20 +242,29 @@ afterAll(() => {
 });
 
 describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
-  it("outside Strict passes the host's environment less Octant's variables, other providers' keys and the host names the profile withholds, and lifts only channel guards", () => {
-    const environment = sanitizeAcpEnvironment(
-      profile,
-      {
-        PATH: "/usr/bin",
-        HOME: "/Users/test",
-        HTTPS_PROXY: "http://proxy.invalid",
-        GH_TOKEN: "gh-token",
-        MISTRAL_API_KEY: "must-not-cross",
-        ANTHROPIC_API_KEY: "must-not-cross",
-        OCTANT_SECRET: "must-not-cross",
-      },
-      { managedHome: "/private/tmp/octant-acp-home", strict: false },
-    );
+  it("outside Strict passes the host's environment less Octant's variables, other providers' keys and the host names the profile withholds, and lifts only channel guards once the person turns provider telemetry on", () => {
+    const host = {
+      PATH: "/usr/bin",
+      HOME: "/Users/test",
+      HTTPS_PROXY: "http://proxy.invalid",
+      GH_TOKEN: "gh-token",
+      MISTRAL_API_KEY: "must-not-cross",
+      ANTHROPIC_API_KEY: "must-not-cross",
+      OCTANT_SECRET: "must-not-cross",
+    };
+    // Provider telemetry is off by default, so a launch whose person chose
+    // nothing keeps every guard, channel guards included.
+    expect(
+      sanitizeAcpEnvironment(profile, host, {
+        managedHome: "/private/tmp/octant-acp-home",
+        strict: false,
+      }),
+    ).toMatchObject(profile.process.guards);
+    const environment = sanitizeAcpEnvironment(profile, host, {
+      managedHome: "/private/tmp/octant-acp-home",
+      strict: false,
+      ownChannels: { telemetry: true, selfUpdate: false },
+    });
     const channels = new Set(profile.process.channelGuards ?? []);
     expect(environment).toMatchObject({
       PATH: "/usr/bin",

@@ -3,13 +3,13 @@ import type { ProviderDriver, ProviderOwnChannels } from "@octant/provider-sdk";
 import { Effect } from "effect";
 
 /**
- * What a launch outside Strict carries when nothing says otherwise: the
- * provider's telemetry follows its own settings, as it does when the person
- * runs the CLI on its own, and its self-update stays off because Octant
- * installs and updates provider CLIs itself.
+ * What a launch outside Strict carries when nothing says otherwise: both
+ * channels closed, as the person's switches default. Telemetry stays off
+ * because Octant sends nothing to a vendor the person did not turn on, and
+ * self-update because Octant installs and updates provider CLIs itself.
  */
 export const DEFAULT_PROVIDER_OWN_CHANNELS: ProviderOwnChannels = {
-  telemetry: true,
+  telemetry: false,
   selfUpdate: false,
 };
 
