@@ -308,10 +308,23 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
   branch. Never commit directly to `main` unless a maintainer explicitly asks.
 - One pull request delivers one coherent outcome. Link the Linear issue in the PR
   description, not in code or docs.
-- Before creating a branch or pull request, inspect open pull requests and branch
-  ancestry for the same task or user-visible outcome. If an existing pull request
-  already owns that outcome, continue on its branch and pull request; do not open
-  a sibling pull request for follow-up work that belongs there.
+- One issue gets one branch and one pull request. Slices, phases, and checklist
+  steps are commits on that branch, not pull requests. Every pull request and
+  every push to one runs hosted CI, including macOS and Windows runners, so the
+  number of pull requests is a cost. (In November 2026 one issue had about 35
+  open slice pull requests, several branched from the same parent, and every
+  push to a lower layer reran CI on each layer above it.)
+- Push work in progress to the branch without opening a pull request. Open it
+  once, when the acceptance criteria are met and the local checks pass. This
+  rule overrides any agent or tool default that opens a pull request after a
+  push. If a tool opens one anyway, it stays a draft until it is ready: drafts
+  run no CI, and marking it ready for review starts the run. Batch review fixes
+  into one push rather than pushing each fix on its own.
+- Before creating a branch or pull request, inspect open and recently closed
+  pull requests (by title and changed files, not only branch name) and branch
+  ancestry for the same task or user-visible outcome. If an existing pull
+  request already owns that outcome, continue on its branch and pull request;
+  do not open a sibling pull request for follow-up work that belongs there.
 - If an open pull request already owns this outcome, push to that branch. Review
   fixes, docs, and follow-ups stay there.
 - Open a new pull request only for a different user-visible outcome, or when the
@@ -321,11 +334,15 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
 - A report, assessment, or audit is not a reason to open a GitHub pull request.
   Keep it in chat or the tracker.
 - Choose the smallest delivery shape that preserves reviewability:
-  - Keep one outcome on one pull request when its jobs are not independently
-    reviewable.
-  - Use a native stacked PR chain for independently reviewable slices that depend
-    on one another: the bottom PR targets `main`, each child targets its parent,
-    and every PR records the stack order and links its adjacent PRs.
+  - Keep one outcome on one pull request. This is the default, including when
+    the work has several internally reviewable parts: reviewers read it commit
+    by commit.
+  - Use a native stacked PR chain only when a maintainer asks for one, or when a
+    single pull request would exceed about 1,500 changed lines outside tests and
+    generated files. The bottom PR targets `main`, each child targets its parent,
+    every PR records the stack order and links its adjacent PRs, and each layer
+    has at most one child. Pull requests whose base is not `main` skip the
+    advisory macOS and Windows CI jobs; the merge queue runs them.
   - Use separate PRs targeting `main` for independent outcomes so the merge queue
     can group them without creating artificial dependencies.
 - Treat a stack as one delivery unit: keep its branches linear, enqueue or merge
@@ -362,7 +379,8 @@ These rules govern Linear issues, not the product's Work/Code thread lifecycle.
 
 - One issue is one outcome a person would notice (a story), not one slice, PR,
   or step. Slices, phases, and stacked PRs are a checklist inside that issue,
-  and several PRs may close one issue. Before filing, add the work to the open
+  and one pull request normally closes it (a stack only under the delivery rules
+  above). Before filing, add the work to the open
   issue that owns the outcome; file a new issue only for a different outcome.
   (In November 2026 a backlog of 47 issues held about 12 outcomes; one feature
   alone had 13 slice issues.)

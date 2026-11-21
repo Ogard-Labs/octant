@@ -11,7 +11,7 @@ name: Visual check
 # decides instead, and a skipped job counts as passed.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
   merge_group:
   push:
     branches: [main]
@@ -46,7 +46,10 @@ jobs:
             # The pull request's own run already compared this change, and a
             # design change still waiting for its pictures must not stop the queue.
             merge_group) draw=false ;;
-            pull_request)
+            # A draft draws nothing; marking it ready for review runs this again.
+            pull_request) if [ "${{ github.event.pull_request.draft }}" = "true" ]; then
+              draw=false
+            else
               # Read the list on its own line, so a failed request fails the
               # step instead of reading as "no screen files changed".
               files="$(gh api --paginate "repos/${{ github.repository }}/pulls/${PULL}/files" --jq '.[].filename')"
@@ -54,7 +57,8 @@ jobs:
                 draw=true
               else
                 draw=false
-              fi ;;
+              fi
+            fi ;;
             *) draw=true ;;
           esac
           echo "draw=${draw}" >> "$GITHUB_OUTPUT"

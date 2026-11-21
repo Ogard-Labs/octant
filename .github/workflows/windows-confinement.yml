@@ -2,6 +2,8 @@ name: Windows native confinement
 
 on:
   pull_request:
+    # A draft runs nothing; marking it ready for review starts the run.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - .github/workflows/windows-confinement.yml
       - scripts/windows-confinement/**
@@ -23,6 +25,7 @@ concurrency:
 
 jobs:
   native:
+    if: github.event.pull_request.draft != true
     name: Measure native Windows confinement
     runs-on: windows-2025
     timeout-minutes: 10
@@ -60,6 +63,7 @@ jobs:
           retention-days: 7
 
   launcher:
+    if: github.event.pull_request.draft != true
     # The dormant launcher's real AppContainer, ACL and job evidence on a
     # hosted runner (an administrator account). It runs no provider and
     # admits no Windows launch: the port still refuses Windows by default.

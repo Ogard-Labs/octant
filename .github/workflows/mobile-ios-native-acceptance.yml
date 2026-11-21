@@ -2,6 +2,8 @@ name: Mobile (iOS offline native acceptance)
 
 on:
   pull_request:
+    # A draft runs nothing; marking it ready for review starts the run.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - apps/mobile/**
       - scripts/mobile-ios-native/**
@@ -18,6 +20,7 @@ concurrency:
 
 jobs:
   acceptance:
+    if: github.event.pull_request.draft != true
     name: Exercise the offline demo on an owned iOS Simulator
     runs-on: macos-26
     timeout-minutes: 45
