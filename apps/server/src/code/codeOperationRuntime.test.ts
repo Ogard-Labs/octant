@@ -6252,14 +6252,15 @@ describe("CodeOperationRuntime", () => {
       new Date(Date.parse("2026-07-21T13:00:00.000Z") + seconds * 1_000).toISOString();
     const connection = {
       ...providerConnection(queue),
-      answerApproval: vi.fn((input: { readonly approved: boolean }) =>
-        input.approved
-          ? Effect.fail({
-              category: "unsupported" as const,
-              message: "The agent only offers Always allow here.",
-            })
-          : Effect.void,
-      ),
+      answerApproval: vi.fn((input: { readonly approved: boolean }) => {
+        if (!input.approved) return Effect.void;
+        // The agent takes three seconds to refuse the allow.
+        clockNow = at(8);
+        return Effect.fail({
+          category: "unsupported" as const,
+          message: "The agent only offers Always allow here.",
+        });
+      }),
     };
     const fixture = runtimeFixture({
       provider: providerDriver(connection),
@@ -6326,8 +6327,8 @@ describe("CodeOperationRuntime", () => {
             event.toolCallId === "call-1" &&
             event.state === "completed",
         );
-        // Asked at :02, the refused allow at :05 put the ask back, denied at
-        // :20: all eighteen seconds are the person's wait.
+        // Asked at :02, the allow at :05 refused at :08 put the ask back,
+        // denied at :20: all eighteen seconds are the person's wait.
         expect(completed).toMatchObject({
           timing: { startedAt: at(0), endedAt: at(40), approvalWaitMs: 18_000 },
         });

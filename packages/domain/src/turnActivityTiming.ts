@@ -140,14 +140,12 @@ export interface TurnActivityTimingTracker {
   readonly approvalSettled: (input: { readonly approvalId: string }) => void;
   /**
    * The runtime refused the person's answer and the ask is open again (an
-   * agent that cannot take a one-call approval): the wait resumes from here,
+   * agent that cannot take a one-call approval): the wait resumes from the
+   * refused answer, so the time the refusal took is still the person's wait,
    * attributed as the ask was, until the next `approvalAnswered`. An ask the
    * tracker never closed with an answer is left alone.
    */
-  readonly approvalReopened: (input: {
-    readonly approvalId: string;
-    readonly occurredAt: UtcTimestamp | string;
-  }) => void;
+  readonly approvalReopened: (input: { readonly approvalId: string }) => void;
   /**
    * Closes an open reasoning span at a terminal instant the provider did not
    * timestamp — a journaled terminal frame uses its own journal time.
@@ -162,8 +160,12 @@ export function createTurnActivityTiming(): TurnActivityTimingTracker {
   let reasoningMs = 0;
   const calls = new Map<string, TrackedCall>();
   const openApprovals = new Map<string, OpenApproval>();
-  // The call each answered ask named, so a refused answer can reopen it.
-  const answeredApprovals = new Map<string, string | undefined>();
+  // The call each answered ask named and when it was answered, so a refused
+  // answer can reopen it without a gap.
+  const answeredApprovals = new Map<
+    string,
+    { readonly toolCallId: string | undefined; readonly answeredAt: UtcTimestamp | string }
+  >();
   // Attributed waits accumulate under the call they name — merged on close,
   // released when that call ends — never scanned across a turn's history.
   const callWaits = new Map<string, CallWaits>();
@@ -276,7 +278,10 @@ export function createTurnActivityTiming(): TurnActivityTimingTracker {
       const open = openApprovals.get(input.approvalId);
       if (open === undefined) return;
       openApprovals.delete(input.approvalId);
-      answeredApprovals.set(input.approvalId, open.toolCallId);
+      answeredApprovals.set(input.approvalId, {
+        toolCallId: open.toolCallId,
+        answeredAt: input.occurredAt,
+      });
       if (open.toolCallId === undefined) unattributedOpen -= 1;
       const answeredAt = parseAt(input.occurredAt);
       const bounded = answeredAt !== undefined && answeredAt >= open.askedAt;
@@ -295,13 +300,13 @@ export function createTurnActivityTiming(): TurnActivityTimingTracker {
       }
     },
     approvalReopened(input) {
-      if (!answeredApprovals.has(input.approvalId)) return;
-      const toolCallId = answeredApprovals.get(input.approvalId);
+      const answered = answeredApprovals.get(input.approvalId);
+      if (answered === undefined) return;
       answeredApprovals.delete(input.approvalId);
       tracker.approvalAsked({
         approvalId: input.approvalId,
-        occurredAt: input.occurredAt,
-        ...(toolCallId === undefined ? {} : { toolCallId }),
+        occurredAt: answered.answeredAt,
+        ...(answered.toolCallId === undefined ? {} : { toolCallId: answered.toolCallId }),
       });
     },
     closeReasoningAt(input) {

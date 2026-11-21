@@ -164,9 +164,10 @@ describe("turn activity timing", () => {
     const timing = createTurnActivityTiming();
     timing.callStarted({ toolCallId: "call-1", occurredAt: at(0) });
     timing.approvalAsked({ approvalId: "a1", occurredAt: at(1), toolCallId: "call-1" });
-    // Approve at 10 is refused and the ask is put back; Deny comes at 70.
+    // Approve at 10 is refused at 15 and the ask is put back; Deny comes at
+    // 70. The five seconds the refusal took are still the person's wait.
     timing.approvalAnswered({ approvalId: "a1", occurredAt: at(10) });
-    timing.approvalReopened({ approvalId: "a1", occurredAt: at(10) });
+    timing.approvalReopened({ approvalId: "a1" });
     timing.approvalAnswered({ approvalId: "a1", occurredAt: at(70) });
     expect(timing.callEnded({ toolCallId: "call-1", occurredAt: at(72) })).toEqual({
       startedAt: at(0),
