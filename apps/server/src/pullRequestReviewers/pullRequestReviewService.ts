@@ -1276,10 +1276,10 @@ export class PullRequestReviewService {
             }
 
             const settleStartedWork = (usage: TurnUsage | undefined) => {
+              // `reasoningTokens` is already part of `outputTokens`; adding it
+              // again recorded an overrun for a review that fit its reservation.
               const observedTokens =
-                usage === undefined
-                  ? undefined
-                  : usage.inputTokens + usage.outputTokens + (usage.reasoningTokens ?? 0);
+                usage === undefined ? undefined : usage.inputTokens + usage.outputTokens;
               this.#runtime.spendCeiling?.settle({
                 reservationId,
                 ...(observedTokens === undefined ? {} : { observedTokens }),

@@ -47,6 +47,7 @@ import type {
   ProviderWakeupSchedule,
   ProviderBackgroundWork,
   ProviderNativeSession,
+  ProviderNativeSessionMessage,
   ProviderNativeSessionCarry,
   ProviderNativeSessions,
 } from "@octant/provider-sdk/driver";
@@ -2846,6 +2847,9 @@ function makeClaudeNativeSessions(
             ? (error as ProviderFailure)
             : failure("unavailable", "The Claude session could not be taken up."),
       }),
+    ...(options.sdk.sessionMessages === undefined
+      ? {}
+      : { history: readHistory(options.sdk.sessionMessages) }),
     // Taken in turn with adoptions of the same session, so a release never
     // removes a record a later adoption wrote.
     release: (input) =>
@@ -2918,6 +2922,27 @@ function makeClaudeNativeSessions(
       ),
     );
   }
+  /**
+   * The adopted session's transcript, which the resume record points at, read
+   * through the SDK from this account's own directory.
+   */
+  function readHistory(
+    sessionMessages: NonNullable<ClaudeAgentSdkPort["sessionMessages"]>,
+  ): NonNullable<ProviderNativeSessions["history"]> {
+    return (input) =>
+      input.instanceId !== options.instanceId
+        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
+        : sessionMessages({
+            sessionId: input.nativeSessionId,
+            projectRoot: input.projectRoot,
+            ...configDirectory,
+          }).pipe(
+            Effect.map((messages) => ({
+              status: "read" as const,
+              messages: claudeSessionMessages(messages),
+            })),
+          );
+  }
   async function adoptOnce(
     input: Parameters<NonNullable<ProviderDriver["nativeSessions"]>["adopt"]>[0],
   ) {
@@ -2963,6 +2988,48 @@ function makeClaudeNativeSessions(
       }),
     };
   }
+}
+
+/**
+ * A Claude transcript's messages as imported messages. A user message is the
+ * person's text; one that only returns tool results is the runtime's, not the
+ * person's, and is left out. An assistant message keeps its text and names its
+ * `tool_use` calls; thinking is left out.
+ */
+export function claudeSessionMessages(
+  messages: ReadonlyArray<{ readonly type: string; readonly message: unknown }>,
+): ReadonlyArray<ProviderNativeSessionMessage> {
+  const imported: ProviderNativeSessionMessage[] = [];
+  for (const entry of messages) {
+    if (entry.type !== "user" && entry.type !== "assistant") continue;
+    const message =
+      typeof entry.message === "object" && entry.message !== null
+        ? (entry.message as Readonly<Record<string, unknown>>)
+        : undefined;
+    const content = message?.content;
+    const texts: string[] = [];
+    const tools: string[] = [];
+    if (typeof content === "string") texts.push(content);
+    else if (Array.isArray(content))
+      for (const candidate of content as ReadonlyArray<unknown>) {
+        if (typeof candidate !== "object" || candidate === null) continue;
+        const part = candidate as Readonly<Record<string, unknown>>;
+        if (part.type === "text" && typeof part.text === "string") texts.push(part.text);
+        else if (
+          entry.type === "assistant" &&
+          part.type === "tool_use" &&
+          typeof part.name === "string"
+        )
+          tools.push(part.name);
+      }
+    if (texts.length === 0 && tools.length === 0) continue;
+    imported.push({
+      role: entry.type === "user" ? "person" : "agent",
+      text: texts.join("\n"),
+      ...(tools.length === 0 ? {} : { tools }),
+    });
+  }
+  return imported;
 }
 
 /**

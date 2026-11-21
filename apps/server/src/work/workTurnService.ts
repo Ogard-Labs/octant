@@ -106,6 +106,7 @@ import {
   type WorkThreadAdoptedSession,
   decodeThreadWorkingDirectory,
   ProviderNativeSessionId,
+  type ImportedSessionHistory,
 } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
@@ -118,6 +119,7 @@ import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/
 import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
+import { readImportedSessionHistory } from "../providers/nativeSessionHistory";
 import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
@@ -403,7 +405,15 @@ export interface WorkTurnServiceDependencies {
   readonly recordAdoptedSession?: (
     thread: WorkThread,
     adopted: WorkThreadAdoptedSession,
+    history: ImportedSessionHistory,
   ) => { readonly status: "recorded" } | { readonly status: "refused"; readonly message: string };
+  /**
+   * The earlier conversation the thread's adoption imported, as journaled;
+   * undefined for a thread adopted before Octant imported any.
+   */
+  readonly readImportedSessionHistory?: (
+    threadId: WorkThreadId,
+  ) => ImportedSessionHistory | undefined;
   /**
    * Stops the thread's session the host kept past its last turn, and every
    * background task in it. Absent, no Work session is kept.
@@ -694,6 +704,7 @@ export class WorkTurnService {
    */
   readonly #adoptingThreads = new Set<string>();
   readonly #recordAdoptedSession: WorkTurnServiceDependencies["recordAdoptedSession"];
+  readonly #readImportedSessionHistory: WorkTurnServiceDependencies["readImportedSessionHistory"];
   readonly #stopKeptSession: WorkTurnServiceDependencies["stopKeptSession"];
   /**
    * The access each running turn holds, by thread. The native harness checks
@@ -796,6 +807,7 @@ export class WorkTurnService {
     this.#resolveStrict = dependencies.resolveStrict;
     this.#forgeChanges = dependencies.forgeChanges;
     this.#recordAdoptedSession = dependencies.recordAdoptedSession;
+    this.#readImportedSessionHistory = dependencies.readImportedSessionHistory;
     this.#stopKeptSession = dependencies.stopKeptSession;
     this.#onRequestSettled = dependencies.onRequestSettled;
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
@@ -1204,7 +1216,9 @@ export class WorkTurnService {
         threadId,
         sessions: [],
         unavailable: target.message,
-        ...(target.adopted === undefined ? {} : { adopted: { nativeSessionId: target.adopted } }),
+        ...(target.adopted === undefined
+          ? {}
+          : { adopted: this.#adoptedWithHistory(threadId, target.adopted) }),
       };
     const listed = await Effect.runPromise(
       Effect.either(
@@ -1293,6 +1307,14 @@ export class WorkTurnService {
           ).pipe(Effect.catchAll(() => Effect.void)),
         );
       try {
+        // Read before the commit checks below, which must not yield. The read
+        // never fails the adoption: a runtime without readable history, or a
+        // read that fails, imports none and says why.
+        const history = await readImportedSessionHistory(target.nativeSessions, {
+          instanceId: target.thread.providerInstanceId,
+          projectRoot: target.projectRoot,
+          nativeSessionId,
+        });
         // The thread must still be empty when the adoption commits. Nothing
         // yields from here to the journal append, so no turn slips in.
         const occupied = this.#conversationRefusal(target.thread);
@@ -1313,18 +1335,22 @@ export class WorkTurnService {
             message:
               "This thread's Project folder changed while it took up the session. Try again.",
           };
-        const recorded = record(target.thread, {
-          nativeSessionId,
-          providerSessionId,
-          resumeCursor: adopted.right,
-          providerInstanceId: target.thread.providerInstanceId,
-          modelId: target.thread.modelId,
-          bindingRevisionId: target.thread.bindingRevisionId,
-          workingDirectory: target.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
-          ...(target.thread.workingFolderId === undefined
-            ? {}
-            : { workingFolderId: target.thread.workingFolderId }),
-        });
+        const recorded = record(
+          target.thread,
+          {
+            nativeSessionId,
+            providerSessionId,
+            resumeCursor: adopted.right,
+            providerInstanceId: target.thread.providerInstanceId,
+            modelId: target.thread.modelId,
+            bindingRevisionId: target.thread.bindingRevisionId,
+            workingDirectory: target.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+            ...(target.thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: target.thread.workingFolderId }),
+          },
+          history,
+        );
         if (recorded.status === "refused")
           return { kind: "work-native-session-refused", message: recorded.message };
         committed = true;
@@ -1335,6 +1361,11 @@ export class WorkTurnService {
     } finally {
       this.#adoptingThreads.delete(key);
     }
+  }
+
+  #adoptedWithHistory(threadId: WorkThreadId, nativeSessionId: ProviderNativeSessionId) {
+    const history = this.#readImportedSessionHistory?.(threadId);
+    return { nativeSessionId, ...(history === undefined ? {} : { history }) };
   }
 
   /**

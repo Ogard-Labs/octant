@@ -582,7 +582,10 @@ export const UsageReconciliation = Schema.Struct({
         return false;
       }
       const imageGeneration = reconciliation.requestShape === "image-generation";
-      if (imageGeneration) return reconciliation.imageUnits !== undefined;
+      // An image job has no context plan. One that completed counts its
+      // images; one that failed after its provider answered delivered none,
+      // and carries no units rather than a count of zero.
+      if (imageGeneration) return reconciliation.planId === undefined;
       if (
         reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
         reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||

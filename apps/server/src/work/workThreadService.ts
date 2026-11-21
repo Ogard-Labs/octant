@@ -49,6 +49,7 @@ import {
   MAX_CHAT_TRANSCRIPT_SEARCH_HITS,
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   type WorkTranscriptSearch,
+  type ImportedSessionHistory,
 } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import {
@@ -147,6 +148,7 @@ import {
 } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { nativeSessionHistoryAppend } from "../providers/nativeSessionHistory";
 import { WorkThreadProjection } from "./workThreadProjection";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 
@@ -512,6 +514,7 @@ export class WorkThreadService {
   recordAdoptedSession(
     current: WorkThread,
     adopted: WorkThreadAdoptedSession,
+    history?: ImportedSessionHistory,
   ):
     | { readonly status: "recorded"; readonly thread: WorkThread }
     | { readonly status: "refused"; readonly message: string } {
@@ -539,11 +542,34 @@ export class WorkThreadService {
       version: latest.version + 1,
       updatedAt: decodeTimestamp(this.#clock()),
     });
-    try {
+    // One journal unit: the adoption and the earlier conversation it imports
+    // are recorded together or not at all.
+    const record = () => {
       this.#append(latest.id, latest.version, "work.thread-updated@1", {
         kind: "thread-updated",
         thread: updated,
       });
+      if (history === undefined) return;
+      this.#persistence.journal.append(
+        nativeSessionHistoryAppend({
+          threadId: String(latest.id),
+          mode: "work",
+          providerInstanceId: adopted.providerInstanceId,
+          nativeSessionId: adopted.nativeSessionId,
+          history,
+          eventId: this.#uuid(),
+          correlationId: this.#uuid(),
+          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          occurredAt: this.#clock(),
+        }),
+      );
+    };
+    try {
+      // Called on the journal itself: its transaction reads the journal's own
+      // state, and a detached call threw and dropped the adoption.
+      const journal = this.#persistence.journal;
+      if (journal.transaction === undefined) record();
+      else journal.transaction(record);
     } catch (error) {
       if (error instanceof ConcurrencyConflict)
         return { status: "refused", message: "This thread changed. Try again." };

@@ -1783,7 +1783,7 @@ describe("WorkThreadService", () => {
     expect("thread" in result ? result.thread.fullAccessSandbox : "missing").toBeUndefined();
   });
 
-  it("marks a thread as carrying outside content before journaling the session it adopted, and refuses when it cannot", () => {
+  it("marks a thread as carrying outside content before journaling the session it adopted with its imported history, and refuses when it cannot", () => {
     const adopted = {
       nativeSessionId: "outside-1",
       providerSessionId: "11111111-1111-4111-8111-111111111111" as never,
@@ -1801,9 +1801,26 @@ describe("WorkThreadService", () => {
     }));
     const marked = serviceFixture({ threads: [thread()], recordExternalContentIngestion: record });
 
-    const result = marked.service.recordAdoptedSession(thread(), adopted);
+    const history = {
+      status: "imported" as const,
+      messages: [{ role: "person" as const, text: "Summarize the board notes" }],
+    };
+    const result = marked.service.recordAdoptedSession(thread(), adopted, history);
 
     expect(result).toMatchObject({ status: "recorded", thread: { adoptedSession: adopted } });
+    // The imported history is its own record, never part of the thread snapshot.
+    expect(marked.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregate: { aggregateType: "native-session-history", aggregateId: ids.thread },
+        expectedVersion: 0,
+        events: [
+          expect.objectContaining({
+            eventName: "native-session.history-imported@1",
+            payload: expect.objectContaining({ mode: "work", history }),
+          }),
+        ],
+      }),
+    );
     expect(record).toHaveBeenCalledWith(
       expect.objectContaining({
         threadId: ids.thread,
@@ -1821,6 +1838,76 @@ describe("WorkThreadService", () => {
     });
     expect(refused.service.recordAdoptedSession(thread(), adopted).status).toBe("refused");
     expect(refused.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("commits an adopted provider session and its imported history to a real journal together", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-work-adopt-"));
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      journal.append({
+        aggregate: { aggregateType: "work-thread", aggregateId: ids.thread },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: ids.project,
+            eventName: "work.thread-created@1",
+            eventVersion: 1,
+            correlationId: ids.project,
+            actor: { kind: "system", actorId: ids.project },
+            occurredAt: now,
+            payload: { kind: "thread-created", thread: thread() },
+          },
+        ],
+      });
+      let sequence = 100;
+      const fixture = serviceFixture({
+        threads: [thread()],
+        uuid: () => `72000000-0000-4000-8000-${String(sequence++).padStart(12, "0")}`,
+        recordExternalContentIngestion: () => ({
+          kind: "recorded",
+          taint: { externalContentIngested: true, ingestedSources: ["adopted-provider-session"] },
+        }),
+      });
+      // The service calls the journal it was given; a real one reads its own
+      // private state, so a call detached from it would throw.
+      Object.assign(fixture.persistence, { journal });
+      const adopted = {
+        nativeSessionId: "outside-1",
+        providerSessionId: "11111111-1111-4111-8111-111111111111" as never,
+        resumeCursor: { driverKind: "claude", value: "outside-cursor" } as never,
+        providerInstanceId: ids.provider as never,
+        modelId: "model-a" as never,
+        bindingRevisionId: ids.binding as never,
+        workingDirectory: "." as never,
+      };
+      const history = {
+        status: "imported" as const,
+        messages: [{ role: "person" as const, text: "Summarize the board notes" }],
+      };
+
+      expect(fixture.service.recordAdoptedSession(thread(), adopted, history)).toMatchObject({
+        status: "recorded",
+      });
+      const names = journal
+        .replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 100 }))
+        .map((event) => event.eventName);
+      expect(names).toEqual([
+        "work.thread-created@1",
+        "work.thread-updated@1",
+        "native-session.history-imported@1",
+      ]);
+    } finally {
+      connection.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("journals a person turning Wake when a message arrives on and off for a Work thread", async () => {
