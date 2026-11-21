@@ -16,7 +16,11 @@ import {
 } from "@octant/contracts";
 import { isLoopbackHostname } from "./shellRoutes";
 import { eventActorForPrincipal } from "./principalEventActor";
-import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
+import {
+  authenticateRouteWindowId,
+  boundPrincipalIsRestricted,
+  readPrincipalRouteContext,
+} from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import type { WorkRequestApplicationService } from "./work/workRequestApplicationService";
 
@@ -34,6 +38,7 @@ export interface WorkRequestRouteService {
     authenticatedWindowId: WindowId,
     command: WorkRequestCommand,
     actor?: EventActor,
+    initiator?: "user" | "agent",
   ) => Promise<WorkRequestCommandResult> | WorkRequestCommandResult;
 }
 
@@ -138,6 +143,8 @@ export function createWorkRequestRouteHandler(dependencies: WorkRequestRouteDepe
             authenticatedWindowId,
             command,
             eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+            // The person: a window on this host or a device they paired.
+            boundPrincipalIsRestricted(request) ? "agent" : "user",
           ),
         ),
         200,

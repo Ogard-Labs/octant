@@ -57,6 +57,8 @@ import {
   symlinkSync,
   writeFileSync,
   readFileSync,
+  readdirSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1135,6 +1137,57 @@ function questionDriver(
               answered.push(input);
               if (answered.length < 2) return;
               yield* emit({ kind: "text-delta", text: " Continuing." });
+              yield* emit({ kind: "completed" });
+            }),
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerTool: () => Effect.void,
+        };
+      }),
+  } as unknown as ProviderDriver;
+}
+
+/** Asks a plain question, then one that wants a secret, and finishes once both are answered. */
+function secretQuestionDriver(
+  answered: Array<{ requestId: string; answer: string }>,
+): ProviderDriver {
+  return {
+    acquire: () =>
+      Effect.sync(() => {
+        const queue = Effect.runSync(Queue.unbounded<never>());
+        let sessionId = "";
+        const emit = (event: Record<string, unknown>) =>
+          Queue.offer(queue, { sessionId, ...event } as never);
+        return {
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
+          start: (input: { readonly sessionId: string }) =>
+            Effect.sync(() => {
+              sessionId = input.sessionId;
+              return { sessionId: input.sessionId };
+            }),
+          send: () =>
+            Effect.gen(function* () {
+              yield* emit({ kind: "text-delta", text: "Connecting." });
+              yield* emit({
+                kind: "user-input-request",
+                requestId: "q-host",
+                prompt: "Which host?",
+                options: [],
+              });
+              yield* emit({
+                kind: "user-input-request",
+                requestId: "q-secret",
+                prompt: "Database credential?",
+                options: [],
+                secret: true,
+              });
+            }),
+          answerUserInput: (input: { readonly requestId: string; readonly answer: string }) =>
+            Effect.gen(function* () {
+              answered.push({ requestId: input.requestId, answer: input.answer });
+              if (answered.length < 2) return;
+              yield* emit({ kind: "text-delta", text: " Connected." });
               yield* emit({ kind: "completed" });
             }),
           interrupt: () => Effect.void,
@@ -7624,6 +7677,94 @@ describe("ChatService", () => {
         answer: "Resolve",
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
+  it("hands a secret question's answer to the provider from the person alone and never records it", async () => {
+    const answered: Array<{ requestId: string; answer: string }> = [];
+    const { service, dataDirectory } = openFixture({ driver: secretQuestionDriver(answered) });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Secret question",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sendPromise = service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Connect to the database",
+    });
+    const pendingQuestion = () =>
+      service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion;
+    const sentinel = "hunter2-secret-sentinel";
+    const answer = (
+      requestId: string,
+      answered: Record<string, unknown>,
+      initiator?: "user" | "agent",
+    ) => {
+      const view = service.read(created.thread.id);
+      return service.execute(
+        {
+          kind: "answer-chat-turn-question",
+          threadId: created.thread.id,
+          expectedVersion: view.thread.version,
+          turnId: view.turns[0]!.id,
+          attemptId: view.turns[0]!.attempts[0]!.id,
+          requestId,
+          ...answered,
+        } as never,
+        initiator === undefined ? undefined : { initiator },
+      );
+    };
+
+    // A secret goes to no plain question.
+    await until(() => pendingQuestion()?.requestId === "q-host");
+    expect(pendingQuestion()).not.toHaveProperty("secret");
+    await expect(answer("q-host", { secretAnswer: sentinel }, "user")).rejects.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    await answer("q-host", { answer: "db.internal" }, "user");
+
+    await until(() => pendingQuestion()?.requestId === "q-secret");
+    expect(pendingQuestion()).toMatchObject({ prompt: "Database credential?", secret: true });
+    expect(service.listPendingQuestions()).toMatchObject([
+      { mode: "chat", kind: "question", text: "Database credential?", secret: true },
+    ]);
+    // An agent acting for the person cannot answer it, nor can a caller
+    // that never said it was the person, and a secret question takes no
+    // answer the attempt would record.
+    await expect(answer("q-secret", { secretAnswer: sentinel }, "agent")).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    await expect(answer("q-secret", { secretAnswer: sentinel })).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    await expect(answer("q-secret", { answer: sentinel }, "user")).rejects.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    expect(answered).toEqual([{ requestId: "q-host", answer: "db.internal" }]);
+
+    const accepted = await answer("q-secret", { secretAnswer: sentinel }, "user");
+    expect(accepted).toMatchObject({ kind: "attempt-updated" });
+    await sendPromise;
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
+    );
+    expect(answered).toEqual([
+      { requestId: "q-host", answer: "db.internal" },
+      { requestId: "q-secret", answer: sentinel },
+    ]);
+    const settled = service.read(created.thread.id).turns[0]!.attempts.at(-1)!;
+    expect(settled.answeredQuestions).toEqual([
+      expect.objectContaining({ requestId: "q-host", answer: "db.internal" }),
+      expect.objectContaining({ requestId: "q-secret", secret: true }),
+    ]);
+    expect(settled.answeredQuestions?.[1]).not.toHaveProperty("answer");
+    expect(JSON.stringify(service.read(created.thread.id))).not.toContain(sentinel);
+    for (const file of readdirSync(dataDirectory, { recursive: true, encoding: "utf8" })) {
+      const path = join(dataDirectory, file);
+      if (statSync(path).isFile()) expect(readFileSync(path).includes(sentinel)).toBe(false);
+    }
   });
 
   it("keeps saying an idle thread awaits its agent's approval, as after a restart took the turn", async () => {

@@ -204,6 +204,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     readonly prompt: string;
     readonly questionnaire?: Questionnaire;
     readonly options: ReadonlyArray<string>;
+    readonly secret?: true;
     readonly signal?: AbortSignal;
   }) => {
     if (
@@ -221,6 +222,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       prompt: input.prompt,
       ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
       options: input.options,
+      ...(input.secret === true ? { secret: true } : {}),
       signal: input.signal,
     });
     return current(input.run, input.signal) ? outcome : { status: "cancelled" as const };
@@ -268,6 +270,9 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
         ...input,
         prompt,
         options: choices.map((option) => option.label),
+        // Its answer comes back here in memory; the parent's journal keeps
+        // only that it was given.
+        ...(input.event.secret === true ? { secret: true } : {}),
       });
       return outcome.status === "answered" ? outcome.answer : undefined;
     },

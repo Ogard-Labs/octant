@@ -43,7 +43,8 @@ const CUSTOM = "octant-question-custom";
  * answers until the last one.
  */
 export function ProviderQuestionCard(props: ProviderQuestionCardProps) {
-  if (props.questionnaire !== undefined)
+  // A secret is only ever typed into the masked field, never kept as a draft.
+  if (props.questionnaire !== undefined && props.secret !== true)
     return <QuestionnaireCard {...props} questionnaire={props.questionnaire} />;
   return <SingleQuestionCard {...props} />;
 }

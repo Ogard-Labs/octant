@@ -115,19 +115,19 @@ export function isLeadQuestionPendingRequest(
 }
 
 /**
- * A Code provider question asking for a secret. Its answer is typed only into
- * the thread's masked field, which sends it without putting it as evidence,
- * so a list never answers it.
+ * A provider question asking for a secret, in a Code, Work or Chat thread.
+ * Its answer is typed only into the thread's masked field, which sends it in
+ * the command and never records it, so a list never answers it.
  */
 export type SecretQuestionPendingRequest = Extract<
   PendingRequest,
-  { readonly mode: "code"; readonly kind: "question" }
+  { readonly mode: "code" | "work" | "chat"; readonly kind: "question" }
 > & { readonly secret: true };
 
 export function isSecretQuestionPendingRequest(
   request: PendingRequest,
 ): request is SecretQuestionPendingRequest {
-  return request.mode === "code" && request.kind === "question" && request.secret === true;
+  return request.kind === "question" && "secret" in request && request.secret === true;
 }
 
 /**

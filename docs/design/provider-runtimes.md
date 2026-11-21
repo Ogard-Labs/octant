@@ -1662,24 +1662,42 @@ authorize a Strict launch.
   so a typed answer passes through. A set with a question Codex marks
   `isSecret`, or that asks for a password, passphrase, API key, access token,
   or private key, is never shown: Codex is answered at once with a refusal
-  telling the model Octant does not collect secrets in chat. Outside Strict,
-  in a Code thread, such a set is shown to the person as Codex shows it, its
-  answer kept out of the journal, logs and evidence (maintainer decision,
-  2026-11-21; built): each secret question carries `secret` on its
-  `user-input-request` and its journaled `input-requested`, the thread's card
-  takes the answer in a masked field with a reveal control, and
-  `answer-provider-input` carries it as `secretAnswer` (at most 4,096
-  characters) in place of a `response` put as evidence, so it reaches the
-  Codex process in memory and the record holds only that the question was
-  answered. Only the person answers it: the host refuses a `secretAnswer`
-  from anyone but a window on this host or a device they paired, refuses one
-  for a question not marked secret, and refuses an evidence answer to a
-  question that is, and a Needs you row for it finds the thread rather than
+  telling the model Octant does not collect secrets in chat. Outside Strict
+  such a set is shown to the person as Codex shows it, its answer kept out of
+  the journal, logs and evidence, in a Code, Work or Chat thread and in an
+  Octant subagent of one (maintainer decisions, 2026-11-21; built): each
+  secret question carries `secret` on its `user-input-request` and on the
+  surface's question record, the question card takes the answer in a masked
+  field with a reveal control, and the answer travels in the surface's own
+  answer command as `secretAnswer` (at most 4,096 characters), so it reaches
+  the Codex process in memory and the record holds only that a secret answer
+  was given:
+  - Code: `answer-provider-input` carries `secretAnswer` in place of a
+    `response` put as evidence; the journaled `input-requested` is marked.
+  - Chat: `answer-chat-turn-question` carries `secretAnswer` in place of
+    `answer`; the attempt's `pendingQuestion` is marked and its answered
+    question keeps `secret: true` with no `answer`.
+  - Work: the request's `user-input` detail is marked, and
+    `resolve-work-request` carries the resolution `{ kind: "user-input",
+secret: true }` with `secretAnswer` beside it, so neither the delivery
+    intent nor the settled request holds the value.
+  - A subagent: its question is asked on the parent thread's harness session
+    marked `secret`, answered with `secretAnswer` on the session's
+    `questions` route, and settles answered with no `answer`; the child's
+    transcript notes the question with the answer left out. A child session
+    carries no `strict` of its own, so the host starts it with
+    `asksSecretQuestions` exactly when its parent thread resolves outside
+    Strict (the parent Strict every child policy reads); the child keeps
+    every other Strict protection, and a parent whose Strict cannot be read
+    keeps the refusal.
+
+  Only the person answers one: each surface refuses a `secretAnswer` from
+  anyone but a window on this host or a device they paired, refuses one for a
+  question not marked secret, and refuses an ordinary answer to a question
+  that is; a Needs you or Inbox row for it finds the thread rather than
   answering. The other questions of the set are asked and recorded as usual.
-  A Strict session, and every session but a Code thread's (a child run, Work,
-  Chat, whose question records keep the answer text), still refuses the set
-  unseen; Codex offers its form only in Plan, a Code level, so those surfaces
-  meet it only through a Codex Plan child run. A subagent's set
+  A Strict session, and a session whose surface did not say it keeps the
+  answer out of its record, still refuses the set unseen. A Codex subagent's set
   (Codex offers the form to the root thread only) is answered empty. The
   capability is reported `supported`.
 

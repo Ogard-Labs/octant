@@ -1486,7 +1486,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   return { value: undefined, base: baseFromResult(result) };
                 }).catch(() => undefined);
               }}
-              onAnswerQuestion={({ turnId, attemptId, requestId, answer }) => {
+              onAnswerQuestion={({ turnId, attemptId, requestId, answer, secret }) => {
                 return enqueueThreadCommand(async (previous) => {
                   const result = await props.controller.execute({
                     kind: "answer-chat-turn-question",
@@ -1495,7 +1495,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     turnId,
                     attemptId,
                     requestId,
-                    answer,
+                    // A secret question's answer rides in the command only.
+                    ...(secret === true ? { secretAnswer: answer } : { answer }),
                   });
                   return {
                     value: result?.kind === "attempt-updated",
