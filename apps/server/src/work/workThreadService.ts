@@ -565,9 +565,11 @@ export class WorkThreadService {
       );
     };
     try {
-      const transaction = this.#persistence.journal.transaction;
-      if (transaction === undefined) record();
-      else transaction(record);
+      // Called on the journal itself: its transaction reads the journal's own
+      // state, and a detached call threw and dropped the adoption.
+      const journal = this.#persistence.journal;
+      if (journal.transaction === undefined) record();
+      else journal.transaction(record);
     } catch (error) {
       if (error instanceof ConcurrencyConflict)
         return { status: "refused", message: "This thread changed. Try again." };
